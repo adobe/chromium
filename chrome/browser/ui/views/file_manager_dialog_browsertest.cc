@@ -108,7 +108,8 @@ IN_PROC_BROWSER_TEST_F(FileManagerDialogTest, FileManagerDestroyListener) {
   listener_.reset();
 }
 
-IN_PROC_BROWSER_TEST_F(FileManagerDialogTest, SelectFileAndCancel) {
+// Flaky: http://crbug.com/89733
+IN_PROC_BROWSER_TEST_F(FileManagerDialogTest, FLAKY_SelectFileAndCancel) {
   // Spawn a dialog to open a file.  The dialog will signal that it is done
   // loading via chrome.test.sendMessage('ready') in the extension JavaScript.
   ExtensionTestMessageListener msg_listener("ready", false /* will_reply */);
