@@ -568,6 +568,20 @@ const Experiment kExperiments[] = {
     SINGLE_VALUE_TYPE(switches::kEnableCssRegions)
   },
   {
+    "enable-css-regions-auto-height",
+    IDS_FLAGS_CSS_REGIONS_AUTO_HEIGHT_NAME,
+    IDS_FLAGS_CSS_REGIONS_AUTO_HEIGHT_DESCRIPTION,
+    kOsAll,
+    SINGLE_VALUE_TYPE(switches::kEnableCssRegionsAutoHeight)
+  },
+  {
+    "enable-css-shaders",
+    IDS_FLAGS_CSS_SHADERS_NAME,
+    IDS_FLAGS_CSS_SHADERS_DESCRIPTION,
+    kOsAll,
+    SINGLE_VALUE_TYPE(switches::kEnableCssShaders)
+  },
+  {
     "ntp-app-install-hint",
     IDS_FLAGS_APP_INSTALL_HINT_NAME,
     IDS_FLAGS_APP_INSTALL_HINT_DESCRIPTION,

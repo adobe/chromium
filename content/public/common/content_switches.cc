@@ -236,6 +236,9 @@ const char kEnableDeferred2dCanvas[]        = "enable-deferred-2d-canvas";
 // Enables CSS3 regions
 const char kEnableCssRegions[]              = "enable-css-regions";
 
+// Enables CSS3 regions auto height
+const char kEnableCssRegionsAutoHeight[]    = "enable-css-regions-auto-height";
+
 // Enables CSS3 custom filters
 const char kEnableCssShaders[]              = "enable-css-shaders";
 

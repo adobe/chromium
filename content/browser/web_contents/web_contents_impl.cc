@@ -444,6 +444,8 @@ WebPreferences WebContentsImpl::GetWebkitPrefs(RenderViewHost* rvh,
       !command_line.HasSwitch(switches::kDisableFullScreen);
   prefs.css_regions_enabled =
       command_line.HasSwitch(switches::kEnableCssRegions);
+  prefs.css_regions_auto_height_enabled =
+      command_line.HasSwitch(switches::kEnableCssRegionsAutoHeight);
   prefs.css_shaders_enabled =
       command_line.HasSwitch(switches::kEnableCssShaders);
 

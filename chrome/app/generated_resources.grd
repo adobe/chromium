@@ -5514,6 +5514,18 @@ Keep your key file in a safe place. You will need it to create new versions of y
       <message name="IDS_FLAGS_CSS_REGIONS_DESCRIPTION" desc="Description for the flag to enable CSS Regions.">
         Enable CSS Regions.
       </message>
+      <message name="IDS_FLAGS_CSS_REGIONS_AUTO_HEIGHT_NAME" desc="Name for the flag to enable CSS Regions Auto Height.">
+        Enable CSS Regions Auto Height Experimental support.
+      </message>
+      <message name="IDS_FLAGS_CSS_REGIONS_AUTO_HEIGHT_DESCRIPTION" desc="Description for the flag to enable CSS Regions Auto Height.">
+        Enable CSS Regions Auto Height Experimental support.
+      </message>
+      <message name="IDS_FLAGS_CSS_SHADERS_NAME" desc="Name for the flag to enable CSS Shaders.">
+        Enable CSS Shaders.
+      </message>
+      <message name="IDS_FLAGS_CSS_SHADERS_DESCRIPTION" desc="Description for the flag to enable CSS Shaders.">
+        Enable CSS Shaders.
+      </message>
       <message name="IDS_FLAGS_WEBUI_TASK_MANAGER_NAME" desc="Title for the flag to use the WebUI task manager.">
         Enable experimental task manager.
       </message>
