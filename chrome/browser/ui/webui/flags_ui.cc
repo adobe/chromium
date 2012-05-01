@@ -14,6 +14,7 @@
 #include "chrome/browser/about_flags.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/prefs/pref_service.h"
+#include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/webui/chrome_url_data_manager.h"
@@ -175,4 +176,14 @@ RefCountedMemory* FlagsUI::GetFaviconResourceBytes() {
 // static
 void FlagsUI::RegisterPrefs(PrefService* prefs) {
   prefs->RegisterListPref(prefs::kEnabledLabsExperiments);
+  static const char* kAdobeMay2012PrototypeFeaturesEnabled = "browser.adobe-may2012-prototype-features-enabled";
+  prefs->RegisterBooleanPref(kAdobeMay2012PrototypeFeaturesEnabled, false);
+  if (!prefs->GetBoolean(kAdobeMay2012PrototypeFeaturesEnabled)) {
+    ListPrefUpdate update(prefs, prefs::kEnabledLabsExperiments);
+    ListValue* experiments_list = update.Get();
+    experiments_list->Append(new StringValue("enable-css-regions"));
+    experiments_list->Append(new StringValue("enable-css-regions-auto-height"));
+    experiments_list->Append(new StringValue("enable-css-shaders"));
+    prefs->SetBoolean(kAdobeMay2012PrototypeFeaturesEnabled, true);
+  }
 }
