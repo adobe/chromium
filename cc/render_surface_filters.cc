@@ -349,6 +349,7 @@ WebKit::WebFilterOperations RenderSurfaceFilters::optimize(const WebKit::WebFilt
         case WebKit::WebFilterOperation::FilterTypeBlur:
         case WebKit::WebFilterOperation::FilterTypeDropShadow:
         case WebKit::WebFilterOperation::FilterTypeZoom:
+        case WebKit::WebFilterOperation::FilterTypeCustom:
             newList.append(op);
             break;
         case WebKit::WebFilterOperation::FilterTypeBrightness:
@@ -434,6 +435,8 @@ SkBitmap RenderSurfaceFilters::apply(const WebKit::WebFilterOperations& filters,
         case WebKit::WebFilterOperation::FilterTypeInvert:
         case WebKit::WebFilterOperation::FilterTypeOpacity:
             NOTREACHED();
+            break;
+        case WebKit::WebFilterOperation::FilterTypeCustom:
             break;
         }
         state.swap();
