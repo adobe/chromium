@@ -9,8 +9,10 @@
 #include "base/logging.h"
 #include "base/string16.h"
 #include "skia/ext/refptr.h"
+#include "cc/transform_operations.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebFilterOperation.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebFilterOperations.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebCustomFilterParameter.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebCustomFilterProgram.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebGraphicsContext3D.h"
 #include "third_party/skia/include/core/SkCanvas.h"
@@ -455,6 +457,47 @@ SkBitmap RenderSurfaceFilters::apply(const WebKit::WebFilterOperations& filters,
             for (size_t i = 0; i < parameters.size(); ++i) {
                 const WebKit::WebCustomFilterParameter& parameter = parameters[i];
                 std::cerr << "----> parameter: " << string16(parameter.name) << "\n";
+                switch (parameter.type) {
+                case WebKit::WebCustomFilterParameter::ParameterTypeNumber:
+                    std::cerr << "----+++ of type: number\n";
+                    break;
+                case WebKit::WebCustomFilterParameter::ParameterTypeArray:
+                    std::cerr << "----+++ of type: array\n";
+                    break;
+                case WebKit::WebCustomFilterParameter::ParameterTypeTransform:
+                    std::cerr << "----+++ of type: transform\n";
+                    break;
+                }
+                switch (parameter.type) {
+                case WebKit::WebCustomFilterParameter::ParameterTypeNumber:
+                case WebKit::WebCustomFilterParameter::ParameterTypeArray:
+                    std::cerr << "----+++ of values (" << parameter.values.size() << "):";
+                    for (size_t i = 0; i < parameter.values.size(); ++i)
+                        std::cerr << parameter.values[i] << ", ";
+                    std::cerr << "\n";
+                    break;
+                case WebKit::WebCustomFilterParameter::ParameterTypeTransform: {
+                    const WebKit::WebTransformationMatrix& matrix = parameter.matrix;
+                    std::cerr << "-----+++ Matrix: ("
+                            << matrix.m11() << ", "
+                            << matrix.m12() << ", "
+                            << matrix.m13() << ", "
+                            << matrix.m14() << ",\n                  "
+                            << matrix.m21() << ", "
+                            << matrix.m22() << ", "
+                            << matrix.m23() << ", "
+                            << matrix.m24() << ",\n                  "
+                            << matrix.m31() << ", "
+                            << matrix.m32() << ", "
+                            << matrix.m33() << ", "
+                            << matrix.m34() << ",\n                  "
+                            << matrix.m41() << ", "
+                            << matrix.m42() << ", "
+                            << matrix.m43() << ", "
+                            << matrix.m44() << ")\n";
+                    break;
+                }
+                }
             }
             break;
         }
