@@ -4,10 +4,14 @@
 
 #include "cc/render_surface_filters.h"
 
+#include <iostream>
+
 #include "base/logging.h"
+#include "base/string16.h"
 #include "skia/ext/refptr.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebFilterOperation.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebFilterOperations.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebCustomFilterProgram.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebGraphicsContext3D.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/effects/SkBlurImageFilter.h"
@@ -436,8 +440,24 @@ SkBitmap RenderSurfaceFilters::apply(const WebKit::WebFilterOperations& filters,
         case WebKit::WebFilterOperation::FilterTypeOpacity:
             NOTREACHED();
             break;
-        case WebKit::WebFilterOperation::FilterTypeCustom:
+        case WebKit::WebFilterOperation::FilterTypeCustom: {
+            WebKit::WebCustomFilterProgram* program = op.customFilterProgram();
+            assert(program);
+            std::cerr << "custom filter render -> " 
+                    << program 
+                    << "\n----vertex---\n"
+                    << string16(program->vertexShader())
+                    << "\n----fragment----\n" 
+                    << string16(program->fragmentShader())
+                    << "\n----\n";
+            WebKit::WebVector<WebKit::WebCustomFilterParameter> parameters;
+            op.customFilterParameters(parameters);
+            for (size_t i = 0; i < parameters.size(); ++i) {
+                const WebKit::WebCustomFilterParameter& parameter = parameters[i];
+                std::cerr << "----> parameter: " << string16(parameter.name) << "\n";
+            }
             break;
+        }
         }
         state.swap();
     }
