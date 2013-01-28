@@ -447,10 +447,10 @@ SkBitmap RenderSurfaceFilters::apply(const WebKit::WebFilterOperations& filters,
             assert(program);
             std::cerr << "custom filter render -> " 
                     << program 
-                    << "\n----vertex---\n"
-                    << string16(program->vertexShader())
-                    << "\n----fragment----\n" 
-                    << string16(program->fragmentShader())
+                    //<< "\n----vertex---\n"
+                    //<< string16(program->vertexShader())
+                    //<< "\n----fragment----\n" 
+                    //<< string16(program->fragmentShader())
                     << "\n----\n";
             WebKit::WebVector<WebKit::WebCustomFilterParameter> parameters;
             op.customFilterParameters(parameters);
