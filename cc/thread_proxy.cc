@@ -229,7 +229,8 @@ bool ThreadProxy::recreateOutputSurface()
     if (!outputSurface.get())
         return false;
     if (m_layerTreeHost->needsSharedContext())
-        if (!WebSharedGraphicsContext3D::createCompositorThreadContext())
+        if (!WebSharedGraphicsContext3D::createCompositorThreadContext() ||
+            !WebSharedGraphicsContext3D::createCompositorThreadCustomFilterContext()) // FIXME: We really shouldn't create this unless we see a custom filter.
             return false;
 
     // Make a blocking call to recreateOutputSurfaceOnImplThread. The results of that
@@ -589,8 +590,10 @@ void ThreadProxy::beginFrame(scoped_ptr<BeginFrameAndCommitState> beginFrameStat
         return;
     }
 
-    if (m_layerTreeHost->needsSharedContext() && !WebSharedGraphicsContext3D::haveCompositorThreadContext())
+    if (m_layerTreeHost->needsSharedContext() && !WebSharedGraphicsContext3D::haveCompositorThreadContext()) {
         WebSharedGraphicsContext3D::createCompositorThreadContext();
+        WebSharedGraphicsContext3D::createCompositorThreadCustomFilterContext(); // FIXME: We really shouldn't create this unless we see a custom filter.
+    }
 
     // Do not notify the impl thread of commit requests that occur during
     // the apply/animate/layout part of the beginFrameAndCommit process since

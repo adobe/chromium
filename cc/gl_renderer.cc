@@ -4,6 +4,7 @@
 
 #include "cc/gl_renderer.h"
 
+#include <iostream>
 #include <set>
 #include <string>
 #include <vector>
@@ -352,10 +353,13 @@ void GLRenderer::drawDebugBorderQuad(const DrawingFrame& frame, const DebugBorde
 
 static WebGraphicsContext3D* getFilterContext(bool hasImplThread)
 {
-    if (hasImplThread)
+    if (hasImplThread) {
+        std::cerr << "GLRenderer::getFilterContext hasImplThread true" << std::endl;
         return WebSharedGraphicsContext3D::compositorThreadContext();
-    else
+    } else {
+        std::cerr << "GLRenderer::getFilterContext hasImplThread false" << std::endl;
         return WebSharedGraphicsContext3D::mainThreadContext();
+    }
 }
 
 static GrContext* getFilterGrContext(bool hasImplThread)
