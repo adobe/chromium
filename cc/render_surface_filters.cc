@@ -4,7 +4,9 @@
 
 #include "cc/render_surface_filters.h"
 
+// Custom Filters
 #include <iostream>
+#include "third_party/khronos/GLES2/gl2.h"
 
 #include "base/logging.h"
 #include "base/string16.h"
@@ -375,8 +377,53 @@ WebKit::WebFilterOperations RenderSurfaceFilters::optimize(const WebKit::WebFilt
     return newList;
 }
 
-SkBitmap RenderSurfaceFilters::apply(const WebKit::WebFilterOperations& filters, unsigned textureId, const gfx::SizeF& size, WebKit::WebGraphicsContext3D* context3D, GrContext* grContext)
+SkBitmap RenderSurfaceFilters::apply(const WebKit::WebFilterOperations& filters, unsigned textureId, const gfx::SizeF& size, WebKit::WebGraphicsContext3D* context3D, GrContext* grContext,
+    WebKit::WebGraphicsContext3D* customFilterContext3D, GrContext* customFilterGrContext)
 {
+    // Wrap the source texture in a Ganesh platform texture.
+    GrPlatformTextureDesc platformTextureDescription;
+    platformTextureDescription.fWidth = size.width();
+    platformTextureDescription.fHeight = size.height();
+    platformTextureDescription.fConfig = kSkia8888_GrPixelConfig;
+    platformTextureDescription.fTextureHandle = textureId;
+    skia::RefPtr<GrTexture> texture = skia::AdoptRef(customFilterGrContext->createPlatformTexture(platformTextureDescription));
+
+    // Place the platform texture inside an SkBitmap.
+    SkBitmap sourceBitmap;
+    sourceBitmap.setConfig(SkBitmap::kARGB_8888_Config, size.width(), size.height());
+    skia::RefPtr<SkGrPixelRef> pixelRef = skia::AdoptRef(new SkGrPixelRef(texture.get()));
+    sourceBitmap.setPixelRef(pixelRef.get());
+
+    // Scratch texture.
+    GrTextureDesc desc;
+    desc.fFlags = kRenderTarget_GrTextureFlagBit | kNoStencil_GrTextureFlagBit;
+    desc.fSampleCnt = 0;
+    desc.fWidth = sourceBitmap.width();
+    desc.fHeight = sourceBitmap.height();
+    desc.fConfig = kSkia8888_GrPixelConfig;
+    GrAutoScratchTexture scratchTextureLocal(customFilterGrContext, desc, GrContext::kExact_ScratchTexMatch);
+    skia::RefPtr<GrTexture> scratchTexture = skia::AdoptRef(scratchTextureLocal.detach());
+
+    // Device.
+    skia::RefPtr<SkGpuDevice> device = skia::AdoptRef(new SkGpuDevice(customFilterGrContext, scratchTexture.get()));
+
+    // Canvas.
+    skia::RefPtr<SkCanvas> canvas = skia::AdoptRef(new SkCanvas(device.get()));
+    SkPaint paint;
+    paint.setColor(SK_ColorYELLOW);
+    canvas->drawCircle(0, 0, 500, paint);
+    canvas->flush();
+
+    // Flush.
+    customFilterContext3D->flush();
+
+    // Swap.
+    skia::RefPtr<SkGrPixelRef> scratchTexturePixelRef = skia::AdoptRef(new SkGrPixelRef(scratchTexture.get()));
+    sourceBitmap.setPixelRef(scratchTexturePixelRef.get());
+
+    return sourceBitmap;
+
+    /*
     if (!context3D || !grContext)
         return SkBitmap();
 
@@ -506,6 +553,7 @@ SkBitmap RenderSurfaceFilters::apply(const WebKit::WebFilterOperations& filters,
     }
     context3D->flush();
     return state.source();
+    */
 }
 
 }  // namespace cc

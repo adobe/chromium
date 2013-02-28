@@ -211,7 +211,7 @@ void GLRenderer::clearFramebuffer(DrawingFrame& frame)
 {
     // On DEBUG builds, opaque render passes are cleared to blue to easily see regions that were not drawn on the screen.
     if (frame.currentRenderPass->has_transparent_background)
-        GLC(m_context, m_context->clearColor(0, 0, 0, 0));
+        GLC(m_context, m_context->clearColor(0, 1, 0, 1));
     else
         GLC(m_context, m_context->clearColor(0, 0, 1, 1));
 
@@ -370,6 +370,18 @@ static GrContext* getFilterGrContext(bool hasImplThread)
         return WebSharedGraphicsContext3D::mainThreadGrContext();
 }
 
+static WebGraphicsContext3D* getCustomFilterContext(bool hasImplThread)
+{
+    assert(hasImplThread); // FIXME(CF): We're not worrying about the single threaded case right now.
+    return WebSharedGraphicsContext3D::compositorThreadCustomFilterContext();
+}
+
+static GrContext* getCustomFilterGrContext(bool hasImplThread)
+{
+    assert(hasImplThread); // FIXME(CF): We're not worrying about the single threaded case right now.
+    return WebSharedGraphicsContext3D::compositorThreadCustomFilterGrContext();
+}
+
 static inline SkBitmap applyFilters(GLRenderer* renderer, const WebKit::WebFilterOperations& filters, ScopedResource* sourceTexture, bool hasImplThread)
 {
     if (filters.isEmpty())
@@ -378,13 +390,19 @@ static inline SkBitmap applyFilters(GLRenderer* renderer, const WebKit::WebFilte
     WebGraphicsContext3D* filterContext = getFilterContext(hasImplThread);
     GrContext* filterGrContext = getFilterGrContext(hasImplThread);
 
+    // Custom Filters.
+    WebGraphicsContext3D* customFilterContext = getCustomFilterContext(hasImplThread);
+    GrContext* customFilterGrContext = getCustomFilterGrContext(hasImplThread);
+
     if (!filterContext || !filterGrContext)
         return SkBitmap();
 
     renderer->context()->flush();
 
+    fprintf(stderr, "renderer->context(): %p filterContext: %p customFilterContext: %p\n", renderer->context(), filterContext, customFilterContext);
+
     ResourceProvider::ScopedWriteLockGL lock(renderer->resourceProvider(), sourceTexture->id());
-    SkBitmap source = RenderSurfaceFilters::apply(filters, lock.textureId(), sourceTexture->size(), filterContext, filterGrContext);
+    SkBitmap source = RenderSurfaceFilters::apply(filters, lock.textureId(), sourceTexture->size(), filterContext, filterGrContext, customFilterContext, customFilterGrContext);
     return source;
 }
 
@@ -1273,7 +1291,7 @@ void GLRenderer::drawQuadGeometry(const DrawingFrame& frame, const gfx::Transfor
     toGLMatrix(&glMatrix[0], frame.projectionMatrix * quadRectMatrix);
     GLC(m_context, m_context->uniformMatrix4fv(matrixLocation, 1, false, &glMatrix[0]));
 
-    GLC(m_context, m_context->drawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0));
+    GLC(m_context, m_context->drawElements(GL_TRIANGLES, 3, GL_UNSIGNED_SHORT, 0));
 }
 
 void GLRenderer::copyTextureToFramebuffer(const DrawingFrame& frame, int textureId, const gfx::Rect& rect, const gfx::Transform& drawMatrix)
