@@ -377,50 +377,77 @@ WebKit::WebFilterOperations RenderSurfaceFilters::optimize(const WebKit::WebFilt
     return newList;
 }
 
+static WebKit::WebGLId createShader(WebKit::WebGraphicsContext3D* context, WebKit::WGC3Denum type, const WebKit::WGC3Dchar* source)
+{
+    WebKit::WebGLId shader = context->createShader(GL_VERTEX_SHADER);
+    if (!shader) {
+        std::cerr << "Failed to create shader." << std::endl;
+        return 0;
+    } else {
+        std::cerr << "Created shader with id " << (int)shader << "." << std::endl;
+    }
+
+    context->shaderSource(shader, source);
+    context->compileShader(shader);
+    WebKit::WGC3Dint compileStatus = 0;
+    context->getShaderiv(shader, GL_COMPILE_STATUS, &compileStatus);
+    if (!compileStatus) {
+        std::cerr << "Failed to compile shader." << std::endl;
+        context->deleteShader(shader);
+        return 0;
+    } else {
+        std::cerr << "Compiled shader." << std::endl;
+        return shader;
+    }
+}
+
 SkBitmap RenderSurfaceFilters::apply(const WebKit::WebFilterOperations& filters, unsigned textureId, const gfx::SizeF& size, WebKit::WebGraphicsContext3D* context3D, GrContext* grContext,
     WebKit::WebGraphicsContext3D* customFilterContext3D, GrContext* customFilterGrContext)
 {
-    // Wrap the source texture in a Ganesh platform texture.
-    GrPlatformTextureDesc platformTextureDescription;
-    platformTextureDescription.fWidth = size.width();
-    platformTextureDescription.fHeight = size.height();
-    platformTextureDescription.fConfig = kSkia8888_GrPixelConfig;
-    platformTextureDescription.fTextureHandle = textureId;
-    skia::RefPtr<GrTexture> texture = skia::AdoptRef(customFilterGrContext->createPlatformTexture(platformTextureDescription));
-
-    // Place the platform texture inside an SkBitmap.
-    SkBitmap sourceBitmap;
-    sourceBitmap.setConfig(SkBitmap::kARGB_8888_Config, size.width(), size.height());
-    skia::RefPtr<SkGrPixelRef> pixelRef = skia::AdoptRef(new SkGrPixelRef(texture.get()));
-    sourceBitmap.setPixelRef(pixelRef.get());
-
-    // Scratch texture.
+    // Create a scratch texture.
     GrTextureDesc desc;
     desc.fFlags = kRenderTarget_GrTextureFlagBit | kNoStencil_GrTextureFlagBit;
     desc.fSampleCnt = 0;
-    desc.fWidth = sourceBitmap.width();
-    desc.fHeight = sourceBitmap.height();
+    desc.fWidth = size.width();
+    desc.fHeight = size.height();
     desc.fConfig = kSkia8888_GrPixelConfig;
     GrAutoScratchTexture scratchTextureLocal(customFilterGrContext, desc, GrContext::kExact_ScratchTexMatch);
     skia::RefPtr<GrTexture> scratchTexture = skia::AdoptRef(scratchTextureLocal.detach());
 
-    // Device.
-    skia::RefPtr<SkGpuDevice> device = skia::AdoptRef(new SkGpuDevice(customFilterGrContext, scratchTexture.get()));
+    // Draw into the scratch texture using the custom filter context.
 
-    // Canvas.
-    skia::RefPtr<SkCanvas> canvas = skia::AdoptRef(new SkCanvas(device.get()));
-    SkPaint paint;
-    paint.setColor(SK_ColorYELLOW);
-    canvas->drawCircle(0, 0, 500, paint);
-    canvas->flush();
+    // Set up context.
+    if (!customFilterContext3D->makeContextCurrent()) {
+        std::cerr << "Failed to make custom filters context current." << std::endl;
+        return SkBitmap();
+    } else {
+        std::cerr << "Made custom filters context current." << std::endl;
+    }
+    customFilterContext3D->enable(GL_DEPTH_TEST);
+
+    // Set up program.
+    const WebKit::WGC3Dchar* vertexShaderSource = "void main() {}";
+    WebKit::WebGLId vertexShader = createShader(customFilterContext3D, GL_VERTEX_SHADER, vertexShaderSource);
+    if (!vertexShader)
+        return SkBitmap();
+
+    const WebKit::WGC3Dchar* fragmentShaderSource = "void main() {}";
+    WebKit::WebGLId fragmentShader = createShader(customFilterContext3D, GL_FRAGMENT_SHADER, fragmentShaderSource);
+    if (!fragmentShader)
+        return SkBitmap();
+
+    // Set up buffers.
 
     // Flush.
     customFilterContext3D->flush();
 
-    // Swap.
+    // Create a bitmap pointing to the scratch texture.
+    SkBitmap sourceBitmap;
+    sourceBitmap.setConfig(SkBitmap::kARGB_8888_Config, size.width(), size.height());
     skia::RefPtr<SkGrPixelRef> scratchTexturePixelRef = skia::AdoptRef(new SkGrPixelRef(scratchTexture.get()));
     sourceBitmap.setPixelRef(scratchTexturePixelRef.get());
 
+    std::cerr << "Done." << std::endl;
     return sourceBitmap;
 
     /*
@@ -495,7 +522,7 @@ SkBitmap RenderSurfaceFilters::apply(const WebKit::WebFilterOperations& filters,
             std::cerr << "custom filter render -> " 
                     << program 
                     //<< "\n----vertex---\n"
-                    //<< string16(program->vertexShader())
+                    //<< string16(program->shader())
                     //<< "\n----fragment----\n" 
                     //<< string16(program->fragmentShader())
                     << "\n----\n";
