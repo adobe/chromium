@@ -6,6 +6,7 @@
 
 // Custom Filters
 #include <iostream>
+#include "cc/gl_renderer.h"
 #include "third_party/khronos/GLES2/gl2.h"
 
 #include "base/logging.h"
@@ -379,26 +380,38 @@ WebKit::WebFilterOperations RenderSurfaceFilters::optimize(const WebKit::WebFilt
 
 static WebKit::WebGLId createShader(WebKit::WebGraphicsContext3D* context, WebKit::WGC3Denum type, const WebKit::WGC3Dchar* source)
 {
-    WebKit::WebGLId shader = context->createShader(GL_VERTEX_SHADER);
-    if (!shader) {
-        std::cerr << "Failed to create shader." << std::endl;
-        return 0;
-    } else {
-        std::cerr << "Created shader with id " << (int)shader << "." << std::endl;
-    }
-
-    context->shaderSource(shader, source);
-    context->compileShader(shader);
+    WebKit::WebGLId shader = GLC(context, context->createShader(type));
+    std::cerr << "Created shader with id " << shader << "." << std::endl;
+    GLC(context, context->shaderSource(shader, source));
+    GLC(context, context->compileShader(shader));
     WebKit::WGC3Dint compileStatus = 0;
-    context->getShaderiv(shader, GL_COMPILE_STATUS, &compileStatus);
+    GLC(context, context->getShaderiv(shader, GL_COMPILE_STATUS, &compileStatus));
     if (!compileStatus) {
         std::cerr << "Failed to compile shader." << std::endl;
-        context->deleteShader(shader);
+        GLC(context, context->deleteShader(shader));
         return 0;
     } else {
         std::cerr << "Compiled shader." << std::endl;
         return shader;
     }
+}
+
+static WebKit::WebGLId createProgram(WebKit::WebGraphicsContext3D* context, WebKit::WebGLId vertexShader, WebKit::WebGLId fragmentShader)
+{
+    WebKit::WebGLId program = GLC(context, context->createProgram());
+    GLC(context, context->attachShader(program, vertexShader));
+    GLC(context, context->attachShader(program, fragmentShader));
+    GLC(context, context->linkProgram(program));
+    WebKit::WGC3Dint linkStatus = 0;
+    GLC(context, context->getProgramiv(program, GL_LINK_STATUS, &linkStatus));
+    if (!linkStatus) {
+        std::cerr << "Failed to link program." << std::endl;
+        GLC(context, context->deleteProgram(program));
+        return 0;
+    } else {
+        std::cerr << "Linked program." << std::endl;
+        return program;
+    }    
 }
 
 SkBitmap RenderSurfaceFilters::apply(const WebKit::WebFilterOperations& filters, unsigned textureId, const gfx::SizeF& size, WebKit::WebGraphicsContext3D* context3D, GrContext* grContext,
@@ -420,26 +433,64 @@ SkBitmap RenderSurfaceFilters::apply(const WebKit::WebFilterOperations& filters,
     if (!customFilterContext3D->makeContextCurrent()) {
         std::cerr << "Failed to make custom filters context current." << std::endl;
         return SkBitmap();
-    } else {
-        std::cerr << "Made custom filters context current." << std::endl;
     }
-    customFilterContext3D->enable(GL_DEPTH_TEST);
+    std::cerr << "Made custom filters context current." << std::endl;
+    GLC(customFilterContext3D, customFilterContext3D->enable(GL_DEPTH_TEST));
 
-    // Set up program.
-    const WebKit::WGC3Dchar* vertexShaderSource = "void main() {}";
+    // Set up vertex shader.
+    const WebKit::WGC3Dchar* vertexShaderSource = "attribute vec3 a_position; void main() { gl_Position = vec4(a_position, 1.0); }";
     WebKit::WebGLId vertexShader = createShader(customFilterContext3D, GL_VERTEX_SHADER, vertexShaderSource);
     if (!vertexShader)
         return SkBitmap();
 
-    const WebKit::WGC3Dchar* fragmentShaderSource = "void main() {}";
+    // Set up fragment shader.
+    const WebKit::WGC3Dchar* fragmentShaderSource = "void main() { gl_FragColor = vec4(1.0, 0.0, 1.0, 1.0); }";
     WebKit::WebGLId fragmentShader = createShader(customFilterContext3D, GL_FRAGMENT_SHADER, fragmentShaderSource);
     if (!fragmentShader)
         return SkBitmap();
 
-    // Set up buffers.
+    // Set up program.
+    WebKit::WebGLId program = createProgram(customFilterContext3D, vertexShader, fragmentShader);
+    if (!program)
+        return SkBitmap();
+    GLC(customFilterContext3D, customFilterContext3D->useProgram(program));
+
+    // Set up vertex buffer.
+    WebKit::WebGLId vertexBuffer = GLC(customFilterContext3D, customFilterContext3D->createBuffer());
+    std::cerr << "Created vertex buffer." << std::endl;
+    GLC(customFilterContext3D, customFilterContext3D->bindBuffer(GL_ARRAY_BUFFER, vertexBuffer));
+    const int numVertices = 6;
+    const int numComponentsPerVertex = 3;
+    const int numComponents = numVertices * numComponentsPerVertex;
+    const int numBytesPerComponent = sizeof(float);
+    const int numBytesPerVertex = numComponentsPerVertex * numBytesPerComponent;
+    const int numBytes = numComponents * numBytesPerComponent;
+    const float f0 = 0.0;
+    const float f1 = 1.0;
+    const float vertices[numComponents] = {
+        f0, f0, f0,
+        f1, f0, f0,
+        f1, f1, f0,
+        f0, f0, f0,
+        f1, f1, f0,
+        f0, f1, f0
+    };
+    GLC(customFilterContext3D, customFilterContext3D->bufferData(GL_ARRAY_BUFFER, numBytes, vertices, GL_STATIC_DRAW));
+    std::cerr << "Uploaded vertex data." << std::endl;
+
+    // Bind attribute pointing to vertex buffer.
+    WebKit::WGC3Dint vertexAttributeLocation = GLC(customFilterContext3D, customFilterContext3D->getAttribLocation(program, "a_position"));
+    std::cerr << "Found vertex attribute at location " << vertexAttributeLocation << "." << std::endl;
+    GLC(customFilterContext3D, customFilterContext3D->vertexAttribPointer(vertexAttributeLocation, 3, GL_FLOAT, false, numBytesPerVertex, 0));
+    GLC(customFilterContext3D, customFilterContext3D->enableVertexAttribArray(vertexAttributeLocation));
+    std::cerr << "Bound vertex attribute." << std::endl;
+
+    // Draw!
+    GLC(customFilterContext3D, customFilterContext3D->drawArrays(GL_TRIANGLES, 0, numVertices));
+    std::cerr << "Draw arrays!" << std::endl;
 
     // Flush.
-    customFilterContext3D->flush();
+    GLC(customFilterContext3D, customFilterContext3D->flush());
 
     // Create a bitmap pointing to the scratch texture.
     SkBitmap sourceBitmap;
