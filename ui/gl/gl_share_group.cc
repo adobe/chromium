@@ -48,7 +48,7 @@ void GLShareGroup::SetSharedContext(GLContext* context) {
 }
 
 GLContext* GLShareGroup::GetSharedContext() {
-  return shared_context_;
+  return shared_context_.get();
 }
 
 GLShareGroup::~GLShareGroup() {

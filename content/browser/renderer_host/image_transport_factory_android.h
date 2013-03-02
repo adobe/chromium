@@ -35,6 +35,7 @@ class ImageTransportFactoryAndroid {
 
   virtual WebKit::WebGraphicsContext3D* GetContext3D() = 0;
   virtual GLHelper* GetGLHelper() = 0;
+  virtual void SetContext3D(WebKit::WebGraphicsContext3D*) { }
 
 protected:
   ImageTransportFactoryAndroid();

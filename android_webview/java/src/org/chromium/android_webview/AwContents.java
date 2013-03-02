@@ -18,6 +18,7 @@ import android.os.Message;
 import android.text.TextUtils;
 import android.util.Log;
 import android.view.MotionEvent;
+import android.view.Surface;
 import android.view.View;
 import android.view.ViewGroup;
 import android.webkit.GeolocationPermissions;
@@ -321,6 +322,17 @@ public class AwContents {
 
         // returning false will cause a fallback to SW path.
         return true;
+    }
+    
+    public void setSurface(Surface surface) {
+    	if (mNativeAwContents == 0) return;
+    	nativeSetSurface(mNativeAwContents, surface);
+    }
+    
+    public boolean onDrawGL(int width, int height) {
+    	if (mNativeAwContents == 0) return false;
+    	nativeSetScrollForHWFrame(mNativeAwContents, mContainerView.getScrollX(), mContainerView.getScrollY());
+    	return nativeDrawGL(mNativeAwContents, 0, 0, width, height, width, height);
     }
 
     public void onDraw(Canvas canvas) {
@@ -937,7 +949,7 @@ public class AwContents {
 
     @CalledByNative
     private void invalidate() {
-        mContainerView.invalidate();
+    	mContentsClient.onInvalidate();
     }
 
     @CalledByNative
@@ -1072,6 +1084,9 @@ public class AwContents {
     private native boolean nativeDrawSW(int nativeAwContents, Canvas canvas, int clipX, int clipY,
             int clipW, int clipH);
     private native int nativeGetAwDrawGLViewContext(int nativeAwContents);
+    private native boolean nativeDrawGL(int nativeAwContents, int clipX, int clipY,
+            int clipW, int clipH, int width, int height);
+    private native void nativeSetSurface(int nativeAwContents, Surface surface);
     private native Picture nativeCapturePicture(int nativeAwContents);
     private native void nativeEnableOnNewPicture(int nativeAwContents, boolean enabled,
             boolean invalidationOnly);

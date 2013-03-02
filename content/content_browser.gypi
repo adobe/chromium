@@ -616,6 +616,8 @@
     'browser/renderer_host/clipboard_message_filter.cc',
     'browser/renderer_host/clipboard_message_filter.h',
     'browser/renderer_host/clipboard_message_filter_mac.mm',
+    'browser/renderer_host/android_compositor_switches.h',
+    'browser/renderer_host/android_compositor_switches.cc',
     'browser/renderer_host/compositor_impl_android.h',
     'browser/renderer_host/compositor_impl_android.cc',
     'browser/renderer_host/compositing_iosurface_mac.h',

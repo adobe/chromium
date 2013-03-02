@@ -13,6 +13,10 @@
 
 struct ANativeWindow;
 
+namespace WebKit {
+class WebGraphicsContext3D;
+}
+
 namespace cc {
 class Layer;
 class VideoLayer;
@@ -36,11 +40,14 @@ class SurfaceTextureTransportClient : public cc::VideoFrameProvider {
   virtual void PutCurrentFrame(const scoped_refptr<media::VideoFrame>& frame)
       OVERRIDE;
 
+  void DetachFromHostContext();
+
  private:
   void OnSurfaceTextureFrameAvailable();
 
   scoped_refptr<cc::VideoLayer> video_layer_;
   scoped_refptr<SurfaceTextureBridge> surface_texture_;
+  WebKit::WebGraphicsContext3D* context_;
   ANativeWindow* window_;
   scoped_refptr<media::VideoFrame> video_frame_;
   uint32 texture_id_;

@@ -8,6 +8,7 @@
 #include "base/android/scoped_java_ref.h"
 
 struct AwDrawGLInfo;
+struct ANativeWindow;
 
 namespace content {
 class ContentViewCore;
@@ -15,6 +16,7 @@ class ContentViewCore;
 
 namespace gfx {
 class Rect;
+class Size;
 }
 
 namespace android_webview {
@@ -76,6 +78,8 @@ class BrowserViewRenderer {
 
   // Software rendering methods.
   virtual bool DrawSW(jobject java_canvas, const gfx::Rect& clip_bounds) = 0;
+  virtual bool DrawGL(const gfx::Rect& clip_bounds, const gfx::Size& size) = 0;
+  virtual void SetWindow(ANativeWindow* window) = 0;
 
   // CapturePicture API methods.
   virtual base::android::ScopedJavaLocalRef<jobject> CapturePicture() = 0;

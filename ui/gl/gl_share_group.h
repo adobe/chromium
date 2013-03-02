@@ -48,7 +48,7 @@ class GL_EXPORT GLShareGroup : public base::RefCounted<GLShareGroup> {
   typedef std::set<GLContext*> ContextSet;
   ContextSet contexts_;
 
-  GLContext* shared_context_;
+  scoped_refptr<GLContext> shared_context_;
 
   DISALLOW_COPY_AND_ASSIGN(GLShareGroup);
 };

@@ -19,6 +19,7 @@
 #include "cc/thread_impl.h"
 #include "content/browser/gpu/browser_gpu_channel_host_factory.h"
 #include "content/browser/gpu/gpu_surface_tracker.h"
+#include "content/browser/renderer_host/android_compositor_switches.h"
 #include "content/browser/renderer_host/image_transport_factory_android.h"
 #include "content/common/gpu/client/gl_helper.h"
 #include "content/common/gpu/client/gpu_channel_host.h"
@@ -137,6 +138,14 @@ void CompositorImpl::SetVisible(bool visible) {
     settings.calculateTopControlsPosition = false;
     settings.topControlsHeight = 0.f;
     settings.useMemoryManagement = false;
+
+    CommandLine* command_line = CommandLine::ForCurrentProcess();
+    settings.initialDebugState.showFPSCounter =
+        command_line->HasSwitch(switches::kAndroidUIShowFPSCounter);
+    settings.initialDebugState.showPlatformLayerTree =
+        command_line->HasSwitch(switches::kAndroidUIShowLayerTree);
+    settings.initialDebugState.showDebugBorders =
+        command_line->HasSwitch(switches::kAndroidUIShowLayerBorders);
 
     // Do not clear the framebuffer when rendering into external GL contexts
     // like Android View System's.
@@ -280,6 +289,7 @@ scoped_ptr<cc::OutputSurface> CompositorImpl::createOutputSurface() {
             attrs,
             window_,
             NULL));
+    ImageTransportFactoryAndroid::GetInstance()->SetContext3D(context.get());
     return make_scoped_ptr(new cc::OutputSurface(
         context.PassAs<WebKit::WebGraphicsContext3D>()));
   } else {

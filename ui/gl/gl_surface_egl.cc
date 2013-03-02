@@ -247,7 +247,7 @@ bool NativeViewGLSurfaceEGL::Initialize() {
       gfx::g_driver_egl.ext.b_EGL_NV_post_sub_buffer ?
           egl_window_attributes_sub_buffer :
           NULL);
-
+  
   if (!surface_) {
     LOG(ERROR) << "eglCreateWindowSurface failed with error "
                << GetLastEGLErrorString();

@@ -539,6 +539,11 @@ gfx::Rect RenderWidgetHostViewAndroid::GetBoundsInRootWindow() {
   return GetViewBounds();
 }
 
+void RenderWidgetHostViewAndroid::DetachTransportSurfaceFromHostContext() {
+  if (surface_texture_transport_.get())
+    surface_texture_transport_->DetachFromHostContext();
+}
+
 gfx::GLSurfaceHandle RenderWidgetHostViewAndroid::GetCompositingSurface() {
   if (surface_texture_transport_.get()) {
     return surface_texture_transport_->GetCompositingSurface(

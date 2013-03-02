@@ -43,6 +43,8 @@ class BrowserViewRendererImpl
   virtual void DrawGL(AwDrawGLInfo* draw_info) OVERRIDE;
   virtual void SetScrollForHWFrame(int x, int y) OVERRIDE;
   virtual bool DrawSW(jobject java_canvas, const gfx::Rect& clip) OVERRIDE;
+  virtual void SetWindow(ANativeWindow* window) OVERRIDE;
+  virtual bool DrawGL(const gfx::Rect& clip, const gfx::Size& size) OVERRIDE;
   virtual base::android::ScopedJavaLocalRef<jobject> CapturePicture() OVERRIDE;
   virtual void EnableOnNewPicture(OnNewPictureMode mode) OVERRIDE;
   virtual void OnVisibilityChanged(

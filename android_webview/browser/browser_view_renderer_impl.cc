@@ -14,6 +14,8 @@
 #include "base/debug/trace_event.h"
 #include "base/logging.h"
 #include "cc/layer.h"
+#include "content/public/browser/interstitial_page.h"
+#include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/android/content_view_core.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/web_contents.h"
@@ -160,6 +162,32 @@ void BrowserViewRendererImpl::SetContents(ContentViewCore* content_view_core) {
   view_clip_layer_->removeAllChildren();
   view_clip_layer_->addChild(content_view_core->GetLayer());
   Invalidate();
+}
+
+void BrowserViewRendererImpl::SetWindow(ANativeWindow* window) {
+  // This is copied from ContentViewCoreImpl::GetRenderWidgetHostViewAndroid.
+  content::RenderWidgetHostView* rwhv = web_contents_ ? web_contents_->GetRenderWidgetHostView() : 0;
+  if (rwhv)
+    rwhv->DetachTransportSurfaceFromHostContext();
+  compositor_->SetWindowSurface(window);
+}
+
+bool BrowserViewRendererImpl::DrawGL(const gfx::Rect& clip, const gfx::Size& size) {
+  SetCompositorVisibility(view_visible_);
+  if (!compositor_visible_)
+    return false;
+
+  compositor_->SetWindowBounds(gfx::Size(size.width(), size.height()));
+  compositor_->SetHasTransparentBackground(false);
+  view_clip_layer_->setMasksToBounds(false);
+  transform_layer_->setTransform(gfx::Transform());
+  scissor_clip_layer_->setMasksToBounds(false);
+  scissor_clip_layer_->setPosition(gfx::PointF());
+  scissor_clip_layer_->setBounds(gfx::Size(size.width(), size.height()));
+  scissor_clip_layer_->setSublayerTransform(gfx::Transform());
+  compositor_->Composite();
+  is_composite_pending_ = false;
+  return true;
 }
 
 void BrowserViewRendererImpl::DrawGL(AwDrawGLInfo* draw_info) {

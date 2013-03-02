@@ -163,6 +163,10 @@ class CONTENT_EXPORT RenderWidgetHostView {
   // The region specified will be transparent to mouse clicks.
   virtual void SetClickthroughRegion(SkRegion* region) = 0;
 #endif
+
+#if defined(ANDROID)
+  virtual void DetachTransportSurfaceFromHostContext() { };
+#endif
 };
 
 }  // namespace content

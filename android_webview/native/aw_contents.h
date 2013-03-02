@@ -109,6 +109,7 @@ class AwContents : public FindHelper::Listener,
       JNIEnv* env, jobject obj);
   jboolean RestoreFromOpaqueState(JNIEnv* env, jobject obj, jbyteArray state);
   void FocusFirstNode(JNIEnv* env, jobject obj);
+  void SetSurface(JNIEnv* env, jobject obj, jobject surfaceObj);
   bool DrawSW(JNIEnv* env,
               jobject obj,
               jobject canvas,
@@ -118,6 +119,14 @@ class AwContents : public FindHelper::Listener,
               jint clip_h);
   void SetScrollForHWFrame(JNIEnv* env, jobject obj,
                            int scroll_x, int scroll_y);
+  bool DrawGL(JNIEnv* env,
+              jobject obj,
+              jint clip_x,
+              jint clip_y,
+              jint clip_w,
+              jint clip_h,
+              jint width,
+              jint height);
   jint GetAwDrawGLViewContext(JNIEnv* env, jobject obj);
   base::android::ScopedJavaLocalRef<jobject> CapturePicture(JNIEnv* env,
                                                             jobject obj);

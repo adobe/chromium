@@ -289,9 +289,16 @@ bool WebGraphicsContext3DCommandBufferImpl::InitializeCommandBuffer(
   base::AutoLock lock(g_all_shared_contexts_lock.Get());
   CommandBufferProxyImpl* share_group = NULL;
   if (attributes_.shareResources) {
-    WebGraphicsContext3DCommandBufferImpl* share_group_context =
-        g_all_shared_contexts.Pointer()->empty() ?
-            NULL : *g_all_shared_contexts.Pointer()->begin();
+    WebGraphicsContext3DCommandBufferImpl* share_group_context = NULL;
+    std::set<WebGraphicsContext3DCommandBufferImpl*>* share_set =
+      g_all_shared_contexts.Pointer();
+    for (std::set<WebGraphicsContext3DCommandBufferImpl*>::iterator iter =
+          share_set->begin(); iter != share_set->end(); ++iter) {
+      if ((*iter)->host_ == host_) {
+        share_group_context = *iter;
+        break;
+      }
+    }
     share_group = share_group_context ?
         share_group_context->command_buffer_ : NULL;
   }

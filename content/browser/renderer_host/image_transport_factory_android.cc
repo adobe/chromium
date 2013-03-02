@@ -37,25 +37,23 @@ class DirectGLImageTransportFactory : public ImageTransportFactoryAndroid {
   virtual void ReleaseTexture(
       uint32 texture_id, const signed char* mailbox_name) OVERRIDE {}
   virtual WebKit::WebGraphicsContext3D* GetContext3D() OVERRIDE {
-    return context_.get();
+    return context_;
   }
   virtual GLHelper* GetGLHelper() OVERRIDE { return NULL; }
 
+  virtual void SetContext3D(WebKit::WebGraphicsContext3D* context) OVERRIDE {
+    context_ = context;
+  }
+
  private:
-  scoped_ptr<webkit::gpu::WebGraphicsContext3DInProcessImpl> context_;
+  WebKit::WebGraphicsContext3D* context_;
 
   DISALLOW_COPY_AND_ASSIGN(DirectGLImageTransportFactory);
 };
 
-DirectGLImageTransportFactory::DirectGLImageTransportFactory() {
-  WebKit::WebGraphicsContext3D::Attributes attrs;
-  attrs.shareResources = false;
-  attrs.noAutomaticFlushes = true;
-  context_.reset(
-      webkit::gpu::WebGraphicsContext3DInProcessImpl::CreateForWindow(
-          attrs,
-          NULL,
-          NULL));
+DirectGLImageTransportFactory::DirectGLImageTransportFactory() 
+  : context_(0) {
+  // CompositorImpl is supposed to inject the right context using SetContext3D.
 }
 
 DirectGLImageTransportFactory::~DirectGLImageTransportFactory() {

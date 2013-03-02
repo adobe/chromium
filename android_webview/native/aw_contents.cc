@@ -4,6 +4,8 @@
 
 #include "android_webview/native/aw_contents.h"
 
+#include <android/native_window_jni.h>
+
 #include "android_webview/browser/aw_browser_context.h"
 #include "android_webview/browser/aw_browser_main_parts.h"
 #include "android_webview/browser/browser_view_renderer_impl.h"
@@ -643,6 +645,29 @@ bool AwContents::DrawSW(JNIEnv* env,
 void AwContents::SetScrollForHWFrame(JNIEnv* env, jobject obj,
                                      int scroll_x, int scroll_y) {
   browser_view_renderer_->SetScrollForHWFrame(scroll_x, scroll_y);
+}
+
+void AwContents::SetSurface(JNIEnv* env, jobject obj, jobject surfaceObj) {
+  if (surfaceObj == NULL) {
+    browser_view_renderer_->SetWindow(0);
+    return;
+  }
+  ANativeWindow* window = ANativeWindow_fromSurface(env, surfaceObj);
+  browser_view_renderer_->SetWindow(window);
+  ANativeWindow_release(window);
+}
+
+bool AwContents::DrawGL(JNIEnv* env,
+                        jobject obj,
+                        jint clip_x,
+                        jint clip_y,
+                        jint clip_w,
+                        jint clip_h,
+                        jint width,
+                        jint height) {
+  browser_view_renderer_->DrawGL(gfx::Rect(clip_x, clip_y, clip_w, clip_h), 
+      gfx::Size(width, height));
+  return true;
 }
 
 void AwContents::SetPendingWebContentsForPopup(

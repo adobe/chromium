@@ -304,4 +304,7 @@ public abstract class AwContentsClient extends ContentViewClient {
     @Override
     final public void onContextualActionBarHidden() {
     }
+
+	public void onInvalidate() {
+	}
 }

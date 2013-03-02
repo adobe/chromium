@@ -146,6 +146,8 @@ class RenderWidgetHostViewAndroid : public RenderWidgetHostViewBase {
   virtual void ShowDisambiguationPopup(const gfx::Rect& target_rect,
                                        const SkBitmap& zoomed_bitmap) OVERRIDE;
 
+  virtual void DetachTransportSurfaceFromHostContext() OVERRIDE;
+
   // Non-virtual methods
   void SetContentViewCore(ContentViewCoreImpl* content_view_core);
   SkColor GetCachedBackgroundColor() const;

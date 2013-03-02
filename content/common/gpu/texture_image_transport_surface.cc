@@ -447,7 +447,7 @@ void TextureImageTransportSurface::AttachBackTextureToFBO() {
 
 void TextureImageTransportSurface::ConsumeTexture(Texture* texture) {
   DCHECK(!texture->service_id);
-
+  
   scoped_ptr<TextureDefinition> definition(mailbox_manager_->ConsumeTexture(
       GL_TEXTURE_2D, texture->mailbox_name));
   if (definition.get()) {
@@ -461,7 +461,7 @@ void TextureImageTransportSurface::ConsumeTexture(Texture* texture) {
 
 void TextureImageTransportSurface::ProduceTexture(Texture* texture) {
   DCHECK(texture->service_id);
-
+  
   TextureManager* texture_manager =
       helper_->stub()->decoder()->GetContextGroup()->texture_manager();
   DCHECK(texture->size.width() > 0 && texture->size.height() > 0);
