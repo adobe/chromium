@@ -594,6 +594,7 @@ void GLRenderer::drawRenderPassQuad(DrawingFrame& frame, const RenderPassDrawQua
     if (filterBitmap.getTexture()) {
         GrTexture* texture = reinterpret_cast<GrTexture*>(filterBitmap.getTexture());
         context()->bindTexture(GL_TEXTURE_2D, texture->getTextureHandle());
+        std::cerr << "Bind texture " << texture->getTextureHandle() << " in gl_renderer." << std::endl;
     } else
         contentsResourceLock = make_scoped_ptr(new ResourceProvider::ScopedSamplerGL(m_resourceProvider, contentsTexture->id(),
                                                                                      GL_TEXTURE_2D, GL_LINEAR));
