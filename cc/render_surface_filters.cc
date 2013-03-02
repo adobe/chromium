@@ -460,8 +460,8 @@ SkBitmap RenderSurfaceFilters::apply(const WebKit::WebFilterOperations& filters,
     std::cerr << "Attached depth buffer." << std::endl;
 
     // Set up viewport.
-    // GLC(customFilterContext3D, customFilterContext3D->viewport(0, 0, width, height));
-    // std::cerr << "Set up viewport." << std::endl;
+    GLC(customFilterContext3D, customFilterContext3D->viewport(0, 0, width, height));
+    std::cerr << "Set up viewport." << std::endl;
 
     // Clear render buffers.
     GLC(customFilterContext3D, customFilterContext3D->clearColor(1.0, 0.0, 0.0, 1.0));
