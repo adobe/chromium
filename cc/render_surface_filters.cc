@@ -261,6 +261,7 @@ public:
         m_source.setConfig(SkBitmap::kARGB_8888_Config, size.width(), size.height());
         skia::RefPtr<SkGrPixelRef> pixelRef = skia::AdoptRef(new SkGrPixelRef(texture.get()));
         m_source.setPixelRef(pixelRef.get());
+        std::cerr << "Init: Source has texture with id " << texture->getTextureHandle() << "." <<  std::endl;
     }
 
     ~FilterBufferState() { }
@@ -279,34 +280,36 @@ public:
             m_scratchTextures[i] = skia::AdoptRef(scratchTexture.detach());
             if (!m_scratchTextures[i])
                 return false;
-            std::cerr << "Created scratch texture " << i << " with texture id " << m_scratchTextures[i]->getTextureHandle() << "." << std::endl;
         }
         return true;
     }
 
     SkCanvas* canvas()
     {
-        std::cerr << "Access canvas. Canvas ptr is " << (int)m_canvas.get() << "." << std::endl;
-        if (!m_canvas.get()) {
+        if (!m_canvas.get())
             createCanvas();
-            std::cerr << "Created canvas. Canvas ptr is " << (int)m_canvas.get() << "." << std::endl;
-        }
         return m_canvas.get();
+    }
+
+    // Instead of drawing to a canvas, we can draw to the current texture directly.
+    GrTexture* currentTexture()
+    {
+        return m_scratchTextures[m_currentTexture].get();
     }
 
     const SkBitmap& source() { return m_source; }
 
     void swap()
     {
-        m_canvas->flush();
-        std::cerr << "Clear canvas. Canvas ptr is " << (int)m_canvas.get() << "." << std::endl;
-        m_canvas.clear();
-        std::cerr << "Cleared canvas. Canvas ptr is " << (int)m_canvas.get() << "." << std::endl;
-        m_device.clear();
+        if (m_canvas.get()) {
+            m_canvas->flush();
+            m_canvas.clear();
+            m_device.clear();
+        }
 
         skia::RefPtr<SkGrPixelRef> pixelRef = skia::AdoptRef(new SkGrPixelRef(m_scratchTextures[m_currentTexture].get()));
         m_source.setPixelRef(pixelRef.get());
-        std::cerr << "Swap current texture " << m_currentTexture << " -> " << (1 - m_currentTexture) << "." << std::endl;
+        std::cerr << "Swap: Set source pixel ref to texture with id " << m_scratchTextures[m_currentTexture]->getTextureHandle() << "." <<  std::endl;
         m_currentTexture = 1 - m_currentTexture;
     }
 
@@ -317,7 +320,6 @@ private:
         m_device = skia::AdoptRef(new SkGpuDevice(m_grContext, m_scratchTextures[m_currentTexture].get()));
         m_canvas = skia::AdoptRef(new SkCanvas(m_device.get()));
         m_canvas->clear(0x0);
-        std::cerr << "Created canvas using texture " << m_currentTexture << " with texture id " << m_scratchTextures[m_currentTexture]->getTextureHandle() << "." << std::endl;
     }
 
     GrContext* m_grContext;
@@ -422,18 +424,20 @@ static WebKit::WebGLId createProgram(WebKit::WebGraphicsContext3D* context, WebK
     }    
 }
 
-static SkBitmap applyCustomFilter(WebKit::WebGraphicsContext3D* context, GrContext* grContext, const gfx::SizeF& size)
+static SkBitmap applyCustomFilter(WebKit::WebGraphicsContext3D* context, GrTexture* destinationTexture, const gfx::SizeF& size)
 {
     // Create a scratch texture.
-    GrTextureDesc desc;
-    desc.fFlags = kRenderTarget_GrTextureFlagBit | kNoStencil_GrTextureFlagBit;
-    desc.fSampleCnt = 0;
-    desc.fWidth = size.width();
-    desc.fHeight = size.height();
-    desc.fConfig = kSkia8888_GrPixelConfig;
-    GrAutoScratchTexture scratchTextureLocal(grContext, desc, GrContext::kExact_ScratchTexMatch);
-    skia::RefPtr<GrTexture> scratchTexture = skia::AdoptRef(scratchTextureLocal.detach());
-    std::cerr << "Create scatch texture with id " << scratchTexture->getTextureHandle() << "." << std::endl;
+    // GrTextureDesc desc;
+    // desc.fFlags = kRenderTarget_GrTextureFlagBit | kNoStencil_GrTextureFlagBit;
+    // desc.fSampleCnt = 0;
+    // desc.fWidth = size.width();
+    // desc.fHeight = size.height();
+    // desc.fConfig = kSkia8888_GrPixelConfig;
+    // GrAutoScratchTexture destinationTextureLocal(grContext, desc, GrContext::kExact_ScratchTexMatch);
+    // skia::RefPtr<GrTexture> destinationTexture = skia::AdoptRef(destinationTextureLocal.detach());
+    // std::cerr << "Create scratch texture with id " << destinationTexture->getTextureHandle() << "." << std::endl;
+    
+    std::cerr << "Writing to texture with id " << destinationTexture->getTextureHandle() << "." << std::endl;
 
     // Draw into the scratch texture using the custom filter context.
 
@@ -451,8 +455,8 @@ static SkBitmap applyCustomFilter(WebKit::WebGraphicsContext3D* context, GrConte
     std::cerr << "Created frame buffer." << std::endl;
 
     // Attach texture to frame buffer.
-    GLC(context, context->framebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, scratchTexture->getTextureHandle(), 0));
-    std::cerr << "Bound texture with id " << scratchTexture->getTextureHandle() << " to frame buffer." << std::endl;
+    GLC(context, context->framebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, destinationTexture->getTextureHandle(), 0));
+    std::cerr << "Bound texture with id " << destinationTexture->getTextureHandle() << " to frame buffer." << std::endl;
 
     // Set up depth buffer.
     WebKit::WebGLId depthBuffer = GLC(context, context->createRenderbuffer());
@@ -532,9 +536,9 @@ static SkBitmap applyCustomFilter(WebKit::WebGraphicsContext3D* context, GrConte
 
     // Create a bitmap pointing to the scratch texture.
     SkBitmap bitmap;
-    bitmap.setConfig(SkBitmap::kARGB_8888_Config, size.width(), size.height());
-    skia::RefPtr<SkGrPixelRef> scratchTexturePixelRef = skia::AdoptRef(new SkGrPixelRef(scratchTexture.get()));
-    bitmap.setPixelRef(scratchTexturePixelRef.get());
+    // bitmap.setConfig(SkBitmap::kARGB_8888_Config, size.width(), size.height());
+    // skia::RefPtr<SkGrPixelRef> destinationTexturePixelRef = skia::AdoptRef(new SkGrPixelRef(destinationTexture));
+    // bitmap.setPixelRef(destinationTexturePixelRef.get());
 
     std::cerr << "Done." << std::endl;
     return bitmap;
@@ -543,8 +547,6 @@ static SkBitmap applyCustomFilter(WebKit::WebGraphicsContext3D* context, GrConte
 SkBitmap RenderSurfaceFilters::apply(const WebKit::WebFilterOperations& filters, unsigned textureId, const gfx::SizeF& size, WebKit::WebGraphicsContext3D* context3D, GrContext* grContext,
     WebKit::WebGraphicsContext3D* customFilterContext3D, GrContext* customFilterGrContext)
 {
-    //return applyCustomFilter(customFilterContext3D, customFilterGrContext, size);
-
     if (!context3D || !grContext)
         return SkBitmap();
 
@@ -611,6 +613,11 @@ SkBitmap RenderSurfaceFilters::apply(const WebKit::WebFilterOperations& filters,
             NOTREACHED();
             break;
         case WebKit::WebFilterOperation::FilterTypeCustom: {
+            std::cerr << "Custom filter found." << std::endl;
+            //applyCustomFilter(customFilterContext3D, state.currentTexture(), size);
+            applyCustomFilter(customFilterContext3D, state.currentTexture(), size);
+
+            /*
             WebKit::WebCustomFilterProgram* program = op.customFilterProgram();
             assert(program);
             std::cerr << "custom filter render -> " 
@@ -667,12 +674,13 @@ SkBitmap RenderSurfaceFilters::apply(const WebKit::WebFilterOperations& filters,
                 }
                 }
             }
+            */
             break;
         }
         }
         state.swap();
     }
-    context3D->flush();
+    // context3D->flush();
     return state.source();
 }
 
