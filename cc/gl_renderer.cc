@@ -211,7 +211,7 @@ void GLRenderer::clearFramebuffer(DrawingFrame& frame)
 {
     // On DEBUG builds, opaque render passes are cleared to blue to easily see regions that were not drawn on the screen.
     if (frame.currentRenderPass->has_transparent_background)
-        GLC(m_context, m_context->clearColor(0, 1, 0, 1));
+        GLC(m_context, m_context->clearColor(0, 0, 0, 0));
     else
         GLC(m_context, m_context->clearColor(0, 0, 1, 1));
 
@@ -1292,7 +1292,7 @@ void GLRenderer::drawQuadGeometry(const DrawingFrame& frame, const gfx::Transfor
     toGLMatrix(&glMatrix[0], frame.projectionMatrix * quadRectMatrix);
     GLC(m_context, m_context->uniformMatrix4fv(matrixLocation, 1, false, &glMatrix[0]));
 
-    GLC(m_context, m_context->drawElements(GL_TRIANGLES, 3, GL_UNSIGNED_SHORT, 0));
+    GLC(m_context, m_context->drawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0));
 }
 
 void GLRenderer::copyTextureToFramebuffer(const DrawingFrame& frame, int textureId, const gfx::Rect& rect, const gfx::Transform& drawMatrix)

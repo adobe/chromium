@@ -279,14 +279,18 @@ public:
             m_scratchTextures[i] = skia::AdoptRef(scratchTexture.detach());
             if (!m_scratchTextures[i])
                 return false;
+            std::cerr << "Created scratch texture " << i << " with texture id " << m_scratchTextures[i]->getTextureHandle() << "." << std::endl;
         }
         return true;
     }
 
     SkCanvas* canvas()
     {
-        if (!m_canvas.get())
+        std::cerr << "Access canvas. Canvas ptr is " << (int)m_canvas.get() << "." << std::endl;
+        if (!m_canvas.get()) {
             createCanvas();
+            std::cerr << "Created canvas. Canvas ptr is " << (int)m_canvas.get() << "." << std::endl;
+        }
         return m_canvas.get();
     }
 
@@ -295,11 +299,14 @@ public:
     void swap()
     {
         m_canvas->flush();
+        std::cerr << "Clear canvas. Canvas ptr is " << (int)m_canvas.get() << "." << std::endl;
         m_canvas.clear();
+        std::cerr << "Cleared canvas. Canvas ptr is " << (int)m_canvas.get() << "." << std::endl;
         m_device.clear();
 
         skia::RefPtr<SkGrPixelRef> pixelRef = skia::AdoptRef(new SkGrPixelRef(m_scratchTextures[m_currentTexture].get()));
         m_source.setPixelRef(pixelRef.get());
+        std::cerr << "Swap current texture " << m_currentTexture << " -> " << (1 - m_currentTexture) << "." << std::endl;
         m_currentTexture = 1 - m_currentTexture;
     }
 
@@ -310,6 +317,7 @@ private:
         m_device = skia::AdoptRef(new SkGpuDevice(m_grContext, m_scratchTextures[m_currentTexture].get()));
         m_canvas = skia::AdoptRef(new SkCanvas(m_device.get()));
         m_canvas->clear(0x0);
+        std::cerr << "Created canvas using texture " << m_currentTexture << " with texture id " << m_scratchTextures[m_currentTexture]->getTextureHandle() << "." << std::endl;
     }
 
     GrContext* m_grContext;
@@ -414,8 +422,7 @@ static WebKit::WebGLId createProgram(WebKit::WebGraphicsContext3D* context, WebK
     }    
 }
 
-SkBitmap RenderSurfaceFilters::apply(const WebKit::WebFilterOperations& filters, unsigned textureId, const gfx::SizeF& size, WebKit::WebGraphicsContext3D* context3D, GrContext* grContext,
-    WebKit::WebGraphicsContext3D* customFilterContext3D, GrContext* customFilterGrContext)
+static SkBitmap applyCustomFilter(WebKit::WebGraphicsContext3D* context, GrContext* grContext, const gfx::SizeF& size)
 {
     // Create a scratch texture.
     GrTextureDesc desc;
@@ -424,72 +431,72 @@ SkBitmap RenderSurfaceFilters::apply(const WebKit::WebFilterOperations& filters,
     desc.fWidth = size.width();
     desc.fHeight = size.height();
     desc.fConfig = kSkia8888_GrPixelConfig;
-    GrAutoScratchTexture scratchTextureLocal(customFilterGrContext, desc, GrContext::kExact_ScratchTexMatch);
+    GrAutoScratchTexture scratchTextureLocal(grContext, desc, GrContext::kExact_ScratchTexMatch);
     skia::RefPtr<GrTexture> scratchTexture = skia::AdoptRef(scratchTextureLocal.detach());
     std::cerr << "Create scatch texture with id " << scratchTexture->getTextureHandle() << "." << std::endl;
 
     // Draw into the scratch texture using the custom filter context.
 
     // Set up context.
-    if (!customFilterContext3D->makeContextCurrent()) {
+    if (!context->makeContextCurrent()) {
         std::cerr << "Failed to make custom filters context current." << std::endl;
         return SkBitmap();
     }
     std::cerr << "Made custom filters context current." << std::endl;
-    GLC(customFilterContext3D, customFilterContext3D->enable(GL_DEPTH_TEST));
+    GLC(context, context->enable(GL_DEPTH_TEST));
 
     // Create frame buffer.
-    WebKit::WebGLId frameBuffer = GLC(customFilterContext3D, customFilterContext3D->createFramebuffer());
-    GLC(customFilterContext3D, customFilterContext3D->bindFramebuffer(GL_FRAMEBUFFER, frameBuffer));
+    WebKit::WebGLId frameBuffer = GLC(context, context->createFramebuffer());
+    GLC(context, context->bindFramebuffer(GL_FRAMEBUFFER, frameBuffer));
     std::cerr << "Created frame buffer." << std::endl;
 
     // Attach texture to frame buffer.
-    GLC(customFilterContext3D, customFilterContext3D->framebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, scratchTexture->getTextureHandle(), 0));
+    GLC(context, context->framebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, scratchTexture->getTextureHandle(), 0));
     std::cerr << "Bound texture with id " << scratchTexture->getTextureHandle() << " to frame buffer." << std::endl;
 
     // Set up depth buffer.
-    WebKit::WebGLId depthBuffer = GLC(customFilterContext3D, customFilterContext3D->createRenderbuffer());
-    GLC(customFilterContext3D, customFilterContext3D->bindRenderbuffer(GL_RENDERBUFFER, depthBuffer));
+    WebKit::WebGLId depthBuffer = GLC(context, context->createRenderbuffer());
+    GLC(context, context->bindRenderbuffer(GL_RENDERBUFFER, depthBuffer));
     WebKit::WGC3Dsizei width = size.width();
     WebKit::WGC3Dsizei height = size.height();
-    GLC(customFilterContext3D, customFilterContext3D->renderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT16, width, height));
+    GLC(context, context->renderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT16, width, height));
     std::cerr << "Set up depth buffer." << std::endl;
 
     // Attach depth buffer to frame buffer.
-    GLC(customFilterContext3D, customFilterContext3D->framebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, depthBuffer));
+    GLC(context, context->framebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, depthBuffer));
     std::cerr << "Attached depth buffer." << std::endl;
 
     // Set up viewport.
-    GLC(customFilterContext3D, customFilterContext3D->viewport(0, 0, width, height));
+    GLC(context, context->viewport(0, 0, width, height));
     std::cerr << "Set up viewport." << std::endl;
 
     // Clear render buffers.
-    GLC(customFilterContext3D, customFilterContext3D->clearColor(1.0, 0.0, 0.0, 1.0));
-    GLC(customFilterContext3D, customFilterContext3D->clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT));
+    GLC(context, context->clearColor(1.0, 0.0, 0.0, 1.0));
+    GLC(context, context->clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT));
     std::cerr << "Cleared render buffers." << std::endl;
 
     // Set up vertex shader.
     const WebKit::WGC3Dchar* vertexShaderSource = "precision mediump float; attribute vec3 a_position; void main() { gl_Position = vec4(a_position, 1.0); }";
-    WebKit::WebGLId vertexShader = createShader(customFilterContext3D, GL_VERTEX_SHADER, vertexShaderSource);
+    WebKit::WebGLId vertexShader = createShader(context, GL_VERTEX_SHADER, vertexShaderSource);
     if (!vertexShader)
         return SkBitmap();
 
     // Set up fragment shader.
     const WebKit::WGC3Dchar* fragmentShaderSource = "precision mediump float; void main() { gl_FragColor = vec4(1.0, 0.0, 1.0, 1.0); }";
-    WebKit::WebGLId fragmentShader = createShader(customFilterContext3D, GL_FRAGMENT_SHADER, fragmentShaderSource);
+    WebKit::WebGLId fragmentShader = createShader(context, GL_FRAGMENT_SHADER, fragmentShaderSource);
     if (!fragmentShader)
         return SkBitmap();
 
     // Set up program.
-    WebKit::WebGLId program = createProgram(customFilterContext3D, vertexShader, fragmentShader);
+    WebKit::WebGLId program = createProgram(context, vertexShader, fragmentShader);
     if (!program)
         return SkBitmap();
-    GLC(customFilterContext3D, customFilterContext3D->useProgram(program));
+    GLC(context, context->useProgram(program));
 
     // Set up vertex buffer.
-    WebKit::WebGLId vertexBuffer = GLC(customFilterContext3D, customFilterContext3D->createBuffer());
+    WebKit::WebGLId vertexBuffer = GLC(context, context->createBuffer());
     std::cerr << "Created vertex buffer." << std::endl;
-    GLC(customFilterContext3D, customFilterContext3D->bindBuffer(GL_ARRAY_BUFFER, vertexBuffer));
+    GLC(context, context->bindBuffer(GL_ARRAY_BUFFER, vertexBuffer));
     const int numVertices = 6;
     const int numComponentsPerVertex = 3;
     const int numComponents = numVertices * numComponentsPerVertex;
@@ -497,7 +504,7 @@ SkBitmap RenderSurfaceFilters::apply(const WebKit::WebFilterOperations& filters,
     const int numBytesPerVertex = numComponentsPerVertex * numBytesPerComponent;
     const int numBytes = numComponents * numBytesPerComponent;
     const float f0 = -1.0;
-    const float f1 = 1.0;
+    const float f1 = 0.75;
     const float vertices[numComponents] = {
         f0, f0, f0,
         f1, f0, f0,
@@ -506,22 +513,22 @@ SkBitmap RenderSurfaceFilters::apply(const WebKit::WebFilterOperations& filters,
         f1, f1, f0,
         f0, f1, f0
     };
-    GLC(customFilterContext3D, customFilterContext3D->bufferData(GL_ARRAY_BUFFER, numBytes, vertices, GL_STATIC_DRAW));
+    GLC(context, context->bufferData(GL_ARRAY_BUFFER, numBytes, vertices, GL_STATIC_DRAW));
     std::cerr << "Uploaded vertex data." << std::endl;
 
     // Bind attribute pointing to vertex buffer.
-    WebKit::WGC3Dint vertexAttributeLocation = GLC(customFilterContext3D, customFilterContext3D->getAttribLocation(program, "a_position"));
+    WebKit::WGC3Dint vertexAttributeLocation = GLC(context, context->getAttribLocation(program, "a_position"));
     std::cerr << "Found vertex attribute at location " << vertexAttributeLocation << "." << std::endl;
-    GLC(customFilterContext3D, customFilterContext3D->vertexAttribPointer(vertexAttributeLocation, 3, GL_FLOAT, false, numBytesPerVertex, 0));
-    GLC(customFilterContext3D, customFilterContext3D->enableVertexAttribArray(vertexAttributeLocation));
+    GLC(context, context->vertexAttribPointer(vertexAttributeLocation, 3, GL_FLOAT, false, numBytesPerVertex, 0));
+    GLC(context, context->enableVertexAttribArray(vertexAttributeLocation));
     std::cerr << "Bound vertex attribute." << std::endl;
 
     // Draw!
-    GLC(customFilterContext3D, customFilterContext3D->drawArrays(GL_TRIANGLES, 0, numVertices));
+    GLC(context, context->drawArrays(GL_TRIANGLES, 0, numVertices));
     std::cerr << "Draw arrays!" << std::endl;
 
     // Flush.
-    GLC(customFilterContext3D, customFilterContext3D->flush());
+    GLC(context, context->flush());
 
     // Create a bitmap pointing to the scratch texture.
     SkBitmap bitmap;
@@ -531,8 +538,13 @@ SkBitmap RenderSurfaceFilters::apply(const WebKit::WebFilterOperations& filters,
 
     std::cerr << "Done." << std::endl;
     return bitmap;
+}
 
-    /*
+SkBitmap RenderSurfaceFilters::apply(const WebKit::WebFilterOperations& filters, unsigned textureId, const gfx::SizeF& size, WebKit::WebGraphicsContext3D* context3D, GrContext* grContext,
+    WebKit::WebGraphicsContext3D* customFilterContext3D, GrContext* customFilterGrContext)
+{
+    //return applyCustomFilter(customFilterContext3D, customFilterGrContext, size);
+
     if (!context3D || !grContext)
         return SkBitmap();
 
@@ -662,7 +674,6 @@ SkBitmap RenderSurfaceFilters::apply(const WebKit::WebFilterOperations& filters,
     }
     context3D->flush();
     return state.source();
-    */
 }
 
 }  // namespace cc
