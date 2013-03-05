@@ -424,9 +424,9 @@ static WebKit::WebGLId createProgram(WebKit::WebGraphicsContext3D* context, WebK
     }    
 }
 
-static void applyCustomFilter(WebKit::WebGraphicsContext3D* context, WebKit::WebGLId destinationTextureId, const gfx::SizeF& size)
+static void applyCustomFilter(WebKit::WebGraphicsContext3D* context, WebKit::WebGLId destinationTextureId, WebKit::WebGLId sourceTextureId, const gfx::SizeF& size)
 {
-    std::cerr << "Writing to texture with id " << destinationTextureId << "." << std::endl;
+    std::cerr << "Applying custom filter with destination texture id " << destinationTextureId << " and source texture id " << sourceTextureId << "." << std::endl;
 
     // Set up context.
     if (!context->makeContextCurrent()) {
@@ -473,7 +473,7 @@ static void applyCustomFilter(WebKit::WebGraphicsContext3D* context, WebKit::Web
         return;
 
     // Set up fragment shader.
-    const WebKit::WGC3Dchar* fragmentShaderSource = "precision mediump float; void main() { gl_FragColor = vec4(1.0, 0.0, 1.0, 1.0); }";
+    const WebKit::WGC3Dchar* fragmentShaderSource = "precision mediump float; uniform sampler2D css_u_texture; void main() { vec4 sourceColor = texture2D(css_u_texture, vec2(0.5, 0.5)); gl_FragColor = vec4(sourceColor.rgb, 1.0); }";
     WebKit::WebGLId fragmentShader = createShader(context, GL_FRAGMENT_SHADER, fragmentShaderSource);
     if (!fragmentShader)
         return;
@@ -495,7 +495,7 @@ static void applyCustomFilter(WebKit::WebGraphicsContext3D* context, WebKit::Web
     const int numBytesPerVertex = numComponentsPerVertex * numBytesPerComponent;
     const int numBytes = numComponents * numBytesPerComponent;
     const float f0 = -1.0;
-    const float f1 = 0.75;
+    const float f1 = 1.0;
     const float vertices[numComponents] = {
         f0, f0, f0,
         f1, f0, f0,
@@ -513,6 +513,17 @@ static void applyCustomFilter(WebKit::WebGraphicsContext3D* context, WebKit::Web
     GLC(context, context->vertexAttribPointer(vertexAttributeLocation, 3, GL_FLOAT, false, numBytesPerVertex, 0));
     GLC(context, context->enableVertexAttribArray(vertexAttributeLocation));
     std::cerr << "Bound vertex attribute." << std::endl;
+
+    // Bind source texture.
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, sourceTextureId);
+    std::cerr << "Bound source texture with id " << sourceTextureId << "." << std::endl;
+
+    // Bind uniform pointing to source texture.
+    WebKit::WGC3Dint sourceTextureUniformLocation = GLC(context, context->getUniformLocation(program, "css_u_texture"));
+    std::cerr << "Found vertex attribute at location " << vertexAttributeLocation << "." << std::endl;
+    glUniform1i(sourceTextureUniformLocation, 0);
+    std::cerr << "Bound source texture uniform to texture unit 0." << std::endl;
 
     // Draw!
     GLC(context, context->drawArrays(GL_TRIANGLES, 0, numVertices));
@@ -593,7 +604,9 @@ SkBitmap RenderSurfaceFilters::apply(const WebKit::WebFilterOperations& filters,
         case WebKit::WebFilterOperation::FilterTypeCustom: {
             std::cerr << "Custom filter found." << std::endl;
             grContext->flush(GrContext::kDiscard_FlushBit);
-            applyCustomFilter(customFilterContext3D, state.currentTexture()->getTextureHandle(), size);
+            WebKit::WebGLId destinationTextureId = state.currentTexture()->getTextureHandle();
+            WebKit::WebGLId sourceTextureId = reinterpret_cast<GrTexture*>(state.source().getTexture())->getTextureHandle();
+            applyCustomFilter(customFilterContext3D, destinationTextureId, sourceTextureId, size);
             /*
             WebKit::WebCustomFilterProgram* program = op.customFilterProgram();
             assert(program);
