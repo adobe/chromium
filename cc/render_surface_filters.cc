@@ -262,7 +262,7 @@ public:
         m_source.setConfig(SkBitmap::kARGB_8888_Config, size.width(), size.height());
         skia::RefPtr<SkGrPixelRef> pixelRef = skia::AdoptRef(new SkGrPixelRef(texture.get()));
         m_source.setPixelRef(pixelRef.get());
-        std::cerr << "Init: Source has texture with id " << texture->getTextureHandle() << "." <<  std::endl;
+        std::cerr << "FilterBufferState Constructor: Source has texture with id " << texture->getTextureHandle() << "." <<  std::endl;
     }
 
     ~FilterBufferState() { }
@@ -304,13 +304,14 @@ public:
     {
         if (m_canvas.get()) {
             m_canvas->flush();
+            std::cerr << "Flush and destroy canvas." << std::endl;
             m_canvas.clear();
             m_device.clear();
         }
 
         skia::RefPtr<SkGrPixelRef> pixelRef = skia::AdoptRef(new SkGrPixelRef(m_scratchTextures[m_currentTexture].get()));
         m_source.setPixelRef(pixelRef.get());
-        std::cerr << "Swap: Set source pixel ref to texture with id " << m_scratchTextures[m_currentTexture]->getTextureHandle() << "." <<  std::endl;
+        std::cerr << "Swap: Set source pixel ref to texture with id " << m_scratchTextures[m_currentTexture]->getTextureHandle() << "." << std::endl;
         m_currentTexture = 1 - m_currentTexture;
     }
 
@@ -321,6 +322,7 @@ private:
         m_device = skia::AdoptRef(new SkGpuDevice(m_grContext, m_scratchTextures[m_currentTexture].get()));
         m_canvas = skia::AdoptRef(new SkCanvas(m_device.get()));
         m_canvas->clear(0x0);
+        std::cerr << "Create canvas backed by texture id " << m_scratchTextures[m_currentTexture]->getTextureHandle() << "." << std::endl;
     }
 
     GrContext* m_grContext;
@@ -392,7 +394,7 @@ WebKit::WebFilterOperations RenderSurfaceFilters::optimize(const WebKit::WebFilt
 static WebKit::WebGLId createShader(WebKit::WebGraphicsContext3D* context, WebKit::WGC3Denum type, const WebKit::WGC3Dchar* source)
 {
     WebKit::WebGLId shader = GLC(context, context->createShader(type));
-    std::cerr << "Created shader with id " << shader << "." << std::endl;
+    // std::cerr << "Created shader with id " << shader << "." << std::endl;
     GLC(context, context->shaderSource(shader, source));
     GLC(context, context->compileShader(shader));
     WebKit::WGC3Dint compileStatus = 0;
@@ -402,7 +404,7 @@ static WebKit::WebGLId createShader(WebKit::WebGraphicsContext3D* context, WebKi
         GLC(context, context->deleteShader(shader));
         return 0;
     } else {
-        std::cerr << "Compiled shader." << std::endl;
+        // std::cerr << "Compiled shader." << std::endl;
         return shader;
     }
 }
@@ -420,7 +422,7 @@ static WebKit::WebGLId createProgram(WebKit::WebGraphicsContext3D* context, WebK
         GLC(context, context->deleteProgram(program));
         return 0;
     } else {
-        std::cerr << "Linked program." << std::endl;
+        // std::cerr << "Linked program." << std::endl;
         return program;
     }    
 }
@@ -434,17 +436,17 @@ static void applyCustomFilter(const WebKit::WebFilterOperation& op, WebKit::WebG
         std::cerr << "Failed to make custom filters context current." << std::endl;
         return;
     }
-    std::cerr << "Made custom filters context current." << std::endl;
+    // std::cerr << "Made custom filters context current." << std::endl;
     GLC(context, context->enable(GL_DEPTH_TEST));
 
     // Create frame buffer.
     WebKit::WebGLId frameBuffer = GLC(context, context->createFramebuffer());
     GLC(context, context->bindFramebuffer(GL_FRAMEBUFFER, frameBuffer));
-    std::cerr << "Created frame buffer." << std::endl;
+    // std::cerr << "Created frame buffer." << std::endl;
 
     // Attach texture to frame buffer.
     GLC(context, context->framebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, destinationTextureId, 0));
-    std::cerr << "Bound texture with id " << destinationTextureId << " to frame buffer." << std::endl;
+    // std::cerr << "Bound texture with id " << destinationTextureId << " to frame buffer." << std::endl;
 
     // Set up depth buffer.
     WebKit::WebGLId depthBuffer = GLC(context, context->createRenderbuffer());
@@ -452,20 +454,20 @@ static void applyCustomFilter(const WebKit::WebFilterOperation& op, WebKit::WebG
     WebKit::WGC3Dsizei width = size.width();
     WebKit::WGC3Dsizei height = size.height();
     GLC(context, context->renderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT16, width, height));
-    std::cerr << "Set up depth buffer." << std::endl;
+    // std::cerr << "Set up depth buffer." << std::endl;
 
     // Attach depth buffer to frame buffer.
     GLC(context, context->framebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, depthBuffer));
-    std::cerr << "Attached depth buffer." << std::endl;
+    // std::cerr << "Attached depth buffer." << std::endl;
 
     // Set up viewport.
     GLC(context, context->viewport(0, 0, width, height));
-    std::cerr << "Set up viewport." << std::endl;
+    // std::cerr << "Set up viewport." << std::endl;
 
     // Clear render buffers.
     GLC(context, context->clearColor(1.0, 0.0, 0.0, 1.0));
     GLC(context, context->clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT));
-    std::cerr << "Cleared render buffers." << std::endl;
+    // std::cerr << "Cleared render buffers." << std::endl;
 
     // Set up vertex shader.
     // const WebKit::WGC3Dchar* vertexShaderSource = "precision mediump float; attribute vec4 a_position; attribute vec2 css_a_texCoord; varying vec2 css_v_texCoord; void main() { css_v_texCoord = css_a_texCoord; gl_Position = a_position; }";
@@ -489,7 +491,7 @@ static void applyCustomFilter(const WebKit::WebFilterOperation& op, WebKit::WebG
 
     // Set up vertex buffer.
     WebKit::WebGLId vertexBuffer = GLC(context, context->createBuffer());
-    std::cerr << "Created vertex buffer." << std::endl;
+    // std::cerr << "Created vertex buffer." << std::endl;
     GLC(context, context->bindBuffer(GL_ARRAY_BUFFER, vertexBuffer));
     const int numVertices = 6;
     const int numComponentsPerVertexPosition = 4;
@@ -512,31 +514,31 @@ static void applyCustomFilter(const WebKit::WebFilterOperation& op, WebKit::WebG
         f0, f1, f0, f1, t0, t1
     };
     GLC(context, context->bufferData(GL_ARRAY_BUFFER, numBytes, vertices, GL_STATIC_DRAW));
-    std::cerr << "Uploaded vertex data." << std::endl;
+    // std::cerr << "Uploaded vertex data." << std::endl;
 
     // Bind attribute pointing to vertex positions.
     WebKit::WGC3Dint positionAttributeLocation = GLC(context, context->getAttribLocation(program, "a_position"));
-    std::cerr << "Found position attribute at location " << positionAttributeLocation << "." << std::endl;
+    // std::cerr << "Found position attribute at location " << positionAttributeLocation << "." << std::endl;
     GLC(context, context->vertexAttribPointer(positionAttributeLocation, numComponentsPerVertexPosition, GL_FLOAT, false, numBytesPerVertex, 0));
     GLC(context, context->enableVertexAttribArray(positionAttributeLocation));
-    std::cerr << "Bound position attribute." << std::endl;
+    // std::cerr << "Bound position attribute." << std::endl;
 
     // Bind attribute pointing to texture coordinates.
     WebKit::WGC3Dint texCoordLocation = GLC(context, context->getAttribLocation(program, "a_texCoord"));
-    std::cerr << "Found tex coord attribute at location " << texCoordLocation << "." << std::endl;
+    // std::cerr << "Found tex coord attribute at location " << texCoordLocation << "." << std::endl;
     GLC(context, context->vertexAttribPointer(texCoordLocation, numComponentsPerVertexTexCoord, GL_FLOAT, false, numBytesPerVertex, numComponentsPerVertexPosition * numBytesPerComponent));
     GLC(context, context->enableVertexAttribArray(texCoordLocation));
-    std::cerr << "Bound tex coord attribute." << std::endl;
+    // std::cerr << "Bound tex coord attribute." << std::endl;
 
     // Bind source texture.
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, sourceTextureId);
-    std::cerr << "Bound source texture with id " << sourceTextureId << "." << std::endl;
+    // std::cerr << "Bound source texture with id " << sourceTextureId << "." << std::endl;
 
     // Bind uniform pointing to source texture.
     WebKit::WGC3Dint sourceTextureUniformLocation = GLC(context, context->getUniformLocation(program, "css_u_texture"));
     glUniform1i(sourceTextureUniformLocation, 0);
-    std::cerr << "Bound source texture uniform to texture unit 0." << std::endl;
+    // std::cerr << "Bound source texture uniform to texture unit 0." << std::endl;
 
     // Bind projection matrix uniform.
     WebKit::WGC3Dint projectionMatrixLocation = GLC(context, context->getUniformLocation(program, "u_projectionMatrix"));
@@ -566,9 +568,9 @@ SkBitmap RenderSurfaceFilters::apply(const WebKit::WebFilterOperations& filters,
 
     for (unsigned i = 0; i < optimizedFilters.size(); ++i) {
         const WebKit::WebFilterOperation& op = optimizedFilters.at(i);
-        SkCanvas* canvas = state.canvas();
         switch (op.type()) {
         case WebKit::WebFilterOperation::FilterTypeColorMatrix: {
+            SkCanvas* canvas = state.canvas();
             SkPaint paint;
             skia::RefPtr<SkColorMatrixFilter> filter = skia::AdoptRef(new SkColorMatrixFilter(op.matrix()));
             paint.setColorFilter(filter.get());
@@ -576,14 +578,17 @@ SkBitmap RenderSurfaceFilters::apply(const WebKit::WebFilterOperations& filters,
             break;
         }
         case WebKit::WebFilterOperation::FilterTypeBlur: {
+            SkCanvas* canvas = state.canvas();
             float stdDeviation = op.amount();
             skia::RefPtr<SkImageFilter> filter = skia::AdoptRef(new SkBlurImageFilter(stdDeviation, stdDeviation));
             SkPaint paint;
             paint.setImageFilter(filter.get());
             canvas->drawSprite(state.source(), 0, 0, &paint);
+            std::cerr << "Apply blur." << std::endl;
             break;
         }
         case WebKit::WebFilterOperation::FilterTypeDropShadow: {
+            SkCanvas* canvas = state.canvas();
             skia::RefPtr<SkImageFilter> blurFilter = skia::AdoptRef(new SkBlurImageFilter(op.amount(), op.amount()));
             skia::RefPtr<SkColorFilter> colorFilter = skia::AdoptRef(SkColorFilter::CreateModeFilter(op.dropShadowColor(), SkXfermode::kSrcIn_Mode));
             SkPaint paint;
@@ -597,6 +602,7 @@ SkBitmap RenderSurfaceFilters::apply(const WebKit::WebFilterOperations& filters,
             break;
         }
         case WebKit::WebFilterOperation::FilterTypeZoom: {
+            SkCanvas* canvas = state.canvas();
             SkPaint paint;
             skia::RefPtr<SkImageFilter> zoomFilter = skia::AdoptRef(
                 new SkMagnifierImageFilter(
@@ -622,8 +628,8 @@ SkBitmap RenderSurfaceFilters::apply(const WebKit::WebFilterOperations& filters,
             NOTREACHED();
             break;
         case WebKit::WebFilterOperation::FilterTypeCustom: {
-            std::cerr << "Custom filter found." << std::endl;
-            grContext->flush(GrContext::kDiscard_FlushBit);
+            grContext->flush();
+            context3D->flush();
             WebKit::WebGLId destinationTextureId = state.currentTexture()->getTextureHandle();
             WebKit::WebGLId sourceTextureId = reinterpret_cast<GrTexture*>(state.source().getTexture())->getTextureHandle();
             applyCustomFilter(op, sourceTextureId, size, customFilterContext3D, destinationTextureId);
