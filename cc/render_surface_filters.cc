@@ -467,13 +467,13 @@ static void applyCustomFilter(WebKit::WebGraphicsContext3D* context, WebKit::Web
     std::cerr << "Cleared render buffers." << std::endl;
 
     // Set up vertex shader.
-    const WebKit::WGC3Dchar* vertexShaderSource = "precision mediump float; attribute vec3 a_position; void main() { gl_Position = vec4(a_position, 1.0); }";
+    const WebKit::WGC3Dchar* vertexShaderSource = "precision mediump float; attribute vec4 a_position; attribute vec2 css_a_texCoord; varying vec2 css_v_texCoord; void main() { css_v_texCoord = css_a_texCoord; gl_Position = a_position; }";
     WebKit::WebGLId vertexShader = createShader(context, GL_VERTEX_SHADER, vertexShaderSource);
     if (!vertexShader)
         return;
 
     // Set up fragment shader.
-    const WebKit::WGC3Dchar* fragmentShaderSource = "precision mediump float; uniform sampler2D css_u_texture; void main() { vec4 sourceColor = texture2D(css_u_texture, vec2(0.5, 0.5)); gl_FragColor = vec4(sourceColor.rgb, 1.0); }";
+    const WebKit::WGC3Dchar* fragmentShaderSource = "precision mediump float; uniform sampler2D css_u_texture; varying vec2 css_v_texCoord; void main() { vec4 sourceColor = texture2D(css_u_texture, css_v_texCoord); gl_FragColor = vec4(sourceColor.rgb, 1.0); }";
     WebKit::WebGLId fragmentShader = createShader(context, GL_FRAGMENT_SHADER, fragmentShaderSource);
     if (!fragmentShader)
         return;
@@ -489,30 +489,41 @@ static void applyCustomFilter(WebKit::WebGraphicsContext3D* context, WebKit::Web
     std::cerr << "Created vertex buffer." << std::endl;
     GLC(context, context->bindBuffer(GL_ARRAY_BUFFER, vertexBuffer));
     const int numVertices = 6;
-    const int numComponentsPerVertex = 3;
+    const int numComponentsPerVertexPosition = 4;
+    const int numComponentsPerVertexTexCoord = 2;
+    const int numComponentsPerVertex = numComponentsPerVertexPosition + numComponentsPerVertexTexCoord;
     const int numComponents = numVertices * numComponentsPerVertex;
     const int numBytesPerComponent = sizeof(float);
     const int numBytesPerVertex = numComponentsPerVertex * numBytesPerComponent;
     const int numBytes = numComponents * numBytesPerComponent;
     const float f0 = -1.0;
     const float f1 = 1.0;
+    const float t0 = 0.0;
+    const float t1 = 1.0;
     const float vertices[numComponents] = {
-        f0, f0, f0,
-        f1, f0, f0,
-        f1, f1, f0,
-        f0, f0, f0,
-        f1, f1, f0,
-        f0, f1, f0
+        f0, f0, f0, f1, t0, t0,
+        f1, f0, f0, f1, t1, t0,
+        f1, f1, f0, f1, t1, t1,
+        f0, f0, f0, f1, t0, t0,
+        f1, f1, f0, f1, t1, t1,
+        f0, f1, f0, f1, t0, t1
     };
     GLC(context, context->bufferData(GL_ARRAY_BUFFER, numBytes, vertices, GL_STATIC_DRAW));
     std::cerr << "Uploaded vertex data." << std::endl;
 
-    // Bind attribute pointing to vertex buffer.
-    WebKit::WGC3Dint vertexAttributeLocation = GLC(context, context->getAttribLocation(program, "a_position"));
-    std::cerr << "Found vertex attribute at location " << vertexAttributeLocation << "." << std::endl;
-    GLC(context, context->vertexAttribPointer(vertexAttributeLocation, 3, GL_FLOAT, false, numBytesPerVertex, 0));
-    GLC(context, context->enableVertexAttribArray(vertexAttributeLocation));
-    std::cerr << "Bound vertex attribute." << std::endl;
+    // Bind attribute pointing to vertex positions.
+    WebKit::WGC3Dint positionAttributeLocation = GLC(context, context->getAttribLocation(program, "a_position"));
+    std::cerr << "Found position attribute at location " << positionAttributeLocation << "." << std::endl;
+    GLC(context, context->vertexAttribPointer(positionAttributeLocation, numComponentsPerVertexPosition, GL_FLOAT, false, numBytesPerVertex, 0));
+    GLC(context, context->enableVertexAttribArray(positionAttributeLocation));
+    std::cerr << "Bound position attribute." << std::endl;
+
+    // Bind attribute pointing to texture coordinates.
+    WebKit::WGC3Dint texCoordLocation = GLC(context, context->getAttribLocation(program, "css_a_texCoord"));
+    std::cerr << "Found tex coord attribute at location " << texCoordLocation << "." << std::endl;
+    GLC(context, context->vertexAttribPointer(texCoordLocation, numComponentsPerVertexTexCoord, GL_FLOAT, false, numBytesPerVertex, numComponentsPerVertexPosition * numBytesPerComponent));
+    GLC(context, context->enableVertexAttribArray(texCoordLocation));
+    std::cerr << "Bound tex coord attribute." << std::endl;
 
     // Bind source texture.
     glActiveTexture(GL_TEXTURE0);
@@ -521,7 +532,6 @@ static void applyCustomFilter(WebKit::WebGraphicsContext3D* context, WebKit::Web
 
     // Bind uniform pointing to source texture.
     WebKit::WGC3Dint sourceTextureUniformLocation = GLC(context, context->getUniformLocation(program, "css_u_texture"));
-    std::cerr << "Found vertex attribute at location " << vertexAttributeLocation << "." << std::endl;
     glUniform1i(sourceTextureUniformLocation, 0);
     std::cerr << "Bound source texture uniform to texture unit 0." << std::endl;
 
