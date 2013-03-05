@@ -372,14 +372,10 @@ static GrContext* getFilterGrContext(bool hasImplThread)
 
 static WebGraphicsContext3D* getCustomFilterContext(bool hasImplThread)
 {
-    assert(hasImplThread); // FIXME(CF): We're not worrying about the single threaded case right now.
-    return WebSharedGraphicsContext3D::compositorThreadCustomFilterContext();
-}
-
-static GrContext* getCustomFilterGrContext(bool hasImplThread)
-{
-    assert(hasImplThread); // FIXME(CF): We're not worrying about the single threaded case right now.
-    return WebSharedGraphicsContext3D::compositorThreadCustomFilterGrContext();
+    if (hasImplThread)
+        return WebSharedGraphicsContext3D::compositorThreadCustomFilterContext();
+    else
+        return WebSharedGraphicsContext3D::mainThreadCustomFilterContext();
 }
 
 static inline SkBitmap applyFilters(GLRenderer* renderer, const WebKit::WebFilterOperations& filters, ScopedResource* sourceTexture, bool hasImplThread)
@@ -392,7 +388,6 @@ static inline SkBitmap applyFilters(GLRenderer* renderer, const WebKit::WebFilte
 
     // Custom Filters.
     WebGraphicsContext3D* customFilterContext = getCustomFilterContext(hasImplThread);
-    GrContext* customFilterGrContext = getCustomFilterGrContext(hasImplThread);
 
     if (!filterContext || !filterGrContext)
         return SkBitmap();
@@ -402,7 +397,8 @@ static inline SkBitmap applyFilters(GLRenderer* renderer, const WebKit::WebFilte
     fprintf(stderr, "renderer->context(): %p filterContext: %p customFilterContext: %p\n", renderer->context(), filterContext, customFilterContext);
 
     ResourceProvider::ScopedWriteLockGL lock(renderer->resourceProvider(), sourceTexture->id());
-    SkBitmap source = RenderSurfaceFilters::apply(filters, lock.textureId(), sourceTexture->size(), filterContext, filterGrContext, customFilterContext, customFilterGrContext);
+    SkBitmap source = RenderSurfaceFilters::apply(filters, lock.textureId(), sourceTexture->size(), filterContext, filterGrContext, customFilterContext);
+    renderer->context()->makeContextCurrent();
     return source;
 }
 

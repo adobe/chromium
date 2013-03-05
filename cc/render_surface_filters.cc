@@ -424,27 +424,14 @@ static WebKit::WebGLId createProgram(WebKit::WebGraphicsContext3D* context, WebK
     }    
 }
 
-static SkBitmap applyCustomFilter(WebKit::WebGraphicsContext3D* context, GrTexture* destinationTexture, const gfx::SizeF& size)
+static void applyCustomFilter(WebKit::WebGraphicsContext3D* context, GrTexture* destinationTexture, const gfx::SizeF& size)
 {
-    // Create a scratch texture.
-    // GrTextureDesc desc;
-    // desc.fFlags = kRenderTarget_GrTextureFlagBit | kNoStencil_GrTextureFlagBit;
-    // desc.fSampleCnt = 0;
-    // desc.fWidth = size.width();
-    // desc.fHeight = size.height();
-    // desc.fConfig = kSkia8888_GrPixelConfig;
-    // GrAutoScratchTexture destinationTextureLocal(grContext, desc, GrContext::kExact_ScratchTexMatch);
-    // skia::RefPtr<GrTexture> destinationTexture = skia::AdoptRef(destinationTextureLocal.detach());
-    // std::cerr << "Create scratch texture with id " << destinationTexture->getTextureHandle() << "." << std::endl;
-    
     std::cerr << "Writing to texture with id " << destinationTexture->getTextureHandle() << "." << std::endl;
-
-    // Draw into the scratch texture using the custom filter context.
 
     // Set up context.
     if (!context->makeContextCurrent()) {
         std::cerr << "Failed to make custom filters context current." << std::endl;
-        return SkBitmap();
+        return;
     }
     std::cerr << "Made custom filters context current." << std::endl;
     GLC(context, context->enable(GL_DEPTH_TEST));
@@ -483,18 +470,18 @@ static SkBitmap applyCustomFilter(WebKit::WebGraphicsContext3D* context, GrTextu
     const WebKit::WGC3Dchar* vertexShaderSource = "precision mediump float; attribute vec3 a_position; void main() { gl_Position = vec4(a_position, 1.0); }";
     WebKit::WebGLId vertexShader = createShader(context, GL_VERTEX_SHADER, vertexShaderSource);
     if (!vertexShader)
-        return SkBitmap();
+        return;
 
     // Set up fragment shader.
     const WebKit::WGC3Dchar* fragmentShaderSource = "precision mediump float; void main() { gl_FragColor = vec4(1.0, 0.0, 1.0, 1.0); }";
     WebKit::WebGLId fragmentShader = createShader(context, GL_FRAGMENT_SHADER, fragmentShaderSource);
     if (!fragmentShader)
-        return SkBitmap();
+        return;
 
     // Set up program.
     WebKit::WebGLId program = createProgram(context, vertexShader, fragmentShader);
     if (!program)
-        return SkBitmap();
+        return;
     GLC(context, context->useProgram(program));
 
     // Set up vertex buffer.
@@ -533,19 +520,10 @@ static SkBitmap applyCustomFilter(WebKit::WebGraphicsContext3D* context, GrTextu
 
     // Flush.
     GLC(context, context->flush());
-
-    // Create a bitmap pointing to the scratch texture.
-    SkBitmap bitmap;
-    // bitmap.setConfig(SkBitmap::kARGB_8888_Config, size.width(), size.height());
-    // skia::RefPtr<SkGrPixelRef> destinationTexturePixelRef = skia::AdoptRef(new SkGrPixelRef(destinationTexture));
-    // bitmap.setPixelRef(destinationTexturePixelRef.get());
-
-    std::cerr << "Done." << std::endl;
-    return bitmap;
+    std::cerr << "Flush custom filter context." << std::endl;
 }
 
-SkBitmap RenderSurfaceFilters::apply(const WebKit::WebFilterOperations& filters, unsigned textureId, const gfx::SizeF& size, WebKit::WebGraphicsContext3D* context3D, GrContext* grContext,
-    WebKit::WebGraphicsContext3D* customFilterContext3D, GrContext* customFilterGrContext)
+SkBitmap RenderSurfaceFilters::apply(const WebKit::WebFilterOperations& filters, unsigned textureId, const gfx::SizeF& size, WebKit::WebGraphicsContext3D* context3D, GrContext* grContext, WebKit::WebGraphicsContext3D* customFilterContext3D)
 {
     if (!context3D || !grContext)
         return SkBitmap();
@@ -614,9 +592,8 @@ SkBitmap RenderSurfaceFilters::apply(const WebKit::WebFilterOperations& filters,
             break;
         case WebKit::WebFilterOperation::FilterTypeCustom: {
             std::cerr << "Custom filter found." << std::endl;
-            //applyCustomFilter(customFilterContext3D, state.currentTexture(), size);
+            grContext->flush(GrContext::kDiscard_FlushBit);
             applyCustomFilter(customFilterContext3D, state.currentTexture(), size);
-
             /*
             WebKit::WebCustomFilterProgram* program = op.customFilterProgram();
             assert(program);
@@ -680,7 +657,7 @@ SkBitmap RenderSurfaceFilters::apply(const WebKit::WebFilterOperations& filters,
         }
         state.swap();
     }
-    // context3D->flush();
+    context3D->flush();
     return state.source();
 }
 
