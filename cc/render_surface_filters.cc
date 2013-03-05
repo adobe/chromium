@@ -424,9 +424,9 @@ static WebKit::WebGLId createProgram(WebKit::WebGraphicsContext3D* context, WebK
     }    
 }
 
-static void applyCustomFilter(WebKit::WebGraphicsContext3D* context, GrTexture* destinationTexture, const gfx::SizeF& size)
+static void applyCustomFilter(WebKit::WebGraphicsContext3D* context, WebKit::WebGLId destinationTextureId, const gfx::SizeF& size)
 {
-    std::cerr << "Writing to texture with id " << destinationTexture->getTextureHandle() << "." << std::endl;
+    std::cerr << "Writing to texture with id " << destinationTextureId << "." << std::endl;
 
     // Set up context.
     if (!context->makeContextCurrent()) {
@@ -442,8 +442,8 @@ static void applyCustomFilter(WebKit::WebGraphicsContext3D* context, GrTexture* 
     std::cerr << "Created frame buffer." << std::endl;
 
     // Attach texture to frame buffer.
-    GLC(context, context->framebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, destinationTexture->getTextureHandle(), 0));
-    std::cerr << "Bound texture with id " << destinationTexture->getTextureHandle() << " to frame buffer." << std::endl;
+    GLC(context, context->framebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, destinationTextureId, 0));
+    std::cerr << "Bound texture with id " << destinationTextureId << " to frame buffer." << std::endl;
 
     // Set up depth buffer.
     WebKit::WebGLId depthBuffer = GLC(context, context->createRenderbuffer());
@@ -593,7 +593,7 @@ SkBitmap RenderSurfaceFilters::apply(const WebKit::WebFilterOperations& filters,
         case WebKit::WebFilterOperation::FilterTypeCustom: {
             std::cerr << "Custom filter found." << std::endl;
             grContext->flush(GrContext::kDiscard_FlushBit);
-            applyCustomFilter(customFilterContext3D, state.currentTexture(), size);
+            applyCustomFilter(customFilterContext3D, state.currentTexture()->getTextureHandle(), size);
             /*
             WebKit::WebCustomFilterProgram* program = op.customFilterProgram();
             assert(program);
