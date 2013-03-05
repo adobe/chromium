@@ -17,6 +17,7 @@
 #include "third_party/WebKit/Source/Platform/chromium/public/WebFilterOperations.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebCustomFilterParameter.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebCustomFilterProgram.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebCString.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebGraphicsContext3D.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/effects/SkBlurImageFilter.h"
@@ -424,7 +425,7 @@ static WebKit::WebGLId createProgram(WebKit::WebGraphicsContext3D* context, WebK
     }    
 }
 
-static void applyCustomFilter(WebKit::WebGraphicsContext3D* context, WebKit::WebGLId destinationTextureId, WebKit::WebGLId sourceTextureId, const gfx::SizeF& size)
+static void applyCustomFilter(const WebKit::WebFilterOperation& op, WebKit::WebGLId sourceTextureId, const gfx::SizeF& size, WebKit::WebGraphicsContext3D* context, WebKit::WebGLId destinationTextureId)
 {
     std::cerr << "Applying custom filter with destination texture id " << destinationTextureId << " and source texture id " << sourceTextureId << "." << std::endl;
 
@@ -467,14 +468,16 @@ static void applyCustomFilter(WebKit::WebGraphicsContext3D* context, WebKit::Web
     std::cerr << "Cleared render buffers." << std::endl;
 
     // Set up vertex shader.
-    const WebKit::WGC3Dchar* vertexShaderSource = "precision mediump float; attribute vec4 a_position; attribute vec2 css_a_texCoord; varying vec2 css_v_texCoord; void main() { css_v_texCoord = css_a_texCoord; gl_Position = a_position; }";
-    WebKit::WebGLId vertexShader = createShader(context, GL_VERTEX_SHADER, vertexShaderSource);
+    // const WebKit::WGC3Dchar* vertexShaderSource = "precision mediump float; attribute vec4 a_position; attribute vec2 css_a_texCoord; varying vec2 css_v_texCoord; void main() { css_v_texCoord = css_a_texCoord; gl_Position = a_position; }";
+    const WebKit::WebCString vertexShaderString = op.customFilterProgram()->vertexShader().utf8();
+    WebKit::WebGLId vertexShader = createShader(context, GL_VERTEX_SHADER, vertexShaderString.data());
     if (!vertexShader)
         return;
 
     // Set up fragment shader.
-    const WebKit::WGC3Dchar* fragmentShaderSource = "precision mediump float; uniform sampler2D css_u_texture; varying vec2 css_v_texCoord; void main() { vec4 sourceColor = texture2D(css_u_texture, css_v_texCoord); gl_FragColor = vec4(sourceColor.rgb, 1.0); }";
-    WebKit::WebGLId fragmentShader = createShader(context, GL_FRAGMENT_SHADER, fragmentShaderSource);
+    // const WebKit::WGC3Dchar* fragmentShaderSource = "precision mediump float; uniform sampler2D css_u_texture; varying vec2 css_v_texCoord; void main() { vec4 sourceColor = texture2D(css_u_texture, css_v_texCoord); gl_FragColor = vec4(sourceColor.rgb, 1.0); }";
+    const WebKit::WebCString fragmentShaderString = op.customFilterProgram()->fragmentShader().utf8();
+    WebKit::WebGLId fragmentShader = createShader(context, GL_FRAGMENT_SHADER, fragmentShaderString.data());
     if (!fragmentShader)
         return;
 
@@ -519,7 +522,7 @@ static void applyCustomFilter(WebKit::WebGraphicsContext3D* context, WebKit::Web
     std::cerr << "Bound position attribute." << std::endl;
 
     // Bind attribute pointing to texture coordinates.
-    WebKit::WGC3Dint texCoordLocation = GLC(context, context->getAttribLocation(program, "css_a_texCoord"));
+    WebKit::WGC3Dint texCoordLocation = GLC(context, context->getAttribLocation(program, "a_texCoord"));
     std::cerr << "Found tex coord attribute at location " << texCoordLocation << "." << std::endl;
     GLC(context, context->vertexAttribPointer(texCoordLocation, numComponentsPerVertexTexCoord, GL_FLOAT, false, numBytesPerVertex, numComponentsPerVertexPosition * numBytesPerComponent));
     GLC(context, context->enableVertexAttribArray(texCoordLocation));
@@ -534,6 +537,13 @@ static void applyCustomFilter(WebKit::WebGraphicsContext3D* context, WebKit::Web
     WebKit::WGC3Dint sourceTextureUniformLocation = GLC(context, context->getUniformLocation(program, "css_u_texture"));
     glUniform1i(sourceTextureUniformLocation, 0);
     std::cerr << "Bound source texture uniform to texture unit 0." << std::endl;
+
+    // Bind projection matrix uniform.
+    WebKit::WGC3Dint projectionMatrixLocation = GLC(context, context->getUniformLocation(program, "u_projectionMatrix"));
+    float projectionMatrix[16];
+    for (int i = 0; i < 16; i++)
+        projectionMatrix[i] = (i % 5 == 0) ? 1.0 : 0.0;
+    GLC(context, context->uniformMatrix4fv(projectionMatrixLocation, 1, false, projectionMatrix));
 
     // Draw!
     GLC(context, context->drawArrays(GL_TRIANGLES, 0, numVertices));
@@ -616,16 +626,17 @@ SkBitmap RenderSurfaceFilters::apply(const WebKit::WebFilterOperations& filters,
             grContext->flush(GrContext::kDiscard_FlushBit);
             WebKit::WebGLId destinationTextureId = state.currentTexture()->getTextureHandle();
             WebKit::WebGLId sourceTextureId = reinterpret_cast<GrTexture*>(state.source().getTexture())->getTextureHandle();
-            applyCustomFilter(customFilterContext3D, destinationTextureId, sourceTextureId, size);
+            applyCustomFilter(op, sourceTextureId, size, customFilterContext3D, destinationTextureId);
+
             /*
             WebKit::WebCustomFilterProgram* program = op.customFilterProgram();
             assert(program);
             std::cerr << "custom filter render -> " 
                     << program 
-                    //<< "\n----vertex---\n"
-                    //<< string16(program->shader())
-                    //<< "\n----fragment----\n" 
-                    //<< string16(program->fragmentShader())
+                    << "\n----vertex---\n"
+                    << string16(program->vertexShader())
+                    << "\n----fragment----\n" 
+                    << string16(program->fragmentShader())
                     << "\n----\n";
             WebKit::WebVector<WebKit::WebCustomFilterParameter> parameters;
             op.customFilterParameters(parameters);
