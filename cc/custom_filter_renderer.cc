@@ -151,7 +151,7 @@ void CustomFilterRenderer::render(const WebKit::WebFilterOperation& op, WebKit::
 
     // Generate a mesh.
     gfx::RectF meshBox(0.0, 0.0, 1.0, 1.0);
-    CustomFilterMesh mesh(1, 1, meshBox, MeshTypeAttached);
+    CustomFilterMesh mesh(op.meshRows(), op.meshColumns(), meshBox, (CustomFilterMeshType)op.meshType());
 
     // Set up vertex buffer.
     WebKit::WebGLId vertexBuffer = GLC(m_context, m_context->createBuffer());
