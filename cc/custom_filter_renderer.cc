@@ -132,14 +132,12 @@ void CustomFilterRenderer::render(const WebKit::WebFilterOperation& op, WebKit::
     GLC(m_context, m_context->clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT));
 
     // Set up vertex shader.
-    // const WebKit::WGC3Dchar* vertexShaderSource = "precision mediump float; attribute vec4 a_position; attribute vec2 css_a_texCoord; varying vec2 css_v_texCoord; void main() { css_v_texCoord = css_a_texCoord; gl_Position = a_position; }";
     const WebKit::WebCString vertexShaderString = op.customFilterProgram()->vertexShader().utf8();
     WebKit::WebGLId vertexShader = createShader(m_context, GL_VERTEX_SHADER, vertexShaderString.data());
     if (!vertexShader)
         return;
 
     // Set up fragment shader.
-    // const WebKit::WGC3Dchar* fragmentShaderSource = "precision mediump float; uniform sampler2D css_u_texture; varying vec2 css_v_texCoord; void main() { vec4 sourceColor = texture2D(css_u_texture, css_v_texCoord); gl_FragColor = vec4(sourceColor.rgb, 1.0); }";
     const WebKit::WebCString fragmentShaderString = op.customFilterProgram()->fragmentShader().utf8();
     WebKit::WebGLId fragmentShader = createShader(m_context, GL_FRAGMENT_SHADER, fragmentShaderString.data());
     if (!fragmentShader)
