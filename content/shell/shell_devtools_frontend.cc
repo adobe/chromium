@@ -9,6 +9,7 @@
 #include "content/public/browser/devtools_http_handler.h"
 #include "content/public/browser/devtools_manager.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_view.h"
 #include "content/public/common/content_client.h"
 #include "content/shell/shell.h"
 #include "content/shell/shell_browser_context.h"
@@ -30,7 +31,10 @@ GURL GetDevToolsPathAsURL() {
     return GURL();
   }
 #if defined(OS_MACOSX)
-  dir_exe = dir_exe.AppendASCII("../../..");
+  // On Mac, the executable is in out/Release/Content
+  // Shell.app/Frameworks/Content Shell Helper.app/Contents/MacOS/Content Shell
+  // Helper. We need to go up 6 directories to get to out/Release.
+  dir_exe = dir_exe.AppendASCII("../../../../../..");
 #endif
   base::FilePath dev_tools_path = dir_exe.AppendASCII(
       "resources/inspector/devtools.html");
@@ -65,7 +69,7 @@ ShellDevToolsFrontend* ShellDevToolsFrontend::Show(
 }
 
 void ShellDevToolsFrontend::Focus() {
-  web_contents()->Focus();
+  web_contents()->GetView()->Focus();
 }
 
 void ShellDevToolsFrontend::Close() {

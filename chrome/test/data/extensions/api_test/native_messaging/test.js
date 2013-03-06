@@ -2,23 +2,27 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+var appName = 'com.google.chrome.test.echo';
+
 chrome.test.getConfig(function(config) {
     chrome.test.runTests([
 
       function sendMessageWithCallback() {
         var message = {"text": "Hi there!", "number": 3};
         chrome.runtime.sendNativeMessage(
-            'echo.py', message,
-            chrome.test.callbackPass(function(nativeResponse) {
-          var expectedResponse = {"id": 1, "echo": message};
-          chrome.test.assertEq(expectedResponse, nativeResponse);
+            appName, message,
+            chrome.test.callbackPass(function(response) {
+          chrome.test.assertEq(1, response.id);
+          chrome.test.assertEq(message, response.echo);
+          chrome.test.assertEq(
+              response.caller_url, window.location.origin + "/");
         }));
       },
 
-      // The goal of this test, is just not to crash.
+      // The goal of this test is just not to crash.
       function sendMessageWithoutCallback() {
         var message = {"text": "Hi there!", "number": 3};
-        chrome.runtime.sendNativeMessage('echo.py', message);
+        chrome.extension.sendNativeMessage(appName, message);
         chrome.test.succeed(); // Mission Complete
       },
 
@@ -26,19 +30,19 @@ chrome.test.getConfig(function(config) {
         var messagesToSend = [{"text": "foo"},
                               {"text": "bar", "funCount": 9001},
                               {}];
-        var expectedResponses = [{"id": 1, "echo": messagesToSend[0]},
-                                 {"id": 2, "echo": messagesToSend[1]},
-                                 {"id": 3, "echo": messagesToSend[2]}];
         var currentMessage = 0;
 
-        port = chrome.runtime.connectNative('echo.py');
+        port = chrome.extension.connectNative(appName);
         port.postMessage(messagesToSend[currentMessage]);
 
         port.onMessage.addListener(function(message) {
-          chrome.test.assertEq(expectedResponses[currentMessage], message);
+          chrome.test.assertEq(currentMessage + 1, message.id);
+          chrome.test.assertEq(messagesToSend[currentMessage], message.echo);
+          chrome.test.assertEq(
+              message.caller_url, window.location.origin + "/");
           currentMessage++;
 
-          if (currentMessage == expectedResponses.length)
+          if (currentMessage == messagesToSend.length)
             chrome.test.notifyPass();
           else
             port.postMessage(messagesToSend[currentMessage]);

@@ -105,7 +105,7 @@ std::vector<std::string> MakeNextProtos(const char* a, ...) {
 // SpdyNextProtos returns a vector of NPN protocol strings for negotiating
 // SPDY.
 std::vector<std::string> SpdyNextProtos() {
-  return MakeNextProtos("http/1.1", "spdy/2", "spdy/3", NULL);
+  return MakeNextProtos("http/1.1", "spdy/2", "spdy/3", "spdy/3.1", NULL);
 }
 
 int GetIdleSocketCountInTransportSocketPool(net::HttpNetworkSession* session) {
@@ -2755,7 +2755,7 @@ TEST_F(HttpNetworkTransactionSpdy3Test, HttpsProxySpdyConnectHttps) {
   scoped_ptr<SpdyFrame> wrapped_body(
       ConstructSpdyBodyFrame(1, "1234567890", 10, false));
   scoped_ptr<SpdyFrame> window_update(
-      ConstructSpdyWindowUpdate(1, wrapped_get_resp->length()));
+      ConstructSpdyWindowUpdate(1, wrapped_get_resp->size()));
 
   MockWrite spdy_writes[] = {
       CreateMockWrite(*connect, 1),
@@ -2835,9 +2835,9 @@ TEST_F(HttpNetworkTransactionSpdy3Test, HttpsProxySpdyConnectSpdy) {
   scoped_ptr<SpdyFrame> body(ConstructSpdyBodyFrame(1, true));
   scoped_ptr<SpdyFrame> wrapped_body(ConstructWrappedSpdyFrame(body, 1));
   scoped_ptr<SpdyFrame> window_update_get_resp(
-      ConstructSpdyWindowUpdate(1, wrapped_get_resp->length()));
+      ConstructSpdyWindowUpdate(1, wrapped_get_resp->size()));
   scoped_ptr<SpdyFrame> window_update_body(
-      ConstructSpdyWindowUpdate(1, wrapped_body->length()));
+      ConstructSpdyWindowUpdate(1, wrapped_body->size()));
 
   MockWrite spdy_writes[] = {
       CreateMockWrite(*connect, 1),
@@ -2981,7 +2981,7 @@ TEST_F(HttpNetworkTransactionSpdy3Test,
       ConstructSpdyBodyFrame(1, resp1, strlen(resp1), false));
   scoped_ptr<SpdyFrame> wrapped_body1(ConstructSpdyBodyFrame(1, "1", 1, false));
   scoped_ptr<SpdyFrame> window_update(
-      ConstructSpdyWindowUpdate(1, wrapped_get_resp1->length()));
+      ConstructSpdyWindowUpdate(1, wrapped_get_resp1->size()));
 
   // CONNECT to news.google.com:443 via SPDY.
   const char* const kConnectHeaders2[] = {
@@ -3133,7 +3133,7 @@ TEST_F(HttpNetworkTransactionSpdy3Test,
       ConstructSpdyBodyFrame(1, resp1, strlen(resp1), false));
   scoped_ptr<SpdyFrame> wrapped_body1(ConstructSpdyBodyFrame(1, "1", 1, false));
   scoped_ptr<SpdyFrame> window_update(
-      ConstructSpdyWindowUpdate(1, wrapped_get_resp1->length()));
+      ConstructSpdyWindowUpdate(1, wrapped_get_resp1->size()));
 
   // Fetch https://www.google.com/2 via HTTP.
   const char get2[] = "GET /2 HTTP/1.1\r\n"
@@ -9558,7 +9558,7 @@ TEST_F(HttpNetworkTransactionSpdy3Test, SpdyAlternateProtocolThroughProxy) {
   HttpStreamFactory::set_use_alternate_protocols(true);
   HttpStreamFactory::SetNextProtos(
       MakeNextProtos(
-          "http/1.1", "http1.1", "spdy/2", "spdy/3", "spdy", NULL));
+          "http/1.1", "http1.1", "spdy/2", "spdy/3", "spdy/3.1", "spdy", NULL));
 
   SpdySessionDependencies session_deps(
       ProxyService::CreateFixedFromPacResult("PROXY myproxy:70"));

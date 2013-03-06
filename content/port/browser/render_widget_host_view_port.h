@@ -27,6 +27,10 @@ struct GpuHostMsg_AcceleratedSurfacePostSubBuffer_Params;
 struct ViewHostMsg_TextInputState_Params;
 struct ViewHostMsg_SelectionBounds_Params;
 
+namespace cc {
+class CompositorFrame;
+}
+
 namespace media {
 class VideoFrame;
 }
@@ -43,6 +47,7 @@ struct WebScreenInfo;
 
 namespace content {
 class BackingStore;
+class RenderWidgetHostViewFrameSubscriber;
 class SmoothScrollGesture;
 struct NativeWebKeyboardEvent;
 
@@ -166,6 +171,8 @@ class CONTENT_EXPORT RenderWidgetHostViewPort : public RenderWidgetHostView,
   // contents, scaled to |dst_size|, and written to |output|.
   // |callback| is invoked with true on success, false otherwise. |output| can
   // be initialized even on failure.
+  // A smaller region than |src_subrect| may be copied if the underlying surface
+  // is smaller than |src_subrect|.
   // NOTE: |callback| is called asynchronously.
   virtual void CopyFromCompositingSurface(
       const gfx::Rect& src_subrect,
@@ -191,6 +198,19 @@ class CONTENT_EXPORT RenderWidgetHostViewPort : public RenderWidgetHostView,
   // should be renamed to HasCompositingSurface(), or unified with
   // IsSurfaceAvailableForCopy() and HasAcceleratedSurface().
   virtual bool CanCopyToVideoFrame() const = 0;
+
+  // Return true if frame subscription is supported on this platform.
+  virtual bool CanSubscribeFrame() const = 0;
+
+  // Begin subscribing for presentation events and captured frames.
+  // |subscriber| is now owned by this object, it will be called only on the
+  // UI thread.
+  virtual void BeginFrameSubscription(
+      RenderWidgetHostViewFrameSubscriber* subscriber) = 0;
+
+  // End subscribing for frame presentation events. FrameSubscriber will be
+  // deleted after this call.
+  virtual void EndFrameSubscription() = 0;
 
   // Called when accelerated compositing state changes.
   virtual void OnAcceleratedCompositingStateChange() = 0;
@@ -219,7 +239,12 @@ class CONTENT_EXPORT RenderWidgetHostViewPort : public RenderWidgetHostView,
   // returned only if the accelerated surface size matches.
   virtual bool HasAcceleratedSurface(const gfx::Size& desired_size) = 0;
 
+  virtual void OnSwapCompositorFrame(const cc::CompositorFrame& frame) = 0;
+
   virtual void GetScreenInfo(WebKit::WebScreenInfo* results) = 0;
+
+  // The size of the view's backing surface in non-DPI-adjusted pixels.
+  virtual gfx::Size GetPhysicalBackingSize() const = 0;
 
   // Gets the bounds of the window, in screen coordinates.
   virtual gfx::Rect GetBoundsInRootWindow() = 0;
@@ -270,11 +295,11 @@ class CONTENT_EXPORT RenderWidgetHostViewPort : public RenderWidgetHostView,
 #if defined(OS_ANDROID)
   virtual void ShowDisambiguationPopup(const gfx::Rect& target_rect,
                                        const SkBitmap& zoomed_bitmap) = 0;
-  virtual void UpdateFrameInfo(const gfx::Vector2d& scroll_offset,
+  virtual void UpdateFrameInfo(const gfx::Vector2dF& scroll_offset,
                                float page_scale_factor,
-                               float min_page_scale_factor,
-                               float max_page_scale_factor,
-                               const gfx::Size& content_size,
+                               const gfx::Vector2dF& page_scale_factor_limits,
+                               const gfx::SizeF& content_size,
+                               const gfx::SizeF& viewport_size,
                                const gfx::Vector2dF& controls_offset,
                                const gfx::Vector2dF& content_offset) = 0;
   virtual void HasTouchEventHandlers(bool need_touch_events) = 0;

@@ -11,7 +11,7 @@
 #include "chrome/browser/extensions/api/api_function.h"
 #include "chrome/browser/extensions/extension_function.h"
 #include "chrome/common/extensions/api/experimental_notification.h"
-#include "ui/notifications/notification_types.h"
+#include "ui/message_center/notification_types.h"
 
 namespace extensions {
 
@@ -32,7 +32,7 @@ class NotificationApiFunction : public ApiFunction {
   // UITHreadExtensionFunction:
   virtual bool RunImpl() OVERRIDE;
 
-  ui::notifications::NotificationType MapApiTemplateTypeToType(
+  message_center::NotificationType MapApiTemplateTypeToType(
       api::experimental_notification::TemplateType type);
 };
 
@@ -70,21 +70,21 @@ class NotificationUpdateFunction : public NotificationApiFunction {
                              EXPERIMENTAL_NOTIFICATION_UPDATE)
 };
 
-class NotificationDeleteFunction : public NotificationApiFunction {
+class NotificationClearFunction : public NotificationApiFunction {
  public:
-  NotificationDeleteFunction();
+  NotificationClearFunction();
 
   // UIThreadExtensionFunction:
   virtual bool RunNotificationApi() OVERRIDE;
 
  protected:
-  virtual ~NotificationDeleteFunction();
+  virtual ~NotificationClearFunction();
 
  private:
-  scoped_ptr<api::experimental_notification::Delete::Params> params_;
+  scoped_ptr<api::experimental_notification::Clear::Params> params_;
 
-  DECLARE_EXTENSION_FUNCTION("experimental.notification.delete",
-                             EXPERIMENTAL_NOTIFICATION_DELETE)
+  DECLARE_EXTENSION_FUNCTION("experimental.notification.clear",
+                             EXPERIMENTAL_NOTIFICATION_CLEAR)
 };
 
 }  // namespace extensions

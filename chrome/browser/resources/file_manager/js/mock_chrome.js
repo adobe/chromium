@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2013 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -46,6 +46,12 @@ function cloneShallow(object) {
   return clone;
 }
 
+
+/**
+ * Mock for |chrome| namespace.
+ */
+var chrome = window.chrome || {};
+
 /**
  * Mock out the chrome.fileBrowserPrivate API for use in the harness.
  */
@@ -91,16 +97,18 @@ chrome.fileBrowserPrivate = {
   /**
    * Select multiple files.
    */
-  selectFiles: function(selectedFiles) {
+  selectFiles: function(selectedFiles, callback) {
     console.log('selectFiles called: ' + selectedFiles.length +
                 ' files selected');
+    callback();
   },
 
   /**
    * Select a single file.
    */
-  selectFile: function(selectedFile, index) {
+  selectFile: function(selectedFile, index, callback) {
     console.log('selectFile called: ' + selectedFile + ', ' + index);
+    callback();
   },
 
   /**
@@ -504,6 +512,7 @@ chrome.fileBrowserPrivate = {
       ERROR_WHITESPACE_NAME: 'Invalid name',
       ERROR_NEW_FOLDER_EMPTY_NAME: 'Please specify a folder name',
       NEW_FOLDER_BUTTON_LABEL: 'New folder',
+      NEW_WINDOW_BUTTON_LABEL: 'New window',
       FILENAME_LABEL: 'File Name',
       PREPARING_LABEL: 'Preparing',
       DRAGGING_MULTIPLE_ITEMS: '$1 items',

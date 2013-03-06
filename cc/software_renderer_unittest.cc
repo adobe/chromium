@@ -8,10 +8,10 @@
 #include "cc/quad_sink.h"
 #include "cc/render_pass.h"
 #include "cc/render_pass_draw_quad.h"
+#include "cc/software_output_device.h"
 #include "cc/solid_color_draw_quad.h"
 #include "cc/test/animation_test_common.h"
 #include "cc/test/fake_output_surface.h"
-#include "cc/test/fake_software_output_device.h"
 #include "cc/test/geometry_test_utils.h"
 #include "cc/test/render_pass_test_common.h"
 #include "cc/test/render_pass_test_utils.h"
@@ -32,13 +32,11 @@ public:
     }
 
     void initializeRenderer() {
-        m_outputSurface = FakeOutputSurface::CreateSoftware(scoped_ptr<SoftwareOutputDevice>(new FakeSoftwareOutputDevice));
+        m_outputSurface = FakeOutputSurface::CreateSoftware(make_scoped_ptr(new SoftwareOutputDevice));
         m_resourceProvider = ResourceProvider::create(m_outputSurface.get());
-        m_renderer = SoftwareRenderer::create(this, resourceProvider(), softwareDevice());
+        m_renderer = SoftwareRenderer::create(this, m_outputSurface.get(), resourceProvider());
     }
 
-    SoftwareOutputDevice* softwareDevice() const { return m_outputSurface->software_device(); }
-    FakeOutputSurface* outputSurface() const { return m_outputSurface.get(); }
     ResourceProvider* resourceProvider() const { return m_resourceProvider.get(); }
     SoftwareRenderer* renderer() const { return m_renderer.get(); }
     void setViewportSize(const gfx::Size& viewportSize) { m_viewportSize = viewportSize; }
@@ -78,7 +76,7 @@ TEST_F(SoftwareRendererTest, solidColorQuad)
     initializeRenderer();
 
     scoped_ptr<SharedQuadState> sharedQuadState = SharedQuadState::Create();
-    sharedQuadState->SetAll(gfx::Transform(), outerRect, outerRect, false, 1.0);
+    sharedQuadState->SetAll(gfx::Transform(), outerSize, outerRect, outerRect, false, 1.0);
     RenderPass::Id rootRenderPassId = RenderPass::Id(1, 1);
     scoped_ptr<TestRenderPass> rootRenderPass = TestRenderPass::Create();
     rootRenderPass->SetNew(rootRenderPassId, outerRect, outerRect, gfx::Transform());
@@ -137,14 +135,14 @@ TEST_F(SoftwareRendererTest, tileQuad)
     gfx::Rect rootRect = gfx::Rect(deviceViewportSize());
 
     scoped_ptr<SharedQuadState> sharedQuadState = SharedQuadState::Create();
-    sharedQuadState->SetAll(gfx::Transform(), outerRect, outerRect, false, 1.0);
+    sharedQuadState->SetAll(gfx::Transform(), outerSize, outerRect, outerRect, false, 1.0);
     RenderPass::Id rootRenderPassId = RenderPass::Id(1, 1);
     scoped_ptr<TestRenderPass> rootRenderPass = TestRenderPass::Create();
     rootRenderPass->SetNew(rootRenderPassId, rootRect, rootRect, gfx::Transform());
     scoped_ptr<TileDrawQuad> outerQuad = TileDrawQuad::Create();
-    outerQuad->SetNew(sharedQuadState.get(), outerRect, outerRect, resourceYellow, gfx::RectF(outerSize), outerSize, false, false, false, false, false);
+    outerQuad->SetNew(sharedQuadState.get(), outerRect, outerRect, resourceYellow, gfx::RectF(outerSize), outerSize, false);
     scoped_ptr<TileDrawQuad> innerQuad = TileDrawQuad::Create();
-    innerQuad->SetNew(sharedQuadState.get(), innerRect, innerRect, resourceCyan, gfx::RectF(innerSize), innerSize, false, false, false, false, false);
+    innerQuad->SetNew(sharedQuadState.get(), innerRect, innerRect, resourceCyan, gfx::RectF(innerSize), innerSize, false);
     rootRenderPass->AppendQuad(innerQuad.PassAs<DrawQuad>());
     rootRenderPass->AppendQuad(outerQuad.PassAs<DrawQuad>());
 

@@ -30,6 +30,7 @@
 #include "content/common/database_messages.h"
 #include "content/common/db_message_filter.h"
 #include "content/common/dom_storage_messages.h"
+#include "content/common/gpu/client/context_provider_command_buffer.h"
 #include "content/common/gpu/client/gpu_channel_host.h"
 #include "content/common/gpu/gpu_messages.h"
 #include "content/common/indexed_db/indexed_db_dispatcher.h"
@@ -321,6 +322,8 @@ void RenderThreadImpl::Init() {
   hidden_widget_count_ = 0;
   idle_notification_delay_in_ms_ = kInitialIdleHandlerDelayMs;
   idle_notifications_to_skip_ = 0;
+  should_send_focus_ipcs_ = true;
+  short_circuit_size_updates_ = false;
   compositor_initialized_ = false;
 
   appcache_dispatcher_.reset(new AppCacheDispatcher(Get()));
@@ -718,6 +721,7 @@ void RenderThreadImpl::EnsureWebKitInitialized() {
 
   if (command_line.HasSwitch(switches::kEnableExperimentalWebKitFeatures)) {
     WebRuntimeFeatures::enableStyleScoped(true);
+    WebRuntimeFeatures::enableCustomDOMElements(true);
     WebRuntimeFeatures::enableCSSExclusions(true);
     WebRuntimeFeatures::enableExperimentalContentSecurityPolicyFeatures(true);
     WebRuntimeFeatures::enableCSSRegions(true);
@@ -901,6 +905,53 @@ RenderThreadImpl::GetGpuVDAContext3D() {
       gpu_vda_context3d_->setContextLostCallback(context_lost_cb_.get());
   }
   return gpu_vda_context3d_.get();
+}
+
+scoped_ptr<WebGraphicsContext3DCommandBufferImpl>
+RenderThreadImpl::CreateOffscreenContext3d() {
+  WebKit::WebGraphicsContext3D::Attributes attributes;
+  attributes.shareResources = true;
+  attributes.depth = false;
+  attributes.stencil = false;
+  attributes.antialias = false;
+  attributes.noAutomaticFlushes = true;
+
+  return make_scoped_ptr(
+      WebGraphicsContext3DCommandBufferImpl::CreateOffscreenContext(
+          this,
+          attributes,
+          GURL("chrome://gpu/RenderThreadImpl::CreateOffscreenContext3d")));
+}
+
+class RenderThreadImpl::RendererContextProviderCommandBuffer
+    : public content::ContextProviderCommandBuffer {
+ protected:
+  virtual ~RendererContextProviderCommandBuffer() {}
+
+  virtual scoped_ptr<WebGraphicsContext3DCommandBufferImpl>
+  CreateOffscreenContext3d() {
+    RenderThreadImpl* self = RenderThreadImpl::current();
+    DCHECK(self);
+    return self->CreateOffscreenContext3d().Pass();
+  }
+};
+
+scoped_refptr<cc::ContextProvider>
+RenderThreadImpl::OffscreenContextProviderForMainThread() {
+  if (!shared_contexts_main_thread_ ||
+      shared_contexts_main_thread_->DestroyedOnMainThread())
+    shared_contexts_main_thread_ = new RendererContextProviderCommandBuffer;
+  return shared_contexts_main_thread_;
+}
+
+scoped_refptr<cc::ContextProvider>
+RenderThreadImpl::OffscreenContextProviderForCompositorThread() {
+  if (!shared_contexts_compositor_thread_ ||
+      shared_contexts_compositor_thread_->DestroyedOnMainThread()) {
+    shared_contexts_compositor_thread_ =
+        new RendererContextProviderCommandBuffer;
+  }
+  return shared_contexts_compositor_thread_;
 }
 
 AudioRendererMixerManager* RenderThreadImpl::GetAudioRendererMixerManager() {

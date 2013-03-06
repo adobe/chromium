@@ -205,6 +205,7 @@ class DriveFileSystemTest : public testing::Test {
         "gdata/root_feed.json");
     fake_drive_service_->LoadAccountMetadataForWapi(
         "gdata/account_metadata.json");
+    fake_drive_service_->LoadAppListForDriveApi("drive/applist.json");
 
     fake_free_disk_space_getter_.reset(new FakeFreeDiskSpaceGetter);
 
@@ -265,7 +266,7 @@ class DriveFileSystemTest : public testing::Test {
 
   bool LoadFeed(const std::string& filename, bool is_delta_feed) {
     if (!test_util::LoadChangeFeed(filename,
-                                   file_system_->feed_loader(),
+                                   file_system_->change_list_loader(),
                                    is_delta_feed,
                                    root_feed_changestamp_)) {
       return false;
@@ -551,7 +552,7 @@ TEST_F(DriveFileSystemTest, DuplicatedAsyncInitialization) {
   // GetEntryInfoByPath() was called twice, but the account metadata and the
   // resource list should only be loaded once. In the past, there was a bug
   // that caused them to be loaded twice.
-  EXPECT_EQ(1, fake_drive_service_->account_metadata_load_count());
+  EXPECT_EQ(1, fake_drive_service_->about_resource_load_count());
   EXPECT_EQ(1, fake_drive_service_->resource_list_load_count());
 }
 
@@ -890,7 +891,7 @@ TEST_F(DriveFileSystemTest, CachedFeedLoadingThenServerFeedLoading) {
 
   // SaveTestFileSystem and "account_metadata.json" have the same changestamp,
   // so no request for new feeds (i.e., call to GetResourceList) should happen.
-  EXPECT_EQ(1, fake_drive_service_->account_metadata_load_count());
+  EXPECT_EQ(1, fake_drive_service_->about_resource_load_count());
   EXPECT_EQ(0, fake_drive_service_->resource_list_load_count());
 
 
@@ -899,7 +900,7 @@ TEST_F(DriveFileSystemTest, CachedFeedLoadingThenServerFeedLoading) {
   // To test it, call CheckForUpdates and verify it does try to check updates.
   file_system_->CheckForUpdates();
   google_apis::test_util::RunBlockingPoolTask();
-  EXPECT_EQ(2, fake_drive_service_->account_metadata_load_count());
+  EXPECT_EQ(2, fake_drive_service_->about_resource_load_count());
 }
 
 TEST_F(DriveFileSystemTest, OfflineCachedFeedLoading) {
@@ -925,7 +926,7 @@ TEST_F(DriveFileSystemTest, OfflineCachedFeedLoading) {
       .Times(AtLeast(1));
 
   google_apis::test_util::RunBlockingPoolTask();
-  EXPECT_EQ(1, fake_drive_service_->account_metadata_load_count());
+  EXPECT_EQ(1, fake_drive_service_->about_resource_load_count());
   EXPECT_EQ(1, fake_drive_service_->resource_list_load_count());
 }
 
@@ -1244,7 +1245,7 @@ TEST_F(DriveFileSystemTest, MoveFileFromRootToSubDirectory) {
 
   // Expect notification for both source and destination directories.
   EXPECT_CALL(*mock_directory_observer_, OnDirectoryChanged(
-      Eq(base::FilePath(FILE_PATH_LITERAL("drive"))))).Times(2);
+      Eq(base::FilePath(FILE_PATH_LITERAL("drive"))))).Times(1);
   EXPECT_CALL(*mock_directory_observer_, OnDirectoryChanged(
       Eq(base::FilePath(FILE_PATH_LITERAL("drive/Directory 1"))))).Times(1);
 
@@ -1286,7 +1287,7 @@ TEST_F(DriveFileSystemTest, MoveFileFromSubDirectoryToRoot) {
 
   // Expect notification for both source and destination directories.
   EXPECT_CALL(*mock_directory_observer_, OnDirectoryChanged(
-      Eq(base::FilePath(FILE_PATH_LITERAL("drive"))))).Times(2);
+      Eq(base::FilePath(FILE_PATH_LITERAL("drive"))))).Times(1);
   EXPECT_CALL(*mock_directory_observer_, OnDirectoryChanged(
       Eq(base::FilePath(FILE_PATH_LITERAL("drive/Directory 1"))))).Times(1);
 
@@ -1343,12 +1344,9 @@ TEST_F(DriveFileSystemTest, MoveFileBetweenSubDirectories) {
 
   EXPECT_FALSE(EntryExists(interim_file_path));
 
-  // Expect notification for both source and destination directories plus
-  // interim file path.
+  // Expect notification for both source and destination directories.
   EXPECT_CALL(*mock_directory_observer_, OnDirectoryChanged(
       Eq(base::FilePath(FILE_PATH_LITERAL("drive/Directory 1"))))).Times(1);
-  EXPECT_CALL(*mock_directory_observer_, OnDirectoryChanged(
-      Eq(base::FilePath(FILE_PATH_LITERAL("drive"))))).Times(1);
   EXPECT_CALL(*mock_directory_observer_, OnDirectoryChanged(
       Eq(base::FilePath(FILE_PATH_LITERAL("drive/New Folder 1"))))).Times(1);
 
@@ -1981,7 +1979,7 @@ TEST_F(DriveFileSystemTest, GetAvailableSpace) {
   EXPECT_EQ(GG_LONGLONG(9876543210), bytes_total);
 }
 
-TEST_F(DriveFileSystemTest, RequestDirectoryRefresh) {
+TEST_F(DriveFileSystemTest, RefreshDirectory) {
   ASSERT_TRUE(LoadRootFeedDocument("gdata/root_feed.json"));
 
   // We'll notify the directory change to the observer.
@@ -1989,9 +1987,12 @@ TEST_F(DriveFileSystemTest, RequestDirectoryRefresh) {
       OnDirectoryChanged(Eq(
           base::FilePath::FromUTF8Unsafe(kDriveRootDirectory)))).Times(1);
 
-  file_system_->RequestDirectoryRefresh(
-      base::FilePath::FromUTF8Unsafe(kDriveRootDirectory));
+  DriveFileError error = DRIVE_FILE_ERROR_FAILED;
+  file_system_->RefreshDirectory(
+      base::FilePath::FromUTF8Unsafe(kDriveRootDirectory),
+      base::Bind(&test_util::CopyErrorCodeFromFileOperationCallback, &error));
   google_apis::test_util::RunBlockingPoolTask();
+  EXPECT_EQ(DRIVE_FILE_OK, error);
 }
 
 TEST_F(DriveFileSystemTest, OpenAndCloseFile) {
@@ -2093,14 +2094,14 @@ TEST_F(DriveFileSystemTest, OpenAndCloseFile) {
 }
 
 // TODO(satorux): Testing if WebAppsRegistry is loaded here is awkward. We
-// should move this to drive_feed_loader_unittest.cc. crbug.com/161703
+// should move this to change_list_loader_unittest.cc. crbug.com/161703
 TEST_F(DriveFileSystemTest, WebAppsRegistryIsLoaded) {
   SaveTestFileSystem(USE_SERVER_TIMESTAMP);
 
   // No apps should be found as the webapps registry is empty.
   ScopedVector<DriveWebAppInfo> apps;
   drive_webapps_registry_->GetWebAppsForFile(
-      base::FilePath::FromUTF8Unsafe("foo.ext_1"),
+      base::FilePath::FromUTF8Unsafe("foo.exe"),
       "" /* mime_type */,
       &apps);
   EXPECT_TRUE(apps.empty());
@@ -2110,9 +2111,9 @@ TEST_F(DriveFileSystemTest, WebAppsRegistryIsLoaded) {
   // changestamp, and the webapps registry will be loaded at the same time.
   EXPECT_TRUE(EntryExists(base::FilePath(FILE_PATH_LITERAL("drive/File1"))));
 
-  // An app for foo.ext_1 should now be found, as the registry was loaded.
+  // An app for foo.exe should now be found, as the registry was loaded.
   drive_webapps_registry_->GetWebAppsForFile(
-      base::FilePath(FILE_PATH_LITERAL("foo.ext_1")),
+      base::FilePath(FILE_PATH_LITERAL("foo.exe")),
       "" /* mime_type */,
       &apps);
   EXPECT_EQ(1U, apps.size());

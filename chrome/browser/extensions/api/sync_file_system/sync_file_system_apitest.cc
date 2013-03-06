@@ -8,6 +8,7 @@
 #include "base/run_loop.h"
 #include "chrome/browser/extensions/event_names.h"
 #include "chrome/browser/extensions/extension_apitest.h"
+#include "chrome/browser/sync_file_system/drive_file_sync_service.h"
 #include "chrome/browser/sync_file_system/file_status_observer.h"
 #include "chrome/browser/sync_file_system/local_change_processor.h"
 #include "chrome/browser/sync_file_system/mock_remote_file_sync_service.h"
@@ -23,6 +24,7 @@
 
 using ::testing::_;
 using ::testing::Return;
+using fileapi::FileSystemURL;
 using sync_file_system::MockRemoteFileSyncService;
 using sync_file_system::RemoteFileSyncService;
 using sync_file_system::SyncFileSystemServiceFactory;
@@ -69,7 +71,7 @@ ACTION_P(NotifyOkStateAndCallback, mock_remote_service) {
   mock_remote_service->NotifyRemoteServiceStateUpdated(
       sync_file_system::REMOTE_SERVICE_OK, "Test event description.");
   base::MessageLoopProxy::current()->PostTask(
-      FROM_HERE, base::Bind(arg1, fileapi::SYNC_STATUS_OK));
+      FROM_HERE, base::Bind(arg1, sync_file_system::SYNC_STATUS_OK));
 }
 
 ACTION_P2(UpdateRemoteChangeQueue, origin, mock_remote_service) {
@@ -83,14 +85,14 @@ ACTION_P5(ReturnWithFakeFileAddedStatus,
           sync_direction,
           sync_file_status,
           sync_action_taken) {
-  fileapi::FileSystemURL mock_url = fileapi::CreateSyncableFileSystemURL(
+  FileSystemURL mock_url = sync_file_system::CreateSyncableFileSystemURL(
       *origin,
-      "drive",
+      sync_file_system::DriveFileSyncService::kServiceName,
       base::FilePath(FILE_PATH_LITERAL("foo.txt")));
   mock_remote_service->NotifyRemoteChangeQueueUpdated(0);
   base::MessageLoopProxy::current()->PostTask(
       FROM_HERE, base::Bind(arg1,
-                            fileapi::SYNC_STATUS_OK,
+                            sync_file_system::SYNC_STATUS_OK,
                             mock_url));
   mock_remote_service->NotifyFileStatusChanged(
       mock_url, sync_direction, sync_file_status, sync_action_taken);

@@ -18,6 +18,8 @@ enum StatusCode {
   kUnknownError = 13,
   kXPathLookupError = 19,
   kNoSuchWindow = 23,
+  kUnexpectedAlertOpen = 26,
+  kNoAlertOpen = 27,
   kInvalidSelector = 32,
   kSessionNotCreatedException = 33,
   // Chrome-specific status codes.
@@ -35,6 +37,8 @@ class Status {
   Status(StatusCode code, const Status& cause);
   Status(StatusCode code, const std::string& details, const Status& cause);
   ~Status();
+
+  void AddDetails(const std::string& details);
 
   bool IsOk() const;
   bool IsError() const;

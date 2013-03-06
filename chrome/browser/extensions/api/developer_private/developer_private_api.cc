@@ -27,6 +27,8 @@
 #include "chrome/browser/ui/webui/extensions/extension_icon_source.h"
 #include "chrome/browser/view_type_utils.h"
 #include "chrome/common/extensions/api/developer_private.h"
+#include "chrome/common/extensions/api/icons/icons_handler.h"
+#include "chrome/common/extensions/background_info.h"
 #include "chrome/common/extensions/extension_icon_set.h"
 #include "chrome/common/extensions/extension_resource.h"
 #include "chrome/common/extensions/manifest_url_handler.h"
@@ -157,7 +159,7 @@ scoped_ptr<developer::ItemInfo>
     NOTREACHED();
   }
 
-  if (item.location() == Manifest::LOAD) {
+  if (extensions::Manifest::IsUnpackedLocation(item.location())) {
     info->path.reset(
         new std::string(UTF16ToUTF8(item.path().LossyDisplayName())));
   }
@@ -165,8 +167,9 @@ scoped_ptr<developer::ItemInfo>
   info->incognito_enabled = service->IsIncognitoEnabled(item.id());
   info->wants_file_access = item.wants_file_access();
   info->allow_file_access = service->AllowFileAccess(&item);
-  info->allow_reload = (item.location() == Manifest::LOAD);
-  info->is_unpacked = (item.location() == Manifest::LOAD);
+  info->allow_reload =
+      extensions::Manifest::IsUnpackedLocation(item.location());
+  info->is_unpacked = extensions::Manifest::IsUnpackedLocation(item.location());
   info->terminated = service->terminated_extensions()->Contains(item.id());
   info->allow_incognito = item.can_be_incognito_enabled();
 
@@ -261,6 +264,7 @@ void DeveloperPrivateGetItemsInfoFunction::
                              process->GetBrowserContext()->IsOffTheRecord()));
   }
 }
+
 linked_ptr<developer::ItemInspectView> DeveloperPrivateGetItemsInfoFunction::
     constructInspectView(
         const GURL& url,
@@ -300,10 +304,11 @@ ItemInspectViewList DeveloperPrivateGetItemsInfoFunction::
   GetShellWindowPagesForExtensionProfile(extension, &result);
 
   // Include a link to start the lazy background page, if applicable.
-  if (extension->has_lazy_background_page() && extension_is_enabled &&
+  if (BackgroundInfo::HasLazyBackgroundPage(extension) &&
+      extension_is_enabled &&
       !process_manager->GetBackgroundHostForExtension(extension->id())) {
-    result.push_back(
-        constructInspectView(extension->GetBackgroundURL(), -1, -1, false));
+    result.push_back(constructInspectView(
+        BackgroundInfo::GetBackgroundURL(extension), -1, -1, false));
   }
 
   ExtensionService* service = profile()->GetExtensionService();
@@ -317,10 +322,11 @@ ItemInspectViewList DeveloperPrivateGetItemsInfoFunction::
         process_manager->GetRenderViewHostsForExtension(extension->id()),
         &result);
 
-    if (extension->has_lazy_background_page() && extension_is_enabled &&
+    if (BackgroundInfo::HasLazyBackgroundPage(extension) &&
+        extension_is_enabled &&
         !process_manager->GetBackgroundHostForExtension(extension->id())) {
-    result.push_back(
-        constructInspectView(extension->GetBackgroundURL(), -1, -1, false));
+    result.push_back(constructInspectView(
+        BackgroundInfo::GetBackgroundURL(extension), -1, -1, false));
     }
   }
 
@@ -349,7 +355,7 @@ bool DeveloperPrivateGetItemsInfoFunction::RunImpl() {
     items.InsertAll(*service->terminated_extensions());
   }
 
-  std::map<std::string, ExtensionResource> idToIcon;
+  std::map<std::string, ExtensionResource> id_to_icon;
   ItemInfoList item_list;
 
   for (ExtensionSet::const_iterator iter = items.begin();
@@ -357,8 +363,10 @@ bool DeveloperPrivateGetItemsInfoFunction::RunImpl() {
     const Extension& item = **iter;
 
     ExtensionResource item_resource =
-        item.GetIconResource(48, ExtensionIconSet::MATCH_BIGGER);
-    idToIcon[item.id()] = item_resource;
+        extensions::IconsInfo::GetIconResource(&item,
+                                               48,
+                                               ExtensionIconSet::MATCH_BIGGER);
+    id_to_icon[item.id()] = item_resource;
 
     if (item.location() == Manifest::COMPONENT)
       continue;  // Skip built-in extensions / apps;
@@ -370,7 +378,7 @@ bool DeveloperPrivateGetItemsInfoFunction::RunImpl() {
       base::Bind(&DeveloperPrivateGetItemsInfoFunction::GetIconsOnFileThread,
                  this,
                  item_list,
-                 idToIcon));
+                 id_to_icon));
   return true;
 }
 
@@ -407,6 +415,29 @@ bool DeveloperPrivateAllowFileAccessFunction::RunImpl() {
 
 DeveloperPrivateAllowFileAccessFunction::
     ~DeveloperPrivateAllowFileAccessFunction() {}
+
+bool DeveloperPrivateAllowIncognitoFunction::RunImpl() {
+  std::string extension_id;
+  bool allow = false;
+  EXTENSION_FUNCTION_VALIDATE(args_->GetString(0, &extension_id));
+  EXTENSION_FUNCTION_VALIDATE(args_->GetBoolean(1, &allow));
+
+  ExtensionService* service = profile()->GetExtensionService();
+  const Extension* extension = service->GetInstalledExtension(extension_id);
+  bool result = true;
+
+  if (!extension) {
+    result = false;
+  } else {
+    service->SetIsIncognitoEnabled(extension->id(), allow);
+  }
+
+  return result;
+}
+
+DeveloperPrivateAllowIncognitoFunction::
+    ~DeveloperPrivateAllowIncognitoFunction() {}
+
 
 bool DeveloperPrivateReloadFunction::RunImpl() {
   std::string extension_id;
@@ -750,8 +781,9 @@ bool DeveloperPrivateGetStringsFunction::RunImpl() {
     dict->SetString(id, l10n_util::GetStringUTF16(idr))
   SET_STRING("extensionSettings", IDS_MANAGE_EXTENSIONS_SETTING_WINDOWS_TITLE);
 
-  SET_STRING("extensionSettingsNoExtensions", IDS_EXTENSIONS_NONE_INSTALLED);
-  SET_STRING("extensionSettingsAppsDevtool", IDS_EXTENSIONS_APPS_DEVTOOL);
+  SET_STRING("appsDevtoolNoItems",
+             IDS_APPS_DEVTOOL_NONE_INSTALLED);
+  SET_STRING("appsDevtoolTitle", IDS_APPS_DEVTOOL_TITLE);
   SET_STRING("extensionSettingsGetMoreExtensions", IDS_GET_MORE_EXTENSIONS);
   SET_STRING("extensionSettingsExtensionId", IDS_EXTENSIONS_ID);
   SET_STRING("extensionSettingsExtensionPath", IDS_EXTENSIONS_PATH);
@@ -774,6 +806,7 @@ bool DeveloperPrivateGetStringsFunction::RunImpl() {
   SET_STRING("extensionSettingsRestart", IDS_EXTENSIONS_RESTART);
   SET_STRING("extensionSettingsOptions", IDS_EXTENSIONS_OPTIONS_LINK);
   SET_STRING("extensionSettingsActivity", IDS_EXTENSIONS_ACTIVITY_LINK);
+  SET_STRING("extensionSettingsPermissions", IDS_EXTENSIONS_PERMISSIONS_LINK);
   SET_STRING("extensionSettingsVisitWebsite", IDS_EXTENSIONS_VISIT_WEBSITE);
   SET_STRING("extensionSettingsVisitWebStore", IDS_EXTENSIONS_VISIT_WEBSTORE);
   SET_STRING("extensionSettingsPolicyControlled",
@@ -783,16 +816,19 @@ bool DeveloperPrivateGetStringsFunction::RunImpl() {
   SET_STRING("extensionSettingsSideloadWipeout",
              IDS_OPTIONS_SIDELOAD_WIPEOUT_BANNER);
   SET_STRING("extensionSettingsShowButton", IDS_EXTENSIONS_SHOW_BUTTON);
-  SET_STRING("extensionSettingsLoadUnpackedButton",
-             IDS_EXTENSIONS_LOAD_UNPACKED_BUTTON);
-  SET_STRING("extensionSettingsPackButton", IDS_EXTENSIONS_PACK_BUTTON);
+  SET_STRING("appsDevtoolLoadUnpackedButton",
+             IDS_APPS_DEVTOOL_LOAD_UNPACKED_BUTTON);
+  SET_STRING("appsDevtoolPackButton", IDS_APPS_DEVTOOL_PACK_BUTTON);
   SET_STRING("extensionSettingsCommandsLink",
              IDS_EXTENSIONS_COMMANDS_CONFIGURE);
-  SET_STRING("extensionSettingsUpdateButton", IDS_EXTENSIONS_UPDATE_BUTTON);
+  SET_STRING("appsDevtoolUpdateButton", IDS_APPS_DEVTOOL_UPDATE_BUTTON);
   SET_STRING("extensionSettingsWarningsTitle", IDS_EXTENSION_WARNINGS_TITLE);
   SET_STRING("extensionSettingsShowDetails", IDS_EXTENSIONS_SHOW_DETAILS);
   SET_STRING("extensionSettingsHideDetails", IDS_EXTENSIONS_HIDE_DETAILS);
   SET_STRING("extensionUninstall", IDS_EXTENSIONS_UNINSTALL);
+  SET_STRING("extensionsPermissionsHeading",
+             IDS_EXTENSIONS_PERMISSIONS_HEADING);
+  SET_STRING("extensionsPermissionsClose", IDS_EXTENSIONS_PERMISSIONS_CLOSE);
 
 // Pack Extension strings
   SET_STRING("packExtensionOverlay", IDS_EXTENSION_PACK_DIALOG_TITLE);

@@ -8,8 +8,10 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/api/extension_action/page_action_handler.h"
 #include "chrome/common/extensions/api/i18n/default_locale_handler.h"
+#include "chrome/common/extensions/api/icons/icons_handler.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_manifest_constants.h"
+#include "chrome/common/extensions/manifest_handler.h"
 #include "chrome/common/extensions/manifest_tests/extension_manifest_test.h"
 #include "chrome/common/extensions/manifest_url_handler.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -22,20 +24,16 @@
 namespace errors = extension_manifest_errors;
 namespace keys = extension_manifest_keys;
 
+namespace extensions {
+
 class InitValueManifestTest : public ExtensionManifestTest {
+ protected:
   virtual void SetUp() OVERRIDE {
     ExtensionManifestTest::SetUp();
-    extensions::ManifestHandler::Register(
-        keys::kOptionsPage,
-        make_linked_ptr(new extensions::OptionsPageHandler));
-    extensions::ManifestHandler::Register(
-        keys::kDefaultLocale,
-        make_linked_ptr(new extensions::DefaultLocaleHandler));
-  linked_ptr<extensions::PageActionHandler> page_action_handler(
-      new extensions::PageActionHandler);
-  extensions::ManifestHandler::Register(keys::kPageAction, page_action_handler);
-  extensions::ManifestHandler::Register(
-      keys::kPageActions, page_action_handler);
+    (new extensions::DefaultLocaleHandler)->Register();
+    (new extensions::IconsHandler)->Register();
+    (new extensions::OptionsPageHandler)->Register();
+    (new extensions::PageActionHandler)->Register();
   }
 };
 
@@ -92,14 +90,14 @@ TEST_F(InitValueManifestTest, InitFromValueInvalid) {
 }
 
 TEST_F(InitValueManifestTest, InitFromValueValid) {
-  scoped_refptr<extensions::Extension> extension(LoadAndExpectSuccess(
+  scoped_refptr<Extension> extension(LoadAndExpectSuccess(
       "init_valid_minimal.json"));
 
   base::FilePath path;
   PathService::Get(chrome::DIR_TEST_DATA, &path);
   path = path.AppendASCII("extensions");
 
-  EXPECT_TRUE(extensions::Extension::IdIsValid(extension->id()));
+  EXPECT_TRUE(Extension::IdIsValid(extension->id()));
   EXPECT_EQ("1.0.0.0", extension->VersionString());
   EXPECT_EQ("my extension", extension->name());
   EXPECT_EQ(extension->id(), extension->url().host());
@@ -114,9 +112,9 @@ TEST_F(InitValueManifestTest, InitFromValueValid) {
   // Test with an options page.
   extension = LoadAndExpectSuccess("init_valid_options.json");
   EXPECT_EQ("chrome-extension",
-            extensions::ManifestURL::GetOptionsPage(extension).scheme());
+            ManifestURL::GetOptionsPage(extension).scheme());
   EXPECT_EQ("/options.html",
-            extensions::ManifestURL::GetOptionsPage(extension).path());
+            ManifestURL::GetOptionsPage(extension).path());
 
   Testcase testcases[] = {
     // Test that an empty list of page actions does not stop a browser action
@@ -154,7 +152,7 @@ TEST_F(InitValueManifestTest, InitFromValueValidNameInRTL) {
 #endif
 
   // No strong RTL characters in name.
-  scoped_refptr<extensions::Extension> extension(LoadAndExpectSuccess(
+  scoped_refptr<Extension> extension(LoadAndExpectSuccess(
       "init_valid_name_no_rtl.json"));
 
   string16 localized_name(ASCIIToUTF16("Dictionary (by Google)"));
@@ -175,3 +173,5 @@ TEST_F(InitValueManifestTest, InitFromValueValidNameInRTL) {
   base::i18n::SetICUDefaultLocale(locale);
 #endif
 }
+
+}  // namespace extensions

@@ -9,6 +9,16 @@
     # something reasonably current; the "77.34.5" is a hint that this isn't a
     # standard Chrome.
     'content_shell_version': '19.77.34.5',
+    'conditions': [
+      # TODO(glider): enable the custom freetype under ASan once we figure out
+      # how to use it with non-instrumented Python.
+      # See http://crbug.com/179814.
+      ['OS=="linux" and asan==0', {
+       'use_custom_freetype%': 1,
+      }, {
+       'use_custom_freetype%': 0,
+      }],
+    ],
   },
   'targets': [
     {
@@ -117,6 +127,7 @@
         'shell/shell_switches.h',
         'shell/shell_url_request_context_getter.cc',
         'shell/shell_url_request_context_getter.h',
+        'shell/shell_web_contents_view_delegate_android.cc',
         'shell/shell_web_contents_view_delegate_creator.h',
         'shell/shell_web_contents_view_delegate_gtk.cc',
         'shell/shell_web_contents_view_delegate_mac.mm',
@@ -206,6 +217,11 @@
             '../chromeos/chromeos.gyp:chromeos',
            ],
         }], # chromeos==1
+        ['use_custom_freetype==1', {
+          'dependencies': [
+             '../third_party/freetype2/freetype2.gyp:freetype2',
+          ],
+        }],
       ],
     },
     {

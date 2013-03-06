@@ -463,10 +463,16 @@ bool GetDesktopShortcutTemplate(base::Environment* env,
 
   std::vector<base::FilePath> search_paths;
 
+  // Search paths as specified in the XDG Base Directory Specification.
+  // http://standards.freedesktop.org/basedir-spec/latest/
   std::string xdg_data_home;
+  std::string home;
   if (env->GetVar("XDG_DATA_HOME", &xdg_data_home) &&
       !xdg_data_home.empty()) {
     search_paths.push_back(base::FilePath(xdg_data_home));
+  } else if (env->GetVar("HOME", &home) && !home.empty()) {
+    search_paths.push_back(base::FilePath(home).Append(".local").Append(
+        "share"));
   }
 
   std::string xdg_data_dirs;
@@ -476,19 +482,16 @@ bool GetDesktopShortcutTemplate(base::Environment* env,
     while (tokenizer.GetNext()) {
       base::FilePath data_dir(tokenizer.token());
       search_paths.push_back(data_dir);
-      search_paths.push_back(data_dir.Append("applications"));
     }
+  } else {
+    search_paths.push_back(base::FilePath("/usr/local/share"));
+    search_paths.push_back(base::FilePath("/usr/share"));
   }
-
-  // Add some fallback paths for systems which don't have XDG_DATA_DIRS or have
-  // it incomplete.
-  search_paths.push_back(base::FilePath("/usr/share/applications"));
-  search_paths.push_back(base::FilePath("/usr/local/share/applications"));
 
   std::string template_filename(GetDesktopName(env));
   for (std::vector<base::FilePath>::const_iterator i = search_paths.begin();
        i != search_paths.end(); ++i) {
-    base::FilePath path = i->Append(template_filename);
+    base::FilePath path = i->Append("applications").Append(template_filename);
     VLOG(1) << "Looking for desktop file template in " << path.value();
     if (file_util::PathExists(path)) {
       VLOG(1) << "Found desktop file template at " << path.value();
@@ -673,6 +676,7 @@ std::string GetDesktopFileContents(
 
 bool CreateDesktopShortcut(
     const ShellIntegration::ShortcutInfo& shortcut_info,
+    const ShellIntegration::ShortcutLocations& creation_locations,
     const std::string& shortcut_template) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
 
@@ -682,9 +686,9 @@ bool CreateDesktopShortcut(
         shortcut_info.profile_path, shortcut_info.extension_id);
     // For extensions we do not want duplicate shortcuts. So, delete any that
     // already exist and replace them.
-    if (shortcut_info.create_on_desktop)
+    if (creation_locations.on_desktop)
       DeleteShortcutOnDesktop(shortcut_filename);
-    if (shortcut_info.create_in_applications_menu)
+    if (creation_locations.in_applications_menu)
       DeleteShortcutInApplicationsMenu(shortcut_filename);
   } else {
     shortcut_filename = GetWebShortcutFilename(shortcut_info.url);
@@ -708,10 +712,10 @@ bool CreateDesktopShortcut(
 
   bool success = true;
 
-  if (shortcut_info.create_on_desktop)
+  if (creation_locations.on_desktop)
     success = CreateShortcutOnDesktop(shortcut_filename, contents);
 
-  if (shortcut_info.create_in_applications_menu)
+  if (creation_locations.in_applications_menu)
     success = CreateShortcutInApplicationsMenu(shortcut_filename, contents) &&
               success;
 

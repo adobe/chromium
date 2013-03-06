@@ -18,9 +18,9 @@
 #if defined(OS_WIN)
 #include "base/win/windows_version.h"
 #include "chrome/browser/shell_integration.h"
-#include "chrome/browser/ui/views/hwnd_util.h"
 #include "chrome/browser/ui/views/panels/taskbar_window_thumbnailer_win.h"
 #include "ui/base/win/shell.h"
+#include "ui/views/win/hwnd_util.h"
 #endif
 
 // static
@@ -38,6 +38,7 @@ PanelStackView::PanelStackView(
     scoped_ptr<StackedPanelCollection> stacked_collection)
     : stacked_collection_(stacked_collection.Pass()),
       delay_initialized_(false),
+      is_drawing_attention_(false),
       window_(NULL) {
   window_ = new views::Widget;
   views::Widget::InitParams params(views::Widget::InitParams::TYPE_WINDOW);
@@ -72,12 +73,15 @@ void PanelStackView::EnsureInitialized() {
   ui::win::SetAppIdForWindow(
       ShellIntegration::GetAppModelIdForProfile(UTF8ToWide(panel->app_name()),
                                                 panel->profile()->GetPath()),
-      chrome::HWNDForWidget(window_));
+      views::HWNDForWidget(window_));
 #endif
+
+  views::WidgetFocusManager::GetInstance()->AddFocusChangeListener(this);
 }
 
 void PanelStackView::Close() {
   window_->Close();
+  views::WidgetFocusManager::GetInstance()->RemoveFocusChangeListener(this);
 }
 
 void PanelStackView::OnPanelAddedOrRemoved(Panel* panel) {
@@ -101,7 +105,7 @@ void PanelStackView::Minimize() {
   if (base::win::GetVersion() < base::win::VERSION_WIN7)
     return;
 
-  HWND native_window = chrome::HWNDForWidget(window_);
+  HWND native_window = views::HWNDForWidget(window_);
 
   if (!thumbnailer_.get()) {
     DCHECK(native_window);
@@ -115,13 +119,23 @@ void PanelStackView::Minimize() {
         iter != stacked_collection_->panels().end(); ++iter) {
     Panel* panel = *iter;
     native_panel_windows.push_back(
-        chrome::HWNDForWidget(
+        views::HWNDForWidget(
             static_cast<PanelView*>(panel->native_panel())->window()));
   }
   thumbnailer_->Start(native_panel_windows);
 #endif
 
   window_->Minimize();
+}
+
+void PanelStackView::DrawSystemAttention(bool draw_attention) {
+  // The underlying call of FlashFrame, FlashWindowEx, seems not to work
+  // correctly if it is called more than once consecutively.
+  if (draw_attention == is_drawing_attention_)
+    return;
+  is_drawing_attention_ = draw_attention;
+
+  window_->FlashFrame(draw_attention);
 }
 
 string16 PanelStackView::GetWindowTitle() const {
@@ -172,15 +186,30 @@ void PanelStackView::OnWidgetActivationChanged(views::Widget* widget,
 #endif
 }
 
+void PanelStackView::OnNativeFocusChange(gfx::NativeView focused_before,
+                                         gfx::NativeView focused_now) {
+  // When the user selects the stacked panels via ALT-TAB or WIN-TAB, the
+  // background stack window, instead of the foreground panel window, receives
+  // WM_SETFOCUS message. To deal with this, we listen to the focus change event
+  // and activate the most recently active panel.
+#if defined(OS_WIN)
+  if (focused_now == window_->GetNativeView()) {
+    Panel* panel_to_focus = stacked_collection_->most_recently_active_panel();
+    if (panel_to_focus)
+      panel_to_focus->Activate();
+  }
+#endif
+}
+
 void PanelStackView::UpdateWindowOwnerForTaskbarIconAppearance(Panel* panel) {
 #if defined(OS_WIN)
-  HWND panel_window = chrome::HWNDForWidget(
+  HWND panel_window = views::HWNDForWidget(
       static_cast<PanelView*>(panel->native_panel())->window());
 
   HWND stack_window = NULL;
   StackedPanelCollection* stack = panel->stack();
   if (stack) {
-    stack_window = chrome::HWNDForWidget(
+    stack_window = views::HWNDForWidget(
         static_cast<PanelStackView*>(stack->native_stack())->window_);
   }
 

@@ -108,6 +108,9 @@ void AllStatus::OnSyncEngineEvent(const SyncEngineEvent& event) {
       status_.sync_protocol_error =
           event.snapshot.model_neutral_state().sync_protocol_error;
       break;
+    case SyncEngineEvent::RETRY_TIME_CHANGED:
+      status_.retry_time = event.retry_time;
+      break;
     default:
       LOG(ERROR) << "Unrecognized Syncer Event: " << event.what_happened;
       break;
@@ -164,9 +167,15 @@ void AllStatus::SetKeystoreMigrationTime(const base::Time& migration_time) {
   status_.keystore_migration_time = migration_time;
 }
 
-void AllStatus::SetUniqueId(const std::string& guid) {
+void AllStatus::SetSyncId(const std::string& sync_id) {
   ScopedStatusLock lock(this);
-  status_.unique_id = guid;
+  status_.sync_id = sync_id;
+}
+
+void AllStatus::SetInvalidatorClientId(
+    const std::string& invalidator_client_id) {
+  ScopedStatusLock lock(this);
+  status_.invalidator_client_id = invalidator_client_id;
 }
 
 void AllStatus::IncrementNudgeCounter(NudgeSource source) {

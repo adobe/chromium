@@ -13,6 +13,7 @@
 #include "base/threading/sequenced_worker_pool.h"
 #include "base/values.h"
 #include "chrome/browser/google_apis/auth_service.h"
+#include "chrome/browser/google_apis/drive_api_parser.h"
 #include "chrome/browser/google_apis/gdata_wapi_operations.h"
 #include "chrome/browser/google_apis/gdata_wapi_parser.h"
 #include "chrome/browser/google_apis/gdata_wapi_url_generator.h"
@@ -26,6 +27,16 @@ using content::BrowserThread;
 namespace google_apis {
 
 namespace {
+
+// OAuth2 scopes for the documents API.
+const char kDocsListScope[] = "https://docs.google.com/feeds/";
+const char kSpreadsheetsScope[] = "https://spreadsheets.google.com/feeds/";
+const char kUserContentScope[] = "https://docs.googleusercontent.com/";
+const char kDriveAppsScope[] = "https://www.googleapis.com/auth/drive.apps";
+
+// The resource ID for the root directory for WAPI is defined in the spec:
+// https://developers.google.com/google-apps/documents-list/
+const char kWapiRootDirectoryResourceId[] = "folder:root";
 
 // Parses the JSON value to ResourceList.
 scoped_ptr<ResourceList> ParseResourceListOnBlockingPool(
@@ -94,30 +105,6 @@ void ParseResourceEntryAndRun(const GetResourceEntryCallback& callback,
   callback.Run(error, entry.Pass());
 }
 
-// Parses the JSON value to AccountMetadataFeed on the blocking pool and runs
-// |callback| on the UI thread once parsing is done.
-void ParseAccounetMetadataAndRun(const GetAccountMetadataCallback& callback,
-                                 GDataErrorCode error,
-                                 scoped_ptr<base::Value> value) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  DCHECK(!callback.is_null());
-
-  if (!value) {
-    callback.Run(error, scoped_ptr<AccountMetadataFeed>());
-    return;
-  }
-
-  // Parsing AccountMetadataFeed is cheap enough to do on UI thread.
-  scoped_ptr<AccountMetadataFeed> entry =
-      google_apis::AccountMetadataFeed::CreateFrom(*value);
-  if (!entry) {
-    callback.Run(GDATA_PARSE_ERROR, scoped_ptr<AccountMetadataFeed>());
-    return;
-  }
-
-  callback.Run(error, entry.Pass());
-}
-
 // Extracts the open link url from the JSON Feed. Used by AuthorizeApp().
 void ExtractOpenLinkAndRun(const std::string app_id,
                            const AuthorizeAppCallback& callback,
@@ -131,12 +118,12 @@ void ExtractOpenLinkAndRun(const std::string app_id,
     return;
   }
 
-  const ScopedVector<google_apis::Link>& feed_links = entry->links();
+  const ScopedVector<google_apis::Link>& resource_links = entry->links();
   GURL open_link;
-  for (size_t i = 0; i < feed_links.size(); ++i) {
-    if (feed_links[i]->type() == google_apis::Link::LINK_OPEN_WITH &&
-        feed_links[i]->app_id() == app_id) {
-        open_link = feed_links[i]->href();
+  for (size_t i = 0; i < resource_links.size(); ++i) {
+    if (resource_links[i]->type() == google_apis::Link::LINK_OPEN_WITH &&
+        resource_links[i]->app_id() == app_id) {
+        open_link = resource_links[i]->href();
         break;
     }
   }
@@ -144,15 +131,36 @@ void ExtractOpenLinkAndRun(const std::string app_id,
   callback.Run(error, open_link);
 }
 
-// OAuth2 scopes for the documents API.
-const char kDocsListScope[] = "https://docs.google.com/feeds/";
-const char kSpreadsheetsScope[] = "https://spreadsheets.google.com/feeds/";
-const char kUserContentScope[] = "https://docs.googleusercontent.com/";
-const char kDriveAppsScope[] = "https://www.googleapis.com/auth/drive.apps";
+void ParseAboutResourceAndRun(
+    const GetAboutResourceCallback& callback,
+    GDataErrorCode error,
+    scoped_ptr<AccountMetadata> account_metadata) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK(!callback.is_null());
 
-// The resource ID for the root directory for WAPI is defined in the spec:
-// https://developers.google.com/google-apps/documents-list/
-const char kWapiRootDirectoryResourceId[] = "folder:root";
+  scoped_ptr<AboutResource> about_resource;
+  if (account_metadata) {
+    about_resource = AboutResource::CreateFromAccountMetadata(
+        *account_metadata, kWapiRootDirectoryResourceId);
+  }
+
+  callback.Run(error, about_resource.Pass());
+}
+
+void ParseAppListAndRun(
+    const GetAppListCallback& callback,
+    GDataErrorCode error,
+    scoped_ptr<AccountMetadata> account_metadata) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK(!callback.is_null());
+
+  scoped_ptr<AppList> app_list;
+  if (account_metadata) {
+    app_list = AppList::CreateFromAccountMetadata(*account_metadata);
+  }
+
+  callback.Run(error, app_list.Pass());
+}
 
 }  // namespace
 
@@ -281,13 +289,35 @@ void GDataWapiService::GetAccountMetadata(
           operation_registry(),
           url_request_context_getter_,
           url_generator_,
-          base::Bind(&ParseAccounetMetadataAndRun, callback)));
+          callback,
+          true));  // Include installed apps.
+}
+
+void GDataWapiService::GetAboutResource(
+    const GetAboutResourceCallback& callback) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK(!callback.is_null());
+
+  runner_->StartOperationWithRetry(
+      new GetAccountMetadataOperation(
+          operation_registry(),
+          url_request_context_getter_,
+          url_generator_,
+          base::Bind(&ParseAboutResourceAndRun, callback),
+          false));  // Exclude installed apps.
 }
 
 void GDataWapiService::GetAppList(const GetAppListCallback& callback) {
-  // For WAPI, AccountMetadata includes Drive application information, and
-  // this function is not used.
-  NOTREACHED();
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK(!callback.is_null());
+
+  runner_->StartOperationWithRetry(
+      new GetAccountMetadataOperation(
+          operation_registry(),
+          url_request_context_getter_,
+          url_generator_,
+          base::Bind(&ParseAppListAndRun, callback),
+          true));  // Include installed apps.
 }
 
 void GDataWapiService::DownloadFile(
@@ -454,8 +484,16 @@ void GDataWapiService::InitiateUploadExistingFile(
                                               etag));
 }
 
-void GDataWapiService::ResumeUpload(const ResumeUploadParams& params,
-                                    const UploadRangeCallback& callback) {
+void GDataWapiService::ResumeUpload(
+    UploadMode upload_mode,
+    const base::FilePath& drive_file_path,
+    const GURL& upload_url,
+    int64 start_position,
+    int64 end_position,
+    int64 content_length,
+    const std::string& content_type,
+    const scoped_refptr<net::IOBuffer>& buf,
+    const UploadRangeCallback& callback) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(!callback.is_null());
 
@@ -463,7 +501,14 @@ void GDataWapiService::ResumeUpload(const ResumeUploadParams& params,
       new ResumeUploadOperation(operation_registry(),
                                 url_request_context_getter_,
                                 callback,
-                                params));
+                                upload_mode,
+                                drive_file_path,
+                                upload_url,
+                                start_position,
+                                end_position,
+                                content_length,
+                                content_type,
+                                buf));
 }
 
 void GDataWapiService::GetUploadStatus(
@@ -475,8 +520,14 @@ void GDataWapiService::GetUploadStatus(
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(!callback.is_null());
 
-  // TODO(hidehiko): Implement this.
-  NOTREACHED();
+  runner_->StartOperationWithRetry(
+      new GetUploadStatusOperation(operation_registry(),
+                                   url_request_context_getter_,
+                                   callback,
+                                   upload_mode,
+                                   drive_file_path,
+                                   upload_url,
+                                   content_length));
 }
 
 void GDataWapiService::AuthorizeApp(const GURL& edit_url,

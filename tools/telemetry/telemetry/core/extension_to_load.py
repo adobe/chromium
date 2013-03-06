@@ -8,23 +8,46 @@ from telemetry.core.chrome import crx_id
 class ExtensionPathNonExistentException(Exception):
   pass
 
+class MissingPublicKeyException(Exception):
+  pass
+
 class ExtensionToLoad(object):
   def __init__(self, path, is_component=False):
     if not os.path.isdir(path):
       raise ExtensionPathNonExistentException(
           'Extension path not a directory %s' % path)
     self._path = path
+    self._local_path = path
     self._is_component = is_component
+    if is_component and not crx_id.HasPublicKey(path):
+      raise MissingPublicKeyException(
+         'Component extension %s must have a public key' % path)
 
   @property
   def extension_id(self):
     """Unique extension id of this extension."""
-    return crx_id.GetCRXAppID(os.path.abspath(self._path))
+    if crx_id.HasPublicKey(self._path):
+      # Calculate extension id from the public key.
+      return crx_id.GetCRXAppID(os.path.abspath(self._path))
+    else:
+      # Calculate extension id based on the path on the device.
+      return crx_id.GetCRXAppID(os.path.abspath(self._local_path),
+                                from_file_path=True)
 
   @property
   def path(self):
-    """Path to extension directory."""
+    """Path to extension source directory."""
     return self._path
+
+  @property
+  def local_path(self):
+    """Path to extension destination directory, for remote instances of
+    chrome"""
+    return self._local_path
+
+  @local_path.setter
+  def local_path(self, local_path):
+    self._local_path = local_path
 
   @property
   def is_component(self):

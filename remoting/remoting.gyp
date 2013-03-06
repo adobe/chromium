@@ -20,6 +20,7 @@
     },
 
     'remoting_multi_process%': '<(remoting_multi_process)',
+    'remoting_rdp_session%': 0,
     'remoting_use_apps_v2%': 0,
 
     # The |major|, |build| and |patch| versions are inherited from Chrome.
@@ -89,10 +90,15 @@
         'host_plugin_prefix': '',
       }],
       ['OS=="win"', {
-        # Use auto-generated CLSID for the daemon controller to make sure that
-        # the newly installed version of the controller will be used during
-        # upgrade even if there is an old instance running already.
-        'daemon_controller_clsid': '<!(python tools/uuidgen.py)',
+        # Use auto-generated CLSIDs to make sure that the newly installed COM
+        # classes will be used during/after upgrade even if there are old
+        # instances running already.
+        # The parameter passed to uuidgen.py is ignored, but needed to make sure
+        # that the script will be invoked separately for each CLSID. Otherwise
+        # GYP will reuse the value returned by the first invocation of
+        # the script.
+        'daemon_controller_clsid': '<!(python tools/uuidgen.py 1)',
+        'rdp_desktop_session_clsid': '<!(python tools/uuidgen.py 2)',
       }],
     ],
     'remoting_webapp_locale_files': [
@@ -179,6 +185,7 @@
       'webapp/error.js',
       'webapp/event_handlers.js',
       'webapp/format_iq.js',
+      'webapp/host.js',
       'webapp/host_controller.js',
       'webapp/host_list.js',
       'webapp/host_screen.js',
@@ -256,6 +263,12 @@
       ['OS=="win" and buildtype == "Official"', {
         'defines': [
           'REMOTING_ENABLE_BREAKPAD'
+        ],
+      }],
+      ['OS=="win" and remoting_multi_process != 0 and \
+          remoting_rdp_session != 0', {
+        'defines': [
+          'REMOTING_RDP_SESSION',
         ],
       }],
       ['remoting_multi_process != 0', {
@@ -353,6 +366,7 @@
             'host/host_port_allocator.h',
             'host/host_secret.cc',
             'host/host_secret.h',
+            'host/host_status_monitor.h',
             'host/host_status_observer.h',
             'host/host_user_interface.cc',
             'host/host_user_interface.h',
@@ -366,6 +380,8 @@
             'host/ipc_desktop_environment.h',
             'host/ipc_event_executor.cc',
             'host/ipc_event_executor.h',
+            'host/ipc_host_event_logger.cc',
+            'host/ipc_host_event_logger.h',
             'host/ipc_video_frame_capturer.cc',
             'host/ipc_video_frame_capturer.h',
             'host/it2me_host_user_interface.cc',
@@ -589,7 +605,7 @@
             ['OS=="win"', {
               'dependencies': [
                 '../google_update/google_update.gyp:google_update',
-                'remoting_controller_idl',
+                'remoting_lib_idl',
               ],
               # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
               'msvs_disabled_warnings': [4267, ],
@@ -663,7 +679,7 @@
                 'ISOLATION_AWARE_ENABLED=1',
               ],
               'dependencies': [
-                'remoting_controller_idl',
+                'remoting_lib_idl',
                 'remoting_version_resources',
               ],
               'include_dirs': [
@@ -1124,16 +1140,16 @@
           ],
         },  # end of target 'remoting_breakpad_tester'
         {
-          'target_name': 'remoting_controller_idl',
+          'target_name': 'remoting_lib_idl',
           'type': 'static_library',
           'sources': [
-            'host/win/elevated_controller_idl.templ',
-            '<(SHARED_INTERMEDIATE_DIR)/remoting/host/elevated_controller.h',
-            '<(SHARED_INTERMEDIATE_DIR)/remoting/host/elevated_controller.idl',
-            '<(SHARED_INTERMEDIATE_DIR)/remoting/host/elevated_controller_i.c',
+            'host/win/chromoting_lib_idl.templ',
+            '<(SHARED_INTERMEDIATE_DIR)/remoting/host/chromoting_lib.h',
+            '<(SHARED_INTERMEDIATE_DIR)/remoting/host/chromoting_lib.idl',
+            '<(SHARED_INTERMEDIATE_DIR)/remoting/host/chromoting_lib_i.c',
           ],
           # This target exports a hard dependency because dependent targets may
-          # include elevated_controller.h, a generated header.
+          # include chromoting_lib.h, a generated header.
           'hard_dependency': 1,
           'msvs_settings': {
             'VCMIDLTool': {
@@ -1150,21 +1166,56 @@
               'rule_name': 'generate_idl',
               'extension': 'templ',
               'outputs': [
-                '<(SHARED_INTERMEDIATE_DIR)/remoting/host/elevated_controller.idl',
+                '<(SHARED_INTERMEDIATE_DIR)/remoting/host/chromoting_lib.idl',
               ],
               'action': [
                 'python',
                 '<(version_py_path)',
-                '-e', 'DAEMON_CONTROLLER_CLSID="<(daemon_controller_clsid)"',
+                '-e', "DAEMON_CONTROLLER_CLSID='<(daemon_controller_clsid)'",
+                '-e', "RDP_DESKTOP_SESSION_CLSID='<(rdp_desktop_session_clsid)'",
                 '<(RULE_INPUT_PATH)',
                 '<@(_outputs)',
               ],
               'process_outputs_as_sources': 1,
               'message': 'Generating <@(_outputs)',
-              'msvs_cygwin_shell': 1,
+              'msvs_cygwin_shell': 0,
             },
           ],
-        },  # end of target 'remoting_controller_idl'
+        },  # end of target 'remoting_lib_idl'
+
+        # Regenerates 'chromoting_lib.rc' (used to embed 'chromoting_lib.tlb'
+        # into remoting_core.dll's resources) every time
+        # 'chromoting_lib_idl.templ' changes. Making remoting_core depend on
+        # both this and 'remoting_lib_idl' targets ensures that the resorces
+        # are rebuilt every time the type library is updated. GYP alone is
+        # not smart enough to figure out this dependency on its own.
+        {
+          'target_name': 'remoting_lib_rc',
+          'type': 'none',
+          'sources': [
+            'host/win/chromoting_lib_idl.templ',
+          ],
+          'hard_dependency': 1,
+          'direct_dependent_settings': {
+            'include_dirs': [
+              '<(SHARED_INTERMEDIATE_DIR)',
+            ],
+          },
+          'rules': [
+            {
+              'rule_name': 'generate_rc',
+              'extension': 'templ',
+              'outputs': [
+                '<(SHARED_INTERMEDIATE_DIR)/remoting/host/chromoting_lib.rc',
+              ],
+              'action': [
+                'echo 1 typelib "remoting/host/chromoting_lib.tlb" > <@(_outputs)',
+              ],
+              'message': 'Generating <@(_outputs)',
+              'msvs_cygwin_shell': 0,
+            },
+          ],
+        },  # end of target 'remoting_lib_rc'
         {
           'target_name': 'remoting_configurer',
           'type': 'executable',
@@ -1269,6 +1320,7 @@
             '_ATL_NO_AUTOMATIC_NAMESPACE',
             '_ATL_NO_EXCEPTIONS',
             'DAEMON_CONTROLLER_CLSID="{<(daemon_controller_clsid)}"',
+            'RDP_DESKTOP_SESSION_CLSID="{<(rdp_desktop_session_clsid)}"',
             'HOST_IMPLEMENTATION',
             'ISOLATION_AWARE_ENABLED=1',
             'STRICT',
@@ -1283,18 +1335,19 @@
             '../net/net.gyp:net',
             'remoting_base',
             'remoting_breakpad',
-            'remoting_controller_idl',
             'remoting_host',
             'remoting_host_event_logger',
             'remoting_host_logging',
+            'remoting_lib_idl',
+            'remoting_lib_rc',
             'remoting_me2me_host_static',
             'remoting_protocol',
             'remoting_version_resources',
           ],
           'sources': [
+            '<(SHARED_INTERMEDIATE_DIR)/remoting/host/chromoting_lib.rc',
             '<(SHARED_INTERMEDIATE_DIR)/remoting/host/remoting_host_messages.rc',
             '<(SHARED_INTERMEDIATE_DIR)/remoting/remoting_core_version.rc',
-            'base/scoped_sc_handle_win.h',
             'host/chromoting_messages.cc',
             'host/chromoting_messages.h',
             'host/config_file_watcher.cc',
@@ -1324,26 +1377,29 @@
             'host/sas_injector_win.cc',
             'host/verify_config_window_win.cc',
             'host/verify_config_window_win.h',
+            'host/win/chromoting_module.cc',
+            'host/win/chromoting_module.h',
             'host/win/core.cc',
             'host/win/core.rc',
             'host/win/core_resource.h',
             'host/win/elevated_controller.cc',
             'host/win/elevated_controller.h',
-            'host/win/elevated_controller_module.cc',
             'host/win/host_service.cc',
             'host/win/host_service.h',
             'host/win/omaha.cc',
             'host/win/omaha.h',
+            'host/win/rdp_desktop_session.cc',
+            'host/win/rdp_desktop_session.h',
             'host/win/unprivileged_process_delegate.cc',
             'host/win/unprivileged_process_delegate.h',
             'host/win/worker_process_launcher.cc',
             'host/win/worker_process_launcher.h',
-            'host/win/wts_console_monitor.h',
-            'host/win/wts_console_observer.h',
             'host/win/wts_console_session_process_driver.cc',
             'host/win/wts_console_session_process_driver.h',
             'host/win/wts_session_process_delegate.cc',
             'host/win/wts_session_process_delegate.h',
+            'host/win/wts_terminal_monitor.h',
+            'host/win/wts_terminal_observer.h',
             'host/worker_process_ipc_delegate.h',
           ],
           'msvs_settings': {
@@ -1685,7 +1741,8 @@
           ],
           'defs': [
             'BRANDING=<(branding)',
-            'CONTROLLER_CLSID={<(daemon_controller_clsid)}',
+            'DAEMON_CONTROLLER_CLSID={<(daemon_controller_clsid)}',
+            'RDP_DESKTOP_SESSION_CLSID={<(rdp_desktop_session_clsid)}',
             'REMOTING_MULTI_PROCESS=<(remoting_multi_process)',
             'VERSION=<(version_full)',
           ],
@@ -2232,11 +2289,9 @@
         '../jingle/jingle.gyp:jingle_glue',
         '../jingle/jingle.gyp:notifier',
         '../third_party/libjingle/libjingle.gyp:libjingle',
-        '../third_party/libjingle/libjingle.gyp:libjingle_p2p',
       ],
       'export_dependent_settings': [
         '../third_party/libjingle/libjingle.gyp:libjingle',
-        '../third_party/libjingle/libjingle.gyp:libjingle_p2p',
       ],
       'sources': [
         'jingle_glue/chromium_socket_factory.cc',
@@ -2368,15 +2423,6 @@
       'target_name': 'remoting_unittests',
       'type': 'executable',
       'dependencies': [
-        'remoting_base',
-        'remoting_resources',
-        'remoting_breakpad',
-        'remoting_client',
-        'remoting_client_plugin',
-        'remoting_host',
-        'remoting_jingle_glue',
-        'remoting_protocol',
-        'remoting_host_setup_base',
         '../base/base.gyp:base',
         '../base/base.gyp:base_i18n',
         '../base/base.gyp:test_support_base',
@@ -2388,6 +2434,16 @@
         '../testing/gmock.gyp:gmock',
         '../testing/gtest.gyp:gtest',
         '../ui/ui.gyp:ui',
+        'remoting_base',
+        'remoting_breakpad',
+        'remoting_client',
+        'remoting_client_plugin',
+        'remoting_host',
+        'remoting_host_event_logger',
+        'remoting_host_setup_base',
+        'remoting_jingle_glue',
+        'remoting_protocol',
+        'remoting_resources',
       ],
       'defines': [
         'VERSION=<(version_full)',
@@ -2438,6 +2494,7 @@
         'host/host_key_pair_unittest.cc',
         'host/host_mock_objects.cc',
         'host/host_mock_objects.h',
+        'host/host_status_monitor_fake.h',
         'host/ipc_desktop_environment_unittest.cc',
         'host/json_host_config_unittest.cc',
         'host/linux/x_server_clipboard_unittest.cc',

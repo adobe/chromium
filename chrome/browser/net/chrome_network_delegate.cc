@@ -12,8 +12,8 @@
 #include "base/path_service.h"
 #include "base/prefs/pref_service.h"
 #include "base/prefs/public/pref_member.h"
-#include "base/string_split.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_split.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/content_settings/cookie_settings.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
@@ -372,7 +372,7 @@ int ChromeNetworkDelegate::OnBeforeURLRequest(
         net::NetLog::TYPE_CHROME_POLICY_ABORTED_REQUEST,
         net::NetLog::StringCallback("url",
                                     &request->url().possibly_invalid_spec()));
-    return net::ERR_NETWORK_ACCESS_DENIED;
+    return net::ERR_BLOCKED_BY_ADMINISTRATOR;
   }
 #endif
 
@@ -657,7 +657,7 @@ int ChromeNetworkDelegate::OnBeforeSocketStreamConnect(
         net::NetLog::TYPE_CHROME_POLICY_ABORTED_REQUEST,
         net::NetLog::StringCallback("url",
                                     &socket->url().possibly_invalid_spec()));
-    return net::ERR_NETWORK_ACCESS_DENIED;
+    return net::ERR_BLOCKED_BY_ADMINISTRATOR;
   }
 #endif
   return net::OK;

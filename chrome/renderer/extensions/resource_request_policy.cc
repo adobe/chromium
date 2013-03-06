@@ -8,6 +8,7 @@
 #include "base/logging.h"
 #include "base/stringprintf.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/extensions/api/icons/icons_handler.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_set.h"
 #include "chrome/common/extensions/manifest_url_handler.h"
@@ -22,12 +23,6 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
 
 namespace extensions {
-
-// This method does a security check whether chrome-extension:// URLs can be
-// requested by the renderer. Since this is in an untrusted process, the browser
-// has a similar check to enforce the policy, in case this process is exploited.
-// If you are changing this function, ensure equivalent checks are added to
-// extension_protocols.cc AllowExtensionResourceLoad.
 
 // static
 bool ResourceRequestPolicy::CanRequestResource(
@@ -52,7 +47,8 @@ bool ResourceRequestPolicy::CanRequestResource(
   std::string resource_root_relative_path =
       resource_url.path().empty() ? "" : resource_url.path().substr(1);
   if (extension->is_hosted_app() &&
-      !extension->icons().ContainsPath(resource_root_relative_path)) {
+      !IconsInfo::GetIcons(extension)
+          .ContainsPath(resource_root_relative_path)) {
     LOG(ERROR) << "Denying load of " << resource_url.spec() << " from "
                << "hosted app.";
     return false;

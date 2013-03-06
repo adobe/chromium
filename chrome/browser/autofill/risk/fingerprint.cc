@@ -9,7 +9,7 @@
 #include "base/cpu.h"
 #include "base/logging.h"
 #include "base/prefs/pref_service.h"
-#include "base/string_split.h"
+#include "base/strings/string_split.h"
 #include "base/sys_info.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
@@ -193,9 +193,6 @@ class FingerprintDataLoader : public content::GpuDataManagerObserver {
 
   // content::GpuDataManagerObserver:
   virtual void OnGpuInfoUpdate() OVERRIDE;
-  virtual void OnVideoMemoryUsageStatsUpdate(
-      const content::GPUVideoMemoryUsageStats& video_memory_usage_stats)
-      OVERRIDE;
 
   // Callbacks for asynchronously loaded data.
   void OnGotFonts(scoped_ptr<base::ListValue> fonts);
@@ -285,10 +282,6 @@ void FingerprintDataLoader::OnGpuInfoUpdate() {
 
   gpu_data_manager_->RemoveObserver(this);
   MaybeFillFingerprint();
-}
-
-void FingerprintDataLoader::OnVideoMemoryUsageStatsUpdate(
-    const content::GPUVideoMemoryUsageStats& video_memory_usage_stats) {
 }
 
 void FingerprintDataLoader::OnGotFonts(scoped_ptr<base::ListValue> fonts) {
@@ -396,11 +389,26 @@ void GetFingerprint(
   if (host_view)
     host_view->GetRenderWidgetHost()->GetWebScreenInfo(&screen_info);
 
+  internal::GetFingerprintInternal(
+      gaia_id, window_bounds, content_bounds, screen_info, prefs, callback);
+}
+
+namespace internal {
+
+void GetFingerprintInternal(
+    int64 gaia_id,
+    const gfx::Rect& window_bounds,
+    const gfx::Rect& content_bounds,
+    const WebKit::WebScreenInfo& screen_info,
+    const PrefService& prefs,
+    const base::Callback<void(scoped_ptr<Fingerprint>)>& callback) {
   // Begin loading all of the data that we need to load asynchronously.
   // This class is responsible for freeing its own memory.
   new FingerprintDataLoader(gaia_id, window_bounds, content_bounds, screen_info,
                             prefs, callback);
 }
+
+}  // namespace internal
 
 }  // namespace risk
 }  // namespace autofill

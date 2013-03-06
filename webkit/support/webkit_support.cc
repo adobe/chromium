@@ -57,7 +57,9 @@
 #include "webkit/glue/webkit_constants.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/glue/webkitplatformsupport_impl.h"
+#include "webkit/glue/webthread_impl.h"
 #include "webkit/glue/weburlrequest_extradata_impl.h"
+#include "webkit/gpu/test_context_provider_factory.h"
 #include "webkit/gpu/webgraphicscontext3d_in_process_command_buffer_impl.h"
 #include "webkit/gpu/webgraphicscontext3d_in_process_impl.h"
 #if defined(OS_ANDROID)
@@ -395,7 +397,7 @@ void TearDownTestEnvironment() {
   logging::CloseLogFile();
 }
 
-WebKit::WebKitPlatformSupport* GetWebKitPlatformSupport() {
+WebKit::Platform* GetWebKitPlatformSupport() {
   DCHECK(test_environment);
   return test_environment->webkit_platform_support();
 }
@@ -442,7 +444,7 @@ WebKit::WebMediaPlayer* CreateMediaPlayer(
       true);
 #else
   webkit_media::WebMediaPlayerParams params(
-      NULL, NULL, NULL, new media::MediaLog());
+      NULL, NULL, new media::MediaLog());
   return new webkit_media::WebMediaPlayerImpl(
       frame,
       client,
@@ -491,6 +493,8 @@ void SetUpGLBindings(GLBindingPreferences bindingPref) {
     default:
       NOTREACHED();
   }
+  webkit::gpu::TestContextProviderFactory::SetUpFactoryForTesting(
+      g_graphics_context_3d_implementation);
 }
 
 void SetGraphicsContext3DImplementation(GraphicsContext3DImplementation impl) {
@@ -520,35 +524,27 @@ WebKit::WebGraphicsContext3D* CreateGraphicsContext3D(
   return NULL;
 }
 
-static WebKit::WebLayerTreeView* CreateLayerTreeView(
-    WebKit::WebLayerTreeViewImplForTesting::RenderingType type,
-    WebKit::WebLayerTreeViewClient* client) {
+WebKit::WebLayerTreeView* CreateLayerTreeView(
+    LayerTreeViewType type,
+    DRTLayerTreeViewClient* client,
+    WebKit::WebThread* thread) {
+  scoped_ptr<cc::Thread> compositor_thread;
+  if (thread)
+    compositor_thread = cc::ThreadImpl::createForDifferentThread(
+        static_cast<webkit_glue::WebThreadImpl*>(thread)->
+        message_loop()->message_loop_proxy());
+
   scoped_ptr<WebKit::WebLayerTreeViewImplForTesting> view(
       new WebKit::WebLayerTreeViewImplForTesting(type, client));
-
-  scoped_ptr<cc::Thread> compositor_thread;
-
-  webkit::WebCompositorSupportImpl* compositor_support_impl =
-      test_environment->webkit_platform_support()->compositor_support_impl();
-  if (compositor_support_impl->impl_thread_message_loop_proxy())
-    compositor_thread = cc::ThreadImpl::createForDifferentThread(
-        compositor_support_impl->impl_thread_message_loop_proxy());
 
   if (!view->initialize(compositor_thread.Pass()))
     return NULL;
   return view.release();
 }
 
-WebKit::WebLayerTreeView* CreateLayerTreeViewSoftware(
-    WebKit::WebLayerTreeViewClient* client) {
-  return CreateLayerTreeView(
-      WebKit::WebLayerTreeViewImplForTesting::SOFTWARE_CONTEXT, client);
-}
-
-WebKit::WebLayerTreeView* CreateLayerTreeView3d(
-    WebKit::WebLayerTreeViewClient* client) {
-  return CreateLayerTreeView(
-      WebKit::WebLayerTreeViewImplForTesting::MESA_CONTEXT, client);
+void SetThreadedCompositorEnabled(bool enabled) {
+  test_environment->webkit_platform_support()->
+      set_threaded_compositing_enabled(enabled);
 }
 
 void RegisterMockedURL(const WebKit::WebURL& url,

@@ -17,6 +17,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/web_applications/web_app.h"
 #include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/extensions/api/icons/icons_handler.h"
 #include "chrome/common/extensions/extension.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_details.h"
@@ -210,20 +211,16 @@ void UpdateShortcutWorker::CheckExistingShortcuts() {
 
   // Locations to check to shortcut_paths.
   struct {
-    bool& use_this_location;
     int location_id;
     const wchar_t* sub_dir;
   } locations[] = {
     {
-      shortcut_info_.create_on_desktop,
       base::DIR_USER_DESKTOP,
       NULL
     }, {
-      shortcut_info_.create_in_applications_menu,
       base::DIR_START_MENU,
       NULL
     }, {
-      shortcut_info_.create_in_quick_launch_bar,
       // For Win7, create_in_quick_launch_bar means pinning to taskbar.
       base::DIR_APP_DATA,
       (base::win::GetVersion() >= base::win::VERSION_WIN7) ?
@@ -233,8 +230,6 @@ void UpdateShortcutWorker::CheckExistingShortcuts() {
   };
 
   for (int i = 0; i < arraysize(locations); ++i) {
-    locations[i].use_this_location = false;
-
     base::FilePath path;
     if (!PathService::Get(locations[i].location_id, &path)) {
       NOTREACHED();
@@ -247,7 +242,6 @@ void UpdateShortcutWorker::CheckExistingShortcuts() {
     base::FilePath shortcut_file = path.Append(file_name_).
         ReplaceExtension(FILE_PATH_LITERAL(".lnk"));
     if (file_util::PathExists(shortcut_file)) {
-      locations[i].use_this_location = true;
       shortcut_files_.push_back(shortcut_file);
     }
   }
@@ -353,9 +347,6 @@ ShellIntegration::ShortcutInfo ShortcutInfoForExtensionAndProfile(
     const extensions::Extension* extension, Profile* profile) {
   ShellIntegration::ShortcutInfo shortcut_info;
   web_app::UpdateShortcutInfoForApp(*extension, profile, &shortcut_info);
-  shortcut_info.create_in_applications_menu = true;
-  shortcut_info.create_in_quick_launch_bar = true;
-  shortcut_info.create_on_desktop = true;
   return shortcut_info;
 }
 
@@ -413,8 +404,8 @@ void UpdateShortcutInfoAndIconForApp(
   std::vector<extensions::ImageLoader::ImageRepresentation> info_list;
   for (size_t i = 0; i < arraysize(kDesiredSizes); ++i) {
     int size = kDesiredSizes[i];
-    ExtensionResource resource = extension.GetIconResource(
-        size, ExtensionIconSet::MATCH_EXACTLY);
+    ExtensionResource resource = extensions::IconsInfo::GetIconResource(
+        &extension, size, ExtensionIconSet::MATCH_EXACTLY);
     if (!resource.empty()) {
       info_list.push_back(extensions::ImageLoader::ImageRepresentation(
           resource,
@@ -431,11 +422,11 @@ void UpdateShortcutInfoAndIconForApp(
     // If there is no icon at the desired sizes, we will resize what we can get.
     // Making a large icon smaller is preferred to making a small icon larger,
     // so look for a larger icon first:
-    ExtensionResource resource = extension.GetIconResource(
-        size, ExtensionIconSet::MATCH_BIGGER);
+    ExtensionResource resource = extensions::IconsInfo::GetIconResource(
+        &extension, size, ExtensionIconSet::MATCH_BIGGER);
     if (resource.empty()) {
-      resource = extension.GetIconResource(
-          size, ExtensionIconSet::MATCH_SMALLER);
+      resource = extensions::IconsInfo::GetIconResource(
+          &extension, size, ExtensionIconSet::MATCH_SMALLER);
     }
     info_list.push_back(extensions::ImageLoader::ImageRepresentation(
         resource,

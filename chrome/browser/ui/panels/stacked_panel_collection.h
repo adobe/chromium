@@ -26,7 +26,7 @@ class StackedPanelCollection : public PanelCollection {
   virtual ~StackedPanelCollection();
 
   // PanelCollection OVERRIDES:
-  virtual void OnDisplayAreaChanged(const gfx::Rect& old_display_area) OVERRIDE;
+  virtual void OnDisplayChanged() OVERRIDE;
   virtual void RefreshLayout() OVERRIDE;
   virtual void AddPanel(Panel* panel,
                         PositioningMask positioning_mask) OVERRIDE;
@@ -60,6 +60,7 @@ class StackedPanelCollection : public PanelCollection {
   virtual void OnPanelActiveStateChanged(Panel* panel) OVERRIDE;
 
   Panel* GetPanelAbove(Panel* panel) const;
+  Panel* GetPanelBelow(Panel* panel) const;
   bool HasPanel(Panel* panel) const;
 
   void MoveAllDraggingPanelsInstantly(const gfx::Vector2d& delta_origin);
@@ -77,6 +78,10 @@ class StackedPanelCollection : public PanelCollection {
   Panel* bottom_panel() const {
     return panels_.empty() ? NULL : panels_.back();
   }
+  Panel* most_recently_active_panel() const {
+    return most_recently_active_panels_.empty() ?
+        NULL : most_recently_active_panels_.front();
+  }
 
  private:
   struct PanelPlacement {
@@ -91,6 +96,14 @@ class StackedPanelCollection : public PanelCollection {
 
     PanelPlacement() : panel(NULL), top_panel(NULL) { }
   };
+
+  // Returns the enclosing bounds that include all panels in the stack.
+  gfx::Rect GetEnclosingBounds() const;
+
+  // Returns the work area where the stack resides. If the stack spans across
+  // multiple displays, return the work area of the display that most closely
+  // intersects the stack.
+  gfx::Rect GetWorkArea() const;
 
   // Tries to collapse panels in the least recently active order in order to get
   // enough bottom space for |needed_space|. Returns the current available space

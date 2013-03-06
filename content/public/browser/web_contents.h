@@ -272,22 +272,6 @@ class WebContents : public PageNavigator,
   virtual WebContents* Clone() = 0;
 
   // Views and focus -----------------------------------------------------------
-  // TODO(brettw): Most of these should be removed and the caller should call
-  // the view directly.
-
-  // Returns the actual window that is focused when this WebContents is shown.
-  virtual gfx::NativeView GetContentNativeView() const = 0;
-
-  // Returns the NativeView associated with this WebContents. Outside of
-  // automation in the context of the UI, this is required to be implemented.
-  virtual gfx::NativeView GetNativeView() const = 0;
-
-  // Returns the bounds of this WebContents in the screen coordinate system.
-  virtual void GetContainerBounds(gfx::Rect* out) const = 0;
-
-  // Makes the tab the focused window.
-  virtual void Focus() = 0;
-
   // Focuses the first (last if |reverse| is true) element in the page.
   // Invoked when this tab is getting the focus through tab traversal (|reverse|
   // is true when using Shift-Tab).
@@ -426,9 +410,6 @@ class WebContents : public PageNavigator,
   // the page contents. The view calls this function when the tab is focused
   // to see what it should do.
   virtual bool FocusLocationBarByDefault() = 0;
-
-  // Focuses the location bar.
-  virtual void SetFocusToLocationBar(bool select_all) = 0;
 
   // Does this have an opener associated with it?
   virtual bool HasOpener() const = 0;

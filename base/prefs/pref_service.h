@@ -36,10 +36,6 @@ namespace base {
 class FilePath;
 }
 
-namespace content {
-class BrowserContext;
-}
-
 namespace subtle {
 class PrefMemberBase;
 class ScopedUserPrefUpdateBase;
@@ -220,6 +216,12 @@ class BASE_PREFS_EXPORT PrefService : public base::NonThreadSafe {
   // the preference is not set in the user pref store, returns NULL.
   const base::Value* GetUserPrefValue(const char* path) const;
 
+  // Changes the default value for a preference. Takes ownership of |value|.
+  //
+  // Will cause a pref change notification to be fired if this causes
+  // the effective value to change.
+  void SetDefaultPrefValue(const char* path, base::Value* value);
+
   // Returns the default value of the given preference. |path| must point to a
   // registered preference. In that case, will never return NULL.
   const base::Value* GetDefaultPrefValue(const char* path) const;
@@ -348,11 +350,5 @@ class BASE_PREFS_EXPORT PrefService : public base::NonThreadSafe {
 
   DISALLOW_COPY_AND_ASSIGN(PrefService);
 };
-
-// Retrieves a PrefService for the given context.
-//
-// TODO(joi): This doesn't really belong here, since it references a
-// content type; probably best to get rid of it completely.
-PrefService* PrefServiceFromBrowserContext(content::BrowserContext* context);
 
 #endif  // BASE_PREFS_PREF_SERVICE_H_

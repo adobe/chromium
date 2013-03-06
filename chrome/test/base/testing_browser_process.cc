@@ -15,7 +15,7 @@
 #include "testing/gtest/include/gtest/gtest.h"
 
 #if !defined(OS_IOS)
-#include "chrome/browser/media_gallery/media_file_system_registry.h"
+#include "chrome/browser/media_galleries/media_file_system_registry.h"
 #include "chrome/browser/notifications/notification_ui_manager.h"
 #include "chrome/browser/prerender/prerender_tracker.h"
 #include "chrome/browser/printing/background_printing_manager.h"
@@ -24,15 +24,15 @@
 #include "chrome/browser/thumbnails/render_widget_snapshot_taker.h"
 #endif
 
+#if defined(OS_CHROMEOS)
+#include "chrome/browser/chromeos/settings/device_settings_service.h"
+#endif
+
 #if defined(ENABLE_CONFIGURATION_POLICY)
 #include "chrome/browser/policy/browser_policy_connector.h"
 #else
 #include "chrome/browser/policy/policy_service_stub.h"
 #endif  // defined(ENABLE_CONFIGURATION_POLICY)
-
-#if defined(ENABLE_MESSAGE_CENTER) && defined(USE_ASH)
-#include "ash/shell.h"
-#endif
 
 #if defined(ENABLE_MESSAGE_CENTER)
 #include "ui/message_center/message_center.h"
@@ -58,8 +58,7 @@ TestingBrowserProcess::TestingBrowserProcess()
 TestingBrowserProcess::~TestingBrowserProcess() {
   EXPECT_FALSE(local_state_);
 #if defined(ENABLE_CONFIGURATION_POLICY)
-  if (browser_policy_connector_)
-    browser_policy_connector_->Shutdown();
+  SetBrowserPolicyConnector(NULL);
 #endif
 }
 
@@ -198,13 +197,7 @@ NotificationUIManager* TestingBrowserProcess::notification_ui_manager() {
 
 #if defined(ENABLE_MESSAGE_CENTER)
 message_center::MessageCenter* TestingBrowserProcess::message_center() {
-#if defined(USE_ASH)
-    return ash::Shell::GetInstance()->message_center();
-#else
-  if (!message_center_.get())
-    message_center_.reset(new message_center::MessageCenter());
-  return message_center_.get();
-#endif
+  return message_center::MessageCenter::Get();
 }
 #endif
 
@@ -373,8 +366,16 @@ void TestingBrowserProcess::SetIOThread(IOThread* io_thread) {
 void TestingBrowserProcess::SetBrowserPolicyConnector(
     policy::BrowserPolicyConnector* connector) {
 #if defined(ENABLE_CONFIGURATION_POLICY)
-  if (browser_policy_connector_)
+  if (browser_policy_connector_) {
     browser_policy_connector_->Shutdown();
+#if defined(OS_CHROMEOS)
+    if (!connector) {
+      // If the connector was created then it accessed this global singleton.
+      // It must also be Shutdown() for a clean teardown.
+      chromeos::DeviceSettingsService::Get()->Shutdown();
+    }
+#endif
+  }
   browser_policy_connector_.reset(connector);
 #else
   CHECK(false);

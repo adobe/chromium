@@ -40,7 +40,7 @@
 #include "chrome/browser/intranet_redirect_detector.h"
 #include "chrome/browser/io_thread.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
-#include "chrome/browser/media_gallery/media_file_system_registry.h"
+#include "chrome/browser/media_galleries/media_file_system_registry.h"
 #include "chrome/browser/metrics/metrics_service.h"
 #include "chrome/browser/metrics/thread_watcher.h"
 #include "chrome/browser/metrics/variations/variations_service.h"
@@ -92,10 +92,6 @@
 #else
 #include "chrome/browser/policy/policy_service_stub.h"
 #endif  // defined(ENABLE_CONFIGURATION_POLICY)
-
-#if defined(ENABLE_MESSAGE_CENTER) && defined(USE_ASH)
-#include "ash/shell.h"
-#endif
 
 #if defined(ENABLE_MESSAGE_CENTER)
 #include "ui/message_center/message_center.h"
@@ -159,9 +155,6 @@ BrowserProcessImpl::BrowserProcessImpl(
       created_local_state_(false),
       created_icon_manager_(false),
       created_notification_ui_manager_(false),
-#if defined(ENABLE_MESSAGE_CENTER) && !defined(USE_ASH)
-      created_message_center_(false),
-#endif
       created_safe_browsing_service_(false),
       module_ref_count_(0),
       did_start_(false),
@@ -191,6 +184,10 @@ BrowserProcessImpl::BrowserProcessImpl(
   extension_event_router_forwarder_ = new extensions::EventRouterForwarder;
 
   ExtensionRendererState::GetInstance()->Init();
+
+#if defined(ENABLE_MESSAGE_CENTER)
+  message_center::MessageCenter::Initialize();
+#endif
 }
 
 BrowserProcessImpl::~BrowserProcessImpl() {
@@ -246,6 +243,10 @@ void BrowserProcessImpl::StartTearDown() {
 #endif
 
   ExtensionRendererState::GetInstance()->Shutdown();
+
+#if defined(ENABLE_MESSAGE_CENTER)
+  message_center::MessageCenter::Shutdown();
+#endif
 
 #if defined(ENABLE_CONFIGURATION_POLICY)
   // The policy providers managed by |browser_policy_connector_| need to shut
@@ -461,13 +462,7 @@ NotificationUIManager* BrowserProcessImpl::notification_ui_manager() {
 #if defined(ENABLE_MESSAGE_CENTER)
 message_center::MessageCenter* BrowserProcessImpl::message_center() {
   DCHECK(CalledOnValidThread());
-#if defined(USE_ASH)
-  return ash::Shell::GetInstance()->message_center();
-#else
-  if (!created_message_center_)
-    CreateMessageCenter();
-  return message_center_.get();
-#endif
+  return message_center::MessageCenter::Get();
 }
 #endif
 
@@ -475,10 +470,8 @@ policy::BrowserPolicyConnector* BrowserProcessImpl::browser_policy_connector() {
   DCHECK(CalledOnValidThread());
 #if defined(ENABLE_CONFIGURATION_POLICY)
   if (!created_browser_policy_connector_) {
-    // Init() should not reenter this function. If it does this will DCHECK.
     DCHECK(!browser_policy_connector_);
     browser_policy_connector_.reset(new policy::BrowserPolicyConnector());
-    browser_policy_connector_->Init();
     created_browser_policy_connector_ = true;
   }
   return browser_policy_connector_.get();
@@ -844,6 +837,16 @@ void BrowserProcessImpl::PreCreateThreads() {
 }
 
 void BrowserProcessImpl::PreMainMessageLoopRun() {
+#if defined(ENABLE_CONFIGURATION_POLICY)
+  // browser_policy_connector() is created very early because local_state()
+  // needs policy to be initialized with the managed preference values.
+  // However, policy fetches from the network and loading of disk caches
+  // requires that threads are running; this Init() call lets the connector
+  // resume its initialization now that the loops are spinning and the
+  // system request context is available for the fetchers.
+  browser_policy_connector()->Init(local_state(), system_request_context());
+#endif
+
   if (local_state_->IsManagedPreference(prefs::kDefaultBrowserSettingEnabled))
     ApplyDefaultBrowserPolicy();
 
@@ -905,14 +908,6 @@ void BrowserProcessImpl::CreateNotificationUIManager() {
   created_notification_ui_manager_ = true;
 #endif
 }
-
-#if defined(ENABLE_MESSAGE_CENTER) && !defined(USE_ASH)
-void BrowserProcessImpl::CreateMessageCenter() {
-  DCHECK(message_center_.get() == NULL);
-  message_center_.reset(new message_center::MessageCenter());
-  created_message_center_ = true;
-}
-#endif
 
 void BrowserProcessImpl::CreateBackgroundModeManager() {
   DCHECK(background_mode_manager_.get() == NULL);

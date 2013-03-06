@@ -25,6 +25,8 @@
         'bluetooth/bluetooth_adapter_chromeos.h',
         'bluetooth/bluetooth_adapter_factory.cc',
         'bluetooth/bluetooth_adapter_factory.h',
+        'bluetooth/bluetooth_adapter_mac.h',
+        'bluetooth/bluetooth_adapter_mac.mm',
         'bluetooth/bluetooth_adapter_win.cc',
         'bluetooth/bluetooth_adapter_win.h',
         'bluetooth/bluetooth_device.cc',
@@ -71,6 +73,13 @@
                 ],
               },
             },
+          },
+        }],
+        ['OS=="mac"', {
+          'link_settings': {
+            'libraries': [
+              '$(SDKROOT)/System/Library/Frameworks/IOBluetooth.framework',
+            ],
           },
         }],
       ],
@@ -142,6 +151,7 @@
       'sources': [
         'bluetooth/bluetooth_adapter_chromeos_unittest.cc',
         'bluetooth/bluetooth_adapter_devices_chromeos_unittest.cc',
+        'bluetooth/bluetooth_adapter_mac_unittest.mm',
         'bluetooth/bluetooth_adapter_win_unittest.cc',
         'bluetooth/bluetooth_device_win_unittest.cc',
         'bluetooth/bluetooth_service_record_chromeos_unittest.cc',

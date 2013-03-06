@@ -5,6 +5,7 @@
 
 """End to end tests for ChromeDriver."""
 
+import base64
 import ctypes
 import optparse
 import os
@@ -18,6 +19,9 @@ from webelement import WebElement
 
 _THIS_DIR = os.path.abspath(os.path.dirname(__file__))
 sys.path.insert(0, os.path.join(_THIS_DIR, os.pardir, 'pylib'))
+
+_TEST_DATA_DIR = os.path.join(_THIS_DIR, os.pardir, 'data', 'chromedriver')
+
 from common import chrome_paths
 from common import unittest_util
 
@@ -331,6 +335,20 @@ class ChromeDriverTest(unittest.TestCase):
     self._driver.MouseDoubleClick()
     self.assertEquals(1, len(self._driver.FindElements('tag name', 'br')))
 
+  def testAlert(self):
+    self.assertFalse(self._driver.IsAlertOpen())
+    # TODO(kkania): Don't use setTimeout once crbug.com/177511 is fixed.
+    div = self._driver.ExecuteScript(
+        'window.setTimeout('
+        '    function() { window.confirmed = confirm(\'HI\'); },'
+        '    0);')
+    self.assertTrue(self._driver.IsAlertOpen())
+    self.assertEquals('HI', self._driver.GetAlertMessage())
+    self._driver.HandleAlert(False)
+    self.assertFalse(self._driver.IsAlertOpen())
+    self.assertEquals(False,
+                      self._driver.ExecuteScript('return window.confirmed'))
+
 
 class ChromeSwitchesCapabilitiesTest(unittest.TestCase):
   """Tests that chromedriver properly processes chromeOptions.args capabilities.
@@ -349,6 +367,21 @@ class ChromeSwitchesCapabilitiesTest(unittest.TestCase):
                                        chrome_switches=['dom-automation'])
     result = driver.ExecuteScript('return window.domAutomationController')
     self.assertNotEqual(None, result)
+
+
+class ChromeExtensionsCapabilityTest(unittest.TestCase):
+  """Tests that chromedriver properly processes chromeOptions.extensions."""
+
+  def testExtensionsInstall(self):
+    """Checks that chromedriver can take the extensions."""
+    crx_1 = os.path.join(_TEST_DATA_DIR, 'ext_test_1.crx')
+    crx_2 = os.path.join(_TEST_DATA_DIR, 'ext_test_2.crx')
+    crx_1_encoded = base64.b64encode(open(crx_1).read())
+    crx_2_encoded = base64.b64encode(open(crx_2).read())
+    extensions = [crx_1_encoded, crx_2_encoded]
+    driver = chromedriver.ChromeDriver(_CHROMEDRIVER_LIB,
+                                       chrome_binary=_CHROME_BINARY,
+                                       chrome_extensions=extensions)
 
 
 if __name__ == '__main__':

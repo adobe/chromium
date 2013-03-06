@@ -299,6 +299,11 @@ void LocationBarViewMac::OnChanged() {
   location_icon_decoration_->SetImage(image);
   ev_bubble_decoration_->SetImage(image);
   Layout();
+
+  if (browser_->instant_controller()) {
+    browser_->instant_controller()->SetOmniboxBounds(
+        gfx::Rect(NSRectToCGRect([field_ frame])));
+  }
 }
 
 void LocationBarViewMac::OnSelectionBoundsChanged() {
@@ -518,7 +523,7 @@ void LocationBarViewMac::ZoomChangedForActiveTab(bool can_show_bubble) {
   OnDecorationsChanged();
 
   if (can_show_bubble && zoom_decoration_->IsVisible())
-    zoom_decoration_->ShowBubble(YES);
+    zoom_decoration_->ToggleBubble(YES);
 }
 
 NSPoint LocationBarViewMac::GetActionBoxAnchorPoint() const {

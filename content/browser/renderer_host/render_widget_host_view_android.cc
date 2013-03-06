@@ -10,6 +10,8 @@
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/utf_string_conversions.h"
+#include "cc/compositor_frame.h"
+#include "cc/compositor_frame_ack.h"
 #include "cc/layer.h"
 #include "cc/texture_layer.h"
 #include "content/browser/android/content_view_core_impl.h"
@@ -34,6 +36,38 @@
 #include "webkit/compositor_bindings/web_compositor_support_impl.h"
 
 namespace content {
+
+namespace {
+
+void InsertSyncPointAndAckForGpu(
+    int gpu_host_id, int route_id, const std::string& return_mailbox) {
+  uint32 sync_point =
+      ImageTransportFactoryAndroid::GetInstance()->InsertSyncPoint();
+  AcceleratedSurfaceMsg_BufferPresented_Params ack_params;
+  ack_params.mailbox_name = return_mailbox;
+  ack_params.sync_point = sync_point;
+  RenderWidgetHostImpl::AcknowledgeBufferPresent(
+      route_id, gpu_host_id, ack_params);
+}
+
+void InsertSyncPointAndAckForCompositor(
+    int renderer_host_id,
+    int route_id,
+    const gpu::Mailbox& return_mailbox,
+    const gfx::Size return_size) {
+  cc::CompositorFrameAck ack;
+  ack.gl_frame_data.reset(new cc::GLFrameData());
+  if (!return_mailbox.IsZero()) {
+    ack.gl_frame_data->mailbox = return_mailbox;
+    ack.gl_frame_data->size = return_size;
+    ack.gl_frame_data->sync_point =
+        ImageTransportFactoryAndroid::GetInstance()->InsertSyncPoint();
+  }
+  RenderWidgetHostImpl::SendSwapCompositorFrameAck(
+      route_id, renderer_host_id, ack);
+}
+
+}  // anonymous namespace
 
 RenderWidgetHostViewAndroid::RenderWidgetHostViewAndroid(
     RenderWidgetHostImpl* widget_host,
@@ -74,7 +108,6 @@ bool RenderWidgetHostViewAndroid::OnMessageReceived(
   IPC_BEGIN_MESSAGE_MAP(RenderWidgetHostViewAndroid, message)
     IPC_MESSAGE_HANDLER(ViewHostMsg_ImeBatchStateChanged_ACK,
                         OnProcessImeBatchStateAck)
-    IPC_MESSAGE_HANDLER(ViewHostMsg_UpdateFrameInfo, OnUpdateFrameInfo)
     IPC_MESSAGE_HANDLER(ViewHostMsg_StartContentIntent, OnStartContentIntent)
     IPC_MESSAGE_HANDLER(ViewHostMsg_DidChangeBodyBackgroundColor,
                         OnDidChangeBodyBackgroundColor)
@@ -118,20 +151,21 @@ void RenderWidgetHostViewAndroid::WasHidden() {
   host_->WasHidden();
 }
 
-void RenderWidgetHostViewAndroid::SetSize(const gfx::Size& size) {
-  if (surface_texture_transport_.get()) {
-    // Temporary workaround: crbug.com/174405.
+void RenderWidgetHostViewAndroid::WasResized() {
+  if (surface_texture_transport_.get() && content_view_core_)
     surface_texture_transport_->SetSize(
-        content_view_core_ ? content_view_core_->GetPhysicalSize() : size);
-  }
+        content_view_core_->GetPhysicalBackingSize());
 
   host_->WasResized();
 }
 
+void RenderWidgetHostViewAndroid::SetSize(const gfx::Size& size) {
+  // Ignore the given size as only the Java code has the power to
+  // resize the view on Android.
+  WasResized();
+}
+
 void RenderWidgetHostViewAndroid::SetBounds(const gfx::Rect& rect) {
-  if (rect.origin().x() || rect.origin().y()) {
-    VLOG(0) << "SetBounds not implemented for (x,y)!=(0,0)";
-  }
   SetSize(rect.size());
 }
 
@@ -274,7 +308,14 @@ gfx::Rect RenderWidgetHostViewAndroid::GetViewBounds() const {
   if (!content_view_core_)
     return gfx::Rect();
 
-  return gfx::Rect(content_view_core_->GetDIPSize());
+  return gfx::Rect(content_view_core_->GetViewportSizeDip());
+}
+
+gfx::Size RenderWidgetHostViewAndroid::GetPhysicalBackingSize() const {
+  if (!content_view_core_)
+    return gfx::Size();
+
+  return content_view_core_->GetPhysicalBackingSize();
 }
 
 void RenderWidgetHostViewAndroid::UpdateCursor(const WebCursor& cursor) {
@@ -291,7 +332,7 @@ void RenderWidgetHostViewAndroid::TextInputStateChanged(
   if (!IsShowing())
     return;
 
-  content_view_core_->ImeUpdateAdapter(
+  content_view_core_->UpdateImeAdapter(
       GetNativeImeAdapter(),
       static_cast<int>(params.type),
       params.value, params.selection_start, params.selection_end,
@@ -306,21 +347,6 @@ int RenderWidgetHostViewAndroid::GetNativeImeAdapter() {
 void RenderWidgetHostViewAndroid::OnProcessImeBatchStateAck(bool is_begin) {
   if (content_view_core_)
     content_view_core_->ProcessImeBatchStateAck(is_begin);
-}
-
-void RenderWidgetHostViewAndroid::OnUpdateFrameInfo(
-    const gfx::Vector2d& scroll_offset,
-    float page_scale_factor,
-    float min_page_scale_factor,
-    float max_page_scale_factor,
-    const gfx::Size& content_size) {
-  UpdateFrameInfo(scroll_offset,
-                  page_scale_factor,
-                  min_page_scale_factor,
-                  max_page_scale_factor,
-                  content_size,
-                  gfx::Vector2dF(),
-                  gfx::Vector2dF());
 }
 
 void RenderWidgetHostViewAndroid::OnDidChangeBodyBackgroundColor(
@@ -450,14 +476,54 @@ void RenderWidgetHostViewAndroid::ShowDisambiguationPopup(
 void RenderWidgetHostViewAndroid::OnAcceleratedCompositingStateChange() {
 }
 
+void RenderWidgetHostViewAndroid::OnSwapCompositorFrame(
+    const cc::CompositorFrame& frame) {
+  if (!frame.gl_frame_data || frame.gl_frame_data->mailbox.IsZero())
+    return;
+
+  base::Closure callback = base::Bind(&InsertSyncPointAndAckForCompositor,
+                                      host_->GetProcess()->GetID(),
+                                      host_->GetRoutingID(),
+                                      current_mailbox_,
+                                      texture_size_in_layer_);
+  ImageTransportFactoryAndroid::GetInstance()->WaitSyncPoint(
+      frame.gl_frame_data->sync_point);
+  BuffersSwapped(
+      frame.gl_frame_data->mailbox, frame.gl_frame_data->size, callback);
+
+}
+
 void RenderWidgetHostViewAndroid::AcceleratedSurfaceBuffersSwapped(
     const GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params& params,
     int gpu_host_id) {
-  ImageTransportFactoryAndroid* factory =
-      ImageTransportFactoryAndroid::GetInstance();
-
   if (params.mailbox_name.empty())
     return;
+
+  std::string return_mailbox;
+  if (!current_mailbox_.IsZero()) {
+    return_mailbox.assign(
+        reinterpret_cast<const char*>(current_mailbox_.name),
+        sizeof(current_mailbox_.name));
+  }
+
+  base::Closure callback = base::Bind(&InsertSyncPointAndAckForGpu,
+                                      gpu_host_id, params.route_id,
+                                      return_mailbox);
+
+  gpu::Mailbox mailbox;
+  std::copy(params.mailbox_name.data(),
+            params.mailbox_name.data() + params.mailbox_name.length(),
+            reinterpret_cast<char*>(mailbox.name));
+
+  BuffersSwapped(mailbox, params.size, callback);
+}
+
+void RenderWidgetHostViewAndroid::BuffersSwapped(
+    const gpu::Mailbox& mailbox,
+    const gfx::Size size,
+    const base::Closure& ack_callback) {
+  ImageTransportFactoryAndroid* factory =
+      ImageTransportFactoryAndroid::GetInstance();
 
   // TODO(sievers): When running the impl thread in the browser we
   // need to delay the ACK until after commit and use more than a single
@@ -465,20 +531,16 @@ void RenderWidgetHostViewAndroid::AcceleratedSurfaceBuffersSwapped(
   DCHECK(!CompositorImpl::IsThreadingEnabled());
 
   if (texture_id_in_layer_) {
-    DCHECK(!current_mailbox_name_.empty());
+    DCHECK(!current_mailbox_.IsZero());
     ImageTransportFactoryAndroid::GetInstance()->ReleaseTexture(
-        texture_id_in_layer_,
-        reinterpret_cast<const signed char*>(
-            current_mailbox_name_.data()));
+        texture_id_in_layer_, current_mailbox_.name);
   } else {
     texture_id_in_layer_ = factory->CreateTexture();
     texture_layer_->setTextureId(texture_id_in_layer_);
   }
 
   ImageTransportFactoryAndroid::GetInstance()->AcquireTexture(
-      texture_id_in_layer_,
-      reinterpret_cast<const signed char*>(
-          params.mailbox_name.data()));
+      texture_id_in_layer_, mailbox.name);
 
   // We need to tell ContentViewCore about the new frame before calling
   // setNeedsDisplay() below so that it has the needed information schedule the
@@ -487,18 +549,10 @@ void RenderWidgetHostViewAndroid::AcceleratedSurfaceBuffersSwapped(
     content_view_core_->DidProduceRendererFrame();
 
   texture_layer_->setNeedsDisplay();
-  texture_layer_->setBounds(params.size);
-  texture_size_in_layer_ = params.size;
-
-  uint32 sync_point =
-      ImageTransportFactoryAndroid::GetInstance()->InsertSyncPoint();
-
-  AcceleratedSurfaceMsg_BufferPresented_Params ack_params;
-  ack_params.mailbox_name = current_mailbox_name_;
-  ack_params.sync_point = sync_point;
-   RenderWidgetHostImpl::AcknowledgeBufferPresent(
-      params.route_id, gpu_host_id, ack_params);
-  current_mailbox_name_ = params.mailbox_name;
+  texture_layer_->setBounds(size);
+  texture_size_in_layer_ = size;
+  current_mailbox_ = mailbox;
+  ack_callback.Run();
 }
 
 void RenderWidgetHostViewAndroid::AcceleratedSurfacePostSubBuffer(
@@ -518,7 +572,7 @@ void RenderWidgetHostViewAndroid::AcceleratedSurfaceRelease() {
     ImageTransportFactoryAndroid::GetInstance()->DeleteTexture(
         texture_id_in_layer_);
     texture_id_in_layer_ = 0;
-    current_mailbox_name_.clear();
+    current_mailbox_ = gpu::Mailbox();
   }
 }
 
@@ -636,21 +690,21 @@ SkColor RenderWidgetHostViewAndroid::GetCachedBackgroundColor() const {
 }
 
 void RenderWidgetHostViewAndroid::UpdateFrameInfo(
-    const gfx::Vector2d& scroll_offset,
+    const gfx::Vector2dF& scroll_offset,
     float page_scale_factor,
-    float min_page_scale_factor,
-    float max_page_scale_factor,
-    const gfx::Size& content_size,
+    const gfx::Vector2dF& page_scale_factor_limits,
+    const gfx::SizeF& content_size,
+    const gfx::SizeF& viewport_size,
     const gfx::Vector2dF& controls_offset,
     const gfx::Vector2dF& content_offset) {
   if (content_view_core_) {
-    content_view_core_->UpdateContentSize(content_size.width(),
-                                          content_size.height());
-    content_view_core_->UpdatePageScaleLimits(min_page_scale_factor,
-                                              max_page_scale_factor);
-    content_view_core_->UpdateScrollOffsetAndPageScaleFactor(scroll_offset.x(),
-                                                             scroll_offset.y(),
-                                                             page_scale_factor);
+    // All offsets and sizes are in CSS pixels.
+    content_view_core_->UpdateFrameInfo(
+        scroll_offset.x(), scroll_offset.y(),
+        page_scale_factor,
+        page_scale_factor_limits.x(), page_scale_factor_limits.y(),
+        content_size.width(), content_size.height(),
+        viewport_size.width(), viewport_size.height());
     content_view_core_->UpdateOffsetsForFullscreen(controls_offset.y(),
                                                    content_offset.y());
   }
@@ -681,9 +735,8 @@ void RenderWidgetHostViewPort::GetDefaultScreenInfo(
   // TODO(husky): Remove any system controls from availableRect.
   results->availableRect = display.work_area();
   results->deviceScaleFactor = display.device_scale_factor();
-
   gfx::DeviceDisplayInfo info;
-  results->depth = info.GetBitsPerPixel();;
+  results->depth = info.GetBitsPerPixel();
   results->depthPerComponent = info.GetBitsPerComponent();
   results->isMonochrome = (results->depthPerComponent == 0);
 }

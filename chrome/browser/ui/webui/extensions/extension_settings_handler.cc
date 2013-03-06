@@ -32,7 +32,6 @@
 #include "chrome/browser/extensions/unpacked_installer.h"
 #include "chrome/browser/extensions/updater/extension_updater.h"
 #include "chrome/browser/google/google_util.h"
-#include "chrome/browser/prefs/pref_registry_syncable.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/tab_contents/background_contents.h"
 #include "chrome/browser/ui/browser_finder.h"
@@ -44,6 +43,7 @@
 #include "chrome/browser/view_type_utils.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/extensions/background_info.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_icon_set.h"
@@ -52,6 +52,7 @@
 #include "chrome/common/extensions/manifest_url_handler.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
@@ -139,11 +140,11 @@ DictionaryValue* ExtensionSettingsHandler::CreateExtensionDetailValue(
                                       extension_misc::EXTENSION_ICON_MEDIUM,
                                       ExtensionIconSet::MATCH_BIGGER,
                                       !enabled, NULL);
-  if (extension->location() == Manifest::LOAD)
+  if (Manifest::IsUnpackedLocation(extension->location()))
     extension_data->SetString("path", extension->path().value());
   extension_data->SetString("icon", icon.spec());
   extension_data->SetBoolean("isUnpacked",
-                             extension->location() == Manifest::LOAD);
+      Manifest::IsUnpackedLocation(extension->location()));
   extension_data->SetBoolean("terminated",
       extension_service_->terminated_extensions()->Contains(extension->id()));
   extension_data->SetBoolean("enabledIncognito",
@@ -157,7 +158,7 @@ DictionaryValue* ExtensionSettingsHandler::CreateExtensionDetailValue(
       enabled && CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kEnableExtensionActivityUI));
   extension_data->SetBoolean("allow_reload",
-                             extension->location() == Manifest::LOAD);
+      Manifest::IsUnpackedLocation(extension->location()));
   extension_data->SetBoolean("is_hosted_app", extension->is_hosted_app());
   extension_data->SetBoolean("is_platform_app", extension->is_platform_app());
   extension_data->SetBoolean("homepageProvided",
@@ -185,7 +186,7 @@ DictionaryValue* ExtensionSettingsHandler::CreateExtensionDetailValue(
 
   // Determine the sort order: Extensions loaded through --load-extensions show
   // up at the top. Disabled extensions show up at the bottom.
-  if (extension->location() == Manifest::LOAD)
+  if (Manifest::IsUnpackedLocation(extension->location()))
     extension_data->SetInteger("order", 1);
   else
     extension_data->SetInteger("order", 2);
@@ -236,7 +237,7 @@ DictionaryValue* ExtensionSettingsHandler::CreateExtensionDetailValue(
   }
 
   // Add install warnings (these are not the same as warnings!).
-  if (extension->location() == Manifest::LOAD) {
+  if (Manifest::IsUnpackedLocation(extension->location())) {
     const std::vector<extensions::InstallWarning>& install_warnings =
         extension->install_warnings();
     if (!install_warnings.empty()) {
@@ -535,7 +536,7 @@ void ExtensionSettingsHandler::ReloadUnpackedExtensions() {
   std::vector<const Extension*> unpacked_extensions;
   for (ExtensionSet::const_iterator extension = extensions->begin();
        extension != extensions->end(); ++extension) {
-    if ((*extension)->location() == Manifest::LOAD)
+    if (Manifest::IsUnpackedLocation((*extension)->location()))
       unpacked_extensions.push_back(*extension);
   }
 
@@ -974,10 +975,12 @@ ExtensionSettingsHandler::GetInspectablePagesForExtension(
       extension_service_->profile(), &result);
 
   // Include a link to start the lazy background page, if applicable.
-  if (extension->has_lazy_background_page() && extension_is_enabled &&
+  if (extensions::BackgroundInfo::HasLazyBackgroundPage(extension) &&
+      extension_is_enabled &&
       !process_manager->GetBackgroundHostForExtension(extension->id())) {
     result.push_back(
-        ExtensionPage(extension->GetBackgroundURL(), -1, -1, false));
+        ExtensionPage(extensions::BackgroundInfo::GetBackgroundURL(extension),
+                      -1, -1, false));
   }
 
   // Repeat for the incognito process, if applicable. Don't try to get
@@ -991,10 +994,12 @@ ExtensionSettingsHandler::GetInspectablePagesForExtension(
         process_manager->GetRenderViewHostsForExtension(extension->id()),
         &result);
 
-    if (extension->has_lazy_background_page() && extension_is_enabled &&
+    if (extensions::BackgroundInfo::HasLazyBackgroundPage(extension)
+        && extension_is_enabled &&
         !process_manager->GetBackgroundHostForExtension(extension->id())) {
       result.push_back(
-          ExtensionPage(extension->GetBackgroundURL(), -1, -1, true));
+          ExtensionPage(extensions::BackgroundInfo::GetBackgroundURL(extension),
+                        -1, -1, true));
     }
   }
 

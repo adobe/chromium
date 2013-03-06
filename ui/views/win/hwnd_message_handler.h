@@ -124,12 +124,6 @@ class VIEWS_EXPORT HWNDMessageHandler : public ui::WindowImpl,
 
   void SetTitle(const string16& title);
 
-  void SetAccessibleName(const string16& name);
-  void SetAccessibleRole(ui::AccessibilityTypes::Role role);
-  void SetAccessibleState(ui::AccessibilityTypes::State state);
-  void SendNativeAccessibilityEvent(int id,
-                                    ui::AccessibilityTypes::Event event_type);
-
   void SetCursor(HCURSOR cursor);
 
   void FrameTypeChanged();
@@ -296,7 +290,6 @@ class VIEWS_EXPORT HWNDMessageHandler : public ui::WindowImpl,
     MSG_WM_NCPAINT(OnNCPaint)
     MSG_WM_NOTIFY(OnNotify)
     MSG_WM_PAINT(OnPaint)
-    MSG_WM_POWERBROADCAST(OnPowerBroadcast)
     MSG_WM_SETFOCUS(OnSetFocus)
     MSG_WM_SETICON(OnSetIcon)
     MSG_WM_SETTEXT(OnSetText)
@@ -346,7 +339,6 @@ class VIEWS_EXPORT HWNDMessageHandler : public ui::WindowImpl,
   LRESULT OnNCUAHDrawFrame(UINT message, WPARAM w_param, LPARAM l_param);
   LRESULT OnNotify(int w_param, NMHDR* l_param);
   void OnPaint(HDC dc);
-  LRESULT OnPowerBroadcast(DWORD power_event, DWORD data);
   LRESULT OnReflectedMessage(UINT message, WPARAM w_param, LPARAM l_param);
   LRESULT OnSetCursor(UINT message, WPARAM w_param, LPARAM l_param);
   void OnSetFocus(HWND last_focused_window);

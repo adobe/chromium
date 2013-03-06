@@ -55,6 +55,7 @@
 #include "chrome/test/base/history_index_restore_observer.h"
 #include "chrome/test/base/testing_pref_service_syncable.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/user_prefs/user_prefs.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_process_host.h"
@@ -163,6 +164,7 @@ TestingProfile::TestingProfile()
     : start_time_(Time::Now()),
       testing_prefs_(NULL),
       incognito_(false),
+      original_profile_(NULL),
       last_session_exited_cleanly_(true),
       profile_dependency_manager_(ProfileDependencyManager::GetInstance()),
       delegate_(NULL) {
@@ -177,6 +179,7 @@ TestingProfile::TestingProfile(const base::FilePath& path)
     : start_time_(Time::Now()),
       testing_prefs_(NULL),
       incognito_(false),
+      original_profile_(NULL),
       last_session_exited_cleanly_(true),
       profile_path_(path),
       profile_dependency_manager_(ProfileDependencyManager::GetInstance()),
@@ -190,6 +193,7 @@ TestingProfile::TestingProfile(const base::FilePath& path,
     : start_time_(Time::Now()),
       testing_prefs_(NULL),
       incognito_(false),
+      original_profile_(NULL),
       last_session_exited_cleanly_(true),
       profile_path_(path),
       profile_dependency_manager_(ProfileDependencyManager::GetInstance()),
@@ -213,6 +217,7 @@ TestingProfile::TestingProfile(
       prefs_(prefs.release()),
       testing_prefs_(NULL),
       incognito_(false),
+      original_profile_(NULL),
       last_session_exited_cleanly_(true),
       extension_special_storage_policy_(extension_policy),
       profile_path_(path),
@@ -267,6 +272,9 @@ void TestingProfile::CreateTempProfileDir() {
 }
 
 void TestingProfile::Init() {
+  if (prefs_.get())
+    components::UserPrefs::Set(this, prefs_.get());
+
   if (!file_util::PathExists(profile_path_))
     file_util::CreateDirectory(profile_path_);
 
@@ -431,14 +439,7 @@ void TestingProfile::BlockUntilBookmarkModelLoaded() {
   BookmarkModel* bookmark_model =
       BookmarkModelFactory::GetForProfileIfExists(this);
   DCHECK(bookmark_model);
-  if (bookmark_model->IsLoaded())
-    return;
-  base::RunLoop run_loop;
-  BookmarkLoadObserver observer(content::GetQuitTaskForRunLoop(&run_loop));
-  bookmark_model->AddObserver(&observer);
-  run_loop.Run();
-  bookmark_model->RemoveObserver(&observer);
-  DCHECK(bookmark_model->IsLoaded());
+  ui_test_utils::WaitForBookmarkModelToLoad(bookmark_model);
 }
 
 void TestingProfile::BlockUntilHistoryIndexIsRefreshed() {
@@ -500,6 +501,10 @@ void TestingProfile::SetOffTheRecordProfile(Profile* profile) {
   incognito_profile_.reset(profile);
 }
 
+void TestingProfile::SetOriginalProfile(Profile* profile) {
+  original_profile_ = profile;
+}
+
 Profile* TestingProfile::GetOffTheRecordProfile() {
   return incognito_profile_.get();
 }
@@ -509,6 +514,8 @@ bool TestingProfile::HasOffTheRecordProfile() {
 }
 
 Profile* TestingProfile::GetOriginalProfile() {
+  if (original_profile_)
+    return original_profile_;
   return this;
 }
 
@@ -556,8 +563,8 @@ void TestingProfile::CreateTestingPrefService() {
   DCHECK(!prefs_.get());
   testing_prefs_ = new TestingPrefServiceSyncable();
   prefs_.reset(testing_prefs_);
-  Profile::RegisterUserPrefs(testing_prefs_->registry());
-  chrome::RegisterUserPrefs(testing_prefs_, testing_prefs_->registry());
+  components::UserPrefs::Set(this, prefs_.get());
+  chrome::RegisterUserPrefs(testing_prefs_->registry());
 }
 
 PrefService* TestingProfile::GetPrefs() {

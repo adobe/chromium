@@ -19,13 +19,18 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #include "third_party/WebKit/Tools/DumpRenderTree/chromium/TestRunner/public/WebTestInterfaces.h"
 #include "third_party/WebKit/Tools/DumpRenderTree/chromium/TestRunner/public/WebTestProxy.h"
+#include "third_party/WebKit/Tools/DumpRenderTree/chromium/TestRunner/public/WebTestRunner.h"
 #include "v8/include/v8.h"
+#include "webkit/mocks/mock_webhyphenator.h"
 #include "webkit/tools/test_shell/mock_webclipboard_impl.h"
+#include "webkit/tools/test_shell/test_shell_webmimeregistry_impl.h"
 
 using WebKit::WebClipboard;
 using WebKit::WebFrame;
+using WebKit::WebHyphenator;
 using WebKit::WebMediaStreamCenter;
 using WebKit::WebMediaStreamCenterClient;
+using WebKit::WebMimeRegistry;
 using WebKit::WebPlugin;
 using WebKit::WebPluginParams;
 using WebKit::WebRTCPeerConnectionHandler;
@@ -47,6 +52,14 @@ ShellContentRendererClient::ShellContentRendererClient() {
 ShellContentRendererClient::~ShellContentRendererClient() {
 }
 
+void ShellContentRendererClient::LoadHyphenDictionary(
+    base::PlatformFile dict_file) {
+  if (!hyphenator_)
+    hyphenator_.reset(new webkit_glue::MockWebHyphenator);
+  base::SeekPlatformFile(dict_file, base::PLATFORM_FILE_FROM_BEGIN, 0);
+  hyphenator_->LoadDictionary(dict_file);
+}
+
 void ShellContentRendererClient::RenderThreadStarted() {
   shell_observer_.reset(new ShellRenderProcessObserver());
 #if defined(OS_MACOSX)
@@ -63,6 +76,9 @@ void ShellContentRendererClient::RenderViewCreated(RenderView* render_view) {
   test_runner->Reset();
   render_view->GetWebView()->setSpellCheckClient(
       test_runner->proxy()->spellCheckClient());
+  render_view->GetWebView()->setPermissionClient(
+      ShellRenderProcessObserver::GetInstance()->test_interfaces()->testRunner()
+          ->webPermissions());
   WebTestDelegate* delegate =
       ShellRenderProcessObserver::GetInstance()->test_delegate();
   if (delegate == static_cast<WebTestDelegate*>(test_runner))
@@ -120,6 +136,23 @@ WebClipboard* ShellContentRendererClient::OverrideWebClipboard() {
   return clipboard_.get();
 }
 
+WebMimeRegistry* ShellContentRendererClient::OverrideWebMimeRegistry() {
+  if (!CommandLine::ForCurrentProcess()->HasSwitch(switches::kDumpRenderTree))
+    return NULL;
+  if (!mime_registry_)
+    mime_registry_.reset(new TestShellWebMimeRegistryImpl);
+  return mime_registry_.get();
+}
+
+WebHyphenator* ShellContentRendererClient::OverrideWebHyphenator() {
+  if (!CommandLine::ForCurrentProcess()->HasSwitch(switches::kDumpRenderTree))
+    return NULL;
+  if (!hyphenator_)
+    hyphenator_.reset(new webkit_glue::MockWebHyphenator);
+  return hyphenator_.get();
+
+}
+
 void ShellContentRendererClient::WebTestProxyCreated(RenderView* render_view,
                                                      WebTestProxyBase* proxy) {
   WebKitTestRunner* test_runner = new WebKitTestRunner(render_view);
@@ -130,6 +163,17 @@ void ShellContentRendererClient::WebTestProxyCreated(RenderView* render_view,
       ShellRenderProcessObserver::GetInstance()->test_interfaces());
   test_runner->proxy()->setDelegate(
       ShellRenderProcessObserver::GetInstance()->test_delegate());
+}
+
+bool ShellContentRendererClient::AllowBrowserPlugin(
+    WebKit::WebPluginContainer* container) const {
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableBrowserPluginForAllViewTypes)) {
+    // Allow BrowserPlugin if forced by command line flag. This is generally
+    // true for tests.
+    return true;
+  }
+  return ContentRendererClient::AllowBrowserPlugin(container);
 }
 
 }  // namespace content

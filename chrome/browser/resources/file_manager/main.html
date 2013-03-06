@@ -52,6 +52,7 @@
       <script src="../../../../ui/webui/resources/js/cr/ui/list_single_selection_model.js"></script>
       <script src="../../../../ui/webui/resources/js/cr/ui/list_selection_controller.js"></script>
       <script src="../../../../ui/webui/resources/js/cr/ui/list.js"></script>
+      <script src="../../../../ui/webui/resources/js/cr/ui/autocomplete_list.js"></script>
 
       <script src="../../../../ui/webui/resources/js/cr/ui/splitter.js"></script>
       <script src="../../../../ui/webui/resources/js/cr/ui/table/table_splitter.js"></script>
@@ -118,6 +119,8 @@
                shortcut="U+007F"></command>
       <command id="newfolder" i18n-values="label:NEW_FOLDER_BUTTON_LABEL"
                shortcut="U+0045-Ctrl"></command>
+      <command id="newwindow" i18n-values="label:NEW_WINDOW_BUTTON_LABEL"
+          ></command>
 
       <command id="search" shortcut="U+0046-Ctrl"></command>
 
@@ -175,6 +178,7 @@
     </menu>
 
     <menu id="gear-menu" class="chrome-menu" showShortcuts>
+      <menuitem command="#newwindow"></menuitem>
       <menuitem command="#newfolder"></menuitem>
       <hr>
       <menuitem id="drive-sync-settings"
@@ -217,7 +221,6 @@
           <div id="dir-breadcrumbs" class="breadcrumbs"></div>
           <input id="search-box" type="search" tabindex="9"
               i18n-values="aria-label:SEARCH_TEXT_LABEL">
-
           <div class="right buttonbar">
             <div>
               <button class="left small" id="detail-view" tabindex="10"

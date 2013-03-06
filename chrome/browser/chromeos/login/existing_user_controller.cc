@@ -23,7 +23,6 @@
 #include "chrome/browser/chromeos/accessibility/accessibility_util.h"
 #include "chrome/browser/chromeos/boot_times_loader.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
-#include "chrome/browser/chromeos/cros/network_library.h"
 #include "chrome/browser/chromeos/customization_document.h"
 #include "chrome/browser/chromeos/kiosk_mode/kiosk_mode_settings.h"
 #include "chrome/browser/chromeos/login/helper.h"
@@ -31,6 +30,7 @@
 #include "chrome/browser/chromeos/login/login_utils.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
+#include "chrome/browser/chromeos/net/connectivity_state_helper.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/chromeos/system/statistics_provider.h"
 #include "chrome/browser/google/google_util.h"
@@ -210,6 +210,15 @@ void ExistingUserController::ResumeLogin() {
   // This means the user signed-in, then auto-enrollment used his credentials
   // to enroll and succeeded.
   resume_login_callback_.Run();
+}
+
+void ExistingUserController::OnKioskAppLaunchStarted() {
+  login_display_->SetUIEnabled(false);
+}
+
+void ExistingUserController::OnKioskAppLaunchFailed() {
+  login_display_->SetUIEnabled(true);
+  // TODO(xiyuan): Show some error message.
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -657,10 +666,7 @@ void ExistingUserController::OnLoginFailure(const LoginFailure& failure) {
     // cached locally or the local admin account.
     bool is_known_user =
         UserManager::Get()->IsKnownUser(last_login_attempt_username_);
-    NetworkLibrary* network = CrosLibrary::Get()->GetNetworkLibrary();
-    if (!network) {
-      ShowError(IDS_LOGIN_ERROR_NO_NETWORK_LIBRARY, error);
-    } else if (!network->Connected()) {
+    if (!ConnectivityStateHelper::Get()->IsConnected()) {
       if (is_known_user)
         ShowError(IDS_LOGIN_ERROR_AUTHENTICATING, error);
       else
@@ -818,6 +824,7 @@ void ExistingUserController::WhiteListCheckFailed(const std::string& email) {
 
   // Reenable clicking on other windows and status area.
   login_display_->SetUIEnabled(true);
+  login_display_->ShowSigninUI(email);
 
   if (login_status_consumer_) {
     login_status_consumer_->OnLoginFailure(LoginFailure(
@@ -970,8 +977,7 @@ void ExistingUserController::ShowError(int error_id,
   // for end users, developers can see details string in Chrome logs.
   VLOG(1) << details;
   HelpAppLauncher::HelpTopic help_topic_id;
-  NetworkLibrary* network_library = CrosLibrary::Get()->GetNetworkLibrary();
-  bool is_offline = !network_library || !network_library->Connected();
+  bool is_offline = !ConnectivityStateHelper::Get()->IsConnected();
   switch (login_performer_->error().state()) {
     case GoogleServiceAuthError::CONNECTION_FAILED:
       help_topic_id = HelpAppLauncher::HELP_CANT_ACCESS_ACCOUNT_OFFLINE;

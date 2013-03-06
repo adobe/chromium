@@ -23,6 +23,7 @@
 
 #if defined(OS_WIN)
 #include "base/win/metro.h"
+#include "ui/base/win/dpi.h"
 #include <Windows.h>
 #endif  // defined(OS_WIN)
 
@@ -118,8 +119,11 @@ std::vector<ScaleFactor>& GetSupportedScaleFactorsInternal() {
 #elif defined(OS_MACOSX)
     if (base::mac::IsOSLionOrLater())
       supported_scale_factors->push_back(SCALE_FACTOR_200P);
-#elif defined(OS_WIN) && defined(ENABLE_HIDPI)
-    if (base::win::IsMetroProcess() && ui::IsTouchDevicePresent()) {
+#elif defined(OS_WIN)
+    // Have high-DPI resources for 140% and 180% scaling on Windows based on
+    // default scaling for Metro mode.  Round to nearest supported scale in
+    // all cases.
+    if (ui::IsInHighDPIMode()) {
       supported_scale_factors->push_back(SCALE_FACTOR_140P);
       supported_scale_factors->push_back(SCALE_FACTOR_180P);
     }

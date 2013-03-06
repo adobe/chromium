@@ -26,6 +26,7 @@
       </if>
       <if expr="pp_ifdef('chromeos')">
         <structure name="IDR_DEMO_USER_LOGIN_HTML" file="resources\chromeos\login\demo_user_login.html" flattenhtml="true" type="chrome_html" />
+        <structure name="IDR_DEMO_USER_LOGIN_JS" file="resources\chromeos\login\demo_user_login.js" flattenhtml="true" type="chrome_html" />
         <structure name="IDR_APP_LAUNCH_SPLASH_HTML" file="resources\chromeos\app_launch\app_launch.html" flattenhtml="true" type="chrome_html" />
         <structure name="IDR_APP_LAUNCH_SPLASH_JS" file="resources\chromeos\app_launch\app_launch.js" flattenhtml="true" type="chrome_html" />
       </if>
@@ -54,6 +55,7 @@
       <structure name="IDR_READER_OUT_OF_DATE_HTML" file="resources\reader_out_of_date.html" flattenhtml="true" type="chrome_html" />
       <structure name="IDR_SSL_ROAD_BLOCK_HTML" file="resources\ssl_roadblock.html" flattenhtml="true" type="chrome_html" />
       <structure name="IDR_SAFE_BROWSING_MALWARE_BLOCK_V2" file="resources\safe_browsing\malware_block_v2.html" flattenhtml="true" type="chrome_html" />
+      <structure name="IDR_MANAGED_USER_PASSPHRASE_DIALOG_HTML" file="resources\managed_user_passphrase_dialog.html" flattenhtml="true" type="chrome_html" />
     </structures>
     <includes>
       <if expr="is_win">
@@ -113,7 +115,6 @@
         <include name="IDR_EXTENSIONS_JS" file="resources\extensions\extensions.js" flattenhtml="true" type="BINDATA" />
       </if>
       <include name="IDR_FLAGS_HTML" file="resources\flags.html" flattenhtml="true" type="BINDATA" />
-      <include name="IDR_FLAGS_HTML_WARNING" file="resources\flags_warning.html" flattenhtml="true" type="BINDATA" />
       <include name="IDR_FLAGS_JS" file="resources\flags.js" type="BINDATA" />
       <if expr="not pp_ifdef('android')">
         <include name="IDR_GAIA_LOGIN_HTML" file="sync\resources\gaia_login.html" flattenhtml="true" type="BINDATA" />
@@ -299,8 +300,9 @@
       <if expr="pp_ifdef('image_loader_extension')">
         <include name="IDR_IMAGE_LOADER_MANIFEST" file="resources\image_loader\manifest.json" type="BINDATA" />
       </if>
-      <if expr="pp_ifdef('chromeos')">
+      <if expr="pp_ifdef('chromeos') and pp_ifdef('_google_chrome')">
         <include name="IDR_WALLPAPERMANAGER_MANIFEST" file="resources\chromeos\wallpaper_manager\manifest.json" type="BINDATA" />
+        <include name="IDR_NETWORK_CONFIGURATION_MANIFEST" file="resources\chromeos\network_configuration\manifest.json" type="BINDATA" />
       </if>
       <if expr="(is_linux and pp_ifdef('toolkit_views')) or pp_ifdef('use_ash')">
         <include name="IDR_HTTP_AUTH_HTML" file="resources\http_auth.html" flattenhtml="true" type="BINDATA" />
@@ -319,10 +321,7 @@
         <include name="IDR_SET_AS_DEFAULT_BROWSER_HTML" file="resources\set_as_default_browser.html" flattenhtml="true" allowexternalscript="true" type="BINDATA" />
       </if>
       <include name="IDR_MANAGED_MODE_BLOCK_INTERSTITIAL_HTML" file="resources\managed_mode_block_interstitial.html" flattenhtml="true" type="BINDATA" />
-      <include name="IDR_MANAGED_USER_PASSPHRASE_DIALOG_HTML" file="resources\managed_user_passphrase_dialog.html" allowexternalscript="true" type="chrome_html" />
       <include name="IDR_MANAGED_USER_PASSPHRASE_DIALOG_JS" file="resources\managed_user_passphrase_dialog.js" type="BINDATA" />
-      <include name="IDR_MANAGED_USER_PASSPHRASE_DIALOG_CSS" file="resources\managed_user_passphrase_dialog.css" type="BINDATA" />
-      <include name="IDR_MANAGED_USER_PASSPHRASE_DIALOG_IMG" file="resources\options\managed_user.png" type="BINDATA" />
       <include name="IDR_PROFILE_SIGNIN_CONFIRMATION_HTML" file="resources\profile_signin_confirmation.html" type="BINDATA" />
       <include name="IDR_PROFILE_SIGNIN_CONFIRMATION_JS" file="resources\profile_signin_confirmation.js" type="BINDATA" />
     </includes>

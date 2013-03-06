@@ -168,7 +168,7 @@ void ReloadInternal(Browser* browser,
   WebContents* web_contents = GetOrCloneTabForDisposition(browser, disposition);
   web_contents->UserGestureDone();
   if (!web_contents->FocusLocationBarByDefault())
-    web_contents->Focus();
+    web_contents->GetView()->Focus();
   if (ignore_cache)
     web_contents->GetController().ReloadIgnoringCache(true);
   else
@@ -293,10 +293,6 @@ void NewEmptyWindow(Profile* profile, HostDesktopType desktop_type) {
 }
 
 Browser* OpenEmptyWindow(Profile* profile, HostDesktopType desktop_type) {
-  // TODO(scottmg): http://crbug.com/128578
-  // This is necessary because WebContentsViewAura doesn't have enough context
-  // to get the right StackingClient (and therefore parent window) otherwise.
-  ScopedForceDesktopType force_desktop_type(desktop_type);
   Browser* browser = new Browser(
       Browser::CreateParams(Browser::TYPE_TABBED, profile, desktop_type));
   AddBlankTabAt(browser, -1, true);

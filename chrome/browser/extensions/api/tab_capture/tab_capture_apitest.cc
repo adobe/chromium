@@ -26,21 +26,24 @@ class TabCaptureApiTest : public ExtensionApiTest {
 
 }  // namespace
 
-IN_PROC_BROWSER_TEST_F(TabCaptureApiTest, ApiTests) {
+#if defined(OS_MACOSX)
+// Very flaky on Mac: http://crbug.com/180193
+#define MAYBE_ApiTests DISABLED_ApiTests
+#else
+#define MAYBE_ApiTests ApiTests
+#endif
+
+IN_PROC_BROWSER_TEST_F(TabCaptureApiTest, MAYBE_ApiTests) {
   extensions::FeatureSwitch::ScopedOverride tab_capture(
       extensions::FeatureSwitch::tab_capture(), true);
   ASSERT_TRUE(RunExtensionSubtest("tab_capture/experimental",
                                   "api_tests.html")) << message_;
 }
 
-#if defined(OS_WIN) || defined(OS_MACOSX)
-// See http://crbug.com/174640
-#define MAYBE_EndToEnd DISABLED_EndToEnd
-#else
-#define MAYBE_EndToEnd EndToEnd
-#endif
-
-IN_PROC_BROWSER_TEST_F(TabCaptureApiTest, MAYBE_EndToEnd) {
+// TODO(miu): Disabled until the two most-likely sources of the "flaky timeouts"
+// are resolved: 1) http://crbug.com/177163 and 2) http://crbug.com/174519.
+// See http://crbug.com/174640.
+IN_PROC_BROWSER_TEST_F(TabCaptureApiTest, DISABLED_EndToEnd) {
   extensions::FeatureSwitch::ScopedOverride tab_capture(
       extensions::FeatureSwitch::tab_capture(), true);
   ASSERT_TRUE(RunExtensionSubtest("tab_capture/experimental",

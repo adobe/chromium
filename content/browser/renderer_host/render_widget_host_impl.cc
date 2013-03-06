@@ -18,6 +18,7 @@
 #include "base/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "cc/compositor_frame.h"
+#include "cc/compositor_frame_ack.h"
 #include "content/browser/gpu/gpu_process_host.h"
 #include "content/browser/gpu/gpu_process_host_ui_shim.h"
 #include "content/browser/gpu/gpu_surface_tracker.h"
@@ -29,8 +30,8 @@
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/renderer_host/render_widget_helper.h"
 #include "content/browser/renderer_host/render_widget_host_delegate.h"
-#include "content/browser/renderer_host/tap_suppression_controller.h"
 #include "content/browser/renderer_host/touch_event_queue.h"
+#include "content/browser/renderer_host/touchpad_tap_suppression_controller.h"
 #include "content/common/accessibility_messages.h"
 #include "content/common/content_constants_internal.h"
 #include "content/common/gpu/gpu_messages.h"
@@ -195,8 +196,8 @@ RenderWidgetHostImpl::RenderWidgetHostImpl(RenderWidgetHostDelegate* delegate,
   process_->WidgetRestored();
 
 #if defined(USE_AURA)
-  bool overscroll_enabled = CommandLine::ForCurrentProcess()->
-      HasSwitch(switches::kEnableOverscrollHistoryNavigation);
+  bool overscroll_enabled = !CommandLine::ForCurrentProcess()->
+      HasSwitch(switches::kDisableOverscrollHistoryNavigation);
   SetOverscrollControllerEnabled(overscroll_enabled);
 #endif
 }
@@ -480,26 +481,30 @@ void RenderWidgetHostImpl::WasResized() {
   gfx::Rect view_bounds = view_->GetViewBounds();
   gfx::Size new_size(view_bounds.size());
 
+  gfx::Size old_physical_backing_size = physical_backing_size_;
+  physical_backing_size_ = view_->GetPhysicalBackingSize();
   bool was_fullscreen = is_fullscreen_;
   is_fullscreen_ = IsFullscreen();
-  bool fullscreen_changed = was_fullscreen != is_fullscreen_;
-  bool size_changed = new_size != current_size_;
 
-  // Avoid asking the RenderWidget to resize to its current size, since it
-  // won't send us a PaintRect message in that case.
-  if (!size_changed && !fullscreen_changed)
+  bool size_changed = new_size != current_size_;
+  bool side_payload_changed =
+      old_physical_backing_size != physical_backing_size_ ||
+      was_fullscreen != is_fullscreen_;
+
+  if (!size_changed && !side_payload_changed)
     return;
 
   if (in_flight_size_ != gfx::Size() && new_size == in_flight_size_ &&
-      !fullscreen_changed)
+      !side_payload_changed)
     return;
 
-  // We don't expect to receive an ACK when the requested size is empty.
+  // We don't expect to receive an ACK when the requested size is empty or when
+  // the main viewport size didn't change.
   if (!new_size.IsEmpty() && size_changed)
     resize_ack_pending_ = true;
 
-  if (!Send(new ViewMsg_Resize(routing_id_, new_size,
-          GetRootWindowResizerRect(), is_fullscreen_))) {
+  if (!Send(new ViewMsg_Resize(routing_id_, new_size, physical_backing_size_,
+                               GetRootWindowResizerRect(), is_fullscreen_))) {
     resize_ack_pending_ = false;
   } else {
     in_flight_size_ = new_size;
@@ -988,7 +993,8 @@ void RenderWidgetHostImpl::ForwardGestureEvent(
   ForwardInputEvent(gesture_event, sizeof(WebGestureEvent), false);
 }
 
-// Forwards MouseEvent without passing it through TapSuppressionController
+// Forwards MouseEvent without passing it through
+// TouchpadTapSuppressionController
 void RenderWidgetHostImpl::ForwardMouseEventImmediately(
     const WebMouseEvent& mouse_event) {
   TRACE_EVENT2("renderer_host",
@@ -1527,15 +1533,27 @@ void RenderWidgetHostImpl::OnSwapCompositorFrame(
 #if defined(OS_ANDROID)
   if (view_) {
     view_->UpdateFrameInfo(
-        gfx::ToRoundedVector2d(frame.metadata.root_scroll_offset),
+        frame.metadata.root_scroll_offset,
         frame.metadata.page_scale_factor,
-        frame.metadata.min_page_scale_factor,
-        frame.metadata.max_page_scale_factor,
-        gfx::ToCeiledSize(frame.metadata.root_layer_size),
+        gfx::Vector2dF(
+            frame.metadata.min_page_scale_factor,
+            frame.metadata.max_page_scale_factor),
+        frame.metadata.root_layer_size,
+        frame.metadata.viewport_size,
         frame.metadata.location_bar_offset,
         frame.metadata.location_bar_content_translation);
   }
 #endif
+  if (view_) {
+    view_->OnSwapCompositorFrame(frame);
+  } else if (frame.gl_frame_data) {
+    cc::CompositorFrameAck ack;
+    ack.gl_frame_data.reset(new cc::GLFrameData());
+    ack.gl_frame_data->mailbox = frame.gl_frame_data->mailbox;
+    ack.gl_frame_data->size = frame.gl_frame_data->size;
+    ack.gl_frame_data->sync_point = 0;
+    SendSwapCompositorFrameAck(routing_id_, process_->GetID(), ack);
+  }
 }
 
 void RenderWidgetHostImpl::OnUpdateRect(
@@ -2333,6 +2351,14 @@ void RenderWidgetHostImpl::AcknowledgeBufferPresent(
     ui_shim->Send(new AcceleratedSurfaceMsg_BufferPresented(route_id,
                                                             params));
   }
+}
+
+// static
+void RenderWidgetHostImpl::SendSwapCompositorFrameAck(
+    int32 route_id, int renderer_host_id, const cc::CompositorFrameAck& ack) {
+  RenderProcessHost* host = RenderProcessHost::FromID(renderer_host_id);
+  if (host)
+    host->Send(new ViewMsg_SwapCompositorFrameAck(route_id, ack));
 }
 
 void RenderWidgetHostImpl::AcknowledgeSwapBuffersToRenderer() {

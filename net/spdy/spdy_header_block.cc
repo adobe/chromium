@@ -5,6 +5,7 @@
 #include "net/spdy/spdy_header_block.h"
 
 #include "base/values.h"
+#include "net/spdy/spdy_http_utils.h"
 
 namespace net {
 
@@ -16,7 +17,9 @@ Value* SpdyHeaderBlockNetLogCallback(
   for (SpdyHeaderBlock::const_iterator it = headers->begin();
        it != headers->end(); ++it) {
     headers_dict->SetWithoutPathExpansion(
-        it->first, new StringValue(it->second));
+        it->first,
+        new StringValue(
+            ShouldShowHttpHeaderValue(it->first) ? it->second : "[elided]"));
   }
   dict->Set("headers", headers_dict);
   return dict;

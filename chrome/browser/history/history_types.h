@@ -44,6 +44,7 @@ typedef int64 DownloadID;   // Identifier for a download.
 typedef int64 FaviconID;  // For favicons.
 typedef int64 FaviconBitmapID; // Identifier for a bitmap in a favicon.
 typedef int64 SegmentID;  // URL segments for the most visited view.
+typedef int64 SegmentDurationID;  // Unique identifier for segment_duration.
 typedef int64 IconMappingID; // For page url and icon mapping.
 
 // URLRow ---------------------------------------------------------------------
@@ -815,6 +816,19 @@ class VisitDatabaseObserver {
  public:
   virtual ~VisitDatabaseObserver();
   virtual void OnAddVisit(const BriefVisitInfo& info) = 0;
+};
+
+struct ExpireHistoryArgs {
+  ExpireHistoryArgs();
+  ~ExpireHistoryArgs();
+
+  // Sets |begin_time| and |end_time| to the beginning and end of the day (in
+  // local time) on which |time| occurs.
+  void SetTimeRangeForOneDay(base::Time time);
+
+  std::set<GURL> urls;
+  base::Time begin_time;
+  base::Time end_time;
 };
 
 }  // namespace history

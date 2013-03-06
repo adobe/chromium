@@ -41,6 +41,7 @@
 #include "chrome/browser/web_applications/web_app.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/extensions/api/icons/icons_handler.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_resource.h"
 #include "chrome/common/pref_names.h"
@@ -870,7 +871,8 @@ ui::MenuModel* ChromeLauncherControllerPerBrowser::CreateContextMenu(
   return new LauncherContextMenu(this, &item, root_window);
 }
 
-ui::MenuModel* ChromeLauncherControllerPerBrowser::CreateApplicationMenu(
+ash::LauncherMenuModel*
+ChromeLauncherControllerPerBrowser::CreateApplicationMenu(
     const ash::LauncherItem& item) {
   // Not used by this launcher type.
   return NULL;
@@ -1265,7 +1267,7 @@ ash::LauncherID ChromeLauncherControllerPerBrowser::InsertAppLauncherItem(
   ash::LauncherItem item;
   item.type = controller->GetLauncherItemType();
   item.is_incognito = false;
-  item.image = Extension::GetDefaultIcon(true);
+  item.image = extensions::IconsInfo::GetDefaultAppIcon();
 
   WebContents* active_tab = GetLastActiveWebContents(app_id);
   if (active_tab) {

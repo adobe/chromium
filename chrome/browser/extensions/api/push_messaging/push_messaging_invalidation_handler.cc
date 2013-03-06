@@ -7,8 +7,8 @@
 #include <algorithm>
 #include <vector>
 
-#include "base/string_split.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_split.h"
 #include "chrome/browser/extensions/api/push_messaging/push_messaging_invalidation_handler_delegate.h"
 #include "chrome/browser/sync/invalidation_frontend.h"
 #include "chrome/common/extensions/extension.h"
@@ -125,6 +125,7 @@ void PushMessagingInvalidationHandler::OnIncomingInvalidation(
                                          &subchannel)) {
       delegate_->OnMessage(extension_id, subchannel, it->second.payload);
     }
+    service_->AcknowledgeInvalidation(it->first, it->second.ack_handle);
   }
 }
 

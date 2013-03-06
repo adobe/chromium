@@ -6,7 +6,7 @@
 
 #include "base/base64.h"
 #include "base/prefs/testing_pref_service.h"
-#include "base/string_split.h"
+#include "base/strings/string_split.h"
 #include "chrome/browser/metrics/proto/study.pb.h"
 #include "chrome/browser/metrics/variations/resource_request_allowed_notifier_test_util.h"
 #include "chrome/browser/metrics/variations/variations_service.h"
@@ -393,6 +393,10 @@ TEST(VariationsServiceTest, LoadSeed) {
   EXPECT_FALSE(prefs.FindPreference(prefs::kVariationsSeed)->IsDefaultValue());
   EXPECT_FALSE(variations_service.LoadTrialsSeedFromPref(&prefs, &loaded_seed));
   EXPECT_TRUE(prefs.FindPreference(prefs::kVariationsSeed)->IsDefaultValue());
+
+  // Check that having no seed in prefs results in a return value of false.
+  prefs.ClearPref(prefs::kVariationsSeed);
+  EXPECT_FALSE(variations_service.LoadTrialsSeedFromPref(&prefs, &loaded_seed));
 }
 
 TEST(VariationsServiceTest, StoreSeed) {

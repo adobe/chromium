@@ -33,6 +33,10 @@ class ImmersiveModeController : public ui::EventHandler,
   // Must initialize after browser view has a Widget and native window.
   void Init();
 
+  // Returns true if immersive mode should be used for fullscreen based on
+  // command line flags.
+  static bool UseImmersiveFullscreen();
+
   // Enables or disables immersive mode.
   void SetEnabled(bool enabled);
   bool enabled() const { return enabled_; }
@@ -70,6 +74,7 @@ class ImmersiveModeController : public ui::EventHandler,
 
   // Testing interface.
   void SetHideTabIndicatorsForTest(bool hide);
+  void SetEnabledForTest(bool enabled);
   void StartRevealForTest();
   void OnRevealViewLostMouseForTest();
 
@@ -78,7 +83,8 @@ class ImmersiveModeController : public ui::EventHandler,
 
   enum Animate {
     ANIMATE_NO,
-    ANIMATE_YES,
+    ANIMATE_SLOW,
+    ANIMATE_FAST,
   };
   enum Layout {
     LAYOUT_NO,
@@ -89,8 +95,9 @@ class ImmersiveModeController : public ui::EventHandler,
   void EnableWindowObservers(bool enable);
 
   // Temporarily reveals the top-of-window views while in immersive mode,
-  // hiding them when the cursor exits the area of the top views.
-  void StartReveal();
+  // hiding them when the cursor exits the area of the top views. If |animate|
+  // is not ANIMATE_NO, slides in the view, otherwise shows it immediately.
+  void StartReveal(Animate animate);
 
   // Slide in the reveal view.
   void AnimateShowRevealView();
@@ -105,8 +112,12 @@ class ImmersiveModeController : public ui::EventHandler,
   // the |browser_view_| layout when the reveal finishes.
   void EndReveal(Animate animate, Layout layout);
 
+  // Updates layout for |browser_view_| including window caption controls and
+  // tab strip style |immersive_style|.
+  void LayoutBrowserView(bool immersive_style);
+
   // Slide out the reveal view. Deletes the view when complete.
-  void AnimateHideRevealView();
+  void AnimateHideRevealView(int duration_ms);
 
   // Cleans up the reveal view when the hide animation completes.
   void OnHideAnimationCompleted();

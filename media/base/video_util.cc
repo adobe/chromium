@@ -8,6 +8,7 @@
 
 #include "base/logging.h"
 #include "media/base/video_frame.h"
+#include "media/base/yuv_convert.h"
 
 namespace media {
 
@@ -86,7 +87,7 @@ void FillYUV(VideoFrame* frame, uint8 y, uint8 u, uint8 v) {
 }
 
 void RotatePlaneByPixels(
-    uint8* src,
+    const uint8* src,
     uint8* dest,
     int width,
     int height,
@@ -175,7 +176,7 @@ void RotatePlaneByPixels(
 
   // Copy pixels.
   for (int row = 0; row < num_rows; ++row) {
-    uint8* src_ptr = src;
+    const uint8* src_ptr = src;
     uint8* dest_ptr = dest;
     for (int col = 0; col < num_cols; ++col) {
       *dest_ptr = *src_ptr++;
@@ -184,6 +185,53 @@ void RotatePlaneByPixels(
     src += src_stride;
     dest += dest_row_step;
   }
+}
+
+gfx::Rect ComputeLetterboxRegion(const gfx::Rect& bounds,
+                                 const gfx::Size& content) {
+  int64 x = static_cast<int64>(content.width()) * bounds.height();
+  int64 y = static_cast<int64>(content.height()) * bounds.width();
+
+  gfx::Size letterbox(bounds.width(), bounds.height());
+  if (y < x)
+    letterbox.set_height(static_cast<int>(y / content.width()));
+  else
+    letterbox.set_width(static_cast<int>(x / content.height()));
+  gfx::Rect result = bounds;
+  result.ClampToCenteredSize(letterbox);
+  return result;
+}
+
+void CopyRGBToVideoFrame(const uint8* source,
+                         int stride,
+                         const gfx::Rect& region_in_frame,
+                         VideoFrame* frame) {
+  const int kY = VideoFrame::kYPlane;
+  const int kU = VideoFrame::kUPlane;
+  const int kV = VideoFrame::kVPlane;
+  CHECK_EQ(frame->stride(kU), frame->stride(kV));
+  const int uv_stride = frame->stride(kU);
+
+  if (region_in_frame != gfx::Rect(frame->coded_size())) {
+    // TODO(justinlin): Optimize this by clearing just the margins.
+    // http://crbug.com/178789
+    FillYUV(frame, 0x00, 0x80, 0x80);
+  }
+
+  const int y_offset = region_in_frame.x()
+                     + (region_in_frame.y() * frame->stride(kY));
+  const int uv_offset = region_in_frame.x() / 2
+                      + (region_in_frame.y() / 2 * uv_stride);
+
+  ConvertRGB32ToYUV(source,
+                    frame->data(kY) + y_offset,
+                    frame->data(kU) + uv_offset,
+                    frame->data(kV) + uv_offset,
+                    region_in_frame.width(),
+                    region_in_frame.height(),
+                    stride,
+                    frame->stride(kY),
+                    uv_stride);
 }
 
 }  // namespace media

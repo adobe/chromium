@@ -13,6 +13,7 @@
 #include "chrome/browser/bookmarks/bookmark_node_data.h"
 #include "chrome/browser/chromeos/input_method/input_method_configuration.h"
 #include "chrome/browser/command_updater.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/omnibox/omnibox_edit_controller.h"
 #include "chrome/browser/ui/omnibox/omnibox_edit_model.h"
 #include "chrome/browser/ui/omnibox/omnibox_popup_model.h"
@@ -100,10 +101,10 @@ int GetEditFontPixelSize(bool popup_window_mode) {
 }
 
 // This will write |url| and |text| to the clipboard as a well-formed URL.
-void DoCopyURL(const GURL& url, const string16& text) {
+void DoCopyURL(const GURL& url, const string16& text, Profile* profile) {
   BookmarkNodeData data;
   data.ReadFromTuple(url, text);
-  data.WriteToClipboard(NULL);
+  data.WriteToClipboard(profile);
 }
 
 }  // namespace
@@ -243,47 +244,69 @@ void OmniboxViewViews::OnMouseReleased(const ui::MouseEvent& event) {
 }
 
 bool OmniboxViewViews::OnKeyPressed(const ui::KeyEvent& event) {
-  // Use our own implementation of paste. See OnPaste() for details.
-  if (!read_only() && event.IsControlDown() &&
-      event.key_code() == ui::VKEY_V) {
-    OnBeforePossibleChange();
-    OnPaste();
-    OnAfterPossibleChange();
-    return true;
+  switch (event.key_code()) {
+    case ui::VKEY_RETURN:
+      model()->AcceptInput(event.IsAltDown() ? NEW_FOREGROUND_TAB : CURRENT_TAB,
+                           false);
+      return true;
+    case ui::VKEY_ESCAPE:
+      return model()->OnEscapeKeyPressed();
+    case ui::VKEY_CONTROL:
+      model()->OnControlKeyChanged(true);
+      break;
+    case ui::VKEY_DELETE:
+      if (event.IsShiftDown() && model()->popup_model()->IsOpen())
+        model()->popup_model()->TryDeletingCurrentItem();
+      break;
+    case ui::VKEY_UP:
+      model()->OnUpOrDownKeyPressed(-1);
+      return true;
+    case ui::VKEY_DOWN:
+      model()->OnUpOrDownKeyPressed(1);
+      return true;
+    case ui::VKEY_PRIOR:
+      model()->OnUpOrDownKeyPressed(-1 * model()->result().size());
+      return true;
+    case ui::VKEY_NEXT:
+      model()->OnUpOrDownKeyPressed(model()->result().size());
+      return true;
+    case ui::VKEY_V:
+      if (event.IsControlDown() && !read_only()) {
+        OnBeforePossibleChange();
+        OnPaste();
+        OnAfterPossibleChange();
+        return true;
+      }
+      break;
+    default:
+      break;
   }
 
   bool handled = views::Textfield::OnKeyPressed(event);
-  if (event.key_code() == ui::VKEY_RETURN) {
-    bool alt_held = event.IsAltDown();
-    model()->AcceptInput(alt_held ? NEW_FOREGROUND_TAB : CURRENT_TAB, false);
-    handled = true;
-  } else if (!handled && event.key_code() == ui::VKEY_ESCAPE) {
-    // Let the model handle the Escape key or continue its propagation.
-    handled = model()->OnEscapeKeyPressed();
-  } else if (event.key_code() == ui::VKEY_CONTROL) {
-    // Omnibox2 can switch its contents while pressing a control key. To switch
-    // the contents of omnibox2, we notify the OmniboxEditModel class when the
-    // control-key state is changed.
-    model()->OnControlKeyChanged(true);
-  } else if (!handled && event.key_code() == ui::VKEY_DELETE &&
-             event.IsShiftDown()) {
-    // If shift+del didn't change the text, we let this delete an entry from
-    // the popup.  We can't check to see if the IME handled it because even if
-    // nothing is selected, the IME or the TextView still report handling it.
-    if (model()->popup_model()->IsOpen())
-      model()->popup_model()->TryDeletingCurrentItem();
-  } else if (!handled && event.key_code() == ui::VKEY_UP) {
-    model()->OnUpOrDownKeyPressed(-1);
-    handled = true;
-  } else if (!handled && event.key_code() == ui::VKEY_DOWN) {
-    model()->OnUpOrDownKeyPressed(1);
-    handled = true;
-  } else if (!handled &&
-             event.key_code() == ui::VKEY_TAB &&
-             !event.IsControlDown()) {
+#if !defined(OS_WIN) || defined(USE_AURA)
+  // TODO(msw): Avoid this complexity, consolidate cross-platform behavior.
+  handled |= SkipDefaultKeyEventProcessing(event);
+#endif
+  return handled;
+}
+
+bool OmniboxViewViews::OnKeyReleased(const ui::KeyEvent& event) {
+  // The omnibox contents may change while the control key is pressed.
+  if (event.key_code() == ui::VKEY_CONTROL)
+    model()->OnControlKeyChanged(false);
+  return views::Textfield::OnKeyReleased(event);
+}
+
+bool OmniboxViewViews::SkipDefaultKeyEventProcessing(
+    const ui::KeyEvent& event) {
+  // Handle keyword hint tab-to-search and tabbing through dropdown results.
+  // This must run before acclerator handling invokes a focus change on tab.
+  if (views::FocusManager::IsTabTraversalKeyEvent(event)) {
     if (model()->is_keyword_hint() && !event.IsShiftDown()) {
-      handled = model()->AcceptKeyword();
-    } else if (model()->popup_model()->IsOpen()) {
+      model()->AcceptKeyword();
+      return true;
+    }
+    if (model()->popup_model()->IsOpen()) {
       if (event.IsShiftDown() &&
           model()->popup_model()->selected_line_state() ==
               OmniboxPopupModel::KEYWORD) {
@@ -291,24 +314,11 @@ bool OmniboxViewViews::OnKeyPressed(const ui::KeyEvent& event) {
       } else {
         model()->OnUpOrDownKeyPressed(event.IsShiftDown() ? -1 : 1);
       }
-      handled = true;
+      return true;
     }
   }
-  // TODO(msw): Handle Instant, tab through popup, tab to search, page up/down.
-  return handled;
-}
 
-bool OmniboxViewViews::OnKeyReleased(const ui::KeyEvent& event) {
-  // Omnibox2 can switch its contents while pressing a control key. To switch
-  // the contents of omnibox2, we notify the OmniboxEditModel class when the
-  // control-key state is changed.
-  if (event.key_code() == ui::VKEY_CONTROL) {
-    // TODO(oshima): investigate if we need to support keyboard with two
-    // controls.
-    model()->OnControlKeyChanged(false);
-    return true;
-  }
-  return false;
+  return Textfield::SkipDefaultKeyEventProcessing(event);
 }
 
 void OmniboxViewViews::OnFocus() {
@@ -644,10 +654,13 @@ void OmniboxViewViews::OnAfterCutOrCopy() {
   model()->AdjustTextForCopy(GetSelectedRange().GetMin(), IsSelectAll(),
                              &selected_text, &url, &write_url);
   if (write_url) {
-    DoCopyURL(url, selected_text);
+    DoCopyURL(url, selected_text, model()->profile());
   } else {
     ui::ScopedClipboardWriter scoped_clipboard_writer(
-        ui::Clipboard::GetForCurrentThread(), ui::Clipboard::BUFFER_STANDARD);
+        ui::Clipboard::GetForCurrentThread(),
+        ui::Clipboard::BUFFER_STANDARD,
+        content::BrowserContext::GetMarkerForOffTheRecordContext(
+            model()->profile()));
     scoped_clipboard_writer.WriteText(selected_text);
   }
 }
@@ -691,7 +704,7 @@ void OmniboxViewViews::UpdateContextMenu(ui::SimpleMenuModel* menu_contents) {
   menu_contents->AddItemWithStringId(IDC_EDIT_SEARCH_ENGINES,
       IDS_EDIT_SEARCH_ENGINES);
 
-  if (chrome::search::IsQueryExtractionEnabled(location_bar_view_->profile())) {
+  if (chrome::search::IsQueryExtractionEnabled()) {
     int copy_position = menu_contents->GetIndexOfCommandId(IDS_APP_COPY);
     DCHECK(copy_position >= 0);
     menu_contents->InsertItemWithStringIdAt(
@@ -820,7 +833,9 @@ string16 OmniboxViewViews::GetSelectedText() const {
 }
 
 void OmniboxViewViews::CopyURL() {
-  DoCopyURL(toolbar_model()->GetURL(), toolbar_model()->GetText(false));
+  DoCopyURL(toolbar_model()->GetURL(),
+            toolbar_model()->GetText(false),
+            model()->profile());
 }
 
 void OmniboxViewViews::OnPaste() {

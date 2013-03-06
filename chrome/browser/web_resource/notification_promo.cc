@@ -18,10 +18,10 @@
 #include "base/time.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/prefs/pref_registry_syncable.h"
 #include "chrome/browser/web_resource/promo_resource_service.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/pref_names.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/user_metrics.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/url_util.h"
@@ -143,7 +143,8 @@ base::Value* DeepCopyAndResolveStrings(
       const base::ListValue* list = static_cast<const base::ListValue*>(node);
       base::ListValue* copy = new base::ListValue;
       for (base::ListValue::const_iterator it = list->begin();
-           it != list->end(); ++it) {
+           it != list->end();
+           ++it) {
         base::Value* child_copy = DeepCopyAndResolveStrings(*it, strings);
         copy->Append(child_copy);
       }
@@ -154,13 +155,12 @@ base::Value* DeepCopyAndResolveStrings(
       const base::DictionaryValue* dict =
           static_cast<const base::DictionaryValue*>(node);
       base::DictionaryValue* copy = new base::DictionaryValue;
-      for (base::DictionaryValue::key_iterator it = dict->begin_keys();
-           it != dict->end_keys(); ++it) {
-        const base::Value* child = NULL;
-        bool rv = dict->GetWithoutPathExpansion(*it, &child);
-        DCHECK(rv);
-        base::Value* child_copy = DeepCopyAndResolveStrings(child, strings);
-        copy->SetWithoutPathExpansion(*it, child_copy);
+      for (base::DictionaryValue::Iterator it(*dict);
+           !it.IsAtEnd();
+           it.Advance()) {
+        base::Value* child_copy = DeepCopyAndResolveStrings(&it.value(),
+                                                            strings);
+        copy->SetWithoutPathExpansion(it.key(), child_copy);
       }
       return copy;
     }

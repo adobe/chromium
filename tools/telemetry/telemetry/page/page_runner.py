@@ -67,26 +67,51 @@ class PageRunner(object):
     self.Close()
 
   def Run(self, options, possible_browser, test, results):
+    # Reorder page set based on options.
+    pages = _ShuffleAndFilterPageSet(self.page_set, options)
+
     # Check if we can run against WPR.
-    for page in self.page_set.pages:
+    pages_without_archives = []
+    for page in pages:
       parsed_url = urlparse.urlparse(page.url)
       if parsed_url.scheme == 'file':
         continue
       if not page.archive_path:
-        logging.warning("""
+        if options.allow_live_sites:
+          logging.warning("""
   No page set archive provided for the page %s. Benchmarking against live sites!
   Results won't be repeatable or comparable.
 """, page.url)
+        else:
+          logging.warning("""
+  No page set archive provided for the page %s. Not running the page. To run
+  against live sites, pass the flag --run-against-live-sites.
+""", page.url)
+          results.AddFailure(page, 'Page set archive not defined', '')
+          pages_without_archives.append(page)
       elif options.wpr_mode != wpr_modes.WPR_RECORD:
         # The page has an archive, and we're not recording.
         if not os.path.isfile(page.archive_path):
-          logging.warning("""
+          if options.allow_live_sites:
+            logging.warning("""
   The page set archive %s for page %s does not exist, benchmarking against live
   sites! Results won't be repeatable or comparable.
 
   To fix this, either add svn-internal to your .gclient using
   http://goto/read-src-internal, or create a new archive using record_wpr.
   """, os.path.relpath(page.archive_path), page.url)
+          else:
+            logging.warning("""
+  The page set archive %s for page %s does not exist. Not running the page.
+
+  To fix this, either add svn-internal to your .gclient using
+  http://goto/read-src-internal, or create a new archive using record_wpr.
+  To run against live sites, pass the flag --allow-live-sites.
+  """, os.path.relpath(page.archive_path), page.url)
+            results.AddFailure(page, 'Page set archive doesn\'t exist', '')
+            pages_without_archives.append(page)
+
+    pages = [page for page in pages if page not in pages_without_archives]
 
     # Verify credentials path.
     credentials_path = None
@@ -100,7 +125,7 @@ class PageRunner(object):
     if self.page_set.user_agent_type:
       options.browser_user_agent_type = self.page_set.user_agent_type
 
-    for page in self.page_set:
+    for page in pages:
       test.CustomizeBrowserOptionsForPage(page, possible_browser.options)
 
     # Check tracing directory.
@@ -112,9 +137,6 @@ class PageRunner(object):
                         options.trace_dir)
       elif os.listdir(options.trace_dir):
         raise Exception('Trace directory isn\'t empty: %s' % options.trace_dir)
-
-    # Reorder page set based on options.
-    pages = _ShuffleAndFilterPageSet(self.page_set, options)
 
     state = _RunState()
     last_archive_path = None
@@ -139,6 +161,11 @@ class PageRunner(object):
               if len(state.browser.tabs) == 0:
                 state.browser.tabs.New()
               state.tab = state.browser.tabs[0]
+
+            if state.browser.supports_tab_control:
+              while len(state.browser.tabs) > 1:
+                state.browser.tabs[-1].Close()
+
             if options.trace_dir:
               self._SetupTracingTab(state)
 

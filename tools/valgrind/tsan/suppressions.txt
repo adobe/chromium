@@ -931,16 +931,23 @@
    fun:_vsnprintf_helper
 }
 {
-   bug_137973_a
-   ThreadSanitizer:Race
-   fun:media::Pipeline::OnVideoTimeUpdate
-   fun:base::internal::RunnableAdapter::Run
+  bug_137973_a
+  ThreadSanitizer:Race
+  fun:media::Pipeline::OnVideoTimeUpdate
+  fun:base::internal::RunnableAdapter::Run
 }
 {
   bug_137973_b
   ThreadSanitizer:Race
   fun:media::Pipeline::SetState
   fun:media::Pipeline::StopTask
+  fun:base::internal::RunnableAdapter::Run
+}
+{
+  bug_137973_c
+  ThreadSanitizer:Race
+  fun:media::Pipeline::SetState
+  fun:media::Pipeline::SeekTask
   fun:base::internal::RunnableAdapter::Run
 }
 {
@@ -1038,4 +1045,19 @@
   fun:StartupBrowserCreatorImpl::ProcessStartupURLs
   fun:StartupBrowserCreatorImpl::ProcessLaunchURLs
   fun:StartupBrowserCreatorImpl::Launch
+}
+{
+   bug_178433a
+   ThreadSanitizer:Race
+   fun:scoped_refptr::operator->
+   fun:base::WaitableEvent::Signal
+   fun:base::debug::TraceSamplingThread::ThreadMain
+   fun:base::::ThreadFunc
+}
+{
+   bug_178433b
+   ThreadSanitizer:Race
+   fun:base::internal::scoped_ptr_impl::get
+   ...
+   fun:base::debug::TraceSamplingThread::ThreadMain
 }

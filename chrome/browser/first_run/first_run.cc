@@ -28,7 +28,6 @@
 #include "chrome/browser/importer/importer_list.h"
 #include "chrome/browser/importer/importer_progress_dialog.h"
 #include "chrome/browser/importer/importer_progress_observer.h"
-#include "chrome/browser/prefs/pref_registry_syncable.h"
 #include "chrome/browser/process_singleton.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/search_engines/template_url_service.h"
@@ -50,6 +49,7 @@
 #include "chrome/installer/util/master_preferences.h"
 #include "chrome/installer/util/master_preferences_constants.h"
 #include "chrome/installer/util/util_constants.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/user_metrics.h"
@@ -64,6 +64,11 @@ namespace {
 // Flags for functions of similar name.
 bool should_show_welcome_page_ = false;
 bool should_do_autofill_personal_data_manager_first_run_ = false;
+
+// Flags indicating whether a first-run profile auto import was performed, and
+// whether the importer process exited successfully.
+bool did_perform_profile_import = false;
+bool profile_import_exited_successfully = false;
 
 // Helper class that performs delayed first-run tasks that need more of the
 // chrome infrastructure to be up and running before they can be attempted.
@@ -695,7 +700,9 @@ void AutoImport(
                   importer::FAVORITES,
                   items);
 
-    internal::ImportSettings(profile, importer_host, importer_list, items);
+    profile_import_exited_successfully =
+        internal::ImportSettings(profile, importer_host, importer_list, items);
+    DCHECK(profile_import_exited_successfully);
   }
 
   content::RecordAction(UserMetricsAction("FirstRunDef_Accept"));
@@ -703,6 +710,7 @@ void AutoImport(
   process_singleton->Unlock();
   first_run::CreateSentinel();
 #endif  // !defined(USE_AURA)
+  did_perform_profile_import = true;
 }
 
 void DoPostImportTasks(Profile* profile, bool make_chrome_default) {
@@ -733,6 +741,12 @@ void DoPostImportTasks(Profile* profile, bool make_chrome_default) {
 #endif  // !defined(USE_AURA)
 
   internal::DoPostImportPlatformSpecificTasks();
+}
+
+bool DidPerformProfileImport(bool* exited_successfully) {
+  if (exited_successfully)
+    *exited_successfully = profile_import_exited_successfully;
+  return did_perform_profile_import;
 }
 
 }  // namespace first_run

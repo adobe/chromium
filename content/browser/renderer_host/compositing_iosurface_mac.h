@@ -15,9 +15,11 @@
 #include "base/synchronization/lock.h"
 #include "base/time.h"
 #include "base/timer.h"
+#include "media/base/video_frame.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/rect.h"
+#include "ui/gfx/rect_conversions.h"
 #include "ui/gfx/size.h"
 
 class IOSurfaceSupport;
@@ -27,6 +29,8 @@ class Rect;
 }
 
 namespace content {
+
+class RenderWidgetHostViewFrameSubscriber;
 
 // This class manages an OpenGL context and IOSurface for the accelerated
 // compositing code path. The GL context is attached to
@@ -50,10 +54,16 @@ class CompositingIOSurfaceMac {
   void SetIOSurface(uint64 io_surface_handle,
                     const gfx::Size& size);
 
+  // Get the CGL renderer ID currently associated with this context.
+  int GetRendererID();
+
   // Blit the IOSurface at the upper-left corner of the |view|. If |view| window
   // size is larger than the IOSurface, the remaining right and bottom edges
   // will be white. |scaleFactor| is 1 in normal views, 2 in HiDPI views.
-  void DrawIOSurface(NSView* view, float scale_factor);
+  // |frame_subscriber| listens to this draw event and provides output buffer
+  // for copying this frame into.
+  void DrawIOSurface(NSView* view, float scale_factor,
+                     RenderWidgetHostViewFrameSubscriber* frame_subscriber);
 
   // Copy the data of the "live" OpenGL texture referring to this IOSurfaceRef
   // into |out|. The copied region is specified with |src_pixel_subrect| and
@@ -64,9 +74,18 @@ class CompositingIOSurfaceMac {
   // |callback| is invoked when the operation is completed or failed.
   // Do no call this method again before |callback| is invoked.
   void CopyTo(const gfx::Rect& src_pixel_subrect,
+              float src_scale_factor,
               const gfx::Size& dst_pixel_size,
               const SkBitmap& out,
               const base::Callback<void(bool, const SkBitmap&)>& callback);
+
+  // Transfer the contents of the surface to an already-allocated YV12
+  // VideoFrame, and invoke a callback to indicate success or failure.
+  void CopyToVideoFrame(
+      const gfx::Rect& src_subrect,
+      float src_scale_factor,
+      const scoped_refptr<media::VideoFrame>& target,
+      const base::Callback<void(bool)>& callback);
 
   // Unref the IOSurface and delete the associated GL texture. If the GPU
   // process is no longer referencing it, this will delete the IOSurface.
@@ -171,8 +190,7 @@ class CompositingIOSurfaceMac {
       pixel_buffer = 0;
       use_fence = false;
       fence = 0;
-      out_buf.reset();
-      callback.Reset();
+      map_buffer_callback.Reset();
     }
 
     bool started;
@@ -184,8 +202,7 @@ class CompositingIOSurfaceMac {
     GLuint fence;
     gfx::Rect src_rect;
     gfx::Size dest_size;
-    SkBitmap out_buf;
-    base::Callback<void(bool, const SkBitmap&)> callback;
+    base::Callback<base::Closure(void*)> map_buffer_callback;
   };
 
   CompositingIOSurfaceMac(IOSurfaceSupport* io_surface_support,
@@ -219,17 +236,32 @@ class CompositingIOSurfaceMac {
   void StartOrContinueDisplayLink();
   void StopDisplayLink();
 
+  // Copy current frame to |target| video frame. This method must be called
+  // within a CGL context. Returns a callback that should be called outside
+  // of the CGL context.
+  base::Closure CopyToVideoFrameInternal(
+      const gfx::Rect& src_subrect,
+      float src_scale_factor,
+      const scoped_refptr<media::VideoFrame>& target,
+      const base::Callback<void(bool)>& callback);
+
   // Two implementations of CopyTo() in synchronous and asynchronous mode.
+  // These may copy regions smaller than the requested |src_pixel_subrect| if
+  // the iosurface is smaller than |src_pixel_subrect|.
   bool SynchronousCopyTo(const gfx::Rect& src_pixel_subrect,
+                         float src_scale_factor,
                          const gfx::Size& dst_pixel_size,
                          const SkBitmap& out);
   bool AsynchronousCopyTo(
       const gfx::Rect& src_pixel_subrect,
+      float src_scale_factor,
       const gfx::Size& dst_pixel_size,
-      const SkBitmap& out,
-      const base::Callback<void(bool, const SkBitmap&)>& callback);
+      const base::Callback<base::Closure(void*)>& map_buffer_callback);
   void FinishCopy();
   void CleanupResourcesForCopy();
+
+  gfx::Rect IntersectWithIOSurface(const gfx::Rect& rect,
+                                   float scale_factor) const;
 
   // Cached pointer to IOSurfaceSupport Singleton.
   IOSurfaceSupport* io_surface_support_;

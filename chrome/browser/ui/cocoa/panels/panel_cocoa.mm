@@ -158,10 +158,6 @@ void PanelCocoa::UpdatePanelLoadingAnimations(bool should_animate) {
   [controller_ updateThrobber:should_animate];
 }
 
-void PanelCocoa::NotifyPanelOnUserChangedTheme() {
-  NOTIMPLEMENTED();
-}
-
 void PanelCocoa::PanelWebContentsFocused(content::WebContents* contents) {
   // Nothing to do.
 }
@@ -242,6 +238,10 @@ void PanelCocoa::SetWindowCornerStyle(panel::CornerStyle corner_style) {
   corner_style_ = corner_style;
 
   // TODO(dimich): investigate how to support it on Mac.
+}
+
+void PanelCocoa::MinimizePanelBySystem() {
+  NOTIMPLEMENTED();
 }
 
 void PanelCocoa::PanelExpansionStateChanging(

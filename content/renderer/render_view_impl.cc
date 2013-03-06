@@ -83,6 +83,7 @@
 #include "content/renderer/gpu/compositor_output_surface.h"
 #include "content/renderer/gpu/compositor_software_output_device_gl_adapter.h"
 #include "content/renderer/gpu/compositor_thread.h"
+#include "content/renderer/gpu/mailbox_output_surface.h"
 #include "content/renderer/gpu/render_widget_compositor.h"
 #include "content/renderer/idle_user_detector.h"
 #include "content/renderer/input_tag_speech_dispatcher.h"
@@ -184,7 +185,6 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebUserMediaClient.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebWindowFeatures.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/default/WebRenderTheme.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/default/WebRenderTheme.h"
 #include "ui/base/ui_base_switches.h"
 #include "ui/gfx/native_widget_types.h"
@@ -445,11 +445,11 @@ NOINLINE static void CrashIntentionally() {
 static void MaybeHandleDebugURL(const GURL& url) {
   if (!url.SchemeIs(chrome::kChromeUIScheme))
     return;
-  if (url == GURL(chrome::kChromeUICrashURL)) {
+  if (url == GURL(kChromeUICrashURL)) {
     CrashIntentionally();
-  } else if (url == GURL(chrome::kChromeUIKillURL)) {
+  } else if (url == GURL(kChromeUIKillURL)) {
     base::KillProcess(base::GetCurrentProcessHandle(), 1, false);
-  } else if (url == GURL(chrome::kChromeUIHangURL)) {
+  } else if (url == GURL(kChromeUIHangURL)) {
     for (;;) {
       base::PlatformThread::Sleep(base::TimeDelta::FromSeconds(1));
     }
@@ -611,6 +611,7 @@ RenderViewImpl::RenderViewImpl(RenderViewImplParams* params)
       send_content_state_immediately_(false),
       enabled_bindings_(0),
       send_preferred_size_changes_(false),
+      auto_resize_mode_(false),
       is_loading_(false),
       navigation_gesture_(NavigationGestureUnknown),
       opened_by_user_gesture_(true),
@@ -1106,6 +1107,8 @@ bool RenderViewImpl::OnMessageReceived(const IPC::Message& message) {
     IPC_MESSAGE_HANDLER_DELAY_REPLY(ViewMsg_SynchronousFind, OnSynchronousFind)
     IPC_MESSAGE_HANDLER(ViewMsg_UndoScrollFocusedEditableNodeIntoView,
                         OnUndoScrollFocusedEditableNodeIntoRect)
+    IPC_MESSAGE_HANDLER(ViewMsg_EnableHidingTopControls,
+                        OnEnableHidingTopControls)
 #elif defined(OS_MACOSX)
     IPC_MESSAGE_HANDLER(ViewMsg_CopyToFindPboard, OnCopyToFindPboard)
     IPC_MESSAGE_HANDLER(ViewMsg_PluginImeCompositionCompleted,
@@ -1608,7 +1611,10 @@ void RenderViewImpl::UpdateURL(WebFrame* frame) {
   params.frame_id = frame->identifier();
   params.socket_address.set_host(response.remoteIPAddress().utf8());
   params.socket_address.set_port(response.remotePort());
-  params.was_fetched_via_proxy = response.wasFetchedViaProxy();
+  WebURLResponseExtraDataImpl* extra_data = GetExtraDataFromResponse(response);
+  if (extra_data) {
+    params.was_fetched_via_proxy = extra_data->was_fetched_via_proxy();
+  }
   params.was_within_same_page = navigation_state->was_within_same_page();
   if (!document_state->security_info().empty()) {
     // SSL state specified in the request takes precedence over the one in the
@@ -1916,7 +1922,8 @@ WebView* RenderViewImpl::createView(
   params.user_gesture = creator->isProcessingUserGesture();
   params.window_container_type = WindowFeaturesToContainerType(features);
   params.session_storage_namespace_id = session_storage_namespace_id_;
-  params.frame_name = frame_name;
+  if (frame_name != "_blank")
+    params.frame_name = frame_name;
   params.opener_frame_id = creator->identifier();
   params.opener_url = creator->document().url();
   GURL security_url(creator->document().securityOrigin().toString().utf8());
@@ -1950,7 +1957,7 @@ WebView* RenderViewImpl::createView(
       routing_id,
       surface_id,
       cloned_session_storage_namespace_id,
-      frame_name,
+      string16(),  // WebCore will take care of setting the correct name.
       true,
       false,
       1,
@@ -2041,8 +2048,15 @@ scoped_ptr<cc::OutputSurface> RenderViewImpl::CreateOutputSurface() {
           new CompositorOutputSurface(routing_id(), NULL,
               new CompositorSoftwareOutputDeviceGLAdapter(context)));
   } else {
-      return scoped_ptr<cc::OutputSurface>(
-          new CompositorOutputSurface(routing_id(), context, NULL));
+      bool composite_to_mailbox =
+          command_line.HasSwitch(cc::switches::kCompositeToMailbox);
+      DCHECK(!composite_to_mailbox || command_line.HasSwitch(
+          cc::switches::kEnableCompositorFrameMessage));
+      // No swap throttling yet when compositing on the main thread.
+      DCHECK(!composite_to_mailbox || is_threaded_compositing_enabled_);
+      return scoped_ptr<cc::OutputSurface>(composite_to_mailbox ?
+          new MailboxOutputSurface(routing_id(), context, NULL) :
+              new CompositorOutputSurface(routing_id(), context, NULL));
   }
 }
 
@@ -2311,14 +2325,10 @@ void RenderViewImpl::showContextMenu(
   // selection. If that's the case, update the render view's state just prior
   // to showing the context menu.
   // TODO(asvitkine): http://crbug.com/152432
-  string16 selection_text;
-  if (!selection_text_.empty() && !selection_range_.is_empty()) {
-    const int start = selection_range_.GetMin() - selection_text_offset_;
-    const size_t length = selection_range_.length();
-    if (start >= 0 && start + length <= selection_text_.length())
-      selection_text = selection_text_.substr(start, length);
-  }
-  if (params.selection_text != selection_text) {
+  if (ShouldUpdateSelectionTextFromContextMenuParams(selection_text_,
+                                                     selection_text_offset_,
+                                                     selection_range_,
+                                                     params)) {
     selection_text_ = params.selection_text;
     // TODO(asvitkine): Text offset and range is not available in this case.
     selection_text_offset_ = 0;
@@ -2518,7 +2528,8 @@ void RenderViewImpl::didFocus() {
   //                 we won't have to test for user gesture anymore and we can
   //                 move that code back to render_widget.cc
   if (webview() && webview()->mainFrame() &&
-      webview()->mainFrame()->isProcessingUserGesture()) {
+      webview()->mainFrame()->isProcessingUserGesture() &&
+      RenderThreadImpl::current()->should_send_focus_ipcs()) {
     Send(new ViewHostMsg_Focus(routing_id_));
   }
 }
@@ -2526,7 +2537,8 @@ void RenderViewImpl::didFocus() {
 void RenderViewImpl::didBlur() {
   // TODO(jcivelli): see TODO above in didFocus().
   if (webview() && webview()->mainFrame() &&
-      webview()->mainFrame()->isProcessingUserGesture()) {
+      webview()->mainFrame()->isProcessingUserGesture() &&
+      RenderThreadImpl::current()->should_send_focus_ipcs()) {
     Send(new ViewHostMsg_Blur(routing_id_));
   }
 }
@@ -2701,10 +2713,7 @@ WebMediaPlayer* RenderViewImpl::createMediaPlayer(
 
   const CommandLine* cmd_line = CommandLine::ForCurrentProcess();
 #if defined(ENABLE_WEBRTC)
-  // TODO(wjia): when all patches related to WebMediaPlayerMS have been
-  // landed, remove the switch. Refer to crbug.com/142988.
-  if (!cmd_line->HasSwitch(switches::kDisableWebMediaPlayerMS) &&
-      MediaStreamImpl::CheckMediaStream(url)) {
+  if (MediaStreamImpl::CheckMediaStream(url)) {
     EnsureMediaStreamImpl();
     return new webkit_media::WebMediaPlayerMS(
         frame, client, AsWeakPtr(), media_stream_impl_, new RenderMediaLog());
@@ -2723,7 +2732,7 @@ WebMediaPlayer* RenderViewImpl::createMediaPlayer(
     return NULL;
   }
 
-  if (cmd_line->HasSwitch(switches::kMediaPlayerInRenderProcess)) {
+  if (cmd_line->HasSwitch(switches::kInProcessWebGL)) {
     if (!media_bridge_manager_.get()) {
       media_bridge_manager_.reset(
           new webkit_media::MediaPlayerBridgeManagerImpl(1));
@@ -2787,7 +2796,7 @@ WebMediaPlayer* RenderViewImpl::createMediaPlayer(
   }
 
   webkit_media::WebMediaPlayerParams params(
-      sink, gpu_factories, media_stream_impl_, new RenderMediaLog());
+      sink, gpu_factories, new RenderMediaLog());
   WebMediaPlayer* media_player =
       GetContentClient()->renderer()->OverrideCreateWebMediaPlayer(
           this, frame, client, AsWeakPtr(), params);
@@ -3882,16 +3891,19 @@ void RenderViewImpl::didReceiveResponse(
   int http_status_code = response.httpStatusCode();
 
   // Record page load flags.
-  document_state->set_was_fetched_via_spdy(response.wasFetchedViaSPDY());
-  document_state->set_was_npn_negotiated(response.wasNpnNegotiated());
   WebURLResponseExtraDataImpl* extra_data = GetExtraDataFromResponse(response);
   if (extra_data) {
+    document_state->set_was_fetched_via_spdy(
+        extra_data->was_fetched_via_spdy());
+    document_state->set_was_npn_negotiated(
+        extra_data->was_npn_negotiated());
     document_state->set_npn_negotiated_protocol(
         extra_data->npn_negotiated_protocol());
+    document_state->set_was_alternate_protocol_available(
+        extra_data->was_alternate_protocol_available());
+    document_state->set_was_fetched_via_proxy(
+        extra_data->was_fetched_via_proxy());
   }
-  document_state->set_was_alternate_protocol_available(
-      response.wasAlternateProtocolAvailable());
-  document_state->set_was_fetched_via_proxy(response.wasFetchedViaProxy());
   document_state->set_http_status_code(http_status_code);
   // Whether or not the http status code actually corresponds to an error is
   // only checked when the page is done loading, if |use_error_page| is
@@ -4171,10 +4183,6 @@ void RenderViewImpl::didChangeContentsSize(WebFrame* frame,
     cached_has_main_frame_horizontal_scrollbar_ = has_horizontal_scrollbar;
     cached_has_main_frame_vertical_scrollbar_ = has_vertical_scrollbar;
   }
-
-#if defined(OS_ANDROID)
-  ScheduleUpdateFrameInfo();
-#endif
 }
 
 void RenderViewImpl::UpdateScrollState(WebFrame* frame) {
@@ -4205,11 +4213,12 @@ void RenderViewImpl::didChangeScrollOffset(WebFrame* frame) {
 
   FOR_EACH_OBSERVER(
       RenderViewObserver, observers_, DidChangeScrollOffset(frame));
+}
 
-#if defined(OS_ANDROID)
-  if (webview()->mainFrame() == frame)
-    ScheduleUpdateFrameInfo();
-#endif
+void RenderViewImpl::willInsertBody(WebKit::WebFrame* frame) {
+  if (!frame->parent()) {
+    Send(new ViewHostMsg_WillInsertBody(routing_id()));
+  }
 }
 
 #if defined(OS_ANDROID)
@@ -4256,6 +4265,26 @@ void RenderViewImpl::SendFindReply(int request_id,
                                   selection_rect,
                                   ordinal,
                                   final_status_update));
+}
+
+// static
+bool RenderViewImpl::ShouldUpdateSelectionTextFromContextMenuParams(
+    const string16& selection_text,
+    size_t selection_text_offset,
+    const ui::Range& selection_range,
+    const ContextMenuParams& params) {
+  string16 trimmed_selection_text;
+  if (!selection_text.empty() && !selection_range.is_empty()) {
+    const int start = selection_range.GetMin() - selection_text_offset;
+    const size_t length = selection_range.length();
+    if (start >= 0 && start + length <= selection_text.length()) {
+      TrimWhitespace(selection_text.substr(start, length), TRIM_ALL,
+                     &trimmed_selection_text);
+    }
+  }
+  string16 trimmed_params_text;
+  TrimWhitespace(params.selection_text, TRIM_ALL, &trimmed_params_text);
+  return trimmed_params_text != trimmed_selection_text;
 }
 
 void RenderViewImpl::reportFindInPageMatchCount(int request_id,
@@ -5406,6 +5435,7 @@ void RenderViewImpl::OnEnableAutoResize(const gfx::Size& min_size,
   DCHECK(disable_scrollbars_size_limit_.IsEmpty());
   if (!webview())
     return;
+  auto_resize_mode_ = true;
   webview()->enableAutoResizeMode(min_size, max_size);
 }
 
@@ -5413,9 +5443,11 @@ void RenderViewImpl::OnDisableAutoResize(const gfx::Size& new_size) {
   DCHECK(disable_scrollbars_size_limit_.IsEmpty());
   if (!webview())
     return;
+  auto_resize_mode_ = false;
   webview()->disableAutoResizeMode();
 
-  Resize(new_size, resizer_rect_, is_fullscreen_, NO_RESIZE_ACK);
+  Resize(new_size, physical_backing_size_, resizer_rect_, is_fullscreen_,
+         NO_RESIZE_ACK);
 }
 
 void RenderViewImpl::OnEnablePreferredSizeChangedMode() {
@@ -5710,6 +5742,7 @@ void RenderViewImpl::OnMoveOrResizeStarted() {
 }
 
 void RenderViewImpl::OnResize(const gfx::Size& new_size,
+                              const gfx::Size& physical_backing_size,
                               const gfx::Rect& resizer_rect,
                               bool is_fullscreen) {
   if (webview()) {
@@ -5721,7 +5754,8 @@ void RenderViewImpl::OnResize(const gfx::Size& new_size,
     UpdateScrollState(webview()->mainFrame());
   }
 
-  RenderWidget::OnResize(new_size, resizer_rect, is_fullscreen);
+  RenderWidget::OnResize(new_size, physical_backing_size, resizer_rect,
+                         is_fullscreen);
 }
 
 void RenderViewImpl::WillInitiatePaint() {
@@ -6167,6 +6201,8 @@ void RenderViewImpl::SetDeviceScaleFactor(float device_scale_factor) {
     webview()->settings()->setAcceleratedCompositingForFixedPositionEnabled(
         ShouldUseFixedPositionCompositing(device_scale_factor_));
   }
+  if (auto_resize_mode_)
+    AutoResizeCompositor();
 }
 
 ui::TextInputType RenderViewImpl::GetTextInputType() {
@@ -6690,13 +6726,27 @@ bool RenderViewImpl::didTapMultipleTargets(
 }
 
 skia::RefPtr<SkPicture> RenderViewImpl::CapturePicture() {
-  return compositor_ ? compositor_->layer_tree_host()->capturePicture() :
+  return compositor_ ? compositor_->CapturePicture() :
       skia::RefPtr<SkPicture>();
 }
 #endif
 
 unsigned RenderViewImpl::GetLocalSessionHistoryLengthForTesting() const {
   return history_list_length_;
+}
+
+void RenderViewImpl::SetFocusAndActivateForTesting(bool enable) {
+  if (enable) {
+    if (has_focus())
+      return;
+    OnSetActive(true);
+    OnSetFocus(true);
+  } else {
+    if (!has_focus())
+      return;
+    OnSetFocus(false);
+    OnSetActive(false);
+  }
 }
 
 void RenderViewImpl::OnReleaseDisambiguationPopupDIB(

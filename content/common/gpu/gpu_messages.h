@@ -80,6 +80,9 @@ IPC_STRUCT_END()
 IPC_STRUCT_BEGIN(AcceleratedSurfaceMsg_BufferPresented_Params)
   IPC_STRUCT_MEMBER(std::string, mailbox_name)
   IPC_STRUCT_MEMBER(uint32, sync_point)
+#if defined(OS_MACOSX)
+  IPC_STRUCT_MEMBER(int32, renderer_id)
+#endif
 IPC_STRUCT_END()
 
 IPC_STRUCT_BEGIN(GPUCommandBufferConsoleMessage)
@@ -106,7 +109,6 @@ IPC_STRUCT_BEGIN(GpuStreamTextureMsg_MatrixChanged_Params)
   IPC_STRUCT_MEMBER(float, m32)
   IPC_STRUCT_MEMBER(float, m33)
 IPC_STRUCT_END()
-IPC_ENUM_TRAITS(content::SurfaceTexturePeer::SurfaceTextureTarget)
 #endif
 
 IPC_STRUCT_TRAITS_BEGIN(content::DxDiagNode)
@@ -418,7 +420,7 @@ IPC_SYNC_MESSAGE_CONTROL1_0(GpuChannelMsg_DestroyCommandBuffer,
 // Generates n new unique mailbox names synchronously.
 IPC_SYNC_MESSAGE_CONTROL1_1(GpuChannelMsg_GenerateMailboxNames,
                             unsigned, /* num */
-                            std::vector<std::string> /* mailbox_names */)
+                            std::vector<gpu::Mailbox> /* mailbox_names */)
 
 // Generates n new unique mailbox names asynchronously.
 IPC_MESSAGE_CONTROL1(GpuChannelMsg_GenerateMailboxNamesAsync,
@@ -426,7 +428,7 @@ IPC_MESSAGE_CONTROL1(GpuChannelMsg_GenerateMailboxNamesAsync,
 
 // Reply to GpuChannelMsg_GenerateMailboxNamesAsync.
 IPC_MESSAGE_CONTROL1(GpuChannelMsg_GenerateMailboxNamesReply,
-                     std::vector<std::string> /* mailbox_names */)
+                     std::vector<gpu::Mailbox> /* mailbox_names */)
 
 #if defined(OS_ANDROID)
 // Register the StreamTextureProxy class with the GPU process, so that
@@ -438,10 +440,8 @@ IPC_SYNC_MESSAGE_CONTROL2_1(GpuChannelMsg_RegisterStreamTextureProxy,
 
 // Tells the GPU process create and send the java surface texture object to
 // the renderer process through the binder thread.
-IPC_MESSAGE_CONTROL4(GpuChannelMsg_EstablishStreamTexture,
+IPC_MESSAGE_CONTROL3(GpuChannelMsg_EstablishStreamTexture,
                      int32, /* stream_id */
-                     content::SurfaceTexturePeer::SurfaceTextureTarget,
-                     /* type */
                      int32, /* primary_id */
                      int32 /* secondary_id */)
 #endif
@@ -580,11 +580,6 @@ IPC_SYNC_MESSAGE_ROUTED0_1(GpuCommandBufferMsg_InsertSyncPoint,
 // Retires the sync point. Note: this message is not sent explicitly by the
 // renderer, but is synthesized by the GPU process.
 IPC_MESSAGE_ROUTED1(GpuCommandBufferMsg_RetireSyncPoint,
-                    uint32 /* sync_point */)
-
-// Makes this command buffer wait on a sync point. Command buffer message
-// execution will be delayed until the sync point has been reached.
-IPC_MESSAGE_ROUTED1(GpuCommandBufferMsg_WaitSyncPoint,
                     uint32 /* sync_point */)
 
 // Makes this command buffer signal when a sync point is reached, by sending

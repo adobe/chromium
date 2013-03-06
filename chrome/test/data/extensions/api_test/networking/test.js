@@ -107,7 +107,6 @@ var availableTests = [
                     "Type": "WiFi",
                     "WiFi": {
                       "SSID": "stub_wifi1",
-                      "Type": "WiFi"
                     }
                   },
                   {
@@ -117,7 +116,8 @@ var availableTests = [
                     "Type": "WiFi",
                     "WiFi": {
                       "SSID": "stub_wifi2",
-                      "Type": "WiFi"
+                      "Security": "WPA-PSK",
+                      "SignalStrength": 80
                     }
                   },
                   {
@@ -141,8 +141,7 @@ var availableTests = [
                     "Name": "wifi1",
                     "Type": "WiFi",
                     "WiFi": {
-                      "SSID": "stub_wifi1",
-                      "Type": "WiFi"
+                      "SSID": "stub_wifi1"
                     }
                   },
                   {
@@ -152,7 +151,8 @@ var availableTests = [
                     "Type": "WiFi",
                     "WiFi": {
                       "SSID": "stub_wifi2",
-                      "Type": "WiFi"
+                      "Security": "WPA-PSK",
+                      "SignalStrength": 80
                     }
                   }
                   ], result);
@@ -197,16 +197,16 @@ var availableTests = [
         assertTrue(isValid);
       }));
   },
-  function verifyAndSignCredentials() {
-    chrome.networkingPrivate.verifyAndSignCredentials(
+  function verifyAndEncryptCredentials() {
+    chrome.networkingPrivate.verifyAndEncryptCredentials(
       verificationProperties,
       "guid",
       callbackPass(function(result) {
         assertEq("encrypted_credentials", result);
       }));
   },
-  function verifyAndSignData() {
-    chrome.networkingPrivate.verifyAndSignData(
+  function verifyAndEncryptData() {
+    chrome.networkingPrivate.verifyAndEncryptData(
       verificationProperties,
       "data",
       callbackPass(function(result) {

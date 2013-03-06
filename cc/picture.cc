@@ -9,7 +9,6 @@
 #include "skia/ext/analysis_canvas.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkData.h"
-#include "third_party/skia/include/core/SkTileGridPicture.h"
 #include "third_party/skia/include/utils/SkPictureUtils.h"
 #include "ui/gfx/rect_conversions.h"
 #include "ui/gfx/skia_util.h"
@@ -17,8 +16,6 @@
 namespace {
 // URI label for a lazily decoded SkPixelRef.
 const char labelLazyDecoded[] = "lazy";
-// Tile size in recording coordinates used by SkTileGridPicture
-const int tileGridSize = 256;
 }
 
 namespace cc {
@@ -42,23 +39,42 @@ Picture::Picture(const skia::RefPtr<SkPicture>& picture,
 Picture::~Picture() {
 }
 
-scoped_refptr<Picture> Picture::Clone() const {
-  // SkPicture is not thread-safe to rasterize with, so return a thread-safe
-  // clone of it.
+scoped_refptr<Picture> Picture::GetCloneForDrawingOnThread(
+    unsigned thread_index) const {
+  // SkPicture is not thread-safe to rasterize with, this returns a clone
+  // to rasterize with on a specific thread.
+  CHECK_GT(clones_.size(), thread_index);
+  return clones_[thread_index];
+}
+
+void Picture::CloneForDrawing(int num_threads) {
+  TRACE_EVENT1("cc", "Picture::CloneForDrawing", "num_threads", num_threads);
+
   DCHECK(picture_);
-  skia::RefPtr<SkPicture> clone = skia::AdoptRef(picture_->clone());
-  return make_scoped_refptr(new Picture(clone, layer_rect_, opaque_rect_));
+  scoped_array<SkPicture> clones(new SkPicture[num_threads]);
+  picture_->clone(&clones[0], num_threads);
+
+  clones_.clear();
+  for (int i = 0; i < num_threads; i++) {
+    scoped_refptr<Picture> clone = make_scoped_refptr(
+        new Picture(skia::AdoptRef(new SkPicture(clones[i])),
+                    layer_rect_,
+                    opaque_rect_));
+    clones_.push_back(clone);
+  }
 }
 
 void Picture::Record(ContentLayerClient* painter,
-                     RenderingStats* stats) {
+                     RenderingStats* stats,
+                     const SkTileGridPicture::TileGridInfo& tileGridInfo) {
   TRACE_EVENT2("cc", "Picture::Record",
                "width", layer_rect_.width(), "height", layer_rect_.height());
 
   // Record() should only be called once.
   DCHECK(!picture_);
+  DCHECK(!tileGridInfo.fTileInterval.isEmpty());
   picture_ = skia::AdoptRef(new SkTileGridPicture(
-      tileGridSize, tileGridSize, layer_rect_.width(), layer_rect_.height()));
+      layer_rect_.width(), layer_rect_.height(), tileGridInfo));
 
   SkCanvas* canvas = picture_->beginRecording(
       layer_rect_.width(),

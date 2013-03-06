@@ -31,7 +31,7 @@
     "channel": "stable",
     "extension_types": ["packaged_app", "hosted_app"]
   },
-    "autotestPrivate": {
+  "autotestPrivate": {
     "channel": "stable",
     "extension_types": ["extension", "packaged_app"],
     "location": "component"
@@ -123,10 +123,18 @@
     "channel": "trunk",
     "extension_types": ["extension"]
   },
-  "declarativeWebRequest": {
-    "channel": "beta",
-    "extension_types": ["extension", "packaged_app"]
-  },
+  "declarativeWebRequest": [
+    {
+      "channel": "beta",
+      "extension_types": ["extension", "packaged_app"]
+    },
+    {
+      "channel": "stable",
+      "extension_types": ["extension", "packaged_app"],
+      // Legacy Browser Support (remove once this API hits stable).
+      "whitelist": ["heildphpnddilhkemkielfhnkaagiabh"]
+    }
+  ],
   "downloads": {
     "channel": "dev",
     "extension_types": [
@@ -170,7 +178,7 @@
     "extension_types": ["extension", "packaged_app"]
   },
   "fullscreen": {
-    "channel": "dev",
+    "channel": "stable",
     "extension_types": ["platform_app"]
   },
   "geolocation": {
@@ -224,14 +232,15 @@
     "channel": "stable",
     "extension_types": [ "platform_app" ]
   },
-  // TODO(thestig) Remove this as part of http:://crbug.com/144496
+  // TODO(thestig) Remove this as part of http://crbug.com/144496
   "mediaGalleriesPrivate": {
     "channel": "stable",
     "extension_types": [ "platform_app" ],
     "whitelist": [
-      "ebpbnabdhheoknfklmpddcdijjkmklkp",
-      "efjnaogkjbogokcnohkmnjdojkikgobo",
-      "ejegoaikibpmikoejfephaneibodccma"
+      "dhgjflpimlbndbpamnkoepaacagejgda",
+      "ebpbnabdhheoknfklmpddcdijjkmklkp",  // G+ Photos staging
+      "efjnaogkjbogokcnohkmnjdojkikgobo",  // G+ Photos prod
+      "ejegoaikibpmikoejfephaneibodccma"   // G+ Photos dev
     ]
   },
   "mediaPlayerPrivate": {
@@ -252,10 +261,20 @@
       "ionpfmkccalenbmnddpbmocokhaknphg"   // Quickoffice dev
     ]
   },
+  "nativeMessaging": {
+    "channel": "dev",
+    "extension_types": [
+      "extension", "packaged_app", "hosted_app", "platform_app"
+    ]
+  },
   "networkingPrivate": {
     "channel": "dev",
     "extension_types": ["extension", "packaged_app"],
-    "location": "component"
+    "whitelist": [
+      "pkedcjkdefgpdelpbcmbmeomcjbeemfm",  // CV
+      "fmfcbgogabcbclcofgocippekhfcmgfj",  // CV Staging
+      "hfaagokkkhdbgiakmmlclaapfelnkoah"   // CV Canary
+    ]
   },
   "notifications": {
     "channel": "stable",
@@ -353,7 +372,7 @@
   },
   "tabCapture": [{
     "channel": "dev",
-    "extension_types": ["extension", "packaged_app"]
+    "extension_types": ["extension", "packaged_app", "platform_app"]
   }, {
     "channel": "stable",
     "extension_types": ["extension", "packaged_app"],
@@ -390,11 +409,11 @@
     ]
   },
   "usb": {
-    "channel": "dev",
+    "channel": "stable",
     "extension_types": ["platform_app"]
   },
   "usbDevices": {
-    "channel": "dev",
+    "channel": "stable",
     "extension_types": ["platform_app"]
   },
   "videoCapture": {

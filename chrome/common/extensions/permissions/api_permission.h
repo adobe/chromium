@@ -67,6 +67,7 @@ class APIPermission {
     kDeveloperPrivate,
     kDevtools,
     kDownloads,
+    kDownloadsInternal,
     kEchoPrivate,
     kExperimental,
     kFileBrowserHandler,
@@ -87,6 +88,7 @@ class APIPermission {
     kMediaGalleriesPrivate,
     kMediaPlayerPrivate,
     kMetricsPrivate,
+    kNativeMessaging,
     kNetworkingPrivate,
     kNotification,
     kPageCapture,
@@ -217,7 +219,7 @@ class APIPermissionInfo {
     // Indicates that extensions cannot specify the permission as optional.
     kFlagCannotBeOptional = 1 << 3,
 
-    // Indicates that extensions cannot specify the permission as optional.
+    // Indicates that extensions must specify the permission as optional.
     kFlagMustBeOptional = 1 << 4
   };
 

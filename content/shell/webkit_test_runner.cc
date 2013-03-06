@@ -19,6 +19,7 @@
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "content/public/renderer/render_view.h"
+#include "content/public/renderer/render_view_visitor.h"
 #include "content/public/test/layouttest_support.h"
 #include "content/shell/shell_messages.h"
 #include "content/shell/shell_render_process_observer.h"
@@ -80,6 +81,8 @@ namespace content {
 
 namespace {
 
+int kDefaultLayoutTestTimeoutMs = 30 * 1000;
+
 void InvokeTaskHelper(void* context) {
   WebTask* task = reinterpret_cast<WebTask*>(context);
   task->run();
@@ -110,11 +113,58 @@ void CopyCanvasToBitmap(SkCanvas* canvas,  SkBitmap* snapshot) {
 
 }
 
+class SyncNavigationStateVisitor : public RenderViewVisitor {
+ public:
+  SyncNavigationStateVisitor() {}
+  virtual ~SyncNavigationStateVisitor() {}
+
+  virtual bool Visit(RenderView* render_view) OVERRIDE {
+    SyncNavigationState(render_view);
+    return true;
+  }
+ private:
+  DISALLOW_COPY_AND_ASSIGN(SyncNavigationStateVisitor);
+};
+
+class ProxyToRenderViewVisitor : public RenderViewVisitor {
+ public:
+  explicit ProxyToRenderViewVisitor(WebTestProxyBase* proxy)
+      : proxy_(proxy),
+        render_view_(NULL) {
+  }
+  virtual ~ProxyToRenderViewVisitor() {}
+
+  RenderView* render_view() const { return render_view_; }
+
+  virtual bool Visit(RenderView* render_view) OVERRIDE {
+    WebKitTestRunner* test_runner = WebKitTestRunner::Get(render_view);
+    if (!test_runner) {
+      NOTREACHED();
+      return true;
+    }
+    if (test_runner->proxy() == proxy_) {
+      render_view_ = render_view;
+      return false;
+    }
+    return true;
+  }
+ private:
+  WebTestProxyBase* proxy_;
+  RenderView* render_view_;
+
+  DISALLOW_COPY_AND_ASSIGN(ProxyToRenderViewVisitor);
+};
+
 }  // namespace
 
 WebKitTestRunner::WebKitTestRunner(RenderView* render_view)
     : RenderViewObserver(render_view),
       RenderViewObserverTracker<WebKitTestRunner>(render_view),
+      proxy_(NULL),
+      focused_view_(NULL),
+      enable_pixel_dumping_(true),
+      layout_test_timeout_(kDefaultLayoutTestTimeoutMs),
+      allow_external_pages_(false),
       is_main_window_(false) {
 }
 
@@ -264,8 +314,7 @@ std::string WebKitTestRunner::makeURLErrorDescription(
 }
 
 void WebKitTestRunner::setClientWindowRect(const WebRect& rect) {
-  Send(new ShellViewHostMsg_SetClientWindowRect(
-      routing_id(), gfx::Rect(rect)));
+  ForceResizeRenderView(render_view(), WebSize(rect.width, rect.height));
 }
 
 void WebKitTestRunner::showDevTools() {
@@ -295,8 +344,35 @@ void WebKitTestRunner::setDeviceScaleFactor(float factor) {
   render_view()->GetWebView()->setDeviceScaleFactor(factor);
 }
 
+void WebKitTestRunner::setFocus(WebTestProxyBase* proxy, bool focus) {
+  ProxyToRenderViewVisitor visitor(proxy);
+  RenderView::ForEach(&visitor);
+  if (!visitor.render_view()) {
+    NOTREACHED();
+    return;
+  }
+
+  // Check whether the focused view was closed meanwhile.
+  if (!WebKitTestRunner::Get(focused_view_))
+    focused_view_ = NULL;
+
+  if (focus) {
+    if (focused_view_ != visitor.render_view()) {
+      if (focused_view_)
+        SetFocusAndActivate(focused_view_, false);
+      SetFocusAndActivate(visitor.render_view(), true);
+      focused_view_ = visitor.render_view();
+    }
+  } else {
+    if (focused_view_ == visitor.render_view()) {
+      SetFocusAndActivate(visitor.render_view(), false);
+      focused_view_ = NULL;
+    }
+  }
+}
+
 void WebKitTestRunner::setFocus(bool focus) {
-  Send(new ShellViewHostMsg_SetFocus(routing_id(), focus));
+  // TODO(jochen): Remove once the new WebKit API is rolled.
 }
 
 void WebKitTestRunner::setAcceptAllCookies(bool accept) {
@@ -333,6 +409,8 @@ void WebKitTestRunner::testFinished() {
       ShellRenderProcessObserver::GetInstance()->test_interfaces();
   interfaces->setTestIsRunning(false);
   if (interfaces->testRunner()->shouldDumpBackForwardList()) {
+    SyncNavigationStateVisitor visitor;
+    RenderView::ForEach(&visitor);
     Send(new ShellViewHostMsg_CaptureSessionHistory(routing_id()));
   } else {
     CaptureDump();
@@ -357,9 +435,7 @@ int WebKitTestRunner::layoutTestTimeout() {
 }
 
 void WebKitTestRunner::closeRemainingWindows() {
-  // We currently always close all remaining windows at the end of each test.
-  // TODO(jochen): Reuse the renderer across tests instead of closing all
-  // windows. http://crbug.com/171128
+  Send(new ShellViewHostMsg_CloseRemainingWindows(routing_id()));
 }
 
 int WebKitTestRunner::navigationEntryCount() {
@@ -435,12 +511,11 @@ bool WebKitTestRunner::OnMessageReceived(const IPC::Message& message) {
 // Public methods - -----------------------------------------------------------
 
 void WebKitTestRunner::Reset() {
+  // The proxy_ is always non-NULL, it is set right after construction.
+  proxy_->reset();
   prefs_.reset();
-  webkit_glue::WebPreferences prefs = render_view()->GetWebkitPreferences();
-  ExportLayoutTestSpecificPreferences(prefs_, &prefs);
-  render_view()->SetWebkitPreferences(prefs);
   enable_pixel_dumping_ = true;
-  layout_test_timeout_ = 30 * 1000;
+  layout_test_timeout_ = kDefaultLayoutTestTimeoutMs;
   allow_external_pages_ = false;
   expected_pixel_hash_ = std::string();
   routing_ids_.clear();
@@ -469,7 +544,8 @@ void WebKitTestRunner::CaptureDump() {
   Send(
       new ShellViewHostMsg_TextDump(routing_id(), proxy()->captureTree(false)));
 
-  if (interfaces->testRunner()->shouldGeneratePixelResults()) {
+  if (enable_pixel_dumping_ &&
+      interfaces->testRunner()->shouldGeneratePixelResults()) {
     SkBitmap snapshot;
     CopyCanvasToBitmap(proxy()->capturePixels(), &snapshot);
 
@@ -516,6 +592,8 @@ void WebKitTestRunner::OnSetTestConfiguration(
   allow_external_pages_ = params.allow_external_pages;
   expected_pixel_hash_ = params.expected_pixel_hash;
   is_main_window_ = true;
+
+  setFocus(proxy_, true);
 
   WebTestInterfaces* interfaces =
       ShellRenderProcessObserver::GetInstance()->test_interfaces();

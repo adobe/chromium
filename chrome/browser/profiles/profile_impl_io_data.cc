@@ -10,7 +10,9 @@
 #include "base/logging.h"
 #include "base/prefs/pref_service.h"
 #include "base/prefs/public/pref_member.h"
+#include "base/sequenced_task_runner.h"
 #include "base/stl_util.h"
+#include "base/threading/sequenced_worker_pool.h"
 #include "base/threading/worker_pool.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry_factory.h"
@@ -388,6 +390,9 @@ void ProfileImplIOData::InitializeInternal(
     scoped_refptr<SQLitePersistentCookieStore> cookie_db =
         new SQLitePersistentCookieStore(
             lazy_params_->cookie_path,
+            BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO),
+            BrowserThread::GetBlockingPool()->GetSequencedTaskRunner(
+                BrowserThread::GetBlockingPool()->GetSequenceToken()),
             lazy_params_->restore_old_session_cookies,
             new ClearOnExitPolicy(lazy_params_->special_storage_policy));
     cookie_store =
@@ -496,6 +501,9 @@ void ProfileImplIOData::
       new net::CookieMonster(
           new SQLitePersistentCookieStore(
               lazy_params_->extensions_cookie_path,
+              BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO),
+              BrowserThread::GetBlockingPool()->GetSequencedTaskRunner(
+                  BrowserThread::GetBlockingPool()->GetSequenceToken()),
               lazy_params_->restore_old_session_cookies, NULL), NULL);
   // Enable cookies for devtools and extension URLs.
   const char* schemes[] = {chrome::kChromeDevToolsScheme,
@@ -592,7 +600,13 @@ ProfileImplIOData::InitializeAppRequestContext(
     DCHECK(!cookie_path.empty());
 
     scoped_refptr<SQLitePersistentCookieStore> cookie_db =
-        new SQLitePersistentCookieStore(cookie_path, false, NULL);
+        new SQLitePersistentCookieStore(
+            cookie_path,
+            BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO),
+            BrowserThread::GetBlockingPool()->GetSequencedTaskRunner(
+                BrowserThread::GetBlockingPool()->GetSequenceToken()),
+            false,
+            NULL);
     // TODO(creis): We should have a cookie delegate for notifying the cookie
     // extensions API, but we need to update it to understand isolated apps
     // first.
@@ -746,7 +760,8 @@ void ProfileImplIOData::ClearNetworkingHistorySinceOnIOThread(
   DCHECK(initialized());
 
   DCHECK(transport_security_state());
-  transport_security_state()->DeleteSince(time);  // Completes synchronously.
+  // Completes synchronously.
+  transport_security_state()->DeleteAllDynamicDataSince(time);
   DCHECK(http_server_properties_manager_);
   http_server_properties_manager_->Clear(completion);
 }

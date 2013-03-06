@@ -10,6 +10,7 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
+#include "chrome/common/extensions/api/icons/icons_handler.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_icon_set.h"
 #include "chrome/common/extensions/extension_set.h"
@@ -42,15 +43,17 @@ static const char kAppWarningLearnMoreUrl[] =
 #endif  // defined(OS_CHROMEOS)
 
 enum NAV_SUGGESTIONS {
-  SUGGEST_NONE     = 0,
-  SUGGEST_RELOAD   = 1 << 0,
-  SUGGEST_HOSTNAME = 1 << 1,
-  SUGGEST_CHECK_CONNECTION = 1 << 2,
-  SUGGEST_DNS_CONFIG = 1 << 3,
-  SUGGEST_FIREWALL_CONFIG = 1 << 4,
-  SUGGEST_PROXY_CONFIG = 1 << 5,
-  SUGGEST_DISABLE_EXTENSION = 1 << 6,
-  SUGGEST_LEARNMORE = 1 << 7,
+  SUGGEST_NONE                  = 0,
+  SUGGEST_RELOAD                = 1 << 0,
+  SUGGEST_HOSTNAME              = 1 << 1,
+  SUGGEST_CHECK_CONNECTION      = 1 << 2,
+  SUGGEST_DNS_CONFIG            = 1 << 3,
+  SUGGEST_FIREWALL_CONFIG       = 1 << 4,
+  SUGGEST_PROXY_CONFIG          = 1 << 5,
+  SUGGEST_DISABLE_EXTENSION     = 1 << 6,
+  SUGGEST_LEARNMORE             = 1 << 7,
+  SUGGEST_VIEW_POLICIES         = 1 << 8,
+  SUGGEST_CONTACT_ADMINISTRATOR = 1 << 9,
 };
 
 struct LocalizedErrorMap {
@@ -277,6 +280,13 @@ const LocalizedErrorMap net_error_options[] = {
    IDS_ERRORPAGES_SUMMARY_NETWORK_CHANGED,
    IDS_ERRORPAGES_DETAILS_NETWORK_CHANGED,
    SUGGEST_RELOAD | SUGGEST_CHECK_CONNECTION,
+  },
+  {net::ERR_BLOCKED_BY_ADMINISTRATOR,
+   IDS_ERRORPAGES_TITLE_BLOCKED,
+   IDS_ERRORPAGES_HEADING_BLOCKED_BY_ADMINISTRATOR,
+   IDS_ERRORPAGES_SUMMARY_BLOCKED_BY_ADMINISTRATOR,
+   IDS_ERRORPAGES_DETAILS_BLOCKED_BY_ADMINISTRATOR,
+   SUGGEST_VIEW_POLICIES | SUGGEST_CONTACT_ADMINISTRATOR,
   },
 };
 
@@ -661,6 +671,22 @@ void LocalizedError::GetStrings(const WebKit::WebURLError& error,
       error_strings->Set("suggestionsLearnMore", suggest_learn_more);
     }
   }
+
+  if (options.suggestions & SUGGEST_VIEW_POLICIES) {
+    DictionaryValue* suggestion = new DictionaryValue;
+    suggestion->SetString("msg",
+                          l10n_util::GetStringUTF16(
+                              IDS_ERRORPAGES_SUGGESTION_VIEW_POLICIES));
+    error_strings->Set("suggestionsViewPolicies", suggestion);
+  }
+
+  if (options.suggestions & SUGGEST_CONTACT_ADMINISTRATOR) {
+    DictionaryValue* suggestion = new DictionaryValue;
+    suggestion->SetString("msg",
+                          l10n_util::GetStringUTF16(
+                              IDS_ERRORPAGES_SUGGESTION_CONTACT_ADMINISTRATOR));
+    error_strings->Set("suggestionsContactAdministrator", suggestion);
+  }
 }
 
 string16 LocalizedError::GetErrorDetails(const WebKit::WebURLError& error) {
@@ -716,11 +742,15 @@ void LocalizedError::GetAppErrorStrings(
                                        failed_url.c_str()));
 
   error_strings->SetString("title", app->name());
-  error_strings->SetString("icon",
-      app->GetIconURL(extension_misc::EXTENSION_ICON_GIGANTOR,
-                      ExtensionIconSet::MATCH_SMALLER).spec());
+  error_strings->SetString(
+      "icon",
+      extensions::IconsInfo::GetIconURL(
+          app,
+          extension_misc::EXTENSION_ICON_GIGANTOR,
+          ExtensionIconSet::MATCH_SMALLER).spec());
   error_strings->SetString("name", app->name());
-  error_strings->SetString("msg",
+  error_strings->SetString(
+      "msg",
       l10n_util::GetStringUTF16(IDS_ERRORPAGES_APP_WARNING));
 
 #if defined(OS_CHROMEOS)

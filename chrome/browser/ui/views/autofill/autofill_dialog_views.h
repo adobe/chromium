@@ -11,13 +11,12 @@
 #include "chrome/browser/ui/autofill/autofill_dialog_view.h"
 #include "ui/views/controls/button/button.h"
 #include "ui/views/controls/button/menu_button_listener.h"
+#include "ui/views/controls/combobox/combobox_listener.h"
 #include "ui/views/controls/link_listener.h"
 #include "ui/views/controls/progress_bar.h"
 #include "ui/views/controls/textfield/textfield_controller.h"
 #include "ui/views/focus/focus_manager.h"
 #include "ui/views/window/dialog_delegate.h"
-
-class ConstrainedWindowViews;
 
 namespace content {
 class KeyboardListener;
@@ -39,6 +38,7 @@ class MenuRunner;
 class TextButton;
 class Textfield;
 class WebView;
+class Widget;
 }
 
 namespace ui {
@@ -57,7 +57,8 @@ class AutofillDialogViews : public AutofillDialogView,
                             public views::ButtonListener,
                             public views::TextfieldController,
                             public views::FocusChangeListener,
-                            public views::LinkListener {
+                            public views::LinkListener,
+                            public views::ComboboxListener {
  public:
   explicit AutofillDialogViews(AutofillDialogController* controller);
   virtual ~AutofillDialogViews();
@@ -66,12 +67,14 @@ class AutofillDialogViews : public AutofillDialogView,
   virtual void Show() OVERRIDE;
   virtual void Hide() OVERRIDE;
   virtual void UpdateAccountChooser() OVERRIDE;
+  virtual void UpdateButtonStrip() OVERRIDE;
   virtual void UpdateNotificationArea() OVERRIDE;
   virtual void UpdateSection(DialogSection section) OVERRIDE;
   virtual void GetUserInput(DialogSection section,
                             DetailOutputMap* output) OVERRIDE;
   virtual string16 GetCvc() OVERRIDE;
   virtual bool UseBillingForShipping() OVERRIDE;
+  virtual bool SaveDetailsInWallet() OVERRIDE;
   virtual bool SaveDetailsLocally() OVERRIDE;
   virtual const content::NavigationController& ShowSignIn() OVERRIDE;
   virtual void HideSignIn() OVERRIDE;
@@ -90,9 +93,12 @@ class AutofillDialogViews : public AutofillDialogView,
   virtual string16 GetDialogButtonLabel(ui::DialogButton button) const OVERRIDE;
   virtual bool IsDialogButtonEnabled(ui::DialogButton button) const OVERRIDE;
   virtual views::View* CreateExtraView() OVERRIDE;
+  virtual views::View* CreateTitlebarExtraView() OVERRIDE;
   virtual views::View* CreateFootnoteView() OVERRIDE;
   virtual bool Cancel() OVERRIDE;
   virtual bool Accept() OVERRIDE;
+  virtual views::NonClientFrameView* CreateNonClientFrameView(
+      views::Widget* widget) OVERRIDE;
 
   // views::ButtonListener implementation:
   virtual void ButtonPressed(views::Button* sender,
@@ -114,6 +120,9 @@ class AutofillDialogViews : public AutofillDialogView,
 
   // views::LinkListener implementation:
   virtual void LinkClicked(views::Link* source, int event_flags) OVERRIDE;
+
+  // views::ComboboxListener implementation:
+  virtual void OnSelectedIndexChanged(views::Combobox* combobox) OVERRIDE;
 
  private:
   // A class which holds a textfield and draws extra stuff on top, like
@@ -144,11 +153,53 @@ class AutofillDialogViews : public AutofillDialogView,
     DISALLOW_COPY_AND_ASSIGN(DecoratedTextfield);
   };
 
+  // A View which displays the currently selected account and lets the user
+  // switch accounts.
+  class AccountChooser : public views::View,
+                         public views::LinkListener {
+   public:
+    explicit AccountChooser(AutofillDialogController* controller);
+    virtual ~AccountChooser();
+
+    // Updates the view based on the state that |controller_| reports.
+    void Update();
+
+    // views::View implementation.
+    virtual bool OnMousePressed(const ui::MouseEvent& event) OVERRIDE;
+    virtual void OnMouseReleased(const ui::MouseEvent& event) OVERRIDE;
+
+    // views::LinkListener implementation.
+    virtual void LinkClicked(views::Link* source, int event_flags) OVERRIDE;
+
+   private:
+    // The icon for the currently in-use account.
+    views::ImageView* image_;
+
+    // The label for the currently in-use account.
+    views::Label* label_;
+
+    // The drop arrow.
+    views::ImageView* arrow_;
+
+    // The signin link.
+    views::Link* link_;
+
+    // The controller |this| queries for logic and state.
+    AutofillDialogController* controller_;
+
+    // Runs the suggestion menu (triggered by each section's |suggested_button|.
+    scoped_ptr<views::MenuRunner> menu_runner_;
+
+    DISALLOW_COPY_AND_ASSIGN(AccountChooser);
+  };
+
   // An area for notifications. Some notifications point at the account chooser.
   class NotificationArea : public views::View {
    public:
     NotificationArea();
     virtual ~NotificationArea();
+
+    views::Checkbox* checkbox() { return checkbox_; }
 
     void set_arrow_centering_anchor(views::View* arrow_centering_anchor) {
       arrow_centering_anchor_ = arrow_centering_anchor;
@@ -161,6 +212,8 @@ class AutofillDialogViews : public AutofillDialogView,
     virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
 
    private:
+    views::View* container_;
+    views::Checkbox* checkbox_;
     views::Label* label_;
 
     // If |notification_.HasArrow()| is true, the arrow should point at this.
@@ -335,12 +388,9 @@ class AutofillDialogViews : public AutofillDialogView,
   // The controller that drives this view. Weak pointer, always non-NULL.
   AutofillDialogController* const controller_;
 
-  // True if the termination action was a submit.
-  bool did_submit_;
-
   // The window that displays |contents_|. Weak pointer; may be NULL when the
   // dialog is closing.
-  ConstrainedWindowViews* window_;
+  views::Widget* window_;
 
   // The top-level View for the dialog. Owned by the constrained window.
   views::View* contents_;
@@ -358,8 +408,8 @@ class AutofillDialogViews : public AutofillDialogView,
   // Runs the suggestion menu (triggered by each section's |suggested_button|.
   scoped_ptr<views::MenuRunner> menu_runner_;
 
-  // A link to allow choosing different accounts to pay with.
-  views::Link* account_chooser_link_;
+  // The view that allows the user to toggle the data source.
+  AccountChooser* account_chooser_;
 
   // View to host the signin dialog and related controls.
   views::View* sign_in_container_;

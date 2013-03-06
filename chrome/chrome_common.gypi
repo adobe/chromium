@@ -168,6 +168,8 @@
         'common/extensions/api/extension_api_stub.cc',
         'common/extensions/api/i18n/default_locale_handler.cc',
         'common/extensions/api/i18n/default_locale_handler.h',
+        'common/extensions/api/icons/icons_handler.cc',
+        'common/extensions/api/icons/icons_handler.h',
         'common/extensions/api/identity/oauth2_manifest_handler.cc',
         'common/extensions/api/identity/oauth2_manifest_handler.h',
         'common/extensions/api/input_ime/input_components_handler.cc',
@@ -182,6 +184,8 @@
         'common/extensions/api/speech/tts_engine_manifest_handler.h',
         'common/extensions/api/themes/theme_handler.cc',
         'common/extensions/api/themes/theme_handler.h',
+        'common/extensions/background_info.cc',
+        'common/extensions/background_info.h',
         'common/extensions/command.cc',
         'common/extensions/command.h',
         'common/extensions/csp_handler.cc',
@@ -318,6 +322,8 @@
         'common/metrics/metrics_service_base.h',
         'common/metrics/metrics_util.cc',
         'common/metrics/metrics_util.h',
+        'common/metrics/variations/uniformity_field_trials.cc',
+        'common/metrics/variations/uniformity_field_trials.h',
         'common/metrics/variations/variations_util.cc',
         'common/metrics/variations/variations_util.h',
         'common/multi_process_lock.h',
@@ -442,7 +448,11 @@
         ['OS=="win"', {
           'include_dirs': [
             '<(DEPTH)/third_party/wtl/include',
-          ]
+          ],
+          'sources!': [
+            'common/crash_keys.cc',
+            'common/crash_keys.h',
+          ],
         }],
         ['toolkit_uses_gtk == 1', {
           'dependencies': [
@@ -499,6 +509,8 @@
             ['include', 'common/extensions/api/extension_action/browser_action_handler.h'],
             ['include', 'common/extensions/api/extension_action/page_action_handler.cc'],
             ['include', 'common/extensions/api/extension_action/page_action_handler.h'],
+            ['include', 'common/extensions/api/icons/icons_handler.cc'],
+            ['include', 'common/extensions/api/icons/icons_handler.h'],
             ['include', 'common/extensions/api/i18n/default_locale_handler.cc'],
             ['include', 'common/extensions/api/i18n/default_locale_handler.h'],
             ['include', 'common/extensions/api/identity/oauth2_manifest_handler.cc'],

@@ -1205,6 +1205,47 @@ void HistoryBackend::QuerySegmentUsage(
   request->ForwardResult(request->handle(), &request->value.get());
 }
 
+void HistoryBackend::IncreaseSegmentDuration(const GURL& url,
+                                             base::Time time,
+                                             base::TimeDelta delta) {
+  if (!db_.get())
+    return;
+
+  const std::string segment_name(VisitSegmentDatabase::ComputeSegmentName(url));
+  SegmentID segment_id = db_->GetSegmentNamed(segment_name);
+  if (!segment_id) {
+    URLID url_id = db_->GetRowForURL(url, NULL);
+    if (!url_id)
+      return;
+    segment_id = db_->CreateSegment(url_id, segment_name);
+    if (!segment_id)
+      return;
+  }
+  SegmentDurationID duration_id;
+  base::TimeDelta total_delta;
+  if (!db_->GetSegmentDuration(segment_id, time, &duration_id,
+                               &total_delta)) {
+    db_->CreateSegmentDuration(segment_id, time, delta);
+    return;
+  }
+  total_delta += delta;
+  db_->SetSegmentDuration(duration_id, total_delta);
+}
+
+void HistoryBackend::QuerySegmentDuration(
+    scoped_refptr<QuerySegmentUsageRequest> request,
+    const base::Time from_time,
+    int max_result_count) {
+  if (request->canceled())
+    return;
+
+  if (db_.get()) {
+    db_->QuerySegmentDuration(from_time, max_result_count,
+                              &request->value.get());
+  }
+  request->ForwardResult(request->handle(), &request->value.get());
+}
+
 // Keyword visits --------------------------------------------------------------
 
 void HistoryBackend::SetKeywordSearchTermsForURL(const GURL& url,
@@ -1275,20 +1316,26 @@ void HistoryBackend::QueryDownloads(std::vector<DownloadRow>* rows) {
 void HistoryBackend::CleanUpInProgressEntries() {
   // If some "in progress" entries were not updated when Chrome exited, they
   // need to be cleaned up.
-  if (db_.get())
-    db_->CleanUpInProgressEntries();
+  if (!db_.get())
+    return;
+  db_->CleanUpInProgressEntries();
+  ScheduleCommit();
 }
 
 // Update a particular download entry.
 void HistoryBackend::UpdateDownload(const history::DownloadRow& data) {
-  if (db_.get())
-    db_->UpdateDownload(data);
+  if (!db_.get())
+    return;
+  db_->UpdateDownload(data);
+  ScheduleCommit();
 }
 
 void HistoryBackend::CreateDownload(const history::DownloadRow& history_info,
                                     int64* db_handle) {
-  if (db_.get())
-    *db_handle = db_->CreateDownload(history_info);
+  if (!db_.get())
+    return;
+  *db_handle = db_->CreateDownload(history_info);
+  ScheduleCommit();
 }
 
 void HistoryBackend::RemoveDownloads(const std::set<int64>& handles) {
@@ -1320,6 +1367,7 @@ void HistoryBackend::RemoveDownloads(const std::set<int64>& handles) {
     UMA_HISTOGRAM_COUNTS("Download.DatabaseRemoveDownloadsCountNotRemoved",
                          num_downloads_not_deleted);
   }
+  ScheduleCommit();
 }
 
 void HistoryBackend::QueryHistory(scoped_refptr<QueryHistoryRequest> request,
@@ -2708,6 +2756,26 @@ void HistoryBackend::ExpireHistoryForTimes(
   if (std::binary_search(sorted_times.begin(), sorted_times.end(),
                          first_recorded_time_, std::greater<base::Time>()))
     db_->GetStartDate(&first_recorded_time_);
+}
+
+void HistoryBackend::ExpireHistory(
+    const std::vector<history::ExpireHistoryArgs>& expire_list) {
+  if (db_.get()) {
+    bool update_first_recorded_time = false;
+
+    for (std::vector<history::ExpireHistoryArgs>::const_iterator it =
+         expire_list.begin(); it != expire_list.end(); ++it) {
+      expirer_.ExpireHistoryBetween(it->urls, it->begin_time, it->end_time);
+
+      if (it->begin_time < first_recorded_time_)
+        update_first_recorded_time = true;
+    }
+    Commit();
+
+    // Update |first_recorded_time_| if any deletion might have affected it.
+    if (update_first_recorded_time)
+      db_->GetStartDate(&first_recorded_time_);
+  }
 }
 
 void HistoryBackend::URLsNoLongerBookmarked(const std::set<GURL>& urls) {

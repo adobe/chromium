@@ -15,6 +15,7 @@ class ListValue;
 class Value;
 }
 
+class JavaScriptDialogManager;
 struct KeyEvent;
 struct MouseEvent;
 class Status;
@@ -25,6 +26,9 @@ class WebView {
 
   // Return the id for this WebView.
   virtual std::string GetId() = 0;
+
+  // Make DevToolsCient connect to DevTools if it is disconnected.
+  virtual Status ConnectIfNecessary() = 0;
 
   // Close the WebView itself.
   virtual Status Close() = 0;
@@ -73,6 +77,12 @@ class WebView {
 
   // Returns the frame id for the main frame.
   virtual Status GetMainFrame(std::string* out_frame) = 0;
+
+  // Returns the JavaScriptDialogManager. Never null.
+  virtual JavaScriptDialogManager* GetJavaScriptDialogManager() = 0;
+
+  // Captures the visible portions of the web view as a base64-encoded PNG.
+  virtual Status CaptureScreenshot(std::string* screenshot) = 0;
 };
 
 #endif  // CHROME_TEST_CHROMEDRIVER_WEB_VIEW_H_

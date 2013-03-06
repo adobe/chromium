@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -64,8 +64,7 @@ var instantConfig = (function() {
       row.appendChild(input);
 
       var units = createElementWithClass('div', 'row-units');
-      if (field.units)
-        units.innerHTML = field.units;
+      if (field.units) units.innerHTML = field.units;
       row.appendChild(units);
 
       $('instant-form').appendChild(row);
@@ -118,25 +117,7 @@ var instantConfig = (function() {
       value = parseFloat($(prefName).value);
     else
       value = $(prefName).value;
-    chrome.send(
-        'setPreferenceValue',
-        [prefName, value]);
-  }
-
-  /**
-   * Handle processing of "Reset" button.
-   * Causes off form values to be updated based on current preference values.
-   */
-  function onReset() {
-    for (var i = 0; i < FIELDS.length; i++) {
-      var field = FIELDS[i];
-      if ($(field.key).type == 'checkbox')
-        $(field.key).checked = field.default;
-      else
-        $(field.key).value = field.default;
-      setPreferenceValue(field.key);
-    }
-    return false;
+    chrome.send('setPreferenceValue', [prefName, value]);
   }
 
   /**
@@ -173,6 +154,14 @@ var instantConfig = (function() {
     }
   }
 
+  /**
+   * Resets list of debug events.
+   */
+  function clearDebugInfo() {
+    $('instant-debug-info').innerHTML = '';
+    chrome.send('clearDebugInfo');
+  }
+
   function loadForm() {
     for (var i = 0; i < FIELDS.length; i++)
       getPreferenceValue(FIELDS[i].key);
@@ -187,8 +176,8 @@ var instantConfig = (function() {
     initForm();
     getDebugInfo();
 
-    $('reset-button').onclick = onReset.bind(this);
     $('save-button').onclick = onSave.bind(this);
+    $('clear-button').onclick = clearDebugInfo.bind(this);
   }
 
   return {

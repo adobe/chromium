@@ -30,10 +30,6 @@
 #include "ui/gl/gpu_preference.h"
 #include "ui/surface/transport_dib.h"
 
-#if defined(OS_MACOSX)
-#include "ui/surface/accelerated_surface_mac.h"
-#endif
-
 namespace gpu {
 namespace gles2 {
 class ImageManager;
@@ -171,15 +167,13 @@ class GpuCommandBufferStub
   void OnEnsureBackbuffer();
 
   void OnRetireSyncPoint(uint32 sync_point);
-  void OnWaitSyncPoint(uint32 sync_point);
+  bool OnWaitSyncPoint(uint32 sync_point);
   void OnSyncPointRetired();
   void OnSignalSyncPoint(uint32 sync_point, uint32 id);
   void OnSignalSyncPointAck(uint32 id);
 
   void OnReceivedClientManagedMemoryStats(const GpuManagedMemoryStats& stats);
   void OnSetClientHasMemoryAllocationChangedCallback(bool has_callback);
-
-  void OnReschedule();
 
   void OnCommandProcessed();
   void OnParseError();

@@ -113,8 +113,8 @@
     'common/android/device_telephony_info.h',
     'common/android/hash_set.cc',
     'common/android/hash_set.h',
-    'common/android/surface_callback.cc',
-    'common/android/surface_callback.h',
+    'common/android/scoped_java_surface.cc',
+    'common/android/scoped_java_surface.h',
     'common/android/surface_texture_bridge.cc',
     'common/android/surface_texture_bridge.h',
     'common/android/surface_texture_listener.cc',
@@ -128,7 +128,10 @@
     'common/appcache/appcache_dispatcher.cc',
     'common/appcache/appcache_dispatcher.h',
     'common/appcache_messages.h',
-    'common/browser_plugin_messages.h',
+    'common/browser_plugin/browser_plugin_constants.cc',
+    'common/browser_plugin/browser_plugin_constants.h',
+    'common/browser_plugin/browser_plugin_message_enums.h',
+    'common/browser_plugin/browser_plugin_messages.h',
     'common/cc_messages.cc',
     'common/cc_messages.h',
     'common/child_histogram_message_filter.cc',
@@ -485,6 +488,15 @@
     ['enable_gpu==1', {
       'dependencies': [
         '../gpu/gpu.gyp:command_buffer_service',
+      ],
+    }],
+    ['OS=="android"', {
+      'dependencies': [
+        '../media/media.gyp:media',
+      ],
+      'sources': [
+        'common/gpu/media/android_video_decode_accelerator.cc',
+        'common/gpu/media/android_video_decode_accelerator.h',
       ],
     }],
     ['target_arch=="arm" and chromeos == 1', {

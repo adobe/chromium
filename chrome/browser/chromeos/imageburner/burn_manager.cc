@@ -14,6 +14,7 @@
 #include "chrome/browser/chromeos/system/statistics_provider.h"
 #include "chrome/common/chrome_paths.h"
 #include "content/public/browser/browser_thread.h"
+#include "grit/generated_resources.h"
 #include "net/url_request/url_fetcher.h"
 #include "net/url_request/url_request_status.h"
 
@@ -30,6 +31,8 @@ const char kHwidStatistic[] = "hardware_class";
 const char kConfigFileUrl[] =
     "https://dl.google.com/dl/edgedl/chromeos/recovery/recovery.conf";
 const char kTempImageFolderName[] = "chromeos_image";
+
+const char kImageZipFileName[] = "chromeos_image.bin.zip";
 
 const int64 kBytesImageDownloadProgressReportInterval = 10240;
 
@@ -188,12 +191,6 @@ void StateMachine::OnSuccess() {
   OnStateChanged();
 }
 
-void StateMachine::OnCancelation() {
-  // We use state CANCELLED only to let observers know that they have to
-  // process cancelation. We don't actually change the state.
-  FOR_EACH_OBSERVER(Observer, observers_, OnBurnStateChanged(CANCELLED));
-}
-
 ////////////////////////////////////////////////////////////////////////////////
 //
 // BurnManager
@@ -201,12 +198,18 @@ void StateMachine::OnCancelation() {
 ////////////////////////////////////////////////////////////////////////////////
 
 BurnManager::BurnManager()
-    : weak_ptr_factory_(this),
+    : device_handler_(disks::DiskMountManager::GetInstance()),
       config_file_url_(kConfigFileUrl),
       config_file_fetched_(false),
       state_machine_(new StateMachine()),
-      bytes_image_download_progress_last_reported_(0) {
+      bytes_image_download_progress_last_reported_(0),
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_ptr_factory_(this)) {
+  CrosLibrary::Get()->GetNetworkLibrary()->AddNetworkManagerObserver(this);
   CrosLibrary::Get()->GetBurnLibrary()->AddObserver(this);
+  base::WeakPtr<BurnManager> weak_ptr(weak_ptr_factory_.GetWeakPtr());
+  device_handler_.SetCallbacks(
+      base::Bind(&BurnManager::NotifyDeviceAdded, weak_ptr),
+      base::Bind(&BurnManager::NotifyDeviceRemoved, weak_ptr));
 }
 
 BurnManager::~BurnManager() {
@@ -214,6 +217,7 @@ BurnManager::~BurnManager() {
     file_util::Delete(image_dir_, true);
   }
   CrosLibrary::Get()->GetBurnLibrary()->RemoveObserver(this);
+  CrosLibrary::Get()->GetNetworkLibrary()->RemoveNetworkManagerObserver(this);
 }
 
 // static
@@ -250,6 +254,47 @@ void BurnManager::RemoveObserver(Observer* observer) {
   observers_.RemoveObserver(observer);
 }
 
+std::vector<disks::DiskMountManager::Disk> BurnManager::GetBurnableDevices() {
+  return device_handler_.GetBurnableDevices();
+}
+
+bool BurnManager::IsNetworkConnected() const {
+  return CrosLibrary::Get()->GetNetworkLibrary()->Connected();
+}
+
+void BurnManager::Cancel() {
+  OnError(IDS_IMAGEBURN_USER_ERROR);
+}
+
+void BurnManager::OnError(int message_id) {
+  // If we are in intial state, error has already been dispached.
+  if (state_machine_->state() == StateMachine::INITIAL) {
+    return;
+  }
+
+  // Remember burner state, since it will be reset after OnError call.
+  StateMachine::State state = state_machine_->state();
+
+  // Dispach error. All hadlers' OnError event will be called before returning
+  // from this. This includes us, too.
+  state_machine_->OnError(message_id);
+
+  // Cancel and clean up the current task.
+  // Note: the cancellation of this class looks not handled correctly.
+  // In particular, there seems no clean-up code for creating a temporary
+  // directory, or fetching config files. Also, there seems an issue
+  // about the cancellation of BurnLibrary.
+  // TODO(hidehiko): Fix the issue.
+  if (state  == StateMachine::DOWNLOADING) {
+    CancelImageFetch();
+  } else if (state == StateMachine::BURNING) {
+    // Burn library doesn't send cancelled signal upon CancelBurnImage
+    // invokation.
+    CancelBurnImage();
+  }
+  ResetTargetPaths();
+}
+
 void BurnManager::CreateImageDir() {
   if (image_dir_.empty()) {
     CHECK(PathService::Get(chrome::DIR_DEFAULT_DOWNLOADS, &image_dir_));
@@ -267,6 +312,7 @@ void BurnManager::CreateImageDir() {
 }
 
 void BurnManager::OnImageDirCreated(bool success) {
+  zip_image_file_path_ = image_dir_.Append(kImageZipFileName);
   FOR_EACH_OBSERVER(Observer, observers_, OnImageDirCreated(success));
 }
 
@@ -276,9 +322,7 @@ const base::FilePath& BurnManager::GetImageDir() {
 
 void BurnManager::FetchConfigFile() {
   if (config_file_fetched_) {
-    FOR_EACH_OBSERVER(
-        Observer, observers_,
-        OnConfigFileFetched(true, image_file_name_, image_download_url_));
+    FOR_EACH_OBSERVER(Observer, observers_, OnConfigFileFetched(true));
     return;
   }
 
@@ -292,29 +336,31 @@ void BurnManager::FetchConfigFile() {
   config_fetcher_->Start();
 }
 
-void BurnManager::FetchImage(const GURL& image_url,
-                             const base::FilePath& file_path) {
+void BurnManager::FetchImage() {
   tick_image_download_start_ = base::TimeTicks::Now();
   bytes_image_download_progress_last_reported_ = 0;
-  image_fetcher_.reset(net::URLFetcher::Create(image_url,
+  image_fetcher_.reset(net::URLFetcher::Create(image_download_url_,
                                                net::URLFetcher::GET,
                                                this));
   image_fetcher_->SetRequestContext(
       g_browser_process->system_request_context());
   image_fetcher_->SaveResponseToFileAtPath(
-      file_path,
+      zip_image_file_path_,
       BrowserThread::GetMessageLoopProxyForThread(BrowserThread::FILE));
   image_fetcher_->Start();
+
+  state_machine_->OnDownloadStarted();
 }
 
 void BurnManager::CancelImageFetch() {
   image_fetcher_.reset();
 }
 
-void BurnManager::DoBurn(const base::FilePath& source_path,
-                         const std::string& image_name) {
+void BurnManager::DoBurn() {
   CrosLibrary::Get()->GetBurnLibrary()->DoBurn(
-      source_path, image_name, target_file_path(), target_device_path());
+      zip_image_file_path_, image_file_name_,
+      target_file_path(), target_device_path());
+  state_machine_->OnBurnStarted();
 }
 
 void BurnManager::CancelBurnImage() {
@@ -331,6 +377,7 @@ void BurnManager::OnURLFetchComplete(const net::URLFetcher* source) {
     config_fetcher_.reset();
     ConfigFileFetched(success, data);
   } else if (source == image_fetcher_.get()) {
+    state_machine_->OnDownloadFinished();
     FOR_EACH_OBSERVER(Observer, observers_, OnImageFileFetched(success));
   }
 }
@@ -358,11 +405,27 @@ void BurnManager::OnURLFetchDownloadProgress(const net::URLFetcher* source,
 }
 
 void BurnManager::BurnProgressUpdated(BurnLibrary* object,
-                                      BurnEvent evt,
+                                      BurnEvent event,
                                       const ImageBurnStatus& status) {
-  // At the moment, this is just a proxy of BurnLibrary callback to observers.
+  if (event == BURN_SUCCESS) {
+    // The burning task is successfully done.
+    // Update the state.
+    state_machine_->OnSuccess();
+  }
+
+  // Proxy the BurnLibrary callback to observers.
   FOR_EACH_OBSERVER(
-      Observer, observers_, OnBurnProgressUpdated(evt, status));
+      Observer, observers_, OnBurnProgressUpdated(event, status));
+}
+
+void BurnManager::OnNetworkManagerChanged(NetworkLibrary* obj) {
+  // TODO(hidehiko): Split this into a class to write tests.
+  if (state_machine_->state() == StateMachine::INITIAL && IsNetworkConnected())
+    FOR_EACH_OBSERVER(Observer, observers_, OnNetworkDetected());
+
+  if (state_machine_->state() == StateMachine::DOWNLOADING &&
+      !IsNetworkConnected())
+    OnError(IDS_IMAGEBURN_NETWORK_ERROR);
 }
 
 void BurnManager::ConfigFileFetched(bool fetched, const std::string& content) {
@@ -387,9 +450,26 @@ void BurnManager::ConfigFileFetched(bool fetched, const std::string& content) {
     image_download_url_ = GURL();
   }
 
-  FOR_EACH_OBSERVER(
-      Observer, observers_,
-      OnConfigFileFetched(fetched, image_file_name_, image_download_url_));
+  FOR_EACH_OBSERVER(Observer, observers_, OnConfigFileFetched(fetched));
+}
+
+void BurnManager::NotifyDeviceAdded(
+    const disks::DiskMountManager::Disk& disk) {
+  FOR_EACH_OBSERVER(Observer, observers_, OnDeviceAdded(disk));
+}
+
+void BurnManager::NotifyDeviceRemoved(
+    const disks::DiskMountManager::Disk& disk) {
+  FOR_EACH_OBSERVER(Observer, observers_, OnDeviceRemoved(disk));
+
+  if (target_device_path_.value() == disk.device_path()) {
+    // The device is removed during the burning process.
+    // Note: in theory, this is not a part of notification, but cancelling
+    // the running burning task. However, there is no good place to be in the
+    // current code.
+    // TODO(hidehiko): Clean this up after refactoring.
+    OnError(IDS_IMAGEBURN_DEVICE_NOT_FOUND_ERROR);
+  }
 }
 
 }  // namespace imageburner

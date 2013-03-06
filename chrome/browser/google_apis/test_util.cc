@@ -12,6 +12,8 @@
 #include "base/pending_task.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
+#include "base/strings/string_number_conversions.h"
+#include "base/strings/string_split.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "chrome/browser/google_apis/drive_api_parser.h"
 #include "chrome/browser/google_apis/gdata_wapi_operations.h"
@@ -143,11 +145,30 @@ void CopyResultsFromGetResourceListCallback(
 
 void CopyResultsFromGetAccountMetadataCallback(
     GDataErrorCode* error_out,
-    scoped_ptr<AccountMetadataFeed>* account_metadata_out,
+    scoped_ptr<AccountMetadata>* account_metadata_out,
     GDataErrorCode error_in,
-    scoped_ptr<AccountMetadataFeed> account_metadata_in) {
+    scoped_ptr<AccountMetadata> account_metadata_in) {
   account_metadata_out->swap(account_metadata_in);
   *error_out = error_in;
+}
+
+void CopyResultsFromGetAccountMetadataCallbackAndQuit(
+    GDataErrorCode* error_out,
+    scoped_ptr<AccountMetadata>* account_metadata_out,
+    GDataErrorCode error_in,
+    scoped_ptr<AccountMetadata> account_metadata_in) {
+  CopyResultsFromGetAccountMetadataCallback(
+      error_out, account_metadata_out, error_in, account_metadata_in.Pass());
+  MessageLoop::current()->Quit();
+}
+
+void CopyResultsFromGetAboutResourceCallback(
+    GDataErrorCode* error_out,
+    scoped_ptr<AboutResource>* about_resource_out,
+    GDataErrorCode error_in,
+    scoped_ptr<AboutResource> about_resource_in) {
+  *error_out = error_in;
+  *about_resource_out = about_resource_in.Pass();
 }
 
 void CopyResultsFromGetAppListCallback(
@@ -175,6 +196,15 @@ void CopyResultsFromInitiateUploadCallback(
     const GURL& url_in) {
   *error_out = error_in;
   *url_out = url_in;
+}
+
+void CopyResultsFromInitiateUploadCallbackAndQuit(
+    GDataErrorCode* error_out,
+    GURL* url_out,
+    GDataErrorCode error_in,
+    const GURL& url_in) {
+  CopyResultsFromInitiateUploadCallback(error_out, url_out, error_in, url_in);
+  MessageLoop::current()->Quit();
 }
 
 void CopyResultsFromUploadRangeCallback(
@@ -249,6 +279,36 @@ bool VerifyJsonData(const base::FilePath& expected_json_file_path,
   }
 
   return true;
+}
+
+bool ParseContentRangeHeader(const std::string& value,
+                             int64* start_position,
+                             int64* end_position,
+                             int64* length) {
+  DCHECK(start_position);
+  DCHECK(end_position);
+  DCHECK(length);
+
+  std::string remaining;
+  if (!RemovePrefix(value, "bytes ", &remaining))
+    return false;
+
+  std::vector<std::string> parts;
+  base::SplitString(remaining, '/', &parts);
+  if (parts.size() != 2U)
+    return false;
+
+  const std::string range = parts[0];
+  if (!base::StringToInt64(parts[1], length))
+    return false;
+
+  parts.clear();
+  base::SplitString(range, '-', &parts);
+  if (parts.size() != 2U)
+    return false;
+
+  return (base::StringToInt64(parts[0], start_position) &&
+          base::StringToInt64(parts[1], end_position));
 }
 
 }  // namespace test_util

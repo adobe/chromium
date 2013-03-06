@@ -4,7 +4,10 @@
 
 #include "cc/delegated_renderer_layer_impl.h"
 
+#include "base/bind.h"
 #include "cc/append_quads_data.h"
+#include "cc/delegated_frame_data.h"
+#include "cc/layer_tree_impl.h"
 #include "cc/math_util.h"
 #include "cc/quad_sink.h"
 #include "cc/render_pass_draw_quad.h"
@@ -14,11 +17,13 @@ namespace cc {
 
 DelegatedRendererLayerImpl::DelegatedRendererLayerImpl(
     LayerTreeImpl* tree_impl, int id)
-    : LayerImpl(tree_impl, id) {
+    : LayerImpl(tree_impl, id),
+      child_id_(0) {
 }
 
 DelegatedRendererLayerImpl::~DelegatedRendererLayerImpl() {
   ClearRenderPasses();
+  ClearChildId();
 }
 
 bool DelegatedRendererLayerImpl::hasDelegatedContent() const {
@@ -32,23 +37,115 @@ bool DelegatedRendererLayerImpl::hasContributingDelegatedRenderPasses() const {
   return render_passes_in_draw_order_.size() > 1;
 }
 
+static ResourceProvider::ResourceId ResourceRemapHelper(
+    bool* invalid_frame,
+    const ResourceProvider::ResourceIdMap& child_to_parent_map,
+    ResourceProvider::ResourceIdSet *remapped_resources,
+    ResourceProvider::ResourceId id) {
+
+  ResourceProvider::ResourceIdMap::const_iterator it =
+      child_to_parent_map.find(id);
+  if (it == child_to_parent_map.end()) {
+    *invalid_frame = true;
+    return 0;
+  }
+
+  DCHECK(it->first == id);
+  ResourceProvider::ResourceId remapped_id = it->second;
+  remapped_resources->insert(remapped_id);
+  return remapped_id;
+}
+
+void DelegatedRendererLayerImpl::SetFrameData(
+    scoped_ptr<DelegatedFrameData> frame_data,
+    gfx::RectF damage_in_frame,
+    TransferableResourceArray* resources_for_ack) {
+  CreateChildIdIfNeeded();
+  DCHECK(child_id_);
+
+  ResourceProvider* resource_provider = layerTreeImpl()->resource_provider();
+    const ResourceProvider::ResourceIdMap& resource_map =
+        resource_provider->getChildToParentMap(child_id_);
+
+  if (frame_data) {
+    // A frame with an empty root render pass is invalid.
+    DCHECK(frame_data->render_pass_list.empty() ||
+           !frame_data->render_pass_list.back()->output_rect.IsEmpty());
+
+    // Display size is already set so we can compute what the damage rect
+    // will be in layer space.
+    if (!frame_data->render_pass_list.empty()) {
+      RenderPass* new_root_pass = frame_data->render_pass_list.back();
+      gfx::RectF damage_in_layer = MathUtil::mapClippedRect(
+          DelegatedFrameToLayerSpaceTransform(
+              new_root_pass->output_rect.size()),
+          damage_in_frame);
+      setUpdateRect(gfx::UnionRects(updateRect(), damage_in_layer));
+    }
+
+    resource_provider->receiveFromChild(child_id_, frame_data->resource_list);
+
+    bool invalid_frame = false;
+    ResourceProvider::ResourceIdSet used_resources;
+    DrawQuad::ResourceIteratorCallback remap_resources_to_parent_callback =
+        base::Bind(&ResourceRemapHelper,
+                   &invalid_frame,
+                   resource_map,
+                   &used_resources);
+    for (size_t i = 0; i < frame_data->render_pass_list.size(); ++i) {
+      RenderPass* pass = frame_data->render_pass_list[i];
+      for (size_t j = 0; j < pass->quad_list.size(); ++j) {
+        DrawQuad* quad = pass->quad_list[j];
+        quad->IterateResources(remap_resources_to_parent_callback);
+      }
+    }
+
+    if (!invalid_frame) {
+      // Save the remapped quads on the layer. This steals the quads and render
+      // passes from the frame_data.
+      SetRenderPasses(&frame_data->render_pass_list);
+      resources_.swap(used_resources);
+    }
+  }
+
+  ResourceProvider::ResourceIdArray unused_resources;
+  for (ResourceProvider::ResourceIdMap::const_iterator it =
+           resource_map.begin();
+       it != resource_map.end();
+       ++it) {
+    bool resource_is_in_current_frame = resources_.count(it->second);
+    bool resource_is_in_use = resource_provider->inUseByConsumer(it->second);
+    if (!resource_is_in_current_frame && !resource_is_in_use)
+      unused_resources.push_back(it->second);
+  }
+  resource_provider->prepareSendToChild(
+      child_id_, unused_resources, resources_for_ack);
+}
+
+void DelegatedRendererLayerImpl::SetDisplaySize(gfx::Size size) {
+  if (display_size_ == size)
+    return;
+  display_size_ = size;
+  noteLayerPropertyChanged();
+}
+
 void DelegatedRendererLayerImpl::SetRenderPasses(
-    ScopedPtrVector<RenderPass>& render_passes_in_draw_order) {
+    ScopedPtrVector<RenderPass>* render_passes_in_draw_order) {
   gfx::RectF old_root_damage;
   if (!render_passes_in_draw_order_.empty())
     old_root_damage = render_passes_in_draw_order_.back()->damage_rect;
 
   ClearRenderPasses();
 
-  for (size_t i = 0; i < render_passes_in_draw_order.size(); ++i) {
+  for (size_t i = 0; i < render_passes_in_draw_order->size(); ++i) {
+    ScopedPtrVector<RenderPass>::iterator to_take =
+        render_passes_in_draw_order->begin() + i;
     render_passes_index_by_id_.insert(
-        std::pair<RenderPass::Id, int>(render_passes_in_draw_order[i]->id, i));
-    scoped_ptr<RenderPass> passed_render_pass =
-        render_passes_in_draw_order.take(
-            render_passes_in_draw_order.begin() + i);
-    render_passes_in_draw_order_.push_back(passed_render_pass.Pass());
+        std::pair<RenderPass::Id, int>((*to_take)->id, i));
+    scoped_ptr<RenderPass> taken_render_pass =
+        render_passes_in_draw_order->take(to_take);
+    render_passes_in_draw_order_.push_back(taken_render_pass.Pass());
   }
-  render_passes_in_draw_order.clear();
 
   if (!render_passes_in_draw_order_.empty())
     render_passes_in_draw_order_.back()->damage_rect.Union(old_root_damage);
@@ -60,13 +157,25 @@ void DelegatedRendererLayerImpl::ClearRenderPasses() {
   render_passes_in_draw_order_.clear();
 }
 
-scoped_ptr<LayerImpl> DelegatedRendererLayerImpl::createLayerImpl(LayerTreeImpl* treeImpl)
-{
-    return DelegatedRendererLayerImpl::create(treeImpl, id()).PassAs<LayerImpl>();
+scoped_ptr<LayerImpl> DelegatedRendererLayerImpl::createLayerImpl(
+    LayerTreeImpl* treeImpl) {
+  return DelegatedRendererLayerImpl::create(treeImpl, id()).PassAs<LayerImpl>();
 }
 
 void DelegatedRendererLayerImpl::didLoseOutputSurface() {
   ClearRenderPasses();
+  ClearChildId();
+}
+
+gfx::Transform DelegatedRendererLayerImpl::DelegatedFrameToLayerSpaceTransform(
+    gfx::Size frame_size) const {
+  gfx::Size display_size = display_size_.IsEmpty() ? bounds() : display_size_;
+
+  gfx::Transform delegated_frame_to_layer_space_transform;
+  delegated_frame_to_layer_space_transform.Scale(
+      static_cast<double>(display_size.width()) / frame_size.width(),
+      static_cast<double>(display_size.height()) / frame_size.height());
+  return delegated_frame_to_layer_space_transform;
 }
 
 static inline int IndexToId(int index) { return index + 1; }
@@ -167,16 +276,8 @@ void DelegatedRendererLayerImpl::AppendRenderPassQuads(
         // Don't allow areas inside the bounds that are empty.
         DCHECK(display_size_.IsEmpty() ||
                gfx::Rect(display_size_).Contains(gfx::Rect(bounds())));
-        gfx::Size display_size =
-            display_size_.IsEmpty() ? bounds() : display_size_;
-
-        gfx::Transform delegated_frame_to_layer_space_transform;
-        delegated_frame_to_layer_space_transform.Scale(
-            static_cast<double>(display_size.width()) / frame_size.width(),
-            static_cast<double>(display_size.height()) / frame_size.height());
-
         gfx::Transform delegated_frame_to_target_transform =
-            drawTransform() * delegated_frame_to_layer_space_transform;
+            drawTransform() * DelegatedFrameToLayerSpaceTransform(frame_size);
 
         output_shared_quad_state->content_to_target_transform.ConcatTransform(
             delegated_frame_to_target_transform);
@@ -226,6 +327,23 @@ void DelegatedRendererLayerImpl::AppendRenderPassQuads(
 
 const char* DelegatedRendererLayerImpl::layerTypeAsString() const {
   return "DelegatedRendererLayer";
+}
+
+void DelegatedRendererLayerImpl::CreateChildIdIfNeeded() {
+  if (child_id_)
+    return;
+
+  ResourceProvider* resource_provider = layerTreeImpl()->resource_provider();
+  child_id_ = resource_provider->createChild();
+}
+
+void DelegatedRendererLayerImpl::ClearChildId() {
+  if (!child_id_)
+    return;
+
+  ResourceProvider* resource_provider = layerTreeImpl()->resource_provider();
+  resource_provider->destroyChild(child_id_);
+  child_id_ = 0;
 }
 
 }  // namespace cc

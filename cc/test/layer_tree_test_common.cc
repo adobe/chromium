@@ -78,6 +78,10 @@ void MockLayerTreeHostImpl::commitComplete()
 {
     LayerTreeHostImpl::commitComplete();
     m_testHooks->commitCompleteOnThread(this);
+
+    if (!settings().implSidePainting)
+        m_testHooks->treeActivatedOnThread(this);
+
 }
 
 bool MockLayerTreeHostImpl::prepareToDraw(FrameData& frame)
@@ -94,13 +98,31 @@ void MockLayerTreeHostImpl::drawLayers(FrameData& frame)
     m_testHooks->drawLayersOnThread(this);
 }
 
-void MockLayerTreeHostImpl::activatePendingTreeIfNeeded()
+bool MockLayerTreeHostImpl::activatePendingTreeIfNeeded()
 {
     if (!pendingTree())
-        return;
+        return false;
 
-    if (m_testHooks->canActivatePendingTree())
-        activatePendingTree();
+    if (!m_testHooks->canActivatePendingTree())
+        return false;
+
+    bool activated = LayerTreeHostImpl::activatePendingTreeIfNeeded();
+    if (activated)
+        m_testHooks->treeActivatedOnThread(this);
+    return activated;
+}
+
+bool MockLayerTreeHostImpl::initializeRenderer(scoped_ptr<OutputSurface> outputSurface)
+{
+    bool success = LayerTreeHostImpl::initializeRenderer(outputSurface.Pass());
+    m_testHooks->initializedRendererOnThread(this, success);
+    return success;
+}
+
+void MockLayerTreeHostImpl::setVisible(bool visible)
+{
+    LayerTreeHostImpl::setVisible(visible);
+    m_testHooks->didSetVisibleOnImplTree(this, visible);
 }
 
 void MockLayerTreeHostImpl::animateLayers(base::TimeTicks monotonicTime, base::Time wallClockTime)
@@ -272,7 +294,9 @@ ThreadedTest::ThreadedTest()
     , m_endWhenBeginReturns(false)
     , m_timedOut(false)
     , m_scheduled(false)
+    , m_scheduleWhenSetVisibleTrue(false)
     , m_started(false)
+    , m_ended(false)
     , m_implThread(0)
     , m_weakFactory(ALLOW_THIS_IN_INITIALIZER_LIST(this))
 {
@@ -383,6 +407,8 @@ void ThreadedTest::scheduleComposite()
 
 void ThreadedTest::realEndTest()
 {
+    m_ended = true;
+
     if (m_layerTreeHost && proxy()->commitPendingForTesting()) {
         proxy()->mainThread()->postTask(base::Bind(&ThreadedTest::realEndTest, m_mainThreadWeakPtr));
         return;
@@ -435,15 +461,33 @@ void ThreadedTest::dispatchSetVisible(bool visible)
 {
     DCHECK(!proxy() || proxy()->isMainThread());
 
-    if (m_layerTreeHost.get())
-        m_layerTreeHost->setVisible(visible);
+    if (!m_layerTreeHost)
+        return;
+
+    m_layerTreeHost->setVisible(visible);
+
+    // If the LTH is being made visible and a previous scheduleComposite() was
+    // deferred because the LTH was not visible, re-schedule the composite now.
+    if (m_layerTreeHost->visible() && m_scheduleWhenSetVisibleTrue)
+        scheduleComposite();
 }
 
 void ThreadedTest::dispatchComposite()
 {
     m_scheduled = false;
-    if (m_layerTreeHost.get())
-        m_layerTreeHost->composite();
+
+    if (!m_layerTreeHost)
+        return;
+
+    // If the LTH is not visible, defer the composite until the LTH is made
+    // visible.
+    if (!m_layerTreeHost->visible()) {
+        m_scheduleWhenSetVisibleTrue = true;
+        return;
+    }
+
+    m_scheduleWhenSetVisibleTrue = false;
+    m_layerTreeHost->composite();
 }
 
 void ThreadedTest::runTest(bool threaded)

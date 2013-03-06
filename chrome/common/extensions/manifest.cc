@@ -7,8 +7,8 @@
 #include "base/basictypes.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
-#include "base/string_split.h"
 #include "base/stringprintf.h"
+#include "base/strings/string_split.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/common/extensions/extension_manifest_constants.h"
 #include "chrome/common/extensions/features/base_feature_provider.h"
@@ -34,18 +34,23 @@ int GetLocationRank(Manifest::Location location) {
   switch (location) {
     // Component extensions can not be overriden by any other type.
     case Manifest::COMPONENT:
-      rank = 6;
+      rank = 7;
       break;
 
     // Policy controlled extensions may not be overridden by any type
     // that is not part of chrome.
     case Manifest::EXTERNAL_POLICY_DOWNLOAD:
-      rank = 5;
+      rank = 6;
       break;
 
     // A developer-loaded extension should override any installed type
-    // that a user can disable.
-    case Manifest::LOAD:
+    // that a user can disable. Anything specified on the command-line should
+    // override one loaded via the extensions UI.
+    case Manifest::COMMAND_LINE:
+      rank = 5;
+      break;
+
+    case Manifest::UNPACKED:
       rank = 4;
       break;
 
@@ -95,7 +100,7 @@ Manifest::Location Manifest::GetHigherPriorityLocation(
   return (loc1_rank > loc2_rank ? loc1 : loc2 );
 }
 
-Manifest::Manifest(Location location, scoped_ptr<DictionaryValue> value)
+Manifest::Manifest(Location location, scoped_ptr<base::DictionaryValue> value)
     : location_(location),
       value_(value.Pass()),
       type_(TYPE_UNKNOWN) {
@@ -119,13 +124,13 @@ Manifest::Manifest(Location location, scoped_ptr<DictionaryValue> value)
 Manifest::~Manifest() {
 }
 
-void Manifest::ValidateManifest(
+bool Manifest::ValidateManifest(
     std::string* error,
     std::vector<InstallWarning>* warnings) const {
   *error = "";
   if (type_ == Manifest::TYPE_PLATFORM_APP && GetManifestVersion() < 2) {
     *error = errors::kPlatformAppNeedsManifestVersion2;
-    return;
+    return false;
   }
 
   // Check every feature to see if its in the manifest. Note that this means
@@ -153,15 +158,16 @@ void Manifest::ValidateManifest(
   }
 
   // Also generate warnings for keys that are not features.
-  for (DictionaryValue::key_iterator key = value_->begin_keys();
-      key != value_->end_keys(); ++key) {
-    if (!BaseFeatureProvider::GetManifestFeatures()->GetFeature(*key)) {
+  for (base::DictionaryValue::Iterator it(*value_); !it.IsAtEnd();
+       it.Advance()) {
+    if (!BaseFeatureProvider::GetManifestFeatures()->GetFeature(it.key())) {
       warnings->push_back(InstallWarning(
           InstallWarning::FORMAT_TEXT,
           base::StringPrintf("Unrecognized manifest key '%s'.",
-                             (*key).c_str())));
+                             it.key().c_str())));
     }
   }
+  return true;
 }
 
 bool Manifest::HasKey(const std::string& key) const {
@@ -169,12 +175,12 @@ bool Manifest::HasKey(const std::string& key) const {
 }
 
 bool Manifest::HasPath(const std::string& path) const {
-  Value* ignored = NULL;
+  base::Value* ignored = NULL;
   return CanAccessPath(path) && value_->Get(path, &ignored);
 }
 
 bool Manifest::Get(
-    const std::string& path, Value** out_value) const {
+    const std::string& path, const base::Value** out_value) const {
   return CanAccessPath(path) && value_->Get(path, out_value);
 }
 
@@ -199,28 +205,18 @@ bool Manifest::GetString(
 }
 
 bool Manifest::GetDictionary(
-    const std::string& path, const DictionaryValue** out_value) const {
-  return GetDictionary(path, const_cast<DictionaryValue**>(out_value));
-}
-
-bool Manifest::GetDictionary(
-    const std::string& path, DictionaryValue** out_value) const {
+    const std::string& path, const base::DictionaryValue** out_value) const {
   return CanAccessPath(path) && value_->GetDictionary(path, out_value);
 }
 
 bool Manifest::GetList(
-    const std::string& path, const ListValue** out_value) const {
-  return GetList(path, const_cast<ListValue**>(out_value));
-}
-
-bool Manifest::GetList(
-    const std::string& path, ListValue** out_value) const {
+    const std::string& path, const base::ListValue** out_value) const {
   return CanAccessPath(path) && value_->GetList(path, out_value);
 }
 
 Manifest* Manifest::DeepCopy() const {
   Manifest* manifest = new Manifest(
-      location_, scoped_ptr<DictionaryValue>(value_->DeepCopy()));
+      location_, scoped_ptr<base::DictionaryValue>(value_->DeepCopy()));
   manifest->set_extension_id(extension_id_);
   return manifest;
 }

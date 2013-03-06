@@ -415,11 +415,18 @@ void SyncManagerImpl::Init(
   connection_manager_->set_client_id(directory()->cache_guid());
   connection_manager_->AddListener(this);
 
-  // Retrieve and set the sync notifier id.
-  std::string unique_id = directory()->cache_guid();
-  DVLOG(1) << "Read notification unique ID: " << unique_id;
-  allstatus_.SetUniqueId(unique_id);
-  invalidator_->SetUniqueId(unique_id);
+  std::string sync_id = directory()->cache_guid();
+
+  // TODO(rlarocque): The invalidator client ID should be independent from the
+  // sync client ID.  See crbug.com/124142.
+  const std::string invalidator_client_id = sync_id;
+
+  allstatus_.SetSyncId(sync_id);
+  allstatus_.SetInvalidatorClientId(invalidator_client_id);
+
+  DVLOG(1) << "Setting sync client ID: " << sync_id;
+  DVLOG(1) << "Setting invalidator client ID: " << invalidator_client_id;
+  invalidator_->SetUniqueId(invalidator_client_id);
 
   // Build a SyncSessionContext and store the worker in it.
   DVLOG(1) << "Sync is bringing up SyncSessionContext.";
@@ -434,7 +441,8 @@ void SyncManagerImpl::Init(
       &throttled_data_type_tracker_,
       listeners,
       &debug_info_event_listener_,
-      &traffic_recorder_).Pass();
+      &traffic_recorder_,
+      invalidator_client_id).Pass();
   session_context_->set_account_name(credentials.email);
   scheduler_ = internal_components_factory->BuildScheduler(
       name_, session_context_.get()).Pass();
@@ -626,6 +634,13 @@ void SyncManagerImpl::UnregisterInvalidationHandler(
   DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(initialized_);
   invalidator_->UnregisterHandler(handler);
+}
+
+void SyncManagerImpl::AcknowledgeInvalidation(
+    const invalidation::ObjectId& id, const syncer::AckHandle& ack_handle) {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK(initialized_);
+  invalidator_->Acknowledge(id, ack_handle);
 }
 
 void SyncManagerImpl::AddObserver(SyncManager::Observer* observer) {
@@ -1214,8 +1229,6 @@ void SyncManagerImpl::OnInvalidatorStateChange(InvalidatorState state) {
     // If the invalidator's credentials were rejected, that means that
     // our sync credentials are also bad, so invalidate those.
     connection_manager_->OnInvalidationCredentialsRejected();
-    FOR_EACH_OBSERVER(SyncManager::Observer, observers_,
-                      OnConnectionStatusChange(CONNECTION_AUTH_ERROR));
   }
 
   if (js_event_handler_.IsInitialized()) {
@@ -1231,6 +1244,16 @@ void SyncManagerImpl::OnInvalidatorStateChange(InvalidatorState state) {
 void SyncManagerImpl::OnIncomingInvalidation(
     const ObjectIdInvalidationMap& invalidation_map) {
   DCHECK(thread_checker_.CalledOnValidThread());
+
+  // TODO(dcheng): Acknowledge immediately for now. Fix this once the
+  // invalidator doesn't repeatedly ping for unacknowledged invaliations, since
+  // it conflicts with the sync scheduler's internal backoff algorithm.
+  // See http://crbug.com/124149 for more information.
+  for (ObjectIdInvalidationMap::const_iterator it = invalidation_map.begin();
+       it != invalidation_map.end(); ++it) {
+    invalidator_->Acknowledge(it->first, it->second.ack_handle);
+  }
+
   const ModelTypeInvalidationMap& type_invalidation_map =
       ObjectIdInvalidationMapToModelTypeInvalidationMap(invalidation_map);
   if (type_invalidation_map.empty()) {

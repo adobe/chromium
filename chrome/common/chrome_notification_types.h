@@ -355,12 +355,6 @@ enum NotificationType {
   // used.
   NOTIFICATION_TOP_SITES_CHANGED,
 
-  // Bookmarks ---------------------------------------------------------------
-
-  // Sent when the bookmark bar model finishes loading. This source is the
-  // Profile, and the details aren't used.
-  NOTIFICATION_BOOKMARK_MODEL_LOADED,
-
   // Task Manager ------------------------------------------------------------
 
   // Sent when WebUI TaskManager opens and is ready for showing tasks.
@@ -1106,8 +1100,8 @@ enum NotificationType {
   // Sent each time the InstantController is updated.
   NOTIFICATION_INSTANT_CONTROLLER_UPDATED,
 
-  // Sent when an Instant preview is committed. The Source is the WebContents
-  // containing the committed preview.
+  // Sent when an Instant overlay is committed. The Source is the WebContents
+  // containing the committed overlay.
   NOTIFICATION_INSTANT_COMMITTED,
 
   // Sent when the Instant Controller determines whether the overlay supports
@@ -1264,6 +1258,5 @@ enum NotificationType {
 };
 
 }  // namespace chrome
-
 
 #endif  // CHROME_COMMON_CHROME_NOTIFICATION_TYPES_H_

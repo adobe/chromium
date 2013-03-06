@@ -40,14 +40,12 @@ class StubCredentialsBackend(object):
 
 class PageRunnerTests(unittest.TestCase):
   # TODO(nduca): Move the basic "test failed, test succeeded" tests from
-  # multi_page_benchmark_unittest to here.
+  # page_benchmark_unittest to here.
 
   def testHandlingOfCrashedTab(self):
     ps = page_set.PageSet()
     page1 = page_module.Page('chrome://crash', ps)
-    page2 = page_module.Page('http://www.google.com', ps)
     ps.pages.append(page1)
-    ps.pages.append(page2)
     results = page_test.PageTestResults()
 
     class Test(page_test.PageTest):
@@ -58,10 +56,12 @@ class PageRunnerTests(unittest.TestCase):
       options = options_for_unittests.GetCopy()
       possible_browser = browser_finder.FindBrowser(options)
       runner.Run(options, possible_browser, Test('RunTest'), results)
-    self.assertEquals(1, len(results.page_successes))
+    self.assertEquals(0, len(results.page_successes))
     self.assertEquals(1, len(results.page_failures))
 
-  def testCredentialsWhenLoginFails(self):
+  def disabled_testCredentialsWhenLoginFails(self):
+    # This test is disabled because it runs against live sites, and needs to be
+    # fixed. crbug.com/179038
     results = page_test.PageTestResults()
     credentials_backend = StubCredentialsBackend(login_return_value=False)
     did_run = self.runCredentialsTest(credentials_backend, results)
@@ -69,7 +69,9 @@ class PageRunnerTests(unittest.TestCase):
     assert credentials_backend.did_get_login_no_longer_needed == False
     assert did_run == False
 
-  def testCredentialsWhenLoginSucceeds(self):
+  def disabled_testCredentialsWhenLoginSucceeds(self):
+    # This test is disabled because it runs against live sites, and needs to be
+    # fixed. crbug.com/179038
     results = page_test.PageTestResults()
     credentials_backend = StubCredentialsBackend(login_return_value=True)
     did_run = self.runCredentialsTest(credentials_backend, results)
@@ -139,3 +141,35 @@ class PageRunnerTests(unittest.TestCase):
       runner.Run(options, possible_browser, test, results)
 
     self.assertTrue(hasattr(test, 'hasRun') and test.hasRun)
+
+  # Ensure that page_runner forces exactly 1 tab before running a page.
+  def testOneTab(self):
+    ps = page_set.PageSet()
+    page = page_module.Page(
+        'file:///' + os.path.join('..', '..', 'unittest_data', 'blank.html'),
+        ps,
+        base_dir=os.path.dirname(__file__))
+    ps.pages.append(page)
+
+    class TestOneTab(page_test.PageTest):
+      def __init__(self,
+                   test_method_name,
+                   action_name_to_run='',
+                   needs_browser_restart_after_each_run=False):
+        super(TestOneTab, self).__init__(test_method_name, action_name_to_run,
+                                         needs_browser_restart_after_each_run)
+        self._browser = None
+
+      def SetUpBrowser(self, browser):
+        self._browser = browser
+        self._browser.tabs.New()
+
+      def RunTest(self, page, tab, results): # pylint: disable=W0613,R0201
+        assert len(self._browser.tabs) == 1
+
+    test = TestOneTab('RunTest')
+    with page_runner.PageRunner(ps) as runner:
+      options = options_for_unittests.GetCopy()
+      possible_browser = browser_finder.FindBrowser(options)
+      results = page_test.PageTestResults()
+      runner.Run(options, possible_browser, test, results)

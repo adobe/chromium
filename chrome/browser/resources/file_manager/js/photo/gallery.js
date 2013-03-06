@@ -137,7 +137,6 @@ Gallery.openStandalone = function(path, pageState, opt_callback) {
         metadataCache: MetadataCache.createFull(),
         pageState: pageState,
         onClose: onClose,
-        allowMosaic: true, /* For debugging purposes */
         displayStringFunction: strf
       };
       Gallery.open(context, urls, selectedUrls);
@@ -148,18 +147,30 @@ Gallery.openStandalone = function(path, pageState, opt_callback) {
 
 /**
  * Tools fade-out timeout im milliseconds.
+ * @const
  * @type {number}
  */
 Gallery.FADE_TIMEOUT = 3000;
 
 /**
  * First time tools fade-out timeout im milliseconds.
+ * @const
  * @type {number}
  */
 Gallery.FIRST_FADE_TIMEOUT = 1000;
 
 /**
+ * Time until mosaic is initialized in the background. Used to make gallery
+ * in the slide mode load faster. In miiliseconds.
+ * @const
+ * @type {number}
+ */
+Gallery.MOSAIC_BACKGROUND_INIT_DELAY = 1000;
+
+/**
  * Types of metadata Gallery uses (to query the metadata cache).
+ * @const
+ * @type {string}
  */
 Gallery.METADATA_TYPE = 'thumbnail|filesystem|media|streaming';
 
@@ -167,13 +178,14 @@ Gallery.METADATA_TYPE = 'thumbnail|filesystem|media|streaming';
  * Initialize listeners.
  * @private
  */
-
 Gallery.prototype.initListeners_ = function() {
   if (!util.TEST_HARNESS)
     this.document_.oncontextmenu = function(e) { e.preventDefault(); };
 
   this.keyDownBound_ = this.onKeyDown_.bind(this);
   this.document_.body.addEventListener('keydown', this.keyDownBound_);
+
+  util.disableBrowserShortcutKeys(this.document_);
 
   this.inactivityWatcher_ = new MouseInactivityWatcher(
       this.container_, Gallery.FADE_TIMEOUT, this.hasActiveTool.bind(this));
@@ -259,15 +271,13 @@ Gallery.prototype.initDom_ = function() {
 
   var onThumbnailError = this.context_.onThumbnailError || function() {};
 
-  if (this.context_.allowMosaic) {
-    this.modeButton_ = util.createChild(this.toolbar_, 'button mode', 'button');
-    this.modeButton_.addEventListener('click',
-        this.toggleMode_.bind(this, null));
+  this.modeButton_ = util.createChild(this.toolbar_, 'button mode', 'button');
+  this.modeButton_.addEventListener('click',
+      this.toggleMode_.bind(this, null));
 
-    this.mosaicMode_ = new MosaicMode(content,
-        this.dataModel_, this.selectionModel_, this.metadataCache_,
-        this.toggleMode_.bind(this, null), onThumbnailError);
-  }
+  this.mosaicMode_ = new MosaicMode(content,
+      this.dataModel_, this.selectionModel_, this.metadataCache_,
+      this.toggleMode_.bind(this, null), onThumbnailError);
 
   this.slideMode_ = new SlideMode(this.container_, content,
       this.toolbar_, this.prompt_,
@@ -363,7 +373,8 @@ Gallery.prototype.load = function(urls, selectedUrls) {
   } else {
     this.setCurrentMode_(this.slideMode_);
     var maybeLoadMosaic = function() {
-      if (mosaic) mosaic.init();
+      if (mosaic)
+        mosaic.init();
       cr.dispatchSimpleEvent(this, 'loaded');
     }.bind(this);
     /* TODO: consider nice blow-up animation for the first image */

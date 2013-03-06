@@ -12,6 +12,7 @@
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
+#include "chrome/browser/google_apis/drive_api_parser.h"
 #include "chrome/browser/google_apis/drive_uploader.h"
 #include "chrome/browser/google_apis/gdata_wapi_service.h"
 #include "chrome/browser/google_apis/gdata_wapi_url_generator.h"
@@ -33,6 +34,8 @@ const char kMimeTypeOctetStream[] = "application/octet-stream";
 // This path is not actually used but is required by DriveUploaderInterface.
 const base::FilePath::CharType kDummyDrivePath[] =
     FILE_PATH_LITERAL("/dummy/drive/path");
+
+void EmptyGDataErrorCodeCallback(google_apis::GDataErrorCode error) {}
 
 bool HasParentLinkTo(const ScopedVector<google_apis::Link>& links,
                      const GURL& parent_link) {
@@ -232,6 +235,9 @@ void DriveFileSyncClient::DidGetDirectory(
   DCHECK_EQ(google_apis::ENTRY_KIND_FOLDER, entry->kind());
   DCHECK_EQ(directory_name, entry->title());
 
+  if (entry->title() == kSyncRootDirectoryName)
+    EnsureSyncRootIsNotInMyDrive(entry->resource_id());
+
   callback.Run(error, entry->resource_id());
 }
 
@@ -270,19 +276,22 @@ void DriveFileSyncClient::DidEnsureUniquenessForCreateDirectory(
   //   the conflict was resolved.
   //
 
-  if (error == google_apis::HTTP_FOUND) {
+  if (error == google_apis::HTTP_FOUND)
     error = google_apis::HTTP_CREATED;
-  }
+
+  if (entry->title() == kSyncRootDirectoryName)
+    EnsureSyncRootIsNotInMyDrive(entry->resource_id());
+
   callback.Run(error, entry->resource_id());
 }
 
 void DriveFileSyncClient::GetLargestChangeStamp(
     const ChangeStampCallback& callback) {
   DCHECK(CalledOnValidThread());
-  DVLOG(2) << "Getting largest changestamp";
+  DVLOG(2) << "Getting largest change id";
 
-  drive_service_->GetAccountMetadata(
-      base::Bind(&DriveFileSyncClient::DidGetAccountMetadata,
+  drive_service_->GetAboutResource(
+      base::Bind(&DriveFileSyncClient::DidGetAboutResource,
                  AsWeakPtr(), callback));
 }
 
@@ -298,22 +307,22 @@ void DriveFileSyncClient::GetResourceEntry(
                  AsWeakPtr(), callback));
 }
 
-void DriveFileSyncClient::DidGetAccountMetadata(
+void DriveFileSyncClient::DidGetAboutResource(
     const ChangeStampCallback& callback,
     google_apis::GDataErrorCode error,
-    scoped_ptr<google_apis::AccountMetadataFeed> metadata) {
+    scoped_ptr<google_apis::AboutResource> about_resource) {
   DCHECK(CalledOnValidThread());
 
-  int64 largest_changestamp = 0;
+  int64 largest_change_id = 0;
   if (error == google_apis::HTTP_SUCCESS) {
-    DCHECK(metadata);
-    largest_changestamp = metadata->largest_changestamp();
-    DVLOG(2) << "Got largest changestamp: " << largest_changestamp;
+    DCHECK(about_resource);
+    largest_change_id = about_resource->largest_change_id();
+    DVLOG(2) << "Got largest change id: " << largest_change_id;
   } else {
-    DVLOG(2) << "Error on getting largest changestamp: " << error;
+    DVLOG(2) << "Error on getting largest change id: " << error;
   }
 
-  callback.Run(error, largest_changestamp);
+  callback.Run(error, largest_change_id);
 }
 
 void DriveFileSyncClient::SearchFilesInDirectory(
@@ -443,17 +452,40 @@ void DriveFileSyncClient::DeleteFile(
   DCHECK(CalledOnValidThread());
   DVLOG(2) << "Deleting file: " << resource_id;
 
-  drive_service_->GetResourceEntry(
+  // Load actual remote_file_md5 to check for conflict before deletion.
+  if (!remote_file_md5.empty()) {
+    drive_service_->GetResourceEntry(
+        resource_id,
+        base::Bind(&DriveFileSyncClient::DidGetResourceEntry,
+                   AsWeakPtr(),
+                   base::Bind(&DriveFileSyncClient::DeleteFileInternal,
+                              AsWeakPtr(), remote_file_md5, callback)));
+    return;
+  }
+
+  // Expected remote_file_md5 is empty so do a force delete.
+  drive_service_->DeleteResource(
       resource_id,
-      base::Bind(&DriveFileSyncClient::DidGetResourceEntry,
-                 AsWeakPtr(),
-                 base::Bind(&DriveFileSyncClient::DeleteFileInternal,
-                            AsWeakPtr(), remote_file_md5, callback)));
+      std::string(),
+      base::Bind(&DriveFileSyncClient::DidDeleteFile,
+                 AsWeakPtr(), callback));
+  return;
 }
 
 GURL DriveFileSyncClient::ResourceIdToResourceLink(
     const std::string& resource_id) const {
   return url_generator_.GenerateEditUrl(resource_id);
+}
+
+void DriveFileSyncClient::EnsureSyncRootIsNotInMyDrive(
+    const std::string& sync_root_resource_id) const {
+  DCHECK(CalledOnValidThread());
+  DVLOG(2) << "Ensuring the sync root directory is not in 'My Drive'.";
+
+  drive_service_->RemoveResourceFromDirectory(
+      drive_service_->GetRootResourceId(),
+      sync_root_resource_id,
+      base::Bind(&EmptyGDataErrorCodeCallback));
 }
 
 // static
@@ -718,7 +750,7 @@ void DriveFileSyncClient::DeleteFileInternal(
 
   // If remote file's hash value is different from the expected one, conflict
   // might have occurred.
-  if (remote_file_md5 != entry->file_md5()) {
+  if (!remote_file_md5.empty() && remote_file_md5 != entry->file_md5()) {
     DVLOG(2) << "Conflict detected before deleting file";
     callback.Run(google_apis::HTTP_CONFLICT);
     return;

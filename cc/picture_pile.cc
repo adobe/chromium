@@ -23,7 +23,7 @@ const int kPixelDistanceToRecord = 8000;
 
 namespace cc {
 
-PicturePile::PicturePile() {
+PicturePile::PicturePile() : num_raster_threads_(0) {
 }
 
 PicturePile::~PicturePile() {
@@ -31,9 +31,12 @@ PicturePile::~PicturePile() {
 
 void PicturePile::Update(
     ContentLayerClient* painter,
+    SkColor background_color,
     const Region& invalidation,
     gfx::Rect visible_layer_rect,
     RenderingStats* stats) {
+  background_color_ = background_color;
+
   gfx::Rect interest_rect = visible_layer_rect;
   interest_rect.Inset(
       -kPixelDistanceToRecord,
@@ -82,16 +85,25 @@ void PicturePile::Update(
     // Create a picture in this list if it doesn't exist.
     PictureList& pic_list = picture_list_map_[iter.index()];
     if (pic_list.empty()) {
-      gfx::Rect tile =
-          tiling_.TileBoundsWithBorder(iter.index_x(), iter.index_y());
+      // Inflate the base picture with a margin, similar to invalidations, so
+      // that when scaled down to at least min_contents_scale, the enclosed
+      // rect still includes content all the way to the edge of the layer.
+      gfx::Rect tile = tiling_.TileBounds(iter.index_x(), iter.index_y());
+      tile.Inset(
+        -buffer_pixels(),
+        -buffer_pixels(),
+        -buffer_pixels(),
+        -buffer_pixels());
       scoped_refptr<Picture> base_picture = Picture::Create(tile);
       pic_list.push_back(base_picture);
     }
 
     for (PictureList::iterator pic = pic_list.begin();
          pic != pic_list.end(); ++pic) {
-      if (!(*pic)->HasRecording())
-        (*pic)->Record(painter, stats);
+      if (!(*pic)->HasRecording()) {
+        (*pic)->Record(painter, stats, tile_grid_info_);
+        (*pic)->CloneForDrawing(num_raster_threads_);
+      }
     }
   }
 
@@ -145,10 +157,10 @@ void PicturePile::InvalidateRect(
 
 
 void PicturePile::PushPropertiesTo(PicturePileImpl* other) {
-  // TODO(enne): Don't clear clones or push anything if nothing has changed
+  // TODO(enne): Don't create clones or push anything if nothing has changed
   // on this layer this frame.
   PicturePileBase::PushPropertiesTo(other);
-  other->clones_.clear();
+  other->CloneForDrawing(num_raster_threads_);
 }
 
 }  // namespace cc

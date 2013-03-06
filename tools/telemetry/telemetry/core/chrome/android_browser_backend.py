@@ -75,6 +75,8 @@ class AndroidBrowserBackend(browser_backend.BrowserBackend):
     args = map(QuoteIfNeeded, args)
     self._adb.Adb().SetProtectedFileContents(cmdline_file, ' '.join(args))
 
+    # TODO: Once --enable-remote-debugging flag makes its way to the oldest
+    # version under test (m27 goes to stable), remove this hack.
     # Force devtools protocol on, if not already done and we can access
     # protected files.
     if (not is_content_shell and
@@ -144,8 +146,13 @@ class AndroidBrowserBackend(browser_backend.BrowserBackend):
 
   def GetBrowserStartupArgs(self):
     args = super(AndroidBrowserBackend, self).GetBrowserStartupArgs()
+    args.append('--enable-remote-debugging')
     args.append('--disable-fre')
     return args
+
+  @property
+  def pid(self):
+    return int(self._adb.ExtractPid(self._package)[0])
 
   def __del__(self):
     self.Close()

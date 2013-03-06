@@ -303,14 +303,6 @@ UI_EXPORT bool ParseOutputOverscanFlag(const unsigned char* prop,
                                        unsigned long nitems,
                                        bool* flag);
 
-// Gets the names of the all displays physically connected to the system.
-UI_EXPORT std::vector<std::string> GetDisplayNames(
-    const std::vector<XID>& output_id);
-
-// Gets the name of outputs given by |output_id|.
-UI_EXPORT std::vector<std::string> GetOutputNames(
-    const std::vector<XID>& output_id);
-
 enum WindowManagerName {
   WM_UNKNOWN,
   WM_BLACKBOX,

@@ -370,6 +370,13 @@ std::vector<int> GetAllCrashExitCodes() {
   return codes;
 }
 
+void MarkAppCleanShutdownAndCommit() {
+  PrefService* pref = g_browser_process->local_state();
+  pref->SetBoolean(prefs::kStabilityExitedCleanly, true);
+  // Start writing right away (write happens on a different thread).
+  pref->CommitPendingWrite();
+}
+
 }  // namespace
 
 // static
@@ -532,10 +539,14 @@ MetricsService::MetricsService()
   scheduler_.reset(new MetricsReportingScheduler(callback));
   log_manager_.set_log_serializer(new MetricsLogSerializer());
   log_manager_.set_max_ongoing_log_store_size(kUploadLogAvoidRetransmitSize);
+
+  BrowserChildProcessObserver::Add(this);
 }
 
 MetricsService::~MetricsService() {
   DisableRecording();
+
+  BrowserChildProcessObserver::Remove(this);
 }
 
 void MetricsService::Start() {
@@ -676,16 +687,29 @@ void MetricsService::SetUpNotifications(
                  content::NotificationService::AllSources());
   registrar->Add(observer, content::NOTIFICATION_RENDERER_PROCESS_HANG,
                  content::NotificationService::AllSources());
-  registrar->Add(observer, content::NOTIFICATION_CHILD_PROCESS_HOST_CONNECTED,
-                 content::NotificationService::AllSources());
-  registrar->Add(observer, content::NOTIFICATION_CHILD_INSTANCE_CREATED,
-                 content::NotificationService::AllSources());
-  registrar->Add(observer, content::NOTIFICATION_CHILD_PROCESS_CRASHED,
-                 content::NotificationService::AllSources());
   registrar->Add(observer, chrome::NOTIFICATION_TEMPLATE_URL_SERVICE_LOADED,
                  content::NotificationService::AllSources());
   registrar->Add(observer, chrome::NOTIFICATION_OMNIBOX_OPENED_URL,
                  content::NotificationService::AllSources());
+}
+
+void MetricsService::BrowserChildProcessHostConnected(
+    const content::ChildProcessData& data) {
+  GetChildProcessStats(data).process_launches++;
+}
+
+void MetricsService::BrowserChildProcessCrashed(
+    const content::ChildProcessData& data) {
+  GetChildProcessStats(data).process_crashes++;
+  // Exclude plugin crashes from the count below because we report them via
+  // a separate UMA metric.
+  if (!IsPluginProcess(data.type))
+    IncrementPrefValue(prefs::kStabilityChildProcessCrashCount);
+}
+
+void MetricsService::BrowserChildProcessInstanceCreated(
+    const content::ChildProcessData& data) {
+  GetChildProcessStats(data).instances++;
 }
 
 void MetricsService::Observe(int type,
@@ -744,12 +768,6 @@ void MetricsService::Observe(int type,
       LogRendererHang();
       break;
 
-    case content::NOTIFICATION_CHILD_PROCESS_HOST_CONNECTED:
-    case content::NOTIFICATION_CHILD_PROCESS_CRASHED:
-    case content::NOTIFICATION_CHILD_INSTANCE_CREATED:
-      LogChildProcessChange(type, source, details);
-      break;
-
     case chrome::NOTIFICATION_TEMPLATE_URL_SERVICE_LOADED:
       LogKeywordCount(content::Source<TemplateURLService>(
           source)->GetTemplateURLs().size());
@@ -795,8 +813,7 @@ void MetricsService::RecordCompletedSessionEnd() {
 void MetricsService::OnAppEnterBackground() {
   scheduler_->Stop();
 
-  PrefService* pref = g_browser_process->local_state();
-  pref->SetBoolean(prefs::kStabilityExitedCleanly, true);
+  MarkAppCleanShutdownAndCommit();
 
   // At this point, there's no way of knowing when the process will be
   // killed, so this has to be treated similar to a shutdown, closing and
@@ -809,9 +826,6 @@ void MetricsService::OnAppEnterBackground() {
     // process is killed.
     OpenNewLog();
   }
-
-  // Start writing right away (write happens on a different thread).
-  pref->CommitPendingWrite();
 }
 
 void MetricsService::OnAppEnterForeground() {
@@ -820,7 +834,14 @@ void MetricsService::OnAppEnterForeground() {
 
   StartSchedulerIfNecessary();
 }
-#endif
+#else
+void MetricsService::LogNeedForCleanShutdown() {
+  PrefService* pref = g_browser_process->local_state();
+  pref->SetBoolean(prefs::kStabilityExitedCleanly, false);
+  // Redundant setting to be sure we call for a clean shutdown.
+  clean_shutdown_status_ = NEED_TO_SHUTDOWN;
+}
+#endif  // defined(OS_ANDROID) || defined(OS_IOS)
 
 void MetricsService::RecordBreakpadRegistration(bool success) {
   if (!success)
@@ -1704,13 +1725,6 @@ void MetricsService::LogRendererHang() {
   IncrementPrefValue(prefs::kStabilityRendererHangCount);
 }
 
-void MetricsService::LogNeedForCleanShutdown() {
-  PrefService* pref = g_browser_process->local_state();
-  pref->SetBoolean(prefs::kStabilityExitedCleanly, false);
-  // Redundant setting to be sure we call for a clean shutdown.
-  clean_shutdown_status_ = NEED_TO_SHUTDOWN;
-}
-
 bool MetricsService::UmaMetricsProperlyShutdown() {
   CHECK(clean_shutdown_status_ == CLEANLY_SHUTDOWN ||
         clean_shutdown_status_ == NEED_TO_SHUTDOWN);
@@ -1719,9 +1733,8 @@ bool MetricsService::UmaMetricsProperlyShutdown() {
 
 void MetricsService::LogCleanShutdown() {
   // Redundant hack to write pref ASAP.
-  PrefService* pref = g_browser_process->local_state();
-  pref->SetBoolean(prefs::kStabilityExitedCleanly, true);
-  pref->CommitPendingWrite();
+  MarkAppCleanShutdownAndCommit();
+
   // Redundant setting to assure that we always reset this value at shutdown
   // (and that we don't use some alternate path, and not call LogCleanShutdown).
   clean_shutdown_status_ = CLEANLY_SHUTDOWN;
@@ -1763,42 +1776,12 @@ void MetricsService::LogPluginLoadingError(const base::FilePath& plugin_path) {
   stats.loading_errors++;
 }
 
-void MetricsService::LogChildProcessChange(
-    int type,
-    const content::NotificationSource& source,
-    const content::NotificationDetails& details) {
-  content::Details<ChildProcessData> child_details(details);
-  const string16& child_name = child_details->name;
-
-  if (child_process_stats_buffer_.find(child_name) ==
-      child_process_stats_buffer_.end()) {
-    child_process_stats_buffer_[child_name] =
-        ChildProcessStats(child_details->type);
-  }
-
-  ChildProcessStats& stats = child_process_stats_buffer_[child_name];
-  switch (type) {
-    case content::NOTIFICATION_CHILD_PROCESS_HOST_CONNECTED:
-      stats.process_launches++;
-      break;
-
-    case content::NOTIFICATION_CHILD_INSTANCE_CREATED:
-      stats.instances++;
-      break;
-
-    case content::NOTIFICATION_CHILD_PROCESS_CRASHED:
-      stats.process_crashes++;
-      // Exclude plugin crashes from the count below because we report them via
-      // a separate UMA metric.
-      if (!IsPluginProcess(child_details->type)) {
-        IncrementPrefValue(prefs::kStabilityChildProcessCrashCount);
-      }
-      break;
-
-    default:
-      NOTREACHED() << "Unexpected notification type " << type;
-      return;
-  }
+MetricsService::ChildProcessStats& MetricsService::GetChildProcessStats(
+    const content::ChildProcessData& data) {
+  const string16& child_name = data.name;
+  if (!ContainsKey(child_process_stats_buffer_, child_name))
+    child_process_stats_buffer_[child_name] = ChildProcessStats(data.type);
+  return child_process_stats_buffer_[child_name];
 }
 
 void MetricsService::LogKeywordCount(size_t keyword_count) {

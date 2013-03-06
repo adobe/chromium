@@ -37,17 +37,12 @@ import org.chromium.content.common.CleanupReference;
 import org.chromium.components.navigation_interception.InterceptNavigationDelegate;
 import org.chromium.components.navigation_interception.NavigationParams;
 import org.chromium.net.GURLUtils;
-import org.chromium.net.X509Util;
 import org.chromium.ui.gfx.DeviceDisplayInfo;
 import org.chromium.ui.gfx.NativeWindow;
 
 import java.io.File;
 import java.net.MalformedURLException;
 import java.net.URL;
-import java.security.KeyStoreException;
-import java.security.NoSuchAlgorithmException;
-import java.security.cert.CertificateException;
-import java.security.cert.X509Certificate;
 
 /**
  * Exposes the native AwContents class, and together these classes wrap the ContentViewCore
@@ -91,10 +86,23 @@ public class AwContents {
         void setMeasuredDimension(int measuredWidth, int measuredHeight);
     }
 
+    /**
+     * Listener for renderer state change notifications coming through ContentViewCore.
+     */
+    private class AwContentStateChangeListener
+            implements ContentViewCore.ContentSizeChangeListener {
+        @Override
+        public void onContentSizeChanged(int contentWidthPix, int contentHeightPix) {
+            mLayoutSizer.onContentSizeChanged(contentWidthPix, contentHeightPix);
+        }
+    }
+
     private int mNativeAwContents;
+    private AwBrowserContext mBrowserContext;
     private ViewGroup mContainerView;
     private ContentViewCore mContentViewCore;
     private AwContentsClient mContentsClient;
+    private AwContentsClientBridge mContentsClientBridge;
     private AwContentsIoThreadClient mIoThreadClient;
     private InterceptNavigationDelegateImpl mInterceptNavigationDelegate;
     private InternalAccessDelegate mInternalAccessAdapter;
@@ -228,21 +236,33 @@ public class AwContents {
         }
     }
 
+    // TODO(joth): Delete this when all callers pass browserContext
+    public AwContents(ViewGroup containerView, InternalAccessDelegate internalAccessAdapter,
+            AwContentsClient contentsClient, boolean isAccessFromFileURLsGrantedByDefault) {
+        this(AwBrowserProcess.getDefaultBrowserContext(), containerView, internalAccessAdapter,
+                contentsClient, isAccessFromFileURLsGrantedByDefault);
+    }
+
     /**
+     * @param browserContext the browsing context to associate this view contents with.
      * @param containerView the view-hierarchy item this object will be bound to.
      * @param internalAccessAdapter to access private methods on containerView.
      * @param contentsClient will receive API callbacks from this WebView Contents
      * @param isAccessFromFileURLsGrantedByDefault passed to ContentViewCore.initialize.
      */
-    public AwContents(ViewGroup containerView, InternalAccessDelegate internalAccessAdapter,
-            AwContentsClient contentsClient, boolean isAccessFromFileURLsGrantedByDefault) {
+    public AwContents(AwBrowserContext browserContext, ViewGroup containerView,
+            InternalAccessDelegate internalAccessAdapter, AwContentsClient contentsClient,
+            boolean isAccessFromFileURLsGrantedByDefault) {
+        mBrowserContext = browserContext;
         mContainerView = containerView;
         mInternalAccessAdapter = internalAccessAdapter;
         // Note that ContentViewCore must be set up before AwContents, as ContentViewCore
         // setup performs process initialisation work needed by AwContents.
         mContentViewCore = new ContentViewCore(containerView.getContext(),
                 ContentViewCore.PERSONALITY_VIEW);
-        mNativeAwContents = nativeInit(contentsClient.getWebContentsDelegate());
+        mContentsClientBridge = new AwContentsClientBridge(contentsClient);
+        mNativeAwContents = nativeInit(contentsClient.getWebContentsDelegate(),
+                mContentsClientBridge);
         mContentsClient = contentsClient;
         mCleanupReference = new CleanupReference(this, new DestroyRunnable(mNativeAwContents));
 
@@ -253,7 +273,7 @@ public class AwContents {
                 isAccessFromFileURLsGrantedByDefault);
         mContentViewCore.setContentViewClient(mContentsClient);
         mLayoutSizer = new AwLayoutSizer(new AwLayoutSizerDelegate());
-        mContentViewCore.setContentSizeChangeListener(mLayoutSizer);
+        mContentViewCore.setContentSizeChangeListener(new AwContentStateChangeListener());
         mContentsClient.installWebContentsObserver(mContentViewCore);
 
         mSettings = new AwSettings(mContentViewCore.getContext(), nativeWebContents);
@@ -265,6 +285,8 @@ public class AwContents {
                 mContentViewCore.getNativeContentViewCore());
 
         mDIPScale = DeviceDisplayInfo.create(containerView.getContext()).getDIPScale();
+        mContentsClient.setDIPScale(mDIPScale);
+        mSettings.setDIPScale(mDIPScale);
 
         ContentVideoView.registerContentVideoViewContextDelegate(
                 new AwContentVideoViewDelegate(contentsClient, containerView.getContext()));
@@ -351,11 +373,11 @@ public class AwContents {
     }
 
     public int getContentHeightCss() {
-        return getContentViewCore().getContentHeight();
+        return (int) Math.ceil(getContentViewCore().getContentHeightCss());
     }
 
     public int getContentWidthCss() {
-        return getContentViewCore().getContentWidth();
+        return (int) Math.ceil(getContentViewCore().getContentWidthCss());
     }
 
     public Picture capturePicture() {
@@ -620,29 +642,7 @@ public class AwContents {
      */
     public SslCertificate getCertificate() {
         if (mNativeAwContents == 0) return null;
-        byte[] derBytes = nativeGetCertificate(mNativeAwContents);
-        if (derBytes == null) {
-            return null;
-        }
-
-        try {
-            X509Certificate x509Certificate =
-                    X509Util.createCertificateFromBytes(derBytes);
-            return new SslCertificate(x509Certificate);
-        } catch (CertificateException e) {
-            // Intentional fall through
-            // A SSL related exception must have occured.  This shouldn't happen.
-            Log.w(TAG, "Could not read certificate: " + e);
-        } catch (KeyStoreException e) {
-            // Intentional fall through
-            // A SSL related exception must have occured.  This shouldn't happen.
-            Log.w(TAG, "Could not read certificate: " + e);
-        } catch (NoSuchAlgorithmException e) {
-            // Intentional fall through
-            // A SSL related exception must have occured.  This shouldn't happen.
-            Log.w(TAG, "Could not read certificate: " + e);
-        }
-        return null;
+        return SslUtil.getCertificateFromDerBytes(nativeGetCertificate(mNativeAwContents));
     }
 
     /**
@@ -683,6 +683,16 @@ public class AwContents {
         data.putString("url", mPossiblyStaleHitTestData.imgSrc);
         msg.setData(data);
         msg.sendToTarget();
+    }
+
+    /**
+     * @see android.webkit.WebView#getScale()
+     *
+     * Please note that the scale returned is the page scale multiplied by
+     * the screen density factor. See CTS WebViewTest.testSetInitialScale.
+     */
+    public float getScale() {
+        return (float)(getContentViewCore().getScale() * mDIPScale);
     }
 
     //--------------------------------------------------------------------------------------------
@@ -770,6 +780,8 @@ public class AwContents {
      */
     public void onSizeChanged(int w, int h, int ow, int oh) {
         if (mNativeAwContents == 0) return;
+
+        mContentViewCore.onPhysicalBackingSizeChanged(w, h);
         mContentViewCore.onSizeChanged(w, h, ow, oh);
         nativeOnSizeChanged(mNativeAwContents, w, h, ow, oh);
     }
@@ -1033,7 +1045,8 @@ public class AwContents {
     //  Native methods
     //--------------------------------------------------------------------------------------------
 
-    private native int nativeInit(AwWebContentsDelegate webViewWebContentsDelegate);
+    private native int nativeInit(AwWebContentsDelegate webViewWebContentsDelegate,
+            AwContentsClientBridge contentsClientBridge);
     private static native void nativeDestroy(int nativeAwContents);
     private static native void nativeSetAwDrawSWFunctionTable(int functionTablePointer);
     private static native int nativeGetAwDrawGLFunction();

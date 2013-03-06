@@ -374,7 +374,7 @@ TEST_F(FakeDriveServiceTest, GetAccountMetadata) {
       "gdata/account_metadata.json"));
 
   GDataErrorCode error = GDATA_OTHER_ERROR;
-  scoped_ptr<AccountMetadataFeed> account_metadata;
+  scoped_ptr<AccountMetadata> account_metadata;
   fake_service_.GetAccountMetadata(
       base::Bind(&test_util::CopyResultsFromGetAccountMetadataCallback,
                  &error,
@@ -395,7 +395,7 @@ TEST_F(FakeDriveServiceTest, GetAccountMetadata_Offline) {
   fake_service_.set_offline(true);
 
   GDataErrorCode error = GDATA_OTHER_ERROR;
-  scoped_ptr<AccountMetadataFeed> account_metadata;
+  scoped_ptr<AccountMetadata> account_metadata;
   fake_service_.GetAccountMetadata(
       base::Bind(&test_util::CopyResultsFromGetAccountMetadataCallback,
                  &error,
@@ -404,6 +404,42 @@ TEST_F(FakeDriveServiceTest, GetAccountMetadata_Offline) {
 
   EXPECT_EQ(GDATA_NO_CONNECTION, error);
   EXPECT_FALSE(account_metadata);
+}
+
+TEST_F(FakeDriveServiceTest, GetAboutResource) {
+  ASSERT_TRUE(fake_service_.LoadAccountMetadataForWapi(
+      "gdata/account_metadata.json"));
+
+  GDataErrorCode error = GDATA_OTHER_ERROR;
+  scoped_ptr<AboutResource> about_resource;
+  fake_service_.GetAboutResource(
+      base::Bind(&test_util::CopyResultsFromGetAboutResourceCallback,
+                 &error, &about_resource));
+  message_loop_.RunUntilIdle();
+
+  EXPECT_EQ(HTTP_SUCCESS, error);
+
+  ASSERT_TRUE(about_resource);
+  // Do some sanity check.
+  EXPECT_EQ(fake_service_.GetRootResourceId(),
+            about_resource->root_folder_id());
+  EXPECT_EQ(1, fake_service_.about_resource_load_count());
+}
+
+TEST_F(FakeDriveServiceTest, GetAboutResource_Offline) {
+  ASSERT_TRUE(fake_service_.LoadAccountMetadataForWapi(
+      "gdata/account_metadata.json"));
+  fake_service_.set_offline(true);
+
+  GDataErrorCode error = GDATA_OTHER_ERROR;
+  scoped_ptr<AboutResource> about_resource;
+  fake_service_.GetAboutResource(
+      base::Bind(&test_util::CopyResultsFromGetAboutResourceCallback,
+                 &error, &about_resource));
+  message_loop_.RunUntilIdle();
+
+  EXPECT_EQ(GDATA_NO_CONNECTION, error);
+  EXPECT_FALSE(about_resource);
 }
 
 TEST_F(FakeDriveServiceTest, GetAppList) {
@@ -1221,12 +1257,11 @@ TEST_F(FakeDriveServiceTest, ResumeUpload_Offline) {
   UploadRangeResponse response;
   scoped_ptr<ResourceEntry> entry;
   fake_service_.ResumeUpload(
-      ResumeUploadParams(UPLOAD_NEW_FILE,
-                         0, 13, 15, "test/foo",
-                         scoped_refptr<net::IOBuffer>(),
-                         upload_location,
-                         base::FilePath(FILE_PATH_LITERAL(
-                             "drive/Directory 1/new file.foo"))),
+      UPLOAD_NEW_FILE,
+      base::FilePath(FILE_PATH_LITERAL("drive/Directory 1/new file.foo")),
+      upload_location,
+      0, 13, 15, "test/foo",
+      scoped_refptr<net::IOBuffer>(),
       base::Bind(&test_util::CopyResultsFromUploadRangeCallback,
                  &response, &entry));
   message_loop_.RunUntilIdle();
@@ -1256,12 +1291,11 @@ TEST_F(FakeDriveServiceTest, ResumeUpload_NotFound) {
   UploadRangeResponse response;
   scoped_ptr<ResourceEntry> entry;
   fake_service_.ResumeUpload(
-      ResumeUploadParams(UPLOAD_NEW_FILE,
-                         0, 13, 15, "test/foo",
-                         scoped_refptr<net::IOBuffer>(),
-                         GURL("https://foo.com/"),
-                         base::FilePath(FILE_PATH_LITERAL(
-                             "drive/Directory 1/new file.foo"))),
+      UPLOAD_NEW_FILE,
+      base::FilePath(FILE_PATH_LITERAL("drive/Directory 1/new file.foo")),
+      GURL("https://foo.com/"),
+      0, 13, 15, "test/foo",
+      scoped_refptr<net::IOBuffer>(),
       base::Bind(&test_util::CopyResultsFromUploadRangeCallback,
                  &response, &entry));
   message_loop_.RunUntilIdle();
@@ -1291,12 +1325,11 @@ TEST_F(FakeDriveServiceTest, ResumeUpload_ExistingFile) {
   UploadRangeResponse response;
   scoped_ptr<ResourceEntry> entry;
   fake_service_.ResumeUpload(
-      ResumeUploadParams(UPLOAD_EXISTING_FILE,
-                         0, 13, 15, "text/plain",
-                         scoped_refptr<net::IOBuffer>(),
-                         upload_location,
-                         base::FilePath(FILE_PATH_LITERAL(
-                             "drive/File 1.txt"))),
+      UPLOAD_EXISTING_FILE,
+      base::FilePath(FILE_PATH_LITERAL("drive/File 1.txt")),
+      upload_location,
+      0, 13, 15, "text/plain",
+      scoped_refptr<net::IOBuffer>(),
       base::Bind(&test_util::CopyResultsFromUploadRangeCallback,
                  &response, &entry));
   message_loop_.RunUntilIdle();
@@ -1305,12 +1338,11 @@ TEST_F(FakeDriveServiceTest, ResumeUpload_ExistingFile) {
   EXPECT_FALSE(entry.get());
 
   fake_service_.ResumeUpload(
-      ResumeUploadParams(UPLOAD_EXISTING_FILE,
-                         14, 15, 15, "text/plain",
-                         scoped_refptr<net::IOBuffer>(),
-                         upload_location,
-                         base::FilePath(FILE_PATH_LITERAL(
-                             "drive/File 1.txt"))),
+      UPLOAD_EXISTING_FILE,
+      base::FilePath(FILE_PATH_LITERAL("drive/File 1.txt")),
+      upload_location,
+      14, 15, 15, "text/plain",
+      scoped_refptr<net::IOBuffer>(),
       base::Bind(&test_util::CopyResultsFromUploadRangeCallback,
                  &response, &entry));
   message_loop_.RunUntilIdle();
@@ -1345,12 +1377,11 @@ TEST_F(FakeDriveServiceTest, ResumeUpload_NewFile) {
   UploadRangeResponse response;
   scoped_ptr<ResourceEntry> entry;
   fake_service_.ResumeUpload(
-      ResumeUploadParams(UPLOAD_NEW_FILE,
-                         0, 13, 15, "test/foo",
-                         scoped_refptr<net::IOBuffer>(),
-                         upload_location,
-                         base::FilePath(FILE_PATH_LITERAL(
-                             "drive/Directory 1/new file.foo"))),
+      UPLOAD_NEW_FILE,
+      base::FilePath(FILE_PATH_LITERAL("drive/Directory 1/new file.foo")),
+      upload_location,
+      0, 13, 15, "test/foo",
+      scoped_refptr<net::IOBuffer>(),
       base::Bind(&test_util::CopyResultsFromUploadRangeCallback,
                  &response, &entry));
   message_loop_.RunUntilIdle();
@@ -1359,12 +1390,11 @@ TEST_F(FakeDriveServiceTest, ResumeUpload_NewFile) {
   EXPECT_FALSE(entry.get());
 
   fake_service_.ResumeUpload(
-      ResumeUploadParams(UPLOAD_NEW_FILE,
-                         14, 15, 15, "test/foo",
-                         scoped_refptr<net::IOBuffer>(),
-                         upload_location,
-                         base::FilePath(FILE_PATH_LITERAL(
-                             "drive/Directory 1/new file.foo"))),
+      UPLOAD_NEW_FILE,
+      base::FilePath(FILE_PATH_LITERAL("drive/Directory 1/new file.foo")),
+      upload_location,
+      14, 15, 15, "test/foo",
+      scoped_refptr<net::IOBuffer>(),
       base::Bind(&test_util::CopyResultsFromUploadRangeCallback,
                  &response, &entry));
   message_loop_.RunUntilIdle();

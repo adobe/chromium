@@ -14,6 +14,8 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/api/commands/commands_handler.h"
+#include "chrome/common/extensions/api/commands/commands_handler.h"
+#include "chrome/common/extensions/background_info.h"
 #include "chrome/common/extensions/command.h"
 #include "chrome/common/extensions/extension_file_util.h"
 #include "chrome/common/extensions/extension_manifest_constants.h"
@@ -101,8 +103,12 @@ static scoped_refptr<Extension> LoadManifestStrict(
 class ExtensionTest : public testing::Test {
  protected:
   virtual void SetUp() OVERRIDE {
-    ManifestHandler::Register(extension_manifest_keys::kCommands,
-                              make_linked_ptr(new CommandsHandler));
+    (new BackgroundManifestHandler)->Register();
+    (new CommandsHandler)->Register();
+  }
+
+  virtual void TearDown() OVERRIDE {
+    ManifestHandler::ClearRegistryForTesting();
   }
 };
 
@@ -113,10 +119,11 @@ TEST_F(ExtensionTest, LocationValuesTest) {
   ASSERT_EQ(1, Manifest::INTERNAL);
   ASSERT_EQ(2, Manifest::EXTERNAL_PREF);
   ASSERT_EQ(3, Manifest::EXTERNAL_REGISTRY);
-  ASSERT_EQ(4, Manifest::LOAD);
+  ASSERT_EQ(4, Manifest::UNPACKED);
   ASSERT_EQ(5, Manifest::COMPONENT);
   ASSERT_EQ(6, Manifest::EXTERNAL_PREF_DOWNLOAD);
   ASSERT_EQ(7, Manifest::EXTERNAL_POLICY_DOWNLOAD);
+  ASSERT_EQ(8, Manifest::COMMAND_LINE);
 }
 
 TEST_F(ExtensionTest, LocationPriorityTest) {

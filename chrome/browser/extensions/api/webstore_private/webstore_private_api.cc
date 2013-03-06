@@ -5,6 +5,7 @@
 #include "chrome/browser/extensions/api/webstore_private/webstore_private_api.h"
 
 #include "apps/app_launcher.h"
+#include "apps/switches.h"
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
 #include "base/lazy_instance.h"
@@ -20,6 +21,8 @@
 #include "chrome/browser/extensions/extension_prefs.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
+#include "chrome/browser/extensions/install_tracker.h"
+#include "chrome/browser/extensions/install_tracker_factory.h"
 #include "chrome/browser/extensions/webstore_installer.h"
 #include "chrome/browser/gpu/gpu_feature_checker.h"
 #include "chrome/browser/profiles/profile_manager.h"
@@ -27,9 +30,9 @@
 #include "chrome/browser/signin/token_service_factory.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
-#include "chrome/browser/ui/app_list/app_list_util.h"
+#include "chrome/browser/ui/app_list/app_list_service.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "chrome/common/chrome_switches.h"
+#include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_l10n_util.h"
 #include "chrome/common/extensions/extension_manifest_constants.h"
@@ -452,7 +455,7 @@ bool CompleteInstallFunction::RunImpl() {
     } else {
       LOG(INFO) << "Enabling App Launcher via flags";
       about_flags::SetExperimentEnabled(g_browser_process->local_state(),
-                                        switches::kShowAppListShortcut,
+                                        apps::switches::kShowAppListShortcut,
                                         true);
     }
   }
@@ -475,17 +478,17 @@ void CompleteInstallFunction::OnGetAppLauncherEnabled(
     bool app_launcher_enabled) {
   if (app_launcher_enabled) {
     std::string name;
-#if defined(ENABLE_APP_LIST)
     if (!approval_->parsed_manifest->GetString(extension_manifest_keys::kName,
                                                &name)) {
       NOTREACHED();
     }
+    // Show the app list so it receives install progress notifications.
+    AppListService::Get()->ShowAppList(profile());
     // Tell the app list about the install that we just started.
-    if (is_app_) {
-      chrome::NotifyAppListOfBeginExtensionInstall(
-          profile(), id, name, approval_->installing_icon);
-    }
-#endif
+    extensions::InstallTracker* tracker =
+        extensions::InstallTrackerFactory::GetForProfile(profile());
+    tracker->OnBeginExtensionInstall(
+        id, name, approval_->installing_icon, is_app_);
   }
 
   // The extension will install through the normal extension install flow, but
@@ -502,6 +505,7 @@ void CompleteInstallFunction::OnExtensionInstallSuccess(
   if (test_webstore_installer_delegate)
     test_webstore_installer_delegate->OnExtensionInstallSuccess(id);
 
+  LOG(INFO) << "Install success, sending response";
   SendResponse(true);
 
   // Matches the AddRef in RunImpl().
@@ -512,16 +516,16 @@ void CompleteInstallFunction::OnExtensionInstallFailure(
     const std::string& id,
     const std::string& error,
     WebstoreInstaller::FailureReason reason) {
-#if defined(ENABLE_APP_LIST)
-  if (is_app_)
-    chrome::NotifyAppListOfExtensionInstallFailure(profile(), id);
-#endif
+  extensions::InstallTracker* tracker =
+      extensions::InstallTrackerFactory::GetForProfile(profile());
+  tracker->OnInstallFailure(id);
   if (test_webstore_installer_delegate) {
     test_webstore_installer_delegate->OnExtensionInstallFailure(
         id, error, reason);
   }
 
   error_ = error;
+  LOG(INFO) << "Install failed, sending response";
   SendResponse(false);
 
   // Matches the AddRef in RunImpl().
@@ -531,12 +535,9 @@ void CompleteInstallFunction::OnExtensionInstallFailure(
 void CompleteInstallFunction::OnExtensionDownloadProgress(
     const std::string& id,
     content::DownloadItem* item) {
-#if defined(ENABLE_APP_LIST)
-  if (is_app_) {
-    chrome::NotifyAppListOfDownloadProgress(profile(), id,
-                                            item->PercentComplete());
-  }
-#endif
+  extensions::InstallTracker* tracker =
+      extensions::InstallTrackerFactory::GetForProfile(profile());
+  tracker->OnDownloadProgress(id, item->PercentComplete());
 }
 
 bool GetBrowserLoginFunction::RunImpl() {

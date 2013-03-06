@@ -7,6 +7,8 @@
 #include <vector>
 
 #include "net/base/net_errors.h"
+#include "net/quic/crypto/quic_decrypter.h"
+#include "net/quic/crypto/quic_encrypter.h"
 #include "net/quic/test_tools/mock_clock.h"
 #include "net/quic/test_tools/quic_connection_peer.h"
 #include "net/quic/test_tools/quic_test_utils.h"
@@ -56,7 +58,9 @@ class QuicConnectionHelperTest : public ::testing::Test {
 
   QuicConnectionHelperTest()
       : guid_(2),
-        framer_(QuicDecrypter::Create(kNULL), QuicEncrypter::Create(kNULL)),
+        framer_(kQuicVersion1,
+                QuicDecrypter::Create(kNULL),
+                QuicEncrypter::Create(kNULL)),
         creator_(guid_, &framer_, QuicRandom::GetInstance()),
         net_log_(BoundNetLog()),
         frame_(1, false, 0, kData) {

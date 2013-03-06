@@ -9,6 +9,7 @@
 #include "cc/layer_tree_host_client.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebLayerTreeView.h"
 #include "webkit/compositor_bindings/webkit_compositor_bindings_export.h"
+#include "webkit/support/webkit_support.h"
 
 namespace cc {
 class LayerTreeHost;
@@ -17,15 +18,13 @@ class Thread;
 
 namespace WebKit {
 class WebLayer;
-class WebLayerTreeViewClient;
-class WebLayerTreeViewClientAdapter;
 
 class WebLayerTreeViewImplForTesting : public WebKit::WebLayerTreeView,
-    public cc::LayerTreeHostClient {
+                                       public cc::LayerTreeHostClient {
  public:
-  enum RenderingType { FAKE_CONTEXT, SOFTWARE_CONTEXT, MESA_CONTEXT };
   WEBKIT_COMPOSITOR_BINDINGS_EXPORT WebLayerTreeViewImplForTesting(
-      RenderingType type, WebKit::WebLayerTreeViewClient* client);
+      webkit_support::LayerTreeViewType type,
+      webkit_support::DRTLayerTreeViewClient* client);
   virtual ~WebLayerTreeViewImplForTesting();
 
   WEBKIT_COMPOSITOR_BINDINGS_EXPORT bool initialize(
@@ -48,7 +47,8 @@ class WebLayerTreeViewImplForTesting : public WebKit::WebLayerTreeView,
                                            float minimum,
                                            float maximum);
   virtual void startPageScaleAnimation(const WebPoint& destination,
-                                       bool use_anchor, float new_page_scale,
+                                       bool use_anchor,
+                                       float new_page_scale,
                                        double duration_sec);
   virtual void setNeedsAnimate();
   virtual void setNeedsRedraw();
@@ -77,19 +77,14 @@ class WebLayerTreeViewImplForTesting : public WebKit::WebLayerTreeView,
   virtual void didCompleteSwapBuffers() OVERRIDE;
   virtual void scheduleComposite() OVERRIDE;
   virtual scoped_refptr<cc::ContextProvider>
-      OffscreenContextProviderForMainThread() OVERRIDE;
+  OffscreenContextProviderForMainThread() OVERRIDE;
   virtual scoped_refptr<cc::ContextProvider>
-      OffscreenContextProviderForCompositorThread() OVERRIDE;
+  OffscreenContextProviderForCompositorThread() OVERRIDE;
 
  private:
-  RenderingType type_;
-  WebKit::WebLayerTreeViewClient* client_;
+  webkit_support::LayerTreeViewType type_;
+  webkit_support::DRTLayerTreeViewClient* client_;
   scoped_ptr<cc::LayerTreeHost> layer_tree_host_;
-
-  class MainThreadContextProvider;
-  scoped_refptr<MainThreadContextProvider> contexts_main_thread_;
-  class CompositorThreadContextProvider;
-  scoped_refptr<CompositorThreadContextProvider> contexts_compositor_thread_;
 };
 
 }  // namespace Web_kit

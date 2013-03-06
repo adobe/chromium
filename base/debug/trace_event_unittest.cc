@@ -393,6 +393,11 @@ void TraceWithAllMacroVariants(WaitableEvent* task_complete_event) {
         "TRACE_EVENT_END_WITH_ID_TID_AND_TIMESTAMP0 call",
         kAsyncId + 1, kThreadId, 45678);
 
+    TRACE_EVENT_OBJECT_CREATED_WITH_ID("all", "tracked object 1", 0x42);
+    TRACE_EVENT_OBJECT_DELETED_WITH_ID("all", "tracked object 1", 0x42);
+
+    TraceScopedTrackableObject<int> trackable("all", "tracked object 2",
+                                              0x2128506);
   } // Scope close causes TRACE_EVENT0 etc to send their END events.
 
   if (task_complete_event)
@@ -649,6 +654,40 @@ void ValidateAllTraceMacrosCreatedData(const ListValue& trace_parsed) {
     std::string id;
     EXPECT_TRUE((item && item->GetString("id", &id)));
     EXPECT_EQ(kAsyncId + 1, atoi(id.c_str()));
+  }
+
+  EXPECT_FIND_("tracked object 1");
+  {
+    std::string phase;
+    std::string id;
+
+    EXPECT_TRUE((item && item->GetString("ph", &phase)));
+    EXPECT_EQ("N", phase);
+    EXPECT_TRUE((item && item->GetString("id", &id)));
+    EXPECT_EQ("42", id);
+    EXPECT_TRUE((item = FindTraceEntry(trace_parsed, "tracked object 1",
+                                       item)));
+    EXPECT_TRUE((item && item->GetString("ph", &phase)));
+    EXPECT_EQ("D", phase);
+    EXPECT_TRUE((item && item->GetString("id", &id)));
+    EXPECT_EQ("42", id);
+  }
+
+  EXPECT_FIND_("tracked object 2");
+  {
+    std::string phase;
+    std::string id;
+
+    EXPECT_TRUE((item && item->GetString("ph", &phase)));
+    EXPECT_EQ("N", phase);
+    EXPECT_TRUE((item && item->GetString("id", &id)));
+    EXPECT_EQ("2128506", id);
+    EXPECT_TRUE((item = FindTraceEntry(trace_parsed, "tracked object 2",
+                                       item)));
+    EXPECT_TRUE((item && item->GetString("ph", &phase)));
+    EXPECT_EQ("D", phase);
+    EXPECT_TRUE((item && item->GetString("id", &id)));
+    EXPECT_EQ("2128506", id);
   }
 }
 
@@ -1492,6 +1531,79 @@ TEST_F(TraceEventTestFixture, TraceOptionsParsing) {
 
   EXPECT_EQ(TraceLog::RECORD_UNTIL_FULL,
             TraceLog::TraceOptionsFromString("record-until-full"));
+}
+
+TEST_F(TraceEventTestFixture, TraceSampling) {
+  ManualTestSetUp();
+
+  event_watch_notification_ = 0;
+  TraceLog::GetInstance()->SetEnabled(
+      std::string("*"),
+      TraceLog::Options(TraceLog::RECORD_UNTIL_FULL |
+                        TraceLog::ENABLE_SAMPLING));
+
+  WaitableEvent* sampled = new WaitableEvent(false, false);
+  TraceLog::GetInstance()->InstallWaitableEventForSamplingTesting(sampled);
+
+  TRACE_EVENT_SAMPLE_STATE(1, "cc", "Stuff");
+  sampled->Wait();
+  TRACE_EVENT_SAMPLE_STATE(1, "cc", "Things");
+  sampled->Wait();
+
+  EndTraceAndFlush();
+
+  // Make sure we hit at least once.
+  EXPECT_TRUE(FindNamePhase("Stuff", "P"));
+  EXPECT_TRUE(FindNamePhase("Things", "P"));
+}
+
+class TraceEventCallbackTest : public TraceEventTestFixture {
+ public:
+  virtual void SetUp() OVERRIDE {
+    TraceEventTestFixture::SetUp();
+    ManualTestSetUp();
+    ASSERT_EQ(NULL, s_instance);
+    s_instance = this;
+  }
+  virtual void TearDown() OVERRIDE {
+    while (TraceLog::GetInstance()->IsEnabled())
+      TraceLog::GetInstance()->SetDisabled();
+    ASSERT_TRUE(!!s_instance);
+    s_instance = NULL;
+    TraceEventTestFixture::TearDown();
+  }
+
+ protected:
+  std::vector<std::string> collected_events_;
+
+  static TraceEventCallbackTest* s_instance;
+  static void Callback(char phase,
+                       const unsigned char* category_enabled,
+                       const char* name,
+                       unsigned long long id,
+                       int num_args,
+                       const char* const arg_names[],
+                       const unsigned char arg_types[],
+                       const unsigned long long arg_values[],
+                       unsigned char flags) {
+    s_instance->collected_events_.push_back(name);
+  }
+};
+
+TraceEventCallbackTest* TraceEventCallbackTest::s_instance;
+
+TEST_F(TraceEventCallbackTest, TraceEventCallback) {
+  TRACE_EVENT_INSTANT0("all", "before enable");
+  TraceLog::GetInstance()->SetEnabled(true, TraceLog::RECORD_UNTIL_FULL);
+  TRACE_EVENT_INSTANT0("all", "before callback set");
+  TraceLog::GetInstance()->SetEventCallback(Callback);
+  TRACE_EVENT_INSTANT0("all", "event1");
+  TRACE_EVENT_INSTANT0("all", "event2");
+  TraceLog::GetInstance()->SetEventCallback(NULL);
+  TRACE_EVENT_INSTANT0("all", "after callback removed");
+  EXPECT_EQ(2u, collected_events_.size());
+  EXPECT_EQ("event1", collected_events_[0]);
+  EXPECT_EQ("event2", collected_events_[1]);
 }
 
 }  // namespace debug

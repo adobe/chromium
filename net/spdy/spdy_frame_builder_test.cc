@@ -26,6 +26,7 @@ TEST(SpdyFrameBuilderTestVersionAgnostic, GetWritableBuffer) {
 enum SpdyFrameBuilderTestTypes {
   SPDY2 = 2,
   SPDY3 = 3,
+  SPDY4 = 4,
 };
 
 class SpdyFrameBuilderTest
@@ -42,7 +43,7 @@ class SpdyFrameBuilderTest
 // All tests are run with two different SPDY versions: SPDY/2 and SPDY/3.
 INSTANTIATE_TEST_CASE_P(SpdyFrameBuilderTests,
                         SpdyFrameBuilderTest,
-                        ::testing::Values(SPDY2, SPDY3));
+                        ::testing::Values(SPDY2, SPDY3, SPDY4));
 
 TEST_P(SpdyFrameBuilderTest, RewriteLength) {
   // Create an empty SETTINGS frame both via framer and manually via builder.
@@ -51,15 +52,14 @@ TEST_P(SpdyFrameBuilderTest, RewriteLength) {
   SpdyFramer framer(spdy_version_);
   SettingsMap settings;
   scoped_ptr<SpdyFrame> expected(framer.CreateSettings(settings));
-  const size_t expected_size =
-      expected->length() + framer.GetControlFrameMinimumSize();
-  SpdyFrameBuilder builder(SETTINGS, 0, spdy_version_, expected_size + 1);
+  SpdyFrameBuilder builder(expected->size() + 1);
+  builder.WriteControlFrameHeader(framer, SETTINGS, 0);
   builder.WriteUInt32(0); // Write the number of settings.
   EXPECT_TRUE(builder.GetWritableBuffer(1) != NULL);
   builder.RewriteLength(framer);
   scoped_ptr<SpdyFrame> built(builder.take());
-  EXPECT_EQ(base::StringPiece(expected->data(), expected_size),
-            base::StringPiece(built->data(), expected_size));
+  EXPECT_EQ(base::StringPiece(expected->data(), expected->size()),
+            base::StringPiece(built->data(), expected->size()));
 }
 
 }  // namespace net

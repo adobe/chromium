@@ -13,7 +13,6 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/first_run/first_run.h"
 #include "chrome/browser/google/google_util.h"
-#include "chrome/browser/prefs/pref_registry_syncable.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_manager.h"
@@ -29,6 +28,7 @@
 #include "chrome/common/net/url_util.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/url_data_source.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
@@ -132,7 +132,8 @@ bool SyncPromoUI::ShouldShowSyncPromo(Profile* profile) {
   // Display the signin promo if the user is not signed in.
   SigninManager* signin = SigninManagerFactory::GetForProfile(
       profile->GetOriginalProfile());
-  return signin->GetAuthenticatedUsername().empty();
+  return !signin->AuthInProgress() && signin->IsSigninAllowed() &&
+      signin->GetAuthenticatedUsername().empty();
 #endif
 }
 

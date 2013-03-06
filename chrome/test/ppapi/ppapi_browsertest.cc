@@ -109,6 +109,15 @@ using content::RenderViewHost;
 #endif
 
 
+// NaCl glibc tests are not included in ARM as there is no glibc support
+// on ARM today.
+#if defined(ARCH_CPU_ARM_FAMILY)
+#define MAYBE_GLIBC(test_name) DISABLED_##test_name
+#else
+#define MAYBE_GLIBC(test_name) test_name
+#endif
+
+
 //
 // Interface tests.
 //
@@ -500,41 +509,53 @@ TEST_PPAPI_OUT_OF_PROCESS(MAYBE_VarDeprecated)
 #ifdef PostMessage
 #undef PostMessage
 #endif
-TEST_PPAPI_IN_PROCESS(PostMessage_SendInInit)
-TEST_PPAPI_IN_PROCESS(PostMessage_SendingData)
-// TODO(danakj): http://crbug.com/115286
-TEST_PPAPI_IN_PROCESS(DISABLED_PostMessage_SendingArrayBuffer)
-TEST_PPAPI_IN_PROCESS(PostMessage_MessageEvent)
-TEST_PPAPI_IN_PROCESS(PostMessage_NoHandler)
-TEST_PPAPI_IN_PROCESS(PostMessage_ExtraParam)
-TEST_PPAPI_OUT_OF_PROCESS(PostMessage_SendInInit)
-TEST_PPAPI_OUT_OF_PROCESS(PostMessage_SendingData)
-TEST_PPAPI_OUT_OF_PROCESS(PostMessage_SendingArrayBuffer)
-TEST_PPAPI_OUT_OF_PROCESS(PostMessage_MessageEvent)
-TEST_PPAPI_OUT_OF_PROCESS(PostMessage_NoHandler)
-TEST_PPAPI_OUT_OF_PROCESS(PostMessage_ExtraParam)
-#if !defined(OS_WIN) && !(defined(OS_LINUX) && defined(ARCH_CPU_64_BITS))
-// Times out on Windows XP, Windows 7, and Linux x64: http://crbug.com/95557
-TEST_PPAPI_OUT_OF_PROCESS(PostMessage_NonMainThread)
-#endif
-TEST_PPAPI_NACL(PostMessage_SendInInit)
-TEST_PPAPI_NACL(PostMessage_SendingData)
-TEST_PPAPI_NACL(PostMessage_SendingArrayBuffer)
-TEST_PPAPI_NACL(PostMessage_MessageEvent)
-// http://crbug.com/167150
-TEST_PPAPI_NACL(DISABLED_PostMessage_NoHandler)
+// PostMessage tests.
+IN_PROC_BROWSER_TEST_F(PPAPITest, PostMessage) {
+  RunTestViaHTTP(
+      LIST_TEST(PostMessage_SendInInit)
+      LIST_TEST(PostMessage_SendingData)
+      LIST_TEST(PostMessage_SendingArrayBuffer)
+      LIST_TEST(PostMessage_MessageEvent)
+      LIST_TEST(PostMessage_NoHandler)
+      LIST_TEST(PostMessage_ExtraParam)
+  );
+}
 
-#if defined(OS_WIN)
-// Flaky: http://crbug.com/111209
-//
-// Note from sheriffs miket and syzm: we're not convinced that this test is
-// directly to blame for the flakiness. It's possible that it's a more general
-// problem that is exposing itself only with one of the later tests in this
-// series.
-TEST_PPAPI_NACL(DISABLED_PostMessage_ExtraParam)
-#else
-TEST_PPAPI_NACL(PostMessage_ExtraParam)
-#endif
+IN_PROC_BROWSER_TEST_F(OutOfProcessPPAPITest, PostMessage) {
+  RunTestViaHTTP(
+      LIST_TEST(PostMessage_SendInInit)
+      LIST_TEST(PostMessage_SendingData)
+      LIST_TEST(PostMessage_SendingArrayBuffer)
+      LIST_TEST(PostMessage_MessageEvent)
+      LIST_TEST(PostMessage_NoHandler)
+      LIST_TEST(PostMessage_ExtraParam)
+      LIST_TEST(PostMessage_NonMainThread)
+  );
+}
+
+IN_PROC_BROWSER_TEST_F(PPAPINaClNewlibTest, PostMessage) {
+  RunTestViaHTTP(
+      LIST_TEST(PostMessage_SendInInit)
+      LIST_TEST(PostMessage_SendingData)
+      LIST_TEST(PostMessage_SendingArrayBuffer)
+      LIST_TEST(PostMessage_MessageEvent)
+      LIST_TEST(PostMessage_NoHandler)
+      LIST_TEST(PostMessage_ExtraParam)
+      LIST_TEST(PostMessage_NonMainThread)
+  );
+}
+
+IN_PROC_BROWSER_TEST_F(PPAPINaClGLibcTest, MAYBE_GLIBC(PostMessage)) {
+  RunTestViaHTTP(
+      LIST_TEST(PostMessage_SendInInit)
+      LIST_TEST(PostMessage_SendingData)
+      LIST_TEST(PostMessage_SendingArrayBuffer)
+      LIST_TEST(PostMessage_MessageEvent)
+      LIST_TEST(PostMessage_NoHandler)
+      LIST_TEST(PostMessage_ExtraParam)
+      LIST_TEST(PostMessage_NonMainThread)
+  );
+}
 
 TEST_PPAPI_IN_PROCESS(Memory)
 TEST_PPAPI_OUT_OF_PROCESS(Memory)
@@ -543,54 +564,62 @@ TEST_PPAPI_NACL(Memory)
 TEST_PPAPI_IN_PROCESS(VideoDecoder)
 TEST_PPAPI_OUT_OF_PROCESS(VideoDecoder)
 
-TEST_PPAPI_IN_PROCESS_VIA_HTTP(FileIO_Open)
-TEST_PPAPI_IN_PROCESS_VIA_HTTP(FileIO_OpenDirectory)
-TEST_PPAPI_IN_PROCESS_VIA_HTTP(FileIO_AbortCalls)
-TEST_PPAPI_IN_PROCESS_VIA_HTTP(FileIO_ParallelReads)
-TEST_PPAPI_IN_PROCESS_VIA_HTTP(FileIO_ParallelWrites)
-TEST_PPAPI_IN_PROCESS_VIA_HTTP(FileIO_NotAllowMixedReadWrite)
-TEST_PPAPI_IN_PROCESS_VIA_HTTP(FileIO_ReadWriteSetLength)
-TEST_PPAPI_IN_PROCESS_VIA_HTTP(FileIO_ReadToArrayWriteSetLength)
-TEST_PPAPI_IN_PROCESS_VIA_HTTP(FileIO_TouchQuery)
-TEST_PPAPI_IN_PROCESS_VIA_HTTP(FileIO_WillWriteWillSetLength)
-
-TEST_PPAPI_OUT_OF_PROCESS_VIA_HTTP(FileIO_Open)
-TEST_PPAPI_OUT_OF_PROCESS_VIA_HTTP(FileIO_AbortCalls)
-TEST_PPAPI_OUT_OF_PROCESS_VIA_HTTP(FileIO_ParallelReads)
-TEST_PPAPI_OUT_OF_PROCESS_VIA_HTTP(FileIO_ParallelWrites)
-TEST_PPAPI_OUT_OF_PROCESS_VIA_HTTP(FileIO_NotAllowMixedReadWrite)
-TEST_PPAPI_OUT_OF_PROCESS_VIA_HTTP(FileIO_ReadWriteSetLength)
-TEST_PPAPI_OUT_OF_PROCESS_VIA_HTTP(FileIO_ReadToArrayWriteSetLength)
-TEST_PPAPI_OUT_OF_PROCESS_VIA_HTTP(FileIO_TouchQuery)
-TEST_PPAPI_OUT_OF_PROCESS_VIA_HTTP(FileIO_WillWriteWillSetLength)
-
-// PPAPINaclTest.FileIO_ParallelReads is flaky on Mac and Windows.
-// http://crbug.com/121104
-#if defined(OS_MACOSX) || defined(OS_WIN)
-#define MAYBE_FileIO_ParallelReads DISABLED_FileIO_ParallelReads
-#else
-#define MAYBE_FileIO_ParallelReads FileIO_ParallelReads
-#endif
-
-// PPAPINaclTest.FileIO_AbortCalls is often flaky on Windows.
-// http://crbug.com/160034
-#if defined(OS_WIN)
-#define MAYBE_FileIO_AbortCalls DISABLED_FileIO_AbortCalls
-#else
-#define MAYBE_FileIO_AbortCalls FileIO_AbortCalls
-#endif
-
-TEST_PPAPI_NACL(FileIO_Open)
-TEST_PPAPI_NACL(MAYBE_FileIO_AbortCalls)
-TEST_PPAPI_NACL(MAYBE_FileIO_ParallelReads)
-// http://crbug.com/167150
-TEST_PPAPI_NACL(DISABLED_FileIO_ParallelWrites)
-TEST_PPAPI_NACL(FileIO_NotAllowMixedReadWrite)
-TEST_PPAPI_NACL(FileIO_TouchQuery)
-TEST_PPAPI_NACL(FileIO_ReadWriteSetLength)
-TEST_PPAPI_NACL(FileIO_ReadToArrayWriteSetLength)
-// The following test requires PPB_FileIO_Trusted, not available in NaCl.
-TEST_PPAPI_NACL(DISABLED_FileIO_WillWriteWillSetLength)
+// FileIO tests.
+IN_PROC_BROWSER_TEST_F(PPAPITest, FileIO) {
+  RunTestViaHTTP(
+      LIST_TEST(FileIO_Open)
+      LIST_TEST(FileIO_OpenDirectory)
+      LIST_TEST(FileIO_AbortCalls)
+      LIST_TEST(FileIO_ParallelReads)
+      LIST_TEST(FileIO_ParallelWrites)
+      LIST_TEST(FileIO_NotAllowMixedReadWrite)
+      LIST_TEST(FileIO_ReadWriteSetLength)
+      LIST_TEST(FileIO_ReadToArrayWriteSetLength)
+      LIST_TEST(FileIO_TouchQuery)
+      LIST_TEST(FileIO_WillWriteWillSetLength)
+  );
+}
+IN_PROC_BROWSER_TEST_F(OutOfProcessPPAPITest, FileIO) {
+  RunTestViaHTTP(
+      LIST_TEST(FileIO_Open)
+      LIST_TEST(FileIO_AbortCalls)
+      LIST_TEST(FileIO_ParallelReads)
+      LIST_TEST(FileIO_ParallelWrites)
+      LIST_TEST(FileIO_NotAllowMixedReadWrite)
+      LIST_TEST(FileIO_ReadWriteSetLength)
+      LIST_TEST(FileIO_ReadToArrayWriteSetLength)
+      LIST_TEST(FileIO_TouchQuery)
+      LIST_TEST(FileIO_WillWriteWillSetLength)
+  );
+}
+IN_PROC_BROWSER_TEST_F(PPAPINaClNewlibTest, FileIO) {
+  RunTestViaHTTP(
+      LIST_TEST(FileIO_Open)
+      LIST_TEST(FileIO_AbortCalls)
+      LIST_TEST(FileIO_ParallelReads)
+      LIST_TEST(FileIO_ParallelWrites)
+      LIST_TEST(FileIO_NotAllowMixedReadWrite)
+      LIST_TEST(FileIO_ReadWriteSetLength)
+      LIST_TEST(FileIO_ReadToArrayWriteSetLength)
+      LIST_TEST(FileIO_TouchQuery)
+      // The following test requires PPB_FileIO_Trusted, not available in NaCl.
+      LIST_TEST(DISABLED_FileIO_WillWriteWillSetLength)
+  );
+}
+IN_PROC_BROWSER_TEST_F(PPAPINaClGLibcTest, MAYBE_GLIBC(FileIO)) {
+  RunTestViaHTTP(
+      LIST_TEST(FileIO_Open)
+      LIST_TEST(FileIO_AbortCalls)
+      LIST_TEST(FileIO_ParallelReads)
+      LIST_TEST(FileIO_ParallelWrites)
+      LIST_TEST(FileIO_NotAllowMixedReadWrite)
+      LIST_TEST(FileIO_ReadWriteSetLength)
+      LIST_TEST(FileIO_ReadToArrayWriteSetLength)
+      LIST_TEST(FileIO_TouchQuery)
+      // The following test requires PPB_FileIO_Trusted, not available in NaCl.
+      LIST_TEST(DISABLED_FileIO_WillWriteWillSetLength)
+  );
+}
 
 TEST_PPAPI_IN_PROCESS_VIA_HTTP(FileRef)
 TEST_PPAPI_OUT_OF_PROCESS_VIA_HTTP(FileRef)
@@ -632,53 +661,107 @@ TEST_PPAPI_OUT_OF_PROCESS_VIA_HTTP(DirectoryReader)
 // runs in process, so there's currently no need for a proxy.
 TEST_PPAPI_IN_PROCESS(UMA)
 
-TEST_PPAPI_IN_PROCESS(NetAddressPrivate_AreEqual)
-TEST_PPAPI_IN_PROCESS(NetAddressPrivate_AreHostsEqual)
-TEST_PPAPI_IN_PROCESS(NetAddressPrivate_Describe)
-TEST_PPAPI_IN_PROCESS(NetAddressPrivate_ReplacePort)
-TEST_PPAPI_IN_PROCESS(NetAddressPrivate_GetAnyAddress)
-TEST_PPAPI_IN_PROCESS(NetAddressPrivate_DescribeIPv6)
-TEST_PPAPI_IN_PROCESS(NetAddressPrivate_GetFamily)
-TEST_PPAPI_IN_PROCESS(NetAddressPrivate_GetPort)
-TEST_PPAPI_IN_PROCESS(NetAddressPrivate_GetAddress)
-TEST_PPAPI_IN_PROCESS(NetAddressPrivate_GetScopeID)
-TEST_PPAPI_OUT_OF_PROCESS(NetAddressPrivate_AreEqual)
-TEST_PPAPI_OUT_OF_PROCESS(NetAddressPrivate_AreHostsEqual)
-TEST_PPAPI_OUT_OF_PROCESS(NetAddressPrivate_Describe)
-TEST_PPAPI_OUT_OF_PROCESS(NetAddressPrivate_ReplacePort)
-TEST_PPAPI_OUT_OF_PROCESS(NetAddressPrivate_GetAnyAddress)
-TEST_PPAPI_OUT_OF_PROCESS(NetAddressPrivate_DescribeIPv6)
-TEST_PPAPI_OUT_OF_PROCESS(NetAddressPrivate_GetFamily)
-TEST_PPAPI_OUT_OF_PROCESS(NetAddressPrivate_GetPort)
-TEST_PPAPI_OUT_OF_PROCESS(NetAddressPrivate_GetAddress)
-TEST_PPAPI_OUT_OF_PROCESS(NetAddressPrivate_GetScopeID)
+// NetAddress tests
+IN_PROC_BROWSER_TEST_F(PPAPITest, NetAddress) {
+  RunTestViaHTTP(
+      LIST_TEST(NetAddressPrivate_AreEqual)
+      LIST_TEST(NetAddressPrivate_AreHostsEqual)
+      LIST_TEST(NetAddressPrivate_Describe)
+      LIST_TEST(NetAddressPrivate_ReplacePort)
+      LIST_TEST(NetAddressPrivate_GetAnyAddress)
+      LIST_TEST(NetAddressPrivate_DescribeIPv6)
+      LIST_TEST(NetAddressPrivate_GetFamily)
+      LIST_TEST(NetAddressPrivate_GetPort)
+      LIST_TEST(NetAddressPrivate_GetAddress)
+      LIST_TEST(NetAddressPrivate_GetScopeID)
+  );
+}
+IN_PROC_BROWSER_TEST_F(OutOfProcessPPAPITest, NetAddress) {
+  RunTestViaHTTP(
+      LIST_TEST(NetAddressPrivate_AreEqual)
+      LIST_TEST(NetAddressPrivate_AreHostsEqual)
+      LIST_TEST(NetAddressPrivate_Describe)
+      LIST_TEST(NetAddressPrivate_ReplacePort)
+      LIST_TEST(NetAddressPrivate_GetAnyAddress)
+      LIST_TEST(NetAddressPrivate_DescribeIPv6)
+      LIST_TEST(NetAddressPrivate_GetFamily)
+      LIST_TEST(NetAddressPrivate_GetPort)
+      LIST_TEST(NetAddressPrivate_GetAddress)
+      LIST_TEST(NetAddressPrivate_GetScopeID)
+  );
+}
+IN_PROC_BROWSER_TEST_F(PPAPINaClNewlibTest, NetAddress) {
+  RunTestViaHTTP(
+      LIST_TEST(NetAddressPrivateUntrusted_AreEqual)
+      LIST_TEST(NetAddressPrivateUntrusted_AreHostsEqual)
+      LIST_TEST(NetAddressPrivateUntrusted_Describe)
+      LIST_TEST(NetAddressPrivateUntrusted_ReplacePort)
+      LIST_TEST(NetAddressPrivateUntrusted_GetAnyAddress)
+      LIST_TEST(NetAddressPrivateUntrusted_GetFamily)
+      LIST_TEST(NetAddressPrivateUntrusted_GetPort)
+      LIST_TEST(NetAddressPrivateUntrusted_GetAddress)
+  );
+}
+IN_PROC_BROWSER_TEST_F(PPAPINaClGLibcTest, MAYBE_GLIBC(NetAddress)) {
+  RunTestViaHTTP(
+      LIST_TEST(NetAddressPrivateUntrusted_AreEqual)
+      LIST_TEST(NetAddressPrivateUntrusted_AreHostsEqual)
+      LIST_TEST(NetAddressPrivateUntrusted_Describe)
+      LIST_TEST(NetAddressPrivateUntrusted_ReplacePort)
+      LIST_TEST(NetAddressPrivateUntrusted_GetAnyAddress)
+      LIST_TEST(NetAddressPrivateUntrusted_GetFamily)
+      LIST_TEST(NetAddressPrivateUntrusted_GetPort)
+      LIST_TEST(NetAddressPrivateUntrusted_GetAddress)
+  );
+}
 
-TEST_PPAPI_NACL(NetAddressPrivateUntrusted_AreEqual)
-TEST_PPAPI_NACL(NetAddressPrivateUntrusted_AreHostsEqual)
-TEST_PPAPI_NACL(NetAddressPrivateUntrusted_Describe)
-TEST_PPAPI_NACL(NetAddressPrivateUntrusted_ReplacePort)
-TEST_PPAPI_NACL(NetAddressPrivateUntrusted_GetAnyAddress)
-TEST_PPAPI_NACL(NetAddressPrivateUntrusted_GetFamily)
-TEST_PPAPI_NACL(NetAddressPrivateUntrusted_GetPort)
-TEST_PPAPI_NACL(NetAddressPrivateUntrusted_GetAddress)
+// NetworkMonitor tests.
+IN_PROC_BROWSER_TEST_F(PPAPITest, NetworkMonitor) {
+  RunTestViaHTTP(
+      LIST_TEST(NetworkMonitorPrivate_Basic)
+      LIST_TEST(NetworkMonitorPrivate_2Monitors)
+      LIST_TEST(NetworkMonitorPrivate_DeleteInCallback)
+      LIST_TEST(NetworkMonitorPrivate_ListObserver)
+  );
+}
+IN_PROC_BROWSER_TEST_F(OutOfProcessPPAPITest, NetworkMonitor) {
+  RunTestViaHTTP(
+      LIST_TEST(NetworkMonitorPrivate_Basic)
+      LIST_TEST(NetworkMonitorPrivate_2Monitors)
+      LIST_TEST(NetworkMonitorPrivate_DeleteInCallback)
+      LIST_TEST(NetworkMonitorPrivate_ListObserver)
+  );
+}
+IN_PROC_BROWSER_TEST_F(PPAPINaClNewlibTest, NetworkMonitor) {
+  RunTestViaHTTP(
+      LIST_TEST(NetworkMonitorPrivate_Basic)
+      LIST_TEST(NetworkMonitorPrivate_2Monitors)
+      LIST_TEST(NetworkMonitorPrivate_DeleteInCallback)
+      LIST_TEST(NetworkMonitorPrivate_ListObserver)
+  );
+}
+IN_PROC_BROWSER_TEST_F(PPAPINaClGLibcTest, MAYBE_GLIBC(NetworkMonitor)) {
+  RunTestViaHTTP(
+      LIST_TEST(NetworkMonitorPrivate_Basic)
+      LIST_TEST(NetworkMonitorPrivate_2Monitors)
+      LIST_TEST(NetworkMonitorPrivate_DeleteInCallback)
+      LIST_TEST(NetworkMonitorPrivate_ListObserver)
+  );
+}
 
-TEST_PPAPI_IN_PROCESS(NetworkMonitorPrivate_Basic)
-TEST_PPAPI_IN_PROCESS(NetworkMonitorPrivate_2Monitors)
-TEST_PPAPI_IN_PROCESS(NetworkMonitorPrivate_DeleteInCallback)
-TEST_PPAPI_IN_PROCESS(NetworkMonitorPrivate_ListObserver)
-TEST_PPAPI_OUT_OF_PROCESS(NetworkMonitorPrivate_Basic)
-TEST_PPAPI_OUT_OF_PROCESS(NetworkMonitorPrivate_2Monitors)
-TEST_PPAPI_OUT_OF_PROCESS(NetworkMonitorPrivate_DeleteInCallback)
-TEST_PPAPI_OUT_OF_PROCESS(NetworkMonitorPrivate_ListObserver)
-TEST_PPAPI_NACL(NetworkMonitorPrivate_Basic)
-TEST_PPAPI_NACL(NetworkMonitorPrivate_2Monitors)
-TEST_PPAPI_NACL(NetworkMonitorPrivate_DeleteInCallback)
-TEST_PPAPI_NACL(NetworkMonitorPrivate_ListObserver)
-
-TEST_PPAPI_IN_PROCESS(Flash_SetInstanceAlwaysOnTop)
-TEST_PPAPI_IN_PROCESS(Flash_GetCommandLineArgs)
-TEST_PPAPI_OUT_OF_PROCESS(Flash_SetInstanceAlwaysOnTop)
-TEST_PPAPI_OUT_OF_PROCESS(Flash_GetCommandLineArgs)
+// Flash tests.
+IN_PROC_BROWSER_TEST_F(PPAPITest, Flash) {
+  RunTestViaHTTP(
+      LIST_TEST(Flash_SetInstanceAlwaysOnTop)
+      LIST_TEST(Flash_GetCommandLineArgs)
+  );
+}
+IN_PROC_BROWSER_TEST_F(OutOfProcessPPAPITest, Flash) {
+  RunTestViaHTTP(
+      LIST_TEST(Flash_SetInstanceAlwaysOnTop)
+      LIST_TEST(Flash_GetCommandLineArgs)
+  );
+}
 
 // In-process WebSocket tests
 IN_PROC_BROWSER_TEST_F(PPAPITest, WebSocket) {
@@ -780,14 +863,7 @@ IN_PROC_BROWSER_TEST_F(PPAPINaClNewlibTest, WebSocket) {
 }
 
 // NaClGLibc WebSocket tests
-// NaCl glibc tests are not included in ARM as there is no glibc support
-// on ARM today.
-#if defined(ARCH_CPU_ARM_FAMILY)
-#define MAYBE_GLIBC_WebSocket DISABLED_WebSocket
-#else
-#define MAYBE_GLIBC_WebSocket WebSocket
-#endif
-IN_PROC_BROWSER_TEST_F(PPAPINaClGLibcTest, MAYBE_GLIBC_WebSocket) {
+IN_PROC_BROWSER_TEST_F(PPAPINaClGLibcTest, MAYBE_GLIBC(WebSocket)) {
   RunTestWithWebSocketServer(
       LIST_TEST(WebSocket_IsWebSocket)
       LIST_TEST(WebSocket_UninitializedPropertiesAccess)
@@ -844,38 +920,41 @@ IN_PROC_BROWSER_TEST_F(PPAPINaClNewlibTest, AudioConfig) {
 }
 
 // NaClGLibc AudioConfig tests
-// NaCl glibc tests are not included in ARM as there is no glibc support
-// on ARM today.
-#if defined(ARCH_CPU_ARM_FAMILY)
-#define MAYBE_GLIBC_AudioConfig DISABLED_AudioConfig
-#else
-#define MAYBE_GLIBC_AudioConfig AudioConfig
-#endif
-IN_PROC_BROWSER_TEST_F(PPAPINaClGLibcTest, MAYBE_GLIBC_AudioConfig) {
+IN_PROC_BROWSER_TEST_F(PPAPINaClGLibcTest, MAYBE_GLIBC(AudioConfig)) {
   RunTestViaHTTP(
       LIST_TEST(AudioConfig_RecommendSampleRate)
       LIST_TEST(AudioConfig_ValidConfigs)
       LIST_TEST(AudioConfig_InvalidConfigs));
 }
 
-// Only run audio output tests if we have an audio device available.
-// TODO(raymes): We should probably test scenarios where there is no audio
-// device available.
-TEST_PPAPI_IN_PROCESS(Audio_Creation)
-TEST_PPAPI_IN_PROCESS(Audio_DestroyNoStop)
-TEST_PPAPI_IN_PROCESS(Audio_Failures)
-TEST_PPAPI_IN_PROCESS(Audio_AudioCallback1)
-TEST_PPAPI_IN_PROCESS(Audio_AudioCallback2)
-TEST_PPAPI_OUT_OF_PROCESS(Audio_Creation)
-TEST_PPAPI_OUT_OF_PROCESS(Audio_DestroyNoStop)
-TEST_PPAPI_OUT_OF_PROCESS(Audio_Failures)
-TEST_PPAPI_OUT_OF_PROCESS(Audio_AudioCallback1)
-TEST_PPAPI_OUT_OF_PROCESS(Audio_AudioCallback2)
-TEST_PPAPI_NACL(Audio_Creation)
-TEST_PPAPI_NACL(Audio_DestroyNoStop)
-TEST_PPAPI_NACL(Audio_Failures)
-TEST_PPAPI_NACL(Audio_AudioCallback1)
-TEST_PPAPI_NACL(Audio_AudioCallback2)
+IN_PROC_BROWSER_TEST_F(PPAPITest, Audio) {
+  RunTest(LIST_TEST(Audio_Creation)
+          LIST_TEST(Audio_DestroyNoStop)
+          LIST_TEST(Audio_Failures)
+          LIST_TEST(Audio_AudioCallback1)
+          LIST_TEST(Audio_AudioCallback2));
+}
+IN_PROC_BROWSER_TEST_F(OutOfProcessPPAPITest, Audio) {
+  RunTest(LIST_TEST(Audio_Creation)
+          LIST_TEST(Audio_DestroyNoStop)
+          LIST_TEST(Audio_Failures)
+          LIST_TEST(Audio_AudioCallback1)
+          LIST_TEST(Audio_AudioCallback2));
+}
+IN_PROC_BROWSER_TEST_F(PPAPINaClNewlibTest, Audio) {
+  RunTestViaHTTP(LIST_TEST(Audio_Creation)
+                 LIST_TEST(Audio_DestroyNoStop)
+                 LIST_TEST(Audio_Failures)
+                 LIST_TEST(Audio_AudioCallback1)
+                 LIST_TEST(Audio_AudioCallback2));
+}
+IN_PROC_BROWSER_TEST_F(PPAPINaClGLibcTest, MAYBE_GLIBC(Audio)) {
+  RunTestViaHTTP(LIST_TEST(Audio_Creation)
+                 LIST_TEST(Audio_DestroyNoStop)
+                 LIST_TEST(Audio_Failures)
+                 LIST_TEST(Audio_AudioCallback1)
+                 LIST_TEST(Audio_AudioCallback2));
+}
 
 TEST_PPAPI_IN_PROCESS(View_CreatedVisible);
 TEST_PPAPI_OUT_OF_PROCESS(View_CreatedVisible);
@@ -943,26 +1022,44 @@ IN_PROC_BROWSER_TEST_F(PPAPITest, InputEvent_AcceptTouchEvent) {
   }
 }
 
-TEST_PPAPI_IN_PROCESS(View_SizeChange);
-TEST_PPAPI_OUT_OF_PROCESS(View_SizeChange);
-TEST_PPAPI_NACL(View_SizeChange);
-TEST_PPAPI_IN_PROCESS(View_ClipChange);
-TEST_PPAPI_OUT_OF_PROCESS(View_ClipChange);
-TEST_PPAPI_NACL(View_ClipChange);
+IN_PROC_BROWSER_TEST_F(PPAPITest, View) {
+  RunTest(LIST_TEST(View_SizeChange)
+          LIST_TEST(View_ClipChange));
+}
+IN_PROC_BROWSER_TEST_F(OutOfProcessPPAPITest, View) {
+  RunTest(LIST_TEST(View_SizeChange)
+          LIST_TEST(View_ClipChange));
+}
+IN_PROC_BROWSER_TEST_F(PPAPINaClNewlibTest, View) {
+  RunTestViaHTTP(LIST_TEST(View_SizeChange)
+                 LIST_TEST(View_ClipChange));
+}
+IN_PROC_BROWSER_TEST_F(PPAPINaClGLibcTest, View) {
+  RunTestViaHTTP(LIST_TEST(View_SizeChange)
+                 LIST_TEST(View_ClipChange));
+}
 
-TEST_PPAPI_IN_PROCESS(ResourceArray_Basics)
-TEST_PPAPI_IN_PROCESS(ResourceArray_OutOfRangeAccess)
-TEST_PPAPI_IN_PROCESS(ResourceArray_EmptyArray)
-TEST_PPAPI_IN_PROCESS(ResourceArray_InvalidElement)
-TEST_PPAPI_OUT_OF_PROCESS(ResourceArray_Basics)
-TEST_PPAPI_OUT_OF_PROCESS(ResourceArray_OutOfRangeAccess)
-TEST_PPAPI_OUT_OF_PROCESS(ResourceArray_EmptyArray)
-TEST_PPAPI_OUT_OF_PROCESS(ResourceArray_InvalidElement)
+IN_PROC_BROWSER_TEST_F(PPAPITest, ResourceArray) {
+  RunTest(LIST_TEST(ResourceArray_Basics)
+          LIST_TEST(ResourceArray_OutOfRangeAccess)
+          LIST_TEST(ResourceArray_EmptyArray)
+          LIST_TEST(ResourceArray_InvalidElement));
+}
+IN_PROC_BROWSER_TEST_F(OutOfProcessPPAPITest, ResourceArray) {
+  RunTest(LIST_TEST(ResourceArray_Basics)
+          LIST_TEST(ResourceArray_OutOfRangeAccess)
+          LIST_TEST(ResourceArray_EmptyArray)
+          LIST_TEST(ResourceArray_InvalidElement));
+}
 
-TEST_PPAPI_IN_PROCESS(FlashMessageLoop_Basics)
-TEST_PPAPI_IN_PROCESS(FlashMessageLoop_RunWithoutQuit)
-TEST_PPAPI_OUT_OF_PROCESS(FlashMessageLoop_Basics)
-TEST_PPAPI_OUT_OF_PROCESS(FlashMessageLoop_RunWithoutQuit)
+IN_PROC_BROWSER_TEST_F(PPAPITest, FlashMessageLoop) {
+  RunTest(LIST_TEST(FlashMessageLoop_Basics)
+          LIST_TEST(FlashMessageLoop_RunWithoutQuit));
+}
+IN_PROC_BROWSER_TEST_F(OutOfProcessPPAPITest, FlashMessageLoop) {
+  RunTest(LIST_TEST(FlashMessageLoop_Basics)
+          LIST_TEST(FlashMessageLoop_RunWithoutQuit));
+}
 
 TEST_PPAPI_IN_PROCESS(MouseCursor)
 TEST_PPAPI_OUT_OF_PROCESS(MouseCursor)
@@ -993,7 +1090,7 @@ TEST_PPAPI_OUT_OF_PROCESS(FlashFile)
 // Mac/Aura reach NOTIMPLEMENTED/time out.
 // mac: http://crbug.com/96767
 // aura: http://crbug.com/104384
-#if defined(OS_MACOSX) || defined(USE_AURA)
+#if defined(OS_MACOSX)
 #define MAYBE_FlashFullscreen DISABLED_FlashFullscreen
 #else
 #define MAYBE_FlashFullscreen FlashFullscreen

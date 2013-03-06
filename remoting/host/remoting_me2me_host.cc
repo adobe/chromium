@@ -54,6 +54,7 @@
 #include "remoting/host/host_user_interface.h"
 #include "remoting/host/ipc_constants.h"
 #include "remoting/host/ipc_desktop_environment.h"
+#include "remoting/host/ipc_host_event_logger.h"
 #include "remoting/host/json_host_config.h"
 #include "remoting/host/log_to_server.h"
 #include "remoting/host/logging.h"
@@ -547,7 +548,10 @@ bool HostProcess::OnMessageReceived(const IPC::Message& message) {
                         DesktopSessionConnector::OnTerminalDisconnected)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
+
+  CHECK(handled) << "Received unexpected IPC type: " << message.type();
   return handled;
+
 #else  // !defined(REMOTING_MULTI_PROCESS)
   return false;
 #endif  // !defined(REMOTING_MULTI_PROCESS)
@@ -800,6 +804,7 @@ bool HostProcess::OnUsernamePolicyUpdate(bool host_username_match_required) {
 #endif
 
     if (shutdown) {
+      LOG(ERROR) << "The host username does not match.";
       ShutdownHost(kUsernameMismatchExitCode);
     }
   } else {
@@ -840,6 +845,8 @@ bool HostProcess::OnCurtainPolicyUpdate(bool curtain_required) {
     // TODO(jamiewalch): Fix this once we have implemented the multi-process
     // daemon architecture (crbug.com/134894)
     if (getuid() == 0) {
+      LOG(ERROR) << "Running the host in the console login session is yet not "
+                    "supported.";
       ShutdownHost(kLoginScreenNotSupportedExitCode);
       return false;
     }
@@ -848,12 +855,18 @@ bool HostProcess::OnCurtainPolicyUpdate(bool curtain_required) {
 
   if (curtain_required_ != curtain_required) {
     if (curtain_required)
-      LOG(ERROR) << "Policy requires curtain-mode.";
+      LOG(INFO) << "Policy requires curtain-mode.";
     else
-      LOG(ERROR) << "Policy does not require curtain-mode.";
+      LOG(INFO) << "Policy does not require curtain-mode.";
     curtain_required_ = curtain_required;
     if (curtaining_host_observer_)
       curtaining_host_observer_->SetEnableCurtaining(curtain_required_);
+
+    // The current Windows curtain mode implementation relies on this code
+    // restarting the host when the curtain mode policy changes. For example if
+    // the policy is enabled while someone is already connected to the console
+    // that session should be either curtained or disconnected. This code makes
+    // sure that the session will be disconnected by restarting the host.
     return true;
   }
   return false;
@@ -935,17 +948,33 @@ void HostProcess::StartHost() {
       this, host_id_, signal_strategy_.get(), directory_bot_jid_));
 
   log_to_server_.reset(
-      new LogToServer(host_, ServerLogEntry::ME2ME, signal_strategy_.get(),
-                      directory_bot_jid_));
-  host_event_logger_ = HostEventLogger::Create(host_, kApplicationName);
+      new LogToServer(host_->AsWeakPtr(), ServerLogEntry::ME2ME,
+                      signal_strategy_.get(), directory_bot_jid_));
+
+  // Set up repoting the host status notifications.
+#if defined(REMOTING_MULTI_PROCESS)
+  host_event_logger_.reset(
+      new IpcHostEventLogger(host_->AsWeakPtr(), daemon_channel_.get()));
+#else  // !defined(REMOTING_MULTI_PROCESS)
+  host_event_logger_ =
+      HostEventLogger::Create(host_->AsWeakPtr(), kApplicationName);
+#endif  // !defined(REMOTING_MULTI_PROCESS)
 
   resizing_host_observer_.reset(
-      new ResizingHostObserver(desktop_resizer_.get(), host_));
+      new ResizingHostObserver(desktop_resizer_.get(), host_->AsWeakPtr()));
+
+#if defined(REMOTING_RDP_SESSION)
+  // TODO(alexeypa): do not create |curtain_| in this case.
+  CurtainMode* curtain = static_cast<IpcDesktopEnvironmentFactory*>(
+      desktop_environment_factory_.get());
+#else  // !defined(REMOTING_RDP_SESSION)
+  CurtainMode* curtain = curtain_.get();
+#endif  // !defined(REMOTING_RDP_SESSION)
 
   // Create a host observer to enable/disable curtain mode as clients connect
   // and disconnect.
   curtaining_host_observer_.reset(new CurtainingHostObserver(
-                                  curtain_.get(), host_));
+      curtain, host_->AsWeakPtr()));
   curtaining_host_observer_->SetEnableCurtaining(curtain_required_);
 
   if (host_user_interface_.get()) {

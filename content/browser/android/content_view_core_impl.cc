@@ -124,15 +124,14 @@ struct ContentViewCoreImpl::JavaObject {
   jmethodID rect_constructor;
   ScopedJavaLocalRef<jobject> CreateJavaRect(
       JNIEnv* env,
-      const gfx::Rect& rect,
-      float scale) {
+      const gfx::Rect& rect) {
     return ScopedJavaLocalRef<jobject>(
         env, env->NewObject(rect_clazz.obj(),
                             rect_constructor,
-                            static_cast<int>(rect.x() * scale),
-                            static_cast<int>(rect.y() * scale),
-                            static_cast<int>(rect.right() * scale),
-                            static_cast<int>(rect.bottom() * scale)));
+                            static_cast<int>(rect.x()),
+                            static_cast<int>(rect.y()),
+                            static_cast<int>(rect.right()),
+                            static_cast<int>(rect.bottom())));
   }
 };
 
@@ -389,33 +388,29 @@ void ContentViewCoreImpl::OnTabCrashed() {
   Java_ContentViewCore_onTabCrash(env, obj.obj());
 }
 
-void ContentViewCoreImpl::UpdateContentSize(int width, int height) {
+// All positions and sizes are in CSS pixels.
+// Note that viewport_width/height is a best effort based.
+// ContentViewCore has the actual information about the physical viewport size.
+void ContentViewCoreImpl::UpdateFrameInfo(
+    float scroll_offset_x, float scroll_offset_y,
+    float page_scale_factor,
+    float min_page_scale_factor, float max_page_scale_factor,
+    float content_width, float content_height,
+    float viewport_width, float viewport_height) {
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> obj = java_ref_.get(env);
   if (obj.is_null())
     return;
-  Java_ContentViewCore_updateContentSize(env, obj.obj(), width, height);
-}
-
-void ContentViewCoreImpl::UpdateScrollOffsetAndPageScaleFactor(int x, int y,
-                                                               float scale) {
-  JNIEnv* env = AttachCurrentThread();
-  ScopedJavaLocalRef<jobject> obj = java_ref_.get(env);
-  if (obj.is_null())
-    return;
-  Java_ContentViewCore_updateScrollOffsetAndPageScaleFactor(
-      env, obj.obj(), static_cast<int>(x * GetDpiScale()),
-      static_cast<int>(y * GetDpiScale()), scale);
-}
-
-void ContentViewCoreImpl::UpdatePageScaleLimits(float minimum_scale,
-                                                float maximum_scale) {
-  JNIEnv* env = AttachCurrentThread();
-  ScopedJavaLocalRef<jobject> obj = java_ref_.get(env);
-  if (obj.is_null())
-    return;
-  Java_ContentViewCore_updatePageScaleLimits(env, obj.obj(), minimum_scale,
-                                             maximum_scale);
+  Java_ContentViewCore_updateFrameInfo(
+      env, obj.obj(),
+      scroll_offset_x,
+      scroll_offset_y,
+      page_scale_factor,
+      min_page_scale_factor, max_page_scale_factor,
+      content_width,
+      content_height,
+      viewport_width,
+      viewport_height);
 }
 
 void ContentViewCoreImpl::UpdateOffsetsForFullscreen(float controls_offset_y,
@@ -536,26 +531,26 @@ void ContentViewCoreImpl::OnSelectionBoundsChanged(
   ScopedJavaLocalRef<jobject> obj = java_ref_.get(env);
   if (obj.is_null())
     return;
-  ScopedJavaLocalRef<jobject> anchor_rect(
-      java_object_->CreateJavaRect(env, params.anchor_rect, 1.f));
-  ScopedJavaLocalRef<jobject> focus_rect(
-      java_object_->CreateJavaRect(env, params.focus_rect, 1.f));
+  ScopedJavaLocalRef<jobject> anchor_rect_dip(
+      java_object_->CreateJavaRect(env, params.anchor_rect));
+  ScopedJavaLocalRef<jobject> focus_rect_dip(
+      java_object_->CreateJavaRect(env, params.focus_rect));
   Java_ContentViewCore_onSelectionBoundsChanged(env, obj.obj(),
-                                                anchor_rect.obj(),
+                                                anchor_rect_dip.obj(),
                                                 params.anchor_dir,
-                                                focus_rect.obj(),
+                                                focus_rect_dip.obj(),
                                                 params.focus_dir,
                                                 params.is_anchor_first);
 }
 
-void ContentViewCoreImpl::ShowPastePopup(int x, int y) {
+void ContentViewCoreImpl::ShowPastePopup(int x_dip, int y_dip) {
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> obj = java_ref_.get(env);
   if (obj.is_null())
     return;
   Java_ContentViewCore_showPastePopup(env, obj.obj(),
-                                      static_cast<jint>(x),
-                                      static_cast<jint>(y));
+                                      static_cast<jint>(x_dip),
+                                      static_cast<jint>(y_dip));
 }
 
 unsigned int ContentViewCoreImpl::GetScaledContentTexture(
@@ -608,18 +603,28 @@ void ContentViewCoreImpl::ShowDisambiguationPopup(
                                                java_bitmap.obj());
 }
 
-gfx::Size ContentViewCoreImpl::GetPhysicalSize() const {
+gfx::Size ContentViewCoreImpl::GetPhysicalBackingSize() const {
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> j_obj = java_ref_.get(env);
   if (j_obj.is_null())
     return gfx::Size();
-  return gfx::Size(Java_ContentViewCore_getWidth(env, j_obj.obj()),
-                   Java_ContentViewCore_getHeight(env, j_obj.obj()));
+  return gfx::Size(
+      Java_ContentViewCore_getPhysicalBackingWidthPix(env, j_obj.obj()),
+      Java_ContentViewCore_getPhysicalBackingHeightPix(env, j_obj.obj()));
 }
 
-gfx::Size ContentViewCoreImpl::GetDIPSize() const {
+gfx::Size ContentViewCoreImpl::GetViewportSizePix() const {
+  JNIEnv* env = AttachCurrentThread();
+  ScopedJavaLocalRef<jobject> j_obj = java_ref_.get(env);
+  if (j_obj.is_null())
+    return gfx::Size();
+  return gfx::Size(Java_ContentViewCore_getViewportWidthPix(env, j_obj.obj()),
+                   Java_ContentViewCore_getViewportHeightPix(env, j_obj.obj()));
+}
+
+gfx::Size ContentViewCoreImpl::GetViewportSizeDip() const {
   return gfx::ToCeiledSize(
-      gfx::ScaleSize(GetPhysicalSize(), 1 / GetDpiScale()));
+      gfx::ScaleSize(GetViewportSizePix(), 1.0f / GetDpiScale()));
 }
 
 void ContentViewCoreImpl::AttachLayer(scoped_refptr<cc::Layer> layer) {
@@ -794,10 +799,8 @@ jboolean ContentViewCoreImpl::SendTouchEvent(JNIEnv* env,
   return false;
 }
 
-int ContentViewCoreImpl::GetTouchPadding()
-{
-  // TODO(trchen): derive a proper padding value from device dpi
-  return 48;
+float ContentViewCoreImpl::GetTouchPaddingDip() {
+  return 48.0f / GetDpiScale();
 }
 
 float ContentViewCoreImpl::GetDpiScale() const {
@@ -807,8 +810,8 @@ float ContentViewCoreImpl::GetDpiScale() const {
 jboolean ContentViewCoreImpl::SendMouseMoveEvent(JNIEnv* env,
                                                  jobject obj,
                                                  jlong time_ms,
-                                                 jint x,
-                                                 jint y) {
+                                                 jfloat x,
+                                                 jfloat y) {
   RenderWidgetHostViewAndroid* rwhv = GetRenderWidgetHostViewAndroid();
   if (!rwhv)
     return false;
@@ -825,8 +828,8 @@ jboolean ContentViewCoreImpl::SendMouseMoveEvent(JNIEnv* env,
 jboolean ContentViewCoreImpl::SendMouseWheelEvent(JNIEnv* env,
                                                   jobject obj,
                                                   jlong time_ms,
-                                                  jint x,
-                                                  jint y,
+                                                  jfloat x,
+                                                  jfloat y,
                                                   jfloat vertical_axis) {
   RenderWidgetHostViewAndroid* rwhv = GetRenderWidgetHostViewAndroid();
   if (!rwhv)
@@ -847,9 +850,8 @@ jboolean ContentViewCoreImpl::SendMouseWheelEvent(JNIEnv* env,
   return true;
 }
 
-WebGestureEvent ContentViewCoreImpl::MakeGestureEvent(WebInputEvent::Type type,
-                                                      long time_ms,
-                                                      int x, int y) const {
+WebGestureEvent ContentViewCoreImpl::MakeGestureEvent(
+    WebInputEvent::Type type, long time_ms, float x, float y) const {
   WebGestureEvent event;
   event.type = type;
   event.x = x / GetDpiScale();
@@ -878,7 +880,7 @@ void ContentViewCoreImpl::SendGestureEvent(
 }
 
 void ContentViewCoreImpl::ScrollBegin(JNIEnv* env, jobject obj, jlong time_ms,
-                                      jint x, jint y) {
+                                      jfloat x, jfloat y) {
   WebGestureEvent event = MakeGestureEvent(
       WebInputEvent::GestureScrollBegin, time_ms, x, y);
   SendGestureEvent(event);
@@ -891,10 +893,9 @@ void ContentViewCoreImpl::ScrollEnd(JNIEnv* env, jobject obj, jlong time_ms) {
 }
 
 void ContentViewCoreImpl::ScrollBy(JNIEnv* env, jobject obj, jlong time_ms,
-                                   jint x, jint y, jint dx, jint dy) {
+                                   jfloat x, jfloat y, jfloat dx, jfloat dy) {
   WebGestureEvent event = MakeGestureEvent(
       WebInputEvent::GestureScrollUpdate, time_ms, x, y);
-
   event.data.scrollUpdate.deltaX = -dx / GetDpiScale();
   event.data.scrollUpdate.deltaY = -dy / GetDpiScale();
 
@@ -902,9 +903,12 @@ void ContentViewCoreImpl::ScrollBy(JNIEnv* env, jobject obj, jlong time_ms,
 }
 
 void ContentViewCoreImpl::FlingStart(JNIEnv* env, jobject obj, jlong time_ms,
-                                     jint x, jint y, jint vx, jint vy) {
+                                     jfloat x, jfloat y, jfloat vx, jfloat vy) {
   WebGestureEvent event = MakeGestureEvent(
       WebInputEvent::GestureFlingStart, time_ms, x, y);
+
+  // Velocity should not be scaled by DIP since that interacts poorly with the
+  // deceleration constants.  The DIP scaling is done on the renderer.
   event.data.flingStart.velocityX = vx;
   event.data.flingStart.velocityY = vy;
 
@@ -918,16 +922,16 @@ void ContentViewCoreImpl::FlingCancel(JNIEnv* env, jobject obj, jlong time_ms) {
 }
 
 void ContentViewCoreImpl::SingleTap(JNIEnv* env, jobject obj, jlong time_ms,
-                                    jint x, jint y,
+                                    jfloat x, jfloat y,
                                     jboolean disambiguation_popup_tap) {
   WebGestureEvent event = MakeGestureEvent(
       WebInputEvent::GestureTap, time_ms, x, y);
 
   event.data.tap.tapCount = 1;
   if (!disambiguation_popup_tap) {
-    int touchPadding = GetTouchPadding();
-    event.data.tap.width = touchPadding / GetDpiScale();
-    event.data.tap.height = touchPadding / GetDpiScale();
+    const float touch_padding_dip = GetTouchPaddingDip();
+    event.data.tap.width = touch_padding_dip;
+    event.data.tap.height = touch_padding_dip;
   }
 
   SendGestureEvent(event);
@@ -935,7 +939,7 @@ void ContentViewCoreImpl::SingleTap(JNIEnv* env, jobject obj, jlong time_ms,
 
 void ContentViewCoreImpl::ShowPressState(JNIEnv* env, jobject obj,
                                          jlong time_ms,
-                                         jint x, jint y) {
+                                         jfloat x, jfloat y) {
   WebGestureEvent event = MakeGestureEvent(
       WebInputEvent::GestureTapDown, time_ms, x, y);
   SendGestureEvent(event);
@@ -944,52 +948,52 @@ void ContentViewCoreImpl::ShowPressState(JNIEnv* env, jobject obj,
 void ContentViewCoreImpl::ShowPressCancel(JNIEnv* env,
                                           jobject obj,
                                           jlong time_ms,
-                                          jint x,
-                                          jint y) {
+                                          jfloat x,
+                                          jfloat y) {
   WebGestureEvent event = MakeGestureEvent(
       WebInputEvent::GestureTapCancel, time_ms, x, y);
   SendGestureEvent(event);
 }
 
 void ContentViewCoreImpl::DoubleTap(JNIEnv* env, jobject obj, jlong time_ms,
-                                    jint x, jint y) {
+                                    jfloat x, jfloat y) {
   WebGestureEvent event = MakeGestureEvent(
       WebInputEvent::GestureDoubleTap, time_ms, x, y);
   SendGestureEvent(event);
 }
 
 void ContentViewCoreImpl::LongPress(JNIEnv* env, jobject obj, jlong time_ms,
-                                    jint x, jint y,
+                                    jfloat x, jfloat y,
                                     jboolean disambiguation_popup_tap) {
   WebGestureEvent event = MakeGestureEvent(
       WebInputEvent::GestureLongPress, time_ms, x, y);
 
   if (!disambiguation_popup_tap) {
-    int touchPadding = GetTouchPadding();
-    event.data.longPress.width = event.data.longPress.height =
-        touchPadding / GetDpiScale();
+    const float touch_padding_dip = GetTouchPaddingDip();
+    event.data.longPress.width = touch_padding_dip;
+    event.data.longPress.height = touch_padding_dip;
   }
 
   SendGestureEvent(event);
 }
 
 void ContentViewCoreImpl::LongTap(JNIEnv* env, jobject obj, jlong time_ms,
-                                  jint x, jint y,
+                                  jfloat x, jfloat y,
                                   jboolean disambiguation_popup_tap) {
   WebGestureEvent event = MakeGestureEvent(
       WebInputEvent::GestureLongTap, time_ms, x, y);
 
   if (!disambiguation_popup_tap) {
-    int touchPadding = GetTouchPadding();
-    event.data.longPress.width = event.data.longPress.height =
-        touchPadding / GetDpiScale();
+    const float touch_padding_dip = GetTouchPaddingDip();
+    event.data.longPress.width = touch_padding_dip;
+    event.data.longPress.height = touch_padding_dip;
   }
 
   SendGestureEvent(event);
 }
 
 void ContentViewCoreImpl::PinchBegin(JNIEnv* env, jobject obj, jlong time_ms,
-                                     jint x, jint y) {
+                                     jfloat x, jfloat y) {
   WebGestureEvent event = MakeGestureEvent(
       WebInputEvent::GesturePinchBegin, time_ms, x, y);
   SendGestureEvent(event);
@@ -1002,7 +1006,8 @@ void ContentViewCoreImpl::PinchEnd(JNIEnv* env, jobject obj, jlong time_ms) {
 }
 
 void ContentViewCoreImpl::PinchBy(JNIEnv* env, jobject obj, jlong time_ms,
-                                  jint anchor_x, jint anchor_y, jfloat delta) {
+                                  jfloat anchor_x, jfloat anchor_y,
+                                  jfloat delta) {
   WebGestureEvent event = MakeGestureEvent(
       WebInputEvent::GesturePinchUpdate, time_ms, anchor_x, anchor_y);
   event.data.pinchUpdate.scale = delta;
@@ -1011,8 +1016,8 @@ void ContentViewCoreImpl::PinchBy(JNIEnv* env, jobject obj, jlong time_ms,
 }
 
 void ContentViewCoreImpl::SelectBetweenCoordinates(JNIEnv* env, jobject obj,
-                                                   jint x1, jint y1,
-                                                   jint x2, jint y2) {
+                                                   jfloat x1, jfloat y1,
+                                                   jfloat x2, jfloat y2) {
   if (GetRenderWidgetHostViewAndroid()) {
     GetRenderWidgetHostViewAndroid()->SelectRange(
         gfx::Point(x1 / GetDpiScale(), y1 / GetDpiScale()),
@@ -1021,7 +1026,7 @@ void ContentViewCoreImpl::SelectBetweenCoordinates(JNIEnv* env, jobject obj,
 }
 
 void ContentViewCoreImpl::MoveCaret(JNIEnv* env, jobject obj,
-                                    jint x, jint y) {
+                                    jfloat x, jfloat y) {
   if (GetRenderWidgetHostViewAndroid()) {
     GetRenderWidgetHostViewAndroid()->MoveCaret(
         gfx::Point(x / GetDpiScale(), y / GetDpiScale()));
@@ -1142,15 +1147,10 @@ jboolean ContentViewCoreImpl::PopulateBitmapFromCompositor(JNIEnv* env,
   return view->PopulateBitmapWithContents(jbitmap);
 }
 
-void ContentViewCoreImpl::SetSize(JNIEnv* env,
-                                  jobject obj,
-                                  jint width,
-                                  jint height) {
+void ContentViewCoreImpl::WasResized(JNIEnv* env, jobject obj) {
   RenderWidgetHostViewAndroid* view = GetRenderWidgetHostViewAndroid();
-  if (!view)
-    return;
-
-  view->SetSize(gfx::Size(width, height));
+  if (view)
+    view->WasResized();
 }
 
 void ContentViewCoreImpl::ShowInterstitialPage(
@@ -1185,6 +1185,17 @@ jboolean ContentViewCoreImpl::IsRenderWidgetHostViewReady(JNIEnv* env,
 void ContentViewCoreImpl::ExitFullscreen(JNIEnv* env, jobject obj) {
   RenderViewHost* host = web_contents_->GetRenderViewHost();
   host->ExitFullscreen();
+}
+
+void ContentViewCoreImpl::EnableHidingTopControls(JNIEnv* env, jobject obj,
+                                                  bool enable) {
+  RenderViewHost* host = web_contents_->GetRenderViewHost();
+  host->Send(new ViewMsg_EnableHidingTopControls(host->GetRoutingID(), enable));
+}
+
+void ContentViewCoreImpl::ShowImeIfNeeded(JNIEnv* env, jobject obj) {
+  RenderViewHost* host = web_contents_->GetRenderViewHost();
+  host->Send(new ViewMsg_ShowImeIfNeeded(host->GetRoutingID()));
 }
 
 void ContentViewCoreImpl::ScrollFocusedEditableNodeIntoView(JNIEnv* env,
@@ -1323,7 +1334,7 @@ bool ContentViewCoreImpl::GetUseDesktopUserAgent(
   return entry && entry->GetIsOverridingUserAgent();
 }
 
-void ContentViewCoreImpl::ImeUpdateAdapter(int native_ime_adapter,
+void ContentViewCoreImpl::UpdateImeAdapter(int native_ime_adapter,
                                            int text_input_type,
                                            const std::string& text,
                                            int selection_start,
@@ -1337,7 +1348,7 @@ void ContentViewCoreImpl::ImeUpdateAdapter(int native_ime_adapter,
     return;
 
   ScopedJavaLocalRef<jstring> jstring_text = ConvertUTF8ToJavaString(env, text);
-  Java_ContentViewCore_imeUpdateAdapter(env, obj.obj(),
+  Java_ContentViewCore_updateImeAdapter(env, obj.obj(),
                                         native_ime_adapter, text_input_type,
                                         jstring_text.obj(),
                                         selection_start, selection_end,

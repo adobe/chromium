@@ -21,7 +21,6 @@ const char kFullWalletValidResponse[] =
     "  \"rest\":\"rest\","
     "  \"billing_address\":"
     "  {"
-    "    \"id\":\"id\","
     "    \"phone_number\":\"phone_number\","
     "    \"postal_address\":"
     "    {"
@@ -280,7 +279,8 @@ const char kFullWalletWithRequiredActions[] =
     "    \"UPGRADE_MIN_ADDRESS\","
     "    \"update_EXPIRATION_date\","
     "    \"INVALID_form_field\","
-    "    \"verify_CVV\""
+    "    \"verify_CVV\","
+    "    \" REQuIrE_PHONE_NumBER\t\n\r \""
     "  ]"
     "}";
 
@@ -304,7 +304,6 @@ const char kFullWalletMalformedBillingAddress[] =
     "  \"rest\":\"rest\","
     "  \"billing_address\":"
     "  {"
-    "    \"id\":\"id\","
     "    \"phone_number\":\"phone_number\","
     "    \"postal_address\":"
     "    {"
@@ -352,8 +351,8 @@ class FullWalletTest : public testing::Test {
  protected:
   void SetUpDictionary(const std::string& json) {
     scoped_ptr<Value> value(base::JSONReader::Read(json));
-    DCHECK(value.get());
-    DCHECK(value->IsType(Value::TYPE_DICTIONARY));
+    ASSERT_TRUE(value.get());
+    ASSERT_TRUE(value->IsType(Value::TYPE_DICTIONARY));
     dict.reset(static_cast<DictionaryValue*>(value.release()));
   }
   scoped_ptr<DictionaryValue> dict;
@@ -361,32 +360,32 @@ class FullWalletTest : public testing::Test {
 
 TEST_F(FullWalletTest, CreateFullWalletMissingExpirationMonth) {
   SetUpDictionary(kFullWalletMissingExpirationMonth);
-  ASSERT_EQ(NULL, FullWallet::CreateFullWallet(*dict).get());
+  EXPECT_EQ(NULL, FullWallet::CreateFullWallet(*dict).get());
 }
 
 TEST_F(FullWalletTest, CreateFullWalletMissingExpirationYear) {
   SetUpDictionary(kFullWalletMissingExpirationYear);
-  ASSERT_EQ(NULL, FullWallet::CreateFullWallet(*dict).get());
+  EXPECT_EQ(NULL, FullWallet::CreateFullWallet(*dict).get());
 }
 
 TEST_F(FullWalletTest, CreateFullWalletMissingIin) {
   SetUpDictionary(kFullWalletMissingIin);
-  ASSERT_EQ(NULL, FullWallet::CreateFullWallet(*dict).get());
+  EXPECT_EQ(NULL, FullWallet::CreateFullWallet(*dict).get());
 }
 
 TEST_F(FullWalletTest, CreateFullWalletMissingRest) {
   SetUpDictionary(kFullWalletMissingRest);
-  ASSERT_EQ(NULL, FullWallet::CreateFullWallet(*dict).get());
+  EXPECT_EQ(NULL, FullWallet::CreateFullWallet(*dict).get());
 }
 
 TEST_F(FullWalletTest, CreateFullWalletMissingBillingAddress) {
   SetUpDictionary(kFullWalletMissingBillingAddress);
-  ASSERT_EQ(NULL, FullWallet::CreateFullWallet(*dict).get());
+  EXPECT_EQ(NULL, FullWallet::CreateFullWallet(*dict).get());
 }
 
 TEST_F(FullWalletTest, CreateFullWalletMalformedBillingAddress) {
   SetUpDictionary(kFullWalletMalformedBillingAddress);
-  ASSERT_EQ(NULL, FullWallet::CreateFullWallet(*dict).get());
+  EXPECT_EQ(NULL, FullWallet::CreateFullWallet(*dict).get());
 }
 
 TEST_F(FullWalletTest, CreateFullWalletWithRequiredActions) {
@@ -397,6 +396,7 @@ TEST_F(FullWalletTest, CreateFullWalletWithRequiredActions) {
   required_actions.push_back(UPDATE_EXPIRATION_DATE);
   required_actions.push_back(INVALID_FORM_FIELD);
   required_actions.push_back(VERIFY_CVV);
+  required_actions.push_back(REQUIRE_PHONE_NUMBER);
 
   FullWallet full_wallet(-1,
                          -1,
@@ -405,9 +405,9 @@ TEST_F(FullWalletTest, CreateFullWalletWithRequiredActions) {
                          scoped_ptr<Address>(),
                          scoped_ptr<Address>(),
                          required_actions);
-  ASSERT_EQ(full_wallet, *FullWallet::CreateFullWallet(*dict));
+  EXPECT_EQ(full_wallet, *FullWallet::CreateFullWallet(*dict));
 
-  DCHECK(!required_actions.empty());
+  ASSERT_FALSE(required_actions.empty());
   required_actions.pop_back();
   FullWallet different_required_actions(
       -1,
@@ -417,16 +417,17 @@ TEST_F(FullWalletTest, CreateFullWalletWithRequiredActions) {
       scoped_ptr<Address>(),
       scoped_ptr<Address>(),
       required_actions);
-  ASSERT_NE(full_wallet, different_required_actions);
+  EXPECT_NE(full_wallet, different_required_actions);
 }
 
 TEST_F(FullWalletTest, CreateFullWalletWithInvalidRequiredActions) {
   SetUpDictionary(kFullWalletWithInvalidRequiredActions);
-  ASSERT_EQ(NULL, FullWallet::CreateFullWallet(*dict).get());
+  EXPECT_EQ(NULL, FullWallet::CreateFullWallet(*dict).get());
 }
 
 TEST_F(FullWalletTest, CreateFullWallet) {
   SetUpDictionary(kFullWalletValidResponse);
+  // NOTE: FullWallet billing address doesn't require an ID.
   scoped_ptr<Address> billing_address(new Address(
       "country_name_code",
       ASCIIToUTF16("recipient_name"),
@@ -436,7 +437,7 @@ TEST_F(FullWalletTest, CreateFullWallet) {
       ASCIIToUTF16("administrative_area_name"),
       ASCIIToUTF16("postal_code_number"),
       ASCIIToUTF16("phone_number"),
-      "id"));
+      ""));
   scoped_ptr<Address> shipping_address(new Address(
       "ship_country_name_code",
       ASCIIToUTF16("ship_recipient_name"),
@@ -455,7 +456,7 @@ TEST_F(FullWalletTest, CreateFullWallet) {
                          billing_address.Pass(),
                          shipping_address.Pass(),
                          required_actions);
-  ASSERT_EQ(full_wallet, *FullWallet::CreateFullWallet(*dict));
+  EXPECT_EQ(full_wallet, *FullWallet::CreateFullWallet(*dict));
 }
 
 // TODO(ahutter): Add tests for GetPan and GetCvn.

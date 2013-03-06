@@ -47,6 +47,7 @@ class CCMessagesTest : public testing::Test {
 
   void Compare(const SharedQuadState* a, const SharedQuadState* b) {
     EXPECT_EQ(a->content_to_target_transform, b->content_to_target_transform);
+    EXPECT_EQ(a->content_bounds, b->content_bounds);
     EXPECT_EQ(a->visible_content_rect, b->visible_content_rect);
     EXPECT_EQ(a->clip_rect, b->clip_rect);
     EXPECT_EQ(a->is_clipped, b->is_clipped);
@@ -157,10 +158,6 @@ class CCMessagesTest : public testing::Test {
     EXPECT_EQ(a->tex_coord_rect, b->tex_coord_rect);
     EXPECT_EQ(a->texture_size, b->texture_size);
     EXPECT_EQ(a->swizzle_contents, b->swizzle_contents);
-    EXPECT_EQ(a->left_edge_aa, b->left_edge_aa);
-    EXPECT_EQ(a->top_edge_aa, b->top_edge_aa);
-    EXPECT_EQ(a->right_edge_aa, b->right_edge_aa);
-    EXPECT_EQ(a->bottom_edge_aa, b->bottom_edge_aa);
   }
 
   void Compare(const YUVVideoDrawQuad* a, const YUVVideoDrawQuad* b) {
@@ -178,7 +175,9 @@ class CCMessagesTest : public testing::Test {
 
   void Compare(const TransferableResource& a, const TransferableResource& b) {
     EXPECT_EQ(a.id, b.id);
+    EXPECT_EQ(a.sync_point, b.sync_point);
     EXPECT_EQ(a.format, b.format);
+    EXPECT_EQ(a.filter, b.filter);
     EXPECT_EQ(a.size.ToString(), b.size.ToString());
     for (size_t i = 0; i < arraysize(a.mailbox.name); ++i)
       EXPECT_EQ(a.mailbox.name[i], b.mailbox.name[i]);
@@ -209,9 +208,6 @@ TEST_F(CCMessagesTest, AllQuads) {
   bool arbitrary_bool1 = true;
   bool arbitrary_bool2 = false;
   bool arbitrary_bool3 = true;
-  bool arbitrary_bool4 = true;
-  bool arbitrary_bool5 = false;
-  bool arbitrary_bool6 = true;
   int arbitrary_int = 5;
   SkColor arbitrary_color = SkColorSetARGB(25, 36, 47, 58);
   IOSurfaceDrawQuad::Orientation arbitrary_orientation =
@@ -247,6 +243,7 @@ TEST_F(CCMessagesTest, AllQuads) {
 
   scoped_ptr<SharedQuadState> shared_state1_in = SharedQuadState::Create();
   shared_state1_in->SetAll(arbitrary_matrix,
+                           arbitrary_size1,
                            arbitrary_rect1,
                            arbitrary_rect2,
                            arbitrary_bool1,
@@ -309,6 +306,7 @@ TEST_F(CCMessagesTest, AllQuads) {
 
   scoped_ptr<SharedQuadState> shared_state2_in = SharedQuadState::Create();
   shared_state2_in->SetAll(arbitrary_matrix,
+                           arbitrary_size2,
                            arbitrary_rect2,
                            arbitrary_rect3,
                            arbitrary_bool1,
@@ -317,6 +315,7 @@ TEST_F(CCMessagesTest, AllQuads) {
 
   scoped_ptr<SharedQuadState> shared_state3_in = SharedQuadState::Create();
   shared_state3_in->SetAll(arbitrary_matrix,
+                           arbitrary_size3,
                            arbitrary_rect3,
                            arbitrary_rect1,
                            arbitrary_bool1,
@@ -370,11 +369,7 @@ TEST_F(CCMessagesTest, AllQuads) {
                   arbitrary_resourceid,
                   arbitrary_rectf1,
                   arbitrary_size1,
-                  arbitrary_bool2,
-                  arbitrary_bool3,
-                  arbitrary_bool4,
-                  arbitrary_bool5,
-                  arbitrary_bool6);
+                  arbitrary_bool2);
   scoped_ptr<DrawQuad> tile_cmp = tile_in->Copy(
       tile_in->shared_quad_state);
 
@@ -490,7 +485,8 @@ TEST_F(CCMessagesTest, AllQuads) {
 TEST_F(CCMessagesTest, Resources) {
   IPC::Message msg(1, 2, IPC::Message::PRIORITY_NORMAL);
   gfx::Size arbitrary_size(757, 1281);
-  unsigned int arbitrary_uint = 71234838;
+  unsigned int arbitrary_uint1 = 71234838;
+  unsigned int arbitrary_uint2 = 53589793;
 
   GLbyte arbitrary_mailbox1[64] = {
     1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0,
@@ -508,20 +504,23 @@ TEST_F(CCMessagesTest, Resources) {
 
   TransferableResource arbitrary_resource1;
   arbitrary_resource1.id = 2178312;
+  arbitrary_resource1.sync_point = arbitrary_uint1;
   arbitrary_resource1.format = 7;
+  arbitrary_resource1.filter = 53;
   arbitrary_resource1.size = gfx::Size(37189, 123123);
-  arbitrary_resource1.mailbox.setName(arbitrary_mailbox1);
+  arbitrary_resource1.mailbox.SetName(arbitrary_mailbox1);
 
   TransferableResource arbitrary_resource2;
   arbitrary_resource2.id = 789132;
+  arbitrary_resource1.sync_point = arbitrary_uint2;
   arbitrary_resource2.format = 30;
+  arbitrary_resource1.filter = 47;
   arbitrary_resource2.size = gfx::Size(89123, 23789);
-  arbitrary_resource2.mailbox.setName(arbitrary_mailbox2);
+  arbitrary_resource2.mailbox.SetName(arbitrary_mailbox2);
 
   DelegatedFrameData frame_in;
-  frame_in.resource_list.sync_point = arbitrary_uint;
-  frame_in.resource_list.resources.push_back(arbitrary_resource1);
-  frame_in.resource_list.resources.push_back(arbitrary_resource2);
+  frame_in.resource_list.push_back(arbitrary_resource1);
+  frame_in.resource_list.push_back(arbitrary_resource2);
 
   IPC::ParamTraits<DelegatedFrameData>::Write(&msg, frame_in);
 
@@ -530,11 +529,9 @@ TEST_F(CCMessagesTest, Resources) {
   EXPECT_TRUE(IPC::ParamTraits<DelegatedFrameData>::Read(&msg,
       &iter, &frame_out));
 
-  EXPECT_EQ(arbitrary_uint, frame_out.resource_list.sync_point);
-
-  EXPECT_EQ(2u, frame_out.resource_list.resources.size());
-  Compare(arbitrary_resource1, frame_out.resource_list.resources[0]);
-  Compare(arbitrary_resource2, frame_out.resource_list.resources[1]);
+  ASSERT_EQ(2u, frame_out.resource_list.size());
+  Compare(arbitrary_resource1, frame_out.resource_list[0]);
+  Compare(arbitrary_resource2, frame_out.resource_list[1]);
 }
 
 }  // namespace

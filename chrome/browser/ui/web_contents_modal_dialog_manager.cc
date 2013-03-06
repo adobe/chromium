@@ -4,7 +4,6 @@
 
 #include "chrome/browser/ui/web_contents_modal_dialog_manager.h"
 
-#include "chrome/browser/ui/web_contents_modal_dialog.h"
 #include "chrome/browser/ui/web_contents_modal_dialog_manager_delegate.h"
 #include "chrome/common/render_messages.h"
 #include "content/public/browser/navigation_details.h"
@@ -21,14 +20,14 @@ WebContentsModalDialogManager::~WebContentsModalDialogManager() {
   DCHECK(child_dialogs_.empty());
 }
 
-void WebContentsModalDialogManager::AddDialog(
-    WebContentsModalDialog* dialog) {
+void WebContentsModalDialogManager::ShowDialog(
+    NativeWebContentsModalDialog dialog) {
   child_dialogs_.push_back(dialog);
 
-  native_manager_->ManageDialog(dialog->GetNativeDialog());
+  native_manager_->ManageDialog(dialog);
 
   if (child_dialogs_.size() == 1) {
-    native_manager_->ShowDialog(dialog->GetNativeDialog());
+    native_manager_->ShowDialog(dialog);
     BlockWebContentsInteraction(true);
   }
 }
@@ -57,14 +56,15 @@ bool WebContentsModalDialogManager::IsShowingDialog() const {
 
 void WebContentsModalDialogManager::FocusTopmostDialog() {
   DCHECK(dialog_count());
-  WebContentsModalDialog* window = *dialog_begin();
-  DCHECK(window);
-  native_manager_->FocusDialog(window->GetNativeDialog());
+  native_manager_->FocusDialog(*dialog_begin());
 }
 
-void WebContentsModalDialogManager::WillClose(WebContentsModalDialog* dialog) {
+void WebContentsModalDialogManager::WillClose(
+    NativeWebContentsModalDialog dialog) {
   WebContentsModalDialogList::iterator i(
-      std::find(child_dialogs_.begin(), child_dialogs_.end(), dialog));
+      std::find(child_dialogs_.begin(),
+                child_dialogs_.end(),
+                dialog));
   bool removed_topmost_dialog = i == child_dialogs_.begin();
   if (i != child_dialogs_.end())
     child_dialogs_.erase(i);
@@ -72,7 +72,7 @@ void WebContentsModalDialogManager::WillClose(WebContentsModalDialog* dialog) {
     BlockWebContentsInteraction(false);
   } else {
     if (removed_topmost_dialog)
-      native_manager_->ShowDialog(child_dialogs_[0]->GetNativeDialog());
+      native_manager_->ShowDialog(child_dialogs_[0]);
     BlockWebContentsInteraction(true);
   }
 }
@@ -94,11 +94,8 @@ void WebContentsModalDialogManager::CloseAllDialogs() {
   WebContentsModalDialogList child_dialogs_copy(child_dialogs_);
   for (WebContentsModalDialogList::iterator it = child_dialogs_copy.begin();
        it != child_dialogs_copy.end(); ++it) {
-    WebContentsModalDialog* dialog = *it;
-    if (dialog) {
-      native_manager_->CloseDialog(dialog->GetNativeDialog());
-      BlockWebContentsInteraction(false);
-    }
+    native_manager_->CloseDialog(*it);
+    BlockWebContentsInteraction(false);
   }
 }
 
@@ -112,10 +109,8 @@ void WebContentsModalDialogManager::DidNavigateMainFrame(
 }
 
 void WebContentsModalDialogManager::DidGetIgnoredUIEvent() {
-  if (dialog_count()) {
-    WebContentsModalDialog* dialog = *dialog_begin();
-    native_manager_->FocusDialog(dialog->GetNativeDialog());
-  }
+  if (dialog_count())
+    native_manager_->FocusDialog(*dialog_begin());
 }
 
 void WebContentsModalDialogManager::WebContentsDestroyed(WebContents* tab) {

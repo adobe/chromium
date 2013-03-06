@@ -154,6 +154,31 @@ class MockTabStripModelObserver : public TabStripModelObserver {
   DISALLOW_COPY_AND_ASSIGN(MockTabStripModelObserver);
 };
 
+class InterstitialObserver : public content::WebContentsObserver {
+ public:
+  InterstitialObserver(content::WebContents* web_contents,
+                       const base::Closure& attach_callback,
+                       const base::Closure& detach_callback)
+      : WebContentsObserver(web_contents),
+        attach_callback_(attach_callback),
+        detach_callback_(detach_callback) {
+  }
+
+  virtual void DidAttachInterstitialPage() OVERRIDE {
+    attach_callback_.Run();
+  }
+
+  virtual void DidDetachInterstitialPage() OVERRIDE {
+    detach_callback_.Run();
+  }
+
+ private:
+  base::Closure attach_callback_;
+  base::Closure detach_callback_;
+
+  DISALLOW_COPY_AND_ASSIGN(InterstitialObserver);
+};
+
 // Used by CloseWithAppMenuOpen. Invokes CloseWindow on the supplied browser.
 void CloseWindowCallback(Browser* browser) {
   chrome::CloseWindow(browser);
@@ -789,7 +814,8 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, DISABLED_ConvertTabToAppShortcut) {
   WebContents* app_tab = chrome::AddSelectedTabWithURL(
       browser(), http_url, content::PAGE_TRANSITION_TYPED);
   ASSERT_EQ(2, browser()->tab_strip_model()->count());
-  ASSERT_EQ(1u, chrome::GetBrowserCount(browser()->profile()));
+  ASSERT_EQ(1u, chrome::GetBrowserCount(browser()->profile(),
+                                        browser()->host_desktop_type()));
 
   // Normal tabs should accept load drops.
   EXPECT_TRUE(initial_tab->GetMutableRendererPrefs()->can_accept_load_drops);
@@ -799,7 +825,8 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, DISABLED_ConvertTabToAppShortcut) {
   chrome::ConvertTabToAppWindow(browser(), app_tab);
 
   // The launch should have created a new browser.
-  ASSERT_EQ(2u, chrome::GetBrowserCount(browser()->profile()));
+  ASSERT_EQ(2u, chrome::GetBrowserCount(browser()->profile(),
+                                        browser()->host_desktop_type()));
 
   // Find the new browser.
   Browser* app_browser = NULL;
@@ -934,7 +961,8 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, AppIdSwitch) {
 
   // Check that the new browser has an app name.
   // The launch should have created a new browser.
-  ASSERT_EQ(2u, chrome::GetBrowserCount(browser()->profile()));
+  ASSERT_EQ(2u, chrome::GetBrowserCount(browser()->profile(),
+                                        browser()->host_desktop_type()));
 
   // Find the new browser.
   Browser* new_browser = NULL;
@@ -1041,7 +1069,8 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, RestorePinnedTabs) {
   launch.ProcessStartupURLs(std::vector<GURL>());
 
   // The launch should have created a new browser.
-  ASSERT_EQ(2u, chrome::GetBrowserCount(browser()->profile()));
+  ASSERT_EQ(2u, chrome::GetBrowserCount(browser()->profile(),
+                                        browser()->host_desktop_type()));
 
   // Find the new browser.
   Browser* new_browser = NULL;
@@ -1115,7 +1144,8 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, OpenAppWindowLikeNtp) {
   EXPECT_EQ(extension_app->GetFullLaunchURL(), app_window->GetURL());
 
   // The launch should have created a new browser.
-  ASSERT_EQ(2u, chrome::GetBrowserCount(browser()->profile()));
+  ASSERT_EQ(2u, chrome::GetBrowserCount(browser()->profile(),
+                                        browser()->host_desktop_type()));
 
   // Find the new browser.
   Browser* new_browser = NULL;
@@ -1422,12 +1452,17 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, InterstitialCommandDisable) {
 
   WebContents* contents = browser()->tab_strip_model()->GetActiveWebContents();
 
-  content::WindowedNotificationObserver interstitial_observer(
-      content::NOTIFICATION_INTERSTITIAL_ATTACHED,
-      content::Source<WebContents>(contents));
-  TestInterstitialPage* interstitial = new TestInterstitialPage(
-      contents, false, GURL());
-  interstitial_observer.Wait();
+  TestInterstitialPage* interstitial = NULL;
+  {
+    scoped_refptr<content::MessageLoopRunner> loop_runner(
+        new content::MessageLoopRunner);
+
+    InterstitialObserver observer(contents,
+                                  loop_runner->QuitClosure(),
+                                  base::Closure());
+    interstitial = new TestInterstitialPage(contents, false, GURL());
+    loop_runner->Run();
+  }
 
   EXPECT_TRUE(contents->ShowingInterstitialPage());
 
@@ -1436,12 +1471,17 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, InterstitialCommandDisable) {
   EXPECT_FALSE(command_updater->IsCommandEnabled(IDC_SAVE_PAGE));
   EXPECT_FALSE(command_updater->IsCommandEnabled(IDC_ENCODING_MENU));
 
-  content::WindowedNotificationObserver interstitial_detach_observer(
-      content::NOTIFICATION_INTERSTITIAL_DETACHED,
-      content::Source<WebContents>(contents));
-  interstitial->Proceed();
-  interstitial_detach_observer.Wait();
-  // interstitial is deleted now.
+  {
+    scoped_refptr<content::MessageLoopRunner> loop_runner(
+        new content::MessageLoopRunner);
+
+    InterstitialObserver observer(contents,
+                                  base::Closure(),
+                                  loop_runner->QuitClosure());
+    interstitial->Proceed();
+    loop_runner->Run();
+    // interstitial is deleted now.
+  }
 
   EXPECT_TRUE(command_updater->IsCommandEnabled(IDC_VIEW_SOURCE));
   EXPECT_TRUE(command_updater->IsCommandEnabled(IDC_PRINT));
@@ -1452,21 +1492,31 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, InterstitialCommandDisable) {
 IN_PROC_BROWSER_TEST_F(BrowserTest, InterstitialCloseTab) {
   WebContents* contents = browser()->tab_strip_model()->GetActiveWebContents();
 
-  content::WindowedNotificationObserver interstitial_observer(
-      content::NOTIFICATION_INTERSTITIAL_ATTACHED,
-      content::Source<WebContents>(contents));
-  // Interstitial will delete itself when we close the tab.
-  new TestInterstitialPage(contents, false, GURL());
-  interstitial_observer.Wait();
+  {
+    scoped_refptr<content::MessageLoopRunner> loop_runner(
+        new content::MessageLoopRunner);
+
+    InterstitialObserver observer(contents,
+                                  loop_runner->QuitClosure(),
+                                  base::Closure());
+    // Interstitial will delete itself when we close the tab.
+    new TestInterstitialPage(contents, false, GURL());
+    loop_runner->Run();
+  }
 
   EXPECT_TRUE(contents->ShowingInterstitialPage());
 
-  content::WindowedNotificationObserver interstitial_detach_observer(
-      content::NOTIFICATION_INTERSTITIAL_DETACHED,
-      content::Source<WebContents>(contents));
-  chrome::CloseTab(browser());
-  interstitial_detach_observer.Wait();
-  // interstitial is deleted now.
+  {
+    scoped_refptr<content::MessageLoopRunner> loop_runner(
+        new content::MessageLoopRunner);
+
+    InterstitialObserver observer(contents,
+                                  base::Closure(),
+                                  loop_runner->QuitClosure());
+    chrome::CloseTab(browser());
+    loop_runner->Run();
+    // interstitial is deleted now.
+  }
 }
 
 class MockWebContentsObserver : public WebContentsObserver {
@@ -1620,6 +1670,9 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, FullscreenBookmarkBar) {
   chrome::ToggleFullscreenMode(browser());
   EXPECT_TRUE(browser()->window()->IsFullscreen());
 #if defined(OS_MACOSX)
+  EXPECT_EQ(BookmarkBar::SHOW, browser()->bookmark_bar_state());
+#elif defined(OS_CHROMEOS)
+  // Immersive fullscreen behaves like Mac presentation mode.
   EXPECT_EQ(BookmarkBar::SHOW, browser()->bookmark_bar_state());
 #else
   EXPECT_EQ(BookmarkBar::HIDDEN, browser()->bookmark_bar_state());
@@ -1862,7 +1915,8 @@ class ClickModifierTest : public InProcessBrowserTest {
                WebKit::WebMouseEvent::Button button,
                WindowOpenDisposition disposition) {
     ui_test_utils::NavigateToURL(browser, url);
-    EXPECT_EQ(1u, chrome::GetBrowserCount(browser->profile()));
+    EXPECT_EQ(1u, chrome::GetBrowserCount(browser->profile(),
+                                          browser->host_desktop_type()));
     EXPECT_EQ(1, browser->tab_strip_model()->count());
     content::WebContents* web_contents =
         browser->tab_strip_model()->GetActiveWebContents();
@@ -1882,7 +1936,8 @@ class ClickModifierTest : public InProcessBrowserTest {
       same_tab_observer.WaitForObservation(
           base::Bind(&content::RunThisRunLoop, base::Unretained(&run_loop)),
           content::GetQuitTaskForRunLoop(&run_loop));
-      EXPECT_EQ(1u, chrome::GetBrowserCount(browser->profile()));
+      EXPECT_EQ(1u, chrome::GetBrowserCount(browser->profile(),
+                                            browser->host_desktop_type()));
       EXPECT_EQ(1, browser->tab_strip_model()->count());
       EXPECT_EQ(getSecondPageTitle(), web_contents->GetTitle());
       return;
@@ -1895,11 +1950,13 @@ class ClickModifierTest : public InProcessBrowserTest {
     observer.Wait();
 
     if (disposition == NEW_WINDOW) {
-      EXPECT_EQ(2u, chrome::GetBrowserCount(browser->profile()));
+      EXPECT_EQ(2u, chrome::GetBrowserCount(browser->profile(),
+                                            browser->host_desktop_type()));
       return;
     }
 
-    EXPECT_EQ(1u, chrome::GetBrowserCount(browser->profile()));
+    EXPECT_EQ(1u, chrome::GetBrowserCount(browser->profile(),
+                                          browser->host_desktop_type()));
     EXPECT_EQ(2, browser->tab_strip_model()->count());
     web_contents = browser->tab_strip_model()->GetActiveWebContents();
     WaitForLoadStop(web_contents);

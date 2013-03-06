@@ -128,7 +128,8 @@ class SyncSchedulerTest : public testing::Test {
             connection_.get(), directory(), workers,
             &extensions_activity_monitor_, throttled_data_type_tracker_.get(),
             std::vector<SyncEngineEventListener*>(), NULL, NULL,
-            true  /* enable keystore encryption */));
+            true,  // enable keystore encryption
+            "fake_invalidator_client_id"));
     context_->set_routing_info(routing_info_);
     context_->set_notifications_enabled(true);
     context_->set_account_name("Test");
@@ -1191,9 +1192,9 @@ TEST_F(SyncSchedulerTest, StartWhenNotConnected) {
   // Should save the nudge for until after the server is reachable.
   MessageLoop::current()->RunUntilIdle();
 
+  scheduler()->OnConnectionStatusChange();
   connection()->SetServerReachable();
   connection()->UpdateConnectionStatus();
-  scheduler()->OnConnectionStatusChange();
   MessageLoop::current()->RunUntilIdle();
 }
 
@@ -1219,9 +1220,9 @@ TEST_F(SyncSchedulerTest, ServerConnectionChangeDuringBackoff) {
   ASSERT_TRUE(scheduler()->IsBackingOff());
 
   // Before we run the scheduled canary, trigger a server connection change.
+  scheduler()->OnConnectionStatusChange();
   connection()->SetServerReachable();
   connection()->UpdateConnectionStatus();
-  scheduler()->OnConnectionStatusChange();
   MessageLoop::current()->RunUntilIdle();
 }
 
@@ -1247,9 +1248,9 @@ TEST_F(SyncSchedulerTest, ConnectionChangeCanaryPreemptedByNudge) {
   ASSERT_TRUE(scheduler()->IsBackingOff());
 
   // Before we run the scheduled canary, trigger a server connection change.
+  scheduler()->OnConnectionStatusChange();
   connection()->SetServerReachable();
   connection()->UpdateConnectionStatus();
-  scheduler()->OnConnectionStatusChange();
   scheduler()->ScheduleNudgeAsync(
       zero(), NUDGE_SOURCE_LOCAL, ModelTypeSet(BOOKMARKS), FROM_HERE);
   MessageLoop::current()->RunUntilIdle();

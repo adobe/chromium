@@ -5,6 +5,8 @@
 #include "base/stl_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "webkit/fileapi/file_system_context.h"
+#include "webkit/fileapi/file_system_file_util.h"
+#include "webkit/fileapi/file_system_operation_context.h"
 #include "webkit/fileapi/file_system_task_runners.h"
 #include "webkit/fileapi/file_system_types.h"
 #include "webkit/fileapi/isolated_context.h"
@@ -18,12 +20,15 @@
 #include "webkit/quota/quota_types.h"
 
 using base::PlatformFileError;
+using fileapi::FileSystemContext;
+using fileapi::FileSystemOperationContext;
+using fileapi::FileSystemURL;
+using fileapi::FileSystemURLSet;
+using fileapi::LocalFileSystemTestOriginHelper;
 using quota::QuotaManager;
 using quota::QuotaStatusCode;
-using sync_file_system::FileChange;
-using sync_file_system::FileChangeList;
 
-namespace fileapi {
+namespace sync_file_system {
 
 class SyncableFileSystemTest : public testing::Test {
  public:
@@ -38,7 +43,7 @@ class SyncableFileSystemTest : public testing::Test {
 
     sync_context_ = new LocalFileSyncContext(base::MessageLoopProxy::current(),
                                              base::MessageLoopProxy::current());
-    ASSERT_EQ(SYNC_STATUS_OK,
+    ASSERT_EQ(sync_file_system::SYNC_STATUS_OK,
               file_system_.MaybeInitializeFileSystemContext(sync_context_));
   }
 
@@ -243,8 +248,8 @@ TEST_F(SyncableFileSystemTest, DisableDirectoryOperations) {
             file_system_.CreateDirectory(URL("dir")));
 
   // Set up another (non-syncable) local file system.
-  LocalFileSystemTestOriginHelper other_file_system_(GURL("http://foo.com/"),
-                                                     kFileSystemTypeTemporary);
+  LocalFileSystemTestOriginHelper other_file_system_(
+      GURL("http://foo.com/"), fileapi::kFileSystemTypeTemporary);
   other_file_system_.SetUp(file_system_.file_system_context());
 
   // Create directory '/a' and file '/a/b' in the other file system.
@@ -276,4 +281,4 @@ TEST_F(SyncableFileSystemTest, DisableDirectoryOperations) {
   other_file_system_.TearDown();
 }
 
-}  // namespace fileapi
+}  // namespace sync_file_system

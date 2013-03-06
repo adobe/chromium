@@ -72,6 +72,7 @@
 #include "chrome/common/badge_util.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/extensions/api/icons/icons_handler.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_manifest_constants.h"
 #include "chrome/common/extensions/extension_resource.h"
@@ -485,13 +486,9 @@ void LocationBarViewGtk::Init(bool popup_window_mode) {
     // TODO(mpcomplete): should we hide this if ShouldOnlyShowLocation()==true?
     action_box_button_.reset(new ActionBoxButtonGtk(browser_));
 
-    // TODO(mpcomplete): Figure out why CustomDrawButton is offset 3 pixels.
-    // This offset corrects the strange offset of CustomDrawButton.
-    const int kMagicActionBoxYOffset = 3;
     GtkWidget* alignment = gtk_alignment_new(0, 0, 1, 1);
     gtk_alignment_set_padding(GTK_ALIGNMENT(alignment),
-                              0, kMagicActionBoxYOffset,
-                              0, InnerPadding());
+                              0, 0, 0, InnerPadding());
     gtk_container_add(GTK_CONTAINER(alignment), action_box_button_->widget());
 
     gtk_box_pack_end(GTK_BOX(hbox_.get()), alignment,
@@ -1812,8 +1809,8 @@ LocationBarViewGtk::PageActionViewGtk::PageActionViewGtk(
           this)) {
   event_box_.Own(gtk_event_box_new());
   gtk_widget_set_size_request(event_box_.get(),
-                              Extension::kPageActionIconMaxSize,
-                              Extension::kPageActionIconMaxSize);
+                              extensions::IconsInfo::kPageActionIconMaxSize,
+                              extensions::IconsInfo::kPageActionIconMaxSize);
 
   // Make the event box not visible so it does not paint a background.
   gtk_event_box_set_visible_window(GTK_EVENT_BOX(event_box_.get()), FALSE);

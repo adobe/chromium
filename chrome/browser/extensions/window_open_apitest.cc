@@ -13,7 +13,6 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_iterator.h"
-#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/panels/panel_manager.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_switches.h"
@@ -73,7 +72,8 @@ bool WaitForTabsAndPopups(Browser* browser,
   const base::TimeDelta kWaitTime = base::TimeDelta::FromSeconds(10);
   base::TimeTicks end_time = base::TimeTicks::Now() + kWaitTime;
   while (base::TimeTicks::Now() < end_time) {
-    if (chrome::GetBrowserCount(browser->profile()) == num_browsers &&
+    if (chrome::GetBrowserCount(browser->profile(),
+                                browser->host_desktop_type()) == num_browsers &&
         browser->tab_strip_model()->count() == num_tabs &&
         GetPanelCount(browser) == num_panels)
       break;
@@ -81,7 +81,9 @@ bool WaitForTabsAndPopups(Browser* browser,
     content::RunAllPendingInMessageLoop();
   }
 
-  EXPECT_EQ(num_browsers, chrome::GetBrowserCount(browser->profile()));
+  EXPECT_EQ(num_browsers,
+            chrome::GetBrowserCount(browser->profile(),
+                                    browser->host_desktop_type()));
   EXPECT_EQ(num_tabs, browser->tab_strip_model()->count());
   EXPECT_EQ(num_panels, GetPanelCount(browser));
 
@@ -101,7 +103,9 @@ bool WaitForTabsAndPopups(Browser* browser,
   }
   EXPECT_EQ(num_popups, num_popups_seen);
 
-  return ((num_browsers == chrome::GetBrowserCount(browser->profile())) &&
+  return ((num_browsers ==
+               chrome::GetBrowserCount(browser->profile(),
+                                       browser->host_desktop_type())) &&
           (num_tabs == browser->tab_strip_model()->count()) &&
           (num_panels == GetPanelCount(browser)) &&
           (num_popups == num_popups_seen));
@@ -243,9 +247,10 @@ IN_PROC_BROWSER_TEST_F(WindowOpenPanelTest, MAYBE_WindowOpenPanel) {
   ASSERT_TRUE(RunExtensionTest("window_open/panel")) << message_;
 }
 
-#if defined(USE_ASH_PANELS)
+#if defined(USE_ASH_PANELS) || defined(OS_WIN)
 // On Ash, this currently fails because we're currently opening new panel
 // windows as popup windows instead.
+// This is also flakey on Windows builds: crbug.com/179251
 #define MAYBE_WindowOpenPanelDetached DISABLED_WindowOpenPanelDetached
 #else
 #define MAYBE_WindowOpenPanelDetached WindowOpenPanelDetached

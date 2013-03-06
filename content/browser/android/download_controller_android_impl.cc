@@ -18,6 +18,7 @@
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/global_request_id.h"
+#include "content/public/browser/web_contents_view.h"
 #include "jni/DownloadController_jni.h"
 #include "net/cookies/cookie_options.h"
 #include "net/cookies/cookie_store.h"
@@ -96,17 +97,22 @@ void DownloadControllerAndroidImpl::CreateGETDownload(
   // We are yielding the UI thread and render_view_host may go away by
   // the time we come back. Pass along render_process_id and render_view_id
   // to retrieve it later (if it still exists).
+  GetDownloadInfoCB cb = base::Bind(
+        &DownloadControllerAndroidImpl::StartAndroidDownload,
+        base::Unretained(this), render_process_id,
+        render_view_host->GetRoutingID());
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
-      base::Bind(&DownloadControllerAndroidImpl::PrepareDownloadInfo,
-                 base::Unretained(this), global_id,
-                 render_process_id,
-                 render_view_host->GetRoutingID()));
+      base::Bind(
+          &DownloadControllerAndroidImpl::PrepareDownloadInfo,
+          base::Unretained(this), global_id,
+          base::Bind(&DownloadControllerAndroidImpl::StartDownloadOnUIThread,
+                     base::Unretained(this), cb)));
 }
 
 void DownloadControllerAndroidImpl::PrepareDownloadInfo(
     const GlobalRequestID& global_id,
-    int render_process_id, int render_view_id) {
+    const GetDownloadInfoCB& callback) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
   net::URLRequest* request =
@@ -125,22 +131,20 @@ void DownloadControllerAndroidImpl::PrepareDownloadInfo(
       cookie_monster->GetAllCookiesForURLAsync(
           request->url(),
           base::Bind(&DownloadControllerAndroidImpl::CheckPolicyAndLoadCookies,
-                     base::Unretained(this), info_android, render_process_id,
-                     render_view_id, global_id));
+                     base::Unretained(this), info_android, callback,
+                     global_id));
     } else {
-      DoLoadCookies(
-          info_android, render_process_id, render_view_id, global_id);
+      DoLoadCookies(info_android, callback, global_id);
     }
   } else {
     // Can't get any cookies, start android download.
-    StartAndroidDownload(info_android, render_process_id, render_view_id);
+    callback.Run(info_android);
   }
 }
 
 void DownloadControllerAndroidImpl::CheckPolicyAndLoadCookies(
-    const DownloadInfoAndroid& info, int render_process_id,
-    int render_view_id, const GlobalRequestID& global_id,
-    const net::CookieList& cookie_list) {
+    const DownloadInfoAndroid& info, const GetDownloadInfoCB& callback,
+    const GlobalRequestID& global_id, const net::CookieList& cookie_list) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
   net::URLRequest* request =
@@ -152,15 +156,15 @@ void DownloadControllerAndroidImpl::CheckPolicyAndLoadCookies(
 
   if (request->context()->network_delegate()->CanGetCookies(
       *request, cookie_list)) {
-    DoLoadCookies(info, render_process_id, render_view_id, global_id);
+    DoLoadCookies(info, callback, global_id);
   } else {
-    StartAndroidDownload(info, render_process_id, render_view_id);
+    callback.Run(info);
   }
 }
 
 void DownloadControllerAndroidImpl::DoLoadCookies(
-    const DownloadInfoAndroid& info, int render_process_id,
-    int render_view_id, const GlobalRequestID& global_id) {
+    const DownloadInfoAndroid& info, const GetDownloadInfoCB& callback,
+    const GlobalRequestID& global_id) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
   net::CookieOptions options;
@@ -176,35 +180,31 @@ void DownloadControllerAndroidImpl::DoLoadCookies(
   request->context()->cookie_store()->GetCookiesWithOptionsAsync(
       info.url, options,
       base::Bind(&DownloadControllerAndroidImpl::OnCookieResponse,
-                 base::Unretained(this), info, render_process_id,
-                 render_view_id));
+                 base::Unretained(this), info, callback));
 }
 
 void DownloadControllerAndroidImpl::OnCookieResponse(
     DownloadInfoAndroid download_info,
-    int render_process_id,
-    int render_view_id,
+    const GetDownloadInfoCB& callback,
     const std::string& cookie) {
   download_info.cookie = cookie;
 
   // We have everything we need, start Android download.
-  StartAndroidDownload(download_info, render_process_id, render_view_id);
+  callback.Run(download_info);
+}
+
+void DownloadControllerAndroidImpl::StartDownloadOnUIThread(
+    const GetDownloadInfoCB& callback,
+    const DownloadInfoAndroid& info) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  BrowserThread::PostTask(
+      BrowserThread::UI, FROM_HERE, base::Bind(callback, info));
 }
 
 void DownloadControllerAndroidImpl::StartAndroidDownload(
-    const DownloadInfoAndroid& info,
-    int render_process_id,
-    int render_view_id) {
-  // Call ourself on the UI thread if not already on it.
-  if (!BrowserThread::CurrentlyOn(BrowserThread::UI)) {
-    BrowserThread::PostTask(
-        BrowserThread::UI, FROM_HERE,
-        base::Bind(&DownloadControllerAndroidImpl::StartAndroidDownload,
-                   base::Unretained(this), info, render_process_id,
-                   render_view_id));
-    return;
-  }
-
+    int render_process_id, int render_view_id,
+    const DownloadInfoAndroid& info) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   JNIEnv* env = AttachCurrentThread();
 
   // Call newHttpGetDownload
@@ -236,20 +236,21 @@ void DownloadControllerAndroidImpl::StartAndroidDownload(
 }
 
 void DownloadControllerAndroidImpl::OnPostDownloadStarted(
-    WebContents* web_contents,
     DownloadItem* download_item) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  if (!download_item->GetWebContents())
+    return;
+
   JNIEnv* env = AttachCurrentThread();
 
   // Register for updates to the DownloadItem.
   download_item->AddObserver(this);
 
   ScopedJavaLocalRef<jobject> view =
-      GetContentViewCoreFromWebContents(web_contents);
-  if(view.is_null()) {
-    // The view went away. Can't proceed.
+      GetContentViewCoreFromWebContents(download_item->GetWebContents());
+  // The view went away. Can't proceed.
+  if (view.is_null())
     return;
-  }
 
   Java_DownloadController_onHttpPostDownloadStarted(
       env, GetJavaObject()->Controller(env).obj(), view.obj());
@@ -258,8 +259,12 @@ void DownloadControllerAndroidImpl::OnPostDownloadStarted(
 void DownloadControllerAndroidImpl::OnDownloadUpdated(DownloadItem* item) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  if (item->GetState() != DownloadItem::COMPLETE)
+  if (!item->IsComplete())
     return;
+
+  // Multiple OnDownloadUpdated() notifications may be issued while the download
+  // is in the COMPLETE state. Only handle one.
+  item->RemoveObserver(this);
 
   // Call onHttpPostDownloadCompleted
   JNIEnv* env = AttachCurrentThread();
@@ -285,9 +290,6 @@ void DownloadControllerAndroidImpl::OnDownloadUpdated(DownloadItem* item) {
       item->GetReceivedBytes(), true);
 }
 
-void DownloadControllerAndroidImpl::OnDownloadOpened(DownloadItem* item) {
-}
-
 ScopedJavaLocalRef<jobject> DownloadControllerAndroidImpl::GetContentView(
     int render_process_id, int render_view_id) {
   RenderViewHost* render_view_host =
@@ -311,7 +313,7 @@ ScopedJavaLocalRef<jobject>
   if (!web_contents)
     return ScopedJavaLocalRef<jobject>();
 
-  ContentViewCore* view_core = web_contents->GetContentNativeView();
+  ContentViewCore* view_core = web_contents->GetView()->GetContentNativeView();
   return view_core ? view_core->GetJavaObject() :
       ScopedJavaLocalRef<jobject>();
 }

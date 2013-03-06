@@ -111,6 +111,7 @@ public:
     virtual void beginCommit();
     virtual void commitComplete();
     virtual void animate(base::TimeTicks monotonicTime, base::Time wallClockTime);
+    virtual void setVisible(bool);
 
     void manageTiles();
 
@@ -156,7 +157,7 @@ public:
     void finishAllRendering();
     int sourceAnimationFrameNumber() const;
 
-    bool initializeRenderer(scoped_ptr<OutputSurface>);
+    virtual bool initializeRenderer(scoped_ptr<OutputSurface>);
     bool isContextLost();
     TileManager* tileManager() { return m_tileManager.get(); }
     Renderer* renderer() { return m_renderer.get(); }
@@ -173,7 +174,7 @@ public:
     const LayerTreeImpl* recycleTree() const { return m_recycleTree.get(); }
     void createPendingTree();
     void checkForCompletedTileUploads();
-    virtual void activatePendingTreeIfNeeded();
+    virtual bool activatePendingTreeIfNeeded();
 
     // Shortcuts to layers on the active tree.
     LayerImpl* rootLayer() const;
@@ -181,7 +182,6 @@ public:
     LayerImpl* currentlyScrollingLayer() const;
 
     bool visible() const { return m_visible; }
-    void setVisible(bool);
 
     size_t memoryAllocationLimitBytes() const { return m_managedMemoryPolicy.bytesLimitWhenVisible; }
 
@@ -263,6 +263,8 @@ public:
     scoped_ptr<base::Value> activationStateAsValue() const;
     scoped_ptr<base::Value> frameStateAsValue() const;
 
+    bool pageScaleAnimationActive() const { return !!m_pageScaleAnimation; }
+
 protected:
     LayerTreeHostImpl(const LayerTreeSettings&, LayerTreeHostImplClient*, Proxy*);
     void activatePendingTree();
@@ -282,10 +284,6 @@ protected:
 private:
     void animatePageScale(base::TimeTicks monotonicTime);
     void animateScrollbars(base::TimeTicks monotonicTime);
-
-    void computeDoubleTapZoomDeltas(ScrollAndScaleSet* scrollInfo);
-    void computePinchZoomDeltas(ScrollAndScaleSet* scrollInfo);
-    void makeScrollAndScaleSet(ScrollAndScaleSet* scrollInfo, gfx::Vector2d scrollOffset, float pageScale);
 
     void setPageScaleDelta(float);
     gfx::Vector2dF scrollLayerWithViewportSpaceDelta(LayerImpl* layerImpl, float scaleFromViewportToScreenSpace, gfx::PointF viewportPoint, gfx::Vector2dF viewportDelta);

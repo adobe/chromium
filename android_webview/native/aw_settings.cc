@@ -13,6 +13,8 @@ namespace android_webview {
 
 AwSettings::AwSettings(JNIEnv* env, jobject obj)
     : java_ref_(env, obj),
+      enable_fixed_layout_(false),
+      initial_page_scale_percent_(0),
       text_zoom_percent_(100) {
 }
 
@@ -21,6 +23,33 @@ AwSettings::~AwSettings() {
 
 void AwSettings::Destroy(JNIEnv* env, jobject obj) {
   delete this;
+}
+
+AwRenderViewHostExt* AwSettings::GetAwRenderViewHostExt() {
+  if (!web_contents()) return NULL;
+  AwContents* contents = AwContents::FromWebContents(web_contents());
+  if (!contents) return NULL;
+  return contents->render_view_host_ext();
+}
+
+void AwSettings::ResetScrollAndScaleState(JNIEnv* env, jobject obj) {
+  AwRenderViewHostExt* rvhe = GetAwRenderViewHostExt();
+  if (!rvhe) return;
+  rvhe->ResetScrollAndScaleState();
+}
+
+void AwSettings::SetEnableFixedLayoutMode(
+    JNIEnv* env, jobject obj, jboolean enabled) {
+  if (enable_fixed_layout_ == enabled) return;
+  enable_fixed_layout_ = enabled;
+  UpdateEnableFixedLayoutMode();
+}
+
+void AwSettings::SetInitialPageScale(
+    JNIEnv* env, jobject obj, jfloat page_scale_percent) {
+  if (initial_page_scale_percent_ == page_scale_percent) return;
+  initial_page_scale_percent_ = page_scale_percent;
+  UpdateInitialPageScale();
 }
 
 void AwSettings::SetTextZoom(JNIEnv* env, jobject obj, jint text_zoom_percent) {
@@ -33,11 +62,25 @@ void AwSettings::SetWebContents(JNIEnv* env, jobject obj, jint web_contents) {
   Observe(reinterpret_cast<content::WebContents*>(web_contents));
 }
 
+
+void AwSettings::UpdateEnableFixedLayoutMode() {
+  AwRenderViewHostExt* rvhe = GetAwRenderViewHostExt();
+  if (!rvhe) return;
+  rvhe->SetEnableFixedLayoutMode(enable_fixed_layout_);
+}
+
+void AwSettings::UpdateInitialPageScale() {
+  AwRenderViewHostExt* rvhe = GetAwRenderViewHostExt();
+  if (!rvhe) return;
+  if (initial_page_scale_percent_ == 0) {
+    rvhe->SetInitialPageScale(-1);
+  } else {
+    rvhe->SetInitialPageScale(initial_page_scale_percent_ / 100.0f);
+  }
+}
+
 void AwSettings::UpdateTextZoom() {
-  if (!web_contents()) return;
-  AwContents* contents = AwContents::FromWebContents(web_contents());
-  if (!contents) return;
-  AwRenderViewHostExt* rvhe = contents->render_view_host_ext();
+  AwRenderViewHostExt* rvhe = GetAwRenderViewHostExt();
   if (!rvhe) return;
   if (text_zoom_percent_ > 0) {
     rvhe->SetTextZoomLevel(webkit_glue::ZoomFactorToZoomLevel(
@@ -49,6 +92,8 @@ void AwSettings::UpdateTextZoom() {
 }
 
 void AwSettings::RenderViewCreated(content::RenderViewHost* render_view_host) {
+  UpdateEnableFixedLayoutMode();
+  UpdateInitialPageScale();
   UpdateTextZoom();
 }
 

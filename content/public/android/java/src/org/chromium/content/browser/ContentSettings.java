@@ -92,6 +92,8 @@ public class ContentSettings {
     private boolean mDomStorageEnabled = false;
     private boolean mDatabaseEnabled = false;
     private boolean mUseWideViewport = false;
+    private boolean mLoadWithOverviewMode = false;
+    private boolean mMediaPlaybackRequiresUserGesture = true;
 
     // Not accessed by the native side.
     private boolean mSupportZoom = true;
@@ -374,6 +376,22 @@ public class ContentSettings {
 
     boolean shouldDisplayZoomControls() {
         return supportsMultiTouchZoom() && mDisplayZoomControls;
+    }
+
+    public void setLoadWithOverviewMode(boolean overview) {
+        assert mCanModifySettings;
+        synchronized (mContentSettingsLock) {
+            if (mLoadWithOverviewMode != overview) {
+                mLoadWithOverviewMode = overview;
+                mEventHandler.syncSettingsLocked();
+            }
+        }
+    }
+
+    public boolean getLoadWithOverviewMode() {
+        synchronized (mContentSettingsLock) {
+            return mLoadWithOverviewMode;
+        }
     }
 
     /**
@@ -1173,6 +1191,30 @@ public class ContentSettings {
         }
     }
 
+    /**
+     * Set whether the user gesture is required for media playback.
+     * @param require true if the user gesture is required.
+     */
+    public void setMediaPlaybackRequiresUserGesture(boolean require) {
+        assert mCanModifySettings;
+        synchronized (mContentSettingsLock) {
+            if (mMediaPlaybackRequiresUserGesture != require) {
+                mMediaPlaybackRequiresUserGesture = require;
+                mEventHandler.syncSettingsLocked();
+            }
+        }
+    }
+
+    /**
+     * Get whether the user gesture is required for Media Playback.
+     * @return true if the user gesture is required.
+     */
+    public boolean getMediaPlaybackRequiresUserGesture() {
+        synchronized (mContentSettingsLock) {
+            return mMediaPlaybackRequiresUserGesture;
+        }
+    }
+
     private int clipFontSize(int size) {
         if (size < MINIMUM_FONT_SIZE) {
             return MINIMUM_FONT_SIZE;
@@ -1191,6 +1233,7 @@ public class ContentSettings {
      */
     public void initFrom(ContentSettings settings) {
         setLayoutAlgorithm(settings.getLayoutAlgorithm());
+        setLoadWithOverviewMode(settings.getLoadWithOverviewMode());
         setTextZoom(settings.getTextZoom());
         setStandardFontFamily(settings.getStandardFontFamily());
         setFixedFontFamily(settings.getFixedFontFamily());
@@ -1219,6 +1262,7 @@ public class ContentSettings {
         setSupportZoom(settings.supportZoom());
         setBuiltInZoomControls(settings.getBuiltInZoomControls());
         setDisplayZoomControls(settings.getDisplayZoomControls());
+        setMediaPlaybackRequiresUserGesture(settings.getMediaPlaybackRequiresUserGesture());
     }
 
     /**

@@ -17,8 +17,8 @@
 #include "chrome/browser/extensions/event_router.h"
 #include "chrome/browser/extensions/extension_function.h"
 #include "chrome/browser/extensions/extension_system.h"
-#include "chrome/browser/media_gallery/media_file_system_registry.h"
-#include "chrome/browser/media_gallery/media_galleries_preferences.h"
+#include "chrome/browser/media_galleries/media_file_system_registry.h"
+#include "chrome/browser/media_galleries/media_galleries_preferences.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_view_host.h"
 
@@ -47,14 +47,14 @@ void HandleProfileShutdownOnFileThread(void* profile_id) {
 // Gets the |gallery_file_path| and |gallery_pref_id| of the gallery specified
 // by the |gallery_id|. Returns true and set |gallery_file_path| and
 // |gallery_pref_id| if the |gallery_id| is valid and returns false otherwise.
-bool GetGalleryFilePathAndId(int gallery_id,
+bool GetGalleryFilePathAndId(const std::string& gallery_id,
                              Profile* profile,
                              const Extension* extension,
                              base::FilePath* gallery_file_path,
                              chrome::MediaGalleryPrefId* gallery_pref_id) {
-  if (gallery_id < 0)
+  chrome::MediaGalleryPrefId pref_id;
+  if (!base::StringToUint64(gallery_id, &pref_id))
     return false;
-  chrome::MediaGalleryPrefId pref_id = static_cast<uint64>(gallery_id);
   chrome::MediaFileSystemRegistry* registry =
       g_browser_process->media_file_system_registry();
    base::FilePath file_path(
@@ -189,7 +189,7 @@ void MediaGalleriesPrivateAddGalleryWatchFunction::HandleResponse(
     bool success) {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
   extensions::api::media_galleries_private::AddGalleryWatchResult result;
-  result.gallery_id = gallery_id;
+  result.gallery_id = base::Uint64ToString(gallery_id);
   result.success = success;
   SetResult(result.ToValue().release());
   if (success) {
@@ -256,7 +256,7 @@ bool MediaGalleriesPrivateGetAllGalleryWatchFunction::RunImpl() {
   if (!render_view_host() || !render_view_host()->GetProcess())
     return false;
 
-  std::vector<int> result;
+  std::vector<std::string> result;
 #if defined(OS_WIN)
   GalleryWatchStateTracker* state_tracker =
       MediaGalleriesPrivateAPI::Get(profile_)->GetGalleryWatchStateTracker();
@@ -265,8 +265,7 @@ bool MediaGalleriesPrivateGetAllGalleryWatchFunction::RunImpl() {
   for (chrome::MediaGalleryPrefIdSet::const_iterator iter =
            gallery_ids.begin();
        iter != gallery_ids.end(); ++iter) {
-    if (*iter < kint32max)
-      result.push_back(*iter);
+    result.push_back(base::Uint64ToString(*iter));
   }
 #endif
   results_ = GetAllGalleryWatch::Results::Create(result);
@@ -308,16 +307,15 @@ bool MediaGalleriesPrivateEjectDeviceFunction::RunImpl() {
   scoped_ptr<EjectDevice::Params> params(EjectDevice::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
-  chrome::RemovableStorageNotifications* storage_notifications =
-      chrome::RemovableStorageNotifications::GetInstance();
+  chrome::StorageMonitor* monitor = chrome::StorageMonitor::GetInstance();
   std::string device_id_str =
-      storage_notifications->GetDeviceIdForTransientId(params->device_id);
+      monitor->GetDeviceIdForTransientId(params->device_id);
   if (device_id_str == "") {
-    HandleResponse(chrome::RemovableStorageNotifications::EJECT_NO_SUCH_DEVICE);
+    HandleResponse(chrome::StorageMonitor::EJECT_NO_SUCH_DEVICE);
     return true;
   }
 
-  storage_notifications->EjectDevice(
+  monitor->EjectDevice(
       device_id_str,
       base::Bind(&MediaGalleriesPrivateEjectDeviceFunction::HandleResponse,
                  base::Unretained(this)));
@@ -326,7 +324,7 @@ bool MediaGalleriesPrivateEjectDeviceFunction::RunImpl() {
 }
 
 void MediaGalleriesPrivateEjectDeviceFunction::HandleResponse(
-    chrome::RemovableStorageNotifications::EjectStatus status) {
+    chrome::StorageMonitor::EjectStatus status) {
 
   using extensions::api::media_galleries_private::
       EJECT_DEVICE_RESULT_CODE_FAILURE;
@@ -339,11 +337,11 @@ void MediaGalleriesPrivateEjectDeviceFunction::HandleResponse(
   using extensions::api::media_galleries_private::EjectDeviceResultCode;
 
   EjectDeviceResultCode result = EJECT_DEVICE_RESULT_CODE_FAILURE;
-  if (status == chrome::RemovableStorageNotifications::EJECT_OK)
+  if (status == chrome::StorageMonitor::EJECT_OK)
     result = EJECT_DEVICE_RESULT_CODE_SUCCESS;
-  if (status == chrome::RemovableStorageNotifications::EJECT_IN_USE)
+  if (status == chrome::StorageMonitor::EJECT_IN_USE)
     result = EJECT_DEVICE_RESULT_CODE_IN_USE;
-  if (status == chrome::RemovableStorageNotifications::EJECT_NO_SUCH_DEVICE)
+  if (status == chrome::StorageMonitor::EJECT_NO_SUCH_DEVICE)
     result = EJECT_DEVICE_RESULT_CODE_NO_SUCH_DEVICE;
 
   SetResult(base::StringValue::CreateStringValue(

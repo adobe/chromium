@@ -4,6 +4,8 @@
 
 #include "chrome/test/chromedriver/status.h"
 
+#include "base/stringprintf.h"
+
 namespace {
 
 // Returns the string equivalent of the given |ErrorCode|.
@@ -27,6 +29,10 @@ const char* DefaultMessageForStatusCode(StatusCode code) {
       return "xpath lookup error";
     case kNoSuchWindow:
       return "no such window";
+    case kUnexpectedAlertOpen:
+      return "unexpected alert open";
+    case kNoAlertOpen:
+      return "no alert open";
     case kInvalidSelector:
       return "invalid selector";
     case kSessionNotCreatedException:
@@ -68,6 +74,10 @@ Status::Status(StatusCode code,
 }
 
 Status::~Status() {}
+
+void Status::AddDetails(const std::string& details) {
+  msg_ += base::StringPrintf("\n  (%s)", details.c_str());
+}
 
 bool Status::IsOk() const {
   return code_ == kOk;

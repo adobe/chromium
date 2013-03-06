@@ -5,7 +5,11 @@
 #ifndef CONTENT_RENDERER_RENDER_VIEW_IMPL_H_
 #define CONTENT_RENDERER_RENDER_VIEW_IMPL_H_
 
+#include <deque>
+#include <map>
 #include <set>
+#include <string>
+#include <vector>
 
 #include "base/basictypes.h"
 #include "base/gtest_prod_util.h"
@@ -390,10 +394,19 @@ class CONTENT_EXPORT RenderViewImpl
 
   void GetWindowSnapshot(const WindowSnapshotCallback& callback);
 
+  // Dispatches the current navigation state to the browser. Called on a
+  // periodic timer so we don't send too many messages.
+  void SyncNavigationState();
+
   // Returns the length of the session history of this RenderView. Note that
   // this only coincides with the actual length of the session history if this
   // RenderView is the currently active RenderView of a WebContents.
   unsigned GetLocalSessionHistoryLengthForTesting() const;
+
+  // Invokes OnSetFocus and marks the widget as active depending on the value
+  // of |enable|. This is used for layout tests that need to control the focus
+  // synchronously from the renderer.
+  void SetFocusAndActivateForTesting(bool enable);
 
   // IPC::Listener implementation ----------------------------------------------
 
@@ -641,6 +654,7 @@ class CONTENT_EXPORT RenderViewImpl
                                         v8::Handle<v8::Context>,
                                         int world_id);
   virtual void didChangeScrollOffset(WebKit::WebFrame* frame);
+  virtual void willInsertBody(WebKit::WebFrame* frame) OVERRIDE;
 #if defined(OS_ANDROID)
   virtual void didFirstVisuallyNonEmptyLayout(WebKit::WebFrame*) OVERRIDE;
 #endif
@@ -771,6 +785,7 @@ class CONTENT_EXPORT RenderViewImpl
   // RenderWidget overrides:
   virtual void Close() OVERRIDE;
   virtual void OnResize(const gfx::Size& new_size,
+                        const gfx::Size& physical_backing_size,
                         const gfx::Rect& resizer_rect,
                         bool is_fullscreen) OVERRIDE;
   virtual void WillInitiatePaint() OVERRIDE;
@@ -862,6 +877,8 @@ class CONTENT_EXPORT RenderViewImpl
   FRIEND_TEST_ALL_PREFIXES(RenderViewImplTest, SetHistoryLengthAndPrune);
   FRIEND_TEST_ALL_PREFIXES(RenderViewImplTest, ZoomLimit);
   FRIEND_TEST_ALL_PREFIXES(RenderViewImplTest, NavigateFrame);
+  FRIEND_TEST_ALL_PREFIXES(RenderViewImplTest,
+                           ShouldUpdateSelectionTextFromContextMenuParams);
 
   typedef std::map<GURL, double> HostZoomLevels;
 
@@ -1053,6 +1070,7 @@ class CONTENT_EXPORT RenderViewImpl
                          const WebKit::WebFindOptions& options,
                          IPC::Message* reply_msg);
   void OnUndoScrollFocusedEditableNodeIntoRect();
+  void OnEnableHidingTopControls(bool enable);
 #elif defined(OS_MACOSX)
   void OnCopyToFindPboard();
   void OnPluginImeCompositionCompleted(const string16& text, int plugin_id);
@@ -1170,10 +1188,6 @@ class CONTENT_EXPORT RenderViewImpl
 #if defined(OS_ANDROID)
   // Launch an Android content intent with the given URL.
   void LaunchAndroidContentIntent(const GURL& intent_url, size_t request_id);
-
-  // Send ViewHostMsg_UpdateFrameInfo to report scale/scroll/size changes.
-  void ScheduleUpdateFrameInfo();
-  void SendUpdateFrameInfo();
 #endif
 
   // Sends a reply to the current find operation handling if it was a
@@ -1184,15 +1198,19 @@ class CONTENT_EXPORT RenderViewImpl
                      const WebKit::WebRect& selection_rect,
                      bool final_status_update);
 
+  // Returns whether |params.selection_text| should be synchronized to the
+  // browser before bringing up the context menu. Static for testing.
+  static bool ShouldUpdateSelectionTextFromContextMenuParams(
+      const string16& selection_text,
+      size_t selection_text_offset,
+      const ui::Range& selection_range,
+      const ContextMenuParams& params);
+
   // Starts nav_state_sync_timer_ if it isn't already running.
   void StartNavStateSyncTimerIfNecessary();
 
   // Stops the current find-in-page search.
   void StopFinding(StopFindAction action);
-
-  // Dispatches the current navigation state to the browser. Called on a
-  // periodic timer so we don't send too many messages.
-  void SyncNavigationState();
 
   // Dispatches the current state of selection on the webpage to the browser if
   // it has changed.
@@ -1240,6 +1258,10 @@ class CONTENT_EXPORT RenderViewImpl
 
   // If true, we send IPC messages when |preferred_size_| changes.
   bool send_preferred_size_changes_;
+
+  // Whether the WebView is in auto resize mode, which is used for example
+  // by extension popups.
+  bool auto_resize_mode_;
 
   // If non-empty, and |send_preferred_size_changes_| is true, disable drawing
   // scroll bars on windows smaller than this size.  Used for windows that the
@@ -1350,9 +1372,16 @@ class CONTENT_EXPORT RenderViewImpl
   // The next target URL we want to send to the browser.
   GURL pending_target_url_;
 
-  // The text selection the last time DidChangeSelection got called.
+  // The text selection the last time DidChangeSelection got called. May contain
+  // additional characters before and after the selected text, for IMEs. The
+  // portion of this string that is the actual selected text starts at index
+  // |selection_range_.GetMin() - selection_text_offset_| and has length
+  // |selection_range_.length()|.
   string16 selection_text_;
+  // The offset corresponding to the start of |selection_text_| in the document.
   size_t selection_text_offset_;
+  // Range over the document corresponding to the actual selected text (which
+  // could correspond to a substring of |selection_text_|; see above).
   ui::Range selection_range_;
 
   // External context menu requests we're waiting for. "Internal"

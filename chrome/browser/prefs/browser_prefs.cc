@@ -52,12 +52,12 @@
 #include "chrome/browser/pepper_flash_settings_manager.h"
 #include "chrome/browser/plugins/plugin_finder.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
-#include "chrome/browser/prefs/pref_registry_syncable.h"
 #include "chrome/browser/prefs/pref_service_syncable.h"
 #include "chrome/browser/prefs/session_startup_pref.h"
 #include "chrome/browser/printing/cloud_print/cloud_print_url.h"
 #include "chrome/browser/printing/print_dialog_cloud.h"
 #include "chrome/browser/profiles/chrome_version_service.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_impl.h"
 #include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_manager.h"
@@ -69,12 +69,12 @@
 #include "chrome/browser/task_manager/task_manager.h"
 #include "chrome/browser/translate/translate_prefs.h"
 #include "chrome/browser/ui/alternate_error_tab_observer.h"
-#include "chrome/browser/ui/app_list/app_list_util.h"
+#include "chrome/browser/ui/app_list/app_list_service.h"
 #include "chrome/browser/ui/autofill/autofill_dialog_controller_impl.h"
-#include "chrome/browser/ui/browser_instant_controller.h"
 #include "chrome/browser/ui/browser_ui_prefs.h"
 #include "chrome/browser/ui/network_profile_bubble.h"
 #include "chrome/browser/ui/prefs/prefs_tab_helper.h"
+#include "chrome/browser/ui/search/search.h"
 #include "chrome/browser/ui/search_engines/keyword_editor_controller.h"
 #include "chrome/browser/ui/startup/autolaunch_prompt.h"
 #include "chrome/browser/ui/tabs/pinned_tab_codec.h"
@@ -89,6 +89,7 @@
 #include "chrome/browser/upgrade_detector.h"
 #include "chrome/browser/web_resource/promo_resource_service.h"
 #include "chrome/common/pref_names.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/render_process_host.h"
 
 #if defined(ENABLE_CONFIGURATION_POLICY)
@@ -173,6 +174,7 @@ void RegisterLocalState(PrefRegistrySimple* registry) {
   registry->RegisterIntegerPref(prefs::kMultipleProfilePrefMigration, 0);
 
   // Please keep this list alphabetized.
+  AppListService::RegisterPrefs(registry);
   apps::RegisterPrefs(registry);
   browser_shutdown::RegisterPrefs(registry);
   BrowserProcessImpl::RegisterPrefs(registry);
@@ -251,25 +253,17 @@ void RegisterLocalState(PrefRegistrySimple* registry) {
 #if defined(OS_MACOSX)
   confirm_quit::RegisterLocalState(registry);
 #endif
-
-#if defined(ENABLE_SETTINGS_APP)
-  chrome::RegisterAppListPrefs(registry);
-#endif
 }
 
-void RegisterUserPrefs(PrefService* user_prefs,
-                       PrefRegistrySyncable* registry) {
-  // TODO(joi): Get rid of the need for the PrefService parameter, and
-  // do registration prior to PrefService creation.
-
+void RegisterUserPrefs(PrefRegistrySyncable* registry) {
   // User prefs. Please keep this list alphabetized.
   AlternateErrorPageTabObserver::RegisterUserPrefs(registry);
   autofill::AutofillDialogControllerImpl::RegisterUserPrefs(registry);
   AutofillManager::RegisterUserPrefs(registry);
   BookmarkPromptPrefs::RegisterUserPrefs(registry);
   bookmark_utils::RegisterUserPrefs(registry);
-  BrowserInstantController::RegisterUserPrefs(user_prefs, registry);
-  browser_sync::SyncPrefs::RegisterUserPrefs(user_prefs, registry);
+  browser_sync::SyncPrefs::RegisterUserPrefs(registry);
+  chrome::search::RegisterUserPrefs(registry);
   ChromeContentBrowserClient::RegisterUserPrefs(registry);
   ChromeDownloadManagerDelegate::RegisterUserPrefs(registry);
   ChromeVersionService::RegisterUserPrefs(registry);
@@ -292,13 +286,14 @@ void RegisterUserPrefs(PrefService* user_prefs,
   PasswordManager::RegisterUserPrefs(registry);
   PrefProxyConfigTrackerImpl::RegisterUserPrefs(registry);
   PrefsTabHelper::RegisterUserPrefs(registry);
+  Profile::RegisterUserPrefs(registry);
   ProfileImpl::RegisterUserPrefs(registry);
   PromoResourceService::RegisterUserPrefs(registry);
   ProtocolHandlerRegistry::RegisterUserPrefs(registry);
   RegisterBrowserUserPrefs(registry);
   SessionStartupPref::RegisterUserPrefs(registry);
   TemplateURLPrepopulateData::RegisterUserPrefs(registry);
-  TranslatePrefs::RegisterUserPrefs(user_prefs, registry);
+  TranslatePrefs::RegisterUserPrefs(registry);
 
 #if defined(ENABLE_CONFIGURATION_POLICY)
   policy::URLBlacklistManager::RegisterUserPrefs(registry);
@@ -350,6 +345,7 @@ void RegisterUserPrefs(PrefService* user_prefs,
   chromeos::OAuth2LoginManager::RegisterUserPrefs(registry);
   chromeos::Preferences::RegisterUserPrefs(registry);
   chromeos::ProxyConfigServiceImpl::RegisterUserPrefs(registry);
+  FlagsUI::RegisterUserPrefs(registry);
 #endif
 
 #if defined(OS_WIN)
@@ -370,6 +366,7 @@ void MigrateUserPrefs(Profile* profile) {
 
   PrefsTabHelper::MigrateUserPrefs(prefs);
   PromoResourceService::MigrateUserPrefs(prefs);
+  TranslatePrefs::MigrateUserPrefs(prefs);
 }
 
 void MigrateBrowserPrefs(Profile* profile, PrefService* local_state) {

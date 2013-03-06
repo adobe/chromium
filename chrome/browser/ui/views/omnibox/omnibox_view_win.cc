@@ -130,17 +130,19 @@ bool IsDrag(const POINT& origin, const POINT& current) {
 }
 
 // Copies |selected_text| as text to the primary clipboard.
-void DoCopyText(const string16& selected_text) {
+void DoCopyText(const string16& selected_text, Profile* profile) {
   ui::ScopedClipboardWriter scw(ui::Clipboard::GetForCurrentThread(),
-                                ui::Clipboard::BUFFER_STANDARD);
+                                ui::Clipboard::BUFFER_STANDARD,
+                                content::BrowserContext::
+                                    GetMarkerForOffTheRecordContext(profile));
   scw.WriteText(selected_text);
 }
 
 // Writes |url| and |text| to the clipboard as a well-formed URL.
-void DoCopyURL(const GURL& url, const string16& text) {
+void DoCopyURL(const GURL& url, const string16& text, Profile* profile) {
   BookmarkNodeData data;
   data.ReadFromTuple(url, text);
-  data.WriteToClipboard(NULL);
+  data.WriteToClipboard(profile);
 }
 
 }  // namespace
@@ -1114,7 +1116,9 @@ int OmniboxViewWin::OnPerformDropImpl(const ui::DropTargetEvent& event,
 }
 
 void OmniboxViewWin::CopyURL() {
-  DoCopyURL(toolbar_model()->GetURL(), toolbar_model()->GetText(false));
+  DoCopyURL(toolbar_model()->GetURL(),
+            toolbar_model()->GetText(false),
+            model()->profile());
 }
 
 bool OmniboxViewWin::SkipDefaultKeyEventProcessing(const ui::KeyEvent& event) {
@@ -1449,9 +1453,9 @@ void OmniboxViewWin::OnCopy() {
   // the smaller value.
   model()->AdjustTextForCopy(sel.cpMin, IsSelectAll(), &text, &url, &write_url);
   if (write_url)
-    DoCopyURL(url, text);
+    DoCopyURL(url, text, model()->profile());
   else
-    DoCopyText(text);
+    DoCopyText(text, model()->profile());
 }
 
 LRESULT OmniboxViewWin::OnCreate(const CREATESTRUCTW* /*create_struct*/) {
@@ -2462,9 +2466,6 @@ void OmniboxViewWin::EmphasizeURLComponents() {
       GetText(), model()->GetDesiredTLD(), &scheme, &host);
   const bool emphasize = model()->CurrentTextIsURL() && (host.len > 0);
 
-  bool instant_extended_api_enabled =
-      chrome::search::IsInstantExtendedAPIEnabled(parent_view_->profile());
-
   // Set the baseline emphasis.
   CHARFORMAT cf = {0};
   cf.dwMask = CFM_COLOR;
@@ -2588,9 +2589,6 @@ void OmniboxViewWin::DrawSlashForInsecureScheme(HDC hdc,
       SkIntToScalar(0),
       SkIntToScalar(PosFromChar(sel.cpMax).x - scheme_rect.left),
       SkIntToScalar(scheme_rect.Height()) };
-
-  bool instant_extended_api_enabled =
-      chrome::search::IsInstantExtendedAPIEnabled(parent_view_->profile());
 
   // Draw the unselected portion of the stroke.
   sk_canvas->save();
@@ -2801,7 +2799,7 @@ void OmniboxViewWin::BuildContextMenu() {
     context_menu_contents_->AddSeparator(ui::NORMAL_SEPARATOR);
     context_menu_contents_->AddItemWithStringId(IDC_CUT, IDS_CUT);
     context_menu_contents_->AddItemWithStringId(IDC_COPY, IDS_COPY);
-    if (chrome::search::IsQueryExtractionEnabled(parent_view_->profile()))
+    if (chrome::search::IsQueryExtractionEnabled())
       context_menu_contents_->AddItemWithStringId(IDC_COPY_URL, IDS_COPY_URL);
     context_menu_contents_->AddItemWithStringId(IDC_PASTE, IDS_PASTE);
     // GetContextualLabel() will override this next label with the

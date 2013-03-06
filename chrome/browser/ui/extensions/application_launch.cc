@@ -4,8 +4,11 @@
 
 #include "chrome/browser/ui/extensions/application_launch.h"
 
+#include <string>
+
 #include "base/command_line.h"
 #include "base/metrics/histogram.h"
+#include "chrome/browser/app_mode/app_mode_utils.h"
 #include "chrome/browser/extensions/extension_prefs.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
@@ -17,6 +20,7 @@
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/host_desktop.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/web_applications/web_app.h"
 #include "chrome/common/chrome_switches.h"
@@ -72,6 +76,35 @@ GURL UrlForExtension(const Extension* extension,
   return url;
 }
 
+ui::WindowShowState DetermineWindowShowState(
+    Profile* profile,
+    extension_misc::LaunchContainer container,
+    const Extension* extension) {
+  if (!extension ||
+      container != extension_misc::LAUNCH_WINDOW) {
+    return ui::SHOW_STATE_DEFAULT;
+  }
+
+  if (chrome::ShouldForceFullscreenApp())
+    return ui::SHOW_STATE_FULLSCREEN;
+
+#if defined(USE_ASH)
+  // In ash, LAUNCH_FULLSCREEN launches in a maximized app window and
+  // LAUNCH_WINDOW launches in a normal app window.
+  ExtensionService* service =
+      extensions::ExtensionSystem::Get(profile)->extension_service();
+  ExtensionPrefs::LaunchType launch_type =
+      service->extension_prefs()->GetLaunchType(
+          extension, ExtensionPrefs::LAUNCH_DEFAULT);
+  if (launch_type == ExtensionPrefs::LAUNCH_FULLSCREEN)
+    return ui::SHOW_STATE_MAXIMIZED;
+  else if (launch_type == ExtensionPrefs::LAUNCH_WINDOW)
+    return ui::SHOW_STATE_NORMAL;
+#endif
+
+  return ui::SHOW_STATE_DEFAULT;
+}
+
 WebContents* OpenApplicationWindow(
     Profile* profile,
     const Extension* extension,
@@ -100,23 +133,9 @@ WebContents* OpenApplicationWindow(
   Browser::CreateParams params(type, profile, chrome::GetActiveDesktop());
   params.app_name = app_name;
   params.initial_bounds = window_bounds;
-
-#if defined(USE_ASH)
-  if (extension &&
-      container == extension_misc::LAUNCH_WINDOW) {
-    // In ash, LAUNCH_FULLSCREEN launches in a maximized app window and
-    // LAUNCH_WINDOW launches in a normal app window.
-    ExtensionService* service =
-        extensions::ExtensionSystem::Get(profile)->extension_service();
-    ExtensionPrefs::LaunchType launch_type =
-        service->extension_prefs()->GetLaunchType(
-            extension, ExtensionPrefs::LAUNCH_DEFAULT);
-    if (launch_type == ExtensionPrefs::LAUNCH_FULLSCREEN)
-      params.initial_show_state = ui::SHOW_STATE_MAXIMIZED;
-    else if (launch_type == ExtensionPrefs::LAUNCH_WINDOW)
-      params.initial_show_state = ui::SHOW_STATE_NORMAL;
-  }
-#endif
+  params.initial_show_state = DetermineWindowShowState(profile,
+                                                       container,
+                                                       extension);
 
   Browser* browser = NULL;
 #if defined(OS_WIN)
@@ -218,25 +237,27 @@ WebContents* OpenApplicationTab(Profile* profile,
     contents = params.target_contents;
   }
 
-#if defined(USE_ASH)
-  // In ash, LAUNCH_FULLSCREEN launches in a maximized app window and it should
-  // not reach here.
-  DCHECK(launch_type != ExtensionPrefs::LAUNCH_FULLSCREEN);
-#else
-  // TODO(skerner):  If we are already in full screen mode, and the user
-  // set the app to open as a regular or pinned tab, what should happen?
-  // Today we open the tab, but stay in full screen mode.  Should we leave
-  // full screen mode in this case?
-  if (launch_type == ExtensionPrefs::LAUNCH_FULLSCREEN &&
-      !browser->window()->IsFullscreen()) {
+  // On Chrome OS the host desktop type for a browser window is always set to
+  // HOST_DESKTOP_TYPE_ASH. On Windows 8 it is only the case for Chrome ASH
+  // in metro mode.
+  if (browser->host_desktop_type() == chrome::HOST_DESKTOP_TYPE_ASH) {
+    // In ash, LAUNCH_FULLSCREEN launches in the OpenApplicationWindow function
+    // i.e. it should not reach here.
+    DCHECK(launch_type != ExtensionPrefs::LAUNCH_FULLSCREEN);
+  } else {
+    // TODO(skerner):  If we are already in full screen mode, and the user
+    // set the app to open as a regular or pinned tab, what should happen?
+    // Today we open the tab, but stay in full screen mode.  Should we leave
+    // full screen mode in this case?
+    if (launch_type == ExtensionPrefs::LAUNCH_FULLSCREEN &&
+        !browser->window()->IsFullscreen()) {
 #if defined(OS_MACOSX)
-    chrome::ToggleFullscreenWithChromeOrFallback(browser);
+      chrome::ToggleFullscreenWithChromeOrFallback(browser);
 #else
-    chrome::ToggleFullscreenMode(browser);
+      chrome::ToggleFullscreenMode(browser);
 #endif
+    }
   }
-#endif
-
   return contents;
 }
 

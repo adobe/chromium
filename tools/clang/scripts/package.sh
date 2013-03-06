@@ -42,6 +42,12 @@ mkdir $PDIR
 mkdir $PDIR/bin
 mkdir $PDIR/lib
 
+if [ "$(uname -s)" = "Darwin" ]; then
+  SO_EXT="dylib"
+else
+  SO_EXT="so"
+fi
+
 # Copy buildlog over.
 cp buildlog.txt $PDIR/
 
@@ -52,11 +58,8 @@ cp "${LLVM_BIN_DIR}/llvm-symbolizer" $PDIR/bin/
 
 # Copy plugins. Some of the dylibs are pretty big, so copy only the ones we
 # care about.
-if [ "$(uname -s)" = "Darwin" ]; then
-  cp "${LLVM_LIB_DIR}/libFindBadConstructs.dylib" $PDIR/lib
-else
-  cp "${LLVM_LIB_DIR}/libFindBadConstructs.so" $PDIR/lib
-fi
+cp "${LLVM_LIB_DIR}/libFindBadConstructs.${SO_EXT}" $PDIR/lib
+cp "${LLVM_LIB_DIR}/libprofile_rt.${SO_EXT}" $PDIR/lib
 
 # Copy built-in headers (lib/clang/3.2/include).
 # libcompiler-rt puts all kinds of libraries there too, but we want only ASan.
@@ -73,11 +76,11 @@ if [ "$(uname -s)" = "Darwin" ]; then
   install_name_tool -id @executable_path/${ASAN_DYLIB_NAME} "${ASAN_DYLIB}"
 else
   # Keep only
-  # Release+Asserts/lib/clang/3.2/lib/linux/libclang_rt.{asan,tsan}-x86_64.a
+  # Release+Asserts/lib/clang/3.2/lib/linux/libclang_rt.{a,t,m}san-x86_64.a
   # TODO(thakis): Make sure the 32bit version of ASan runtime is kept too once
-  # that's built. TSan runtime exists only for 64 bits.
+  # that's built. TSan and MSan runtimes exist only for 64 bits.
   find "${LLVM_LIB_DIR}/clang" -type f -path '*lib/linux*' | \
-       grep -v "asan\|tsan" | xargs rm
+       grep -v "asan\|tsan\|msan" | xargs rm
 fi
 
 cp -R "${LLVM_LIB_DIR}/clang" $PDIR/lib

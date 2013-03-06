@@ -68,6 +68,7 @@ extern const char kDefaultCharset[];
 extern const char kAcceptLanguages[];
 extern const char kStaticEncodings[];
 extern const char kShowBookmarkBar[];
+extern const char kShowAppsShortcutInBookmarkBar[];
 extern const char kBookmarkEditorExpandedNodes[];
 extern const char kWebKitCommonScript[];
 extern const char kWebKitStandardFontFamily[];
@@ -350,6 +351,7 @@ extern const char kPluginsEnabledPlugins[];
 extern const char kPluginsEnabledInternalPDF[];
 extern const char kPluginsEnabledNaCl[];
 extern const char kPluginsMigratedToPepperFlash[];
+extern const char kPluginsRemovedOldComponentPepperFlashSettings[];
 extern const char kPluginsShowDetails[];
 extern const char kPluginsAllowOutdated[];
 extern const char kPluginsAlwaysAuthorize[];
@@ -547,6 +549,7 @@ extern const char kRestartLastSessionOnShutdown[];
 extern const char kWasRestarted[];
 #if defined(OS_WIN)
 extern const char kRestartSwitchMode[];
+extern const char kRestartWithAppList[];
 #endif
 
 extern const char kNumKeywords[];
@@ -595,6 +598,7 @@ extern const char kDevToolsVSplitLocation[];
 // Used by Chrome Mobile.
 extern const char kSpdyProxyAuthEnabled[];
 #endif
+extern const char kSigninAllowed[];
 extern const char kSyncLastSyncedTime[];
 extern const char kSyncHasSetupCompleted[];
 extern const char kSyncKeepEverythingSynced[];
@@ -619,6 +623,7 @@ extern const char kSyncSearchEngines[];
 extern const char kSyncSessions[];
 extern const char kSyncSuppressStart[];
 extern const char kSyncSyncedNotifications[];
+extern const char kSyncTabs[];
 extern const char kGoogleServicesLastUsername[];
 extern const char kGoogleServicesUsername[];
 extern const char kGoogleServicesUsernamePattern[];
@@ -800,6 +805,7 @@ extern const char kWorkspaceCyclerMinScale[];
 extern const char kWorkspaceCyclerMaxScale[];
 extern const char kWorkspaceCyclerMinBrightness[];
 extern const char kWorkspaceCyclerBackgroundOpacity[];
+extern const char kWorkspaceCyclerDesktopWorkspaceBrightness[];
 extern const char kWorkspaceCyclerDistanceToInitiateCycling[];
 extern const char kWorkspaceCyclerScrollDistanceToCycleToNextWorkspace[];
 extern const char kWorkspaceCyclerCyclerStepAnimationDurationRatio[];
@@ -828,6 +834,7 @@ extern const char kPointsBufferedForVelocity[];
 extern const char kRailBreakProportion[];
 extern const char kRailStartProportion[];
 extern const char kSemiLongPressTimeInSeconds[];
+extern const char kTabScrubActivationDelayInMS[];
 extern const char kFlingAccelerationCurveCoefficient0[];
 extern const char kFlingAccelerationCurveCoefficient1[];
 extern const char kFlingAccelerationCurveCoefficient2[];
@@ -859,9 +866,7 @@ extern const char kRLZBrand[];
 extern const char kRLZDisabled[];
 #endif
 
-#if defined(ENABLE_APP_LIST)
 extern const char kAppListProfile[];
-#endif
 
 }  // namespace prefs
 

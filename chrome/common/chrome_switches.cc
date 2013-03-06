@@ -311,6 +311,9 @@ const char kDisableExtensionsHttpThrottling[] =
 const char kDisableExtensionsResourceWhitelist[] =
     "disable-extensions-resource-whitelist";
 
+// Disable Instant extended API.
+const char kDisableInstantExtendedAPI[] = "disable-instant-extended-api";
+
 // Disables improved SafeBrowsing download protection.
 const char kDisableImprovedDownloadProtection[] =
     "disable-improved-download-protection";
@@ -325,10 +328,6 @@ const char kDisableIPv6[]                   = "disable-ipv6";
 // is needed for a domain which shares an IP with an existing connection,
 // attempt to use the existing connection.
 const char kDisableIPPooling[]              = "disable-ip-pooling";
-
-// Disables the native Autofill UI, which is part of the browser process rather
-// than part of the renderer process.  http://crbug.com/51644
-const char kDisableNativeAutofillUi[]           = "disable-native-autofill-ui";
 
 // Disables the menu on the NTP for accessing sessions from other devices.
 const char kDisableNTPOtherSessionsMenu[]   = "disable-ntp-other-sessions-menu";
@@ -566,6 +565,10 @@ const char kNaClDebugMask[]                 = "nacl-debug-mask";
 // Enables hardware exception handling via debugger process.
 const char kEnableNaClExceptionHandling[]   = "enable-nacl-exception-handling";
 
+// Enables the native Autofill UI, which is part of the browser process rather
+// than part of the renderer process.  http://crbug.com/51644
+const char kEnableNativeAutofillUi[]        = "enable-new-autofill-ui";
+
 // Enables the native messaging extensions API.
 const char kEnableNativeMessaging[]         = "enable-native-messaging";
 
@@ -618,6 +621,9 @@ const char kEnableSdch[]                    = "enable-sdch";
 
 // Enable SPDY/3. This is a temporary testing flag.
 const char kEnableSpdy3[]                   = "enable-spdy3";
+
+// Enable SPDY/3.1. This is a temporary testing flag.
+const char kEnableSpdy31[]                  = "enable-spdy31";
 
 // Enable SPDY CREDENTIAL frame support.  This is a temporary testing flag.
 const char kEnableSpdyCredentialFrames[]    = "enable-spdy-credential-frames";
@@ -698,6 +704,9 @@ const char kForceAppMode[]                  = "force-app-mode";
 // Displays the First Run experience when the browser is started, regardless of
 // whether or not it's actually the First Run (this overrides kNoFirstRun).
 const char kForceFirstRun[]                 = "force-first-run";
+
+// Forces application to run in full screen in force app mode.
+const char kForceFullscreenApp[]            = "force-fullscreen-app";
 
 // Tries to load cloud policy for every signed in user, regardless of whether
 // they are a dasher user or not. Used to allow any GAIA account to be used for
@@ -880,6 +889,11 @@ const char kNaClGdbScript[]                 = "nacl-gdb-script";
 // On POSIX only: the contents of this flag are prepended to the nacl-loader
 // command line. Useful values might be "valgrind" or "xterm -e gdb --args".
 const char kNaClLoaderCmdPrefix[]           = "nacl-loader-cmd-prefix";
+
+// List of native messaging hosts outside of the default location. Used for
+// tests. The value must be comma-separate lists of key-value pairs separated
+// equal sign. E.g. "host1=/path/to/host1/manifest.json,host2=/path/host2.json".
+const char kNativeMessagingHosts[] = "native-messaging-hosts";
 
 // Sets the base logging level for the net log. Log 0 logs the most data.
 // Intended primarily for use with --log-net-log.
@@ -1136,6 +1150,10 @@ const char kRecordMode[]                    = "record-mode";
 // Uses custom front-end URL for the remote debugging.
 const char kRemoteDebuggingFrontend[]       = "remote-debugging-frontend";
 
+// Does not show an infobar when an extension attaches to a page using
+// chrome.debugger page. Required to attach to extension background pages.
+const char kSilentDebuggerExtensionAPI[]    = "silent-debugger-extension-api";
+
 // Enables print preview in the renderer. This flag is generated internally by
 // Chrome and does nothing when directly passed to the browser.
 const char kRendererPrintPreview[]          = "renderer-print-preview";
@@ -1196,9 +1214,6 @@ const char kSetToken[]                      = "set-token";
 
 // If true the app list will be shown.
 const char kShowAppList[]                   = "show-app-list";
-
-// If true an app list shortcut will be shown in the taskbar.
-const char kShowAppListShortcut[]           = "show-app-list-shortcut";
 
 // Annotates forms with Autofill field type predictions.
 const char kShowAutofillTypePredictions[]   = "show-autofill-type-predictions";
@@ -1335,6 +1350,9 @@ const char kTestType[]                      = "test-type";
 // channel with the given ID.
 const char kTestingChannelID[]              = "testing-channel";
 
+// Enables tracking the amount of non-idle time spent viewing pages.
+const char kTrackActiveVisitTime[]          = "track-active-visit-time";
+
 // Disables same-origin check on HTTP resources pushed via a SPDY proxy.
 // The value is the host:port of the trusted proxy.
 const char kTrustedSpdyProxy[] = "trusted-spdy-proxy";
@@ -1457,14 +1475,8 @@ const char kDisableLoginAnimations[]        = "disable-login-animations";
 // Avoid doing animations upon oobe.
 const char kDisableOobeAnimation[]          = "disable-oobe-animation";
 
-// Disables fake ethernet network on the login screen.
-const char kDisableStubEthernet[]           = "disable-stub-ethernet";
-
 // Enable Kiosk app mode for ChromeOS.
 const char kEnableAppMode[]                 = "enable-app-mode";
-
-// Enable "interactive" mode for stub implemenations (e.g. NetworkLibrary)
-const char kEnableStubInteractive[]         = "enable-stub-interactive";
 
 // Enables component extension that initializes background pages of
 // certain hosted applications.

@@ -50,7 +50,8 @@ class NET_EXPORT_PRIVATE BufferedSpdyFramerVisitorInterface {
   // Called when data is received.
   // |stream_id| The stream receiving data.
   // |data| A buffer containing the data received.
-  // |len| The length of the data buffer.
+  // |len| The length of the data buffer (at most 2^24 - 1 for SPDY/3,
+  // but 2^16 - 1 - 8 for SPDY/4).
   // When the other side has finished sending data on this stream,
   // this method will be called with a zero-length buffer.
   virtual void OnStreamFrameData(SpdyStreamId stream_id,
@@ -75,7 +76,7 @@ class NET_EXPORT_PRIVATE BufferedSpdyFramerVisitorInterface {
 
   // Called when a WINDOW_UPDATE frame has been parsed.
   virtual void OnWindowUpdate(SpdyStreamId stream_id,
-                              int delta_window_size) = 0;
+                              uint32 delta_window_size) = 0;
 
   // Called after a control frame has been compressed to allow the visitor
   // to record compression statistics.
@@ -130,7 +131,7 @@ class NET_EXPORT_PRIVATE BufferedSpdyFramer
   virtual void OnGoAway(SpdyStreamId last_accepted_stream_id,
                         SpdyGoAwayStatus status) OVERRIDE;
   virtual void OnWindowUpdate(SpdyStreamId stream_id,
-                              int delta_window_size) OVERRIDE;
+                              uint32 delta_window_size) OVERRIDE;
   virtual void OnDataFrameHeader(SpdyStreamId stream_id,
                                  size_t length,
                                  bool fin) OVERRIDE;
@@ -184,8 +185,8 @@ class NET_EXPORT_PRIVATE BufferedSpdyFramer
 
   // Returns the (minimum) size of control frames (sans variable-length
   // portions).
-  size_t GetControlFrameMinimumSize() const {
-    return spdy_framer_.GetControlFrameMinimumSize();
+  size_t GetControlFrameHeaderSize() const {
+    return spdy_framer_.GetControlFrameHeaderSize();
   }
 
   int frames_received() const { return frames_received_; }

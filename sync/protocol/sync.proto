@@ -370,8 +370,13 @@ message ChromiumExtensionsActivity {
 
 // Client specific configuration information.
 message ClientConfigParams {
-  // The set of data types this client has enabled.
+  // The set of data types this client has enabled. Note that this does not
+  // include proxy types, as they do not have protocol field numbers and are
+  // placeholder types that implicitly enable protocol types.
  repeated int32 enabled_type_ids = 1;
+
+ // Whether the PROXY_TABS proxy datatype is enabled on this client.
+ optional bool tabs_datatype_enabled = 2;
 };
 
 message CommitMessage {
@@ -569,6 +574,11 @@ message ClientToServerMessage {
   // The client should set this on every message sent to the server, though its
   // member fields may often be unset.
   optional ClientStatus client_status = 13;
+
+  // The ID that our invalidation client used to identify itself to the server.
+  // Sending the ID here allows the server to not send notifications of our own
+  // changes to our invalidator.
+  optional string invalidator_client_id = 14;
 };
 
 message CommitResponse {

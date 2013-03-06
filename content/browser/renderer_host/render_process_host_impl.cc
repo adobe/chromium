@@ -57,6 +57,7 @@
 #include "content/browser/in_process_webkit/indexed_db_context_impl.h"
 #include "content/browser/in_process_webkit/indexed_db_dispatcher_host.h"
 #include "content/browser/loader/resource_message_filter.h"
+#include "content/browser/loader/resource_scheduler_filter.h"
 #include "content/browser/media/media_internals.h"
 #include "content/browser/mime_registry_message_filter.h"
 #include "content/browser/plugin_service_impl.h"
@@ -482,16 +483,13 @@ bool RenderProcessHostImpl::Init() {
 
 void RenderProcessHostImpl::CreateMessageFilters() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  channel_->AddFilter(new ResourceSchedulerFilter(GetID()));
   MediaInternals* media_internals = MediaInternals::GetInstance();;
   // Add BrowserPluginMessageFilter to ensure it gets the first stab at messages
   // from guests.
-  if (IsGuest()) {
-    scoped_refptr<BrowserPluginMessageFilter> bp_message_filter(
-        new BrowserPluginMessageFilter(
-            GetID(),
-            GetBrowserContext()));
-    channel_->AddFilter(bp_message_filter);
-  }
+  scoped_refptr<BrowserPluginMessageFilter> bp_message_filter(
+      new BrowserPluginMessageFilter(GetID(), IsGuest()));
+  channel_->AddFilter(bp_message_filter);
 
   scoped_refptr<RenderMessageFilter> render_message_filter(
       new RenderMessageFilter(
@@ -768,7 +766,9 @@ void RenderProcessHostImpl::PropagateBrowserCommandLineToRenderer(
     switches::kEnableAccessibilityLogging,
     switches::kEnableBrowserPluginCompositing,
     switches::kEnableBrowserPluginForAllViewTypes,
+    switches::kEnableBrowserPluginPointerLock,
     switches::kEnableDCHECK,
+    switches::kEnableDelegatedRenderer,
     switches::kDisableEncryptedMedia,
     switches::kEnableExperimentalWebKitFeatures,
     switches::kEnableFixedLayout,
@@ -780,7 +780,6 @@ void RenderProcessHostImpl::PropagateBrowserCommandLineToRenderer(
     switches::kEnableMemoryBenchmarking,
     switches::kEnableLogging,
     switches::kDisableMediaSource,
-    switches::kDisableWebMediaPlayerMS,
     switches::kDisableRendererSideMixing,
     switches::kEnableStrictSiteIsolation,
     switches::kDisableFullScreen,
@@ -802,9 +801,15 @@ void RenderProcessHostImpl::PropagateBrowserCommandLineToRenderer(
     switches::kEnableCompositingForFixedPosition,
     switches::kEnableHighDpiCompositingForFixedPosition,
     switches::kDisableCompositingForFixedPosition,
+    switches::kEnableAcceleratedPainting,
     switches::kEnableTouchDragDrop,
     switches::kDisableThreadedCompositing,
     switches::kDisableTouchAdjustment,
+    switches::kDefaultTileWidth,
+    switches::kDefaultTileHeight,
+    switches::kMaxUntiledLayerWidth,
+    switches::kMaxUntiledLayerHeight,
+    switches::kShowFPSCounter,
     switches::kEnableViewport,
     switches::kEnableOpusPlayback,
     switches::kEnableVp9Playback,
@@ -820,13 +825,13 @@ void RenderProcessHostImpl::PropagateBrowserCommandLineToRenderer(
     switches::kLoggingLevel,
     switches::kMemoryMetrics,
 #if defined(OS_ANDROID)
-    switches::kMediaPlayerInRenderProcess,
     switches::kNetworkCountryIso,
+    switches::kDisableGestureRequirementForMediaPlayback,
 #endif
     switches::kNoReferrers,
     switches::kNoSandbox,
     switches::kOldCheckboxStyle,
-    switches::kPpapiOutOfProcess,
+    switches::kPpapiInProcess,
     switches::kRegisterPepperPlugins,
     switches::kRendererAssertTest,
 #if defined(OS_POSIX)
@@ -834,6 +839,8 @@ void RenderProcessHostImpl::PropagateBrowserCommandLineToRenderer(
 #endif
     switches::kRendererStartupDialog,
     switches::kShowPaintRects,
+    switches::kShowCompositedLayerBorders,
+    switches::kShowCompositedLayerTree,
     switches::kSitePerProcess,
     switches::kTestSandbox,
     switches::kTouchEvents,
@@ -848,27 +855,30 @@ void RenderProcessHostImpl::PropagateBrowserCommandLineToRenderer(
     switches::kVModule,
     switches::kWebCoreLogChannels,
     cc::switches::kBackgroundColorInsteadOfCheckerboard,
-    cc::switches::kEnableCompositorFrameMessage,
     cc::switches::kDisableImplSidePainting,
+    cc::switches::kDisableThreadedAnimation,
+    cc::switches::kEnableCompositorFrameMessage,
     cc::switches::kEnableImplSidePainting,
     cc::switches::kEnablePartialSwap,
+    cc::switches::kEnablePerTilePainting,
     cc::switches::kEnableRightAlignedScheduling,
     cc::switches::kEnableTopControlsPositionCalculation,
+    cc::switches::kLowResolutionContentsScaleFactor,
     cc::switches::kNumRasterThreads,
-    cc::switches::kShowPropertyChangedRects,
-    cc::switches::kShowSurfaceDamageRects,
-    cc::switches::kShowScreenSpaceRects,
-    cc::switches::kShowReplicaScreenSpaceRects,
     cc::switches::kShowNonOccludingRects,
     cc::switches::kShowOccludingRects,
+    cc::switches::kShowPropertyChangedRects,
+    cc::switches::kShowReplicaScreenSpaceRects,
+    cc::switches::kShowScreenSpaceRects,
+    cc::switches::kShowSurfaceDamageRects,
+    cc::switches::kSlowDownRasterScaleFactor,
+    cc::switches::kTopControlsHeight,
+    cc::switches::kTopControlsHideThreshold,
+    cc::switches::kTopControlsShowThreshold,
     cc::switches::kTraceAllRenderedFrames,
     cc::switches::kTraceOverdraw,
-    cc::switches::kTopControlsHeight,
-    cc::switches::kTopControlsShowThreshold,
-    cc::switches::kTopControlsHideThreshold,
-    cc::switches::kSlowDownRasterScaleFactor,
     cc::switches::kUseCheapnessEstimator,
-    cc::switches::kLowResolutionContentsScaleFactor,
+    cc::switches::kCompositeToMailbox,
   };
   renderer_cmd->CopySwitchesFrom(browser_cmd, kSwitchNames,
                                  arraysize(kSwitchNames));

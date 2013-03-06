@@ -26,6 +26,7 @@
 #include "base/stringprintf.h"
 #include "base/threading/thread.h"
 #include "base/threading/worker_pool.h"
+#include "base/win/registry.h"
 #include "base/win/scoped_com_initializer.h"
 #include "base/win/scoped_comptr.h"
 #include "base/win/windows_version.h"
@@ -34,6 +35,14 @@
 #include "ui/gl/gl_surface_egl.h"
 
 namespace {
+
+// This must be kept in sync with histograms.xml.
+enum DisplayLinkInstallationStatus {
+  DISPLAY_LINK_NOT_INSTALLED,
+  DISPLAY_LINK_7_1_OR_EARLIER,
+  DISPLAY_LINK_7_2_OR_LATER,
+  DISPLAY_LINK_INSTALLATION_STATUS_MAX
+};
 
 float ReadXMLFloatValue(XmlReader* reader) {
   std::string score_string;
@@ -154,6 +163,28 @@ content::GpuPerformanceStats RetrieveGpuPerformanceStatsWithHistograms() {
   return stats;
 }
 
+// Returns the display link driver version or an invalid version if it is
+// not installed.
+Version DisplayLinkVersion() {
+  base::win::RegKey key;
+
+  if (FAILED(key.Open(
+      HKEY_LOCAL_MACHINE, L"SOFTWARE", KEY_READ | KEY_WOW64_64KEY))) {
+    return Version();
+  }
+
+  if (FAILED(key.OpenKey(L"DisplayLink", KEY_READ | KEY_WOW64_64KEY)))
+    return Version();
+
+  if (FAILED(key.OpenKey(L"Core", KEY_READ | KEY_WOW64_64KEY)))
+    return Version();
+
+  string16 version;
+  if (FAILED(key.ReadValue(L"Version", &version)))
+    return Version();
+
+  return Version(WideToASCII(version));
+}
 }  // namespace anonymous
 
 namespace gpu_info_collector {
@@ -170,6 +201,9 @@ AMDVideoCardType GetAMDVideocardType();
 
 // Collects information about the level of D3D11 support and records it in
 // the UMA stats. Records no stats when D3D11 in not supported at all.
+//
+// http://crbug.com/175525. Using D3D11 seems to crash when dlumd32.dll is
+// loaded. This function is not currently called.
 void CollectD3D11Support(HMODULE d3d11_module) {
   TRACE_EVENT0("gpu", "CollectD3D11Support");
 
@@ -307,12 +341,6 @@ void CollectD3D11SupportDelayed(
 bool CollectDriverInfoD3D(const std::wstring& device_id,
                           content::GPUInfo* gpu_info) {
   TRACE_EVENT0("gpu", "CollectDriverInfoD3D");
-
-  base::WorkerPool::PostTask(
-      FROM_HERE,
-      base::Bind(CollectD3D11SupportDelayed,
-                 base::MessageLoopProxy::current()),
-      false);
 
   // create device info for the display device
   HDEVINFO device_info = SetupDiGetClassDevsW(
@@ -486,6 +514,22 @@ bool CollectBasicGraphicsInfo(content::GPUInfo* gpu_info) {
   // nvd3d9wrap.dll is loaded into all processes when Optimus is enabled.
   HMODULE nvd3d9wrap = GetModuleHandleW(L"nvd3d9wrap.dll");
   gpu_info->optimus = nvd3d9wrap != NULL;
+
+  gpu_info->display_link_version = DisplayLinkVersion();
+
+  if (!gpu_info->display_link_version .IsValid()) {
+    UMA_HISTOGRAM_ENUMERATION("GPU.DisplayLinkInstallationStatus",
+                              DISPLAY_LINK_NOT_INSTALLED,
+                              DISPLAY_LINK_INSTALLATION_STATUS_MAX);
+  } else if (gpu_info->display_link_version.IsOlderThan("7.2")) {
+    UMA_HISTOGRAM_ENUMERATION("GPU.DisplayLinkInstallationStatus",
+                              DISPLAY_LINK_7_1_OR_EARLIER,
+                              DISPLAY_LINK_INSTALLATION_STATUS_MAX);
+  } else {
+    UMA_HISTOGRAM_ENUMERATION("GPU.DisplayLinkInstallationStatus",
+                              DISPLAY_LINK_7_2_OR_LATER,
+                              DISPLAY_LINK_INSTALLATION_STATUS_MAX);
+  }
 
   // Taken from http://developer.nvidia.com/object/device_ids.html
   DISPLAY_DEVICE dd;

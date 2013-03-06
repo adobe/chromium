@@ -24,7 +24,7 @@
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_set.h"
 #include "chrome/common/extensions/permissions/api_permission.h"
-#include "ui/message_center/notifier_settings_view.h"
+#include "ui/message_center/views/notifier_settings_view.h"
 #include "ui/views/widget/widget.h"
 
 BalloonCollectionImplAsh::BalloonCollectionImplAsh()
@@ -72,7 +72,8 @@ void BalloonCollectionImplAsh::DisableNotificationsFromSource(
 }
 
 void BalloonCollectionImplAsh::NotificationRemoved(
-    const std::string& notification_id) {
+    const std::string& notification_id,
+    bool by_user) {
   RemoveById(notification_id);
 }
 
@@ -85,7 +86,7 @@ void BalloonCollectionImplAsh::ShowSettings(
       chrome::FindOrCreateTabbedBrowser(profile,
                                         chrome::HOST_DESKTOP_TYPE_ASH);
   if (GetBalloonExtension(balloon))
-    chrome::ShowExtensions(browser);
+    chrome::ShowExtensions(browser, std::string());
   else
     chrome::ShowContentSettings(browser, CONTENT_SETTINGS_TYPE_NOTIFICATIONS);
 }

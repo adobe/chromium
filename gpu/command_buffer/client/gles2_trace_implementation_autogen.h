@@ -163,7 +163,7 @@ virtual void ShaderBinary(
     GLsizei n, const GLuint* shaders, GLenum binaryformat, const void* binary,
     GLsizei length) OVERRIDE;
 virtual void ShaderSource(
-    GLuint shader, GLsizei count, const char** str,
+    GLuint shader, GLsizei count, const GLchar* const* str,
     const GLint* length) OVERRIDE;
 virtual void StencilFunc(GLenum func, GLint ref, GLuint mask) OVERRIDE;
 virtual void StencilFuncSeparate(
@@ -331,8 +331,10 @@ virtual void AsyncTexImage2DCHROMIUM(
     GLenum target, GLint level, GLint internalformat, GLsizei width,
     GLsizei height, GLint border, GLenum format, GLenum type,
     const void* pixels) OVERRIDE;
+virtual void WaitAsyncTexImage2DCHROMIUM(GLenum target) OVERRIDE;
 virtual void DiscardFramebufferEXT(
     GLenum target, GLsizei count, const GLenum* attachments) OVERRIDE;
 virtual void LoseContextCHROMIUM(GLenum current, GLenum other) OVERRIDE;
+virtual void WaitSyncPointCHROMIUM(GLuint sync_point) OVERRIDE;
 #endif  // GPU_COMMAND_BUFFER_CLIENT_GLES2_TRACE_IMPLEMENTATION_AUTOGEN_H_
 

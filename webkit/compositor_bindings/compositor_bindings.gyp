@@ -9,8 +9,6 @@
       'web_animation_curve_common.h',
       'web_animation_impl.cc',
       'web_animation_impl.h',
-      'web_compositor_support_software_output_device.cc',
-      'web_compositor_support_software_output_device.h',
       'web_content_layer_impl.cc',
       'web_content_layer_impl.h',
       'web_external_texture_layer_impl.cc',
@@ -83,6 +81,7 @@
         '../../media/media.gyp:media',
         '../../skia/skia.gyp:skia',
         '../../ui/ui.gyp:ui',
+        '../../webkit/gpu/webkit_gpu.gyp:webkit_gpu',
         '<(webkit_src_dir)/Source/WebKit/chromium/WebKit.gyp:webkit',
       ],
       'sources': [

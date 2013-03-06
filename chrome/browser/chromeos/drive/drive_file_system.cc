@@ -15,10 +15,10 @@
 #include "base/stringprintf.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "base/values.h"
+#include "chrome/browser/chromeos/drive/change_list_loader.h"
+#include "chrome/browser/chromeos/drive/change_list_processor.h"
 #include "chrome/browser/chromeos/drive/drive.pb.h"
 #include "chrome/browser/chromeos/drive/drive_cache.h"
-#include "chrome/browser/chromeos/drive/drive_feed_loader.h"
-#include "chrome/browser/chromeos/drive/drive_feed_processor.h"
 #include "chrome/browser/chromeos/drive/drive_file_system_observer.h"
 #include "chrome/browser/chromeos/drive/drive_file_system_util.h"
 #include "chrome/browser/chromeos/drive/drive_scheduler.h"
@@ -110,9 +110,6 @@ class OperationReadinessObserver : public google_apis::DriveServiceObserver {
 
   DISALLOW_COPY_AND_ASSIGN(OperationReadinessObserver);
 };
-
-// Used as a FileOperationCallback.
-void EmptyFileOperationCallback(DriveFileError error) {}
 
 // Creates a temporary JSON file representing a document with |edit_url|
 // and |resource_id| under |document_dir| on blocking pool.
@@ -266,7 +263,7 @@ DriveFileSystem::DriveFileSystem(
 void DriveFileSystem::Reload() {
   ResetResourceMetadata();
 
-  feed_loader_->ReloadFromServerIfNeeded(
+  change_list_loader_->ReloadFromServerIfNeeded(
       base::Bind(&DriveFileSystem::NotifyInitialLoadFinishedAndRun,
                  weak_ptr_factory_.GetWeakPtr(),
                  base::Bind(&DriveFileSystem::OnUpdateChecked,
@@ -289,12 +286,12 @@ void DriveFileSystem::Initialize() {
 void DriveFileSystem::ResetResourceMetadata() {
   resource_metadata_.reset(
       new DriveResourceMetadata(drive_service_->GetRootResourceId()));
-  feed_loader_.reset(new DriveFeedLoader(resource_metadata_.get(),
+  change_list_loader_.reset(new ChangeListLoader(resource_metadata_.get(),
                                          scheduler_.get(),
                                          webapps_registry_,
                                          cache_,
                                          blocking_task_runner_));
-  feed_loader_->AddObserver(this);
+  change_list_loader_->AddObserver(this);
 
   // Allocate the drive operation handlers.
   drive_operations_.Init(scheduler_.get(),
@@ -310,8 +307,8 @@ void DriveFileSystem::CheckForUpdates() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DVLOG(1) << "CheckForUpdates";
 
-  if (resource_metadata_->loaded() && !feed_loader_->refreshing()) {
-    feed_loader_->ReloadFromServerIfNeeded(
+  if (resource_metadata_->loaded() && !change_list_loader_->refreshing()) {
+    change_list_loader_->ReloadFromServerIfNeeded(
         base::Bind(&DriveFileSystem::OnUpdateChecked,
                    weak_ptr_factory_.GetWeakPtr()));
   }
@@ -328,7 +325,7 @@ DriveFileSystem::~DriveFileSystem() {
   // This should be called from UI thread, from DriveSystemService shutdown.
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  feed_loader_->RemoveObserver(this);
+  change_list_loader_->RemoveObserver(this);
 
   // Cancel all the in-flight operations.
   // This asynchronously cancels the URL fetch operations.
@@ -347,7 +344,7 @@ void DriveFileSystem::RemoveObserver(DriveFileSystemObserver* observer) {
 
 void DriveFileSystem::StartInitialFeedFetch() {
   if (drive_service_->CanStartOperation()) {
-    LoadFeedIfNeeded(base::Bind(&EmptyFileOperationCallback));
+    LoadFeedIfNeeded(base::Bind(&util::EmptyFileOperationCallback));
   } else {
     // Wait for the service to get ready. The observer deletes itself after
     // OnReadyToPerformOperations() gets called.
@@ -355,7 +352,7 @@ void DriveFileSystem::StartInitialFeedFetch() {
         drive_service_,
         base::Bind(&DriveFileSystem::LoadFeedIfNeeded,
                    weak_ptr_factory_.GetWeakPtr(),
-                   base::Bind(&EmptyFileOperationCallback)));
+                   base::Bind(&util::EmptyFileOperationCallback)));
   }
 }
 
@@ -436,7 +433,7 @@ void DriveFileSystem::LoadFeedIfNeeded(const FileOperationCallback& callback) {
     return;
   }
 
-  if (feed_loader_->refreshing()) {
+  if (change_list_loader_->refreshing()) {
     // If root feed is not loaded but the initialization process has
     // already started, add an observer to execute the remaining task after
     // the end of the initialization.
@@ -446,9 +443,10 @@ void DriveFileSystem::LoadFeedIfNeeded(const FileOperationCallback& callback) {
   }
 
   // Load root feed from the disk cache.
-  feed_loader_->LoadFromCache(base::Bind(&DriveFileSystem::OnFeedCacheLoaded,
-                                         weak_ptr_factory_.GetWeakPtr(),
-                                         callback));
+  change_list_loader_->LoadFromCache(
+      base::Bind(&DriveFileSystem::OnFeedCacheLoaded,
+                 weak_ptr_factory_.GetWeakPtr(),
+                 callback));
 }
 
 void DriveFileSystem::TransferFileFromRemoteToLocal(
@@ -941,58 +939,84 @@ void DriveFileSystem::ReadDirectoryByPathAfterRead(
   callback.Run(DRIVE_FILE_OK, hide_hosted_docs_, entries.Pass());
 }
 
-void DriveFileSystem::RequestDirectoryRefresh(
-    const base::FilePath& directory_path) {
+void DriveFileSystem::RefreshDirectory(
+    const base::FilePath& directory_path,
+    const FileOperationCallback& callback) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK(!callback.is_null());
 
   // Make sure the destination directory exists.
   resource_metadata_->GetEntryInfoByPath(
       directory_path,
-      base::Bind(&DriveFileSystem::RequestDirectoryRefreshAfterGetEntryInfo,
+      base::Bind(&DriveFileSystem::RefreshDirectoryAfterGetEntryInfo,
                  weak_ptr_factory_.GetWeakPtr(),
-                 directory_path));
+                 directory_path,
+                 callback));
 }
 
-void DriveFileSystem::RequestDirectoryRefreshAfterGetEntryInfo(
+void DriveFileSystem::RefreshDirectoryAfterGetEntryInfo(
     const base::FilePath& directory_path,
+    const FileOperationCallback& callback,
     DriveFileError error,
     scoped_ptr<DriveEntryProto> entry_proto) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-
-  if (error != DRIVE_FILE_OK ||
-      !entry_proto->file_info().is_directory()) {
-    LOG(ERROR) << "Directory entry not found: " << directory_path.value();
-    return;
-  }
-
-  feed_loader_->LoadDirectoryFromServer(
-      entry_proto->resource_id(),
-      base::Bind(&DriveFileSystem::OnRequestDirectoryRefresh,
-                 weak_ptr_factory_.GetWeakPtr(),
-                 entry_proto->resource_id(),
-                 directory_path));
-}
-
-void DriveFileSystem::OnRequestDirectoryRefresh(
-    const std::string& directory_resource_id,
-    const base::FilePath& directory_path,
-    const ScopedVector<google_apis::ResourceList>& feed_list,
-    DriveFileError error) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK(!callback.is_null());
 
   if (error != DRIVE_FILE_OK) {
-    LOG(ERROR) << "Failed to refresh directory: " << directory_path.value()
-               << ": " << error;
+    callback.Run(error);
+    return;
+  }
+  if (!entry_proto->file_info().is_directory()) {
+    callback.Run(DRIVE_FILE_ERROR_NOT_A_DIRECTORY);
     return;
   }
 
-  DriveFeedProcessor feed_processor(resource_metadata_.get());
-  feed_processor.FeedToEntryProtoMap(feed_list, NULL, NULL);
+  change_list_loader_->LoadDirectoryFromServer(
+      entry_proto->resource_id(),
+      base::Bind(&DriveFileSystem::RefreshDirectoryAfterLoadDirectory,
+                 weak_ptr_factory_.GetWeakPtr(),
+                 entry_proto->resource_id(),
+                 directory_path,
+                 callback));
+}
+
+void DriveFileSystem::RefreshDirectoryAfterLoadDirectory(
+    const std::string& directory_resource_id,
+    const base::FilePath& directory_path,
+    const FileOperationCallback& callback,
+    const ScopedVector<google_apis::ResourceList>& resource_list,
+    DriveFileError error) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK(!callback.is_null());
+
+  if (error != DRIVE_FILE_OK) {
+    LOG(ERROR) << "Failed to load directory: " << directory_path.value()
+               << ": " << error;
+    callback.Run(error);
+    return;
+  }
+
+  ChangeListProcessor change_list_processor(resource_metadata_.get());
+  change_list_processor.FeedToEntryProtoMap(resource_list, NULL, NULL);
   resource_metadata_->RefreshDirectory(
       directory_resource_id,
-      feed_processor.entry_proto_map(),
-      base::Bind(&DriveFileSystem::OnDirectoryChangeFileMoveCallback,
-                 weak_ptr_factory_.GetWeakPtr()));
+      change_list_processor.entry_proto_map(),
+      base::Bind(&DriveFileSystem::RefreshDirectoryAfterRefreshDirectory,
+                 weak_ptr_factory_.GetWeakPtr(),
+                 callback));
+}
+
+void DriveFileSystem::RefreshDirectoryAfterRefreshDirectory(
+    const FileOperationCallback& callback,
+    DriveFileError error,
+    const base::FilePath& directory_path) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK(!callback.is_null());
+
+  callback.Run(error);
+  // Also notify the observers.
+  if (error == DRIVE_FILE_OK)
+    OnDirectoryChanged(directory_path);
 }
 
 void DriveFileSystem::UpdateFileByResourceId(
@@ -1010,16 +1034,16 @@ void DriveFileSystem::GetAvailableSpace(
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(!callback.is_null());
 
-  scheduler_->GetAccountMetadata(
-      base::Bind(&DriveFileSystem::OnGetAccountMetadata,
+  scheduler_->GetAboutResource(
+      base::Bind(&DriveFileSystem::OnGetAboutResource,
                  weak_ptr_factory_.GetWeakPtr(),
                  callback));
 }
 
-void DriveFileSystem::OnGetAccountMetadata(
+void DriveFileSystem::OnGetAboutResource(
     const GetAvailableSpaceCallback& callback,
     google_apis::GDataErrorCode status,
-    scoped_ptr<google_apis::AccountMetadataFeed> account_metadata) {
+    scoped_ptr<google_apis::AboutResource> about_resource) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(!callback.is_null());
 
@@ -1028,11 +1052,11 @@ void DriveFileSystem::OnGetAccountMetadata(
     callback.Run(error, -1, -1);
     return;
   }
-  DCHECK(account_metadata);
+  DCHECK(about_resource);
 
   callback.Run(DRIVE_FILE_OK,
-               account_metadata->quota_bytes_total(),
-               account_metadata->quota_bytes_used());
+               about_resource->quota_bytes_total(),
+               about_resource->quota_bytes_used());
 }
 
 void DriveFileSystem::OnSearch(
@@ -1137,7 +1161,7 @@ void DriveFileSystem::Search(const std::string& search_query,
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(!callback.is_null());
 
-  feed_loader_->SearchFromServer(
+  change_list_loader_->SearchFromServer(
       search_query,
       shared_with_me,
       next_feed,
@@ -1177,7 +1201,7 @@ void DriveFileSystem::LoadRootFeedFromCacheForTesting(
     const FileOperationCallback& callback) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  feed_loader_->LoadFromCache(callback);
+  change_list_loader_->LoadFromCache(callback);
 }
 
 void DriveFileSystem::OnFileDownloaded(
@@ -1223,8 +1247,11 @@ void DriveFileSystem::UnpinIfPinned(
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   // TODO(hshi): http://crbug.com/127138 notify when file properties change.
   // This allows file manager to clear the "Available offline" checkbox.
-  if (success && cache_entry.is_pinned())
-    cache_->Unpin(resource_id, md5, base::Bind(&EmptyFileOperationCallback));
+  if (success && cache_entry.is_pinned()) {
+    cache_->Unpin(resource_id,
+                  md5,
+                  base::Bind(&util::EmptyFileOperationCallback));
+  }
 }
 
 void DriveFileSystem::OnFileDownloadedAndSpaceChecked(
@@ -1246,7 +1273,7 @@ void DriveFileSystem::OnFileDownloadedAndSpaceChecked(
                     params.md5,
                     downloaded_file_path,
                     DriveCache::FILE_OPERATION_MOVE,
-                    base::Bind(&EmptyFileOperationCallback));
+                    base::Bind(&util::EmptyFileOperationCallback));
       // Storing to cache changes the "offline available" status, hence notify.
       OnDirectoryChanged(params.virtual_file_path.DirName());
     } else {
@@ -1265,13 +1292,6 @@ void DriveFileSystem::OnFileDownloadedAndSpaceChecked(
                                downloaded_file_path,
                                params.mime_type,
                                REGULAR_FILE);
-}
-
-void DriveFileSystem::OnDirectoryChangeFileMoveCallback(
-    DriveFileError error,
-    const base::FilePath& directory_path) {
-  if (error == DRIVE_FILE_OK)
-    OnDirectoryChanged(directory_path);
 }
 
 void DriveFileSystem::NotifyFileSystemMounted() {
@@ -1299,7 +1319,7 @@ void DriveFileSystem::OnFeedCacheLoaded(const FileOperationCallback& callback,
 
   if (error != DRIVE_FILE_OK) {
     // If cache cannot be loaded, try to load from server directly.
-    feed_loader_->ReloadFromServerIfNeeded(
+    change_list_loader_->ReloadFromServerIfNeeded(
         base::Bind(&DriveFileSystem::NotifyInitialLoadFinishedAndRun,
                    weak_ptr_factory_.GetWeakPtr(),
                    callback));
@@ -1380,7 +1400,7 @@ void DriveFileSystem::GetMetadata(
 
   DriveFileSystemMetadata metadata;
   metadata.loaded = resource_metadata_->loaded();
-  metadata.refreshing = feed_loader_->refreshing();
+  metadata.refreshing = change_list_loader_->refreshing();
 
   // Metadata related to delta update.
   metadata.push_notification_enabled = push_notification_enabled_;

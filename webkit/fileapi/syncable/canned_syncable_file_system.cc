@@ -26,11 +26,15 @@
 #include "webkit/quota/quota_manager.h"
 
 using base::PlatformFileError;
+using fileapi::FileSystemContext;
+using fileapi::FileSystemOperation;
+using fileapi::FileSystemURL;
+using fileapi::FileSystemURLSet;
 using quota::QuotaManager;
 using webkit_blob::MockBlobURLRequestContext;
 using webkit_blob::ScopedTextBlob;
 
-namespace fileapi {
+namespace sync_file_system {
 
 namespace {
 
@@ -174,9 +178,9 @@ CannedSyncableFileSystem::CannedSyncableFileSystem(
     base::SingleThreadTaskRunner* file_task_runner)
     : service_name_(service),
       origin_(origin),
-      type_(kFileSystemTypeSyncable),
+      type_(fileapi::kFileSystemTypeSyncable),
       result_(base::PLATFORM_FILE_OK),
-      sync_status_(SYNC_STATUS_OK),
+      sync_status_(sync_file_system::SYNC_STATUS_OK),
       io_task_runner_(io_task_runner),
       file_task_runner_(file_task_runner),
       is_filesystem_set_up_(false),
@@ -201,15 +205,15 @@ void CannedSyncableFileSystem::SetUp() {
       storage_policy);
 
   file_system_context_ = new FileSystemContext(
-      make_scoped_ptr(new FileSystemTaskRunners(
+      make_scoped_ptr(new fileapi::FileSystemTaskRunners(
           io_task_runner_,
           file_task_runner_,
           file_task_runner_)),
-      ExternalMountPoints::CreateRefCounted().get(),
+      fileapi::ExternalMountPoints::CreateRefCounted().get(),
       storage_policy,
       quota_manager_->proxy(),
       data_dir_.path(),
-      CreateAllowFileAccessOptions());
+      fileapi::CreateAllowFileAccessOptions());
 
   // In testing we override this setting to support directory operations
   // by default.
@@ -268,7 +272,7 @@ void CannedSyncableFileSystem::RemoveSyncStatusObserver(
 SyncStatusCode CannedSyncableFileSystem::MaybeInitializeFileSystemContext(
     LocalFileSyncContext* sync_context) {
   DCHECK(sync_context);
-  sync_status_ = SYNC_STATUS_UNKNOWN;
+  sync_status_ = sync_file_system::SYNC_STATUS_UNKNOWN;
   VerifySameTaskRunner(io_task_runner_, sync_context->io_task_runner_);
   sync_context->MaybeInitializeFileSystemContext(
       origin_, service_name_, file_system_context_,
@@ -599,4 +603,4 @@ void CannedSyncableFileSystem::InitializeSyncStatusObserver() {
   file_system_context_->sync_context()->sync_status()->AddObserver(this);
 }
 
-}  // namespace fileapi
+}  // namespace sync_file_system

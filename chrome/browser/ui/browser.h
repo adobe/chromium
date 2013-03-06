@@ -456,11 +456,14 @@ class Browser : public TabStripModelObserver,
   // Show the first run search engine bubble on the location bar.
   void ShowFirstRunBubble();
 
-  // If necessary, update the bookmark bar state according to the instant
-  // preview state: when instant preview shows suggestions and bookmark bar is
+  // If necessary, update the bookmark bar state according to the Instant
+  // overlay state: when Instant overlay shows suggestions and bookmark bar is
   // still showing attached, hide it.
-  void MaybeUpdateBookmarkBarStateForInstantPreview(
+  void MaybeUpdateBookmarkBarStateForInstantOverlay(
       const chrome::search::Mode& mode);
+
+  // Show a download on the download shelf.
+  void ShowDownload(content::DownloadItem* download);
 
   FullscreenController* fullscreen_controller() const {
     return fullscreen_controller_.get();
@@ -490,6 +493,8 @@ class Browser : public TabStripModelObserver,
   FRIEND_TEST_ALL_PREFIXES(StartupBrowserCreatorTest,
                            OpenAppShortcutWindowPref);
   FRIEND_TEST_ALL_PREFIXES(StartupBrowserCreatorTest, OpenAppShortcutTabPref);
+
+  class InterstitialObserver;
 
   // Used to describe why a tab is being detached. This is used by
   // TabDetachedAtImpl.
@@ -559,8 +564,6 @@ class Browser : public TabStripModelObserver,
   virtual void SetFocusToLocationBar(bool select_all) OVERRIDE;
   virtual void RenderWidgetShowing() OVERRIDE;
   virtual int GetExtraRenderViewHeight() const OVERRIDE;
-  virtual void OnStartDownload(content::WebContents* source,
-                               content::DownloadItem* download) OVERRIDE;
   virtual void ViewSourceForTab(content::WebContents* source,
                                 const GURL& page_url) OVERRIDE;
   virtual void ViewSourceForFrame(
@@ -794,6 +797,8 @@ class Browser : public TabStripModelObserver,
                                      const GURL& target_url);
 
   // Data members /////////////////////////////////////////////////////////////
+
+  std::vector<InterstitialObserver*> interstitial_observers_;
 
   content::NotificationRegistrar registrar_;
 

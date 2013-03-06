@@ -12,18 +12,24 @@
     'conditions': [
       ['OS == "android" or OS == "ios"', {
         # Android and iOS don't use ffmpeg.
-        'use_ffmpeg%': 0,
+        'media_use_ffmpeg%': 0,
         # Android and iOS don't use libvpx.
-        'use_libvpx%': 0,
+        'media_use_libvpx%': 0,
       }, {  # 'OS != "android" and OS != "ios"'
-        'use_ffmpeg%': 1,
-        'use_libvpx%': 1,
+        'media_use_ffmpeg%': 1,
+        'media_use_libvpx%': 1,
       }],
       # Screen capturer works only on Windows, OSX and Linux.
       ['OS=="win" or OS=="mac" or OS=="linux"', {
         'screen_capture_supported%': 1,
       }, {
         'screen_capture_supported%': 0,
+      }],
+      # ALSA usage.
+      ['OS=="linux" or OS=="freebsd" or OS=="solaris"', {
+        'use_alsa%': 1,
+      }, {
+        'use_alsa%': 0,
       }],
     ],
   },
@@ -296,8 +302,6 @@
         'filters/decrypting_demuxer_stream.h',
         'filters/decrypting_video_decoder.cc',
         'filters/decrypting_video_decoder.h',
-        'filters/dummy_demuxer.cc',
-        'filters/dummy_demuxer.h',
         'filters/ffmpeg_audio_decoder.cc',
         'filters/ffmpeg_audio_decoder.h',
         'filters/ffmpeg_demuxer.cc',
@@ -324,8 +328,6 @@
         'filters/source_buffer_stream.h',
         'filters/video_decoder_selector.cc',
         'filters/video_decoder_selector.h',
-        'filters/video_frame_generator.cc',
-        'filters/video_frame_generator.h',
         'filters/video_renderer_base.cc',
         'filters/video_renderer_base.h',
         'filters/vpx_video_decoder.cc',
@@ -434,11 +436,11 @@
             'yuv_convert',
           ],
         }],
-        ['use_ffmpeg == 1', {
+        ['media_use_ffmpeg == 1', {
           'dependencies': [
             '../third_party/ffmpeg/ffmpeg.gyp:ffmpeg',
           ],
-        }, {  # use_ffmpeg == 0
+        }, {  # media_use_ffmpeg == 0
           # Exclude the sources that depend on ffmpeg.
           'sources!': [
             'base/media_posix.cc',
@@ -466,11 +468,16 @@
             'webm/webm_stream_parser.h',
           ],
         }],
-        ['use_libvpx == 1', {
+        ['media_use_libvpx == 1', {
           'dependencies': [
             '<(DEPTH)/third_party/libvpx/libvpx.gyp:libvpx',
           ],
-        }, {  # use_libvpx == 0
+        }, {  # media_use_libvpx == 0
+          'direct_dependent_settings': {
+            'defines': [
+              'MEDIA_DISABLE_LIBVPX',
+            ],
+          },
           # Exclude the sources that depend on libvpx.
           'sources!': [
             'filters/vpx_video_decoder.cc',
@@ -556,20 +563,15 @@
             'webm/chromeos/webm_encoder.h',
           ],
         }],
-        ['OS=="linux" or OS=="freebsd" or OS=="solaris"', {
+        ['use_alsa==1', {
           'link_settings': {
             'libraries': [
               '-lasound',
             ],
           },
-        }],
-        ['OS=="openbsd"', {
+        }, { # use_alsa==0
           'sources/': [ ['exclude', '/alsa_' ],
-                        ['exclude', '/audio_manager_linux' ] ],
-          'link_settings': {
-            'libraries': [
-            ],
-          },
+                      ['exclude', '/audio_manager_linux' ] ],
         }],
         ['OS!="openbsd"', {
           'sources!': [
@@ -681,7 +683,7 @@
                   'message': 'Generating Pulse stubs for dynamic loading.',
                 },
               ],
-              'conditions': [ 
+              'conditions': [
                 # Linux/Solaris need libdl for dlopen() and friends.
                 ['OS == "linux" or OS == "solaris"', {
                   'link_settings': {
@@ -809,6 +811,12 @@
             '../build/linux/system.gyp:gtk',
           ],
         }],
+        # ios check is necessary due to http://crbug.com/172682.
+        ['OS != "ios" and (target_arch == "ia32" or target_arch == "x64")', {
+          'dependencies': [
+            'media_sse',
+          ],
+        }],
       ],
       'target_conditions': [
         ['OS == "ios"', {
@@ -862,6 +870,7 @@
         'audio/win/audio_output_win_unittest.cc',
         'audio/win/audio_unified_win_unittest.cc',
         'audio/win/core_audio_util_win_unittest.cc',
+        'base/android/media_codec_bridge_unittest.cc',
         'base/audio_bus_unittest.cc',
         'base/audio_converter_unittest.cc',
         'base/audio_fifo_unittest.cc',
@@ -943,7 +952,7 @@
             'yuv_convert',
           ],
         }],
-        ['use_ffmpeg == 1', {
+        ['media_use_ffmpeg == 1', {
           'dependencies': [
             '../third_party/ffmpeg/ffmpeg.gyp:ffmpeg',
           ],
@@ -991,6 +1000,7 @@
             ['gtest_target_type == "shared_library"', {
               'dependencies': [
                 '../testing/android/native_test.gyp:native_test_native_code',
+                'player_android',
               ],
             }],
           ],
@@ -1008,12 +1018,21 @@
             }],
           ],
         }],
-        [ 'target_arch=="ia32" or target_arch=="x64"', {
+        ['use_alsa==0', {
+          'sources!': [
+            'audio/linux/alsa_output_unittest.cc',
+            'audio/audio_low_latency_input_output_unittest.cc',
+          ],
+        }],
+        ['OS != "ios" and (target_arch=="ia32" or target_arch=="x64")', {
           'sources': [
             'base/simd/convert_rgb_to_yuv_unittest.cc',
           ],
+          'dependencies': [
+            'media_sse',
+          ],
         }],
-        [ 'screen_capture_supported == 0', {
+        ['screen_capture_supported == 0', {
           'sources/': [
             ['exclude', '^video/capture/screen/'],
           ],
@@ -1155,7 +1174,8 @@
             'base/simd/yuv_to_rgb_table.h',
           ],
           'conditions': [
-            [ 'OS!="win" or target_arch=="ia32" or MSVS_VERSION>="2012"', {
+            # TODO(jschuh): Get MMX enabled on Win64. crbug.com/179657
+            [ 'OS!="win" or target_arch=="ia32"', {
               'sources': [
                 'base/simd/filter_yuv_mmx.cc',
               ],
@@ -1422,9 +1442,31 @@
           'includes': [ '../build/jni_generator.gypi' ],
         },
         {
+          'target_name': 'media_codec_jni_headers',
+          'type': 'none',
+          'variables': {
+            'jni_gen_dir': 'media',
+            'input_java_class': 'android/media/MediaCodec.class',
+            'input_jar_file': '<(android_sdk)/android.jar',
+          },
+          'includes': [ '../build/jar_file_jni_generator.gypi' ],
+        },
+        {
+          'target_name': 'media_format_jni_headers',
+          'type': 'none',
+          'variables': {
+            'jni_gen_dir': 'media',
+            'input_java_class': 'android/media/MediaFormat.class',
+            'input_jar_file': '<(android_sdk)/android.jar',
+          },
+          'includes': [ '../build/jar_file_jni_generator.gypi' ],
+        },
+        {
           'target_name': 'player_android',
           'type': 'static_library',
           'sources': [
+            'base/android/media_codec_bridge.cc',
+            'base/android/media_codec_bridge.h',
             'base/android/media_jni_registrar.cc',
             'base/android/media_jni_registrar.h',
             'base/android/media_player_bridge.cc',
@@ -1434,6 +1476,8 @@
           ],
           'dependencies': [
             '../base/base.gyp:base',
+            'media_codec_jni_headers',
+            'media_format_jni_headers',
             'player_android_jni_headers',
           ],
           'include_dirs': [
@@ -1457,7 +1501,7 @@
 
       ],
     }],
-    ['use_ffmpeg == 1', {
+    ['media_use_ffmpeg == 1', {
       'targets': [
         {
           'target_name': 'ffmpeg_unittests',
@@ -1573,6 +1617,28 @@
             'video/capture/screen/differ_block_sse2.h',
           ],
         }, # end of target differ_block_sse2
+      ],
+    }],
+    # ios check is necessary due to http://crbug.com/172682.
+    ['OS != "ios" and (target_arch=="ia32" or target_arch=="x64")', {
+      'targets': [
+        {
+          'target_name': 'media_sse',
+          'type': 'static_library',
+          'cflags': [
+            '-msse',
+          ],
+          'include_dirs': [
+            '..',
+          ],
+          'defines': [
+            'MEDIA_IMPLEMENTATION',
+          ],
+          'sources': [
+            'base/simd/sinc_resampler_sse.cc',
+            'base/simd/vector_math_sse.cc',
+          ],
+        }, # end of target media_sse
       ],
     }],
   ],

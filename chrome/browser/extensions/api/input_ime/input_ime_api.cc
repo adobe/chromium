@@ -15,7 +15,6 @@
 #include "chrome/browser/extensions/extension_input_module_constants.h"
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/common/extensions/extension_manifest_constants.h"
 
 namespace keys = extension_input_module_constants;
 
@@ -151,6 +150,7 @@ const char kOnInputContextUpdate[] = "input.ime.onInputContextUpdate";
 const char kOnKeyEvent[] = "input.ime.onKeyEvent";
 const char kOnCandidateClicked[] = "input.ime.onCandidateClicked";
 const char kOnMenuItemActivated[] = "input.ime.onMenuItemActivated";
+const char kOnSurroundingTextChanged[] = "input.ime.onSurroundingTextChanged";
 
 }  // namespace events
 
@@ -300,6 +300,25 @@ class ImeObserver : public chromeos::InputMethodEngine::Observer {
 
     DispatchEventToExtension(profile_, extension_id_,
                              events::kOnMenuItemActivated, args.Pass());
+  }
+
+  virtual void OnSurroundingTextChanged(const std::string& engine_id,
+                                        const std::string& text,
+                                        int cursor_pos,
+                                        int anchor_pos) {
+    if (profile_ == NULL || extension_id_.empty())
+      return;
+    DictionaryValue* dict = new DictionaryValue();
+    dict->SetString("text", text);
+    dict->SetInteger("focus", cursor_pos);
+    dict->SetInteger("anchor", anchor_pos);
+
+    scoped_ptr<ListValue> args(new ListValue);
+    args->Append(Value::CreateStringValue(engine_id));
+    args->Append(dict);
+
+    DispatchEventToExtension(profile_, extension_id_,
+                             events::kOnSurroundingTextChanged, args.Pass());
   }
 
  private:
@@ -825,6 +844,32 @@ bool UpdateMenuItemsFunction::RunImpl() {
   return true;
 }
 
+bool DeleteSurroundingTextFunction::RunImpl() {
+  DictionaryValue* args;
+  EXTENSION_FUNCTION_VALIDATE(args_->GetDictionary(0, &args));
+
+  std::string engine_id;
+  EXTENSION_FUNCTION_VALIDATE(args->GetString(keys::kEngineIdKey, &engine_id));
+
+  chromeos::InputMethodEngine* engine =
+      InputImeEventRouter::GetInstance()->GetEngine(extension_id(), engine_id);
+  if (!engine) {
+    error_ = kErrorEngineNotAvailable;
+    return false;
+  }
+
+  int context_id = 0;
+  int offset = 0;
+  int length = 0;
+  EXTENSION_FUNCTION_VALIDATE(args->GetInteger(keys::kContextIdKey,
+                                               &context_id));
+  EXTENSION_FUNCTION_VALIDATE(args->GetInteger(keys::kOffsetKey, &offset));
+  EXTENSION_FUNCTION_VALIDATE(args->GetInteger(keys::kLengthKey, &length));
+
+  engine->DeleteSurroundingText(context_id, offset, length, &error_);
+  return true;
+}
+
 bool KeyEventHandled::RunImpl() {
   std::string request_id_str;
   EXTENSION_FUNCTION_VALIDATE(args_->GetString(0, &request_id_str));
@@ -841,8 +886,7 @@ bool KeyEventHandled::RunImpl() {
 
 InputImeAPI::InputImeAPI(Profile* profile)
     : profile_(profile) {
-  ManifestHandler::Register(extension_manifest_keys::kInputComponents,
-                            make_linked_ptr(new InputComponentsHandler));
+  (new InputComponentsHandler)->Register();
 
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_LOADED,
                  content::Source<Profile>(profile));
@@ -859,6 +903,7 @@ InputImeAPI::InputImeAPI(Profile* profile)
   registry->RegisterFunction<SetCursorPositionFunction>();
   registry->RegisterFunction<SetMenuItemsFunction>();
   registry->RegisterFunction<UpdateMenuItemsFunction>();
+  registry->RegisterFunction<DeleteSurroundingTextFunction>();
   registry->RegisterFunction<KeyEventHandled>();
 }
 

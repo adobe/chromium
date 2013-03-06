@@ -28,6 +28,7 @@ class StubWebView : public WebView {
 
   // Overridden from WebView:
   virtual std::string GetId() OVERRIDE;
+  virtual Status ConnectIfNecessary() OVERRIDE;
   virtual Status Close() OVERRIDE;
   virtual Status Load(const std::string& url) OVERRIDE;
   virtual Status Reload() OVERRIDE;
@@ -48,6 +49,8 @@ class StubWebView : public WebView {
   virtual Status WaitForPendingNavigations(
       const std::string& frame_id) OVERRIDE;
   virtual Status GetMainFrame(std::string* frame_id) OVERRIDE;
+  virtual JavaScriptDialogManager* GetJavaScriptDialogManager() OVERRIDE;
+  virtual Status CaptureScreenshot(std::string* screenshot) OVERRIDE;
 
  private:
   std::string id_;

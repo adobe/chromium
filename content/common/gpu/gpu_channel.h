@@ -102,6 +102,11 @@ class GpuChannel : public IPC::Listener,
   // deferred IPC messaged are handled.
   void OnScheduled();
 
+  // This is called when a command buffer transitions between scheduled and
+  // descheduled states. When any stub is descheduled, we stop preempting
+  // other channels.
+  void StubSchedulingChanged(bool scheduled);
+
   void CreateViewCommandBuffer(
       const gfx::GLSurfaceHandle& window,
       int32 surface_id,
@@ -172,8 +177,7 @@ class GpuChannel : public IPC::Listener,
   // Create a java surface texture object and send it to the renderer process
   // through binder thread.
   void OnEstablishStreamTexture(
-      int32 stream_id, SurfaceTexturePeer::SurfaceTextureTarget type,
-      int32 primary_id, int32 secondary_id);
+      int32 stream_id, int32 primary_id, int32 secondary_id);
 #endif
 
   // Collect rendering stats.
@@ -239,6 +243,8 @@ class GpuChannel : public IPC::Listener,
 
   scoped_refptr<SyncPointMessageFilter> filter_;
   scoped_refptr<base::MessageLoopProxy> io_message_loop_;
+
+  size_t num_stubs_descheduled_;
 
   DISALLOW_COPY_AND_ASSIGN(GpuChannel);
 };

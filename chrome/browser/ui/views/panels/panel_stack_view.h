@@ -8,6 +8,7 @@
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/ui/panels/native_panel_stack.h"
+#include "ui/views/focus/widget_focus_manager.h"
 #include "ui/views/widget/widget_delegate.h"
 #include "ui/views/widget/widget_observer.h"
 
@@ -18,7 +19,8 @@ class TaskbarWindowThumbnailerWin;
 // to make all panels appear as a single window on the taskbar or launcher.
 class PanelStackView : public NativePanelStack,
                        public views::WidgetObserver,
-                       public views::WidgetDelegateView {
+                       public views::WidgetDelegateView,
+                       public views::WidgetFocusChangeListener {
  public:
   explicit PanelStackView(
       scoped_ptr<StackedPanelCollection> stacked_collection);
@@ -30,6 +32,7 @@ class PanelStackView : public NativePanelStack,
   virtual void OnPanelAddedOrRemoved(Panel* panel) OVERRIDE;
   virtual void SetBounds(const gfx::Rect& bounds) OVERRIDE;
   virtual void Minimize() OVERRIDE;
+  virtual void DrawSystemAttention(bool draw_attention) OVERRIDE;
 
  private:
   // Overridden from views::WidgetDelegate:
@@ -45,6 +48,10 @@ class PanelStackView : public NativePanelStack,
   virtual void OnWidgetActivationChanged(views::Widget* widget,
                                          bool active) OVERRIDE;
 
+  // Overridden from views::WidgetFocusChangeListener:
+  virtual void OnNativeFocusChange(gfx::NativeView focused_before,
+                                   gfx::NativeView focused_now) OVERRIDE;
+
   void EnsureInitialized();
 
   // Updates the owner of the underlying window such that multiple panels
@@ -55,6 +62,10 @@ class PanelStackView : public NativePanelStack,
   scoped_ptr<StackedPanelCollection> stacked_collection_;
 
   bool delay_initialized_;
+
+  // Is the taskbar icon of the underlying window being flashed in order to
+  // draw the user's attention?
+  bool is_drawing_attention_;
 
   views::Widget* window_;
 

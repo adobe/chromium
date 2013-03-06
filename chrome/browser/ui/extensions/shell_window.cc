@@ -27,6 +27,7 @@
 #include "chrome/browser/ui/web_contents_modal_dialog_manager.h"
 #include "chrome/browser/view_type_utils.h"
 #include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/extensions/api/icons/icons_handler.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_messages.h"
@@ -72,7 +73,7 @@ ShellWindow::CreateParams::CreateParams()
     frame(ShellWindow::FRAME_CHROME),
     transparent_background(false),
     bounds(INT_MIN, INT_MIN, 0, 0),
-    creator_process_id(0), hidden(false) {
+    creator_process_id(0), hidden(false), resizable(true) {
 }
 
 ShellWindow::CreateParams::~CreateParams() {
@@ -367,6 +368,14 @@ void ShellWindow::UpdateDraggableRegions(
   native_app_window_->UpdateDraggableRegions(regions);
 }
 
+void ShellWindow::UpdateAppIcon(const gfx::Image& image) {
+  if (image.IsEmpty())
+    return;
+  app_icon_ = image;
+  native_app_window_->UpdateWindowIcon();
+  extensions::ShellWindowRegistry::Get(profile_)->ShellWindowIconChanged(this);
+}
+
 //------------------------------------------------------------------------------
 // Private methods
 
@@ -393,14 +402,6 @@ void ShellWindow::DidDownloadFavicon(int id,
   UpdateAppIcon(gfx::Image::CreateFrom1xBitmap(largest));
 }
 
-void ShellWindow::UpdateAppIcon(const gfx::Image& image) {
-  if (image.IsEmpty())
-    return;
-  app_icon_ = image;
-  native_app_window_->UpdateWindowIcon();
-  extensions::ShellWindowRegistry::Get(profile_)->ShellWindowIconChanged(this);
-}
-
 void ShellWindow::UpdateExtensionAppIcon() {
   // Ensure previously enqueued callbacks are ignored.
   image_loader_ptr_factory_.InvalidateWeakPtrs();
@@ -409,8 +410,9 @@ void ShellWindow::UpdateExtensionAppIcon() {
   extensions::ImageLoader* loader = extensions::ImageLoader::Get(profile());
   loader->LoadImageAsync(
       extension(),
-      extension()->GetIconResource(kPreferredIconSize,
-                                   ExtensionIconSet::MATCH_BIGGER),
+      extensions::IconsInfo::GetIconResource(extension(),
+                                             kPreferredIconSize,
+                                             ExtensionIconSet::MATCH_BIGGER),
       gfx::Size(kPreferredIconSize, kPreferredIconSize),
       base::Bind(&ShellWindow::OnImageLoaded,
                  image_loader_ptr_factory_.GetWeakPtr()));

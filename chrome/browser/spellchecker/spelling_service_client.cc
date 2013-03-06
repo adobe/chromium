@@ -10,6 +10,7 @@
 #include "base/logging.h"
 #include "base/metrics/field_trial.h"
 #include "base/prefs/pref_service.h"
+#include "base/stl_util.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
@@ -23,21 +24,47 @@
 #include "net/url_request/url_fetcher.h"
 #include "third_party/icu/public/common/unicode/uloc.h"
 
-// Use the public URL to the Spelling service on Chromium.
-#ifndef SPELLING_SERVICE_URL
-#define SPELLING_SERVICE_URL "https://www.googleapis.com/rpc"
-#endif
-
 namespace {
+
 // Constants for the spellcheck field trial.
 const char kSpellcheckFieldTrialName[] = "Spellcheck";
 const char kSpellcheckFieldTrialSuggestionsGroupName[] = "Suggestions";
+
+// The URL for requesting spell checking and sending user feedback.
+const char kSpellingServiceURL[] = "https://www.googleapis.com/rpc";
+
+// Gets the ISO codes for the language and country of this |locale|. The
+// |locale| is an ISO locale ID that may not include a country ID, e.g., "fr" or
+// "de". This method converts the UI locale to a full locale ID and converts the
+// full locale ID to an ISO language code and an ISO3 country code.
+void GetISOLanguageCountryCodeFromLocale(
+    const std::string& locale,
+    std::string* language_code,
+    std::string* country_code) {
+  DCHECK(language_code);
+  DCHECK(country_code);
+  char language[ULOC_LANG_CAPACITY] = ULOC_ENGLISH;
+  const char* country = "USA";
+  if (!locale.empty()) {
+    UErrorCode error = U_ZERO_ERROR;
+    char id[ULOC_LANG_CAPACITY + ULOC_SCRIPT_CAPACITY + ULOC_COUNTRY_CAPACITY];
+    uloc_addLikelySubtags(locale.c_str(), id, arraysize(id), &error);
+    error = U_ZERO_ERROR;
+    uloc_getLanguage(id, language, arraysize(language), &error);
+    country = uloc_getISO3Country(id);
+  }
+  *language_code = std::string(language);
+  *country_code = std::string(country);
+}
+
 }  // namespace
 
 SpellingServiceClient::SpellingServiceClient() {
 }
 
 SpellingServiceClient::~SpellingServiceClient() {
+  STLDeleteContainerPairPointers(spellcheck_fetchers_.begin(),
+                                 spellcheck_fetchers_.end());
 }
 
 bool SpellingServiceClient::RequestTextCheck(
@@ -46,29 +73,17 @@ bool SpellingServiceClient::RequestTextCheck(
     const string16& text,
     const TextCheckCompleteCallback& callback) {
   DCHECK(type == SUGGEST || type == SPELLCHECK);
-  std::string locale = profile->GetPrefs()->GetString(
-      prefs::kSpellCheckDictionary);
-  char language[ULOC_LANG_CAPACITY] = ULOC_ENGLISH;
-  const char* country = "USA";
-  if (!locale.empty()) {
-    // Create the parameters needed by Spelling API. Spelling API needs three
-    // parameters: ISO language code, ISO3 country code, and text to be checked
-    // by the service. On the other hand, Chrome uses an ISO locale ID and it
-    // may not include a country ID, e.g. "fr", "de", etc. To create the input
-    // parameters, we convert the UI locale to a full locale ID, and  convert
-    // the full locale ID to an ISO language code and and ISO3 country code.
-    // Also, we convert the given text to a JSON string, i.e. quote all its
-    // non-ASCII characters.
-    UErrorCode error = U_ZERO_ERROR;
-    char id[ULOC_LANG_CAPACITY + ULOC_SCRIPT_CAPACITY + ULOC_COUNTRY_CAPACITY];
-    uloc_addLikelySubtags(locale.c_str(), id, arraysize(id), &error);
-
-    error = U_ZERO_ERROR;
-    uloc_getLanguage(id, language, arraysize(language), &error);
-    country = uloc_getISO3Country(id);
-  }
-  if (!IsAvailable(profile, type))
+  if (!profile || !IsAvailable(profile, type)) {
+    callback.Run(false, text, std::vector<SpellCheckResult>());
     return false;
+  }
+
+  std::string language_code;
+  std::string country_code;
+  GetISOLanguageCountryCodeFromLocale(
+      profile->GetPrefs()->GetString(prefs::kSpellCheckDictionary),
+      &language_code,
+      &country_code);
 
   // Format the JSON request to be sent to the Spelling service.
   std::string encoded_text;
@@ -90,20 +105,18 @@ bool SpellingServiceClient::RequestTextCheck(
       kSpellingRequest,
       type,
       encoded_text.c_str(),
-      language,
-      country,
+      language_code.c_str(),
+      country_code.c_str(),
       api_key.c_str());
 
-  static const char kSpellingServiceURL[] = SPELLING_SERVICE_URL;
   GURL url = GURL(kSpellingServiceURL);
-  fetcher_.reset(CreateURLFetcher(url));
-  fetcher_->SetRequestContext(profile->GetRequestContext());
-  fetcher_->SetUploadData("application/json", request);
-  fetcher_->SetLoadFlags(
+  net::URLFetcher* fetcher = CreateURLFetcher(url);
+  fetcher->SetRequestContext(profile->GetRequestContext());
+  fetcher->SetUploadData("application/json", request);
+  fetcher->SetLoadFlags(
       net::LOAD_DO_NOT_SEND_COOKIES | net::LOAD_DO_NOT_SAVE_COOKIES);
-  fetcher_->Start();
-  text_ = text;
-  callback_ = callback;
+  spellcheck_fetchers_[fetcher] = new TextCheckCallbackData(callback, text);
+  fetcher->Start();
   return true;
 }
 
@@ -150,17 +163,31 @@ bool SpellingServiceClient::IsAvailable(Profile* profile, ServiceType type) {
   }
 }
 
+SpellingServiceClient::TextCheckCallbackData::TextCheckCallbackData(
+    TextCheckCompleteCallback callback,
+    string16 text)
+      : callback(callback),
+        text(text) {
+}
+
+SpellingServiceClient::TextCheckCallbackData::~TextCheckCallbackData() {
+}
+
 void SpellingServiceClient::OnURLFetchComplete(
     const net::URLFetcher* source) {
-  scoped_ptr<net::URLFetcher> clean_up_fetcher(fetcher_.release());
+  DCHECK(spellcheck_fetchers_[source]);
+  scoped_ptr<const net::URLFetcher> fetcher(source);
+  scoped_ptr<TextCheckCallbackData>
+      callback_data(spellcheck_fetchers_[fetcher.get()]);
   bool success = false;
   std::vector<SpellCheckResult> results;
-  if (source->GetResponseCode() / 100 == 2) {
+  if (fetcher->GetResponseCode() / 100 == 2) {
     std::string data;
-    source->GetResponseAsString(&data);
+    fetcher->GetResponseAsString(&data);
     success = ParseResponse(data, &results);
   }
-  callback_.Run(success, text_, results);
+  callback_data->callback.Run(success, callback_data->text, results);
+  spellcheck_fetchers_.erase(fetcher.get());
 }
 
 net::URLFetcher* SpellingServiceClient::CreateURLFetcher(const GURL& url) {

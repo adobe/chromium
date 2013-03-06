@@ -6,13 +6,14 @@
 
 #include "cc/solid_color_layer.h"
 #include "cc/texture_layer.h"
-#include "content/common/browser_plugin_messages.h"
+#include "content/common/browser_plugin/browser_plugin_messages.h"
 #include "content/renderer/browser_plugin/browser_plugin_manager.h"
 #include "content/renderer/render_thread_impl.h"
 #include "third_party/khronos/GLES2/gl2.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebGraphicsContext3D.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebSharedGraphicsContext3D.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPluginContainer.h"
+#include "ui/gfx/size_conversions.h"
 #include "webkit/compositor_bindings/web_layer_impl.h"
 
 namespace content {
@@ -152,7 +153,8 @@ void BrowserPluginCompositingHelper::OnBuffersSwapped(
     const gfx::Size& size,
     const std::string& mailbox_name,
     int gpu_route_id,
-    int gpu_host_id) {
+    int gpu_host_id,
+    float device_scale_factor) {
   // If the guest crashed but the GPU process didn't, we may still have
   // a transport surface waiting on an ACK, which we must send to
   // avoid leaking.
@@ -188,7 +190,12 @@ void BrowserPluginCompositingHelper::OnBuffersSwapped(
   // or introduce a gutter around it.
   if (buffer_size_ != size) {
     buffer_size_ = size;
-    texture_layer_->setBounds(buffer_size_);
+    // The container size is in DIP, so is the layer size.
+    // Buffer size is in physical pixels, so we need to adjust
+    // it by the device scale factor.
+    gfx::Size device_scale_adjusted_size = gfx::ToFlooredSize(
+        gfx::ScaleSize(buffer_size_, 1.0f / device_scale_factor));
+    texture_layer_->setBounds(device_scale_adjusted_size);
   }
 
   bool current_mailbox_valid = !mailbox_name.empty();

@@ -22,8 +22,6 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/api/omnibox/omnibox_handler.h"
 #include "chrome/common/extensions/extension.h"
-#include "chrome/common/extensions/extension_manifest_constants.h"
-#include "chrome/common/extensions/manifest_handler.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_service.h"
 #include "ui/gfx/image/image.h"
@@ -131,8 +129,7 @@ void ExtensionOmniboxEventRouter::OnInputCancelled(
 OmniboxAPI::OmniboxAPI(Profile* profile)
     : profile_(profile),
       url_service_(TemplateURLServiceFactory::GetForProfile(profile)) {
-  ManifestHandler::Register(extension_manifest_keys::kOmnibox,
-                            make_linked_ptr(new OmniboxHandler));
+  (new OmniboxHandler)->Register();
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_LOADED,
                  content::Source<Profile>(profile));
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_UNLOADED,
@@ -220,6 +217,12 @@ gfx::Image OmniboxAPI::GetOmniboxIcon(const std::string& extension_id) {
 gfx::Image OmniboxAPI::GetOmniboxPopupIcon(const std::string& extension_id) {
   return gfx::Image::CreateFrom1xBitmap(
       omnibox_popup_icon_manager_.GetIcon(extension_id));
+}
+
+template <>
+void ProfileKeyedAPIFactory<OmniboxAPI>::DeclareFactoryDependencies() {
+  DependsOn(ExtensionSystemFactory::GetInstance());
+  DependsOn(TemplateURLServiceFactory::GetInstance());
 }
 
 bool OmniboxSendSuggestionsFunction::RunImpl() {

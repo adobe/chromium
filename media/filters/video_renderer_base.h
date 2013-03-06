@@ -101,8 +101,8 @@ class MEDIA_EXPORT VideoRendererBase
   void FrameReady(VideoDecoder::Status status,
                   const scoped_refptr<VideoFrame>& frame);
 
-  // Helper method for adding a frame to |ready_frames_|
-  void AddReadyFrame(const scoped_refptr<VideoFrame>& frame);
+  // Helper method for adding a frame to |ready_frames_|.
+  void AddReadyFrame_Locked(const scoped_refptr<VideoFrame>& frame);
 
   // Helper method that schedules an asynchronous read from the decoder as long
   // as there isn't a pending read and we have capacity.
@@ -125,9 +125,6 @@ class MEDIA_EXPORT VideoRendererBase
 
   // Helper function that flushes the buffers when a Stop() or error occurs.
   void DoStopOrError_Locked();
-
-  // Return the number of frames currently held by this class.
-  int NumFrames_Locked() const;
 
   // Runs |paint_cb_| with the next frame from |ready_frames_|, updating
   // |last_natural_size_| and running |size_changed_cb_| if the natural size
@@ -172,6 +169,9 @@ class MEDIA_EXPORT VideoRendererBase
   // Queue of incoming frames yet to be painted.
   typedef std::deque<scoped_refptr<VideoFrame> > VideoFrameQueue;
   VideoFrameQueue ready_frames_;
+
+  // Keeps track of whether we received the end of stream buffer.
+  bool received_end_of_stream_;
 
   // Used to signal |thread_| as frames are added to |frames_|.  Rule of thumb:
   // always check |state_| to see if it was set to STOPPED after waking up!
@@ -245,10 +245,6 @@ class MEDIA_EXPORT VideoRendererBase
   TimeDeltaCB get_duration_cb_;
 
   base::TimeDelta preroll_timestamp_;
-
-  // Delayed frame used during kPrerolling to determine whether
-  // |preroll_timestamp_| is between this frame and the next one.
-  scoped_refptr<VideoFrame> prerolling_delayed_frame_;
 
   // Embedder callback for notifying a new frame is available for painting.
   PaintCB paint_cb_;

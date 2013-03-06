@@ -15,7 +15,6 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/chrome_to_mobile_service_factory.h"
-#include "chrome/browser/prefs/pref_registry_syncable.h"
 #include "chrome/browser/printing/cloud_print/cloud_print_url.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/token_service.h"
@@ -34,6 +33,7 @@
 #include "chrome/common/extensions/feature_switch.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
@@ -414,8 +414,7 @@ void ChromeToMobileService::Observe(
   TokenService::TokenAvailableDetails* token_details =
       content::Details<TokenService::TokenAvailableDetails>(details).ptr();
   // Invalidate the cloud print access token on Gaia login token updates.
-  if (token_details->service() == GaiaConstants::kGaiaOAuth2LoginRefreshToken ||
-      token_details->service() == GaiaConstants::kGaiaOAuth2LoginAccessToken)
+  if (token_details->service() == GaiaConstants::kGaiaOAuth2LoginRefreshToken)
     access_token_.clear();
 }
 
@@ -480,6 +479,16 @@ void ChromeToMobileService::OnIncomingInvalidation(
   DCHECK_EQ(1U, invalidation_map.count(invalidation::ObjectId(
       ipc::invalidation::ObjectSource::CHROME_COMPONENTS,
       kSyncInvalidationObjectIdChromeToMobileDeviceList)));
+  // TODO(msw): Unit tests do not provide profiles; see http://crbug.com/122183
+  ProfileSyncService* profile_sync_service =
+      profile_ ? ProfileSyncServiceFactory::GetForProfile(profile_) : NULL;
+  if (profile_sync_service) {
+    // TODO(dcheng): Only acknowledge the invalidation once the device search
+    // has finished. http://crbug.com/156843.
+    profile_sync_service->AcknowledgeInvalidation(
+        invalidation_map.begin()->first,
+        invalidation_map.begin()->second.ack_handle);
+  }
   RequestDeviceSearch();
 }
 

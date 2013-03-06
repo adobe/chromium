@@ -144,7 +144,12 @@ bool AwRenderViewExt::OnMessageReceived(const IPC::Message& message) {
   IPC_BEGIN_MESSAGE_MAP(AwRenderViewExt, message)
     IPC_MESSAGE_HANDLER(AwViewMsg_DocumentHasImages, OnDocumentHasImagesRequest)
     IPC_MESSAGE_HANDLER(AwViewMsg_DoHitTest, OnDoHitTest)
+    IPC_MESSAGE_HANDLER(AwViewMsg_SetEnableFixedLayoutMode,
+                        OnSetEnableFixedLayoutMode)
     IPC_MESSAGE_HANDLER(AwViewMsg_SetTextZoomLevel, OnSetTextZoomLevel)
+    IPC_MESSAGE_HANDLER(AwViewMsg_ResetScrollAndScaleState,
+                        OnResetScrollAndScaleState)
+    IPC_MESSAGE_HANDLER(AwViewMsg_SetInitialPageScale, OnSetInitialPageScale)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
   return handled;
@@ -239,12 +244,31 @@ void AwRenderViewExt::OnDoHitTest(int view_x, int view_y) {
   Send(new AwViewHostMsg_UpdateHitTestData(routing_id(), data));
 }
 
+void AwRenderViewExt::OnSetEnableFixedLayoutMode(bool enabled) {
+  if (!render_view() || !render_view()->GetWebView())
+    return;
+  render_view()->GetWebView()->enableFixedLayoutMode(enabled);
+}
+
 void AwRenderViewExt::OnSetTextZoomLevel(double zoom_level) {
   if (!render_view() || !render_view()->GetWebView())
     return;
   // Hide selection and autofill popups.
   render_view()->GetWebView()->hidePopups();
   render_view()->GetWebView()->setZoomLevel(true, zoom_level);
+}
+
+void AwRenderViewExt::OnResetScrollAndScaleState() {
+  if (!render_view() || !render_view()->GetWebView())
+    return;
+  render_view()->GetWebView()->resetScrollAndScaleState();
+}
+
+void AwRenderViewExt::OnSetInitialPageScale(double page_scale_factor) {
+  if (!render_view() || !render_view()->GetWebView())
+    return;
+  render_view()->GetWebView()->setInitialPageScaleOverride(
+      page_scale_factor);
 }
 
 }  // namespace android_webview

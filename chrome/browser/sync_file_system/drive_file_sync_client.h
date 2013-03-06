@@ -9,6 +9,7 @@
 
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/google_apis/drive_service_interface.h"
+#include "chrome/browser/google_apis/gdata_wapi_url_generator.h"
 #include "chrome/browser/sync_file_system/drive_file_sync_client_interface.h"
 #include "net/base/network_change_notifier.h"
 
@@ -86,6 +87,8 @@ class DriveFileSyncClient
       const GDataErrorCallback& callback) OVERRIDE;
   virtual GURL ResourceIdToResourceLink(
       const std::string& resource_id) const OVERRIDE;
+  virtual void EnsureSyncRootIsNotInMyDrive(
+      const std::string& sync_root_resource_id) const OVERRIDE;
 
   static std::string OriginToDirectoryTitle(const GURL& origin);
   static GURL DirectoryTitleToOrigin(const std::string& title);
@@ -99,7 +102,7 @@ class DriveFileSyncClient
 
  private:
   friend class DriveFileSyncClientTest;
-  friend class DriveFileSyncServiceTest;
+  friend class DriveFileSyncServiceMockTest;
 
   // Constructor for test use.
   DriveFileSyncClient(
@@ -119,6 +122,7 @@ class DriveFileSyncClient
                           const ResourceIdCallback& callback,
                           google_apis::GDataErrorCode error,
                           scoped_ptr<google_apis::ResourceEntry> entry);
+
   void DidEnsureUniquenessForCreateDirectory(
       const ResourceIdCallback& callback,
       google_apis::GDataErrorCode error,
@@ -128,10 +132,10 @@ class DriveFileSyncClient
                               const std::string& search_query,
                               const ResourceListCallback& callback);
 
-  void DidGetAccountMetadata(
+  void DidGetAboutResource(
       const ChangeStampCallback& callback,
       google_apis::GDataErrorCode error,
-      scoped_ptr<google_apis::AccountMetadataFeed> metadata);
+      scoped_ptr<google_apis::AboutResource> about_resource);
 
   void DidGetResourceList(
       const ResourceListCallback& callback,
@@ -158,6 +162,7 @@ class DriveFileSyncClient
                         const UploadFileCallback& callback,
                         google_apis::GDataErrorCode error,
                         scoped_ptr<google_apis::ResourceEntry> entry);
+
   void DidEnsureUniquenessForCreateFile(
       const std::string& expected_resource_id,
       const UploadFileCallback& callback,

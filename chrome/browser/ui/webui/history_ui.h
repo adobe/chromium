@@ -19,10 +19,64 @@
 #include "content/public/browser/web_ui_message_handler.h"
 #include "ui/base/layout.h"
 
+class BookmarkModel;
+class ManagedUserService;
+
 // The handler for Javascript messages related to the "history" view.
 class BrowsingHistoryHandler : public content::WebUIMessageHandler,
                                public content::NotificationObserver {
  public:
+  // Represents a history entry to be shown to the user, representing either
+  // a local or remote visit. A single entry can represent multiple visits,
+  // since only the most recent visit on a particular day is shown.
+  struct HistoryEntry {
+    // Values indicating whether an entry represents only local visits, only
+    // remote visits, or a mixture of both.
+    enum EntryType {
+      EMPTY_ENTRY = 0,
+      LOCAL_ENTRY,
+      REMOTE_ENTRY,
+      COMBINED_ENTRY
+    };
+
+    HistoryEntry(EntryType type, const GURL& url, const string16& title,
+                 base::Time time, const std::set<int64>& timestamps,
+                 bool is_search_result, const string16& snippet);
+    HistoryEntry();
+    virtual ~HistoryEntry();
+
+    // Formats this entry's URL and title and adds them to |result|.
+    void SetUrlAndTitle(DictionaryValue* result) const;
+
+    // Converts the entry to a DictionaryValue to be owned by the caller.
+    scoped_ptr<DictionaryValue> ToValue(
+        BookmarkModel* bookmark_model,
+        ManagedUserService* managed_user_service) const;
+
+    // Comparison function for sorting HistoryEntries from newest to oldest.
+    static bool SortByTimeDescending(
+        const HistoryEntry& entry1, const HistoryEntry& entry2);
+
+    // The type of visits this entry represents: local, remote, or both.
+    EntryType entry_type;
+
+    GURL url;
+    string16 title;  // Title of the entry. May be empty.
+
+    // The time of the entry. Usually this will be the time of the most recent
+    // visit to |url| on a particular day as defined in the local timezone.
+    base::Time time;
+
+    // Timestamps of all local or remote visits the same URL on the same day.
+    std::set<int64> all_timestamps;
+
+    // If true, this entry is a search result.
+    bool is_search_result;
+
+    // The entry's search snippet, if this entry is a search result.
+    string16 snippet;
+  };
+
   BrowsingHistoryHandler();
   virtual ~BrowsingHistoryHandler();
 
@@ -32,8 +86,11 @@ class BrowsingHistoryHandler : public content::WebUIMessageHandler,
   // Handler for the "queryHistory" message.
   void HandleQueryHistory(const base::ListValue* args);
 
-  // Handler for the "removeURLsOnOneDay" message.
-  void HandleRemoveURLsOnOneDay(const base::ListValue* args);
+  // Handler for the "removeUrlsOnOneDay" message.
+  void HandleRemoveUrlsOnOneDay(const base::ListValue* args);
+
+  // Handler for the "removeVisits" message.
+  void HandleRemoveVisits(const base::ListValue* args);
 
   // Handler for "clearBrowsingData" message.
   void HandleClearBrowsingData(const base::ListValue* args);
@@ -41,15 +98,33 @@ class BrowsingHistoryHandler : public content::WebUIMessageHandler,
   // Handler for "removeBookmark" message.
   void HandleRemoveBookmark(const base::ListValue* args);
 
+#if !defined(OS_ANDROID)
+  // Handler for "processManagedUrls".
+  void HandleProcessManagedUrls(const ListValue* args);
+#endif
+
+#if defined(ENABLE_MANAGED_USERS)
+  // Handler for the "setElevated" message.
+  void HandleSetElevated(const base::ListValue* args);
+
+  // Handler for the "managedUserGetElevated" message.
+  void HandleManagedUserGetElevated(const base::ListValue* args);
+
+  // Sets the managed user in elevated state if the authentication was
+  // successful.
+  void PassphraseDialogCallback(bool success);
+
+#endif
+
   // content::NotificationObserver implementation.
   virtual void Observe(int type,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE;
 
-  // Removes duplicate visits from the given list of query results, only
-  // retaining the most recent visit to a URL on a particular day. |results|
-  // must already be sorted by visit time, most recent first.
-  static void RemoveDuplicateResults(base::ListValue* results);
+  // Removes duplicate entries from the query results, only retaining the most
+  // recent visit to a URL on a particular day.
+  static void RemoveDuplicateResults(
+      std::vector<BrowsingHistoryHandler::HistoryEntry>* results);
 
  private:
   // The range for which to return results:
@@ -65,17 +140,9 @@ class BrowsingHistoryHandler : public content::WebUIMessageHandler,
   // Core implementation of history querying.
   void QueryHistory(string16 search_text, const history::QueryOptions& options);
 
-  // Creates a history query result value.
-  base::DictionaryValue* CreateQueryResultValue(
-      const GURL& url, const string16& title, base::Time visit_time,
-      bool is_search_result, const string16& snippet);
-
-  // Sends the accumulated results of the query to the front end, truncating
-  // the number to |max_count| if necessary. If |max_count| is 0, the results
-  // are not truncated.
-  // If |remove_duplicates| is true, duplicate visits on the same day are
-  // removed.
-  void ReturnResultsToFrontEnd(bool remove_duplicates, int max_count);
+  // Combines the query results from the local history database and the history
+  // server, and sends the combined results to the front end.
+  void ReturnResultsToFrontEnd();
 
   // Callback from |web_history_timer_| when a response from web history has
   // not been received in time.
@@ -90,6 +157,7 @@ class BrowsingHistoryHandler : public content::WebUIMessageHandler,
   // Callback from the WebHistoryService when a query has completed.
   void WebHistoryQueryComplete(const string16& search_text,
                                const history::QueryOptions& options,
+                               base::TimeTicks start_time,
                                history::WebHistoryService::Request* request,
                                const base::DictionaryValue* results_value);
 
@@ -103,11 +171,16 @@ class BrowsingHistoryHandler : public content::WebUIMessageHandler,
   bool ExtractIntegerValueAtIndex(
       const base::ListValue* value, int index, int* out_int);
 
-  // Set the query options for a week-wide query, |offset| weeks ago.
+  // Sets the query options for a week-wide query, |offset| weeks ago.
   void SetQueryTimeInWeeks(int offset, history::QueryOptions* options);
 
   // Sets the query options for a monthly query, |offset| months ago.
   void SetQueryTimeInMonths(int offset, history::QueryOptions* options);
+
+#if defined(ENABLE_MANAGED_USERS)
+  // Updates the UI according to the elevation state of the managed user.
+  void ManagedUserSetElevated();
+#endif
 
   content::NotificationRegistrar registrar_;
 
@@ -131,8 +204,11 @@ class BrowsingHistoryHandler : public content::WebUIMessageHandler,
   // The info value that is returned to the front end with the query results.
   base::DictionaryValue results_info_value_;
 
-  // The list of query results that is returned to the front end.
-  base::ListValue results_value_;
+  // The list of query results received from the history service.
+  std::vector<HistoryEntry> query_results_;
+
+  // The list of query results received from the history server.
+  std::vector<HistoryEntry> web_history_query_results_;
 
   // Timer used to implement a timeout on a Web History response.
   base::OneShotTimer<BrowsingHistoryHandler> web_history_timer_;

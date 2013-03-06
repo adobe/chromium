@@ -203,6 +203,8 @@
         'browser/extensions/api/downloads/downloads_api.h',
         'browser/extensions/api/extension_action/extension_action_api.cc',
         'browser/extensions/api/extension_action/extension_action_api.h',
+        'browser/extensions/api/downloads_internal/downloads_internal_api.cc',
+        'browser/extensions/api/downloads_internal/downloads_internal_api.h',
         'browser/extensions/api/extension_action/extension_page_actions_api_constants.cc',
         'browser/extensions/api/extension_action/extension_page_actions_api_constants.h',
         'browser/extensions/api/file_handlers/app_file_handler_util.cc',
@@ -217,6 +219,8 @@
         'browser/extensions/api/history/history_api.cc',
         'browser/extensions/api/i18n/i18n_api.cc',
         'browser/extensions/api/i18n/i18n_api.h',
+        'browser/extensions/api/icons/icons_api.cc',
+        'browser/extensions/api/icons/icons_api.h',
         'browser/extensions/api/identity/identity_api.cc',
         'browser/extensions/api/identity/identity_api.h',
         'browser/extensions/api/identity/web_auth_flow.cc',
@@ -259,6 +263,8 @@
         'browser/extensions/api/messaging/native_process_launcher_win.cc',
         'browser/extensions/api/messaging/native_process_launcher.cc',
         'browser/extensions/api/messaging/native_process_launcher.h',
+        'browser/extensions/api/messaging/native_messaging_host_manifest.cc',
+        'browser/extensions/api/messaging/native_messaging_host_manifest.h',
         'browser/extensions/api/messaging/native_message_port.cc',
         'browser/extensions/api/messaging/native_message_port.h',
         'browser/extensions/api/metrics_private/metrics_private_api.cc',
@@ -635,6 +641,11 @@
         'browser/extensions/image_loader_factory.h',
         'browser/extensions/installed_loader.cc',
         'browser/extensions/installed_loader.h',
+        'browser/extensions/install_observer.h',
+        'browser/extensions/install_tracker.cc',
+        'browser/extensions/install_tracker.h',
+        'browser/extensions/install_tracker_factory.cc',
+        'browser/extensions/install_tracker_factory.h',
         'browser/extensions/key_identifier_conversion_views.cc',
         'browser/extensions/key_identifier_conversion_views.h',
         'browser/extensions/lazy_background_task_queue.cc',
@@ -815,12 +826,6 @@
           'dependencies!': [
             '../device/device.gyp:device_bluetooth',
             '../third_party/libusb/libusb.gyp:libusb'
-          ],
-        }],
-        ['enable_web_intents==0', {
-          'sources!': [
-            'browser/extensions/web_intents_parser.cc',
-            'browser/extensions/web_intents_parser.h',
           ],
         }],
         ['OS=="linux" and use_aura==1', {

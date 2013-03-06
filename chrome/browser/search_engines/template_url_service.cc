@@ -14,9 +14,9 @@
 #include "base/metrics/histogram.h"
 #include "base/prefs/pref_service.h"
 #include "base/stl_util.h"
-#include "base/string_split.h"
 #include "base/string_util.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_split.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/google/google_url_tracker.h"
@@ -66,6 +66,14 @@ const char kReplacementTerm[] = "blah.blah.blah.blah.blah";
 // The name of the histogram used to track default search changes. See the
 // comment for DefaultSearchChangeOrigin.
 const char kDSPChangeHistogramName[] = "Search.DefaultSearchChangeOrigin";
+
+// The name of the histogram used to track whether or not the user has a default
+// search provider.
+const char kHasDSPHistogramName[] = "Search.HasDefaultSearchProvider";
+
+// The name of the histogram used to store the id of the default search
+// provider.
+const char kDSPHistogramName[] = "Search.DefaultSearchProvider";
 
 bool TemplateURLsHaveSamePrefs(const TemplateURL* url1,
                                const TemplateURL* url2) {
@@ -810,13 +818,21 @@ void TemplateURLService::OnWebDataServiceRequestDone(
   if (!is_default_search_managed_) {
     bool has_default_search_provider = default_search_provider_ != NULL &&
         default_search_provider_->SupportsReplacement();
-    UMA_HISTOGRAM_BOOLEAN("Search.HasDefaultSearchProvider",
+    UMA_HISTOGRAM_BOOLEAN(kHasDSPHistogramName,
                           has_default_search_provider);
     // Ensure that default search provider exists. See http://crbug.com/116952.
     if (!has_default_search_provider) {
       bool success =
           SetDefaultSearchProviderNoNotify(FindNewDefaultSearchProvider());
       DCHECK(success);
+    }
+    // Don't log anything if the user has a NULL default search provider. A
+    // logged value of 0 indicates a custom default search provider.
+    if (default_search_provider_) {
+      UMA_HISTOGRAM_ENUMERATION(
+          kDSPHistogramName,
+          default_search_provider_->prepopulate_id(),
+          TemplateURLPrepopulateData::kMaxPrepopulatedEngineID);
     }
   }
 

@@ -18,7 +18,6 @@
 #include "chrome/browser/content_settings/content_settings_mock_observer.h"
 #include "chrome/browser/content_settings/content_settings_utils.h"
 #include "chrome/browser/prefs/browser_prefs.h"
-#include "chrome/browser/prefs/pref_registry_syncable.h"
 #include "chrome/browser/prefs/pref_service_mock_builder.h"
 #include "chrome/browser/prefs/pref_service_syncable.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
@@ -27,6 +26,7 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/testing_pref_service_syncable.h"
 #include "chrome/test/base/testing_profile.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/test/test_browser_thread.h"
 #include "googleurl/src/gurl.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -139,15 +139,13 @@ TEST_F(PrefProviderTest, Incognito) {
   scoped_refptr<PrefRegistrySyncable> registry(new PrefRegistrySyncable);
   PrefServiceSyncable* regular_prefs = builder.CreateSyncable(registry);
 
-  Profile::RegisterUserPrefs(registry);
-  chrome::RegisterUserPrefs(regular_prefs, registry);
+  chrome::RegisterUserPrefs(registry);
 
   builder.WithUserPrefs(otr_user_prefs);
   scoped_refptr<PrefRegistrySyncable> otr_registry(new PrefRegistrySyncable);
   PrefServiceSyncable* otr_prefs = builder.CreateSyncable(otr_registry);
 
-  Profile::RegisterUserPrefs(otr_registry);
-  chrome::RegisterUserPrefs(otr_prefs, otr_registry);
+  chrome::RegisterUserPrefs(otr_registry);
 
   TestingProfile::Builder profile_builder;
   profile_builder.SetPrefService(make_scoped_ptr(regular_prefs));

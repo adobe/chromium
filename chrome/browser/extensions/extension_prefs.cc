@@ -12,11 +12,12 @@
 #include "base/utf_string_conversions.h"
 #include "base/version.h"
 #include "chrome/browser/extensions/admin_policy.h"
+#include "chrome/browser/extensions/api/file_handlers/app_file_handler_util.h"
 #include "chrome/browser/extensions/api/omnibox/omnibox_api.h"
 #include "chrome/browser/extensions/extension_pref_store.h"
 #include "chrome/browser/extensions/extension_sorting.h"
-#include "chrome/browser/prefs/pref_registry_syncable.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
+#include "chrome/browser/ui/host_desktop.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
@@ -26,6 +27,7 @@
 #include "chrome/common/extensions/permissions/permissions_info.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/notification_service.h"
 #include "extensions/common/url_pattern.h"
 #include "grit/generated_resources.h"
@@ -40,6 +42,15 @@ namespace extensions {
 namespace {
 
 // Additional preferences keys
+
+// The file entries that an extension had permission to access.
+const char kFileEntries[] = "file_entries";
+
+// The path to a file entry that an extension had permission to access.
+const char kFileEntryPath[] = "path";
+
+// Whether or not an extension had write access to a file entry.
+const char kFileEntryWritable[] = "writable";
 
 // Whether this extension was running when chrome last shutdown.
 const char kPrefRunning[] = "running";
@@ -424,14 +435,14 @@ void ExtensionPrefs::MakePathsRelative() {
 
   // Collect all extensions ids with absolute paths in |absolute_keys|.
   std::set<std::string> absolute_keys;
-  for (DictionaryValue::key_iterator i = dict->begin_keys();
-       i != dict->end_keys(); ++i) {
+  for (DictionaryValue::Iterator i(*dict); !i.IsAtEnd(); i.Advance()) {
     const DictionaryValue* extension_dict = NULL;
-    if (!dict->GetDictionaryWithoutPathExpansion(*i, &extension_dict))
+    if (!i.value().GetAsDictionary(&extension_dict))
       continue;
     int location_value;
     if (extension_dict->GetInteger(kPrefLocation, &location_value) &&
-        location_value == Manifest::LOAD) {
+        Manifest::IsUnpackedLocation(
+            static_cast<Manifest::Location>(location_value))) {
       // Unpacked extensions can have absolute paths.
       continue;
     }
@@ -440,7 +451,7 @@ void ExtensionPrefs::MakePathsRelative() {
       continue;
     base::FilePath path(path_string);
     if (path.IsAbsolute())
-      absolute_keys.insert(*i);
+      absolute_keys.insert(i.key());
   }
   if (absolute_keys.empty())
     return;
@@ -742,7 +753,7 @@ std::set<std::string> ExtensionPrefs::GetBlacklistedExtensions() {
   if (!extensions)
     return ids;
 
-  for (DictionaryValue::Iterator it(*extensions); it.HasNext(); it.Advance()) {
+  for (DictionaryValue::Iterator it(*extensions); !it.IsAtEnd(); it.Advance()) {
     if (!it.value().IsType(Value::TYPE_DICTIONARY)) {
       NOTREACHED() << "Invalid pref for extension " << it.key();
       continue;
@@ -903,7 +914,7 @@ void ExtensionPrefs::MigratePermissions(const ExtensionIdList& extension_ids) {
     // does not matter how we treat the old effective hosts as long as the
     // new effective hosts will be the same, so we move them to explicit
     // host permissions.
-    const ListValue* hosts;
+    const ListValue* hosts = NULL;
     std::string explicit_hosts =
         JoinPrefs(kPrefGrantedPermissions, kPrefExplicitHosts);
     if (ext->GetList(kPrefOldGrantedHosts, &hosts)) {
@@ -949,10 +960,8 @@ void ExtensionPrefs::ClearRegisteredEvents() {
   if (!extensions)
     return;
 
-  for (DictionaryValue::key_iterator it = extensions->begin_keys();
-       it != extensions->end_keys(); ++it) {
-    UpdateExtensionPref(*it, kRegisteredEvents, NULL);
-  }
+  for (DictionaryValue::Iterator it(*extensions); !it.IsAtEnd(); it.Advance())
+    UpdateExtensionPref(it.key(), kRegisteredEvents, NULL);
 }
 
 PermissionSet* ExtensionPrefs::GetGrantedPermissions(
@@ -1086,7 +1095,7 @@ void ExtensionPrefs::RemoveFilterFromEvent(const std::string& event_name,
     return;
 
   for (size_t i = 0; i < filter_list->GetSize(); i++) {
-    DictionaryValue* filter;
+    DictionaryValue* filter = NULL;
     CHECK(filter_list->GetDictionary(i, &filter));
     if (filter->Equals(filter)) {
       filter_list->Remove(i, NULL);
@@ -1129,6 +1138,61 @@ bool ExtensionPrefs::IsExtensionRunning(const std::string& extension_id) {
   bool running = false;
   extension->GetBoolean(kPrefRunning, &running);
   return running;
+}
+
+void ExtensionPrefs::AddSavedFileEntry(
+    const std::string& extension_id,
+    const std::string& file_entry_id,
+    const base::FilePath& file_path,
+    bool writable) {
+  ScopedExtensionPrefUpdate update(prefs_, extension_id);
+  DictionaryValue* extension_dict = update.Get();
+  DictionaryValue* file_entries = NULL;
+  if (!extension_dict->GetDictionary(kFileEntries, &file_entries)) {
+    file_entries = new DictionaryValue();
+    extension_dict->SetWithoutPathExpansion(kFileEntries, file_entries);
+  }
+  // Once a file's permissions are set they can't be changed.
+  DictionaryValue* file_entry_dict = NULL;
+  if (file_entries->GetDictionary(file_entry_id, &file_entry_dict))
+    return;
+
+  file_entry_dict = new DictionaryValue();
+  file_entry_dict->SetString(kFileEntryPath, file_path.value());
+  file_entry_dict->SetBoolean(kFileEntryWritable, writable);
+  file_entries->SetWithoutPathExpansion(file_entry_id, file_entry_dict);
+}
+
+void ExtensionPrefs::ClearSavedFileEntries(
+    const std::string& extension_id) {
+  ScopedExtensionPrefUpdate update(prefs_, extension_id);
+  DictionaryValue* extension_dict = update.Get();
+  extension_dict->Remove(kFileEntries, NULL);
+}
+
+void ExtensionPrefs::GetSavedFileEntries(
+    const std::string& extension_id,
+    std::vector<app_file_handler_util::SavedFileEntry>* out) {
+  const DictionaryValue* prefs = GetExtensionPref(extension_id);
+  const DictionaryValue* file_entries = NULL;
+  if (!prefs->GetDictionary(kFileEntries, &file_entries))
+    return;
+  for (DictionaryValue::key_iterator it = file_entries->begin_keys();
+       it != file_entries->end_keys(); ++it) {
+    std::string id = *it;
+    const DictionaryValue* file_entry = NULL;
+    if (!file_entries->GetDictionaryWithoutPathExpansion(id, &file_entry))
+      continue;
+    base::FilePath::StringType path_string;
+    if (!file_entry->GetString(kFileEntryPath, &path_string))
+      continue;
+    bool writable = false;
+    if (!file_entry->GetBoolean(kFileEntryWritable, &writable))
+      continue;
+    base::FilePath file_path(path_string);
+    out->push_back(app_file_handler_util::SavedFileEntry(
+        id, file_path, writable));
+  }
 }
 
 ExtensionOmniboxSuggestion
@@ -1236,8 +1300,12 @@ extension_misc::LaunchContainer ExtensionPrefs::GetLaunchContainer(
       // window opening is the default), make the container a window.
       result = extension_misc::LAUNCH_WINDOW;
 #if defined(USE_ASH)
-    } else if (prefs_launch_type == ExtensionPrefs::LAUNCH_FULLSCREEN) {
+    } else if (prefs_launch_type == ExtensionPrefs::LAUNCH_FULLSCREEN &&
+               chrome::GetActiveDesktop() == chrome::HOST_DESKTOP_TYPE_ASH) {
       // LAUNCH_FULLSCREEN launches in a maximized app window in ash.
+      // For desktop chrome AURA on all platforms we should open the
+      // application in full screen mode in the current tab, on the same
+      // lines as non AURA chrome.
       result = extension_misc::LAUNCH_WINDOW;
 #endif
     } else {
@@ -1378,15 +1446,12 @@ void ExtensionPrefs::RemoveMediaGalleryPermissions(
   if (!extensions)
     return;
 
-  for (DictionaryValue::key_iterator it = extensions->begin_keys();
-       it != extensions->end_keys();
-       ++it) {
-    const std::string& id(*it);
-    if (!Extension::IdIsValid(id)) {
+  for (DictionaryValue::Iterator it(*extensions); !it.IsAtEnd(); it.Advance()) {
+    if (!Extension::IdIsValid(it.key())) {
       NOTREACHED();
       continue;
     }
-    RemoveMediaGalleryPermissionsFromExtension(prefs_, id, gallery_id);
+    RemoveMediaGalleryPermissionsFromExtension(prefs_, it.key(), gallery_id);
   }
 }
 
@@ -1525,7 +1590,7 @@ std::string ExtensionPrefs::GetVersionString(const std::string& extension_id) {
 }
 
 void ExtensionPrefs::UpdateManifest(const Extension* extension) {
-  if (extension->location() != Manifest::LOAD) {
+  if (!Manifest::IsUnpackedLocation(extension->location())) {
     const DictionaryValue* extension_dict = GetExtensionPref(extension->id());
     if (!extension_dict)
       return;
@@ -1588,7 +1653,7 @@ const DictionaryValue* ExtensionPrefs::GetExtensionPref(
 
 scoped_ptr<ExtensionInfo> ExtensionPrefs::GetInstalledExtensionInfo(
     const std::string& extension_id) const {
-  const DictionaryValue* ext;
+  const DictionaryValue* ext = NULL;
   const DictionaryValue* extensions = prefs_->GetDictionary(kExtensionsPref);
   if (!extensions ||
       !extensions->GetDictionaryWithoutPathExpansion(extension_id, &ext))
@@ -1615,25 +1680,24 @@ scoped_ptr<ExtensionInfo> ExtensionPrefs::GetInstalledExtensionInfo(
 
   // Make path absolute. Unpacked extensions will already have absolute paths,
   // otherwise make it so.
-  if (location_value != Manifest::LOAD) {
-    DCHECK(location_value == Manifest::COMPONENT ||
+  Manifest::Location location =
+      static_cast<Manifest::Location>(location_value);
+  if (!Manifest::IsUnpackedLocation(location)) {
+    DCHECK(location == Manifest::COMPONENT ||
            !base::FilePath(path).IsAbsolute());
     path = install_directory_.Append(path).value();
   }
 
-  // Only the following extension types can be installed permanently in the
-  // preferences.
-  Manifest::Location location =
-      static_cast<Manifest::Location>(location_value);
+  // Only the following extension types have data saved in the preferences.
   if (location != Manifest::INTERNAL &&
-      location != Manifest::LOAD &&
+      !Manifest::IsUnpackedLocation(location) &&
       !Manifest::IsExternalLocation(location)) {
     NOTREACHED();
     return scoped_ptr<ExtensionInfo>();
   }
 
   const DictionaryValue* manifest = NULL;
-  if (location != Manifest::LOAD &&
+  if (!Manifest::IsUnpackedLocation(location) &&
       !ext->GetDictionary(kPrefManifest, &manifest)) {
     LOG(WARNING) << "Missing manifest for extension " << extension_id;
     // Just a warning for now.
@@ -1649,12 +1713,13 @@ scoped_ptr<ExtensionPrefs::ExtensionsInfo>
     scoped_ptr<ExtensionsInfo> extensions_info(new ExtensionsInfo);
 
   const DictionaryValue* extensions = prefs_->GetDictionary(kExtensionsPref);
-  for (DictionaryValue::key_iterator extension_id = extensions->begin_keys();
-       extension_id != extensions->end_keys(); ++extension_id) {
-    if (!Extension::IdIsValid(*extension_id))
+  for (DictionaryValue::Iterator extension_id(*extensions);
+       !extension_id.IsAtEnd(); extension_id.Advance()) {
+    if (!Extension::IdIsValid(extension_id.key()))
       continue;
 
-    scoped_ptr<ExtensionInfo> info = GetInstalledExtensionInfo(*extension_id);
+    scoped_ptr<ExtensionInfo> info =
+        GetInstalledExtensionInfo(extension_id.key());
     if (info)
       extensions_info->push_back(linked_ptr<ExtensionInfo>(info.release()));
   }
@@ -1748,25 +1813,24 @@ scoped_ptr<ExtensionInfo> ExtensionPrefs::GetDelayedInstallInfo(
 
   // Make path absolute. Unpacked extensions will already have absolute paths,
   // otherwise make it so.
-  if (location_value != Manifest::LOAD) {
-    DCHECK(location_value == Manifest::COMPONENT ||
+  Manifest::Location location =
+      static_cast<Manifest::Location>(location_value);
+  if (!Manifest::IsUnpackedLocation(location)) {
+    DCHECK(location == Manifest::COMPONENT ||
            !base::FilePath(path).IsAbsolute());
     path = install_directory_.Append(path).value();
   }
 
-  // Only the following extension types can be installed permanently in the
-  // preferences.
-  Manifest::Location location =
-      static_cast<Manifest::Location>(location_value);
+  // Only the following extension types have data saved in the preferences.
   if (location != Manifest::INTERNAL &&
-      location != Manifest::LOAD &&
+      !Manifest::IsUnpackedLocation(location) &&
       !Manifest::IsExternalLocation(location)) {
     NOTREACHED();
     return scoped_ptr<ExtensionInfo>();
   }
 
   const DictionaryValue* manifest = NULL;
-  if (location != Manifest::LOAD &&
+  if (!Manifest::IsUnpackedLocation(location) &&
       !ext->GetDictionary(kPrefManifest, &manifest)) {
     LOG(WARNING) << "Missing manifest for extension " << extension_id;
     // Just a warning for now.
@@ -1782,12 +1846,12 @@ scoped_ptr<ExtensionPrefs::ExtensionsInfo> ExtensionPrefs::
   scoped_ptr<ExtensionsInfo> extensions_info(new ExtensionsInfo);
 
   const DictionaryValue* extensions = prefs_->GetDictionary(kExtensionsPref);
-  for (DictionaryValue::key_iterator extension_id = extensions->begin_keys();
-       extension_id != extensions->end_keys(); ++extension_id) {
-    if (!Extension::IdIsValid(*extension_id))
+  for (DictionaryValue::Iterator extension_id(*extensions);
+       !extension_id.IsAtEnd(); extension_id.Advance()) {
+    if (!Extension::IdIsValid(extension_id.key()))
       continue;
 
-    scoped_ptr<ExtensionInfo> info = GetDelayedInstallInfo(*extension_id);
+    scoped_ptr<ExtensionInfo> info = GetDelayedInstallInfo(extension_id.key());
     if (info)
       extensions_info->push_back(linked_ptr<ExtensionInfo>(info.release()));
   }
@@ -1932,7 +1996,7 @@ ExtensionIdList ExtensionPrefs::GetExtensionsFrom(
     const PrefService* pref_service) {
   ExtensionIdList result;
 
-  const base::DictionaryValue* extension_prefs;
+  const base::DictionaryValue* extension_prefs = NULL;
   const base::Value* extension_prefs_value =
       pref_service->GetUserPrefValue(kExtensionsPref);
   if (!extension_prefs_value ||
@@ -1940,15 +2004,15 @@ ExtensionIdList ExtensionPrefs::GetExtensionsFrom(
     return result;  // Empty set
   }
 
-  for (base::DictionaryValue::key_iterator it = extension_prefs->begin_keys();
-       it != extension_prefs->end_keys(); ++it) {
-    const DictionaryValue* ext;
-    if (!extension_prefs->GetDictionaryWithoutPathExpansion(*it, &ext)) {
-      NOTREACHED() << "Invalid pref for extension " << *it;
+  for (base::DictionaryValue::Iterator it(*extension_prefs); !it.IsAtEnd();
+       it.Advance()) {
+    const DictionaryValue* ext = NULL;
+    if (!it.value().GetAsDictionary(&ext)) {
+      NOTREACHED() << "Invalid pref for extension " << it.key();
       continue;
     }
     if (!IsBlacklistBitSet(ext))
-      result.push_back(*it);
+      result.push_back(it.key());
   }
   return result;
 }
@@ -2328,7 +2392,7 @@ void ExtensionPrefs::PopulateExtensionInfoPrefs(
   extension_dict->Set(kPrefPath, Value::CreateStringValue(path));
   // We store prefs about LOAD extensions, but don't cache their manifest
   // since it may change on disk.
-  if (extension->location() != Manifest::LOAD) {
+  if (!Manifest::IsUnpackedLocation(extension->location())) {
     extension_dict->Set(kPrefManifest,
                         extension->manifest()->value()->DeepCopy());
   }

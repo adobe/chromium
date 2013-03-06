@@ -117,6 +117,7 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/extensions/background_info.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/manifest_url_handler.h"
 #include "chrome/common/extensions/permissions/permission_set.h"
@@ -613,7 +614,8 @@ void TestingAutomationProvider::GetBrowserWindowCount(int* window_count) {
 }
 
 void TestingAutomationProvider::GetNormalBrowserWindowCount(int* window_count) {
-  *window_count = static_cast<int>(chrome::GetTabbedBrowserCount(profile_));
+  *window_count = static_cast<int>(chrome::GetTabbedBrowserCount(
+                      profile_, chrome::HOST_DESKTOP_TYPE_NATIVE));
 }
 
 void TestingAutomationProvider::GetBrowserWindow(int index, int* handle) {
@@ -3675,8 +3677,9 @@ void TestingAutomationProvider::GetExtensionsInfo(DictionaryValue* args,
     extension_value->SetString("name", extension->name());
     extension_value->SetString("public_key", extension->public_key());
     extension_value->SetString("description", extension->description());
-    extension_value->SetString("background_url",
-                               extension->GetBackgroundURL().spec());
+    extension_value->SetString(
+        "background_url",
+        extensions::BackgroundInfo::GetBackgroundURL(extension).spec());
     extension_value->SetString("options_url",
         extensions::ManifestURL::GetOptionsPage(extension).spec());
     extension_value->Set("host_permissions",
@@ -3691,7 +3694,7 @@ void TestingAutomationProvider::GetExtensionsInfo(DictionaryValue* args,
                                 location == Manifest::INTERNAL);
     extension_value->SetBoolean("is_user_installed",
         location == Manifest::INTERNAL ||
-        location == Manifest::LOAD);
+        Manifest::IsUnpackedLocation(location));
     extension_value->SetBoolean("is_enabled", service->IsExtensionEnabled(id));
     extension_value->SetBoolean("allowed_in_incognito",
                                 service->IsIncognitoEnabled(id));

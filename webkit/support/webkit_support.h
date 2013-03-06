@@ -22,14 +22,13 @@ class FilePath;
 }
 
 namespace WebKit {
+class Platform;
 class WebApplicationCacheHost;
 class WebApplicationCacheHostClient;
 class WebFileSystemCallbacks;
 class WebFrame;
 class WebGamepads;
-class WebKitPlatformSupport;
 class WebLayerTreeView;
-class WebLayerTreeViewClient;
 class WebMediaPlayer;
 class WebMediaPlayerClient;
 class WebPlugin;
@@ -79,10 +78,10 @@ void SetUpTestEnvironmentForUnitTests(
     WebKit::Platform* shadow_platform_delegate);
 void TearDownTestEnvironment();
 
-// Returns a pointer to a WebKitPlatformSupport implementation for
+// Returns a pointer to a Platform implementation for
 // DumpRenderTree.  Needs to call SetUpTestEnvironment() before this.
 // This returns a pointer to a static instance.  Don't delete it.
-WebKit::WebKitPlatformSupport* GetWebKitPlatformSupport();
+WebKit::Platform* GetWebKitPlatformSupport();
 
 // This is used by WebFrameClient::createPlugin().
 WebKit::WebPlugin* CreateWebPlugin(WebKit::WebFrame* frame,
@@ -134,10 +133,25 @@ WebKit::WebGraphicsContext3D* CreateGraphicsContext3D(
     const WebKit::WebGraphicsContext3D::Attributes& attributes,
     WebKit::WebView* web_view);
 
-WebKit::WebLayerTreeView* CreateLayerTreeViewSoftware(
-    WebKit::WebLayerTreeViewClient* client);
-WebKit::WebLayerTreeView* CreateLayerTreeView3d(
-    WebKit::WebLayerTreeViewClient* client);
+enum LayerTreeViewType {
+  FAKE_CONTEXT,
+  SOFTWARE_CONTEXT,
+  MESA_CONTEXT
+};
+
+class DRTLayerTreeViewClient {
+ public:
+  virtual ~DRTLayerTreeViewClient() { }
+  virtual void Layout() = 0;
+  virtual void ScheduleComposite() = 0;
+};
+
+WebKit::WebLayerTreeView* CreateLayerTreeView(
+    LayerTreeViewType type,
+    DRTLayerTreeViewClient* client,
+    WebKit::WebThread* thread);
+
+void SetThreadedCompositorEnabled(bool enabled);
 
 // ------- URL load mocking.
 // Registers the file at |file_path| to be served when |url| is requested.

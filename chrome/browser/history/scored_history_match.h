@@ -30,7 +30,10 @@ struct ScoredHistoryMatch : public history::HistoryMatch {
   // influence the final score calculated by the client of this index.
   // If the row does not qualify the raw score will be 0. |bookmark_service| is
   // used to determine if the match's URL is referenced by any bookmarks.
+  // |languages| is used to help parse/format the URL before looking for
+  // the terms.
   ScoredHistoryMatch(const URLRow& row,
+                     const std::string& languages,
                      const string16& lower_string,
                      const String16Vector& terms_vector,
                      const RowWordStarts& word_starts,
@@ -125,9 +128,6 @@ struct ScoredHistoryMatch : public history::HistoryMatch {
   // field trial state.
   static void InitializeNewScoringField();
 
-  // Sets only_count_matches_at_word_boundaries based on the field trial state.
-  static void InitializeOnlyCountMatchesAtWordBoundariesField();
-
   // Sets also_do_hup_like_scoring based on the field trial state.
   static void InitializeAlsoDoHUPLikeScoringField();
 
@@ -170,9 +170,6 @@ struct ScoredHistoryMatch : public history::HistoryMatch {
   // affect on HistoryURLProvider-like scoring that can happen in this
   // class as well (see boolean below).
   static bool use_new_scoring;
-
-  // If true, we ignore all matches that are in the middle of a word.
-  static bool only_count_matches_at_word_boundaries;
 
   // If true, assign raw scores to be max(whatever it normally would be,
   // a score that's similar to the score HistoryURL provider would assign).

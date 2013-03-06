@@ -26,6 +26,7 @@
 #include "base/threading/worker_pool.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/about_flags.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_shutdown.h"
 #include "chrome/browser/chromeos/boot_times_loader.h"
@@ -43,6 +44,7 @@
 #include "chrome/browser/chromeos/login/profile_auth_data.h"
 #include "chrome/browser/chromeos/login/screen_locker.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
+#include "chrome/browser/chromeos/net/connectivity_state_helper.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/chromeos/settings/cros_settings_names.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -283,6 +285,10 @@ void LoginUtilsImpl::DoBrowserLaunch(Profile* profile,
   int return_code;
   chrome::startup::IsFirstRun first_run = first_run::IsChromeFirstRun() ?
       chrome::startup::IS_FIRST_RUN : chrome::startup::IS_NOT_FIRST_RUN;
+
+  // TODO(pastarmovj): Restart the browser and apply any flags set by the user.
+  // See: http://crosbug.com/39249
+
   browser_creator.LaunchBrowser(*CommandLine::ForCurrentProcess(),
                                 profile,
                                 base::FilePath(),
@@ -771,8 +777,8 @@ class WarmingObserver : public NetworkLibrary::NetworkManagerObserver,
 };
 
 void LoginUtilsImpl::PrewarmAuthentication() {
-  NetworkLibrary* network = CrosLibrary::Get()->GetNetworkLibrary();
-  if (network->Connected()) {
+  ConnectivityStateHelper* csh = ConnectivityStateHelper::Get();
+  if (csh->IsConnected()) {
     const int kConnectionsNeeded = 1;
     chrome_browser_net::PreconnectOnUIThread(
         GURL(GaiaUrls::GetInstance()->client_login_url()),
@@ -785,10 +791,12 @@ void LoginUtilsImpl::PrewarmAuthentication() {
 }
 
 void LoginUtilsImpl::RestoreAuthenticationSession(Profile* user_profile) {
-  // We don't need to restore session for demo/guest users.
+  // We don't need to restore session for demo/guest/stub/public account users.
   if (!UserManager::Get()->IsUserLoggedIn() ||
       UserManager::Get()->IsLoggedInAsGuest() ||
-      UserManager::Get()->IsLoggedInAsDemoUser()) {
+      UserManager::Get()->IsLoggedInAsPublicAccount() ||
+      UserManager::Get()->IsLoggedInAsDemoUser() ||
+      UserManager::Get()->IsLoggedInAsStub()) {
     return;
   }
 

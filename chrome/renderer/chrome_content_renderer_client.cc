@@ -19,6 +19,7 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/content_settings_pattern.h"
 #include "chrome/common/extensions/api/extension_action/page_action_handler.h"
+#include "chrome/common/extensions/background_info.h"
 #include "chrome/common/extensions/csp_handler.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
@@ -86,7 +87,9 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebCache.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDataSource.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebElement.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebPluginContainer.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPluginParams.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSecurityOrigin.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSecurityPolicy.h"
@@ -127,27 +130,17 @@ using WebKit::WebVector;
 
 namespace {
 
+const char kWebViewTagName[] = "WEBVIEW";
+
 // Explicitly register all extension ManifestHandlers needed to parse
 // fields used in the renderer.
 void RegisterExtensionManifestHandlers() {
-  extensions::ManifestHandler::Register(
-      extension_manifest_keys::kDevToolsPage,
-      make_linked_ptr(new extensions::DevToolsPageHandler));
-  extensions::ManifestHandler::Register(
-      extension_manifest_keys::kWebAccessibleResources,
-      make_linked_ptr(new extensions::WebAccessibleResourcesHandler));
-  linked_ptr<extensions::PageActionHandler> page_action_handler(
-      new extensions::PageActionHandler);
-  extensions::ManifestHandler::Register(
-      extension_manifest_keys::kPageAction, page_action_handler);
-  extensions::ManifestHandler::Register(
-      extension_manifest_keys::kPageActions, page_action_handler);
-  extensions::ManifestHandler::Register(
-      extension_manifest_keys::kContentSecurityPolicy,
-      make_linked_ptr(new extensions::CSPHandler(false))); // not platform app.
-  extensions::ManifestHandler::Register(
-      extension_manifest_keys::kPlatformAppContentSecurityPolicy,
-      make_linked_ptr(new extensions::CSPHandler(true))); // platform app.
+  (new extensions::BackgroundManifestHandler)->Register();
+  (new extensions::DevToolsPageHandler)->Register();
+  (new extensions::WebAccessibleResourcesHandler)->Register();
+  (new extensions::PageActionHandler)->Register();
+  (new extensions::CSPHandler(false))->Register();  // not platform app.
+  (new extensions::CSPHandler(true))->Register();  // platform app.
 }
 
 static void AppendParams(const std::vector<string16>& additional_names,
@@ -545,7 +538,7 @@ WebPlugin* ChromeContentRendererClient::CreatePlugin(
           // Allow built-in extensions and extensions under development.
           bool is_extension_unrestricted = extension &&
               (extension->location() == extensions::Manifest::COMPONENT ||
-               extension->location() == extensions::Manifest::LOAD);
+               extensions::Manifest::IsUnpackedLocation(extension->location()));
           GURL top_url = frame->top()->document().url();
           if (!IsNaClAllowed(manifest_url,
                              top_url,
@@ -1083,6 +1076,32 @@ void ChromeContentRendererClient::RegisterPPAPIInterfaceFactories(
 #if defined(ENABLE_PLUGINS)
   factory_manager->RegisterFactory(ChromePPAPIInterfaceFactory);
 #endif
+}
+
+bool ChromeContentRendererClient::AllowBrowserPlugin(
+    WebKit::WebPluginContainer* container) const {
+  // If this |BrowserPlugin| <object> in the |container| is not inside a
+  // <webview> shadowHost, we disable instantiating this plugin. This is to
+  // discourage and prevent developers from accidentally attaching <object>
+  // directly in apps.
+  //
+  // Note that this check below does *not* ensure any security, it is still
+  // possible to bypass this check.
+  // TODO(lazyboy): http://crbug.com/178663, Ensure we properly disallow
+  // instantiating BrowserPlugin outside of the <webview> shim.
+  if (container->element().isNull())
+    return false;
+
+  if (container->element().shadowHost().isNull())
+    return false;
+
+  if (container->element().shadowHost().tagName().equals(
+          WebKit::WebString::fromUTF8(kWebViewTagName))) {
+    return true;
+  } else {
+    return CommandLine::ForCurrentProcess()->HasSwitch(
+        switches::kEnableBrowserPluginForAllViewTypes);
+  }
 }
 
 }  // namespace chrome

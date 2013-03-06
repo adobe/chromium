@@ -10,13 +10,16 @@
 #include "chrome/browser/tab_contents/tab_util.h"
 #include "chrome/browser/ui/views/constrained_window_views.h"
 #include "chrome/browser/ui/views/login_view.h"
+#include "chrome/browser/ui/web_contents_modal_dialog_manager.h"
 #include "chrome/common/chrome_switches.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_view.h"
 #include "grit/generated_resources.h"
 #include "net/url_request/url_request.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/views/widget/widget.h"
 #include "ui/views/window/dialog_delegate.h"
 
 using content::BrowserThread;
@@ -73,7 +76,7 @@ class LoginHandlerViews : public LoginHandler,
   virtual void DeleteDelegate() OVERRIDE {
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-    // The constrained window is going to delete itself; clear our pointer.
+    // The widget is going to delete itself; clear our pointer.
     dialog_ = NULL;
     SetModel(NULL);
 
@@ -100,6 +103,15 @@ class LoginHandlerViews : public LoginHandler,
 
     SetAuth(login_view_->GetUsername(), login_view_->GetPassword());
     return true;
+  }
+
+  // TODO(wittman): Remove this override once we move to the new style frame
+  // view on all dialogs.
+  virtual views::NonClientFrameView* CreateNonClientFrameView(
+      views::Widget* widget) OVERRIDE {
+    return CreateConstrainedStyleNonClientFrameView(
+        widget,
+        GetWebContentsForLogin()->GetBrowserContext());
   }
 
   virtual views::View* GetInitiallyFocusedView() OVERRIDE {
@@ -136,14 +148,19 @@ class LoginHandlerViews : public LoginHandler,
     // will occur via an InvokeLater on the UI thread, which is guaranteed
     // to happen after this is called (since this was InvokeLater'd first).
     WebContents* requesting_contents = GetWebContentsForLogin();
-    dialog_ = ConstrainedWindowViews::Create(requesting_contents, this);
+    dialog_ = CreateWebContentsModalDialogViews(
+        this,
+        requesting_contents->GetView()->GetNativeView());
+    WebContentsModalDialogManager* web_contents_modal_dialog_manager =
+        WebContentsModalDialogManager::FromWebContents(requesting_contents);
+    web_contents_modal_dialog_manager->ShowDialog(dialog_->GetNativeView());
     NotifyAuthNeeded();
   }
 
   virtual void CloseDialog() OVERRIDE {
-    // The hosting ConstrainedWindowViews may have been freed.
+    // The hosting widget may have been freed.
     if (dialog_)
-      dialog_->CloseWebContentsModalDialog();
+      dialog_->Close();
   }
 
  private:
@@ -155,7 +172,7 @@ class LoginHandlerViews : public LoginHandler,
   // The LoginView that contains the user's login information
   LoginView* login_view_;
 
-  ConstrainedWindowViews* dialog_;
+  views::Widget* dialog_;
 
   DISALLOW_COPY_AND_ASSIGN(LoginHandlerViews);
 };

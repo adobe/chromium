@@ -174,7 +174,6 @@
       'enable_app_list%': '<(enable_app_list)',
       'enable_message_center%': '<(enable_message_center)',
       'use_default_render_theme%': '<(use_default_render_theme)',
-      'enable_web_intents%': 0,  # TODO(thakis): Remove, http://crbug.com/173194
       'buildtype%': '<(buildtype)',
 
       # Override branding to select the desired branding flavor.
@@ -223,11 +222,8 @@
       # use_libjpeg_turbo is set.
       'use_system_libjpeg%': 0,
 
-      # Variable 'component' is for cases where we would like to build some
-      # components as dynamic shared libraries but still need variable
-      # 'library' for static libraries.
-      # By default, component is set to whatever library is set to and
-      # it can be overriden by the GYP command line or by ~/.gyp/include.gypi.
+      # By default, component is set to static_library and it can be overriden
+      # by the GYP command line or by ~/.gyp/include.gypi.
       'component%': 'static_library',
 
       # Set to select the Title Case versions of strings in GRD files.
@@ -278,6 +274,11 @@
       'tsan%': 0,
       'tsan_blacklist%': '<(PRODUCT_DIR)/../../tools/valgrind/tsan_v2/ignores.txt',
 
+      # Enable building with MSAN (Clang's -fsanitize=memory option).
+      # MemorySanitizer only works with clang, but msan=1 implies clang=1
+      # See http://clang.llvm.org/docs/MemorySanitizer.html
+      'msan%': 0,
+
       # Use a modified version of Clang to intercept allocated types and sizes
       # for allocated objects. clang_type_profiler=1 implies clang=1.
       # See http://dev.chromium.org/developers/deep-memory-profiler/cpp-object-type-identifier
@@ -315,10 +316,6 @@
 
       # Enable printing support and UI.
       'enable_printing%': 1,
-
-      # Enable Web Intents web content registration via HTML element
-      # and WebUI managing such registrations.
-      'enable_web_intents_tag%': 0,
 
       # Webrtc compilation is enabled by default. Set to 0 to disable.
       'enable_webrtc%': 1,
@@ -414,15 +411,6 @@
       'spdy_proxy_auth_property%' : '',
 
       'conditions': [
-        # TODO(epoger): Figure out how to set use_skia=1 for Mac outside of
-        # the 'conditions' clause.  Initial attempts resulted in chromium and
-        # webkit disagreeing on its setting.
-        ['OS=="mac"', {
-          'use_skia%': 1,
-        }, {
-          'use_skia%': 1,
-        }],
-
         # A flag for POSIX platforms
         ['OS=="win"', {
           'os_posix%': 0,
@@ -559,7 +547,7 @@
 
         # linux_use_gold_binary: whether to use the binary checked into
         # third_party/gold.
-        ['OS=="linux"', {
+        ['OS=="linux" and target_arch=="x64"', {
           'linux_use_gold_binary%': 1,
         }, {
           'linux_use_gold_binary%': 0,
@@ -568,7 +556,7 @@
         # linux_use_gold_flags: whether to use build flags that rely on gold.
         # On by default for x64 Linux.  Temporarily off for ChromeOS as
         # it failed on a buildbot.
-        ['OS=="linux" and chromeos==0', {
+        ['OS=="linux" and target_arch=="x64" and chromeos==0', {
           'linux_use_gold_flags%': 1,
         }, {
           'linux_use_gold_flags%': 0,
@@ -620,14 +608,13 @@
           'armv7%': 1,
           'linux_breakpad%': 0,
           'linux_use_tcmalloc%': 0,
-          'linux_use_gold_flags%': 0,
           # sysroot needs to be an absolute path otherwise it generates
           # incorrect results when passed to pkg-config
           'sysroot%': '<!(cd <(DEPTH) && pwd -P)/arm-sysroot',
         }], # OS=="linux" and target_arch=="arm" and chromeos==0
 
         ['target_arch=="mipsel"', {
-          'sysroot': '<!(cd <(DEPTH) && pwd -P)/native_client/toolchain/linux_mips-trusted/sysroot',
+          'sysroot%': '<!(cd <(DEPTH) && pwd -P)/mipsel-sysroot/sysroot',
         }],
       ],
 
@@ -681,7 +668,6 @@
     'os_posix%': '<(os_posix)',
     'use_glib%': '<(use_glib)',
     'toolkit_uses_gtk%': '<(toolkit_uses_gtk)',
-    'use_skia%': '<(use_skia)',
     'use_x11%': '<(use_x11)',
     'use_gnome_keyring%': '<(use_gnome_keyring)',
     'linux_fpic%': '<(linux_fpic)',
@@ -715,13 +701,13 @@
     'clang_use_chrome_plugins%': '<(clang_use_chrome_plugins)',
     'mac_want_real_dsym%': '<(mac_want_real_dsym)',
     'asan%': '<(asan)',
+    'msan%': '<(msan)',
     'tsan%': '<(tsan)',
     'tsan_blacklist%': '<(tsan_blacklist)',
     'clang_type_profiler%': '<(clang_type_profiler)',
     'order_profiling%': '<(order_profiling)',
     'order_text_section%': '<(order_text_section)',
     'enable_extensions%': '<(enable_extensions)',
-    'enable_web_intents_tag%': '<(enable_web_intents_tag)',
     'enable_plugin_installation%': '<(enable_plugin_installation)',
     'enable_plugins%': '<(enable_plugins)',
     'enable_session_service%': '<(enable_session_service)',
@@ -751,7 +737,6 @@
     'enable_app_list%': '<(enable_app_list)',
     'enable_message_center%': '<(enable_message_center)',
     'use_default_render_theme%': '<(use_default_render_theme)',
-    'enable_web_intents%': '<(enable_web_intents)',
     'enable_settings_app%': '<(enable_settings_app)',
     'use_official_google_api_keys%': '<(use_official_google_api_keys)',
     'google_api_key%': '<(google_api_key)',
@@ -1049,7 +1034,7 @@
         'conditions': [
           # TODO(glider): set clang to 1 earlier for ASan and TSan builds so
           # that it takes effect here.
-          ['clang==0 and asan==0 and tsan==0', {
+          ['clang==0 and asan==0 and tsan==0 and msan==0', {
             # This will set gcc_version to XY if you are running gcc X.Y.*.
             # This is used to tweak build flags for gcc 4.5.
             'gcc_version%': '<!(python <(DEPTH)/build/compiler_version.py)',
@@ -1059,8 +1044,6 @@
           ['target_arch=="mipsel"', {
             'werror%': '',
             'disable_nacl%': 1,
-            'linux_use_gold_binary%': 0,
-            'linux_use_gold_flags%': 0,
             'nacl_untrusted_build%': 0,
             'linux_use_tcmalloc%': 0,
             'linux_breakpad%': 0,
@@ -1130,11 +1113,14 @@
           # Android API-level of the SDK used for compilation.
           'android_sdk_version%': '17',
 
+          # Android API level 14 is ICS (Android 4.0) which is the minimum
+          # platform requirement for Chrome on Android, we use it for native
+          # code compilation.
           'conditions': [
             ['target_arch == "ia32"', {
               'android_app_abi%': 'x86',
               'android_gdbserver%': '<(android_ndk_root)/prebuilt/android-x86/gdbserver/gdbserver',
-              'android_ndk_sysroot%': '<(android_ndk_root)/platforms/android-9/arch-x86',
+              'android_ndk_sysroot%': '<(android_ndk_root)/platforms/android-14/arch-x86',
               'android_toolchain%': '<(android_ndk_root)/toolchains/x86-4.6/prebuilt/<(host_os)-<(android_host_arch)/bin',
             }],
             ['target_arch=="arm"', {
@@ -1146,7 +1132,7 @@
                 }],
               ],
               'android_gdbserver%': '<(android_ndk_root)/prebuilt/android-arm/gdbserver/gdbserver',
-              'android_ndk_sysroot%': '<(android_ndk_root)/platforms/android-9/arch-arm',
+              'android_ndk_sysroot%': '<(android_ndk_root)/platforms/android-14/arch-arm',
               'android_toolchain%': '<(android_ndk_root)/toolchains/arm-linux-androideabi-4.6/prebuilt/<(host_os)-<(android_host_arch)/bin',
             }],
           ],
@@ -1459,10 +1445,6 @@
         ],
       }],
 
-      ['enable_web_intents_tag==1', {
-        'grit_defines': ['-D', 'enable_web_intents_tag'],
-      }],
-
       ['asan==1 and OS!="win"', {
         'clang%': 1,
       }],
@@ -1474,6 +1456,9 @@
         'mac_strip_release': 0,
       }],
       ['tsan==1', {
+        'clang%': 1,
+      }],
+      ['msan==1', {
         'clang%': 1,
       }],
 
@@ -1664,6 +1649,9 @@
         }],
       ],
     },
+    # TODO(teravest): Remove this define once uses of USE_SKIA are cleaned up
+    # throughout the codebase.
+    'defines' : ['USE_SKIA'],
     'conditions': [
       ['OS=="linux" and linux_use_tcmalloc==1 and clang_type_profiler==1', {
         'cflags_cc!': ['-fno-rtti'],
@@ -1869,11 +1857,6 @@
           'ENABLE_EGLIMAGE=1',
         ],
       }],
-      ['use_skia==1', {
-        'defines': [
-          'USE_SKIA=1',
-        ],
-      }],
       ['asan==1 and OS=="win"', {
         # Since asan on windows uses Syzygy, we need /PROFILE turned on to
         # produce appropriate pdbs.
@@ -1973,11 +1956,6 @@
       ['enable_task_manager==1', {
         'defines': [
           'ENABLE_TASK_MANAGER=1',
-        ],
-      }],
-      ['enable_web_intents==1', {
-        'defines': [
-          'ENABLE_WEB_INTENTS=1',
         ],
       }],
       ['enable_extensions==1', {
@@ -2236,6 +2214,8 @@
               ['<(windows_sdk_path)/Lib/win8/um/x86'],
             'AdditionalLibraryDirectories':
               ['<(windows_sdk_path)/Lib/win8/um/x64'],
+            # Doesn't exist x64 SDK. Should use oleaut32 in any case.
+            'IgnoreDefaultLibraryNames': [ 'olepro32.lib' ],
           },
           'VCLibrarianTool': {
             'AdditionalLibraryDirectories!':
@@ -2928,6 +2908,31 @@
               }],
             ],
           }],
+          ['msan==1', {
+            'target_conditions': [
+              ['_toolset=="target"', {
+                'cflags': [
+                  '-fsanitize=memory',
+                  '-fsanitize-memory-track-origins',
+                  '-fno-omit-frame-pointer',
+                  '-fPIC',
+                ],
+                'ldflags': [
+                  '-fsanitize=memory',
+                ],
+                'defines': [
+                  'MEMORY_SANITIZER',
+                ],
+                'target_conditions': [
+                  ['_type=="executable"', {
+                    'ldflags': [
+                      '-pie',
+                    ],
+                  }],
+                ],
+              }],
+            ],
+          }],
           ['order_profiling!=0 and (chromeos==1 or OS=="linux" or OS=="android")', {
             'target_conditions' : [
               ['_toolset=="target"', {
@@ -2950,8 +2955,8 @@
                 'target_conditions': [
                   ['_toolset=="target"', {
                     'ldflags': [
-                      # Workaround for linker OOM. http://crbug.com/160253.
-                      '-Wl,--no-keep-files-mapped',
+                      # Workaround for linker OOM.
+                      '-Wl,--no-keep-memory',
                     ],
                   }],
                 ],

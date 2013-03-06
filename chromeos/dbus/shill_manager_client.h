@@ -40,13 +40,14 @@ class CHROMEOS_EXPORT ShillManagerClient {
    public:
     virtual void AddDevice(const std::string& device_path) = 0;
     virtual void RemoveDevice(const std::string& device_path) = 0;
-    virtual void ResetDevices() = 0;
+    virtual void ClearDevices() = 0;
     virtual void AddService(const std::string& service_path,
                             bool add_to_watch_list) = 0;
     virtual void AddServiceAtIndex(const std::string& service_path,
                                    size_t index,
                                    bool add_to_watch_list) = 0;
     virtual void RemoveService(const std::string& service_path) = 0;
+    virtual void ClearServices() = 0;
     virtual void AddTechnology(const std::string& type, bool enabled) = 0;
     virtual void RemoveTechnology(const std::string& type) = 0;
     virtual void AddGeoNetwork(const std::string& technology,
@@ -142,7 +143,7 @@ class CHROMEOS_EXPORT ShillManagerClient {
   // return the encrypted credentials for connecting to the network represented
   // by the given |service_path|, encrypted using the |public_key| for the
   // trusted device. If the device is not trusted, return the empty string.
-  virtual void VerifyAndSignCredentials(
+  virtual void VerifyAndEncryptCredentials(
       const std::string& certificate,
       const std::string& public_key,
       const std::string& nonce,
@@ -155,7 +156,7 @@ class CHROMEOS_EXPORT ShillManagerClient {
   // Verify that the given data corresponds to a trusted device, and return the
   // |data| encrypted using the |public_key| for the trusted device. If the
   // device is not trusted, return the empty string.
-  virtual void VerifyAndSignData(const std::string& certificate,
+  virtual void VerifyAndEncryptData(const std::string& certificate,
                                  const std::string& public_key,
                                  const std::string& nonce,
                                  const std::string& signed_data,

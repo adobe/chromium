@@ -31,7 +31,7 @@
 #include "content/browser/renderer_host/render_process_host_impl.h"
 #include "content/browser/renderer_host/render_view_host_delegate.h"
 #include "content/common/accessibility_messages.h"
-#include "content/common/browser_plugin_messages.h"
+#include "content/common/browser_plugin/browser_plugin_messages.h"
 #include "content/common/content_constants_internal.h"
 #include "content/common/desktop_notification_messages.h"
 #include "content/common/drag_messages.h"
@@ -175,6 +175,9 @@ RenderViewHostImpl::RenderViewHostImpl(
       has_timed_out_on_unload_(false),
       unload_ack_is_for_cross_site_transition_(false),
       are_javascript_messages_suppressed_(false),
+      accessibility_layout_callback_(base::Bind(&base::DoNothing)),
+      accessibility_load_callback_(base::Bind(&base::DoNothing)),
+      accessibility_other_callback_(base::Bind(&base::DoNothing)),
       sudden_termination_allowed_(false),
       session_storage_namespace_(
           static_cast<SessionStorageNamespaceImpl*>(session_storage)),
@@ -1524,8 +1527,7 @@ void RenderViewHostImpl::OnAddMessageToConsole(
   if (delegate_->AddMessageToConsole(level, message, line_no, source_id))
     return;
   // Pass through log level only on WebUI pages to limit console spew.
-  int32 resolved_level =
-      (enabled_bindings_ & BINDINGS_POLICY_WEB_UI) ? level : 0;
+  int32 resolved_level = HasWebUIScheme(delegate_->GetURL()) ? level : 0;
 
   if (resolved_level >= ::logging::GetMinLogLevel()) {
     logging::LogMessage("CONSOLE", line_no, resolved_level).stream() << "\"" <<
@@ -1782,6 +1784,21 @@ void RenderViewHostImpl::UpdateFrameTree(
                                    frame_tree_));
 }
 
+void RenderViewHostImpl::SetAccessibilityLayoutCompleteCallbackForTesting(
+    const base::Closure& callback) {
+  accessibility_layout_callback_ = callback;
+}
+
+void RenderViewHostImpl::SetAccessibilityLoadCompleteCallbackForTesting(
+    const base::Closure& callback) {
+  accessibility_load_callback_ = callback;
+}
+
+void RenderViewHostImpl::SetAccessibilityOtherCallbackForTesting(
+    const base::Closure& callback) {
+  accessibility_other_callback_ = callback;
+}
+
 void RenderViewHostImpl::UpdateWebkitPreferences(
     const webkit_glue::WebPreferences& prefs) {
   Send(new ViewMsg_UpdateWebPreferences(GetRoutingID(), prefs));
@@ -1888,17 +1905,13 @@ void RenderViewHostImpl::OnAccessibilityNotifications(
       accessibility_tree_ = param.acc_tree;
     }
 
-    NotificationType dst_type;
-    if (src_type == AccessibilityNotificationLoadComplete)
-      dst_type = NOTIFICATION_ACCESSIBILITY_LOAD_COMPLETE;
-    else if (src_type == AccessibilityNotificationLayoutComplete)
-      dst_type = NOTIFICATION_ACCESSIBILITY_LAYOUT_COMPLETE;
-    else
-      dst_type = NOTIFICATION_ACCESSIBILITY_OTHER;
-    NotificationService::current()->Notify(
-          dst_type,
-          Source<RenderViewHost>(this),
-          NotificationService::NoDetails());
+    if (src_type == AccessibilityNotificationLayoutComplete) {
+      accessibility_layout_callback_.Run();
+    } else if (src_type == AccessibilityNotificationLoadComplete) {
+      accessibility_load_callback_.Run();
+    } else {
+      accessibility_other_callback_.Run();
+    }
   }
 
   Send(new AccessibilityMsg_Notifications_ACK(GetRoutingID()));
@@ -1941,6 +1954,8 @@ void RenderViewHostImpl::OnMediaNotification(int64 player_cookie,
                                              bool has_video,
                                              bool has_audio,
                                              bool is_playing) {
+  // Chrome OS does its own detection of audio and video.
+#if !defined(OS_CHROMEOS)
   if (is_playing) {
     scoped_ptr<PowerSaveBlocker> blocker;
     if (has_video) {
@@ -1959,6 +1974,7 @@ void RenderViewHostImpl::OnMediaNotification(int64 player_cookie,
     delete power_save_blockers_[player_cookie];
     power_save_blockers_.erase(player_cookie);
   }
+#endif
 }
 
 void RenderViewHostImpl::OnRequestDesktopNotificationPermission(

@@ -10,6 +10,7 @@
 #include "net/spdy/spdy_framer.h"
 #include "net/spdy/spdy_protocol.h"
 #include "net/tools/dump_cache/url_utilities.h"
+#include "net/tools/flip_server/constants.h"
 #include "net/tools/flip_server/flip_config.h"
 #include "net/tools/flip_server/http_interface.h"
 #include "net/tools/flip_server/spdy_util.h"
@@ -24,7 +25,7 @@ class SpdyFrameDataFrame : public DataFrame {
   SpdyFrameDataFrame(SpdyFrame* spdy_frame)
     : frame(spdy_frame) {
     data = spdy_frame->data();
-    size = spdy_frame->length() + SpdyFrame::kHeaderSize;
+    size = spdy_frame->size();
   }
 
   virtual ~SpdyFrameDataFrame() {
@@ -434,7 +435,7 @@ size_t SpdySM::SendSynStreamImpl(uint32 stream_id,
 
   SpdyFrame* fsrcf = buffered_spdy_framer_->CreateSynStream(
       stream_id, 0, 0, 0, CONTROL_FLAG_NONE, true, &block);
-  size_t df_size = fsrcf->length() + SpdyFrame::kHeaderSize;
+  size_t df_size = fsrcf->size();
   EnqueueDataFrame(new SpdyFrameDataFrame(fsrcf));
 
   VLOG(2) << ACCEPTOR_CLIENT_IDENT << "SpdySM: Sending SynStreamheader "
@@ -451,7 +452,7 @@ size_t SpdySM::SendSynReplyImpl(uint32 stream_id, const BalsaHeaders& headers) {
 
   SpdyFrame* fsrcf = buffered_spdy_framer_->CreateSynReply(
       stream_id, CONTROL_FLAG_NONE, true, &block);
-  size_t df_size = fsrcf->length() + SpdyFrame::kHeaderSize;
+  size_t df_size = fsrcf->size();
   EnqueueDataFrame(new SpdyFrameDataFrame(fsrcf));
 
   VLOG(2) << ACCEPTOR_CLIENT_IDENT << "SpdySM: Sending SynReplyheader "
@@ -487,8 +488,8 @@ void SpdySM::SendDataFrameImpl(uint32 stream_id, const char* data, int64 len,
     EnqueueDataFrame(new SpdyFrameDataFrame(fdf));
 
     VLOG(2) << ACCEPTOR_CLIENT_IDENT << "SpdySM: Sending data frame "
-            << stream_id << " [" << size << "] shrunk to " << fdf->length()
-            << ", flags=" << flags;
+            << stream_id << " [" << size << "] shrunk to "
+            << (fdf->size() - kSpdyOverhead) << ", flags=" << flags;
 
     data += size;
     len -= size;

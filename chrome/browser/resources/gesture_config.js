@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2013 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -58,8 +58,10 @@ GeneralConfig.prototype = {
       input.id = field.key;
       input.min = field.min || 0;
 
-      if (field.max) input.max = field.max;
-      if (field.step) input.step = field.step;
+      if (field.max)
+        input.max = field.max;
+
+      input.step = field.step || 'any';
 
       if (field.units)
         units.innerHTML = field.units;
@@ -164,7 +166,8 @@ function GestureConfig() {
     {
       key: 'semi_long_press_time_in_seconds',
       label: 'Semi Long Press Time',
-      units: 'seconds'
+      units: 'seconds',
+      step: 0.1
     },
     {
       key: 'max_seconds_between_double_click',
@@ -253,27 +256,36 @@ function GestureConfig() {
     {
       key: 'fling_acceleration_curve_coefficient_0',
       label: 'Touchscreen Fling Acceleration',
-      units: 'x<sup>3</sup>'
+      units: 'x<sup>3</sup>',
+      min: '-1'
     },
     {
       key: 'fling_acceleration_curve_coefficient_1',
       label: '+',
-      units: 'x<sup>2</sup>'
+      units: 'x<sup>2</sup>',
+      min: '-1'
     },
     {
       key: 'fling_acceleration_curve_coefficient_2',
       label: '+',
-      units: 'x<sup>1</sup>'
+      units: 'x<sup>1</sup>',
+      min: '-1'
     },
     {
       key: 'fling_acceleration_curve_coefficient_3',
       label: '+',
-      units: 'x<sup>0</sup>'
+      units: 'x<sup>0</sup>',
+      min: '-1'
     },
     {
       key: 'fling_velocity_cap',
       label: 'Touchscreen Fling Velocity Cap',
       units: 'pixels / second'
+    },
+    {
+      key: 'tab_scrub_activation_delay_in_ms',
+      label: 'Tab scrub auto activation delay, (-1 for never)',
+      units: 'milliseconds'
     }
   ];
 
@@ -350,12 +362,19 @@ function WorkspaceCyclerConfig() {
     {
       key: 'min_brightness',
       label: 'Minimum workspace brightness (deepest & shallowest workspace)',
-      units: '%'
+      units: '%',
+      min: '-1'
     },
     {
       key: 'background_opacity',
       label: 'Desktop background opacity when cycling through workspaces',
       units: '%'
+    },
+    {
+      key: 'desktop_workspace_brightness',
+      label: 'Desktop workspace brightness when cycling through workspaces',
+      units: '%',
+      min: '-1'
     },
     {
       key: 'distance_to_initiate_cycling',
@@ -399,32 +418,38 @@ function FlingConfig() {
     {
       key: 'touchscreen_alpha',
       label: 'Touchscreen fling deacceleration coefficients',
-      units: 'alpha'
+      units: 'alpha',
+      min: '-inf'
     },
     {
       key: 'touchscreen_beta',
       label: '',
-      units: 'beta'
+      units: 'beta',
+      min: '-inf'
     },
     {
       key: 'touchscreen_gamma',
       label: '',
-      units: 'gamma'
+      units: 'gamma',
+      min: '-inf'
     },
     {
       key: 'touchpad_alpha',
       label: 'Touchpad fling deacceleration coefficients',
-      units: 'alpha'
+      units: 'alpha',
+      min: '-inf'
     },
     {
       key: 'touchpad_beta',
       label: '',
-      units: 'beta'
+      units: 'beta',
+      min: '-inf'
     },
     {
       key: 'touchpad_gamma',
       label: '',
-      units: 'gamma'
+      units: 'gamma',
+      min: '-inf'
     },
   ];
 

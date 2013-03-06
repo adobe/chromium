@@ -172,6 +172,7 @@
             '<(webkit_src_dir)/Tools/DumpRenderTree/DumpRenderTree.gyp/DumpRenderTree.gyp:TestRunner',
             '../ui/surface/surface.gyp:surface',
             '../webkit/compositor_bindings/compositor_bindings.gyp:webkit_compositor_support',
+            '../webkit/gpu/webkit_gpu.gyp:webkit_gpu',
             '../webkit/support/webkit_support.gyp:webkit_storage',
             '../webkit/support/webkit_support.gyp:webkit_support_common',
           ],
@@ -195,12 +196,13 @@
             'test/webrtc_audio_device_test.h',
           ],
           'dependencies': [
-            '../third_party/libjingle/libjingle.gyp:libjingle_peerconnection',
+            '../third_party/libjingle/libjingle.gyp:libpeerconnection',
             '../third_party/webrtc/modules/modules.gyp:audio_device',
             '../third_party/webrtc/modules/modules.gyp:video_capture_module',
             '../third_party/webrtc/system_wrappers/source/system_wrappers.gyp:system_wrappers',
             '../third_party/webrtc/video_engine/video_engine.gyp:video_engine_core',
-            '../third_party/webrtc/voice_engine/voice_engine.gyp:voice_engine_core'],
+            '../third_party/webrtc/voice_engine/voice_engine.gyp:voice_engine_core'
+          ],
         }],
         ['toolkit_uses_gtk == 1', {
           'dependencies': [
@@ -297,6 +299,7 @@
         'browser/loader/resource_buffer_unittest.cc',
         'browser/loader/resource_dispatcher_host_unittest.cc',
         'browser/loader/resource_loader_unittest.cc',
+        'browser/loader/resource_scheduler_unittest.cc',
         'browser/mach_broker_mac_unittest.cc',
         'browser/media/media_internals_unittest.cc',
         'browser/media/webrtc_internals_unittest.cc',
@@ -357,6 +360,7 @@
         'common/gpu/gpu_memory_manager_unittest.cc',
         'common/gpu/media/avc_config_record_builder_unittest.cc',
         'common/indexed_db/indexed_db_dispatcher_unittest.cc',
+        'common/indexed_db/proxy_webidbcursor_impl_unittest.cc',
         'common/inter_process_time_ticks_converter_unittest.cc',
         'common/page_zoom_unittest.cc',
         'common/resource_dispatcher_unittest.cc',
@@ -380,6 +384,7 @@
         'renderer/paint_aggregator_unittest.cc',
         'renderer/pepper/pepper_broker_impl_unittest.cc',
         'renderer/render_thread_impl_unittest.cc',
+        'renderer/render_view_impl_unittest.cc',
         'renderer/v8_value_converter_impl_unittest.cc',
         'test/gpu/gpu_test_config_unittest.cc',
         'test/gpu/gpu_test_expectations_parser_unittest.cc',
@@ -518,6 +523,7 @@
             'content_renderer',
             'content_resources.gyp:content_resources',
             '../base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
+            '../gpu/gpu.gyp:gpu',
             '../gpu/gpu.gyp:gpu_unittest_utils',
             '../ipc/ipc.gyp:test_support_ipc',
             '../jingle/jingle.gyp:jingle_glue_test_util',
@@ -555,11 +561,10 @@
             'renderer/media/media_stream_dispatcher_unittest.cc',
             'renderer/media/media_stream_impl_unittest.cc',
             'renderer/media/rtc_peer_connection_handler_unittest.cc',
-            'renderer/media/rtc_video_decoder_unittest.cc',
             'renderer/media/webrtc_audio_device_unittest.cc',
           ],
           'dependencies': [
-            '../third_party/libjingle/libjingle.gyp:libjingle_peerconnection',
+            '../third_party/libjingle/libjingle.gyp:libpeerconnection',
             '../third_party/webrtc/modules/modules.gyp:video_capture_module',
             '../third_party/webrtc/system_wrappers/source/system_wrappers.gyp:system_wrappers',
             '../third_party/webrtc/video_engine/video_engine.gyp:video_engine_core',
@@ -688,6 +693,7 @@
             'HAS_OUT_OF_PROC_TEST_RUNNER',
           ],
           'sources': [
+            'browser/accessibility/accessibility_win_browsertest.cc',
             'browser/accessibility/cross_platform_accessibility_browsertest.cc',
             'browser/accessibility/dump_accessibility_tree_browsertest.cc',
             'browser/accessibility/dump_accessibility_tree_helper.cc',
@@ -701,6 +707,8 @@
             'browser/browser_plugin/test_browser_plugin_embedder.h',
             'browser/browser_plugin/test_browser_plugin_guest.cc',
             'browser/browser_plugin/test_browser_plugin_guest.h',
+            'browser/browser_plugin/test_browser_plugin_guest_manager.cc',
+            'browser/browser_plugin/test_browser_plugin_guest_manager.h',
             'browser/child_process_security_policy_browsertest.cc',
             'browser/database_browsertest.cc',
             'browser/device_orientation/device_orientation_browsertest.cc',
@@ -793,6 +801,7 @@
               'dependencies': [
                 '<(DEPTH)/net/net.gyp:net_resources',
                 '<(DEPTH)/third_party/iaccessible2/iaccessible2.gyp:iaccessible2',
+                '<(DEPTH)/third_party/isimpledom/isimpledom.gyp:isimpledom',
                 '<(DEPTH)/webkit/support/webkit_support.gyp:webkit_resources',
                 '<(DEPTH)/webkit/support/webkit_support.gyp:webkit_strings',
               ],
@@ -809,6 +818,7 @@
               'msvs_disabled_warnings': [ 4267, ],
             }, {  # OS!="win"
               'sources!': [
+                'browser/accessibility/accessibility_win_browsertest.cc',
                 'browser/renderer_host/render_widget_host_view_win_browsertest.cc',
               ],
             }],
@@ -852,6 +862,7 @@
             }],
             ['use_aura==1', {
               'sources!': [
+                'browser/accessibility/accessibility_win_browsertest.cc',
                 'browser/accessibility/dump_accessibility_tree_browsertest.cc',
                 'browser/accessibility/dump_accessibility_tree_helper_win.cc',
                 'browser/accessibility/dump_accessibility_tree_helper.cc',
@@ -890,6 +901,8 @@
       ],
     }],
     ['chromeos==1 or OS=="win" or OS=="mac"', {
+      # TODO(felipeg): Make video_decode_accelerator_unittest work on Android.
+      # http://crbug.com/178647
       'targets': [
           {
             'target_name': 'video_decode_accelerator_unittest',
@@ -960,6 +973,13 @@
             'common/gpu/media/h264_bit_reader_unittest.cc',
             'common/gpu/media/h264_parser_unittest.cc',
           ],
+          'conditions': [
+            ['linux_use_tcmalloc==1', {
+              'dependencies': [
+                '../base/allocator/allocator.gyp:allocator',
+              ],
+            }],
+          ],
         }
       ],
     }],
@@ -1025,6 +1045,7 @@
             'content_java_test_support',
             'content_shell_apk_java',
             '../base/base.gyp:base_java',
+            '../base/base.gyp:base_javatests',
             '../base/base.gyp:base_java_test_support',
             '../media/media.gyp:media_java',
             '../media/media.gyp:media_test_support',

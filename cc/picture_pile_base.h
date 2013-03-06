@@ -35,6 +35,9 @@ class CC_EXPORT PicturePileBase : public base::RefCounted<PicturePileBase> {
   int num_tiles_y() const { return tiling_.num_tiles_y(); }
   gfx::Rect tile_bounds(int x, int y) const { return tiling_.TileBounds(x, y); }
   bool HasRecordingAt(int x, int y);
+  bool CanRaster(float contents_scale, gfx::Rect content_rect);
+
+  void SetTileGridSize(const gfx::Size& tile_grid_size);
 
  protected:
   virtual ~PicturePileBase();
@@ -52,6 +55,8 @@ class CC_EXPORT PicturePileBase : public base::RefCounted<PicturePileBase> {
   TilingData tiling_;
   Region recorded_region_;
   float min_contents_scale_;
+  SkTileGridPicture::TileGridInfo tile_grid_info_;
+  SkColor background_color_;
 
  private:
   void SetBufferPixels(int buffer_pixels);

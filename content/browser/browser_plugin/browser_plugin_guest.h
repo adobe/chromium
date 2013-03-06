@@ -27,6 +27,7 @@
 #include "base/id_map.h"
 #include "base/shared_memory.h"
 #include "base/time.h"
+#include "content/common/browser_plugin/browser_plugin_message_enums.h"
 #include "content/port/common/input_event_ack_state.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
@@ -57,7 +58,10 @@ namespace content {
 
 class BrowserPluginHostFactory;
 class BrowserPluginEmbedder;
+class BrowserPluginGuestManager;
 class RenderProcessHost;
+class RenderWidgetHostView;
+struct MediaStreamRequest;
 
 // A browser plugin guest provides functionality for WebContents to operate in
 // the guest role and implements guest specific overrides for ViewHostMsg_*
@@ -72,7 +76,6 @@ class CONTENT_EXPORT BrowserPluginGuest : public NotificationObserver,
 
   static BrowserPluginGuest* Create(
       int instance_id,
-      WebContentsImpl* embedder_web_contents,
       WebContentsImpl* web_contents,
       const BrowserPluginHostMsg_CreateGuest_Params& params);
 
@@ -84,18 +87,18 @@ class CONTENT_EXPORT BrowserPluginGuest : public NotificationObserver,
 
   bool OnMessageReceivedFromEmbedder(const IPC::Message& message);
 
-  void Initialize(const BrowserPluginHostMsg_CreateGuest_Params& params);
+  void Initialize(WebContentsImpl* embedder_web_contents,
+                  const BrowserPluginHostMsg_CreateGuest_Params& params);
 
   void set_guest_hang_timeout_for_testing(const base::TimeDelta& timeout) {
     guest_hang_timeout_ = timeout;
   }
 
-  void set_embedder_web_contents(WebContentsImpl* web_contents) {
-    embedder_web_contents_ = web_contents;
-  }
   WebContentsImpl* embedder_web_contents() const {
     return embedder_web_contents_;
   }
+
+  RenderWidgetHostView* GetEmbedderRenderWidgetHostView();
 
   bool focused() const { return focused_; }
   bool visible() const { return guest_visible_; }
@@ -147,9 +150,13 @@ class CONTENT_EXPORT BrowserPluginGuest : public NotificationObserver,
   virtual void RunFileChooser(WebContents* web_contents,
                               const FileChooserParams& params) OVERRIDE;
   virtual bool ShouldFocusPageAfterCrash() OVERRIDE;
+  virtual void RequestMediaAccessPermission(
+      WebContents* web_contents,
+      const content::MediaStreamRequest& request,
+      const content::MediaResponseCallback& callback) OVERRIDE;
 
   // Exposes the protected web_contents() from WebContentsObserver.
-  WebContents* GetWebContents();
+  WebContentsImpl* GetWebContents();
 
   // Kill the guest process.
   void Terminate();
@@ -160,12 +167,12 @@ class CONTENT_EXPORT BrowserPluginGuest : public NotificationObserver,
 
   gfx::Point GetScreenCoordinates(const gfx::Point& relative_position) const;
 
-  // Helper to send messages to embedder. Overridden in test implementation
-  // since we want to intercept certain messages for testing.
+  // Helper to send messages to embedder. This methods fills the message with
+  // the correct routing id.
+  // Overridden in test implementation since we want to intercept certain
+  // messages for testing.
   virtual void SendMessageToEmbedder(IPC::Message* msg);
 
-  // Returns the embedder's routing ID.
-  int embedder_routing_id() const;
   // Returns the identifier that uniquely identifies a browser plugin guest
   // within an embedder.
   int instance_id() const { return instance_id_; }
@@ -177,13 +184,24 @@ class CONTENT_EXPORT BrowserPluginGuest : public NotificationObserver,
                                        const std::string& mailbox_name,
                                        uint32 sync_point);
 
+  // Returns whether BrowserPluginGuest is interested in receiving the given
+  // |message|.
+  static bool ShouldForwardToBrowserPluginGuest(const IPC::Message& message);
+
  private:
+  typedef std::pair<content::MediaStreamRequest, content::MediaResponseCallback>
+      MediaStreamRequestAndCallbackPair;
+  typedef std::map<int, MediaStreamRequestAndCallbackPair>
+      MediaStreamRequestsMap;
+
   friend class TestBrowserPluginGuest;
 
   BrowserPluginGuest(int instance_id,
-                     WebContentsImpl* embedder_web_contents,
                      WebContentsImpl* web_contents,
                      const BrowserPluginHostMsg_CreateGuest_Params& params);
+
+  // Returns the embedder's routing ID.
+  int embedder_routing_id() const;
 
   // Schedules this BrowserPluginGuest for deletion if it hasn't already been
   // scheduled.
@@ -207,6 +225,12 @@ class CONTENT_EXPORT BrowserPluginGuest : public NotificationObserver,
 
   // Message handlers for messsages from embedder.
 
+  // Allows or denies a permission request access, after the embedder has had a
+  // chance to decide.
+  void OnRespondPermission(int instance_id,
+                           BrowserPluginPermissionType permission_type,
+                           int request_id,
+                           bool should_allow);
   // Handles drag events from the embedder.
   // When dragging, the drag events go to the embedder first, and if the drag
   // happens on the browser plugin, then the plugin sends a corresponding
@@ -224,6 +248,10 @@ class CONTENT_EXPORT BrowserPluginGuest : public NotificationObserver,
   virtual void OnHandleInputEvent(int instance_id,
                                   const gfx::Rect& guest_window_rect,
                                   const WebKit::WebInputEvent* event);
+  void OnLockMouse(bool user_gesture,
+                   bool last_unlocked_by_target,
+                   bool privileged);
+  void OnLockMouseAck(int instance_id, bool succeeded);
   void OnNavigateGuest(int instance_id, const std::string& src);
   void OnPluginDestroyed(int instance_id);
   // Reload the guest. Overriden in tests.
@@ -268,6 +296,8 @@ class CONTENT_EXPORT BrowserPluginGuest : public NotificationObserver,
                         uint32 sync_point);
 
   void OnTerminateGuest(int instance_id);
+  void OnUnlockMouse();
+  void OnUnlockMouseAck(int instance_id);
   void OnUpdateRectACK(
       int instance_id,
       const BrowserPluginHostMsg_AutoSize_Params& auto_size_params,
@@ -317,13 +347,22 @@ class CONTENT_EXPORT BrowserPluginGuest : public NotificationObserver,
   gfx::Rect guest_screen_rect_;
   base::TimeDelta guest_hang_timeout_;
   bool focused_;
+  bool mouse_locked_;
   bool guest_visible_;
   bool embedder_visible_;
   std::string name_;
   bool auto_size_enabled_;
   gfx::Size max_auto_size_;
   gfx::Size min_auto_size_;
-  bool destroy_called_;
+
+  // A counter to generate unique request id for a media access request.
+  // We only need the ids to be unique for a given BrowserPluginGuest.
+  int current_media_access_request_id_;
+  // A map to store WebContents's media request object and callback.
+  // We need to store these because we need a roundtrip to the embedder to know
+  // if we allow or disallow the request. The key of the map is unique only for
+  // a given BrowserPluginGuest.
+  MediaStreamRequestsMap media_requests_map_;
 
   DISALLOW_COPY_AND_ASSIGN(BrowserPluginGuest);
 };

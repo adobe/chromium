@@ -48,7 +48,7 @@ class ChromeDriver(object):
   """Starts and controls a single Chrome instance on this machine."""
 
   def __init__(self, lib_path, chrome_binary=None, android_package=None,
-               chrome_switches=None):
+               chrome_switches=None, chrome_extensions=None):
     self._lib = ctypes.CDLL(lib_path)
 
     options = {}
@@ -60,6 +60,10 @@ class ChromeDriver(object):
     if chrome_switches:
       assert type(chrome_switches) is list
       options['args'] = chrome_switches
+
+    if chrome_extensions:
+      assert type(chrome_extensions) is list
+      options['extensions'] = chrome_extensions
 
     if options:
       params = {
@@ -208,6 +212,21 @@ class ChromeDriver(object):
 
   def MouseDoubleClick(self, button=0):
     self.ExecuteSessionCommand('mouseDoubleClick', {'button': button})
+
+  def IsAlertOpen(self):
+    return self.ExecuteSessionCommand('getAlert')
+
+  def GetAlertMessage(self):
+    return self.ExecuteSessionCommand('getAlertText')
+
+  def HandleAlert(self, accept, prompt_text=''):
+    if prompt_text:
+      self.ExecuteSessionCommand('setAlertValue', {'text': prompt_text})
+    if accept:
+      cmd = 'acceptAlert'
+    else:
+      cmd = 'dismissAlert'
+    self.ExecuteSessionCommand(cmd)
 
   def Quit(self):
     """Quits the browser and ends the session."""

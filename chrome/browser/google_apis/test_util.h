@@ -19,8 +19,9 @@ class Value;
 
 namespace google_apis {
 
+class AboutResource;
+class AccountMetadata;
 class AppList;
-class AccountMetadataFeed;
 class AuthenticatedOperationInterface;
 class ResourceEntry;
 class ResourceList;
@@ -97,9 +98,24 @@ void CopyResultsFromGetResourceListCallback(
 // Copies the results from GetAccountMetadataCallback.
 void CopyResultsFromGetAccountMetadataCallback(
     GDataErrorCode* error_out,
-    scoped_ptr<AccountMetadataFeed>* account_metadata_out,
+    scoped_ptr<AccountMetadata>* account_metadata_out,
     GDataErrorCode error_in,
-    scoped_ptr<AccountMetadataFeed> account_metadata_in);
+    scoped_ptr<AccountMetadata> account_metadata_in);
+
+// Copies the results from GetAccountMetadataCallback and quit the message
+// loop.
+void CopyResultsFromGetAccountMetadataCallbackAndQuit(
+    GDataErrorCode* error_out,
+    scoped_ptr<AccountMetadata>* account_metadata_out,
+    GDataErrorCode error_in,
+    scoped_ptr<AccountMetadata> account_metadata_in);
+
+// Copies the results from GetAboutResourceCallback.
+void CopyResultsFromGetAboutResourceCallback(
+    GDataErrorCode* error_out,
+    scoped_ptr<AboutResource>* about_resource_out,
+    GDataErrorCode error_in,
+    scoped_ptr<AboutResource> about_resource_in);
 
 // Copies the results from GetAppListCallback.
 void CopyResultsFromGetAppListCallback(
@@ -117,6 +133,13 @@ void CopyResultsFromDownloadActionCallback(
 
 // Copies the results from InitiateUploadCallback.
 void CopyResultsFromInitiateUploadCallback(
+    GDataErrorCode* error_out,
+    GURL* url_out,
+    GDataErrorCode error_in,
+    const GURL& url_in);
+
+// Copies the results from InitiateUploadCallback and quit the message loop.
+void CopyResultsFromInitiateUploadCallbackAndQuit(
     GDataErrorCode* error_out,
     GURL* url_out,
     GDataErrorCode error_in,
@@ -153,6 +176,14 @@ scoped_ptr<test_server::HttpResponse> HandleDownloadRequest(
 // if necessary.
 bool VerifyJsonData(const base::FilePath& expected_json_file_path,
                     const base::Value* json_data);
+
+// Parses a value of Content-Range header, which looks like
+// "bytes <start_position>-<end_position>/<length>".
+// Returns true on success.
+bool ParseContentRangeHeader(const std::string& value,
+                             int64* start_position,
+                             int64* end_position,
+                             int64* length);
 
 }  // namespace test_util
 }  // namespace google_apis

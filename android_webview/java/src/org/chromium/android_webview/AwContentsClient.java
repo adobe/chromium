@@ -8,6 +8,7 @@ import android.graphics.Bitmap;
 import android.graphics.Picture;
 import android.graphics.Rect;
 import android.graphics.RectF;
+import android.net.http.SslError;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.Message;
@@ -16,6 +17,7 @@ import android.view.KeyEvent;
 import android.view.View;
 import android.webkit.ConsoleMessage;
 import android.webkit.GeolocationPermissions;
+import android.webkit.SslErrorHandler;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 
@@ -44,6 +46,8 @@ public abstract class AwContentsClient extends ContentViewClient {
         new AwContentsClientCallbackHelper(this);
 
     private AwWebContentsObserver mWebContentsObserver;
+
+    private double mDIPScale;
 
     //--------------------------------------------------------------------------------------------
     //                        Adapter for WebContentsDelegate methods.
@@ -199,6 +203,10 @@ public abstract class AwContentsClient extends ContentViewClient {
         mWebContentsObserver = new AwWebContentsObserver(contentViewCore);
     }
 
+    void setDIPScale(double dipScale) {
+        mDIPScale = dipScale;
+    }
+
     final AwWebContentsDelegate getWebContentsDelegate() {
         return mWebContentsDelegateAdapter;
     }
@@ -230,6 +238,8 @@ public abstract class AwContentsClient extends ContentViewClient {
     public abstract void onReceivedHttpAuthRequest(AwHttpAuthHandler handler,
             String host, String realm);
 
+    public abstract void onReceivedSslError(ValueCallback<Boolean> callback, SslError error);
+
     public abstract void onReceivedLoginRequest(String realm, String account, String args);
 
     public abstract void onFormResubmission(Message dontResend, Message resend);
@@ -241,6 +251,15 @@ public abstract class AwContentsClient extends ContentViewClient {
             GeolocationPermissions.Callback callback);
 
     public abstract void onGeolocationPermissionsHidePrompt();
+
+    // TODO(mnaganov): Make final after updating the glue layer.
+    public /*final*/ void onScaleChanged(float oldScale, float newScale) {
+        onScaleChangedScaled((float)(oldScale * mDIPScale), (float)(newScale * mDIPScale));
+    }
+
+    // TODO(mnaganov): Make abstract after updating the glue layer.
+    public /*abstract*/ void onScaleChangedScaled(float oldScale, float newScale) {
+    }
 
     protected abstract void handleJsAlert(String url, String message, JsResultReceiver receiver);
 
@@ -263,6 +282,12 @@ public abstract class AwContentsClient extends ContentViewClient {
     public void onReceivedIcon(Bitmap bitmap) { }
 
     protected abstract void onRequestFocus();
+
+    // TODO (michaelbai): This method should be abstract, having empty body here
+    // makes the merge to the Android easy.
+    protected View getVideoLoadingProgressView() {
+        return null;
+    }
 
     //--------------------------------------------------------------------------------------------
     //                              Other WebView-specific methods

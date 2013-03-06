@@ -18,6 +18,8 @@ cr.define('apps_dev_tool', function() {
   // The list of all apps.
   var appList = [];
 
+  /** const*/ var AppsDevTool = apps_dev_tool.AppsDevTool;
+
   /**
    * @param {string} a first string.
    * @param {string} b second string.
@@ -57,7 +59,7 @@ cr.define('apps_dev_tool', function() {
     var itemsDiv = $('items');
 
     // Empty the current content.
-    itemsDiv.innerHTML = '';
+    itemsDiv.textContent = '';
 
     ItemsList.prototype.data_ = appList;
     var itemsList = $('extension-settings-list');
@@ -146,6 +148,9 @@ cr.define('apps_dev_tool', function() {
       var description = node.querySelector('.extension-description span');
       description.textContent = item.description;
 
+      // The 'allow in incognito' checkbox.
+      this.setAllowIncognitoCheckbox_(item, node);
+
       // The 'allow file:// access' checkbox.
       if (item.wants_file_access)
         this.setAllowFileAccessCheckbox_(item, node);
@@ -156,6 +161,9 @@ cr.define('apps_dev_tool', function() {
         options.href = item.options_url;
         options.hidden = false;
       }
+
+      // The 'Permissions' link.
+      this.setPermissionsLink_(item, node);
 
       // The 'View in Web Store/View Web Site' link.
       if (item.homepage_url)
@@ -260,6 +268,35 @@ cr.define('apps_dev_tool', function() {
     },
 
     /**
+     * Sets the permissions link handler.
+     * @param {!Object} item A dictionary of item metadata.
+     * @param {HTMLElement} el HTML element containing all items.
+     * @private
+     */
+    setPermissionsLink_: function(item, el) {
+      var permissions = el.querySelector('.permissions-link');
+      permissions.addEventListener('click', function(e) {
+        var permissionItem = $('permissions-item');
+        permissionItem.textContent = '';
+        chrome.management.getPermissionWarningsById(
+            item.id,
+            function(warnings) {
+              warnings.forEach(function(permission) {
+                var li = document.createElement('li');
+                li.textContent = permission;
+                permissionItem.appendChild(li);
+            });
+          AppsDevTool.showOverlay($('permissions-overlay'));
+        });
+
+        $('permissions-icon').style.backgroundImage =
+            'url(' + item.icon + ')';
+        $('permissions-title').textContent = item.name;
+        e.preventDefault();
+      });
+    },
+
+    /**
      * Sets the remove button handler.
      * @param {!Object} item A dictionary of item metadata.
      * @param {HTMLElement} el HTML element containing all items.
@@ -312,6 +349,26 @@ cr.define('apps_dev_tool', function() {
       });
       fileAccess.querySelector('input').checked = item.allow_file_access;
       fileAccess.hidden = false;
+    },
+
+    /**
+     * Sets the handler for the allow_incognito checkbox.
+     * @param {!Object} item A dictionary of item metadata.
+     * @param {HTMLElement} el HTML element containing all items.
+     * @private
+     */
+    setAllowIncognitoCheckbox_: function(item, el) {
+      if (item.allow_incognito) {
+        var incognito = el.querySelector('.incognito-control');
+        incognito.addEventListener('change', function(e) {
+          chrome.developerPrivate.allowIncognito(
+              item.id, !!e.target.checked, function() {
+            ItemsList.loadItemsInfo();
+          });
+        });
+        incognito.querySelector('input').checked = item.incognito_enabled;
+        incognito.hidden = false;
+      }
     },
 
     /**

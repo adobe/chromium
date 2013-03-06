@@ -7,6 +7,7 @@
 #include "base/json/json_reader.h"
 #include "base/message_loop.h"
 #include "base/message_loop_proxy.h"
+#include "chrome/browser/google_apis/drive_api_parser.h"
 #include "chrome/browser/google_apis/drive_uploader.h"
 #include "chrome/browser/google_apis/gdata_errorcode.h"
 #include "chrome/browser/google_apis/mock_drive_service.h"
@@ -155,12 +156,12 @@ class DriveFileSyncClientTest : public testing::Test {
   DISALLOW_COPY_AND_ASSIGN(DriveFileSyncClientTest);
 };
 
-// Invokes |arg0| as a GetAccountMetadataCallback.
-ACTION_P2(InvokeGetAccountMetadataCallback0, error, result) {
-  scoped_ptr<google_apis::AccountMetadataFeed> account_metadata(result.Pass());
+// Invokes |arg0| as a GetAboutResourceCallback.
+ACTION_P2(InvokeGetAboutResourceCallback0, error, result) {
+  scoped_ptr<google_apis::AboutResource> about_resource(result.Pass());
   base::MessageLoopProxy::current()->PostTask(
       FROM_HERE,
-      base::Bind(arg0, error, base::Passed(&account_metadata)));
+      base::Bind(arg0, error, base::Passed(&about_resource)));
 }
 
 // Invokes |arg1| as a GetResourceEntryCallback.
@@ -267,6 +268,8 @@ void DidDeleteFile(bool* done_out,
 }
 
 TEST_F(DriveFileSyncClientTest, GetSyncRoot) {
+  const std::string kRootResourceId = "folder:root";
+  const std::string kSyncRootResourceId = "folder:sync_root_resource_id";
   scoped_ptr<base::Value> found_result_value(
       LoadJSONFile("sync_file_system/sync_root_found.json").Pass());
   scoped_ptr<google_apis::ResourceList> found_result =
@@ -284,6 +287,15 @@ TEST_F(DriveFileSyncClientTest, GetSyncRoot) {
           google_apis::HTTP_SUCCESS,
           base::Passed(&found_result)));
 
+  // Expect to call GetRootResourceId and RemoveResourceFromDirectory from
+  // EnsureSyncRootIsNotInMyDrive.
+  EXPECT_CALL(*mock_drive_service(), GetRootResourceId())
+      .WillOnce(Return(kRootResourceId));
+  EXPECT_CALL(*mock_drive_service(),
+              RemoveResourceFromDirectory(kRootResourceId,
+                                          kSyncRootResourceId,
+                                          _));
+
   bool done = false;
   GDataErrorCode error = google_apis::GDATA_OTHER_ERROR;
   std::string resource_id;
@@ -293,11 +305,12 @@ TEST_F(DriveFileSyncClientTest, GetSyncRoot) {
 
   EXPECT_TRUE(done);
   EXPECT_EQ(google_apis::HTTP_SUCCESS, error);
-  EXPECT_EQ("folder:sync_root_resource_id", resource_id);
+  EXPECT_EQ(kSyncRootResourceId, resource_id);
 }
 
 TEST_F(DriveFileSyncClientTest, CreateSyncRoot) {
   const std::string kRootResourceId = "folder:root";
+  const std::string kSyncRootResourceId = "folder:sync_root_resource_id";
   scoped_ptr<base::Value> not_found_result_value =
       LoadJSONFile("sync_file_system/sync_root_not_found.json").Pass();
   scoped_ptr<google_apis::ResourceList> not_found_result =
@@ -328,15 +341,24 @@ TEST_F(DriveFileSyncClientTest, CreateSyncRoot) {
           google_apis::HTTP_SUCCESS,
           base::Passed(&found_result)));
 
-  // Expect to call GetRootResourceId from GetDriveDirectoryForSyncRoot.
+  // Expect to call GetRootResourceId from GetDriveDirectoryForSyncRoot for the
+  // first, and from EnsureSyncRootIsNotInMyDrive for the second.
   EXPECT_CALL(*mock_drive_service(), GetRootResourceId())
-      .WillOnce(Return(kRootResourceId));
+      .Times(2)
+      .WillRepeatedly(Return(kRootResourceId));
 
   // Expect to call AddNewDirectory from GetDriveDirectoryForSyncRoot.
   EXPECT_CALL(*mock_drive_service(),
               AddNewDirectory(kRootResourceId, kSyncRootDirectoryName, _))
       .WillOnce(InvokeGetResourceEntryCallback2(google_apis::HTTP_CREATED,
                                                 base::Passed(&created_result)));
+
+  // Expect to call RemoveResourceFromDirectory from
+  // EnsureSyncRootIsNotInMyDrive.
+  EXPECT_CALL(*mock_drive_service(),
+              RemoveResourceFromDirectory(kRootResourceId,
+                                          kSyncRootResourceId,
+                                          _));
 
   bool done = false;
   GDataErrorCode error = google_apis::GDATA_OTHER_ERROR;
@@ -347,11 +369,12 @@ TEST_F(DriveFileSyncClientTest, CreateSyncRoot) {
 
   EXPECT_TRUE(done);
   EXPECT_EQ(google_apis::HTTP_CREATED, error);
-  EXPECT_EQ("folder:sync_root_resource_id", resource_id);
+  EXPECT_EQ(kSyncRootResourceId, resource_id);
 }
 
 TEST_F(DriveFileSyncClientTest, CreateSyncRoot_Conflict) {
   const std::string kRootResourceId = "folder:root";
+  const std::string kSyncRootResourceId = "folder:sync_root_resource_id";
   scoped_ptr<base::Value> not_found_result_value =
       LoadJSONFile("sync_file_system/sync_root_not_found.json").Pass();
   scoped_ptr<google_apis::ResourceList> not_found_result =
@@ -382,9 +405,11 @@ TEST_F(DriveFileSyncClientTest, CreateSyncRoot_Conflict) {
           google_apis::HTTP_SUCCESS,
           base::Passed(&duplicated_result)));
 
-  // Expect to call GetRootResourceId from GetDriveDirectoryForSyncRoot.
+  // Expect to call GetRootResourceId from GetDriveDirectoryForSyncRoot for the
+  // first, and from EnsureSyncRootIsNotInMyDrive for the second.
   EXPECT_CALL(*mock_drive_service(), GetRootResourceId())
-      .WillOnce(Return(kRootResourceId));
+      .Times(2)
+      .WillRepeatedly(Return(kRootResourceId));
 
   // Expect to call AddNewDirectory from GetDriveDirectoryForSyncRoot.
   EXPECT_CALL(*mock_drive_service(),
@@ -397,6 +422,13 @@ TEST_F(DriveFileSyncClientTest, CreateSyncRoot_Conflict) {
   EXPECT_CALL(*mock_drive_service(),
               DeleteResource("folder:sync_root_resource_id_duplicated", _, _))
       .WillOnce(InvokeEntryActionCallback2(google_apis::HTTP_SUCCESS));
+
+  // Expect to call RemoveResourceFromDirectory from
+  // EnsureSyncRootIsNotInMyDrive.
+  EXPECT_CALL(*mock_drive_service(),
+              RemoveResourceFromDirectory(kRootResourceId,
+                                          kSyncRootResourceId,
+                                          _));
 
   bool done = false;
   GDataErrorCode error = google_apis::GDATA_OTHER_ERROR;
@@ -571,14 +603,16 @@ TEST_F(DriveFileSyncClientTest, CreateOriginDirectory_Conflict) {
 TEST_F(DriveFileSyncClientTest, GetLargestChangeStamp) {
   scoped_ptr<base::Value> result(
       LoadJSONFile("sync_file_system/account_metadata.json").Pass());
-  scoped_ptr<google_apis::AccountMetadataFeed> account_metadata(
-      google_apis::AccountMetadataFeed::CreateFrom(*result));
+  scoped_ptr<google_apis::AboutResource> about_resource(
+      google_apis::AboutResource::CreateFromAccountMetadata(
+          *google_apis::AccountMetadata::CreateFrom(*result),
+          "folder:root"));
 
-  // Expect to call GetAccountMetadata from GetLargestChangeStamp.
-  EXPECT_CALL(*mock_drive_service(), GetAccountMetadata(_))
-      .WillOnce(InvokeGetAccountMetadataCallback0(
+  // Expect to call GetAboutResource from GetLargestChangeStamp.
+  EXPECT_CALL(*mock_drive_service(), GetAboutResource(_))
+      .WillOnce(InvokeGetAboutResourceCallback0(
           google_apis::HTTP_SUCCESS,
-          base::Passed(&account_metadata)))
+          base::Passed(&about_resource)))
       .RetiresOnSaturation();
 
   bool done = false;

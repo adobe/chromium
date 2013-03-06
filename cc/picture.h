@@ -12,8 +12,8 @@
 #include "cc/cc_export.h"
 #include "skia/ext/lazy_pixel_ref.h"
 #include "skia/ext/refptr.h"
-#include "third_party/skia/include/core/SkPicture.h"
 #include "third_party/skia/include/core/SkPixelRef.h"
+#include "third_party/skia/include/core/SkTileGridPicture.h"
 #include "ui/gfx/rect.h"
 
 namespace cc {
@@ -29,12 +29,17 @@ class CC_EXPORT Picture
   const gfx::Rect& LayerRect() const { return layer_rect_; }
   const gfx::Rect& OpaqueRect() const { return opaque_rect_; }
 
-  // Make a thread-safe clone for rasterizing with.
-  scoped_refptr<Picture> Clone() const;
+  // Get thread-safe clone for rasterizing with on a specific thread.
+  scoped_refptr<Picture> GetCloneForDrawingOnThread(
+      unsigned thread_index) const;
+
+  // Make thread-safe clones for rasterizing with.
+  void CloneForDrawing(int num_threads);
 
   // Record a paint operation. To be able to safely use this SkPicture for
   // playback on a different thread this can only be called once.
-  void Record(ContentLayerClient*, RenderingStats*);
+  void Record(ContentLayerClient*, RenderingStats*,
+      const SkTileGridPicture::TileGridInfo& tileGridInfo);
 
   // Has Record() been called yet?
   bool HasRecording() const { return picture_.get() != NULL; }
@@ -63,6 +68,9 @@ class CC_EXPORT Picture
   gfx::Rect layer_rect_;
   gfx::Rect opaque_rect_;
   skia::RefPtr<SkPicture> picture_;
+
+  typedef std::vector<scoped_refptr<Picture> > PictureVector;
+  PictureVector clones_;
 
   friend class base::RefCountedThreadSafe<Picture>;
   DISALLOW_COPY_AND_ASSIGN(Picture);

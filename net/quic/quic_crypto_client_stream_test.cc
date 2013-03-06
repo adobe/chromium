@@ -4,6 +4,8 @@
 
 #include "net/quic/quic_crypto_client_stream.h"
 
+#include "net/quic/crypto/quic_decrypter.h"
+#include "net/quic/crypto/quic_encrypter.h"
 #include "net/quic/test_tools/quic_test_utils.h"
 
 using base::StringPiece;
@@ -81,7 +83,8 @@ class TestMockHelper : public MockHelper  {
 
 void TestMockHelper::CheckClientHelloPacket(
     const QuicEncryptedPacket& packet) {
-  QuicFramer quic_framer(QuicDecrypter::Create(kNULL),
+  QuicFramer quic_framer(kQuicVersion1,
+                         QuicDecrypter::Create(kNULL),
                          QuicEncrypter::Create(kNULL));
   TestQuicVisitor quic_visitor;
   quic_framer.set_visitor(&quic_visitor);

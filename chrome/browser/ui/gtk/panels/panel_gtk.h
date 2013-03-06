@@ -56,7 +56,6 @@ class PanelGtk : public NativePanel,
   virtual gfx::NativeWindow GetNativePanelWindow() OVERRIDE;
   virtual void UpdatePanelTitleBar() OVERRIDE;
   virtual void UpdatePanelLoadingAnimations(bool should_animate) OVERRIDE;
-  virtual void NotifyPanelOnUserChangedTheme() OVERRIDE;
   virtual void PanelWebContentsFocused(content::WebContents* contents) OVERRIDE;
   virtual void PanelCut() OVERRIDE;
   virtual void PanelCopy() OVERRIDE;
@@ -82,13 +81,12 @@ class PanelGtk : public NativePanel,
   virtual void EnableResizeByMouse(bool enable) OVERRIDE;
   virtual void UpdatePanelMinimizeRestoreButtonVisibility() OVERRIDE;
   virtual void SetWindowCornerStyle(panel::CornerStyle corner_style) OVERRIDE;
+  virtual void MinimizePanelBySystem() OVERRIDE;
 
   virtual NativePanelTesting* CreateNativePanelTesting() OVERRIDE;
 
   // Overridden from ActiveWindowWatcherXObserver.
   virtual void ActiveWindowChanged(GdkWindow* active_window) OVERRIDE;
-
-  bool UsingDefaultTheme() const;
 
   Panel* panel() const { return panel_.get(); }
   PaintState paint_state() const { return paint_state_; }
@@ -111,8 +109,6 @@ class PanelGtk : public NativePanel,
 
   // Returns the image to paint the frame.
   gfx::Image GetFrameBackground() const;
-  gfx::Image GetDefaultFrameBackground() const;
-  gfx::Image GetThemedFrameBackground() const;
 
   // Animation when panel is first shown.
   void RevealPanel();

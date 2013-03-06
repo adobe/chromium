@@ -38,7 +38,7 @@ class FindBarGtk;
 class FullscreenExitBubbleGtk;
 class GlobalMenuBar;
 class InfoBarContainerGtk;
-class InstantPreviewControllerGtk;
+class InstantOverlayControllerGtk;
 class LocationBar;
 class PrefRegistrySyncable;
 class StatusBubbleGtk;
@@ -106,6 +106,7 @@ class BrowserWindowGtk
   virtual void UpdateFullscreenExitBubbleContent(
       const GURL& url,
       FullscreenExitBubbleType bubble_type) OVERRIDE;
+  virtual bool ShouldHideUIForFullscreen() const OVERRIDE;
   virtual bool IsFullscreen() const OVERRIDE;
   virtual bool IsFullscreenBubbleVisible() const OVERRIDE;
   virtual LocationBar* GetLocationBar() const OVERRIDE;
@@ -508,8 +509,8 @@ class BrowserWindowGtk
   // selected tab contents.
   scoped_ptr<TabContentsContainerGtk> devtools_container_;
 
-  // A sub-controller that manages the Instant preview visual state.
-  scoped_ptr<InstantPreviewControllerGtk> instant_preview_controller_;
+  // A sub-controller that manages the Instant overlay visual state.
+  scoped_ptr<InstantOverlayControllerGtk> instant_overlay_controller_;
 
   // The Extension Keybinding Registry responsible for registering listeners for
   // accelerators that are sent to the window, that are destined to be turned

@@ -94,6 +94,13 @@ class SYNC_EXPORT_PRIVATE SyncSchedulerImpl :
     DROP,
   };
 
+  enum JobPriority {
+    // Non-canary jobs respect exponential backoff.
+    NORMAL_PRIORITY,
+    // Canary jobs bypass exponential backoff, so use with extreme caution.
+    CANARY_PRIORITY
+  };
+
   friend class SyncSchedulerTest;
   friend class SyncSchedulerWhiteboxTest;
   friend class SyncerTest;
@@ -168,10 +175,12 @@ class SYNC_EXPORT_PRIVATE SyncSchedulerImpl :
                        base::TimeDelta delay);
 
   // Helper to assemble a job and post a delayed task to sync.
-  void ScheduleSyncSessionJob(scoped_ptr<SyncSessionJob> job);
+  void ScheduleSyncSessionJob(const tracked_objects::Location& loc,
+                              scoped_ptr<SyncSessionJob> job);
 
   // Invoke the Syncer to perform a sync.
-  bool DoSyncSessionJob(scoped_ptr<SyncSessionJob> job);
+  bool DoSyncSessionJob(scoped_ptr<SyncSessionJob> job,
+                        JobPriority priority);
 
   // Called after the Syncer has performed the sync represented by |job|, to
   // reset our state.  |exited_prematurely| is true if the Syncer did not
@@ -195,7 +204,8 @@ class SYNC_EXPORT_PRIVATE SyncSchedulerImpl :
   void HandleContinuationError(scoped_ptr<SyncSessionJob> old_job);
 
   // Decide whether we should CONTINUE, SAVE or DROP the job.
-  JobProcessDecision DecideOnJob(const SyncSessionJob& job);
+  JobProcessDecision DecideOnJob(const SyncSessionJob& job,
+                                 JobPriority priority);
 
   // If DecideOnJob decides that |job| should be SAVEd, this function will
   // carry out the task of actually "saving" (or coalescing) the job.
@@ -203,7 +213,8 @@ class SYNC_EXPORT_PRIVATE SyncSchedulerImpl :
 
   // Decide on whether to CONTINUE, SAVE or DROP the job when we are in
   // backoff mode.
-  JobProcessDecision DecideWhileInWaitInterval(const SyncSessionJob& job);
+  JobProcessDecision DecideWhileInWaitInterval(const SyncSessionJob& job,
+                                               JobPriority priority);
 
   // 'Impl' here refers to real implementation of public functions, running on
   // |thread_|.
@@ -219,6 +230,9 @@ class SYNC_EXPORT_PRIVATE SyncSchedulerImpl :
 
   // Helper to signal all listeners registered with |session_context_|.
   void Notify(SyncEngineEvent::EventCause cause);
+
+  // Helper to signal listeners about changed retry time
+  void NotifyRetryTime(base::Time retry_time);
 
   // Callback to change backoff state. |to_be_canary| in both cases is the job
   // that should be granted canary privileges. Note: it is possible that the
@@ -245,10 +259,6 @@ class SYNC_EXPORT_PRIVATE SyncSchedulerImpl :
 
   // Creates a session for a poll and performs the sync.
   void PollTimerCallback();
-
-  // Used to update |connection_code_|, see below.
-  void UpdateServerConnectionManagerStatus(
-      HttpResponse::ServerConnectionCode code);
 
   // Called once the first time thread_ is started to broadcast an initial
   // session snapshot containing data like initial_sync_ended.  Important when
@@ -297,9 +307,6 @@ class SYNC_EXPORT_PRIVATE SyncSchedulerImpl :
 
   // The mode of operation.
   Mode mode_;
-
-  // The latest connection code we got while trying to connect.
-  HttpResponse::ServerConnectionCode connection_code_;
 
   // Tracks (does not own) in-flight nudges (scheduled or unscheduled),
   // so we can coalesce. NULL if there is no pending nudge.

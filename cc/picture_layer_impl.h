@@ -84,6 +84,7 @@ protected:
       std::vector<PictureLayerTiling*> used_tilings);
   PictureLayerImpl* PendingTwin() const;
   PictureLayerImpl* ActiveTwin() const;
+  float MinimumContentsScale() const;
 
   virtual void getDebugBorderProperties(
       SkColor* color, float* width) const OVERRIDE;
@@ -94,7 +95,6 @@ protected:
 
   gfx::Transform last_screen_space_transform_;
   gfx::Size last_bounds_;
-  gfx::Size last_content_bounds_;
   float last_content_scale_;
   float ideal_contents_scale_;
   bool is_mask_;

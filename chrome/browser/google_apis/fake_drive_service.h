@@ -58,6 +58,12 @@ class FakeDriveService : public DriveServiceInterface {
     return account_metadata_load_count_;
   }
 
+  // Returns the number of times the about resource is successfully loaded
+  // by GetAboutResource().
+  int about_resource_load_count() const {
+    return about_resource_load_count_;
+  }
+
   // Returns the (fake) URL for the link.
   static GURL GetFakeLinkUrl(const std::string& resource_id);
 
@@ -88,6 +94,8 @@ class FakeDriveService : public DriveServiceInterface {
       const GetResourceEntryCallback& callback) OVERRIDE;
   virtual void GetAccountMetadata(
       const GetAccountMetadataCallback& callback) OVERRIDE;
+  virtual void GetAboutResource(
+      const GetAboutResourceCallback& callback) OVERRIDE;
   virtual void GetAppList(const GetAppListCallback& callback) OVERRIDE;
   virtual void DeleteResource(const std::string& resource_id,
                               const std::string& etag,
@@ -133,8 +141,16 @@ class FakeDriveService : public DriveServiceInterface {
       const std::string& resource_id,
       const std::string& etag,
       const InitiateUploadCallback& callback) OVERRIDE;
-  virtual void ResumeUpload(const ResumeUploadParams& params,
-                            const UploadRangeCallback& callback) OVERRIDE;
+  virtual void ResumeUpload(
+      UploadMode upload_mode,
+      const base::FilePath& drive_file_path,
+      const GURL& upload_url,
+      int64 start_position,
+      int64 end_position,
+      int64 content_length,
+      const std::string& content_type,
+      const scoped_refptr<net::IOBuffer>& buf,
+      const UploadRangeCallback& callback) OVERRIDE;
   virtual void GetUploadStatus(
       UploadMode upload_mode,
       const base::FilePath& drive_file_path,
@@ -174,6 +190,7 @@ class FakeDriveService : public DriveServiceInterface {
   int resource_id_count_;
   int resource_list_load_count_;
   int account_metadata_load_count_;
+  int about_resource_load_count_;
   bool offline_;
 
   DISALLOW_COPY_AND_ASSIGN(FakeDriveService);

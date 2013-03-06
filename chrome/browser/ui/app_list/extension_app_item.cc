@@ -20,6 +20,7 @@
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/extensions/extension_enable_flow.h"
+#include "chrome/common/extensions/api/icons/icons_handler.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_icon_set.h"
@@ -206,7 +207,9 @@ bool ExtensionAppItem::HasOverlay() const {
   return false;
 #else
   const Extension* extension = GetExtension();
-  return extension && !extension->is_platform_app();
+  return extension &&
+         !extension->is_platform_app() &&
+         extension->id() != extension_misc::kChromeAppId;
 #endif
 }
 
@@ -274,7 +277,7 @@ void ExtensionAppItem::Move(const ExtensionAppItem* prev,
 
 void ExtensionAppItem::UpdateIcon() {
   if (!GetExtension()) {
-    SetIcon(installing_icon_);
+    SetIcon(installing_icon_, false);
     return;
   }
   gfx::ImageSkia icon = icon_->image_skia();
@@ -293,7 +296,7 @@ void ExtensionAppItem::UpdateIcon() {
     icon = gfx::ImageSkia(new TabOverlayImageSource(icon, size), size);
   }
 
-  SetIcon(icon);
+  SetIcon(icon, !HasOverlay());
 }
 
 const Extension* ExtensionAppItem::GetExtension() const {
@@ -311,9 +314,9 @@ void ExtensionAppItem::LoadImage(const Extension* extension) {
   icon_.reset(new extensions::IconImage(
       profile_,
       extension,
-      extension->icons(),
+      extensions::IconsInfo::GetIcons(extension),
       icon_size,
-      Extension::GetDefaultIcon(true),
+      extensions::IconsInfo::GetDefaultAppIcon(),
       this));
   UpdateIcon();
 }
@@ -537,8 +540,6 @@ ui::MenuModel* ExtensionAppItem::GetContextMenuModel() {
           MENU_NEW_INCOGNITO_WINDOW,
           IDS_LAUNCHER_NEW_INCOGNITO_WINDOW);
     }
-#else
-    NOTREACHED();
 #endif
   } else {
     extension_menu_items_.reset(new extensions::ContextMenuMatcher(

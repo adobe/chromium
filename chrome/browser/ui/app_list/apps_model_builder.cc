@@ -10,11 +10,16 @@
 #include "base/prefs/pref_service.h"
 #include "chrome/browser/extensions/extension_prefs.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/extensions/extension_sorting.h"
 #include "chrome/browser/extensions/extension_system.h"
+#include "chrome/browser/extensions/install_tracker.h"
+#include "chrome/browser/extensions/install_tracker_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/app_list/extension_app_item.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension.h"
+#include "chrome/common/extensions/extension_constants.h"
+#include "chrome/common/pref_names.h"
 #include "content/public/browser/notification_service.h"
 #include "ui/gfx/image/image_skia.h"
 
@@ -34,6 +39,16 @@ bool AppPrecedes(const ExtensionAppItem* app1, const ExtensionAppItem* app2) {
   return false;
 }
 
+bool ShouldDisplayInAppLauncher(Profile* profile,
+                                scoped_refptr<const Extension> app) {
+  // If it's the web store, check the policy.
+  bool blocked_by_policy =
+      (app->id() == extension_misc::kWebStoreAppId ||
+       app->id() == extension_misc::kEnterpriseWebStoreAppId) &&
+      profile->GetPrefs()->GetBoolean(prefs::kHideWebStoreIcon);
+  return app->ShouldDisplayInAppLauncher() && !blocked_by_policy;
+}
+
 }  // namespace
 
 AppsModelBuilder::AppsModelBuilder(Profile* profile,
@@ -42,7 +57,25 @@ AppsModelBuilder::AppsModelBuilder(Profile* profile,
     : profile_(profile),
       controller_(controller),
       model_(model),
-      ignore_changes_(false) {
+      highlighted_app_pending_(false),
+      ignore_changes_(false),
+      tracker_(extensions::InstallTrackerFactory::GetForProfile(profile_)) {
+  tracker_->AddObserver(this);
+  model_->AddObserver(this);
+}
+
+AppsModelBuilder::~AppsModelBuilder() {
+  OnShutdown();
+  model_->RemoveObserver(this);
+}
+
+void AppsModelBuilder::Build() {
+  DCHECK(model_ && model_->item_count() == 0);
+
+  PopulateApps();
+  UpdateHighlight();
+
+  // Start observing after model is built.
   extensions::ExtensionPrefs* extension_prefs =
       extensions::ExtensionSystem::Get(profile_)->extension_service()->
           extension_prefs();
@@ -60,32 +93,21 @@ AppsModelBuilder::AppsModelBuilder(Profile* profile,
   pref_change_registrar_.Add(extensions::ExtensionPrefs::kExtensionsPref,
                              base::Bind(&AppsModelBuilder::ResortApps,
                                         base::Unretained(this)));
-
-  model_->AddObserver(this);
-}
-
-AppsModelBuilder::~AppsModelBuilder() {
-  model_->RemoveObserver(this);
-}
-
-void AppsModelBuilder::Build() {
-  DCHECK(model_ && model_->item_count() == 0);
-
-  PopulateApps();
-  HighlightApp();
 }
 
 void AppsModelBuilder::OnBeginExtensionInstall(
     const std::string& extension_id,
     const std::string& extension_name,
-    const gfx::ImageSkia& installing_icon) {
+    const gfx::ImageSkia& installing_icon,
+    bool is_app) {
+  if (!is_app)
+    return;
   InsertApp(new ExtensionAppItem(profile_,
                                  extension_id,
                                  controller_,
                                  extension_name,
                                  installing_icon));
-  highlight_app_id_ = extension_id;
-  HighlightApp();
+  SetHighlightedApp(extension_id);
 }
 
 void AppsModelBuilder::OnDownloadProgress(const std::string& extension_id,
@@ -103,10 +125,17 @@ void AppsModelBuilder::OnInstallFailure(const std::string& extension_id) {
   model_->DeleteAt(i);
 }
 
+void AppsModelBuilder::OnShutdown() {
+  if (tracker_) {
+    tracker_->RemoveObserver(this);
+    tracker_ = NULL;
+  }
+}
+
 void AppsModelBuilder::AddApps(const ExtensionSet* extensions, Apps* apps) {
   for (ExtensionSet::const_iterator app = extensions->begin();
        app != extensions->end(); ++app) {
-    if ((*app)->ShouldDisplayInAppLauncher())
+    if (ShouldDisplayInAppLauncher(profile_, *app))
       apps->push_back(new ExtensionAppItem(profile_,
                                            (*app)->id(),
                                            controller_,
@@ -129,6 +158,7 @@ void AppsModelBuilder::PopulateApps() {
   if (apps.empty())
     return;
 
+  service->extension_prefs()->extension_sorting()->FixNTPOrdinalCollisions();
   std::sort(apps.begin(), apps.end(), &AppPrecedes);
 
   for (size_t i = 0; i < apps.size(); ++i)
@@ -188,9 +218,34 @@ int AppsModelBuilder::FindApp(const std::string& app_id) {
   return -1;
 }
 
-void AppsModelBuilder::HighlightApp() {
+void AppsModelBuilder::SetHighlightedApp(const std::string& extension_id) {
+  if (extension_id == highlight_app_id_)
+    return;
+  ExtensionAppItem* old_app = GetApp(highlight_app_id_);
+  if (old_app)
+    old_app->SetHighlighted(false);
+  highlight_app_id_ = extension_id;
+  ExtensionAppItem* new_app = GetApp(highlight_app_id_);
+  highlighted_app_pending_ = !new_app;
+  if (new_app)
+    new_app->SetHighlighted(true);
+}
+
+ExtensionAppItem* AppsModelBuilder::GetApp(
+    const std::string& extension_id) {
   DCHECK(model_);
-  if (highlight_app_id_.empty())
+  if (extension_id.empty())
+    return NULL;
+
+  int index = FindApp(highlight_app_id_);
+  if (index == -1)
+    return NULL;
+  return GetAppAt(index);
+}
+
+void AppsModelBuilder::UpdateHighlight() {
+  DCHECK(model_);
+  if (!highlighted_app_pending_ || highlight_app_id_.empty())
     return;
 
   int index = FindApp(highlight_app_id_);
@@ -198,7 +253,7 @@ void AppsModelBuilder::HighlightApp() {
     return;
 
   model_->GetItemAt(index)->SetHighlighted(true);
-  highlight_app_id_.clear();
+  highlighted_app_pending_ = false;
 }
 
 ExtensionAppItem* AppsModelBuilder::GetAppAt(size_t index) {
@@ -231,7 +286,7 @@ void AppsModelBuilder::Observe(int type,
                                      controller_,
                                      "",
                                      gfx::ImageSkia()));
-      HighlightApp();
+      UpdateHighlight();
       break;
     }
     case chrome::NOTIFICATION_EXTENSION_UNLOADED: {
@@ -253,8 +308,7 @@ void AppsModelBuilder::Observe(int type,
       break;
     }
     case chrome::NOTIFICATION_APP_INSTALLED_TO_APPLIST: {
-      highlight_app_id_ = *content::Details<const std::string>(details).ptr();
-      HighlightApp();
+      SetHighlightedApp(*content::Details<const std::string>(details).ptr());
       break;
     }
     default:

@@ -72,13 +72,6 @@ function WebView(node) {
     };
   }, this);
 
-  node['executeScript'] = function(var_args) {
-    var args = [self.objectNode_.getProcessId(),
-                self.objectNode_.getRouteId()].concat(
-                    Array.prototype.slice.call(arguments));
-    chrome.webview.executeScript.apply(null, args);
-  }
-
   // Map attribute modifications on the <webview> tag to property changes in
   // the underlying <object> node.
   var handleMutation = this.handleMutation_.bind(this);
@@ -129,6 +122,8 @@ function WebView(node) {
   for (var eventName in WEB_VIEW_EVENTS) {
     this.setupEvent_(eventName, WEB_VIEW_EVENTS[eventName]);
   }
+  this.maybeSetupPermissionEvent_();
+  this.maybeSetupExecuteScript_();
 }
 
 /**
@@ -183,4 +178,18 @@ WebView.prototype.setupEvent_ = function(eventname, attribs) {
     });
     node.dispatchEvent(evt);
   });
-}
+};
+
+/**
+ * Implemented when experimental permission is available.
+ * @private
+ */
+WebView.prototype.maybeSetupPermissionEvent_ = function() {};
+
+/**
+ * Implemented when experimental permission is available.
+ * @private
+ */
+WebView.prototype.maybeSetupExecuteScript_ = function() {};
+
+exports.WebView = WebView;

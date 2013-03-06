@@ -40,8 +40,7 @@ class NativeMessageProcessHost
 #endif  // !defined(OS_POSIX)
  {
  public:
-  // Interface for classes that which to recieve messages from the native
-  // process.
+  // Interface for the object that receives messages from the native process.
   class Client {
    public:
     virtual ~Client() {}
@@ -55,12 +54,14 @@ class NativeMessageProcessHost
 
   static scoped_ptr<NativeMessageProcessHost> Create(
       base::WeakPtr<Client> weak_client_ui,
+      const std::string& source_extension_id,
       const std::string& native_host_name,
       int destination_port);
 
   // Create using specified |launcher|. Used in tests.
   static scoped_ptr<NativeMessageProcessHost> CreateWithLauncher(
       base::WeakPtr<Client> weak_client_ui,
+      const std::string& source_extension_id,
       const std::string& native_host_name,
       int destination_port,
       scoped_ptr<NativeProcessLauncher> launcher);
@@ -80,6 +81,7 @@ class NativeMessageProcessHost
 
  private:
   NativeMessageProcessHost(base::WeakPtr<Client> weak_client_ui,
+                           const std::string& source_extension_id,
                            const std::string& native_host_name,
                            int destination_port,
                            scoped_ptr<NativeProcessLauncher> launcher);
@@ -88,10 +90,9 @@ class NativeMessageProcessHost
   void LaunchHostProcess();
 
   // Callback for NativeProcessLauncher::Launch().
-  void OnHostProcessLaunched(
-      base::ProcessHandle native_process_handle,
-      base::PlatformFile read_file,
-      base::PlatformFile write_file);
+  void OnHostProcessLaunched(bool result,
+                             base::PlatformFile read_file,
+                             base::PlatformFile write_file);
 
   // Helper methods to read incoming messages.
   void WaitRead();
@@ -116,6 +117,9 @@ class NativeMessageProcessHost
   // UI thread.
   base::WeakPtr<Client> weak_client_ui_;
 
+  // ID of the calling extension.
+  std::string source_extension_id_;
+
   // Name of the native messaging host.
   std::string native_host_name_;
 
@@ -129,9 +133,6 @@ class NativeMessageProcessHost
   // Set to true after the native messaging connection has been stopped, e.g.
   // due to an error.
   bool closed_;
-
-  // Handle of the native host process.
-  base::ProcessHandle native_process_handle_;
 
   // Input stream handle and reader.
   base::PlatformFile read_file_;

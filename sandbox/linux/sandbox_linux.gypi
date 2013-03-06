@@ -57,7 +57,6 @@
         }],
         # Similarly, compile seccomp BPF when we support it
         [ 'compile_seccomp_bpf==1', {
-          'type': 'static_library',
           'dependencies': [
             'seccomp_bpf',
           ],
@@ -101,6 +100,8 @@
         'seccomp-bpf/errorcode.cc',
         'seccomp-bpf/errorcode.h',
         'seccomp-bpf/instruction.h',
+        'seccomp-bpf/linux_seccomp.h',
+        'seccomp-bpf/port.h',
         'seccomp-bpf/sandbox_bpf.cc',
         'seccomp-bpf/sandbox_bpf.h',
         'seccomp-bpf/syscall.cc',

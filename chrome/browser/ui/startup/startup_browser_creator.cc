@@ -19,15 +19,14 @@
 #include "base/metrics/histogram.h"
 #include "base/path_service.h"
 #include "base/prefs/pref_service.h"
-#include "base/string_split.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_split.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/app_mode/app_mode_utils.h"
 #include "chrome/browser/auto_launch_trial.h"
 #include "chrome/browser/automation/automation_provider.h"
 #include "chrome/browser/automation/automation_provider_list.h"
-#include "chrome/browser/automation/chrome_frame_automation_provider.h"
 #include "chrome/browser/automation/testing_automation_provider.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry.h"
@@ -68,6 +67,7 @@
 #include "ui/base/resource/resource_bundle.h"
 
 #if defined(OS_CHROMEOS)
+#include "chrome/browser/chromeos/app_mode/startup_app_launcher.h"
 #include "chrome/browser/chromeos/kiosk_mode/kiosk_mode_settings.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/profile_startup.h"
@@ -78,6 +78,7 @@
 #endif
 
 #if defined(OS_WIN)
+#include "chrome/browser/automation/chrome_frame_automation_provider_win.h"
 #include "chrome/browser/ui/startup/startup_browser_creator_win.h"
 #endif
 
@@ -394,7 +395,7 @@ std::vector<GURL> StartupBrowserCreator::GetURLsFromCommandLine(
     }
     // Exclude dangerous schemes.
     if (url.is_valid()) {
-      ChildProcessSecurityPolicy *policy =
+      ChildProcessSecurityPolicy* policy =
           ChildProcessSecurityPolicy::GetInstance();
       if (policy->IsWebSafeScheme(url.scheme()) ||
           url.SchemeIs(chrome::kFileScheme) ||
@@ -497,7 +498,7 @@ bool StartupBrowserCreator::ProcessCmdLineImpl(
       silent_launch = true;
 
     if (command_line.HasSwitch(switches::kChromeFrame)) {
-#if !defined(USE_AURA)
+#if defined(OS_WIN)
       if (!CreateAutomationProvider<ChromeFrameAutomationProvider>(
           automation_channel_id, last_used_profile, expected_tabs))
         return false;
@@ -534,21 +535,11 @@ bool StartupBrowserCreator::ProcessCmdLineImpl(
   }
 
   if (command_line.HasSwitch(switches::kInstallFromWebstore)) {
-    int64 start_time = ShowAppInstallUI();
     extensions::StartupHelper helper;
-    bool app_installed =
-        helper.InstallFromWebstore(command_line, last_used_profile);
-    // Nothing more needs to be done if we also don't want to run an app, so
-    // return false to stop launching and quit.
-    if (!chrome::IsRunningInAppMode())
-      return false;
-
-    HideAppInstallUI(start_time);
-    if (!app_installed) {
-      // TODO(zelidrag): Signal somehow to the session manager that app launch
-      // attempt had failed.
-      return false;
-    }
+    helper.InstallFromWebstore(command_line, last_used_profile);
+    // Nothing more needs to be done, so return false to stop launching and
+    // quit.
+    return false;
   }
 
   if (command_line.HasSwitch(switches::kLimitedInstallFromWebstore)) {
@@ -561,6 +552,17 @@ bool StartupBrowserCreator::ProcessCmdLineImpl(
   // The browser will be launched after the user logs in.
   if (command_line.HasSwitch(switches::kLoginManager) ||
       command_line.HasSwitch(switches::kLoginPassword)) {
+    silent_launch = true;
+  }
+
+  if (chrome::IsRunningInAppMode() &&
+      command_line.HasSwitch(switches::kAppId)) {
+    // StartupAppLauncher deletes itself when done.
+    (new chromeos::StartupAppLauncher(
+        last_used_profile,
+        command_line.GetSwitchValueASCII(switches::kAppId)))->Start();
+
+    // Skip browser launch since app mode launches its app window.
     silent_launch = true;
   }
 #endif
@@ -588,7 +590,7 @@ bool StartupBrowserCreator::ProcessCmdLineImpl(
     // chrome to shut down.
     // TODO(jackhou): Do this properly once keep-alive is handled by the
     // background page of apps. Tracked at http://crbug.com/175381
-    if (chrome::GetBrowserCount(last_used_profile) != 0)
+    if (chrome::GetTotalBrowserCountForProfile(last_used_profile) != 0)
       return true;
   }
 
@@ -646,16 +648,6 @@ bool StartupBrowserCreator::ProcessCmdLineImpl(
   }
   return true;
 }
-
-#if !defined(OS_CHROMEOS)
-int64 StartupBrowserCreator::ShowAppInstallUI() {
-  return base::TimeTicks::Now().ToInternalValue();
-}
-
-void StartupBrowserCreator::HideAppInstallUI(
-    int64 start_time) {
-}
-#endif
 
 template <class AutomationProviderClass>
 bool StartupBrowserCreator::CreateAutomationProvider(

@@ -245,6 +245,11 @@ const char kDisableXSSAuditor[]             = "disable-xss-auditor";
 // |DOMAutomationController| to the |AutomationRenderViewHelper|.
 const char kDomAutomationController[]       = "dom-automation";
 
+// Loosen security. Needed for tests using some of the functionality of
+// |DOMAutomationController|.
+const char kReduceSecurityForDomAutomationTests[] =
+    "reduce-security-for-dom-automation-tests";
+
 // Enable hardware accelerated page painting.
 const char kEnableAcceleratedPainting[]     = "enable-accelerated-painting";
 
@@ -262,11 +267,8 @@ const char kEnableBrowserPluginCompositing[] =
 const char kEnableBrowserPluginForAllViewTypes[] =
     "enable-browser-plugin-for-all-view-types";
 
-// Enables using experimental 'guest' view classes for browser plugin.
-// Browser plugin would use WebContentsViewGuest and RenderWidgetHostViewGuest,
-// which wraps the actual *View implementations.
-const char kEnableBrowserPluginGuestViews[] =
-    "enable-browser-plugin-guest-views";
+const char kEnableBrowserPluginPointerLock[] =
+    "enable-browser-plugin-pointer-lock";
 
 // Enable/Disable the creation of compositing layers for fixed position
 // elements. Three options are needed to support four possible scenarios:
@@ -288,6 +290,9 @@ const char kEnableHighDpiCompositingForFixedPosition[] =
 // Enables CSS3 custom filters
 const char kEnableCssShaders[]              = "enable-css-shaders";
 
+// Enables delegated renderer.
+const char kEnableDelegatedRenderer[]       = "enable-delegated-renderer";
+
 // Enables device motion events.
 const char kEnableDeviceMotion[]            = "enable-device-motion";
 
@@ -298,8 +303,8 @@ const char kEnableDownloadResumption[]      = "enable-download-resumption";
 const char kEnableExperimentalWebKitFeatures[] =
     "enable-experimental-webkit-features";
 
-// Enables the threaded HTML parser in WebKit
-const char kEnableThreadedHTMLParser[]      = "enable-threaded-html-parser";
+// Disables the threaded HTML parser in WebKit
+const char kDisableThreadedHTMLParser[]     = "disable-threaded-html-parser";
 
 // Enables the fastback page cache.
 const char kEnableFastback[]                = "enable-fastback";
@@ -334,10 +339,6 @@ const char kEnableLogging[]                 = "enable-logging";
 
 // Disable Media Source API on <audio>/<video> elements.
 const char kDisableMediaSource[]             = "disable-media-source";
-
-// Disables using WebMediaPlayerMS for src of <audio>/<video> derived from
-// media stream.
-const char kDisableWebMediaPlayerMS[]       = "disable-web-media-player-ms";
 
 // Use fake device for MediaStream to replace actual camera and microphone.
 const char kUseFakeDeviceForMediaStream[] = "use-fake-device-for-media-stream";
@@ -549,8 +550,8 @@ const char kPluginStartupDialog[]           = "plugin-startup-dialog";
 // Argument to the process type that indicates a PPAPI broker process type.
 const char kPpapiBrokerProcess[]            = "ppapi-broker";
 
-// Runs PPAPI (Pepper) plugins out-of-process.
-const char kPpapiOutOfProcess[]             = "ppapi-out-of-process";
+// Runs PPAPI (Pepper) plugins in-process.
+const char kPpapiInProcess[]                = "ppapi-in-process";
 
 // Like kPluginLauncher for PPAPI plugins.
 const char kPpapiPluginLauncher[]           = "ppapi-plugin-launcher";
@@ -748,8 +749,9 @@ const char kUseMobileUserAgent[] = "use-mobile-user-agent";
 // Disable history logging for media elements.
 const char kDisableMediaHistoryLogging[]    = "disable-media-history";
 
-// Whether to run media elements in the renderer process.
-const char kMediaPlayerInRenderProcess[]    = "media-player-in-render-process";
+// Disable user gesture requirement for media playback.
+const char kDisableGestureRequirementForMediaPlayback[] =
+    "disable-gesture-requirement-for-media-playback";
 
 // The telephony region (ISO country code) to use in phone number detection.
 const char kNetworkCountryIso[] = "network-country-iso";
@@ -799,8 +801,8 @@ const char kDisableFixedPositionCreatesStackingContext[]
 // Defer image decoding in WebKit until painting.
 const char kEnableDeferredImageDecoding[] = "enable-deferred-image-decoding";
 
-// Enables history navigation in response to horizontal overscroll.
-const char kEnableOverscrollHistoryNavigation[] =
-    "enable-overscroll-history-navigation";
+// Disables history navigation in response to horizontal overscroll.
+const char kDisableOverscrollHistoryNavigation[] =
+    "disable-overscroll-history-navigation";
 
 }  // namespace switches

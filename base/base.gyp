@@ -568,8 +568,6 @@
         'template_util_unittest.cc',
         'test/expectations/expectation_unittest.cc',
         'test/expectations/parser_unittest.cc',
-        'test/sequenced_worker_pool_owner.cc',
-        'test/sequenced_worker_pool_owner.h',
         'test/trace_event_analyzer_unittest.cc',
         'threading/non_thread_safe_unittest.cc',
         'threading/platform_thread_unittest.cc',
@@ -834,6 +832,8 @@
         'test/scoped_path_override.h',
         'test/sequenced_task_runner_test_template.cc',
         'test/sequenced_task_runner_test_template.h',
+        'test/sequenced_worker_pool_owner.cc',
+        'test/sequenced_worker_pool_owner.h',
         'test/simple_test_clock.cc',
         'test/simple_test_clock.h',
         'test/simple_test_tick_clock.cc',
@@ -1103,6 +1103,7 @@
           'sources': [
             'android/java/src/org/chromium/base/BuildInfo.java',
             'android/java/src/org/chromium/base/CpuFeatures.java',
+            'android/java/src/org/chromium/base/ImportantFileWriterAndroid.java',
             'android/java/src/org/chromium/base/LocaleUtils.java',
             'android/java/src/org/chromium/base/PathService.java',
             'android/java/src/org/chromium/base/PathUtils.java',
@@ -1122,6 +1123,13 @@
             'java_in_dir': '../base/android/java',
           },
           'includes': [ '../build/java.gypi' ],
+          'conditions': [
+            ['android_build_type==0', {
+              'dependencies': [
+                '../third_party/jsr-305/jsr-305.gyp:jsr_305_javalib',
+              ],
+            }]
+          ],
         },
         {
           'target_name': 'base_java_test_support',
@@ -1131,6 +1139,18 @@
           ],
           'variables': {
             'java_in_dir': '../base/test/android/javatests',
+          },
+          'includes': [ '../build/java.gypi' ],
+        },
+        {
+          'target_name': 'base_javatests',
+          'type': 'none',
+          'dependencies': [
+            'base_java',
+            'base_java_test_support',
+          ],
+          'variables': {
+            'java_in_dir': '../base/android/javatests',
           },
           'includes': [ '../build/java.gypi' ],
         },

@@ -31,11 +31,13 @@
 
 </head>
 
-<body
 <if expr="not pp_ifdef('android')">
-    class="uber-frame"
-</if>
+<body class="uber-frame"
     i18n-values=".style.fontFamily:fontfamily;.style.fontSize:fontsize">
+</if>
+<if expr="pp_ifdef('android')">
+<body i18n-values=".style.fontFamily:fontfamily;.style.fontSize:fontsize">
+</if>
 
 <div class="page">
   <header>
@@ -76,6 +78,13 @@
     <button id="clear-browsing-data" i18n-content="clearallhistory"></button>
     <button id="remove-selected" disabled="disabled"
         i18n-content="removeselected"></button>
+    <button id="allow-selected" i18n-content="allowitems" disabled="disabled"
+        hidden>
+    </button>
+    <button id="block-selected" i18n-content="blockitems" disabled="disabled"
+        hidden>
+    </button>
+    <button id="lock-unlock-button" i18n-content="unlockButton"></button>
   </div>
 
   <div id="results-display"></div>

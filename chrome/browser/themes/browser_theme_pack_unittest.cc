@@ -14,7 +14,6 @@
 #include "chrome/browser/themes/theme_properties.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/api/themes/theme_handler.h"
-#include "chrome/common/extensions/extension_manifest_constants.h"
 #include "chrome/common/extensions/manifest_handler.h"
 #include "content/public/test/test_browser_thread.h"
 #include "grit/theme_resources.h"
@@ -35,9 +34,11 @@ class BrowserThemePackTest : public ::testing::Test {
 
   virtual void SetUp() OVERRIDE {
     testing::Test::SetUp();
-    extensions::ManifestHandler::Register(
-        extension_manifest_keys::kTheme,
-        make_linked_ptr(new extensions::ThemeHandler));
+    (new extensions::ThemeHandler)->Register();
+  }
+
+  virtual void TearDown() OVERRIDE {
+    extensions::ManifestHandler::ClearRegistryForTesting();
   }
 
   // Transformation for link underline colors.
@@ -315,7 +316,13 @@ TEST_F(BrowserThemePackTest, CanParsePaths) {
   std::map<int, base::FilePath> out_file_paths;
   ParseImageNamesJSON(path_json, &out_file_paths);
 
-  EXPECT_EQ(2u, out_file_paths.size());
+  size_t expected_file_paths = 2u;
+#if defined(OS_WIN) && defined(USE_AURA)
+  // On Windows AURA additional theme paths are generated to map to the special
+  // resource ids like IDR_THEME_FRAME_WIN, etc
+  expected_file_paths = 3u;
+#endif
+  EXPECT_EQ(expected_file_paths, out_file_paths.size());
   // "12" and "5" are internal constants to BrowserThemePack and are
   // PRS_THEME_BUTTON_BACKGROUND and PRS_THEME_TOOLBAR, but they are
   // implementation details that shouldn't be exported.

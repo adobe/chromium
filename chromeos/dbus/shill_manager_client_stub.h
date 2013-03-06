@@ -61,7 +61,7 @@ class ShillManagerClientStub : public ShillManagerClient,
                                  const std::string& device_serial,
                                  const BooleanCallback& callback,
                                  const ErrorCallback& error_callback) OVERRIDE;
-  virtual void VerifyAndSignCredentials(
+  virtual void VerifyAndEncryptCredentials(
       const std::string& certificate,
       const std::string& public_key,
       const std::string& nonce,
@@ -70,7 +70,7 @@ class ShillManagerClientStub : public ShillManagerClient,
       const std::string& service_path,
       const StringCallback& callback,
       const ErrorCallback& error_callback) OVERRIDE;
-  virtual void VerifyAndSignData(const std::string& certificate,
+  virtual void VerifyAndEncryptData(const std::string& certificate,
                                  const std::string& public_key,
                                  const std::string& nonce,
                                  const std::string& signed_data,
@@ -84,7 +84,8 @@ class ShillManagerClientStub : public ShillManagerClient,
 
   virtual void AddDevice(const std::string& device_path) OVERRIDE;
   virtual void RemoveDevice(const std::string& device_path) OVERRIDE;
-  virtual void ResetDevices() OVERRIDE;
+  virtual void ClearDevices() OVERRIDE;
+  virtual void ClearServices() OVERRIDE;
   virtual void AddService(const std::string& service_path,
                           bool add_to_watch_list) OVERRIDE;
   virtual void AddServiceAtIndex(const std::string& service_path,
@@ -106,6 +107,8 @@ class ShillManagerClientStub : public ShillManagerClient,
                                           int delay_ms);
   void NotifyObserversPropertyChanged(const std::string& property);
   base::ListValue* GetListProperty(const std::string& property);
+  bool TechnologyEnabled(const std::string& type) const;
+  base::ListValue* GetEnabledServiceList(const std::string& property) const;
 
   // Dictionary of property name -> property value
   base::DictionaryValue stub_properties_;

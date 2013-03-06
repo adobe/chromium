@@ -187,6 +187,12 @@
         <message desc="The product name. Displayed in various Chrome pages, including the New Tab page, and displayed prominently on the app's main page." name="IDR_PRODUCT_NAME">
           Chrome Remote Desktop
         </message>
+	<message desc="Message displayed at the bottom of the client connect dialog if Chrome Remote Desktop is running in the wrong start-up mode." name="IDR_WARNING_NOT_WINDOWED">
+          NOTE: To ensure that all keyboard shortcuts are available, you can configure Chrome Remote Desktop to ‘Open as window’.
+	</message>
+	<message desc="Error message displayed if the user tries to connect to a computer running out-of-date Me2Me host software." name="IDR_HOST_NEEDS_UPDATE_TITLE">
+	  Chrome Remote Desktop on <ph name="HOSTNAME">$1<ex>My Linux desktop</ex></ph> is out-of-date and needs to be updated.
+	</message>
       </if>
 
       <if expr="not pp_ifdef('_google_chrome')">
@@ -241,6 +247,12 @@
         <message desc="The product name. Displayed in various Chrome pages, including the New Tab page, and displayed prominently on the app's main page." name="IDR_PRODUCT_NAME">
           Chromoting
         </message>
+	<message desc="Message displayed at the bottom of the client connect dialog if Chromoting is running in the wrong start-up mode." name="IDR_WARNING_NOT_WINDOWED">
+          NOTE: To ensure that all keyboard shortcuts are available, you can configure Chromoting to ‘Open as window’.
+	</message>
+	<message desc="Error message displayed if the user tries to connect to a computer running out-of-date Me2Me host software." name="IDR_HOST_NEEDS_UPDATE_TITLE">
+	  Chromoting on <ph name="HOSTNAME">$1<ex>My Linux desktop</ex></ph> is out-of-date and needs to be updated.
+	</message>
       </if>
 
       <message desc="Label for the access code entry box. This is where the client user enters the code that permits access to the host." name="IDR_ACCESS_CODE">
@@ -269,6 +281,9 @@
       </message>
       <message desc="Label for the connect button. Clicking this button will start the Chrome Remote Desktop session if the access code is correct." name="IDR_CONNECT_BUTTON">
         Connect
+      </message>
+      <message desc="Label for the connect button for hosts running an out-of-date version of the Me2Me host software. The user clicks this button to acknowledge the message but continue with the connection anyway." name="IDR_CONNECT_ANYWAY">
+        Connect anyway
       </message>
       <message desc="Confirmation prompt shown when a user attempts to delete a Me2Me host from their host list." name="IDR_CONFIRM_HOST_DELETE">
         Are you sure you want to disable remote connections to <ph name="HOSTNAME">$1<ex>My Linux desktop</ex></ph>? If you change your mind, you'll need to visit that computer to re-enable connections.
@@ -315,11 +330,11 @@
       <message desc="Error displayed if an invalid access code is entered." name="IDR_ERROR_INVALID_ACCESS_CODE">
         The access code is invalid. Please try again.
       </message>
-      <message desc="Error displayed when the host is online, but we are unable to connect to it due to network configuration." name="IDR_ERROR_NETWORK_FAILURE">
+      <message desc="Error displayed when the host is online, but we are unable to connect to it due to network configuration." name="IDR_ERROR_P2P_FAILURE">
         Unable to reach the host. This is probably due to the configuration of the network you are using.
       </message>
-      <message desc="Error displayed by the client if the server does not respond to a network request." name="IDR_ERROR_NO_RESPONSE">
-        The server failed to respond to the network request.
+      <message desc="Error displayed when the host is online, but we are unable to connect to it due to network configuration." name="IDR_ERROR_NETWORK_FAILURE">
+        Could not connect to the network. Please check that your device is on-line.
       </message>
       <message desc="Error displayed when the service returns a 503 error. Such errors are usually temporary, and resolve themselves in about 30 seconds." name="IDR_ERROR_SERVICE_UNAVAILABLE">
         The service is temporarily unavailable. Please try again later.
@@ -447,6 +462,12 @@
       <message desc="Modified version of the host name shown for hosts that are not currently accessible." name="IDR_OFFLINE">
         <ph name="HOSTNAME">$1<ex>My Linux desktop</ex></ph> (offline)
       </message>
+      <message desc="Modified version of the host name shown for hosts that are running an out-of-date version of the Me2Me host software." name="IDR_UPDATE_REQUIRED">
+        <ph name="HOSTNAME">$1<ex>My Linux desktop</ex></ph> (out-of-date)
+      </message>
+      <message desc="Explanatory text displayed if the user tries to connect to a computer running out-of-date Me2Me host software." name="IDR_HOST_NEEDS_UPDATE_DETAIL">
+        Software updates usually happen automatically, but can fail in some rare cases. Updating the software should take no more than a few minutes and can be done while connected to your computer remotely.
+      </message>
       <message desc="In the connection history dialog, clicking this button shows only recent connections from this computer." name="IDR_OUTGOING_CONNECTIONS">
         From this computer
       </message>
@@ -509,9 +530,6 @@
       </message>
       <message desc="Message displayed at the bottom of the host screen if local policy dictates that NAT traversal is disabled, meaning that connections outside the local network will not work." name="IDR_WARNING_NAT_DISABLED">
         NOTE: Policy settings permit connections only between computers within your network.
-      </message>
-      <message desc="Message displayed at the bottom of the client connect dialog if Chromoting is running in the wrong start-up mode." name="IDR_WARNING_NOT_WINDOWED">
-	NOTE: To ensure that all keyboard shortcuts are available, you can configure Chromoting to ‘Open as window’.
       </message>
       <message desc="Link to learn more detailed information on a topic." name="IDR_LEARN_HOW">
 	Learn how.

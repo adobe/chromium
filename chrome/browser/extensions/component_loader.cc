@@ -11,9 +11,7 @@
 #include "base/prefs/pref_notifier.h"
 #include "base/prefs/pref_service.h"
 #include "base/prefs/public/pref_change_registrar.h"
-#include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/prefs/pref_registry_syncable.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
@@ -22,6 +20,7 @@
 #include "chrome/common/extensions/extension_file_util.h"
 #include "chrome/common/extensions/extension_manifest_constants.h"
 #include "chrome/common/pref_names.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
 #include "grit/browser_resources.h"
@@ -426,6 +425,9 @@ void ComponentLoader::AddDefaultComponentExtensionsWithBackgroundPages(
           command_line->GetSwitchValuePath(switches::kEchoExtensionPath);
     }
     Add(IDR_ECHO_MANIFEST, echo_extension_path);
+
+    Add(IDR_NETWORK_CONFIGURATION_MANIFEST,
+        base::FilePath(FILE_PATH_LITERAL("chromeos/network_configuration")));
   }
 
   // Load ChromeVox extension now if spoken feedback is enabled.

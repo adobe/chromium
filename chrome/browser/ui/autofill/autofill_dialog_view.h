@@ -32,6 +32,9 @@ class AutofillDialogView {
   // a new account, etc.).
   virtual void UpdateAccountChooser() = 0;
 
+  // Updates the button strip based on the current controller state.
+  virtual void UpdateButtonStrip() = 0;
+
   // Called when the contents of a section have changed.
   virtual void UpdateSection(DialogSection section) = 0;
 
@@ -45,6 +48,9 @@ class AutofillDialogView {
 
   // Returns the state of the "use billing address for shipping" checkbox.
   virtual bool UseBillingForShipping() = 0;
+
+  // Returns true if current input should be saved in Wallet (if it differs).
+  virtual bool SaveDetailsInWallet() = 0;
 
   // Returns true if new or edited autofill details should be saved.
   virtual bool SaveDetailsLocally() = 0;

@@ -33,6 +33,7 @@
 #include "content/public/browser/render_view_host_observer.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_view.h"
 #include "content/public/browser/web_ui.h"
 #include "ui/aura/env.h"
 #include "ui/gfx/rect.h"
@@ -45,8 +46,6 @@ using content::RenderViewHost;
 using content::WebContents;
 
 namespace {
-
-const char kViewClassName[] = "browser/chromeos/login/WebUILoginView";
 
 // These strings must be kept in sync with handleAccelerator() in oobe.js.
 const char kAccelNameCancel[] = "cancel";
@@ -110,6 +109,10 @@ void RightAlignedView::ChildPreferredSizeChanged(View* child) {
 }  // namespace
 
 namespace chromeos {
+
+// static
+const char WebUILoginView::kViewClassName[] =
+    "browser/chromeos/login/WebUILoginView";
 
 // WebUILoginView public: ------------------------------------------------------
 
@@ -276,7 +279,7 @@ void WebUILoginView::AboutToRequestFocusFromTabTraversal(bool reverse) {
   // Return the focus to the web contents.
   webui_login_->web_contents()->FocusThroughTabTraversal(reverse);
   GetWidget()->Activate();
-  webui_login_->web_contents()->Focus();
+  webui_login_->web_contents()->GetView()->Focus();
 }
 
 void WebUILoginView::Observe(int type,

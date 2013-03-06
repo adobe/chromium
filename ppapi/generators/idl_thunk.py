@@ -302,15 +302,13 @@ def _IsNewestMember(member, members, releases):
     releases - The set of releases to check for versions in.
   """
   build_list = member.GetUniqueReleases(releases)
-  assert(len(build_list) == 1)
-  release = build_list[-1]  # Pick the newest release.
+  release = build_list[0]  # Pick the oldest release.
   same_name_siblings = filter(
       lambda n: str(n) == str(member) and n != member, members)
 
   for s in same_name_siblings:
     sibling_build_list = s.GetUniqueReleases(releases)
-    assert(len(sibling_build_list) == 1)
-    sibling_release = sibling_build_list[-1]
+    sibling_release = sibling_build_list[0]
     if sibling_release > release:
       return False
   return True
@@ -429,7 +427,10 @@ class TGen(GeneratorByFile):
         thunk_type = '_'.join((node.GetName(), version))
         version_list.append((thunk_type, thunk_name))
 
-        out.Write('const %s %s = {\n' % (thunk_type, thunk_name))
+        declare_line = 'const %s %s = {' % (thunk_type, thunk_name)
+        if len(declare_line) > 80:
+          declare_line = 'const %s\n    %s = {' % (thunk_type, thunk_name)
+        out.Write('%s\n' % declare_line)
         generated_functions = []
         members = node.GetListOf('Member')
         for child in members:

@@ -267,6 +267,12 @@ AutofillMetrics::AutofillMetrics() {
 AutofillMetrics::~AutofillMetrics() {
 }
 
+void AutofillMetrics::LogAutocheckoutBubbleMetric(BubbleMetric metric) const {
+  DCHECK(metric < NUM_BUBBLE_METRICS);
+
+  UMA_HISTOGRAM_ENUMERATION("Autocheckout.Bubble", metric, NUM_BUBBLE_METRICS);
+}
+
 void AutofillMetrics::LogCreditCardInfoBarMetric(InfoBarMetric metric) const {
   DCHECK(metric < NUM_INFO_BAR_METRICS);
 
@@ -302,6 +308,24 @@ void AutofillMetrics::LogRequestAutocompleteUiDuration(
 
   LogUMAHistogramLongTimes(prefix + ".UiDuration", duration);
   LogUMAHistogramLongTimes(prefix + ".UiDuration." + suffix, duration);
+}
+
+void AutofillMetrics::LogAutocheckoutDuration(
+    const base::TimeDelta& duration,
+    AutocheckoutCompletionStatus status) const {
+  std::string suffix;
+  switch (status) {
+    case AUTOCHECKOUT_FAILED:
+      suffix = "Failed";
+      break;
+
+    case AUTOCHECKOUT_SUCCEEDED:
+      suffix = "Succeeded";
+      break;
+  }
+
+  LogUMAHistogramLongTimes("Autocheckout.FlowDuration", duration);
+  LogUMAHistogramLongTimes("Autocheckout.FlowDuration." + suffix, duration);
 }
 
 void AutofillMetrics::LogDeveloperEngagementMetric(

@@ -27,10 +27,13 @@ class FilePath;
 namespace WebKit {
 class WebClipboard;
 class WebFrame;
+class WebHyphenator;
 class WebMediaPlayerClient;
 class WebMediaStreamCenter;
 class WebMediaStreamCenterClient;
+class WebMimeRegistry;
 class WebPlugin;
+class WebPluginContainer;
 class WebRTCPeerConnectionHandler;
 class WebRTCPeerConnectionHandlerClient;
 class WebURLRequest;
@@ -139,6 +142,14 @@ class CONTENT_EXPORT ContentRendererClient {
   // returns NULL the content layer will handle clipboard interactions.
   virtual WebKit::WebClipboard* OverrideWebClipboard();
 
+  // Allows the embedder to override the WebKit::WebMimeRegistry used. If it
+  // returns NULL the content layer will provide its own mime registry.
+  virtual WebKit::WebMimeRegistry* OverrideWebMimeRegistry();
+
+  // Allows the embedder to override the WebKit::WebHyphenator used. If it
+  // returns NULL the content layer will handle hyphenation.
+  virtual WebKit::WebHyphenator* OverrideWebHyphenator();
+
   // Returns true if the renderer process should schedule the idle handler when
   // all widgets are hidden.
   virtual bool RunIdleHandlerWhenWidgetsHidden();
@@ -182,7 +193,7 @@ class CONTENT_EXPORT ContentRendererClient {
                                         v8::Handle<v8::Context>,
                                         int world_id) {}
 
-  // See WebKit::WebKitPlatformSupport.
+  // See WebKit::Platform.
   virtual unsigned long long VisitedLinkHash(const char* canonical_url,
                                              size_t length);
   virtual bool IsLinkVisited(unsigned long long link_hash);
@@ -207,6 +218,9 @@ class CONTENT_EXPORT ContentRendererClient {
 
   virtual void RegisterPPAPIInterfaceFactories(
       webkit::ppapi::PpapiInterfaceFactoryManager* factory_manager) {}
+
+  // Returns whether BrowserPlugin should be allowed within the |container|.
+  virtual bool AllowBrowserPlugin(WebKit::WebPluginContainer* container) const;
 };
 
 }  // namespace content

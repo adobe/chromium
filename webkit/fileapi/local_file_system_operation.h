@@ -9,11 +9,8 @@
 
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/memory/scoped_vector.h"
 #include "webkit/fileapi/file_snapshot_policy.h"
-#include "webkit/fileapi/file_system_file_util.h"
 #include "webkit/fileapi/file_system_operation.h"
-#include "webkit/fileapi/file_system_operation_context.h"
 #include "webkit/fileapi/file_system_url.h"
 #include "webkit/fileapi/file_writer_delegate.h"
 #include "webkit/quota/quota_types.h"
@@ -21,6 +18,10 @@
 
 namespace chromeos {
 class CrosMountPointProvider;
+}
+
+namespace sync_file_system {
+class SyncableFileSystemOperation;
 }
 
 namespace fileapi {
@@ -80,6 +81,11 @@ class WEBKIT_STORAGE_EXPORT LocalFileSystemOperation
   virtual void CreateSnapshotFile(
       const FileSystemURL& path,
       const SnapshotFileCallback& callback) OVERRIDE;
+
+  // Creates a nestable operation that inherits operation context
+  // from this operation.  The operation created by this method have to
+  // be die before this operation goes away.
+  virtual LocalFileSystemOperation* CreateNestedOperation();
 
   // Copies in a single file from a different filesystem.
   //
@@ -149,15 +155,13 @@ class WEBKIT_STORAGE_EXPORT LocalFileSystemOperation
                      const StatusCallback& callback);
 
   // Synchronously gets the platform path for the given |url|.
-  void SyncGetPlatformPath(const FileSystemURL& url, base::FilePath* platform_path);
+  void SyncGetPlatformPath(const FileSystemURL& url,
+                           base::FilePath* platform_path);
 
  private:
-  class ScopedUpdateNotifier;
-
-  enum SetUpMode {
-    SETUP_FOR_READ,
-    SETUP_FOR_WRITE,
-    SETUP_FOR_CREATE,
+  enum OperationMode {
+    OPERATION_MODE_READ,
+    OPERATION_MODE_WRITE,
   };
 
   // Only MountPointProviders or testing class can create a
@@ -176,7 +180,7 @@ class WEBKIT_STORAGE_EXPORT LocalFileSystemOperation
 
   friend class RecursiveOperationDelegate;
   friend class CrossOperationDelegate;
-  friend class SyncableFileSystemOperation;
+  friend class sync_file_system::SyncableFileSystemOperation;
 
   LocalFileSystemOperation(
       FileSystemContext* file_system_context,
@@ -187,8 +191,8 @@ class WEBKIT_STORAGE_EXPORT LocalFileSystemOperation
   }
 
   FileSystemOperationContext* operation_context() const {
-    if (overriding_operation_context_)
-      return overriding_operation_context_;
+    if (parent_operation_)
+      return parent_operation_->operation_context();
     return operation_context_.get();
   }
 
@@ -297,41 +301,22 @@ class WEBKIT_STORAGE_EXPORT LocalFileSystemOperation
   // Checks the validity of a given |url| and populates |file_util| for |mode|.
   base::PlatformFileError SetUp(
       const FileSystemURL& url,
-      SetUpMode mode);
+      OperationMode mode);
 
   // Used only for internal assertions.
   // Returns false if there's another inflight pending operation.
   bool SetPendingOperationType(OperationType type);
-
-  // Overrides this operation's operation context by given |context|.
-  // This operation won't own |context| and the |context| needs to outlive
-  // this operation.
-  //
-  // Called only from operation delegates when they create sub-operations
-  // for performing a recursive operation.
-  void set_overriding_operation_context(FileSystemOperationContext* context) {
-    overriding_operation_context_ = context;
-  }
-
-  // Sets a termination callback which is called when this instance goes away
-  // (indicates the operation is finished).
-  void set_termination_callback(const base::Closure& closure) {
-    termination_callback_ = closure;
-  }
 
   scoped_refptr<FileSystemContext> file_system_context_;
 
   scoped_ptr<FileSystemOperationContext> operation_context_;
   AsyncFileUtil* async_file_util_;  // Not owned.
 
-  FileSystemOperationContext* overriding_operation_context_;
-
-  // A callback that is called when this instance goes away.
-  base::Closure termination_callback_;
-
-  // This is set before any write operations to dispatch
-  // FileUpdateObserver::StartUpdate and FileUpdateObserver::EndUpdate.
-  ScopedVector<ScopedUpdateNotifier> scoped_update_notifiers_;
+  // If this operation is created as a sub-operation for nested operation,
+  // this holds non-null value and points to the parent operation.
+  // TODO(kinuko): Cleanup this when we finish cleaning up the
+  // FileSystemOperation lifetime issue.
+  LocalFileSystemOperation* parent_operation_;
 
   // These are all used only by Write().
   friend class FileWriterDelegate;
@@ -352,6 +337,10 @@ class WEBKIT_STORAGE_EXPORT LocalFileSystemOperation
 
   // A flag to make sure we call operation only once per instance.
   OperationType pending_operation_;
+
+  // We keep track of the file to be modified by this operation so that
+  // we can notify observers when we're done.
+  FileSystemURL write_target_url_;
 
   // LocalFileSystemOperation instance is usually deleted upon completion but
   // could be deleted while it has inflight callbacks when Cancel is called.

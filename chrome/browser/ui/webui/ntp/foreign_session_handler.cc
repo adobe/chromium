@@ -16,7 +16,6 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
-#include "chrome/browser/prefs/pref_registry_syncable.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sessions/session_restore.h"
@@ -29,10 +28,12 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/time_format.h"
 #include "chrome/common/url_constants.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/url_data_source.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_view.h"
 #include "content/public/browser/web_ui.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -112,7 +113,7 @@ void ForeignSessionHandler::OpenForeignSessionWindows(
       iter_begin + 1;
   chrome::HostDesktopType host_desktop_type =
       chrome::GetHostDesktopTypeForNativeView(
-          web_ui->GetWebContents()->GetNativeView());
+          web_ui->GetWebContents()->GetView()->GetNativeView());
   SessionRestore::RestoreForeignSessionWindows(
       Profile::FromWebUI(web_ui), host_desktop_type, iter_begin, iter_end);
 }
@@ -215,7 +216,7 @@ bool ForeignSessionHandler::IsTabSyncEnabled() {
   Profile* profile = Profile::FromWebUI(web_ui());
   ProfileSyncService* service =
       ProfileSyncServiceFactory::GetInstance()->GetForProfile(profile);
-  return service && service->GetPreferredDataTypes().Has(syncer::SESSIONS);
+  return service && service->GetPreferredDataTypes().Has(syncer::PROXY_TABS);
 }
 
 string16 ForeignSessionHandler::FormatSessionTime(const base::Time& time) {

@@ -78,6 +78,7 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "chromeos/chromeos_switches.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/power_manager_client.h"
 #include "chromeos/dbus/session_manager_client.h"
@@ -743,7 +744,9 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
     NetworkLibrary* crosnet = CrosLibrary::Get()->GetNetworkLibrary();
     Network* network = crosnet->FindNetworkByPath(network_id);
     if (CommandLine::ForCurrentProcess()->HasSwitch(
-            ash::switches::kAshEnableNewNetworkStatusArea)) {
+            ash::switches::kAshEnableNewNetworkStatusArea) &&
+        CommandLine::ForCurrentProcess()->HasSwitch(
+            chromeos::switches::kEnableNewNetworkConfigurationHandlers)) {
       // If the new network handlers are enabled, this should always trigger
       // displaying the network settings UI.
       if (network)
@@ -1148,6 +1151,7 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
     RefreshNetworkDeviceObserver(crosnet);
     data_promo_notification_->ShowOptionalMobileDataPromoNotification(
         crosnet, GetPrimarySystemTray(), this);
+    UpdateCellularActivation();
 
     NotifyRefreshNetwork();
   }
@@ -1155,7 +1159,6 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
   // Overridden from NetworkLibrary::NetworkObserver.
   virtual void OnNetworkChanged(NetworkLibrary* crosnet,
       const Network* network) OVERRIDE {
-    UpdateCellularActivation(network);
     NotifyRefreshNetwork();
   }
 
@@ -1401,12 +1404,14 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
     UpdateEnterpriseDomain();
   }
 
-  void UpdateCellularActivation(const Network* network) {
-    if (!network || network->type() != chromeos::TYPE_CELLULAR)
+  void UpdateCellularActivation() {
+    const CellularNetworkVector& cellular_networks =
+        CrosLibrary::Get()->GetNetworkLibrary()->cellular_networks();
+    if (cellular_networks.empty())
       return;
-
-    const CellularNetwork* cellular =
-        static_cast<const CellularNetwork*>(network);
+    // We only care about the first cellular network (in practice there will
+    // only ever be one)
+    const CellularNetwork* cellular = cellular_networks[0];
     if (cellular->activation_state() == ACTIVATION_STATE_ACTIVATING) {
       cellular_activating_ = true;
     } else if (cellular->activated() && cellular_activating_) {

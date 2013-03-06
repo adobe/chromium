@@ -7,11 +7,17 @@
 
 #define USE_CC_OUTPUT_SURFACE // TODO(danakj): Remove this.
 
+#include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
 #include "cc/cc_export.h"
 #include "cc/software_output_device.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebCompositorOutputSurface.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebGraphicsContext3D.h"
+
+namespace gfx {
+class Rect;
+class Size;
+}
 
 namespace cc {
 
@@ -70,6 +76,16 @@ class CC_EXPORT OutputSurface : public WebKit::WebCompositorOutputSurface {
   // steal the contents of the CompositorFrame passed in.
   virtual void SendFrameToParentCompositor(CompositorFrame*);
 
+  virtual void EnsureBackbuffer();
+  virtual void DiscardBackbuffer();
+
+  virtual void Reshape(gfx::Size size);
+
+  virtual void BindFramebuffer();
+
+  virtual void PostSubBuffer(gfx::Rect rect);
+  virtual void SwapBuffers();
+
   // Notifies frame-rate smoothness preference. If true, all non-critical
   // processing should be stopped, or lowered in priority.
   virtual void UpdateSmoothnessTakesPriority(bool prefer_smoothness) {}
@@ -79,6 +95,10 @@ class CC_EXPORT OutputSurface : public WebKit::WebCompositorOutputSurface {
   struct cc::OutputSurface::Capabilities capabilities_;
   scoped_ptr<WebKit::WebGraphicsContext3D> context3d_;
   scoped_ptr<cc::SoftwareOutputDevice> software_device_;
+  bool has_gl_discard_backbuffer_;
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(OutputSurface);
 };
 
 }  // namespace cc

@@ -7,8 +7,8 @@
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/string_split.h"
 #include "base/string_util.h"
+#include "base/strings/string_split.h"
 #include "chrome/common/chrome_switches.h"
 #include "content/public/browser/browser_context.h"
 #include "googleurl/src/gurl.h"
@@ -124,8 +124,10 @@ std::string WhitelistManager::GetMatchedURLPrefix(const GURL& url) const {
     // This is only for ~20 sites initially, liner search is sufficient.
     // TODO(benquan): Look for optimization options when we support
     // more sites.
-    if (StartsWithASCII(url.spec(), *it, true))
+    if (StartsWithASCII(url.spec(), *it, true)) {
+      DVLOG(1) << "WhitelistManager matched URLPrefix: " << *it;
       return *it;
+    }
   }
   return std::string();
 }

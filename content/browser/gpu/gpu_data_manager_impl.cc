@@ -23,6 +23,7 @@
 #include "content/browser/gpu/gpu_util.h"
 #include "content/common/gpu/gpu_messages.h"
 #include "content/gpu/gpu_info_collector.h"
+#include "content/public/browser/browser_thread.h"
 #include "content/public/browser/gpu_data_manager_observer.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_constants.h"
@@ -435,6 +436,15 @@ void GpuDataManagerImpl::AppendGpuCommandLine(
     command_line->AppendSwitchPath(switches::kSwiftShaderPath,
                                    swiftshader_path);
 
+#if defined(OS_WIN)
+  // DisplayLink 7.1 and earlier can cause the GPU process to crash on startup.
+  // http://crbug.com/177611
+  if (gpu_info_.display_link_version.IsValid()
+      && gpu_info_.display_link_version.IsOlderThan("7.2")) {
+    command_line->AppendSwitch(switches::kReduceGpuSandbox);
+  }
+#endif
+
   {
     base::AutoLock auto_lock(gpu_info_lock_);
     if (gpu_info_.optimus)
@@ -560,9 +570,21 @@ void GpuDataManagerImpl::BlockDomainFrom3DAPIs(
   BlockDomainFrom3DAPIsAtTime(url, guilt, base::Time::Now());
 }
 
-GpuDataManagerImpl::DomainBlockStatus
-GpuDataManagerImpl::Are3DAPIsBlocked(const GURL& url) const {
-  return Are3DAPIsBlockedAtTime(url, base::Time::Now());
+bool GpuDataManagerImpl::Are3DAPIsBlocked(const GURL& url,
+                                          int render_process_id,
+                                          int render_view_id,
+                                          ThreeDAPIType requester) {
+  bool blocked = Are3DAPIsBlockedAtTime(url, base::Time::Now()) !=
+      GpuDataManagerImpl::DOMAIN_BLOCK_STATUS_NOT_BLOCKED;
+  if (blocked) {
+    BrowserThread::PostTask(
+        BrowserThread::UI, FROM_HERE,
+        base::Bind(&GpuDataManagerImpl::Notify3DAPIBlocked,
+                   base::Unretained(this), url, render_process_id,
+                   render_view_id, requester));
+  }
+
+  return blocked;
 }
 
 void GpuDataManagerImpl::DisableDomainBlockingFor3DAPIsForTesting() {
@@ -780,6 +802,14 @@ GpuDataManagerImpl::Are3DAPIsBlockedAtTime(
 
 int64 GpuDataManagerImpl::GetBlockAllDomainsDurationInMs() const {
   return kBlockAllDomainsMs;
+}
+
+void GpuDataManagerImpl::Notify3DAPIBlocked(const GURL& url,
+                                            int render_process_id,
+                                            int render_view_id,
+                                            ThreeDAPIType requester) {
+  observer_list_->Notify(&GpuDataManagerObserver::DidBlock3DAPIs,
+                         url, render_process_id, render_view_id, requester);
 }
 
 }  // namespace content

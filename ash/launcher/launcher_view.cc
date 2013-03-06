@@ -67,15 +67,15 @@ const float kReservedNonPanelIconProportion = 0.67f;
 // This is the command id of the menu item which contains the name of the menu.
 const int kCommandIdOfMenuName = 0;
 
-// This is the command id of the active menu item.
-const int kCommandIdOfActiveName = 1;
-
 // The background color of the active item in the list.
 const SkColor kActiveListItemBackgroundColor = SkColorSetRGB(203 , 219, 241);
 
 // The background color ot the active & hovered item in the list.
 const SkColor kFocusedActiveListItemBackgroundColor =
     SkColorSetRGB(193, 211, 236);
+
+// The maximum allowable length of a menu line of an application menu in pixels.
+const int kMaximumAppMenuItemLength = 250;
 
 namespace {
 
@@ -98,10 +98,11 @@ class ScopedAnimationSetter {
 class LauncherMenuModelAdapter
     : public views::MenuModelAdapter {
  public:
-  explicit LauncherMenuModelAdapter(ui::MenuModel* menu_model);
+  explicit LauncherMenuModelAdapter(ash::LauncherMenuModel* menu_model);
 
   // Overriding MenuModelAdapter's MenuDelegate implementation.
   virtual const gfx::Font* GetLabelFont(int command_id) const OVERRIDE;
+  virtual bool IsCommandEnabled(int id) const OVERRIDE;
   virtual void GetHorizontalIconMargins(int id,
                                         int icon_size,
                                         int* left_margin,
@@ -109,13 +110,20 @@ class LauncherMenuModelAdapter
   virtual bool GetBackgroundColor(int command_id,
                                   bool is_hovered,
                                   SkColor* override_color) const OVERRIDE;
+  virtual int GetMaxWidthForMenu(views::MenuItemView* menu) OVERRIDE;
+  virtual bool ShouldReserveSpaceForSubmenuIndicator() const OVERRIDE;
+
  private:
+  ash::LauncherMenuModel* launcher_menu_model_;
+
   DISALLOW_COPY_AND_ASSIGN(LauncherMenuModelAdapter);
 };
 
 
-LauncherMenuModelAdapter::LauncherMenuModelAdapter(ui::MenuModel* menu_model)
-    : MenuModelAdapter(menu_model) {}
+LauncherMenuModelAdapter::LauncherMenuModelAdapter(
+    ash::LauncherMenuModel* menu_model)
+    : MenuModelAdapter(menu_model),
+      launcher_menu_model_(menu_model) {}
 
 const gfx::Font* LauncherMenuModelAdapter::GetLabelFont(
     int command_id) const {
@@ -126,11 +134,15 @@ const gfx::Font* LauncherMenuModelAdapter::GetLabelFont(
   return &rb.GetFont(ui::ResourceBundle::BoldFont);
 }
 
+bool LauncherMenuModelAdapter::IsCommandEnabled(int id) const {
+  return id != kCommandIdOfMenuName;
+}
+
 bool LauncherMenuModelAdapter::GetBackgroundColor(
     int command_id,
     bool is_hovered,
     SkColor* override_color) const {
-  if (command_id != kCommandIdOfActiveName)
+  if (!launcher_menu_model_->IsCommandActive(command_id))
     return false;
 
   *override_color = is_hovered ? kFocusedActiveListItemBackgroundColor :
@@ -146,6 +158,14 @@ void LauncherMenuModelAdapter::GetHorizontalIconMargins(
   *left_margin = kHorizontalIconSpacing;
   *right_margin = (command_id != kCommandIdOfMenuName) ?
       kHorizontalIconSpacing : -icon_size;
+}
+
+int LauncherMenuModelAdapter::GetMaxWidthForMenu(views::MenuItemView* menu) {
+  return kMaximumAppMenuItemLength;
+}
+
+bool LauncherMenuModelAdapter::ShouldReserveSpaceForSubmenuIndicator() const {
+  return false;
 }
 
 // Custom FocusSearch used to navigate the launcher in the order items are in
@@ -401,7 +421,6 @@ void LauncherView::Init() {
     view_model_->Add(child, static_cast<int>(i - items.begin()));
     AddChildView(child);
   }
-  UpdateFirstButtonPadding();
   LauncherStatusChanged();
   overflow_button_ = new OverflowButton(this);
   overflow_button_->set_context_menu_controller(this);
@@ -412,7 +431,6 @@ void LauncherView::Init() {
 }
 
 void LauncherView::OnShelfAlignmentChanged() {
-  UpdateFirstButtonPadding();
   overflow_button_->OnShelfAlignmentChanged();
   LayoutToIdealBounds();
   tooltip_->UpdateArrowLocation();
@@ -533,6 +551,16 @@ void LauncherView::CalculateIdealBounds(IdealBounds* bounds) {
           i <= last_visible_index_);
     }
     return;
+  }
+
+  // To address Fitt's law, we make the first launcher button include the
+  // leading inset (if there is one).
+  if (view_model_->view_size() > 0) {
+    view_model_->set_ideal_bounds(0, gfx::Rect(gfx::Size(
+        shelf->PrimaryAxisValue(leading_inset() + kLauncherPreferredSize,
+                                width()),
+        shelf->PrimaryAxisValue(height(),
+                                leading_inset() + kLauncherPreferredSize))));
   }
 
   // Right aligned icons.
@@ -872,21 +900,6 @@ void LauncherView::ToggleOverflowBubble() {
   overflow_bubble_->Show(overflow_button_, overflow_view);
 
   Shell::GetInstance()->UpdateShelfVisibility();
-}
-
-void LauncherView::UpdateFirstButtonPadding() {
-  ShelfLayoutManager* shelf = tooltip_->shelf_layout_manager();
-
-  // Creates an empty border for first launcher button to make included leading
-  // inset act as the button's padding. This is only needed on button creation
-  // and when shelf alignment changes.
-  if (view_model_->view_size() > 0) {
-    view_model_->view_at(0)->set_border(views::Border::CreateEmptyBorder(
-        shelf->PrimaryAxisValue(0, leading_inset()),
-        shelf->PrimaryAxisValue(leading_inset(), 0),
-        0,
-        0));
-  }
 }
 
 void LauncherView::OnFadeOutAnimationEnded() {
@@ -1294,7 +1307,7 @@ void LauncherView::ButtonPressed(views::Button* sender,
 
 bool LauncherView::ShowListMenuForView(const LauncherItem& item,
                                        views::View* source) {
-  scoped_ptr<ui::MenuModel> menu_model;
+  scoped_ptr<ash::LauncherMenuModel> menu_model;
   menu_model.reset(delegate_->CreateApplicationMenu(item));
 
   // Make sure we have a menu and it has at least two items in addition to the
@@ -1302,7 +1315,11 @@ bool LauncherView::ShowListMenuForView(const LauncherItem& item,
   if (!menu_model.get() || menu_model->GetItemCount() <= 4)
     return false;
 
-  ShowMenu(menu_model.get(), source, gfx::Point(), false);
+  ShowMenu(scoped_ptr<views::MenuModelAdapter>(
+               new LauncherMenuModelAdapter(menu_model.get())),
+           source,
+           gfx::Point(),
+           false);
   return true;
 }
 
@@ -1327,20 +1344,18 @@ void LauncherView::ShowContextMenuForView(views::View* source,
       &context_menu_id_,
       view_index == -1 ? 0 : model_->items()[view_index].id);
 
-  ShowMenu(menu_model.get(), source, point, true);
+  ShowMenu(scoped_ptr<views::MenuModelAdapter>(
+               new views::MenuModelAdapter(menu_model.get())),
+           source,
+           point,
+           true);
 }
 
-void LauncherView::ShowMenu(ui::MenuModel* menu_model,
-                            views::View* source,
-                            const gfx::Point& click_point,
-                            bool context_menu) {
-  launcher_menu_runner_.reset();
-  scoped_ptr<views::MenuModelAdapter> menu_model_adapter;
-  if (context_menu)
-    menu_model_adapter.reset(new views::MenuModelAdapter(menu_model));
-  else
-    menu_model_adapter.reset(new LauncherMenuModelAdapter(menu_model));
-
+void LauncherView::ShowMenu(
+    scoped_ptr<views::MenuModelAdapter> menu_model_adapter,
+    views::View* source,
+    const gfx::Point& click_point,
+    bool context_menu) {
   launcher_menu_runner_.reset(
       new views::MenuRunner(menu_model_adapter->CreateMenu()));
 

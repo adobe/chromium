@@ -414,10 +414,20 @@ DialogType.isModal = function(type) {
 
     this.initFileList_(prefs);
     this.initDialogs_();
-    this.bannersController_ = new FileListBannerController(
-        this.directoryModel_, this.volumeManager_, this.document_);
-    this.bannersController_.addEventListener('relayout',
-                                             this.onResize_.bind(this));
+
+    var self = this;
+
+    // Get the 'allowRedeemOffers' preference before launching
+    // FileListBannerController.
+    this.getPreferences_(function(pref) {
+      /* @type {boolean} */
+      var showOffers = pref['allowRedeemOffers'];
+      self.bannersController_ = new FileListBannerController(
+          self.directoryModel_, self.volumeManager_, self.document_,
+          showOffers);
+      self.bannersController_.addEventListener('relayout',
+                                               self.onResize_.bind(self));
+    });
 
     if (!util.platform.v2()) {
       window.addEventListener('popstate', this.onPopState_.bind(this));
@@ -428,7 +438,6 @@ DialogType.isModal = function(type) {
     var dm = this.directoryModel_;
     dm.addEventListener('directory-changed',
                         this.onDirectoryChanged_.bind(this));
-    var self = this;
     dm.addEventListener('begin-update-files', function() {
       self.currentList_.startBatchUpdates();
     });
@@ -571,6 +580,9 @@ DialogType.isModal = function(type) {
 
     CommandUtil.registerCommand(doc, 'newfolder',
         Commands.newFolderCommand, this, this.directoryModel_);
+
+    CommandUtil.registerCommand(doc, 'newwindow',
+        Commands.newWindowCommand, this);
 
     CommandUtil.registerCommand(this.rootsList_, 'unmount',
         Commands.unmountCommand, this.rootsList_, this);
@@ -762,8 +774,53 @@ DialogType.isModal = function(type) {
 
     this.filePopup_ = null;
 
-    this.dialogDom_.querySelector('#search-box').addEventListener(
-        'input', this.onSearchBoxUpdate_.bind(this));
+    var searchBox = this.dialogDom_.querySelector('#search-box');
+    searchBox.addEventListener('input', this.onSearchBoxUpdate_.bind(this));
+
+    var autocompleteList = new cr.ui.AutocompleteList();
+    autocompleteList.id = 'autocomplete-list';
+    autocompleteList.autoExpands = true;
+    autocompleteList.requestSuggestions =
+        this.requestAutocompleteSuggestions_.bind(this);
+    // function(item) {}.bind(this) does not work here, as it's a constructor.
+    var self = this;
+    autocompleteList.itemConstructor = function(item) {
+      return self.createAutocompleteListItem_(item);
+    };
+
+    // Do nothing when a suggestion is selected.
+    autocompleteList.handleSelectedSuggestion = function(selectedItem) {};
+    // Instead, open the suggested item when Enter key is pressed or
+    // mouse-clicked.
+    autocompleteList.handleEnterKeydown =
+        this.openAutocompleteSuggestion_.bind(this);
+    autocompleteList.addEventListener('mousedown', function(event) {
+      this.openAutocompleteSuggestion_();
+    }.bind(this));
+    autocompleteList.addEventListener('mouseover', function(event) {
+      // Change the selection by a mouse over instead of just changing the
+      // color of moused over element with :hover in CSS. Here's why:
+      //
+      // 1) The user selects an item A with up/down keys (item A is highlighted)
+      // 2) Then the user moves the cursor to another item B
+      //
+      // If we just change the color of moused over element (item B), both
+      // the item A and B are highlighted. This is bad. We should change the
+      // selection so only the item B is highlighted.
+      if (event.target.itemInfo)
+        autocompleteList.selectedItem = event.target.itemInfo;
+    }.bind(this));
+
+    var container = this.document_.querySelector('.dialog-header');
+    container.appendChild(autocompleteList);
+    this.autocompleteList_ = autocompleteList;
+
+    searchBox.addEventListener('focus', function(event) {
+      this.autocompleteList_.attachToInput(searchBox);
+    }.bind(this));
+    searchBox.addEventListener('blur', function(event) {
+      this.autocompleteList_.detach();
+    }.bind(this));
 
     this.authFailedWarning_ = dom.querySelector('#drive-auth-failed-warning');
     var authFailedText = this.authFailedWarning_.querySelector('.drive-text');
@@ -787,6 +844,8 @@ DialogType.isModal = function(type) {
 
     this.fileTypeSelector_ = this.dialogDom_.querySelector('#file-type');
     this.initFileTypeFilter_();
+
+    util.disableBrowserShortcutKeys(this.document_);
 
     this.updateWindowState_();
     // Populate the static localized strings.
@@ -1662,10 +1721,9 @@ DialogType.isModal = function(type) {
         callback();
     };
 
-    chrome.fileBrowserPrivate.getPreferences(function(prefs) {
-      self.preferences_ = prefs;
+    this.getPreferences_(function(prefs) {
       done();
-    });
+    }, true);
 
     chrome.fileBrowserPrivate.getDriveConnectionState(function(state) {
       self.driveConnectionState_ = state;
@@ -1838,7 +1896,14 @@ DialogType.isModal = function(type) {
   };
 
   FileManager.prototype.deleteSelection = function() {
-    this.copyManager_.deleteEntries(this.getSelection().entries);
+    // TODO(mtomasz): Remove this temporary dialog. crbug.com/167364
+    var entries = this.getSelection().entries;
+    var message = entries.length == 1 ?
+        strf('GALLERY_CONFIRM_DELETE_ONE', entries[0].name) :
+        strf('GALLERY_CONFIRM_DELETE_SOME', entries.length);
+    this.confirm.show(message, function() {
+      this.copyManager_.deleteEntries(entries);
+    }.bind(this));
   };
 
   FileManager.prototype.blinkSelection = function() {
@@ -2525,16 +2590,6 @@ DialogType.isModal = function(type) {
       chrome.fileBrowserPrivate.getDriveFiles(
         fileUrls,
         function(localPaths) {
-          fileUrls = [].concat(fileUrls);  // Clone the array.
-          // localPath can be empty if the file is not present, which
-          // can happen if the user specifies a new file name to save a
-          // file on drive.
-          for (var i = 0; i != localPaths.length; i++) {
-            if (localPaths[i]) {
-              // Add "localPath" parameter to the drive file URL.
-              fileUrls[i] += '?localPath=' + encodeURIComponent(localPaths[i]);
-            }
-          }
           callback(fileUrls);
         });
     } else {
@@ -2548,14 +2603,17 @@ DialogType.isModal = function(type) {
    * @param {Object} selection Contains urls, filterIndex and multiple fields.
    */
   FileManager.prototype.callSelectFilesApiAndClose_ = function(selection) {
+    var self = this;
+    function callback() {
+      self.onUnload_();
+      window.close();
+    }
     if (selection.multiple) {
-      chrome.fileBrowserPrivate.selectFiles(selection.urls);
+      chrome.fileBrowserPrivate.selectFiles(selection.urls, callback);
     } else {
       chrome.fileBrowserPrivate.selectFile(
-          selection.urls[0], selection.filterIndex);
+          selection.urls[0], selection.filterIndex, callback);
     }
-    this.onUnload_();
-    window.close();
   };
 
   /**
@@ -2879,6 +2937,108 @@ DialogType.isModal = function(type) {
                                 hideNoResultsDiv.bind(this));
   };
 
+  /**
+   * Requests autocomplete suggestions for files on Drive.
+   * Once the suggestions are returned, the autocomplete popup will show up.
+   * @param {string} query The text to autocomplete from.
+   * @private
+   */
+  FileManager.prototype.requestAutocompleteSuggestions_ = function(query) {
+    if (!this.isOnDrive())
+      return;
+    this.lastQuery_ = query;
+
+    // The autocomplete list should be resized and repositioned here as the
+    // search box is resized when it's focused.
+    this.autocompleteList_.syncWidthAndPositionToInput();
+
+    chrome.fileBrowserPrivate.searchDriveMetadata(
+      query,
+      function(suggestions) {
+        // searchDriveMetadata() is asynchronous hence the result of an old
+        // query could be delivered at a later time.
+        if (query != this.lastQuery_)
+          return;
+        this.autocompleteList_.suggestions = suggestions;
+      }.bind(this));
+  };
+
+  /**
+   * Creates a ListItem element for autocomple.
+   * @param {Object} item An object representing a suggestion.
+   * @return {HTMLElement} Element containing the autocomplete suggestions.
+   * @private
+   */
+  FileManager.prototype.createAutocompleteListItem_ = function(item) {
+    var li = new cr.ui.ListItem();
+    li.itemInfo = item;
+    var iconType = FileType.getIcon(item.entry);
+    var icon = this.document_.createElement('div');
+    icon.className = 'detail-icon';
+    icon.setAttribute('file-type-icon', iconType);
+    var text = this.document_.createElement('div');
+    text.className = 'detail-text';
+    // highlightedBaseName is a piece of HTML with meta characters properly
+    // escaped. See the comment at fileBrowserPrivate.searchDriveMetadata().
+    text.innerHTML = item.highlightedBaseName;
+    li.appendChild(icon);
+    li.appendChild(text);
+    return li;
+  };
+
+  /**
+   * Opens the currently selected suggestion item.
+   * @private
+   */
+  FileManager.prototype.openAutocompleteSuggestion_ = function() {
+    var entry = this.autocompleteList_.selectedItem.entry;
+    // If the entry is a directory, just change the directory.
+    if (entry.isDirectory) {
+      this.onDirectoryAction(entry);
+      return;
+    }
+
+    var urls = [entry.toURL()];
+    var self = this;
+
+    // To open a file, first get the mime type.
+    this.metadataCache_.get(urls, 'drive', function(props) {
+      var mimeType = props[0].contentMimeType || '';
+      var mimeTypes = [mimeType];
+      var openIt = function() {
+        var tasks = new FileTasks(self);
+        tasks.init(urls, mimeTypes);
+        tasks.executeDefault();
+      }
+
+      // Change the current directory to the directory that contains the
+      // selected file. Note that this is necessary for an image or a video,
+      // which should be opened in the gallery mode, as the gallery mode
+      // requires the entry to be in the current directory model. For
+      // consistency, the current directory is always changed regardless of
+      // the file type.
+      entry.getParent(function(parent) {
+        var onDirectoryChanged = function(event) {
+          self.directoryModel_.removeEventListener('scan-completed',
+                                                   onDirectoryChanged);
+          self.directoryModel_.selectEntry(entry.name);
+          openIt();
+        }
+        // changeDirectory() returns immediately. We should wait until the
+        // directory scan is complete.
+        self.directoryModel_.addEventListener('scan-completed',
+                                              onDirectoryChanged);
+        self.directoryModel_.changeDirectory(
+          parent.fullPath,
+          function() {
+            // Remove the listner if the change directory failed.
+            self.directoryModel_.removeEventListener('scan-completed',
+                                                     onDirectoryChanged);
+          });
+      });
+    });
+  };
+
   FileManager.prototype.decorateSplitter = function(splitterElement) {
     var self = this;
 
@@ -2950,7 +3110,6 @@ DialogType.isModal = function(type) {
    * @private
    */
   FileManager.prototype.onBeforeUnload_ = function() {
-    this.butterBar_.forceDeleteAndHide();
     if (this.filePopup_ &&
         this.filePopup_.contentWindow &&
         this.filePopup_.contentWindow.beforeunload) {
@@ -2979,5 +3138,26 @@ DialogType.isModal = function(type) {
    */
   FileManager.prototype.getCurrentList = function() {
     return this.currentList_;
+  };
+
+  /**
+   * Retrieve the preferences of the files.app. This method caches the result
+   * and returns it unless opt_update is true.
+   * @param {function(Object.<string, *>)} callback Callback to get the
+   *     preference.
+   * @param {boolean=} opt_update If is's true, don't use the cache and
+   *     retrieve latest preference. Default is false.
+   * @private
+   */
+  FileManager.prototype.getPreferences_ = function(callback, opt_update) {
+    if (!opt_update && !this.preferences_ !== undefined) {
+      callback(this.preferences_);
+      return;
+    }
+
+    chrome.fileBrowserPrivate.getPreferences(function(prefs) {
+      this.preferences_ = prefs;
+      callback(prefs);
+    }.bind(this));
   };
 })();

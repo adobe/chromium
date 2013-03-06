@@ -22,10 +22,12 @@
 #include "ipc/ipc_channel_proxy.h"
 #include "ui/gfx/native_widget_types.h"
 
+class GrContext;
 class SkBitmap;
 struct ViewMsg_New_Params;
 
 namespace WebKit {
+class WebGraphicsContext3D;
 class WebMediaStreamCenter;
 class WebMediaStreamCenterClient;
 }
@@ -41,6 +43,10 @@ class ScopedCOMInitializer;
 #endif
 }
 
+namespace cc {
+class ContextProvider;
+}
+
 namespace IPC {
 class ForwardingMessageFilter;
 }
@@ -51,6 +57,12 @@ class AudioHardwareConfig;
 
 namespace v8 {
 class Extension;
+}
+
+namespace webkit {
+namespace gpu {
+class GrContextForWebGraphicsContext3D;
+}
 }
 
 namespace content {
@@ -173,6 +185,23 @@ class CONTENT_EXPORT RenderThreadImpl : public RenderThread,
   void DoNotSuspendWebKitSharedTimer();
   void DoNotNotifyWebKitOfModalLoop();
 
+  // True if focus changes should be send via IPC to the browser.
+  bool should_send_focus_ipcs() const {
+    return should_send_focus_ipcs_;
+  }
+  void set_should_send_focus_ipcs(bool send) {
+    should_send_focus_ipcs_ = send;
+  }
+
+  // True if RenderWidgets should report the newly requested size back to
+  // WebKit without waiting for the browser to acknowledge the size.
+  bool short_circuit_size_updates() const {
+    return short_circuit_size_updates_;
+  }
+  void set_short_circuit_size_updates(bool short_circuit) {
+    short_circuit_size_updates_ = short_circuit;
+  }
+
   IPC::ForwardingMessageFilter* compositor_output_surface_filter() const {
     return compositor_output_surface_filter_.get();
   }
@@ -197,7 +226,6 @@ class CONTENT_EXPORT RenderThreadImpl : public RenderThread,
   AudioMessageFilter* audio_message_filter() {
     return audio_message_filter_.get();
   }
-
 
 
   // Creates the embedder implementation of WebMediaStreamCenter.
@@ -244,6 +272,10 @@ class CONTENT_EXPORT RenderThreadImpl : public RenderThread,
 
   // Handle loss of the shared GpuVDAContext3D context above.
   static void OnGpuVDAContextLoss();
+
+  scoped_refptr<cc::ContextProvider> OffscreenContextProviderForMainThread();
+  scoped_refptr<cc::ContextProvider>
+      OffscreenContextProviderForCompositorThread();
 
   // AudioRendererMixerManager instance which manages renderer side mixer
   // instances shared based on configured audio parameters.  Lazily created on
@@ -323,6 +355,8 @@ class CONTENT_EXPORT RenderThreadImpl : public RenderThread,
 
   void IdleHandlerInForegroundTab();
 
+  scoped_ptr<WebGraphicsContext3DCommandBufferImpl> CreateOffscreenContext3d();
+
   // These objects live solely on the render thread.
   scoped_ptr<AppCacheDispatcher> appcache_dispatcher_;
   scoped_ptr<DomStorageDispatcher> dom_storage_dispatcher_;
@@ -373,6 +407,10 @@ class CONTENT_EXPORT RenderThreadImpl : public RenderThread,
   bool suspend_webkit_shared_timer_;
   bool notify_webkit_of_modal_loop_;
 
+  // The following flags are used to control layout test specific behavior.
+  bool should_send_focus_ipcs_;
+  bool short_circuit_size_updates_;
+
   // Timer that periodically calls IdleHandler.
   base::RepeatingTimer<RenderThreadImpl> idle_timer_;
 
@@ -385,6 +423,12 @@ class CONTENT_EXPORT RenderThreadImpl : public RenderThread,
   bool compositor_initialized_;
   scoped_ptr<CompositorThread> compositor_thread_;
   scoped_refptr<IPC::ForwardingMessageFilter> compositor_output_surface_filter_;
+
+  class RendererContextProviderCommandBuffer;
+  scoped_refptr<RendererContextProviderCommandBuffer>
+      shared_contexts_main_thread_;
+  scoped_refptr<RendererContextProviderCommandBuffer>
+      shared_contexts_compositor_thread_;
 
   ObserverList<RenderProcessObserver> observers_;
 

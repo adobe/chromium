@@ -50,7 +50,6 @@
 #include "chrome/browser/notifications/desktop_notification_service_factory.h"
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/plugins/plugin_info_message_filter.h"
-#include "chrome/browser/prefs/pref_registry_syncable.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/prerender/prerender_manager.h"
 #include "chrome/browser/prerender/prerender_manager_factory.h"
@@ -82,6 +81,7 @@
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/extensions/background_info.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_process_policy.h"
 #include "chrome/common/extensions/extension_set.h"
@@ -90,6 +90,7 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/url_constants.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/browser_child_process_host.h"
 #include "content/public/browser/browser_main_parts.h"
 #include "content/public/browser/browser_ppapi_host.h"
@@ -751,7 +752,7 @@ bool ChromeContentBrowserClient::ShouldUseProcessPerSite(
   // responsiveness.
   if (extension->GetType() == Manifest::TYPE_HOSTED_APP) {
     if (!extension->HasAPIPermission(APIPermission::kBackground) ||
-        !extension->allow_background_js_access()) {
+        !extensions::BackgroundInfo::AllowJSAccess(extension)) {
       return false;
     }
   }
@@ -875,7 +876,7 @@ bool ChromeContentBrowserClient::ShouldTryToUseExistingProcessHost(
       service->extensions()->GetExtensionOrAppByURL(ExtensionURLInfo(url));
   if (!extension)
     return false;
-  if (!extension->has_background_page())
+  if (!extensions::BackgroundInfo::HasBackgroundPage(extension))
     return false;
 
   std::set<int> process_ids;
@@ -1194,6 +1195,10 @@ void ChromeContentBrowserClient::AppendExtraCommandLineSwitches(
     command_line->CopySwitchesFrom(browser_command_line, kSwitchNames,
                                    arraysize(kSwitchNames));
   } else if (process_type == switches::kGpuProcess) {
+    base::FilePath user_data_dir =
+        browser_command_line.GetSwitchValuePath(switches::kUserDataDir);
+    if (!user_data_dir.empty())
+      command_line->AppendSwitchPath(switches::kUserDataDir, user_data_dir);
     // If --ignore-gpu-blacklist is passed in, don't send in crash reports
     // because GPU is expected to be unreliable.
     if (browser_command_line.HasSwitch(switches::kIgnoreGpuBlacklist) &&
@@ -1640,7 +1645,7 @@ bool ChromeContentBrowserClient::CanCreateWindow(
     // just the origin.
     const Extension* extension = map->extensions().GetExtensionOrAppByURL(
         ExtensionURLInfo(opener_url));
-    if (extension && !extension->allow_background_js_access())
+    if (extension && !extensions::BackgroundInfo::AllowJSAccess(extension))
       *no_javascript_access = true;
   }
   return true;

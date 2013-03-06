@@ -48,7 +48,7 @@ class Address {
   const string16& address_line_1() const { return address_line_1_; }
   const string16& address_line_2() const { return address_line_2_; }
   const string16& locality_name() const { return locality_name_; }
-  const string16& admin_area_name() const {
+  const string16& administrative_area_name() const {
     return administrative_area_name_;
   }
   const string16& postal_code_number() const { return postal_code_number_; }
@@ -70,7 +70,7 @@ class Address {
   void set_locality_name(const string16& locality_name) {
     locality_name_ = locality_name;
   }
-  void set_admin_area_name(const string16& administrative_area_name) {
+  void set_administrative_area_name(const string16& administrative_area_name) {
     administrative_area_name_ = administrative_area_name;
   }
   void set_postal_code_number(const string16& postal_code_number) {
@@ -100,14 +100,21 @@ class Address {
   string16 GetInfo(AutofillFieldType type) const;
 
   // Returns an empty scoped_ptr if input is invalid or a valid address that is
-  // selectable for Google Wallet use.
-  static scoped_ptr<Address>
-      CreateAddressWithID(const base::DictionaryValue& dictionary);
+  // selectable for Google Wallet use. Does not require "id" in |dictionary|.
+  // IDs are not required for billing addresses.
+  static scoped_ptr<Address> CreateAddress(
+      const base::DictionaryValue& dictionary);
+
+  // Returns an empty scoped_ptr if input is invalid or a valid address that is
+  // selectable for Google Wallet use. Requires "id" in |dictionary|. IDs are
+  // required for shipping addresses.
+  static scoped_ptr<Address> CreateAddressWithID(
+      const base::DictionaryValue& dictionary);
 
   // Returns an empty scoped_ptr if input in invalid or a valid address that
   // can only be used for displaying to the user.
-  static scoped_ptr<Address>
-      CreateDisplayAddress(const base::DictionaryValue& dictionary);
+  static scoped_ptr<Address> CreateDisplayAddress(
+      const base::DictionaryValue& dictionary);
 
   bool operator==(const Address& other) const;
   bool operator!=(const Address& other) const;

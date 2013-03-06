@@ -54,9 +54,7 @@
 #include "chrome/browser/extensions/test_management_policy.h"
 #include "chrome/browser/extensions/unpacked_installer.h"
 #include "chrome/browser/extensions/updater/extension_updater.h"
-#include "chrome/browser/plugins/plugin_prefs_factory.h"
 #include "chrome/browser/prefs/browser_prefs.h"
-#include "chrome/browser/prefs/pref_registry_syncable.h"
 #include "chrome/browser/prefs/pref_service_mock_builder.h"
 #include "chrome/browser/prefs/pref_service_syncable.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
@@ -65,6 +63,7 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/api/i18n/default_locale_handler.h"
+#include "chrome/common/extensions/background_info.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_l10n_util.h"
 #include "chrome/common/extensions/extension_manifest_constants.h"
@@ -75,6 +74,7 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/testing_profile.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/dom_storage_context.h"
 #include "content/public/browser/gpu_data_manager.h"
 #include "content/public/browser/indexed_db_context.h"
@@ -448,8 +448,7 @@ void ExtensionServiceTestBase::InitializeExtensionService(
       pref_file, loop_.message_loop_proxy());
   scoped_refptr<PrefRegistrySyncable> registry(new PrefRegistrySyncable);
   scoped_ptr<PrefServiceSyncable> prefs(builder.CreateSyncable(registry));
-  Profile::RegisterUserPrefs(registry);
-  chrome::RegisterUserPrefs(prefs.get(), registry);
+  chrome::RegisterUserPrefs(registry);
   profile_builder.SetPrefService(prefs.Pass());
   profile_builder.SetPath(profile_path);
   profile_ = profile_builder.Build();
@@ -546,9 +545,8 @@ void ExtensionServiceTestBase::SetUpTestCase() {
 void ExtensionServiceTestBase::SetUp() {
   testing::Test::SetUp();
   ExtensionErrorReporter::GetInstance()->ClearErrors();
-  extensions::ManifestHandler::Register(
-      keys::kDefaultLocale,
-      make_linked_ptr(new extensions::DefaultLocaleHandler));
+  (new extensions::BackgroundManifestHandler)->Register();
+  (new extensions::DefaultLocaleHandler)->Register();
 }
 
 void ExtensionServiceTestBase::TearDown() {
@@ -1192,7 +1190,7 @@ TEST_F(ExtensionServiceTest, LoadAllExtensionsFromDirectorySuccess) {
   EXPECT_EQ(std::string("My extension 2"), loaded_[1]->name());
   EXPECT_EQ(std::string(""), loaded_[1]->description());
   EXPECT_EQ(loaded_[1]->GetResourceURL("background.html"),
-            loaded_[1]->GetBackgroundURL());
+            extensions::BackgroundInfo::GetBackgroundURL(loaded_[1]));
   EXPECT_EQ(0u, loaded_[1]->content_scripts().size());
   // We don't parse the plugins section on Chrome OS.
 #if defined(OS_CHROMEOS)
@@ -2657,7 +2655,7 @@ TEST_F(ExtensionServiceTest, LoadExtensionsCanDowngrade) {
 
   EXPECT_EQ(0u, GetErrors().size());
   ASSERT_EQ(1u, loaded_.size());
-  EXPECT_EQ(Manifest::LOAD, loaded_[0]->location());
+  EXPECT_EQ(Manifest::UNPACKED, loaded_[0]->location());
   EXPECT_EQ(1u, service_->extensions()->size());
   EXPECT_EQ("2.0", loaded_[0]->VersionString());
 
@@ -2671,7 +2669,7 @@ TEST_F(ExtensionServiceTest, LoadExtensionsCanDowngrade) {
 
   EXPECT_EQ(0u, GetErrors().size());
   ASSERT_EQ(1u, loaded_.size());
-  EXPECT_EQ(Manifest::LOAD, loaded_[0]->location());
+  EXPECT_EQ(Manifest::UNPACKED, loaded_[0]->location());
   EXPECT_EQ(1u, service_->extensions()->size());
   EXPECT_EQ("1.0", loaded_[0]->VersionString());
 }
@@ -3305,11 +3303,11 @@ TEST_F(ExtensionServiceTest, ManagementPolicyProhibitsLoadFromPrefs) {
   DictionaryValue manifest;
   manifest.SetString(keys::kName, "simple_extension");
   manifest.SetString(keys::kVersion, "1");
-  // LOAD is for extensions loaded from the command line. We use it here, even
+  // UNPACKED is for extensions loaded from a directory. We use it here, even
   // though we're testing loading from prefs, so that we don't need to provide
   // an extension key.
   extensions::ExtensionInfo extension_info(&manifest, "", path,
-                                           Manifest::LOAD);
+                                           Manifest::UNPACKED);
 
   // Ensure we can load it with no management policy in place.
   management_policy_->UnregisterAllProviders();
@@ -3598,6 +3596,43 @@ TEST_F(ExtensionServiceTest, ReloadExtensions) {
   service_->ReloadExtensions();
 
   // Extension counts shouldn't change.
+  EXPECT_EQ(1u, service_->extensions()->size());
+  EXPECT_EQ(0u, service_->disabled_extensions()->size());
+}
+
+// Tests reloading an extension.
+TEST_F(ExtensionServiceTest, ReloadExtension) {
+  InitializeEmptyExtensionService();
+  InitializeExtensionProcessManager();
+
+  // Simple extension that should install without error.
+  const char* extension_id = "behllobkkfkfnphdnhnkndlbkcpglgmj";
+  base::FilePath ext = data_dir_
+      .AppendASCII("good")
+      .AppendASCII("Extensions")
+      .AppendASCII(extension_id)
+      .AppendASCII("1.0.0.0");
+  extensions::UnpackedInstaller::Create(service_)->Load(ext);
+  loop_.RunUntilIdle();
+
+  EXPECT_EQ(1u, service_->extensions()->size());
+  EXPECT_EQ(0u, service_->disabled_extensions()->size());
+
+  service_->ReloadExtension(extension_id);
+
+  // Extension should be disabled now, waiting to be reloaded.
+  EXPECT_EQ(0u, service_->extensions()->size());
+  EXPECT_EQ(1u, service_->disabled_extensions()->size());
+  EXPECT_EQ(Extension::DISABLE_RELOAD,
+            service_->extension_prefs()->GetDisableReasons(extension_id));
+
+  // Reloading again should not crash.
+  service_->ReloadExtension(extension_id);
+
+  // Finish reloading
+  loop_.RunUntilIdle();
+
+  // Extension should be enabled again.
   EXPECT_EQ(1u, service_->extensions()->size());
   EXPECT_EQ(0u, service_->disabled_extensions()->size());
 }
@@ -3996,7 +4031,7 @@ TEST_F(ExtensionServiceTest, LoadExtension) {
   loop_.RunUntilIdle();
   EXPECT_EQ(0u, GetErrors().size());
   ASSERT_EQ(1u, loaded_.size());
-  EXPECT_EQ(Manifest::LOAD, loaded_[0]->location());
+  EXPECT_EQ(Manifest::UNPACKED, loaded_[0]->location());
   EXPECT_EQ(1u, service_->extensions()->size());
 
   ValidatePrefKeyCount(1);
@@ -4033,7 +4068,7 @@ TEST_F(ExtensionServiceTest, GenerateID) {
   EXPECT_EQ(0u, GetErrors().size());
   ASSERT_EQ(1u, loaded_.size());
   ASSERT_TRUE(Extension::IdIsValid(loaded_[0]->id()));
-  EXPECT_EQ(loaded_[0]->location(), Manifest::LOAD);
+  EXPECT_EQ(loaded_[0]->location(), Manifest::UNPACKED);
 
   ValidatePrefKeyCount(1);
 

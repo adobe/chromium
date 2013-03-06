@@ -18,12 +18,13 @@ class ContactManager;
 namespace chromeos {
 
 class BrightnessObserver;
+class KioskAppLauncher;
 class MagnificationManager;
 class OutputObserver;
 class PowerButtonObserver;
 class PowerStateOverride;
 class PrimaryDisplaySwitchObserver;
-class RemovableDeviceNotificationsCros;
+class StorageMonitorCros;
 class ResumeObserver;
 class ScreenDimmingObserver;
 class ScreenLockObserver;
@@ -68,6 +69,10 @@ class ChromeBrowserMainPartsChromeos : public ChromeBrowserMainPartsLinux {
   void SetupLowMemoryHeadroomFieldTrial();
   void SetupZramFieldTrial();
 
+  // Invoked when a kiosk app launch attempt has finished. |success| indicates
+  // whether the attempt succeeds or not.
+  void KioskAppLaunchCallback(bool success);
+
   scoped_ptr<contacts::ContactManager> contact_manager_;
   scoped_ptr<BrightnessObserver> brightness_observer_;
   scoped_ptr<default_app_order::ExternalLoader> app_order_loader_;
@@ -82,14 +87,15 @@ class ChromeBrowserMainPartsChromeos : public ChromeBrowserMainPartsLinux {
   scoped_ptr<UserActivityNotifier> user_activity_notifier_;
   scoped_ptr<VideoActivityNotifier> video_activity_notifier_;
   scoped_ptr<ScreenDimmingObserver> screen_dimming_observer_;
-  scoped_refptr<RemovableDeviceNotificationsCros>
-      removable_device_notifications_;
+  scoped_refptr<StorageMonitorCros> storage_monitor_;
 
   scoped_ptr<internal::DBusServices> dbus_services_;
 
   VersionLoader cros_version_loader_;
   CancelableTaskTracker tracker_;
   bool use_new_network_change_notifier_;
+
+  scoped_ptr<KioskAppLauncher> kiosk_app_launcher_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromeBrowserMainPartsChromeos);
 };

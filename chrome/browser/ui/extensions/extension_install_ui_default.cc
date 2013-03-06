@@ -15,7 +15,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/themes/theme_service_factory.h"
-#include "chrome/browser/ui/app_list/app_list_util.h"
+#include "chrome/browser/ui/app_list/app_list_service.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/browser_finder.h"
@@ -26,7 +26,6 @@
 #include "chrome/browser/ui/simple_message_box.h"
 #include "chrome/browser/ui/singleton_tabs.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
@@ -108,9 +107,8 @@ void OnAppLauncherEnabledCompleted(const extensions::Extension* extension,
                                    SkBitmap* icon,
                                    bool use_bubble,
                                    bool use_launcher) {
-#if defined(ENABLE_APP_LIST)
   if (use_launcher) {
-    chrome::ShowAppList(browser->profile());
+    AppListService::Get()->ShowAppList(browser->profile());
 
     content::NotificationService::current()->Notify(
         chrome::NOTIFICATION_APP_INSTALLED_TO_APPLIST,
@@ -118,7 +116,6 @@ void OnAppLauncherEnabledCompleted(const extensions::Extension* extension,
         content::Details<const std::string>(&extension->id()));
     return;
   }
-#endif
 
   if (use_bubble) {
     chrome::ShowExtensionInstalledBubble(extension, browser, *icon);
@@ -175,10 +172,6 @@ void ExtensionInstallUIDefault::OnInstallSuccess(const Extension* extension,
   Browser* browser =
       chrome::FindOrCreateTabbedBrowser(current_profile,
                                         chrome::GetActiveDesktop());
-  if (browser->tab_strip_model()->count() == 0)
-    chrome::AddBlankTabAt(browser, -1, true);
-  browser->window()->Show();
-
   if (extension->is_app()) {
     bool use_bubble = false;
 
@@ -232,13 +225,17 @@ ExtensionInstallUI* ExtensionInstallUI::Create(Profile* profile) {
 void ExtensionInstallUI::OpenAppInstalledUI(Browser* browser,
                                             const std::string& app_id) {
 #if defined(OS_CHROMEOS)
-  chrome::ShowAppList(browser->profile());
+  AppListService::Get()->ShowAppList(browser->profile());
 
   content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_APP_INSTALLED_TO_APPLIST,
       content::Source<Profile>(browser->profile()),
       content::Details<const std::string>(&app_id));
 #else
+  if (browser->tab_strip_model()->count() == 0)
+    chrome::AddBlankTabAt(browser, -1, true);
+  browser->window()->Show();
+
   chrome::NavigateParams params(chrome::GetSingletonTabNavigateParams(
       browser, GURL(chrome::kChromeUINewTabURL)));
   chrome::Navigate(&params);

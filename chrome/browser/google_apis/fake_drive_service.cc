@@ -9,10 +9,10 @@
 #include "base/file_util.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
-#include "base/string_split.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_split.h"
 #include "base/strings/string_tokenizer.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/google_apis/drive_api_parser.h"
@@ -73,6 +73,7 @@ FakeDriveService::FakeDriveService()
       resource_id_count_(0),
       resource_list_load_count_(0),
       account_metadata_load_count_(0),
+      about_resource_load_count_(0),
       offline_(false) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 }
@@ -106,8 +107,8 @@ bool FakeDriveService::LoadAccountMetadataForWapi(
   account_metadata_value_ = test_util::LoadJSONFile(relative_path);
 
   // Update the largest_changestamp_.
-  scoped_ptr<AccountMetadataFeed> account_metadata =
-      AccountMetadataFeed::CreateFrom(*account_metadata_value_);
+  scoped_ptr<AccountMetadata> account_metadata =
+      AccountMetadata::CreateFrom(*account_metadata_value_);
   largest_changestamp_ = account_metadata->largest_changestamp();
 
   // Add the largest changestamp to the existing entries.
@@ -350,7 +351,7 @@ void FakeDriveService::GetAccountMetadata(
   DCHECK(!callback.is_null());
 
   if (offline_) {
-    scoped_ptr<AccountMetadataFeed> null;
+    scoped_ptr<AccountMetadata> null;
     MessageLoop::current()->PostTask(
         FROM_HERE,
         base::Bind(callback,
@@ -360,13 +361,41 @@ void FakeDriveService::GetAccountMetadata(
   }
 
   ++account_metadata_load_count_;
-  scoped_ptr<AccountMetadataFeed> account_metadata =
-      AccountMetadataFeed::CreateFrom(*account_metadata_value_);
+  scoped_ptr<AccountMetadata> account_metadata =
+      AccountMetadata::CreateFrom(*account_metadata_value_);
   MessageLoop::current()->PostTask(
       FROM_HERE,
       base::Bind(callback,
                  HTTP_SUCCESS,
                  base::Passed(&account_metadata)));
+}
+
+void FakeDriveService::GetAboutResource(
+    const GetAboutResourceCallback& callback) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK(!callback.is_null());
+
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK(!callback.is_null());
+
+  if (offline_) {
+    scoped_ptr<AboutResource> null;
+    MessageLoop::current()->PostTask(
+        FROM_HERE,
+        base::Bind(callback,
+                   GDATA_NO_CONNECTION, base::Passed(&null)));
+    return;
+  }
+
+  ++about_resource_load_count_;
+  scoped_ptr<AboutResource> about_resource(
+      AboutResource::CreateFromAccountMetadata(
+          *AccountMetadata::CreateFrom(*account_metadata_value_),
+          GetRootResourceId()));
+  MessageLoop::current()->PostTask(
+      FROM_HERE,
+      base::Bind(callback,
+                 HTTP_SUCCESS, base::Passed(&about_resource)));
 }
 
 void FakeDriveService::GetAppList(const GetAppListCallback& callback) {
@@ -934,8 +963,16 @@ void FakeDriveService::GetUploadStatus(
   DCHECK(!callback.is_null());
 }
 
-void FakeDriveService::ResumeUpload(const ResumeUploadParams& params,
-                                    const UploadRangeCallback& callback) {
+void FakeDriveService::ResumeUpload(
+      UploadMode upload_mode,
+      const base::FilePath& drive_file_path,
+      const GURL& upload_url,
+      int64 start_position,
+      int64 end_position,
+      int64 content_length,
+      const std::string& content_type,
+      const scoped_refptr<net::IOBuffer>& buf,
+      const UploadRangeCallback& callback) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(!callback.is_null());
 
@@ -946,34 +983,34 @@ void FakeDriveService::ResumeUpload(const ResumeUploadParams& params,
         FROM_HERE,
         base::Bind(callback,
                    UploadRangeResponse(GDATA_NO_CONNECTION,
-                                       params.start_position,
-                                       params.end_position),
+                                       start_position,
+                                       end_position),
                    base::Passed(&result_entry)));
     return;
   }
 
   DictionaryValue* entry = NULL;
-  entry = FindEntryByUploadUrl(params.upload_location);
+  entry = FindEntryByUploadUrl(upload_url);
   if (!entry) {
     MessageLoop::current()->PostTask(
         FROM_HERE,
         base::Bind(callback,
                    UploadRangeResponse(HTTP_NOT_FOUND,
-                                       params.start_position,
-                                       params.end_position),
+                                       start_position,
+                                       end_position),
                    base::Passed(&result_entry)));
     return;
   }
 
-  entry->SetString("docs$size.$t", base::Int64ToString(params.end_position));
+  entry->SetString("docs$size.$t", base::Int64ToString(end_position));
 
-  if (params.content_length != params.end_position) {
+  if (content_length != end_position) {
     MessageLoop::current()->PostTask(
         FROM_HERE,
         base::Bind(callback,
                    UploadRangeResponse(HTTP_RESUME_INCOMPLETE,
-                                       params.start_position,
-                                       params.end_position),
+                                       start_position,
+                                       end_position),
                     base::Passed(&result_entry)));
     return;
   }
@@ -981,15 +1018,15 @@ void FakeDriveService::ResumeUpload(const ResumeUploadParams& params,
   result_entry = ResourceEntry::CreateFrom(*entry).Pass();
 
   GDataErrorCode return_code = HTTP_SUCCESS;
-  if (params.upload_mode == UPLOAD_NEW_FILE)
+  if (upload_mode == UPLOAD_NEW_FILE)
     return_code = HTTP_CREATED;
 
   MessageLoop::current()->PostTask(
       FROM_HERE,
       base::Bind(callback,
                  UploadRangeResponse(return_code,
-                                     params.start_position,
-                                     params.end_position),
+                                     start_position,
+                                     end_position),
                  base::Passed(&result_entry)));
 }
 

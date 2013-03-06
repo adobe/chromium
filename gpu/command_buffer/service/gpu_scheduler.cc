@@ -14,6 +14,10 @@
 #include "ui/gl/gl_fence.h"
 #include "ui/gl/gl_switches.h"
 
+#if defined(OS_WIN)
+#include "base/win/windows_version.h"
+#endif
+
 using ::base::SharedMemory;
 
 namespace gpu {
@@ -132,26 +136,29 @@ void GpuScheduler::SetScheduled(bool scheduled) {
       // state, cancel the task that would reschedule it after a timeout.
       reschedule_task_factory_.InvalidateWeakPtrs();
 
-      if (!scheduled_callback_.is_null())
-        scheduled_callback_.Run();
+      if (!scheduling_changed_callback_.is_null())
+        scheduling_changed_callback_.Run(true);
     }
   } else {
-    if (unscheduled_count_ == 0) {
+    ++unscheduled_count_;
+    if (unscheduled_count_ == 1) {
       TRACE_EVENT_ASYNC_BEGIN1("gpu", "ProcessingSwap", this,
                                "GpuScheduler", this);
 #if defined(OS_WIN)
-      // When the scheduler transitions from scheduled to unscheduled, post a
-      // delayed task that it will force it back into a scheduled state after a
-      // timeout.
-      MessageLoop::current()->PostDelayedTask(
-          FROM_HERE,
-          base::Bind(&GpuScheduler::RescheduleTimeOut,
-                     reschedule_task_factory_.GetWeakPtr()),
-          base::TimeDelta::FromMilliseconds(kRescheduleTimeOutDelay));
+      if (base::win::GetVersion() < base::win::VERSION_VISTA) {
+        // When the scheduler transitions from scheduled to unscheduled, post a
+        // delayed task that it will force it back into a scheduled state after
+        // a timeout. This should only be necessary on pre-Vista.
+        MessageLoop::current()->PostDelayedTask(
+            FROM_HERE,
+            base::Bind(&GpuScheduler::RescheduleTimeOut,
+                       reschedule_task_factory_.GetWeakPtr()),
+            base::TimeDelta::FromMilliseconds(kRescheduleTimeOutDelay));
+      }
 #endif
+      if (!scheduling_changed_callback_.is_null())
+        scheduling_changed_callback_.Run(false);
     }
-
-    ++unscheduled_count_;
   }
 }
 
@@ -164,9 +171,9 @@ bool GpuScheduler::HasMoreWork() {
          (decoder_ && decoder_->ProcessPendingQueries());
 }
 
-void GpuScheduler::SetScheduledCallback(
-    const base::Closure& scheduled_callback) {
-  scheduled_callback_ = scheduled_callback;
+void GpuScheduler::SetSchedulingChangedCallback(
+    const SchedulingChangedCallback& callback) {
+  scheduling_changed_callback_ = callback;
 }
 
 Buffer GpuScheduler::GetSharedMemoryBuffer(int32 shm_id) {

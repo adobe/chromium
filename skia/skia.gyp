@@ -233,6 +233,7 @@
         'SK_ALLOW_STATIC_GLOBAL_INITIALIZERS=0',
 
         'SK_DISABLE_BLUR_ROUNDING',
+        'SK_IGNORE_SUBPIXEL_AXIS_ALIGN_FIX',
 
         # Disable this check because it is too strict for some Chromium-specific
         # subclasses of SkPixelRef. See bug: crbug.com/171776.
@@ -474,6 +475,8 @@
         [ 'OS == "mac"', {
           'defines': [
             'SK_BUILD_FOR_MAC',
+            'SK_USE_MAC_CORE_TEXT',
+#           'SK_USE_COLOR_LUMINANCE',
           ],
           'include_dirs': [
             '../third_party/skia/include/utils/mac',
@@ -490,20 +493,6 @@
             # The mac's fonthost implements the table methods natively,
             # so no need for these generic versions.
             '../third_party/skia/src/ports/SkFontHost_tables.cpp',
-          ],
-          'conditions': [
-             [ 'use_skia == 0', {
-               'sources/': [
-                 ['exclude', '/pdf/'],
-                 ['exclude', 'ext/vector_platform_device_skia\\.(cc|h)'],
-               ],
-            },
-            { # use_skia
-              'defines': [
-                'SK_USE_MAC_CORE_TEXT',
-#                'SK_USE_COLOR_LUMINANCE',
-              ],
-            }],
           ],
         }],
         [ 'OS == "win"', {

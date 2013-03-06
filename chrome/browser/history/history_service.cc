@@ -446,6 +446,25 @@ HistoryService::Handle HistoryService::QuerySegmentUsageSince(
                   from_time, max_result_count);
 }
 
+void HistoryService::IncreaseSegmentDuration(const GURL& url,
+                                             Time time,
+                                             base::TimeDelta delta) {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  ScheduleAndForget(PRIORITY_NORMAL, &HistoryBackend::IncreaseSegmentDuration,
+                    url, time, delta);
+}
+
+HistoryService::Handle HistoryService::QuerySegmentDurationSince(
+    CancelableRequestConsumerBase* consumer,
+    base::Time from_time,
+    int max_result_count,
+    const SegmentQueryCallback& callback) {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  return Schedule(PRIORITY_UI, &HistoryBackend::QuerySegmentDuration,
+                  consumer, new history::QuerySegmentUsageRequest(callback),
+                  from_time, max_result_count);
+}
+
 void HistoryService::SetOnBackendDestroyTask(const base::Closure& task) {
   DCHECK(thread_checker_.CalledOnValidThread());
   ScheduleAndForget(PRIORITY_NORMAL, &HistoryBackend::SetOnBackendDestroyTask,
@@ -1150,6 +1169,20 @@ void HistoryService::ExpireHistoryBetween(
       FROM_HERE,
       base::Bind(&HistoryBackend::ExpireHistoryBetween,
                  history_backend_, restrict_urls, begin_time, end_time),
+      callback);
+}
+
+void HistoryService::ExpireHistory(
+    const std::vector<history::ExpireHistoryArgs>& expire_list,
+    const base::Closure& callback,
+    CancelableTaskTracker* tracker) {
+  DCHECK(thread_);
+  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK(history_backend_.get());
+  tracker->PostTaskAndReply(
+      thread_->message_loop_proxy(),
+      FROM_HERE,
+      base::Bind(&HistoryBackend::ExpireHistory, history_backend_, expire_list),
       callback);
 }
 

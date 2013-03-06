@@ -188,7 +188,9 @@ class CONTENT_EXPORT WebContentsDelegate {
                                  bool* proceed_to_fire_unload);
 
   // Returns true if the location bar should be focused by default rather than
-  // the page contents.
+  // the page contents. NOTE: this is only used if WebContents can't determine
+  // for itself whether the location bar should be focused by default. For a
+  // complete check, you should use WebContents::FocusLocationBarByDefault().
   virtual bool ShouldFocusLocationBarByDefault(WebContents* source);
 
   // Sets focus to the location bar or some other place that is appropriate.
@@ -221,9 +223,6 @@ class CONTENT_EXPORT WebContentsDelegate {
   virtual bool CanDownload(RenderViewHost* render_view_host,
                            int request_id,
                            const std::string& request_method);
-
-  // Notifies the delegate that a download is starting.
-  virtual void OnStartDownload(WebContents* source, DownloadItem* download) {}
 
   // Return much extra vertical space should be allotted to the
   // render view widget during various animations (e.g. infobar closing).

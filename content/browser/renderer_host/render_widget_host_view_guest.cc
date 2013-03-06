@@ -3,15 +3,16 @@
 // found in the LICENSE file.
 
 #include "base/bind_helpers.h"
+#include "base/command_line.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "content/browser/browser_plugin/browser_plugin_guest.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/renderer_host/render_widget_host_view_guest.h"
-#include "content/browser/web_contents/web_contents_impl.h"
-#include "content/common/browser_plugin_messages.h"
+#include "content/common/browser_plugin/browser_plugin_messages.h"
 #include "content/common/gpu/gpu_messages.h"
 #include "content/common/view_messages.h"
+#include "content/public/common/content_switches.h"
 #include "skia/ext/platform_canvas.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebScreenInfo.h"
 #include "webkit/plugins/npapi/webplugin.h"
@@ -21,14 +22,15 @@ namespace content {
 RenderWidgetHostViewGuest::RenderWidgetHostViewGuest(
     RenderWidgetHost* widget_host,
     BrowserPluginGuest* guest,
-    bool enable_compositing,
     RenderWidgetHostView* platform_view)
     : host_(RenderWidgetHostImpl::From(widget_host)),
       guest_(guest),
-      enable_compositing_(enable_compositing),
       is_hidden_(false),
       platform_view_(static_cast<RenderWidgetHostViewPort*>(platform_view)) {
   host_->SetView(this);
+
+  enable_compositing_ = CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kEnableBrowserPluginCompositing);
 }
 
 RenderWidgetHostViewGuest::~RenderWidgetHostViewGuest() {
@@ -108,7 +110,6 @@ void RenderWidgetHostViewGuest::AcceleratedSurfaceBuffersSwapped(
   if (enable_compositing_) {
     guest_->SendMessageToEmbedder(
         new BrowserPluginMsg_BuffersSwapped(
-            guest_->embedder_routing_id(),
             guest_->instance_id(),
             params.size,
             params.mailbox_name,
@@ -124,7 +125,6 @@ void RenderWidgetHostViewGuest::AcceleratedSurfacePostSubBuffer(
   if (enable_compositing_) {
     guest_->SendMessageToEmbedder(
         new BrowserPluginMsg_BuffersSwapped(
-            guest_->embedder_routing_id(),
             guest_->instance_id(),
             params.surface_size,
             params.mailbox_name,
@@ -159,18 +159,15 @@ void RenderWidgetHostViewGuest::InitAsFullscreen(
 }
 
 gfx::NativeView RenderWidgetHostViewGuest::GetNativeView() const {
-  return guest_->embedder_web_contents()->GetRenderWidgetHostView()->
-      GetNativeView();
+  return guest_->GetEmbedderRenderWidgetHostView()->GetNativeView();
 }
 
 gfx::NativeViewId RenderWidgetHostViewGuest::GetNativeViewId() const {
-  return guest_->embedder_web_contents()->GetRenderWidgetHostView()->
-      GetNativeViewId();
+  return guest_->GetEmbedderRenderWidgetHostView()->GetNativeViewId();
 }
 
 gfx::NativeViewAccessible RenderWidgetHostViewGuest::GetNativeViewAccessible() {
-  return guest_->embedder_web_contents()->GetRenderWidgetHostView()->
-      GetNativeViewAccessible();
+  return guest_->GetEmbedderRenderWidgetHostView()->GetNativeViewAccessible();
 }
 
 void RenderWidgetHostViewGuest::MovePluginWindows(
@@ -369,11 +366,11 @@ void RenderWidgetHostViewGuest::ShowDisambiguationPopup(
 }
 
 void RenderWidgetHostViewGuest::UpdateFrameInfo(
-    const gfx::Vector2d& scroll_offset,
+    const gfx::Vector2dF& scroll_offset,
     float page_scale_factor,
-    float min_page_scale_factor,
-    float max_page_scale_factor,
-    const gfx::Size& content_size,
+    const gfx::Vector2dF& page_scale_factor_limits,
+    const gfx::SizeF& content_size,
+    const gfx::SizeF& viewport_size,
     const gfx::Vector2dF& controls_offset,
     const gfx::Vector2dF& content_offset) {
 }

@@ -117,6 +117,7 @@ class CONTENT_EXPORT RenderWidget
   virtual bool Send(IPC::Message* msg) OVERRIDE;
 
   // WebKit::WebWidgetClient
+  virtual void suppressCompositorScheduling(bool enable);
   virtual void willBeginCompositorFrame();
   virtual void didInvalidateRect(const WebKit::WebRect&);
   virtual void didScrollRect(int dx, int dy,
@@ -179,7 +180,8 @@ class CONTENT_EXPORT RenderWidget
 
   // Directs the host to begin a smooth scroll. This scroll should have the same
   // performance characteristics as a user-initiated scroll. Returns an ID of
-  // the scroll gesture.
+  // the scroll gesture. |mouse_event_x| and |mouse_event_y| are expected to be
+  // in local DIP coordinates.
   void BeginSmoothScroll(bool scroll_down,
                          const SmoothScrollCompletionCallback& callback,
                          int pixels_to_scroll,
@@ -268,6 +270,7 @@ class CONTENT_EXPORT RenderWidget
 
   // Resizes the render widget.
   void Resize(const gfx::Size& new_size,
+              const gfx::Size& physical_backing_size,
               const gfx::Rect& resizer_rect,
               bool is_fullscreen,
               ResizeAck resize_ack);
@@ -276,6 +279,7 @@ class CONTENT_EXPORT RenderWidget
   void OnClose();
   void OnCreatingNewAck();
   virtual void OnResize(const gfx::Size& new_size,
+                        const gfx::Size& physical_backing_size,
                         const gfx::Rect& resizer_rect,
                         bool is_fullscreen);
   void OnChangeResizeRect(const gfx::Rect& resizer_rect);
@@ -311,7 +315,10 @@ class CONTENT_EXPORT RenderWidget
                            const gfx::Rect& window_screen_rect);
 #if defined(OS_ANDROID)
   void OnImeBatchStateChanged(bool is_begin);
+  void OnShowImeIfNeeded();
 #endif
+
+  void AutoResizeCompositor();
 
   virtual void SetDeviceScaleFactor(float device_scale_factor);
 
@@ -498,6 +505,9 @@ class CONTENT_EXPORT RenderWidget
   TransportDIB* current_paint_buf_;
 
   PaintAggregator paint_aggregator_;
+
+  // The size of the view's backing surface in non-DPI-adjusted pixels.
+  gfx::Size physical_backing_size_;
 
   // The area that must be reserved for drawing the resize corner.
   gfx::Rect resizer_rect_;

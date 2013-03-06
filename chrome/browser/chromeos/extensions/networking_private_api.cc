@@ -4,7 +4,10 @@
 
 #include "chrome/browser/chromeos/extensions/networking_private_api.h"
 
+#include "base/bind.h"
 #include "base/bind_helpers.h"
+#include "base/callback.h"
+#include "chrome/browser/chromeos/net/managed_network_configuration_handler.h"
 #include "chrome/browser/extensions/extension_function_registry.h"
 #include "chrome/common/extensions/api/networking_private.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
@@ -25,17 +28,10 @@ namespace {
 // An error returned when no valid services were found.
 const char kInvalidResponseError[] = "Error.invalidResponse";
 
-// This creates a new ONC dictionary that only contains the information we're
-// interested in passing on to JavaScript.
+// Filters from the given ONC dictionary the information we're interested in
+// before passing it to JavaScript.
 scoped_ptr<api::NetworkProperties> CreateFilteredResult(
-    const base::DictionaryValue& properties) {
-  scoped_ptr<base::DictionaryValue> onc_properties(
-      onc::TranslateShillServiceToONCPart(
-          properties,
-          &onc::kNetworkConfigurationSignature));
-
-  // Now we filter it so we only include properties that we care about for this
-  // interface.
+    const base::DictionaryValue& onc_dictionary) {
   static const char* const desired_fields[] = {
       onc::network_config::kWiFi,
       onc::network_config::kName,
@@ -47,10 +43,12 @@ scoped_ptr<api::NetworkProperties> CreateFilteredResult(
   scoped_ptr<api::NetworkProperties> filtered_result(
       new api::NetworkProperties);
   for (size_t i = 0; i < arraysize(desired_fields); ++i) {
-    base::Value* value;
-    if (onc_properties->Get(desired_fields[i], &value))
-      filtered_result->additional_properties.Set(desired_fields[i],
-                                                 value->DeepCopy());
+    const base::Value* value;
+    if (onc_dictionary.GetWithoutPathExpansion(desired_fields[i], &value)) {
+      filtered_result->additional_properties.SetWithoutPathExpansion(
+          desired_fields[i],
+          value->DeepCopy());
+    }
   }
 
   return filtered_result.Pass();
@@ -141,8 +139,13 @@ void ResultList::ServicePropertiesCallback(
     DBusMethodCallStatus call_status,
     const base::DictionaryValue& result) {
   if (call_status == DBUS_METHOD_CALL_SUCCESS) {
+    scoped_ptr<base::DictionaryValue> onc_properties(
+        onc::TranslateShillServiceToONCPart(
+            result,
+            &onc::kNetworkWithStateSignature));
+
     scoped_ptr<api::NetworkProperties> filtered_result(
-        CreateFilteredResult(result));
+        CreateFilteredResult(*onc_properties));
 
     std::string onc_type;
     if (filtered_result->additional_properties.GetString(
@@ -155,7 +158,7 @@ void ResultList::ServicePropertiesCallback(
       // this line so that we're sending back the actual GUID. The
       // JavaScript shouldn't care: this ID is opaque to it, and it
       // shouldn't store it anywhere.
-      filtered_result->additional_properties.SetString(
+      filtered_result->additional_properties.SetStringWithoutPathExpansion(
           onc::network_config::kGUID, service_path);
 
       Append(filtered_result.release());
@@ -176,23 +179,54 @@ bool NetworkingPrivateGetPropertiesFunction::RunImpl() {
   scoped_ptr<api::GetProperties::Params> params =
       api::GetProperties::Params::Create(*args_);
   EXTENSION_FUNCTION_VALIDATE(params);
-
-  // TODO(gspencer): Currently we're using the service path as the
-  // |network_guid|. Eventually this should be using the real GUID.
-  DBusThreadManager::Get()->GetShillServiceClient()->GetProperties(
-      dbus::ObjectPath(params->network_guid),
-      base::Bind(&NetworkingPrivateGetPropertiesFunction::ResultCallback,
-                 this));
+  if (ManagedNetworkConfigurationHandler::IsInitialized()) {
+    ManagedNetworkConfigurationHandler::Get()->GetProperties(
+        params->network_guid,
+        base::Bind(
+            &NetworkingPrivateGetPropertiesFunction::GetPropertiesSuccess,
+            this),
+        base::Bind(&NetworkingPrivateGetPropertiesFunction::GetPropertiesFailed,
+                   this));
+  } else {
+    // TODO(gspencer): Currently we're using the service path as the
+    // |network_guid|. Eventually this should be using the real GUID.
+    DBusThreadManager::Get()->GetShillServiceClient()->GetProperties(
+        dbus::ObjectPath(params->network_guid),
+        base::Bind(&NetworkingPrivateGetPropertiesFunction::ResultCallback,
+                   this,
+                   params->network_guid));
+  }
   return true;
 }
 
 void NetworkingPrivateGetPropertiesFunction::ResultCallback(
+    const std::string& service_path,
     DBusMethodCallStatus call_status,
     const base::DictionaryValue& result) {
+  scoped_ptr<base::DictionaryValue> onc_properties(
+      onc::TranslateShillServiceToONCPart(
+          result,
+          &onc::kNetworkWithStateSignature));
+  GetPropertiesSuccess(service_path,
+                       *onc_properties);
+}
+
+void NetworkingPrivateGetPropertiesFunction::GetPropertiesSuccess(
+    const std::string& service_path,
+    const base::DictionaryValue& dictionary) {
   scoped_ptr<api::NetworkProperties> filtered_result(
-      CreateFilteredResult(result));
+      CreateFilteredResult(dictionary));
+  filtered_result->additional_properties.SetStringWithoutPathExpansion(
+      onc::network_config::kGUID, service_path);
   results_ = api::GetProperties::Results::Create(*filtered_result);
   SendResponse(true);
+}
+
+void NetworkingPrivateGetPropertiesFunction::GetPropertiesFailed(
+    const std::string& error_name,
+    scoped_ptr<base::DictionaryValue> error_data) {
+  error_ = error_name;
+  SendResponse(false);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -342,18 +376,19 @@ void NetworkingPrivateVerifyDestinationFunction::ErrorCallback(
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// NetworkingPrivateVerifyAndSignCredentialsFunction
+// NetworkingPrivateVerifyAndEncryptCredentialsFunction
 
-NetworkingPrivateVerifyAndSignCredentialsFunction::
-  ~NetworkingPrivateVerifyAndSignCredentialsFunction() {
+NetworkingPrivateVerifyAndEncryptCredentialsFunction::
+  ~NetworkingPrivateVerifyAndEncryptCredentialsFunction() {
 }
 
-bool NetworkingPrivateVerifyAndSignCredentialsFunction::RunImpl() {
-  scoped_ptr<api::VerifyAndSignCredentials::Params> params =
-      api::VerifyAndSignCredentials::Params::Create(*args_);
+bool NetworkingPrivateVerifyAndEncryptCredentialsFunction::RunImpl() {
+  scoped_ptr<api::VerifyAndEncryptCredentials::Params> params =
+      api::VerifyAndEncryptCredentials::Params::Create(*args_);
   EXTENSION_FUNCTION_VALIDATE(params);
-
-  DBusThreadManager::Get()->GetShillManagerClient()->VerifyAndSignCredentials(
+  ShillManagerClient* shill_manager_client =
+      DBusThreadManager::Get()->GetShillManagerClient();
+  shill_manager_client->VerifyAndEncryptCredentials(
       params->properties.certificate,
       params->properties.public_key,
       params->properties.nonce,
@@ -361,39 +396,39 @@ bool NetworkingPrivateVerifyAndSignCredentialsFunction::RunImpl() {
       params->properties.device_serial,
       params->guid,
       base::Bind(
-          &NetworkingPrivateVerifyAndSignCredentialsFunction::ResultCallback,
+          &NetworkingPrivateVerifyAndEncryptCredentialsFunction::ResultCallback,
           this),
       base::Bind(
-          &NetworkingPrivateVerifyAndSignCredentialsFunction::ErrorCallback,
+          &NetworkingPrivateVerifyAndEncryptCredentialsFunction::ErrorCallback,
           this));
   return true;
 }
 
-void NetworkingPrivateVerifyAndSignCredentialsFunction::ResultCallback(
+void NetworkingPrivateVerifyAndEncryptCredentialsFunction::ResultCallback(
     const std::string& result) {
-  results_ = api::VerifyAndSignCredentials::Results::Create(result);
+  results_ = api::VerifyAndEncryptCredentials::Results::Create(result);
   SendResponse(true);
 }
 
-void NetworkingPrivateVerifyAndSignCredentialsFunction::ErrorCallback(
+void NetworkingPrivateVerifyAndEncryptCredentialsFunction::ErrorCallback(
     const std::string& error_name, const std::string& error) {
   error_ = error_name;
   SendResponse(false);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// NetworkingPrivateVerifyAndSignDataFunction
+// NetworkingPrivateVerifyAndEncryptDataFunction
 
-NetworkingPrivateVerifyAndSignDataFunction::
-  ~NetworkingPrivateVerifyAndSignDataFunction() {
+NetworkingPrivateVerifyAndEncryptDataFunction::
+  ~NetworkingPrivateVerifyAndEncryptDataFunction() {
 }
 
-bool NetworkingPrivateVerifyAndSignDataFunction::RunImpl() {
-  scoped_ptr<api::VerifyAndSignData::Params> params =
-      api::VerifyAndSignData::Params::Create(*args_);
+bool NetworkingPrivateVerifyAndEncryptDataFunction::RunImpl() {
+  scoped_ptr<api::VerifyAndEncryptData::Params> params =
+      api::VerifyAndEncryptData::Params::Create(*args_);
   EXTENSION_FUNCTION_VALIDATE(params);
 
-  DBusThreadManager::Get()->GetShillManagerClient()->VerifyAndSignData(
+  DBusThreadManager::Get()->GetShillManagerClient()->VerifyAndEncryptData(
       params->properties.certificate,
       params->properties.public_key,
       params->properties.nonce,
@@ -401,21 +436,21 @@ bool NetworkingPrivateVerifyAndSignDataFunction::RunImpl() {
       params->properties.device_serial,
       params->data,
       base::Bind(
-          &NetworkingPrivateVerifyAndSignDataFunction::ResultCallback,
+          &NetworkingPrivateVerifyAndEncryptDataFunction::ResultCallback,
           this),
       base::Bind(
-          &NetworkingPrivateVerifyAndSignDataFunction::ErrorCallback,
+          &NetworkingPrivateVerifyAndEncryptDataFunction::ErrorCallback,
           this));
   return true;
 }
 
-void NetworkingPrivateVerifyAndSignDataFunction::ResultCallback(
+void NetworkingPrivateVerifyAndEncryptDataFunction::ResultCallback(
     const std::string& result) {
-  results_ = api::VerifyAndSignData::Results::Create(result);
+  results_ = api::VerifyAndEncryptData::Results::Create(result);
   SendResponse(true);
 }
 
-void NetworkingPrivateVerifyAndSignDataFunction::ErrorCallback(
+void NetworkingPrivateVerifyAndEncryptDataFunction::ErrorCallback(
     const std::string& error_name, const std::string& error) {
   error_ = error_name;
   SendResponse(false);

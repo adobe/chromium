@@ -12,6 +12,10 @@
 #include "content/test/content_browser_test_utils.h"
 #include "net/test/test_server.h"
 
+#if defined(OS_WIN)
+#include "base/win/windows_version.h"
+#endif
+
 namespace content {
 
 class WebrtcBrowserTest: public ContentBrowserTest {
@@ -87,8 +91,10 @@ IN_PROC_BROWSER_TEST_F(WebrtcBrowserTest, MANUAL_CanSetupCallAndSendDtmf) {
       ExecuteJavascript("callAndSendDtmf('123,abc');"));
 }
 
+// This test is flaky on Win XP, Win7 and Linux Precise. Disabling on all just
+// in case.
 IN_PROC_BROWSER_TEST_F(WebrtcBrowserTest,
-                       CanMakeEmptyCallThenAddStreamsAndRenegotiate) {
+                       DISABLED_CanMakeEmptyCallThenAddStreamsAndRenegotiate) {
   GURL url(test_server()->GetURL("files/media/peerconnection-call.html"));
   NavigateToURL(shell(), url);
 

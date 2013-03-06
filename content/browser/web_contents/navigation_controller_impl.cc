@@ -301,10 +301,7 @@ void NavigationControllerImpl::ReloadInternal(bool check_for_repost,
     // The user is asking to reload a page with POST data. Prompt to make sure
     // they really want to do this. If they do, the dialog will call us back
     // with check_for_repost = false.
-    NotificationService::current()->Notify(
-        NOTIFICATION_REPOST_WARNING_SHOWN,
-        Source<NavigationController>(this),
-        NotificationService::NoDetails());
+    web_contents_->NotifyBeforeFormRepostWarningShow();
 
     pending_reload_ = reload_type;
     web_contents_->Activate();
@@ -479,8 +476,8 @@ int NavigationControllerImpl::GetIndexForOffset(int offset) const {
 }
 
 void NavigationControllerImpl::TakeScreenshot() {
-  static bool overscroll_enabled = CommandLine::ForCurrentProcess()->
-      HasSwitch(switches::kEnableOverscrollHistoryNavigation);
+  static bool overscroll_enabled = !CommandLine::ForCurrentProcess()->
+      HasSwitch(switches::kDisableOverscrollHistoryNavigation);
   if (!overscroll_enabled)
     return;
 
@@ -1088,10 +1085,12 @@ void NavigationControllerImpl::RendererDidNavigateToNewPage(
    const ViewHostMsg_FrameNavigate_Params& params, bool replace_entry) {
   NavigationEntryImpl* new_entry;
   bool update_virtual_url;
-  if (pending_entry_) {
-    // TODO(brettw) this assumes that the pending entry is appropriate for the
-    // new page that was just loaded. I don't think this is necessarily the
-    // case! We should have some more tracking to know for sure.
+  // Only make a copy of the pending entry if it is appropriate for the new page
+  // that was just loaded.  We verify this at a coarse grain by checking that
+  // the SiteInstance hasn't been assigned to something else.
+  if (pending_entry_ &&
+      (!pending_entry_->site_instance() ||
+       pending_entry_->site_instance() == web_contents_->GetSiteInstance())) {
     new_entry = new NavigationEntryImpl(*pending_entry_);
 
     // Don't use the page type from the pending entry. Some interstitial page
@@ -1356,7 +1355,7 @@ void NavigationControllerImpl::CopyStateFromAndPrune(
       (!pending_entry_ && last_committed_entry_index_ == GetEntryCount() - 1));
 
   // Remove all the entries leaving the active entry.
-  PruneAllButActive();
+  PruneAllButActiveInternal();
 
   // We now have zero or one entries.  Ensure that adding the entries from
   // source won't put us over the limit.
@@ -1404,6 +1403,26 @@ void NavigationControllerImpl::CopyStateFromAndPrune(
 }
 
 void NavigationControllerImpl::PruneAllButActive() {
+  PruneAllButActiveInternal();
+
+  // If there is an entry left, we need to update the session history length of
+  // the RenderView.
+  if (!GetEntryCount())
+    return;
+
+  NavigationEntryImpl* entry =
+      NavigationEntryImpl::FromNavigationEntry(GetActiveEntry());
+  CHECK(entry);
+  // We pass 0 instead of GetEntryCount() for the history_length parameter of
+  // SetHistoryLengthAndPrune, because it will create history_length additional
+  // history entries.
+  // TODO(jochen): This API is confusing and we should clean it up.
+  // http://crbug.com/178491
+  web_contents_->SetHistoryLengthAndPrune(
+      entry->site_instance(), 0, entry->GetPageID());
+}
+
+void NavigationControllerImpl::PruneAllButActiveInternal() {
   if (transient_entry_index_ != -1) {
     // There is a transient entry. Prune up to it.
     DCHECK_EQ(GetEntryCount() - 1, transient_entry_index_);

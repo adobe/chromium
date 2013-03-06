@@ -21,12 +21,17 @@ class CC_EXPORT PicturePile : public PicturePileBase {
   // Invalidations are in layer space.
   void Update(
       ContentLayerClient* painter,
+      SkColor background_color,
       const Region& invalidation,
       gfx::Rect visible_layer_rect,
       RenderingStats* stats);
 
   // Update other with a shallow copy of this (main => compositor thread commit)
   void PushPropertiesTo(PicturePileImpl* other);
+
+  void set_num_raster_threads(int num_raster_threads) {
+    num_raster_threads_ = num_raster_threads;
+  }
 
  private:
   virtual ~PicturePile();
@@ -37,6 +42,8 @@ class CC_EXPORT PicturePile : public PicturePileBase {
   void InvalidateRect(
       PictureList& picture_list,
       gfx::Rect invalidation);
+
+  int num_raster_threads_;
 
   DISALLOW_COPY_AND_ASSIGN(PicturePile);
 };

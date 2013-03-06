@@ -35,6 +35,8 @@
 #include "chrome/browser/sessions/session_service_factory.h"
 #include "chrome/browser/sessions/tab_restore_service.h"
 #include "chrome/browser/sessions/tab_restore_service_factory.h"
+#include "chrome/browser/signin/signin_manager.h"
+#include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/sync_ui_util.h"
 #include "chrome/browser/ui/browser.h"
@@ -365,8 +367,10 @@ void RecordLastRunAppBundlePath() {
 }
 
 - (void)didEndMainMessageLoop {
-  DCHECK_EQ(0u, chrome::GetBrowserCount([self lastProfile]));
-  if (!chrome::GetBrowserCount([self lastProfile])) {
+  DCHECK_EQ(0u, chrome::GetBrowserCount([self lastProfile],
+                                        chrome::HOST_DESKTOP_TYPE_NATIVE));
+  if (!chrome::GetBrowserCount([self lastProfile],
+                               chrome::HOST_DESKTOP_TYPE_NATIVE)) {
     // As we're shutting down, we need to nuke the TabRestoreService, which
     // will start the shutdown of the NavigationControllers and allow for
     // proper shutdown. If we don't do this, Chrome won't shut down cleanly,
@@ -783,7 +787,10 @@ void RecordLastRunAppBundlePath() {
                 << "NULL lastProfile detected -- not doing anything";
             break;
           }
-          enable = ![self keyWindowIsModal];
+          SigninManager* signin = SigninManagerFactory::GetForProfile(
+              lastProfile->GetOriginalProfile());
+          enable = signin->IsSigninAllowed() &&
+              ![self keyWindowIsModal];
           [BrowserWindowController updateSigninItem:item
                                          shouldShow:enable
                                      currentProfile:lastProfile];
@@ -912,7 +919,7 @@ void RecordLastRunAppBundlePath() {
       break;
     case IDC_MANAGE_EXTENSIONS:
       if (Browser* browser = ActivateBrowser(lastProfile))
-        chrome::ShowExtensions(browser);
+        chrome::ShowExtensions(browser, std::string());
       else
         chrome::OpenExtensionsWindow(lastProfile);
       break;

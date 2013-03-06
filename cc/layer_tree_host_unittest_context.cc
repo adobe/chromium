@@ -6,8 +6,6 @@
 
 #include "base/basictypes.h"
 #include "cc/content_layer.h"
-#include "cc/delegated_renderer_layer.h"
-#include "cc/delegated_renderer_layer_impl.h"
 #include "cc/heads_up_display_layer.h"
 #include "cc/io_surface_layer.h"
 #include "cc/layer_impl.h"
@@ -20,6 +18,8 @@
 #include "cc/test/fake_content_layer_client.h"
 #include "cc/test/fake_content_layer_impl.h"
 #include "cc/test/fake_context_provider.h"
+#include "cc/test/fake_delegated_renderer_layer.h"
+#include "cc/test/fake_delegated_renderer_layer_impl.h"
 #include "cc/test/fake_output_surface.h"
 #include "cc/test/fake_scrollbar_layer.h"
 #include "cc/test/fake_scrollbar_theme_painter.h"
@@ -892,8 +892,8 @@ class LayerTreeHostContextTestDontUseLostResources :
     root_->setAnchorPoint(gfx::PointF());
     root_->setIsDrawable(true);
 
-    scoped_refptr<DelegatedRendererLayer> delegated_ =
-        DelegatedRendererLayer::Create();
+    scoped_refptr<FakeDelegatedRendererLayer> delegated_ =
+        FakeDelegatedRendererLayer::Create();
     delegated_->setBounds(gfx::Size(10, 10));
     delegated_->setAnchorPoint(gfx::PointF());
     delegated_->setIsDrawable(true);
@@ -952,14 +952,9 @@ class LayerTreeHostContextTestDontUseLostResources :
     io_surface_->setIOSurfaceProperties(1, gfx::Size(10, 10));
     root_->addChild(io_surface_);
 
-    scoped_refptr<HeadsUpDisplayLayer> hud_ = HeadsUpDisplayLayer::create();
-    hud_->setBounds(gfx::Size(10, 10));
-    hud_->setAnchorPoint(gfx::PointF());
-    hud_->setIsDrawable(true);
-    root_->addChild(hud_);
     // Enable the hud.
     LayerTreeDebugState debug_state;
-    debug_state.showFPSCounter = true;
+    debug_state.showPropertyChangedRects = true;
     m_layerTreeHost->setDebugState(debug_state);
 
     bool paint_scrollbar = true;
@@ -1013,10 +1008,10 @@ class LayerTreeHostContextTestDontUseLostResources :
       pass_list.push_back(pass.PassAs<RenderPass>());
 
       // First child is the delegated layer.
-      DelegatedRendererLayerImpl* delegated_impl =
-          static_cast<DelegatedRendererLayerImpl*>(
+      FakeDelegatedRendererLayerImpl* delegated_impl =
+          static_cast<FakeDelegatedRendererLayerImpl*>(
               host_impl->rootLayer()->children()[0]);
-      delegated_impl->SetRenderPasses(pass_list);
+      delegated_impl->SetFrameDataForRenderPasses(&pass_list);
       EXPECT_TRUE(pass_list.empty());
 
       color_video_frame_ = VideoFrame::CreateColorFrame(
@@ -1065,9 +1060,12 @@ class LayerTreeHostContextTestDontUseLostResources :
   }
 
   virtual void didCommitAndDrawFrame() OVERRIDE {
+    ASSERT_TRUE(m_layerTreeHost->hudLayer());
     // End the test once we know the 3nd frame drew.
     if (m_layerTreeHost->commitNumber() == 4)
       endTest();
+    else
+      m_layerTreeHost->setNeedsCommit();
   }
 
   virtual void afterTest() OVERRIDE {}
@@ -1085,7 +1083,6 @@ class LayerTreeHostContextTestDontUseLostResources :
   scoped_refptr<VideoLayer> video_hw_;
   scoped_refptr<VideoLayer> video_scaled_hw_;
   scoped_refptr<IOSurfaceLayer> io_surface_;
-  scoped_refptr<HeadsUpDisplayLayer> hud_;
   scoped_refptr<ScrollbarLayer> scrollbar_;
 
   scoped_refptr<VideoFrame> color_video_frame_;

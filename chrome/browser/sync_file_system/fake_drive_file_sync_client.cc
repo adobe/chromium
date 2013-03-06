@@ -12,6 +12,24 @@
 
 namespace sync_file_system {
 
+bool FakeDriveFileSyncClient::RemoteResourceComparator::operator()(
+    const RemoteResource& left,
+    const RemoteResource& right) {
+  if (left.parent_resource_id != right.parent_resource_id)
+    return left.parent_resource_id < right.parent_resource_id;
+  if (left.parent_title != right.parent_title)
+    return left.parent_title < right.parent_title;
+  if (left.title != right.title)
+    return left.title < right.title;
+  if (left.resource_id != right.resource_id)
+    return left.resource_id < right.resource_id;
+  if (left.md5_checksum != right.md5_checksum)
+    return left.md5_checksum < right.md5_checksum;
+  if (left.deleted != right.deleted)
+    return left.deleted < right.deleted;
+  return left.changestamp < right.changestamp;
+}
+
 struct FakeDriveFileSyncClient::ChangeStampComparator {
   bool operator()(const google_apis::ResourceEntry* left,
                   const google_apis::ResourceEntry* right) {
@@ -26,12 +44,14 @@ FakeDriveFileSyncClient::RemoteResource::RemoteResource()
 
 FakeDriveFileSyncClient::RemoteResource::RemoteResource(
     const std::string& parent_resource_id,
+    const std::string& parent_title,
     const std::string& title,
     const std::string& resource_id,
     const std::string& md5_checksum,
     bool deleted,
     int64 changestamp)
     : parent_resource_id(parent_resource_id),
+      parent_title(parent_title),
       title(title),
       resource_id(resource_id),
       md5_checksum(md5_checksum),
@@ -104,8 +124,8 @@ void FakeDriveFileSyncClient::ListChanges(
 
   ScopedVector<google_apis::ResourceEntry> entries;
   typedef RemoteResourceByResourceId::const_iterator iterator;
-  for (iterator itr = remote_resource_.begin();
-       itr != remote_resource_.end(); ++itr) {
+  for (iterator itr = remote_resources_.begin();
+       itr != remote_resources_.end(); ++itr) {
     if (itr->second.changestamp < start_changestamp)
       continue;
     scoped_ptr<google_apis::ResourceEntry> entry(
@@ -137,11 +157,11 @@ void FakeDriveFileSyncClient::DownloadFile(
     const base::FilePath& local_file_path,
     const DownloadFileCallback& callback) {
   RemoteResourceByResourceId::iterator found =
-      remote_resource_.find(resource_id);
+      remote_resources_.find(resource_id);
   std::string file_md5;
   google_apis::GDataErrorCode error = google_apis::HTTP_NOT_FOUND;
 
-  if (found != remote_resource_.end() && !found->second.deleted) {
+  if (found != remote_resources_.end() && !found->second.deleted) {
     scoped_ptr<google_apis::ResourceEntry> entry(
         CreateResourceEntry(found->second));
     file_md5 = entry->file_md5();
@@ -177,7 +197,21 @@ void FakeDriveFileSyncClient::DeleteFile(
     const std::string& resource_id,
     const std::string& remote_file_md5,
     const GDataErrorCallback& callback) {
-  NOTREACHED();
+  google_apis::GDataErrorCode error = google_apis::HTTP_NOT_FOUND;
+  DCHECK(ContainsKey(remote_resources_, resource_id));
+
+  const RemoteResource& deleted_directory = remote_resources_[resource_id];
+  PushRemoteChange(deleted_directory.parent_resource_id,
+                   deleted_directory.parent_title,
+                   deleted_directory.title,
+                   deleted_directory.resource_id,
+                   deleted_directory.md5_checksum,
+                   true /* deleted */);
+
+  error = google_apis::HTTP_SUCCESS;
+  base::MessageLoopProxy::current()->PostTask(
+      FROM_HERE,
+      base::Bind(callback, error));
 }
 
 GURL FakeDriveFileSyncClient::ResourceIdToResourceLink(
@@ -185,14 +219,20 @@ GURL FakeDriveFileSyncClient::ResourceIdToResourceLink(
   return url_generator_.GenerateContentUrl(resource_id);
 }
 
+void FakeDriveFileSyncClient::EnsureSyncRootIsNotInMyDrive(
+    const std::string& sync_root_resource_id) const {
+  // Nothing to do.
+}
+
 void FakeDriveFileSyncClient::PushRemoteChange(
     const std::string& parent_resource_id,
+    const std::string& parent_title,
     const std::string& title,
     const std::string& resource_id,
     const std::string& md5,
     bool deleted) {
-  remote_resource_[resource_id] = RemoteResource(
-      parent_resource_id, title, resource_id,
+  remote_resources_[resource_id] = RemoteResource(
+      parent_resource_id, parent_title, title, resource_id,
       md5, deleted, ++largest_changestamp_);
 }
 
@@ -207,6 +247,7 @@ FakeDriveFileSyncClient::CreateResourceEntry(
   link->set_type(google_apis::Link::LINK_PARENT);
   link->set_href(url_generator_.GenerateContentUrl(
       resource.parent_resource_id));
+  link->set_title(resource.parent_title);
   parent_links.push_back(link.release());
 
   entry->set_links(&parent_links);

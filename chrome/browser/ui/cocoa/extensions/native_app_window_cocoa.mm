@@ -636,6 +636,7 @@ void NativeAppWindowCocoa::InstallDraggableRegionViews() {
                                        webViewHeight - iter->bottom(),
                                        iter->width(),
                                        iter->height())];
+    [controlRegion setAutoresizingMask:NSViewWidthSizable|NSViewHeightSizable];
     [webView addSubview:controlRegion];
   }
 }
@@ -654,7 +655,7 @@ bool NativeAppWindowCocoa::IsAlwaysOnTop() const {
 }
 
 void NativeAppWindowCocoa::RenderViewHostChanged() {
-  web_contents()->Focus();
+  web_contents()->GetView()->Focus();
 }
 
 gfx::Insets NativeAppWindowCocoa::GetFrameInsets() const {

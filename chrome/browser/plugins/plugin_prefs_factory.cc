@@ -7,12 +7,12 @@
 #include "base/path_service.h"
 #include "base/prefs/pref_service.h"
 #include "chrome/browser/plugins/plugin_prefs.h"
-#include "chrome/browser/prefs/pref_registry_syncable.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_dependency_manager.h"
 #include "chrome/browser/profiles/profile_keyed_service.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/pref_names.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 
 // static
 PluginPrefsFactory* PluginPrefsFactory::GetInstance() {
@@ -63,6 +63,10 @@ void PluginPrefsFactory::RegisterUserPrefs(PrefRegistrySyncable* registry) {
   registry->RegisterBooleanPref(prefs::kPluginsMigratedToPepperFlash,
                                 false,
                                 PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterBooleanPref(
+      prefs::kPluginsRemovedOldComponentPepperFlashSettings,
+      false,
+      PrefRegistrySyncable::UNSYNCABLE_PREF);
   registry->RegisterListPref(prefs::kPluginsPluginsList,
                              PrefRegistrySyncable::UNSYNCABLE_PREF);
   registry->RegisterListPref(prefs::kPluginsDisabledPlugins,

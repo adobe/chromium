@@ -11,10 +11,13 @@
 #include "base/platform_file.h"
 #include "base/process_util.h"
 #include "base/values.h"
+#include "chrome/browser/extensions/api/messaging/native_messaging_host_manifest.h"
 #include "chrome/browser/extensions/api/messaging/native_process_launcher.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/extensions/features/feature.h"
+#include "extensions/common/constants.h"
+#include "googleurl/src/gurl.h"
 #include "net/base/file_stream.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
@@ -37,15 +40,16 @@ namespace extensions {
 
 NativeMessageProcessHost::NativeMessageProcessHost(
     base::WeakPtr<Client> weak_client_ui,
+    const std::string& source_extension_id,
     const std::string& native_host_name,
     int destination_port,
     scoped_ptr<NativeProcessLauncher> launcher)
     : weak_client_ui_(weak_client_ui),
+      source_extension_id_(source_extension_id),
       native_host_name_(native_host_name),
       destination_port_(destination_port),
       launcher_(launcher.Pass()),
       closed_(false),
-      native_process_handle_(base::kNullProcessHandle),
       read_pending_(false),
       read_eof_(false),
       write_pending_(false) {
@@ -66,9 +70,11 @@ NativeMessageProcessHost::~NativeMessageProcessHost() {
 // static
 scoped_ptr<NativeMessageProcessHost> NativeMessageProcessHost::Create(
     base::WeakPtr<Client> weak_client_ui,
+    const std::string& source_extension_id,
     const std::string& native_host_name,
     int destination_port) {
-  return CreateWithLauncher(weak_client_ui, native_host_name, destination_port,
+  return CreateWithLauncher(weak_client_ui, source_extension_id,
+                            native_host_name, destination_port,
                             NativeProcessLauncher::CreateDefault());
 }
 
@@ -76,6 +82,7 @@ scoped_ptr<NativeMessageProcessHost> NativeMessageProcessHost::Create(
 scoped_ptr<NativeMessageProcessHost>
 NativeMessageProcessHost::CreateWithLauncher(
     base::WeakPtr<Client> weak_client_ui,
+    const std::string& source_extension_id,
     const std::string& native_host_name,
     int destination_port,
     scoped_ptr<NativeProcessLauncher> launcher) {
@@ -85,11 +92,14 @@ NativeMessageProcessHost::CreateWithLauncher(
   if (Feature::GetCurrentChannel() > chrome::VersionInfo::CHANNEL_DEV ||
       !CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kEnableNativeMessaging)) {
+    content::BrowserThread::DeleteSoon(
+        content::BrowserThread::IO, FROM_HERE, launcher.release());
     return process.Pass();
   }
 
   process.reset(new NativeMessageProcessHost(
-      weak_client_ui, native_host_name, destination_port, launcher.Pass()));
+      weak_client_ui, source_extension_id, native_host_name,
+      destination_port, launcher.Pass()));
 
   return process.Pass();
 }
@@ -97,24 +107,22 @@ NativeMessageProcessHost::CreateWithLauncher(
 void NativeMessageProcessHost::LaunchHostProcess() {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::IO));
 
-  launcher_->Launch(
-      native_host_name_, base::Bind(
-          &NativeMessageProcessHost::OnHostProcessLaunched,
-          base::Unretained(this)));
+  GURL origin(std::string(kExtensionScheme) + "://" + source_extension_id_);
+  launcher_->Launch(origin, native_host_name_,
+                    base::Bind(&NativeMessageProcessHost::OnHostProcessLaunched,
+                               base::Unretained(this)));
 }
 
 void NativeMessageProcessHost::OnHostProcessLaunched(
-    base::ProcessHandle native_process_handle,
+    bool result,
     base::PlatformFile read_file,
     base::PlatformFile write_file) {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::IO));
 
-  if (native_process_handle == base::kNullProcessHandle) {
+  if (!result) {
     OnError();
     return;
   }
-
-  native_process_handle_ = native_process_handle;
 
   read_file_ = read_file;
   read_stream_.reset(new net::FileStream(
@@ -311,17 +319,6 @@ void NativeMessageProcessHost::Close() {
   content::BrowserThread::PostTask(content::BrowserThread::UI, FROM_HERE,
       base::Bind(&Client::CloseChannel, weak_client_ui_,
           destination_port_, true));
-
-  if (native_process_handle_ != base::kNullProcessHandle) {
-    // Give the process some time to shutdown, then try and kill it.
-    content::BrowserThread::PostDelayedTask(
-      content::BrowserThread::IO, FROM_HERE,
-      base::Bind(base::IgnoreResult(&base::KillProcess),
-                 native_process_handle_, 0,
-                 false /* don't wait for exit */),
-      base::TimeDelta::FromMilliseconds(kExitTimeoutMS));
-    native_process_handle_ = base::kNullProcessHandle;
-  }
 }
 
 }  // namespace extensions

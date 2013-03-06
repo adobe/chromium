@@ -56,6 +56,7 @@
       'delegated_renderer_layer_impl.h',
       'delegating_renderer.cc',
       'delegating_renderer.h',
+      'devtools_instrumentation.h',
       'direct_renderer.cc',
       'direct_renderer.h',
       'draw_properties.h',
@@ -246,6 +247,9 @@
       'single_thread_proxy.h',
       'skpicture_content_layer_updater.cc',
       'skpicture_content_layer_updater.h',
+      'software_frame_data.cc',
+      'software_frame_data.h',
+      'software_output_device.cc',
       'software_output_device.h',
       'software_renderer.cc',
       'software_renderer.h',
@@ -342,9 +346,11 @@
       'dependencies': [
         '<(DEPTH)/base/base.gyp:base',
         '<(DEPTH)/base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
+        '<(DEPTH)/gpu/gpu.gyp:gpu',
         '<(DEPTH)/skia/skia.gyp:skia',
         '<(DEPTH)/media/media.gyp:media',
         '<(DEPTH)/ui/gl/gl.gyp:gl',
+        '<(DEPTH)/ui/surface/surface.gyp:surface',
         '<(DEPTH)/ui/ui.gyp:ui',
         '<(webkit_src_dir)/Source/WebKit/chromium/WebKit.gyp:webkit',
       ],
@@ -354,12 +360,6 @@
       'sources': [
         '<@(cc_source_files)',
       ],
-      'all_dependent_settings': {
-        'include_dirs': [
-          # TODO(jamesr): Remove once https://webkit.org/b/105259 lands + rolls
-          '<(webkit_src_dir)/Source/Platform/chromium'
-        ]
-      },
       # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
       'msvs_disabled_warnings': [ 4267, ],
     },

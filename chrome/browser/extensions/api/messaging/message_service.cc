@@ -22,6 +22,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/tab_contents/tab_util.h"
 #include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/extensions/background_info.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_messages.h"
 #include "chrome/common/view_type.h"
@@ -194,6 +195,23 @@ void MessageService::OpenChannelToNativeApp(
     return;
 
 #if defined(OS_WIN) || defined(OS_MACOSX) || defined(OS_LINUX)
+  Profile* profile = Profile::FromBrowserContext(source->GetBrowserContext());
+  ExtensionService* extension_service =
+      extensions::ExtensionSystem::Get(profile)->extension_service();
+  bool has_permission = false;
+  if (extension_service) {
+    const Extension* extension =
+        extension_service->GetExtensionById(source_extension_id, false);
+    has_permission = extension && extension->HasAPIPermission(
+        APIPermission::kNativeMessaging);
+  }
+
+  if (!has_permission) {
+    ExtensionMessagePort port(source, MSG_ROUTING_CONTROL, "");
+    port.DispatchOnDisconnect(GET_OPPOSITE_PORT_ID(receiver_port_id), true);
+    return;
+  }
+
   WebContents* source_contents = tab_util::GetWebContentsByID(
       source_process_id, source_routing_id);
 
@@ -213,7 +231,7 @@ void MessageService::OpenChannelToNativeApp(
       NativeMessageProcessHost::Create(
           base::WeakPtr<NativeMessageProcessHost::Client>(
               weak_factory_.GetWeakPtr()),
-          native_app_name, receiver_port_id);
+          source_extension_id, native_app_name, receiver_port_id);
 
   // Abandon the channel
   if (!native_process.get()) {
@@ -448,7 +466,7 @@ bool MessageService::MaybeAddPendingOpenChannelTask(
   ExtensionService* service = profile->GetExtensionService();
   const std::string& extension_id = params->target_extension_id;
   const Extension* extension = service->extensions()->GetByID(extension_id);
-  if (extension && extension->has_lazy_background_page()) {
+  if (extension && BackgroundInfo::HasLazyBackgroundPage(extension)) {
     // If the extension uses spanning incognito mode, make sure we're always
     // using the original profile since that is what the extension process
     // will use.

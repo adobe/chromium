@@ -13,7 +13,9 @@
   <release seq="1">
     <structures>
       <structure name="IDR_BOOKMARK_MANAGER_MAIN" file="bookmark_manager/main.html" flattenhtml="true" allowexternalscript="true" type="chrome_html" />
-      <structure name="IDR_WALLPAPER_MANAGER_MAIN" file="chromeos/wallpaper_manager/main.html" flattenhtml="true" allowexternalscript="true" type="chrome_html" />
+      <if expr="pp_ifdef('chromeos') and pp_ifdef('_google_chrome')">
+        <structure name="IDR_WALLPAPER_MANAGER_MAIN" file="chromeos/wallpaper_manager/main.html" flattenhtml="true" allowexternalscript="true" type="chrome_html" />
+      </if>
     </structures>
     <includes>
       <include name="IDR_BOOKMARK_MANAGER_BOOKMARK_MANAGER_RECENT" file="bookmark_manager/images/bookmark_manager_recent.png" type="BINDATA" />
@@ -102,7 +104,6 @@
         <include name="IDR_FILE_MANAGER_IMG_GALLERY_2X_CURSOR_NWSE" file="file_manager/images/gallery/2x/cursor_nwse.png" type="BINDATA" />
         <include name="IDR_FILE_MANAGER_IMG_GALLERY_2X_CURSOR_SWNE" file="file_manager/images/gallery/2x/cursor_swne.png" type="BINDATA" />
         <include name="IDR_FILE_MANAGER_IMG_GALLERY_2X_CURSOR_UPDOWN" file="file_manager/images/gallery/2x/cursor_updown.png" type="BINDATA" />
-
       </if>
       <if expr="pp_ifdef('image_loader_extension')">
         <include name="IDR_IMAGE_LOADER_MAIN_JS" file="image_loader/image_loader.js" type="BINDATA" />
@@ -117,10 +118,21 @@
       <include name="IDR_APPS_DEBUGGER_ICON_128" file="apps_debugger/images/dev-icon-128.png" flattenhtml="true" type="BINDATA" />
       <include name="IDR_APPS_DEBUGGER_ICON_16" file="apps_debugger/images/dev-icon-16.png" flattenhtml="true" type="BINDATA" />
 
-      <if expr="pp_ifdef('chromeos')">
+      <if expr="pp_ifdef('chromeos') and pp_ifdef('_google_chrome')">
         <include name="IDR_WALLPAPER_MANAGER_EVENT_JS" file="chromeos/wallpaper_manager/js/event_page.js" flattenhtml="true" type="BINDATA" />
         <include name="IDR_WALLPAPER_MANAGER_MAIN_JS" file="chromeos/wallpaper_manager/js/main_scripts.js" flattenhtml="true" type="BINDATA" />
         <include name="IDR_WALLPAPER_MANAGER_ICON_128" file="chromeos/wallpaper_manager/images/icon128.png" type="BINDATA" />
+
+        <!-- Network status. -->
+        <include name="IDR_NETWORK_CONFIGURATION_STATUS_HTML" file="chromeos/network_configuration/status.html" allowexternalscript="true" type="BINDATA" />
+        <include name="IDR_NETWORK_CONFIGURATION_STATUS_CSS" file="chromeos/network_configuration/css/status.css" type="BINDATA" />
+        <include name="IDR_NETWORK_CONFIGURATION_NETWORK_STATUS_JS" file="chromeos/network_configuration/js/network_status.js" type="BINDATA" />
+        <include name="IDR_NETWORK_CONFIGURATION_MAIN_STATUS_JS" file="chromeos/network_configuration/js/main_status.js" type="BINDATA" />
+        <!-- Network configuration. -->
+        <include name="IDR_NETWORK_CONFIGURATION_CONFIG_HTML" file="chromeos/network_configuration/config.html" allowexternalscript="true" type="BINDATA" />
+        <include name="IDR_NETWORK_CONFIGURATION_CONFIG_CSS" file="chromeos/network_configuration/css/config.css" type="BINDATA" />
+        <include name="IDR_NETWORK_CONFIGURATION_NETWORK_CONFIG_JS" file="chromeos/network_configuration/js/network_config.js" type="BINDATA" />
+        <include name="IDR_NETWORK_CONFIGURATION_MAIN_CONFIG_JS" file="chromeos/network_configuration/js/main_config.js" type="BINDATA" />
       </if>
       <if expr="pp_ifdef('enable_settings_app')">
         <include name="IDR_SETTINGS_APP_JS" file="settings_app/settings_app.js" type="BINDATA" />

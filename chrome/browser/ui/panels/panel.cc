@@ -29,6 +29,7 @@
 #include "chrome/browser/ui/panels/stacked_panel_collection.h"
 #include "chrome/browser/web_applications/web_app.h"
 #include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/extensions/api/icons/icons_handler.h"
 #include "chrome/common/extensions/extension.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
@@ -425,9 +426,6 @@ void Panel::Observe(int type,
     case chrome::NOTIFICATION_APP_TERMINATING:
       Close();
       break;
-    case chrome::NOTIFICATION_BROWSER_THEME_CHANGED:
-      native_panel_->NotifyPanelOnUserChangedTheme();
-      break;
     default:
       NOTREACHED() << "Received unexpected notification " << type;
   }
@@ -528,19 +526,19 @@ void Panel::SetPanelBoundsInstantly(const gfx::Rect& bounds) {
   native_panel_->SetPanelBoundsInstantly(bounds);
 }
 
-void Panel::LimitSizeToDisplayArea(const gfx::Rect& display_area) {
-  int max_width = manager()->GetMaxPanelWidth();
-  int max_height = manager()->GetMaxPanelHeight();
+void Panel::LimitSizeToWorkArea(const gfx::Rect& work_area) {
+  int max_width = manager()->GetMaxPanelWidth(work_area);
+  int max_height = manager()->GetMaxPanelHeight(work_area);
 
   // If the custom max size is used, ensure that it does not exceed the display
   // area.
   if (max_size_policy_ == CUSTOM_MAX_SIZE) {
     int current_max_width = max_size_.width();
     if (current_max_width > max_width)
-      max_width = std::min(current_max_width, display_area.width());
+      max_width = std::min(current_max_width, work_area.width());
     int current_max_height = max_size_.height();
     if (current_max_height > max_height)
-      max_height = std::min(current_max_height, display_area.height());
+      max_height = std::min(current_max_height, work_area.height());
   }
 
   SetSizeRange(min_size_, gfx::Size(max_width, max_height));
@@ -775,6 +773,10 @@ void Panel::SetWindowCornerStyle(panel::CornerStyle corner_style) {
   native_panel_->SetWindowCornerStyle(corner_style);
 }
 
+void Panel::MinimizeBySystem() {
+  native_panel_->MinimizePanelBySystem();
+}
+
 Panel::Panel(const std::string& app_name,
              const gfx::Size& min_size, const gfx::Size& max_size)
     : app_name_(app_name),
@@ -856,8 +858,10 @@ void Panel::UpdateAppIcon() {
   extensions::ImageLoader* loader = extensions::ImageLoader::Get(profile());
   loader->LoadImageAsync(
       extension,
-      extension->GetIconResource(extension_misc::EXTENSION_ICON_SMALL,
-                                 ExtensionIconSet::MATCH_BIGGER),
+      extensions::IconsInfo::GetIconResource(
+          extension,
+          extension_misc::EXTENSION_ICON_SMALL,
+          ExtensionIconSet::MATCH_BIGGER),
       gfx::Size(extension_misc::EXTENSION_ICON_SMALL,
                 extension_misc::EXTENSION_ICON_SMALL),
       base::Bind(&Panel::OnImageLoaded,

@@ -39,6 +39,8 @@
       ],
       'sources': [
         # All .cc, .h under views, except unittests
+        'accessibility/native_view_accessibility.cc',
+        'accessibility/native_view_accessibility.h',
         'accessibility/native_view_accessibility_win.cc',
         'accessibility/native_view_accessibility_win.h',
         'accessible_pane_view.cc',
@@ -88,8 +90,6 @@
         'controls/button/radio_button.h',
         'controls/button/text_button.cc',
         'controls/button/text_button.h',
-        'controls/button/chrome_style.cc',
-        'controls/button/chrome_style.h',
         'controls/combobox/combobox.cc',
         'controls/combobox/combobox.h',
         'controls/combobox/combobox_listener.h',
@@ -229,6 +229,8 @@
         'corewm/compound_event_filter.h',
         'corewm/corewm_switches.cc',
         'corewm/corewm_switches.h',
+        'corewm/cursor_manager.cc',
+        'corewm/cursor_manager.h',
         'corewm/focus_controller.cc',
         'corewm/focus_controller.h',
         'corewm/focus_rules.h',
@@ -236,6 +238,8 @@
         'corewm/image_grid.h',
         'corewm/input_method_event_filter.cc',
         'corewm/input_method_event_filter.h',
+        'corewm/native_cursor_manager.h',
+        'corewm/native_cursor_manager_delegate.h',
         'corewm/shadow.cc',
         'corewm/shadow.h',
         'corewm/shadow_controller.cc',
@@ -337,8 +341,6 @@
         'widget/default_theme_provider.h',
         'widget/desktop_aura/desktop_activation_client.cc',
         'widget/desktop_aura/desktop_activation_client.h',
-        'widget/desktop_aura/desktop_cursor_client.cc',
-        'widget/desktop_aura/desktop_cursor_client.h',
         'widget/desktop_aura/desktop_dispatcher_client.cc',
         'widget/desktop_aura/desktop_dispatcher_client.h',
         'widget/desktop_aura/desktop_drag_drop_client_win.cc',
@@ -349,6 +351,8 @@
         'widget/desktop_aura/desktop_focus_rules.h',
         'widget/desktop_aura/desktop_layout_manager.cc',
         'widget/desktop_aura/desktop_layout_manager.h',
+        'widget/desktop_aura/desktop_native_cursor_manager.cc',
+        'widget/desktop_aura/desktop_native_cursor_manager.h',
         'widget/desktop_aura/desktop_native_widget_aura.cc',
         'widget/desktop_aura/desktop_native_widget_aura.h',
         'widget/desktop_aura/desktop_root_window_host.h',
@@ -407,6 +411,9 @@
         'win/hwnd_message_handler.cc',
         'win/hwnd_message_handler.h',
         'win/hwnd_message_handler_delegate.h',
+        'win/hwnd_util.h',
+        'win/hwnd_util_aurawin.cc',
+        'win/hwnd_util_win.cc',
         'win/scoped_fullscreen_visibility.cc',
         'win/scoped_fullscreen_visibility.h',
         'window/client_view.cc',
@@ -494,6 +501,13 @@
             ['include', 'controls/menu/menu_config_win.cc'],
             ['include', 'controls/menu/menu_item_view_win.cc'],
             ['include', 'controls/menu/menu_separator_win.cc'],
+            ['include', 'accessibility/native_view_accessibility_win.cc'],
+            ['include', 'accessibility/native_view_accessibility_win.h'],
+          ],
+        }],
+        ['use_aura==1 and OS=="linux" and chromeos==0', {
+          'dependencies': [
+            '../linux_ui/linux_ui.gyp:linux_ui',
           ],
         }],
         ['OS=="win"', {
@@ -649,6 +663,7 @@
         'controls/combobox/native_combobox_views_unittest.cc',
         'controls/label_unittest.cc',
         'controls/menu/menu_model_adapter_unittest.cc',
+        'controls/native/native_view_host_aura_unittest.cc',
         'controls/native/native_view_host_unittest.cc',
         'controls/progress_bar_unittest.cc',
         'controls/scrollbar/scrollbar_unittest.cc',
@@ -664,6 +679,7 @@
         'controls/textfield/textfield_views_model_unittest.cc',
         'controls/tree/tree_view_unittest.cc',
         'corewm/compound_event_filter_unittest.cc',
+        'corewm/cursor_manager_unittest.cc',
         'corewm/focus_controller_unittest.cc',
         'corewm/image_grid_unittest.cc',
         'corewm/input_method_event_filter_unittest.cc',
@@ -677,6 +693,7 @@
         'focus/focus_traversal_unittest.cc',
         'layout/box_layout_unittest.cc',
         'layout/grid_layout_unittest.cc',
+        'touchui/touch_selection_controller_impl_unittest.cc',
         'view_model_unittest.cc',
         'view_model_utils_unittest.cc',
         'view_unittest.cc',
@@ -687,8 +704,8 @@
         'run_all_unittests.cc',
       ],
       'conditions': [
-        ['chromeos==1', {
-          'sources': [
+        ['chromeos==0', {
+          'sources!': [
             'touchui/touch_selection_controller_impl_unittest.cc',
           ],
         }],
@@ -712,15 +729,16 @@
           'dependencies': [
             '../aura/aura.gyp:aura_test_support',
           ],
-          'sources/': [
-            ['exclude', 'widget/native_widget_win_unittest.cc'],
+          'sources!': [
+            'widget/native_widget_win_unittest.cc',
           ],
-        }, {
+        }, {  # use_aura==0
+          'sources!': [
+            'controls/native/native_view_host_aura_unittest.cc',
+            'widget/native_widget_aura_unittest.cc',
+          ],
           'sources/': [
-            ['exclude', '../aura/test/test_desktop_delegate.cc'],
-            ['exclude', '../aura/test/test_desktop_delegate.h'],
             ['exclude', 'corewm'],
-            ['exclude', 'widget/native_widget_aura_unittest.cc'],
           ],
         }],
       ],

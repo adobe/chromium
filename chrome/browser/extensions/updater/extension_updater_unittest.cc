@@ -18,10 +18,10 @@
 #include "base/run_loop.h"
 #include "base/sequenced_task_runner.h"
 #include "base/stl_util.h"
-#include "base/string_split.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_split.h"
 #include "base/threading/thread.h"
 #include "base/version.h"
 #include "chrome/browser/extensions/blacklist.h"
@@ -458,9 +458,7 @@ class ExtensionUpdaterTest : public testing::Test {
 
   virtual void SetUp() OVERRIDE {
     prefs_.reset(new TestExtensionPrefs(loop_.message_loop_proxy()));
-    extensions::ManifestHandler::Register(
-        extension_manifest_keys::kUpdateURL,
-        make_linked_ptr(new extensions::UpdateURLHandler));
+    (new extensions::UpdateURLHandler)->Register();
   }
 
   virtual void TearDown() OVERRIDE {
@@ -469,6 +467,7 @@ class ExtensionUpdaterTest : public testing::Test {
     // those objects are released.
     RunUntilIdle();
     prefs_.reset();
+    ManifestHandler::ClearRegistryForTesting();
   }
 
   void RunUntilIdle() {

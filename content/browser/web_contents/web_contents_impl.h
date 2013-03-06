@@ -37,6 +37,7 @@ struct ViewMsg_PostMessage_Params;
 namespace content {
 class BrowserPluginEmbedder;
 class BrowserPluginGuest;
+class BrowserPluginGuestManager;
 class ColorChooser;
 class DateTimeChooserAndroid;
 class DownloadItem;
@@ -85,11 +86,10 @@ class CONTENT_EXPORT WebContentsImpl
   WebContentsImpl* opener() const { return opener_; }
 
   // Creates a WebContents to be used as a browser plugin guest.
-  static void CreateGuest(
+  static BrowserPluginGuest* CreateGuest(
       BrowserContext* browser_context,
       content::SiteInstance* site_instance,
       int routing_id,
-      WebContentsImpl* embedder_web_contents,
       WebContentsImpl* opener_web_contents,
       int guest_instance_id,
       const BrowserPluginHostMsg_CreateGuest_Params& params);
@@ -140,18 +140,12 @@ class CONTENT_EXPORT WebContentsImpl
   // Called by InterstitialPageImpl when it creates a RenderViewHost.
   void RenderViewForInterstitialPageCreated(RenderViewHost* render_view_host);
 
-  // Sets the passed passed interstitial as the currently showing interstitial.
-  // |interstitial_page| should be non NULL (use the remove_interstitial_page
-  // method to unset the interstitial) and no interstitial page should be set
-  // when there is already a non NULL interstitial page set.
-  void set_interstitial_page(InterstitialPageImpl* interstitial_page) {
-    render_manager_.set_interstitial_page(interstitial_page);
-  }
+  // Sets the passed interstitial as the currently showing interstitial.
+  // No interstitial page should already be attached.
+  void AttachInterstitialPage(InterstitialPageImpl* interstitial_page);
 
   // Unsets the currently showing interstitial.
-  void remove_interstitial_page() {
-    render_manager_.remove_interstitial_page();
-  }
+  void DetachInterstitialPage();
 
   void set_opener_web_ui_type(WebUI::TypeID opener_web_ui_type) {
     opener_web_ui_type_ = opener_web_ui_type;
@@ -172,15 +166,19 @@ class CONTENT_EXPORT WebContentsImpl
   // Returns embedder browser plugin object, or NULL if this WebContents is not
   // an embedder.
   BrowserPluginEmbedder* GetBrowserPluginEmbedder() const;
+  // Returns the BrowserPluginGuestManager object, or NULL if this web contents
+  // does not have a BrowserPluginGuestManager.
+  BrowserPluginGuestManager* GetBrowserPluginGuestManager() const;
 
   // Gets the current fullscreen render widget's routing ID. Returns
   // MSG_ROUTING_NONE when there is no fullscreen render widget.
   int GetFullscreenWidgetRoutingID() const;
 
-  void DidBlock3DAPIs(const GURL& url, ThreeDAPIType requester);
-
   // Invoked when visible SSL state (as defined by SSLStatus) changes.
   void DidChangeVisibleSSLState();
+
+  // Invoked before a form repost warning is shown.
+  void NotifyBeforeFormRepostWarningShow();
 
   // WebContents ------------------------------------------------------
   virtual WebContentsDelegate* GetDelegate() OVERRIDE;
@@ -232,10 +230,6 @@ class CONTENT_EXPORT WebContentsImpl
   virtual bool NeedToFireBeforeUnload() OVERRIDE;
   virtual void Stop() OVERRIDE;
   virtual WebContents* Clone() OVERRIDE;
-  virtual gfx::NativeView GetContentNativeView() const OVERRIDE;
-  virtual gfx::NativeView GetNativeView() const OVERRIDE;
-  virtual void GetContainerBounds(gfx::Rect* out) const OVERRIDE;
-  virtual void Focus() OVERRIDE;
   virtual void FocusThroughTabTraversal(bool reverse) OVERRIDE;
   virtual bool ShowingInterstitialPage() const OVERRIDE;
   virtual InterstitialPage* GetInterstitialPage() const OVERRIDE;

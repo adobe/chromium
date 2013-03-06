@@ -407,15 +407,11 @@ void BrowserOptionsHandler::GetLocalizedValues(DictionaryValue* values) {
       "defaultSearchGroupLabel",
       l10n_util::GetStringFUTF16(IDS_SEARCH_PREF_EXPLANATION, omnibox_url));
 
+  std::string instant_pref_name = chrome::search::GetInstantPrefName();
+  int instant_message_id = instant_pref_name == prefs::kInstantEnabled ?
+      IDS_INSTANT_PREF_WITH_WARNING : IDS_INSTANT_EXTENDED_PREF_WITH_WARNING;
   string16 instant_learn_more_url = ASCIIToUTF16(chrome::kInstantLearnMoreURL);
-  int instant_message_id = IDS_INSTANT_PREF_WITH_WARNING;
-  if (chrome::search::IsInstantExtendedAPIEnabled(
-      Profile::FromWebUI(web_ui()))) {
-    instant_message_id = IDS_INSTANT_EXTENDED_PREF_WITH_WARNING;
-    values->SetString("instant_enabled", "instant_extended.enabled");
-  } else {
-    values->SetString("instant_enabled", "instant.enabled");
-  }
+  values->SetString("instant_enabled", instant_pref_name);
   values->SetString(
       "instantPrefAndWarning",
       l10n_util::GetStringFUTF16(instant_message_id, instant_learn_more_url));
@@ -604,6 +600,13 @@ void BrowserOptionsHandler::OnStateChanged() {
   SendProfilesInfo();
 }
 
+void BrowserOptionsHandler::OnSigninAllowedPrefChange() {
+  web_ui()->CallJavascriptFunction("BrowserOptions.updateSyncState",
+                                   *GetSyncStateDictionary());
+
+  SendProfilesInfo();
+}
+
 void BrowserOptionsHandler::PageLoadStarted() {
   page_initialized_ = false;
 }
@@ -674,11 +677,16 @@ void BrowserOptionsHandler::InitializeHandler() {
       prefs::kDefaultZoomLevel, prefs,
       base::Bind(&BrowserOptionsHandler::SetupPageZoomSelector,
                  base::Unretained(this)));
+  profile_pref_registrar_.Init(prefs);
+  profile_pref_registrar_.Add(
+      prefs::kSigninAllowed,
+      base::Bind(&BrowserOptionsHandler::OnSigninAllowedPrefChange,
+                 base::Unretained(this)));
 #if !defined(OS_CHROMEOS)
-  proxy_prefs_.Init(prefs);
-  proxy_prefs_.Add(prefs::kProxy,
-                   base::Bind(&BrowserOptionsHandler::SetupProxySettingsSection,
-                              base::Unretained(this)));
+  profile_pref_registrar_.Add(
+      prefs::kProxy,
+      base::Bind(&BrowserOptionsHandler::SetupProxySettingsSection,
+                 base::Unretained(this)));
 #endif  // !defined(OS_CHROMEOS)
 }
 
@@ -991,7 +999,6 @@ scoped_ptr<ListValue> BrowserOptionsHandler::GetProfilesInfoList() {
                               profile_path == current_profile_path);
     profile_value->SetBoolean("isManaged", cache.ProfileIsManagedAtIndex(i));
 
-
     bool is_gaia_picture =
         cache.IsUsingGAIAPictureOfProfileAtIndex(i) &&
         cache.GetGAIAPictureOfProfileAtIndex(i);
@@ -1103,18 +1110,20 @@ void BrowserOptionsHandler::UpdateAccountPicture() {
 scoped_ptr<DictionaryValue> BrowserOptionsHandler::GetSyncStateDictionary() {
   scoped_ptr<DictionaryValue> sync_status(new DictionaryValue);
   Profile* profile = Profile::FromWebUI(web_ui());
-  sync_status->SetBoolean("signinAllowed", !profile->IsGuestSession());
   if (profile->IsGuestSession()) {
     // Cannot display signin status when running in guest mode on chromeos
     // because there is no SigninManager.
+    sync_status->SetBoolean("signinAllowed", false);
     return sync_status.Pass();
   }
 
   // Signout is not allowed if the user has policy (crbug.com/172204).
   SigninManager* signin = SigninManagerFactory::GetForProfile(profile);
+  DCHECK(signin);
   sync_status->SetBoolean("signoutAllowed", !signin->IsSignoutProhibited());
   ProfileSyncService* service(
       ProfileSyncServiceFactory::GetInstance()->GetForProfile(profile));
+  sync_status->SetBoolean("signinAllowed", signin->IsSigninAllowed());
   sync_status->SetBoolean("syncSystemEnabled", !!service);
   sync_status->SetBoolean("setupCompleted",
                           service && service->HasSyncSetupCompleted());
@@ -1457,7 +1466,7 @@ void BrowserOptionsHandler::SetupProxySettingsSection() {
   bool is_extension_controlled = (proxy_config &&
                                   proxy_config->IsExtensionControlled());
 
-  base::FundamentalValue disabled(proxy_prefs_.IsManaged() ||
+  base::FundamentalValue disabled(profile_pref_registrar_.IsManaged() ||
                                   is_extension_controlled);
   base::FundamentalValue extension_controlled(is_extension_controlled);
   web_ui()->CallJavascriptFunction("BrowserOptions.setupProxySettingsSection",

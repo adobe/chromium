@@ -12,7 +12,7 @@
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "base/timer.h"
-#include "chrome/browser/chromeos/drive/drive_feed_loader_observer.h"
+#include "chrome/browser/chromeos/drive/change_list_loader_observer.h"
 #include "chrome/browser/chromeos/drive/drive_file_system_interface.h"
 #include "chrome/browser/chromeos/drive/file_system/drive_operations.h"
 #include "chrome/browser/chromeos/drive/file_system/operation_observer.h"
@@ -27,11 +27,11 @@ class SequencedTaskRunner;
 }
 
 namespace google_apis {
-class ResourceEntry;
-class AccountMetadataFeed;
-class ResourceList;
+class AboutResource;
 class DriveServiceInterface;
 class DriveUploaderInterface;
+class ResourceEntry;
+class ResourceList;
 }
 
 namespace drive {
@@ -42,7 +42,7 @@ class DriveFunctionRemove;
 class DriveResourceMetadata;
 class DriveScheduler;
 class DriveWebAppsRegistry;
-class DriveFeedLoader;
+class ChangeListLoader;
 
 namespace file_system {
 class CopyOperation;
@@ -52,7 +52,7 @@ class RemoveOperation;
 
 // The production implementation of DriveFileSystemInterface.
 class DriveFileSystem : public DriveFileSystemInterface,
-                        public DriveFeedLoaderObserver,
+                        public ChangeListLoaderObserver,
                         public file_system::OperationObserver {
  public:
   DriveFileSystem(Profile* profile,
@@ -126,8 +126,9 @@ class DriveFileSystem : public DriveFileSystemInterface,
   virtual void ReadDirectoryByPath(
       const base::FilePath& directory_path,
       const ReadDirectoryWithSettingCallback& callback) OVERRIDE;
-  virtual void RequestDirectoryRefresh(
-      const base::FilePath& directory_path) OVERRIDE;
+  virtual void RefreshDirectory(
+      const base::FilePath& directory_path,
+      const FileOperationCallback& callback) OVERRIDE;
   virtual void GetAvailableSpace(
       const GetAvailableSpaceCallback& callback) OVERRIDE;
   virtual void AddUploadedFile(const base::FilePath& directory_path,
@@ -142,9 +143,10 @@ class DriveFileSystem : public DriveFileSystemInterface,
   virtual void OnDirectoryChangedByOperation(
       const base::FilePath& directory_path) OVERRIDE;
 
-  // DriveFeedLoader::Observer overrides.
-  // Used to propagate events from DriveFeedLoader.
-  virtual void OnDirectoryChanged(const base::FilePath& directory_path) OVERRIDE;
+  // ChangeListLoader::Observer overrides.
+  // Used to propagate events from ChangeListLoader.
+  virtual void OnDirectoryChanged(
+      const base::FilePath& directory_path) OVERRIDE;
   virtual void OnResourceListFetched(int num_accumulated_entries) OVERRIDE;
   virtual void OnFeedFromServerLoaded() OVERRIDE;
 
@@ -152,8 +154,8 @@ class DriveFileSystem : public DriveFileSystemInterface,
   void LoadRootFeedFromCacheForTesting(const FileOperationCallback& callback);
 
   // Used in tests to update the file system from |feed_list|.
-  // See also the comment at DriveFeedLoader::UpdateFromFeed().
-  DriveFeedLoader* feed_loader() { return feed_loader_.get(); }
+  // See also the comment at ChangeListLoader::UpdateFromFeed().
+  ChangeListLoader* change_list_loader() { return change_list_loader_.get(); }
 
  private:
   friend class DriveFileSystemTest;
@@ -169,17 +171,17 @@ class DriveFileSystem : public DriveFileSystemInterface,
   // Struct used for AddUploadedFile.
   struct AddUploadedFileParams;
 
-  // Initializes DriveResourceMetadata and related instances (DriveFeedLoader
+  // Initializes DriveResourceMetadata and related instances (ChangeListLoader
   // and DriveOperations). This is a part of the initialization.
   void ResetResourceMetadata();
 
   // Called on preference change.
   void OnDisableDriveHostedFilesChanged();
 
-  // Callback passed to DriveFeedLoader from |Search| method.
+  // Callback passed to ChangeListLoader from |Search| method.
   // |callback| is that should be run with data received. It must not be null.
   // |feed_list| is the document feed for content search.
-  // |error| is the error code returned by DriveFeedLoader.
+  // |error| is the error code returned by ChangeListLoader.
   void OnSearch(bool shared_with_me,
                 const SearchCallback& callback,
                 const ScopedVector<google_apis::ResourceList>& feed_list,
@@ -271,11 +273,11 @@ class DriveFileSystem : public DriveFileSystemInterface,
       const GetFileCompleteForOpenParams& params,
       DriveFileError error);
 
-  // Callback for handling account metadata fetch.
-  void OnGetAccountMetadata(
+  // Callback for handling about resource fetch.
+  void OnGetAboutResource(
       const GetAvailableSpaceCallback& callback,
       google_apis::GDataErrorCode status,
-      scoped_ptr<google_apis::AccountMetadataFeed> account_metadata);
+      scoped_ptr<google_apis::AboutResource> about_resource);
 
   // Callback for handling file downloading requests.
   void OnFileDownloaded(const GetFileFromCacheParams& params,
@@ -290,14 +292,11 @@ class DriveFileSystem : public DriveFileSystemInterface,
 
   // Similar to OnFileDownloaded() but takes |has_enough_space| so we report
   // an error in case we don't have enough disk space.
-  void OnFileDownloadedAndSpaceChecked(const GetFileFromCacheParams& params,
-                                       google_apis::GDataErrorCode status,
-                                       const base::FilePath& downloaded_file_path,
-                                       bool has_enough_space);
-
-  // FileMoveCallback for directory changes. Notifies of directory changes.
-  void OnDirectoryChangeFileMoveCallback(DriveFileError error,
-                                         const base::FilePath& directory_path);
+  void OnFileDownloadedAndSpaceChecked(
+      const GetFileFromCacheParams& params,
+      google_apis::GDataErrorCode status,
+      const base::FilePath& downloaded_file_path,
+      bool has_enough_space);
 
   // Adds the uploaded file to the cache.
   void AddUploadedFileToCache(const AddUploadedFileParams& params,
@@ -400,12 +399,6 @@ class DriveFileSystem : public DriveFileSystemInterface,
       const google_apis::GetContentCallback& get_content_callback,
       scoped_ptr<DriveEntryProto> entry_proto);
 
-  void OnRequestDirectoryRefresh(
-      const std::string& directory_resource_id,
-      const base::FilePath& directory_path,
-      const ScopedVector<google_apis::ResourceList>& feed_list,
-      DriveFileError error);
-
   // Part of GetEntryInfoByResourceId(). Called after
   // DriveResourceMetadata::GetEntryInfoByResourceId() is complete.
   // |callback| must not be null.
@@ -427,12 +420,29 @@ class DriveFileSystem : public DriveFileSystemInterface,
       const base::FilePath& file_path,
       scoped_ptr<DriveEntryProto> entry_proto);
 
-  // Part of RequestDirectoryRefresh(). Called after
+  // Part of RefreshDirectory(). Called after
   // GetEntryInfoByPath() is complete.
-  void RequestDirectoryRefreshAfterGetEntryInfo(
-      const base::FilePath& file_path,
+  void RefreshDirectoryAfterGetEntryInfo(
+      const base::FilePath& directory_path,
+      const FileOperationCallback& callback,
       DriveFileError error,
       scoped_ptr<DriveEntryProto> entry_proto);
+
+  // Part of RefreshDirectory(). Called after
+  // ChangeListLoader::LoadDirectoryFromServer() is complete.
+  void RefreshDirectoryAfterLoadDirectory(
+      const std::string& directory_resource_id,
+      const base::FilePath& directory_path,
+      const FileOperationCallback& callback,
+      const ScopedVector<google_apis::ResourceList>& resource_list,
+      DriveFileError error);
+
+  // Part of RefreshDirectory(). Called after
+  // DriveResourceMetadata::RefreshDirectory() is complete.
+  void RefreshDirectoryAfterRefreshDirectory(
+      const FileOperationCallback& callback,
+      DriveFileError error,
+      const base::FilePath& directory_path);
 
   // Part of GetEntryByResourceId and GetEntryByPath. Checks whether there is a
   // local dirty cache for the entry, and if there is, replace the
@@ -490,8 +500,8 @@ class DriveFileSystem : public DriveFileSystemInterface,
 
   scoped_ptr<PrefChangeRegistrar> pref_registrar_;
 
-  // The loader is used to load the feeds.
-  scoped_ptr<DriveFeedLoader> feed_loader_;
+  // The loader is used to load the change lists.
+  scoped_ptr<ChangeListLoader> change_list_loader_;
 
   ObserverList<DriveFileSystemObserver> observers_;
 

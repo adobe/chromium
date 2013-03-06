@@ -10,6 +10,7 @@
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkSize.h"
 #include "ui/gfx/rect_conversions.h"
+#include "ui/gfx/size_conversions.h"
 #include "ui/gfx/skia_util.h"
 
 namespace cc {
@@ -26,41 +27,36 @@ PicturePileImpl::~PicturePileImpl() {
 }
 
 PicturePileImpl* PicturePileImpl::GetCloneForDrawingOnThread(
-    base::Thread* thread) {
-  // Do we have a clone for this thread yet?
-  CloneMap::iterator it = clones_.find(thread->thread_id());
-  if (it != clones_.end())
-    return it->second;
-
-  // Create clone for this thread.
-  scoped_refptr<PicturePileImpl> clone = CloneForDrawing();
-  clones_[thread->thread_id()] = clone;
-  return clone;
+    unsigned thread_index) const {
+  CHECK_GT(clones_.size(), thread_index);
+  return clones_[thread_index];
 }
 
-scoped_refptr<PicturePileImpl> PicturePileImpl::CloneForDrawing() const {
-  TRACE_EVENT0("cc", "PicturePileImpl::CloneForDrawing");
-  scoped_refptr<PicturePileImpl> clone = Create();
-  clone->tiling_ = tiling_;
-  for (PictureListMap::const_iterator map_iter = picture_list_map_.begin();
-       map_iter != picture_list_map_.end(); ++map_iter) {
-    const PictureList& this_pic_list = map_iter->second;
-    PictureList& clone_pic_list = clone->picture_list_map_[map_iter->first];
-    for (PictureList::const_iterator pic_iter = this_pic_list.begin();
-         pic_iter != this_pic_list.end(); ++pic_iter) {
-      clone_pic_list.push_back((*pic_iter)->Clone());
+void PicturePileImpl::CloneForDrawing(int num_threads) {
+  clones_.clear();
+  for (int i = 0; i < num_threads; i++) {
+    scoped_refptr<PicturePileImpl> clone = Create();
+    clone->tiling_ = tiling_;
+    for (PictureListMap::const_iterator map_iter = picture_list_map_.begin();
+         map_iter != picture_list_map_.end(); ++map_iter) {
+      const PictureList& this_pic_list = map_iter->second;
+      PictureList& clone_pic_list = clone->picture_list_map_[map_iter->first];
+      for (PictureList::const_iterator pic_iter = this_pic_list.begin();
+           pic_iter != this_pic_list.end(); ++pic_iter) {
+        clone_pic_list.push_back((*pic_iter)->GetCloneForDrawingOnThread(i));
+      }
     }
-  }
-  clone->min_contents_scale_ = min_contents_scale_;
-  clone->set_slow_down_raster_scale_factor(
-      slow_down_raster_scale_factor_for_debug_);
+    clone->min_contents_scale_ = min_contents_scale_;
+    clone->set_slow_down_raster_scale_factor(
+        slow_down_raster_scale_factor_for_debug_);
 
-  return clone;
+    clones_.push_back(clone);
+  }
 }
 
 void PicturePileImpl::Raster(
     SkCanvas* canvas,
-    gfx::Rect content_rect,
+    gfx::Rect canvas_rect,
     float contents_scale,
     int64* total_pixels_rasterized) {
 
@@ -72,12 +68,40 @@ void PicturePileImpl::Raster(
 #endif  // NDEBUG
 
   canvas->save();
-  canvas->translate(-content_rect.x(), -content_rect.y());
-  canvas->clipRect(gfx::RectToSkRect(content_rect));
+  canvas->translate(-canvas_rect.x(), -canvas_rect.y());
 
+  gfx::SizeF total_content_size = gfx::ScaleSize(tiling_.total_size(),
+                                                 contents_scale);
+  gfx::Rect total_content_rect(gfx::ToCeiledSize(total_content_size));
+  gfx::Rect content_rect = total_content_rect;
+  content_rect.Intersect(canvas_rect);
+
+  // Clear one texel inside the right/bottom edge of the content rect,
+  // as it may only be partially covered by the picture playback.
+  // Also clear one texel outside the right/bottom edge of the content rect,
+  // as it may get blended in by linear filtering when zoomed in.
+  gfx::Rect deflated_content_rect = total_content_rect;
+  deflated_content_rect.Inset(0, 0, 1, 1);
+
+  gfx::Rect canvas_outside_content_rect = canvas_rect;
+  canvas_outside_content_rect.Subtract(deflated_content_rect);
+
+  if (!canvas_outside_content_rect.IsEmpty()) {
+    gfx::Rect inflated_content_rect = total_content_rect;
+    inflated_content_rect.Inset(0, 0, -1, -1);
+    canvas->clipRect(gfx::RectToSkRect(inflated_content_rect),
+                     SkRegion::kReplace_Op);
+    canvas->clipRect(gfx::RectToSkRect(deflated_content_rect),
+                     SkRegion::kDifference_Op);
+    canvas->drawColor(background_color_, SkXfermode::kSrc_Mode);
+  }
+
+  // Rasterize the collection of relevant picture piles.
   gfx::Rect layer_rect = gfx::ToEnclosingRect(
       gfx::ScaleRect(content_rect, 1.f / contents_scale));
 
+  canvas->clipRect(gfx::RectToSkRect(content_rect),
+                   SkRegion::kReplace_Op);
   Region unclipped(content_rect);
   for (TilingData::Iterator tile_iter(&tiling_, layer_rect);
        tile_iter; ++tile_iter) {
@@ -100,6 +124,7 @@ void PicturePileImpl::Raster(
       // encompasses all invalidated pixels at any larger scale level.
       gfx::Rect content_clip = gfx::ToEnclosedRect(
           gfx::ScaleRect((*i)->LayerRect(), contents_scale));
+      DCHECK(!content_clip.IsEmpty());
       if (!unclipped.Intersects(content_clip))
         continue;
 

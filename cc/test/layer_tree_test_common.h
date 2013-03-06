@@ -32,6 +32,8 @@ public:
 
     virtual void beginCommitOnThread(LayerTreeHostImpl*) { }
     virtual void commitCompleteOnThread(LayerTreeHostImpl*) { }
+    virtual void treeActivatedOnThread(LayerTreeHostImpl*) { }
+    virtual void initializedRendererOnThread(LayerTreeHostImpl*, bool success) { }
     virtual bool prepareToDrawOnThread(
         LayerTreeHostImpl*, LayerTreeHostImpl::FrameData&, bool result);
     virtual void drawLayersOnThread(LayerTreeHostImpl*) { }
@@ -49,6 +51,7 @@ public:
     virtual void scheduleComposite() { }
     virtual void didDeferCommit() { }
     virtual bool canActivatePendingTree();
+    virtual void didSetVisibleOnImplTree(LayerTreeHostImpl*, bool visible) { }
 
     // Implementation of WebAnimationDelegate
     virtual void notifyAnimationStarted(double time) OVERRIDE { }
@@ -129,12 +132,16 @@ protected:
     scoped_ptr<MockLayerImplTreeHostClient> m_client;
     scoped_ptr<LayerTreeHost> m_layerTreeHost;
 
+    bool testEnded() const { return m_ended; }
+
 private:
     bool m_beginning;
     bool m_endWhenBeginReturns;
     bool m_timedOut;
     bool m_scheduled;
+    bool m_scheduleWhenSetVisibleTrue;
     bool m_started;
+    bool m_ended;
 
     scoped_ptr<Thread> m_mainCCThread;
     scoped_ptr<base::Thread> m_implThread;
@@ -160,7 +167,9 @@ public:
     virtual void commitComplete() OVERRIDE;
     virtual bool prepareToDraw(FrameData&) OVERRIDE;
     virtual void drawLayers(FrameData&) OVERRIDE;
-    virtual void activatePendingTreeIfNeeded() OVERRIDE;
+    virtual bool activatePendingTreeIfNeeded() OVERRIDE;
+    virtual bool initializeRenderer(scoped_ptr<OutputSurface> outputSurface) OVERRIDE;
+    virtual void setVisible(bool visible) OVERRIDE;
 
     // Make these public.
     typedef std::vector<LayerImpl*> LayerList;

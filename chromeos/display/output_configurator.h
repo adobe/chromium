@@ -57,7 +57,8 @@ class CHROMEOS_EXPORT OutputConfigurator : public MessageLoop::Dispatcher {
     virtual void OnDisplayModeChanged() {}
 
     // Called when the change of the display mode is issued but failed.
-    virtual void OnDisplayModeChangeFailed() {}
+    // |failed_new_state| is the new state which the system failed to enter.
+    virtual void OnDisplayModeChangeFailed(OutputState failed_new_state) {}
   };
 
   OutputConfigurator();
@@ -73,6 +74,9 @@ class CHROMEOS_EXPORT OutputConfigurator : public MessageLoop::Dispatcher {
   // OutputConfigurator sets the background color of X's RootWindow to this
   // color.
   void Init(bool is_panel_fitting_enabled, uint32 background_color_argb);
+
+  // Stop handling display configuration events/requests.
+  void Stop();
 
   // Called when the user hits ctrl-F4 to request a display mode change.
   // This method should only return false if it was called in a single-head or
@@ -178,7 +182,7 @@ class CHROMEOS_EXPORT OutputConfigurator : public MessageLoop::Dispatcher {
   // Xrandr X11 extension is supported.
   // If this flag is set to false, any attempts to change the output
   // configuration to immediately fail without changing the state.
-  bool is_running_on_chrome_os_;
+  bool configure_display_;
 
   // This is set externally in Init,
   // and is used to enable modes which rely on panel fitting.

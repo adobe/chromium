@@ -89,8 +89,6 @@ void UserActionObserver::OnUserAction(const std::string& action) {
 
 void UserActionObserver::ValidateUserActions(const RecordedUserAction* recorded,
                                              int count) {
-  EXPECT_EQ(count, num_metrics());
-
   for (int i = 0; i < count; ++i) {
     const RecordedUserAction& ua = recorded[i];
     EXPECT_EQ(ua.count, GetMetricCount(ua.name));
@@ -110,13 +108,12 @@ void ValidateHistograms(const RecordedHistogram* recorded,
     const RecordedHistogram& r = recorded[i];
     size_t j = 0;
     for (j = 0; j < histograms.size(); ++j) {
-      base::Histogram* histogram(histograms[j]);
+      base::HistogramBase* histogram(histograms[j]);
 
       if (r.name == histogram->histogram_name()) {
         EXPECT_EQ(r.type, histogram->GetHistogramType());
-        EXPECT_EQ(r.min, histogram->declared_min());
-        EXPECT_EQ(r.max, histogram->declared_max());
-        EXPECT_EQ(r.buckets, histogram->bucket_count());
+        EXPECT_TRUE(
+            histogram->HasConstructionArguments(r.min, r.max, r.buckets));
         break;
       }
     }

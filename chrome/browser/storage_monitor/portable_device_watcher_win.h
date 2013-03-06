@@ -14,7 +14,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/string16.h"
-#include "chrome/browser/storage_monitor/removable_storage_notifications.h"
+#include "chrome/browser/storage_monitor/storage_monitor.h"
 
 namespace base {
 class SequencedTaskRunner;
@@ -28,10 +28,9 @@ class TestPortableDeviceWatcherWin;
 
 // This class watches the portable device mount points and sends notifications
 // about the attached/detached media transfer protocol (MTP) devices.
-// This is a singleton class instantiated by
-// RemovableDeviceNotificationsWindowWin. This class is created, destroyed and
-// operates on the UI thread, except for long running tasks it spins off to a
-// SequencedTaskRunner.
+// This is a singleton class instantiated by StorageMonitorWin. This class is
+// created, destroyed and operates on the UI thread, except for long running
+// tasks it spins off to a SequencedTaskRunner.
 class PortableDeviceWatcherWin {
  public:
   typedef std::vector<string16> StorageObjectIDs;
@@ -71,7 +70,7 @@ class PortableDeviceWatcherWin {
   virtual ~PortableDeviceWatcherWin();
 
   // Must be called after the browser blocking pool is ready for use.
-  // RemovableDeviceNotificationsWindowsWin::Init() will call this function.
+  // StorageMonitorWin::Init() will call this function.
   void Init(HWND hwnd);
 
   // Processes DEV_BROADCAST_DEVICEINTERFACE messages and triggers a
@@ -93,15 +92,14 @@ class PortableDeviceWatcherWin {
 
   // Set the volume notifications object to be used when new
   // devices are found.
-  void SetNotifications(RemovableStorageNotifications::Receiver* notifications);
+  void SetNotifications(StorageMonitor::Receiver* notifications);
 
  private:
   friend class test::TestPortableDeviceWatcherWin;
 
   // Key: MTP device storage unique id.
   // Value: Metadata for the given storage.
-  typedef std::map<std::string, RemovableStorageNotifications::StorageInfo>
-      MTPStorageMap;
+  typedef std::map<std::string, StorageInfo> MTPStorageMap;
 
   // Key: MTP device plug and play ID string.
   // Value: Vector of device storage objects.
@@ -137,7 +135,7 @@ class PortableDeviceWatcherWin {
   base::WeakPtrFactory<PortableDeviceWatcherWin> weak_ptr_factory_;
 
   // The notifications object to use to signal newly attached devices.
-  RemovableStorageNotifications::Receiver* storage_notifications_;
+  StorageMonitor::Receiver* storage_notifications_;
 
   DISALLOW_COPY_AND_ASSIGN(PortableDeviceWatcherWin);
 };

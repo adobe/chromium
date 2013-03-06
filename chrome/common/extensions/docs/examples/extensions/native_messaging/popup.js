@@ -14,7 +14,7 @@ function gotNativeMessage(message) {
 
 function sendNativeMessage() {
   if (!port) {
-    port = chrome.runtime.connectNative('echo.py');
+    port = chrome.extension.connectNative('com.google.chrome.test.echo');
     port.onMessage.addListener(gotNativeMessage);
     document.getElementById('input-text').style.display = 'block';
     document.getElementById('send-native-message').innerHTML = 'Send Message';

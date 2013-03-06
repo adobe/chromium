@@ -410,6 +410,20 @@ class HistoryService : public CancelableRequestProvider,
                             const base::Closure& callback,
                             CancelableTaskTracker* tracker);
 
+  // Removes all visits to specified URLs in specific time ranges.
+  // This is the equivalent ExpireHistoryBetween() once for each element in the
+  // vector. The fields of |ExpireHistoryArgs| map directly to the arguments of
+  // of ExpireHistoryBetween().
+  void ExpireHistory(const std::vector<history::ExpireHistoryArgs>& expire_list,
+                     const base::Closure& callback,
+                     CancelableTaskTracker* tracker);
+
+  // Processes the given |delete_directive| and sends it to the
+  // SyncChangeProcessor (if it exists).  Returns any error resulting
+  // from sending the delete directive to sync.
+  syncer::SyncError ProcessLocalDeleteDirective(
+      const sync_pb::HistoryDeleteDirectiveSpecifics& delete_directive);
+
   // Downloads -----------------------------------------------------------------
 
   // Implemented by the caller of 'CreateDownload' below, and is called when the
@@ -478,6 +492,17 @@ class HistoryService : public CancelableRequestProvider,
                                 const base::Time from_time,
                                 int max_result_count,
                                 const SegmentQueryCallback& callback);
+
+  // Increases the amount of time the user actively viewed the url.
+  void IncreaseSegmentDuration(const GURL& url,
+                               base::Time time,
+                               base::TimeDelta delta);
+
+  // Queries segments based on active time viewed.
+  Handle QuerySegmentDurationSince(CancelableRequestConsumerBase* consumer,
+                                   base::Time from_time,
+                                   int max_result_count,
+                                   const SegmentQueryCallback& callback);
 
   // Keyword search terms -----------------------------------------------------
 
@@ -592,12 +617,6 @@ class HistoryService : public CancelableRequestProvider,
   virtual syncer::SyncError ProcessSyncChanges(
       const tracked_objects::Location& from_here,
       const syncer::SyncChangeList& change_list) OVERRIDE;
-
-  // Processes the given |delete_directive| and sends it to the
-  // SyncChangeProcessor (if it exists).  Returns any error resulting
-  // from sending the delete directive to sync.
-  syncer::SyncError ProcessLocalDeleteDirective(
-      const sync_pb::HistoryDeleteDirectiveSpecifics& delete_directive);
 
  protected:
   // These are not currently used, hopefully we can do something in the future

@@ -126,9 +126,8 @@ void AddAllStringValues(const ListValue& from, std::vector<std::string>* to) {
 // Gets the keys of a DictionaryValue.
 std::vector<std::string> GetKeys(const DictionaryValue& dict) {
   std::vector<std::string> keys;
-  for (DictionaryValue::key_iterator it = dict.begin_keys();
-      it != dict.end_keys(); ++it) {
-    keys.push_back(*it);
+  for (DictionaryValue::Iterator it(dict); !it.IsAtEnd(); it.Advance()) {
+    keys.push_back(it.key());
   }
   return keys;
 }
@@ -162,7 +161,7 @@ void GetModificationQuotaLimitHeuristics(QuotaLimitHeuristics* heuristics) {
 
 }  // namespace
 
-bool StorageGetFunction::RunWithStorage(ValueStore* storage) {
+bool StorageStorageAreaGetFunction::RunWithStorage(ValueStore* storage) {
   Value* input = NULL;
   EXTENSION_FUNCTION_VALIDATE(args_->Get(0, &input));
 
@@ -201,7 +200,8 @@ bool StorageGetFunction::RunWithStorage(ValueStore* storage) {
   }
 }
 
-bool StorageGetBytesInUseFunction::RunWithStorage(ValueStore* storage) {
+bool StorageStorageAreaGetBytesInUseFunction::RunWithStorage(
+    ValueStore* storage) {
   Value* input = NULL;
   EXTENSION_FUNCTION_VALIDATE(args_->Get(0, &input));
 
@@ -235,18 +235,18 @@ bool StorageGetBytesInUseFunction::RunWithStorage(ValueStore* storage) {
   return true;
 }
 
-bool StorageSetFunction::RunWithStorage(ValueStore* storage) {
+bool StorageStorageAreaSetFunction::RunWithStorage(ValueStore* storage) {
   DictionaryValue* input = NULL;
   EXTENSION_FUNCTION_VALIDATE(args_->GetDictionary(0, &input));
   return UseWriteResult(storage->Set(ValueStore::DEFAULTS, *input));
 }
 
-void StorageSetFunction::GetQuotaLimitHeuristics(
+void StorageStorageAreaSetFunction::GetQuotaLimitHeuristics(
     QuotaLimitHeuristics* heuristics) const {
   GetModificationQuotaLimitHeuristics(heuristics);
 }
 
-bool StorageRemoveFunction::RunWithStorage(ValueStore* storage) {
+bool StorageStorageAreaRemoveFunction::RunWithStorage(ValueStore* storage) {
   Value* input = NULL;
   EXTENSION_FUNCTION_VALIDATE(args_->Get(0, &input));
 
@@ -269,16 +269,16 @@ bool StorageRemoveFunction::RunWithStorage(ValueStore* storage) {
   };
 }
 
-void StorageRemoveFunction::GetQuotaLimitHeuristics(
+void StorageStorageAreaRemoveFunction::GetQuotaLimitHeuristics(
     QuotaLimitHeuristics* heuristics) const {
   GetModificationQuotaLimitHeuristics(heuristics);
 }
 
-bool StorageClearFunction::RunWithStorage(ValueStore* storage) {
+bool StorageStorageAreaClearFunction::RunWithStorage(ValueStore* storage) {
   return UseWriteResult(storage->Clear());
 }
 
-void StorageClearFunction::GetQuotaLimitHeuristics(
+void StorageStorageAreaClearFunction::GetQuotaLimitHeuristics(
     QuotaLimitHeuristics* heuristics) const {
   GetModificationQuotaLimitHeuristics(heuristics);
 }

@@ -62,7 +62,7 @@ RenderViewTest::RendererWebKitPlatformSupportImplNoSandbox::
     ~RendererWebKitPlatformSupportImplNoSandbox() {
 }
 
-WebKit::WebKitPlatformSupport*
+WebKit::Platform*
     RenderViewTest::RendererWebKitPlatformSupportImplNoSandbox::Get() {
   return webkit_platform_support_.get();
 }
@@ -311,7 +311,7 @@ void RenderViewTest::Resize(gfx::Size new_size,
                             gfx::Rect resizer_rect,
                             bool is_fullscreen) {
   scoped_ptr<IPC::Message> resize_message(new ViewMsg_Resize(
-      0, new_size, resizer_rect, is_fullscreen));
+      0, new_size, new_size, resizer_rect, is_fullscreen));
   OnMessageReceived(*resize_message);
 }
 

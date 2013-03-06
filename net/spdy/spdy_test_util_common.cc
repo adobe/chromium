@@ -8,6 +8,8 @@
 
 #include "base/compiler_specific.h"
 #include "net/spdy/buffered_spdy_framer.h"
+#include "net/spdy/spdy_session.h"
+#include "net/spdy/spdy_stream.h"
 
 namespace net {
 
@@ -52,7 +54,7 @@ class PriorityGetter : public BufferedSpdyFramerVisitorInterface {
   virtual void OnGoAway(SpdyStreamId last_accepted_stream_id,
                         SpdyGoAwayStatus status) OVERRIDE {}
   virtual void OnWindowUpdate(SpdyStreamId stream_id,
-                              int delta_window_size) OVERRIDE {}
+                              uint32 delta_window_size) OVERRIDE {}
   virtual void OnSynStreamCompressed(
       size_t uncompressed_size,
       size_t compressed_size) OVERRIDE {}
@@ -69,7 +71,7 @@ bool GetSpdyPriority(int version,
   BufferedSpdyFramer framer(version, false);
   PriorityGetter priority_getter;
   framer.set_visitor(&priority_getter);
-  size_t frame_size = frame.length() + SpdyFrame::kHeaderSize;
+  size_t frame_size = frame.size();
   if (framer.ProcessInput(frame.data(), frame_size) != frame_size) {
     return false;
   }
@@ -77,4 +79,40 @@ bool GetSpdyPriority(int version,
   return true;
 }
 
-} // namespace net
+scoped_refptr<SpdyStream> CreateStreamSynchronously(
+    const scoped_refptr<SpdySession>& session,
+    const GURL& url,
+    RequestPriority priority,
+    const BoundNetLog& net_log) {
+  SpdyStreamRequest stream_request;
+  int rv = stream_request.StartRequest(session, url, priority, net_log,
+                                       CompletionCallback());
+  return (rv == OK) ? stream_request.ReleaseStream() : NULL;
+}
+
+StreamReleaserCallback::StreamReleaserCallback(
+    SpdySession* session,
+    SpdyStream* first_stream)
+    : session_(session),
+      first_stream_(first_stream) {}
+
+StreamReleaserCallback::~StreamReleaserCallback() {}
+
+CompletionCallback StreamReleaserCallback::MakeCallback(
+    SpdyStreamRequest* request) {
+  return base::Bind(&StreamReleaserCallback::OnComplete,
+                    base::Unretained(this),
+                    request);
+}
+
+void StreamReleaserCallback::OnComplete(
+    SpdyStreamRequest* request, int result) {
+  session_->CloseSessionOnError(ERR_FAILED, false, "On complete.");
+  session_ = NULL;
+  first_stream_->Cancel();
+  first_stream_ = NULL;
+  request->ReleaseStream()->Cancel();
+  SetResult(result);
+}
+
+}  // namespace net

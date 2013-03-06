@@ -27,8 +27,6 @@
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "base/version.h"
-#include "chrome/browser/accessibility/accessibility_extension_api.h"
-#include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/devtools/devtools_window.h"
 #include "chrome/browser/extensions/api/app_runtime/app_runtime_api.h"
@@ -65,7 +63,6 @@
 #include "chrome/browser/extensions/shell_window_registry.h"
 #include "chrome/browser/extensions/unpacked_installer.h"
 #include "chrome/browser/extensions/updater/extension_updater.h"
-#include "chrome/browser/net/chrome_url_request_context.h"
 #include "chrome/browser/plugins/chrome_plugin_service_filter.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
@@ -79,6 +76,7 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
+#include "chrome/common/extensions/background_info.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_file_util.h"
 #include "chrome/common/extensions/extension_manifest_constants.h"
@@ -86,13 +84,13 @@
 #include "chrome/common/extensions/extension_resource.h"
 #include "chrome/common/extensions/feature_switch.h"
 #include "chrome/common/extensions/features/feature.h"
+#include "chrome/common/extensions/manifest.h"
 #include "chrome/common/extensions/manifest_url_handler.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/startup_metric_utils.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/devtools_agent_host.h"
-#include "content/public/browser/devtools_manager.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/plugin_service.h"
@@ -378,6 +376,8 @@ ExtensionService::ExtensionService(Profile* profile,
   registrar_.Add(this, content::NOTIFICATION_RENDERER_PROCESS_TERMINATED,
                  content::NotificationService::AllBrowserContextsAndSources());
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_HOST_DESTROYED,
+                 content::NotificationService::AllBrowserContextsAndSources());
+  registrar_.Add(this, chrome::NOTIFICATION_UPGRADE_RECOMMENDED,
                  content::NotificationService::AllBrowserContextsAndSources());
   pref_change_registrar_.Init(profile->GetPrefs());
   base::Closure callback =
@@ -712,6 +712,13 @@ void ExtensionService::ReloadExtensionWithEvents(
     const std::string& extension_id,
     int events) {
   CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
+  // If the extension is already reloading, don't reload again.
+  if (extension_prefs_->GetDisableReasons(extension_id) &
+      Extension::DISABLE_RELOAD) {
+    return;
+  }
+
   base::FilePath path;
   const Extension* current_extension = GetExtensionById(extension_id, false);
 
@@ -820,7 +827,7 @@ bool ExtensionService::UninstallExtension(
                                            external_uninstall);
 
   // Tell the backend to start deleting installed extensions on the file thread.
-  if (Manifest::LOAD != extension->location()) {
+  if (!Manifest::IsUnpackedLocation(extension->location())) {
     if (!GetFileTaskRunner()->PostTask(
             FROM_HERE,
             base::Bind(
@@ -1846,16 +1853,17 @@ bool ExtensionService::PopulateExtensionErrorUI(
 }
 
 void ExtensionService::HandleExtensionAlertClosed() {
-  extension_error_ui_.reset();
-}
-
-void ExtensionService::HandleExtensionAlertAccept() {
   const ExtensionIdSet* extension_ids =
       extension_error_ui_->get_blacklisted_extension_ids();
   for (ExtensionIdSet::const_iterator iter = extension_ids->begin();
        iter != extension_ids->end(); ++iter) {
     extension_prefs_->AcknowledgeBlacklistedExtension(*iter);
   }
+  extension_error_ui_.reset();
+}
+
+void ExtensionService::HandleExtensionAlertAccept() {
+  HandleExtensionAlertClosed();
 }
 
 void ExtensionService::AcknowledgeExternalExtension(const std::string& id) {
@@ -1876,6 +1884,7 @@ bool ExtensionService::IsUnacknowledgedExternalExtension(
 
 void ExtensionService::HandleExtensionAlertDetails() {
   extension_error_ui_->ShowExtensions();
+  HandleExtensionAlertClosed();
 }
 
 void ExtensionService::UpdateExternalExtensionAlert() {
@@ -2079,10 +2088,9 @@ void ExtensionService::AddExtension(const Extension* extension) {
   MaybeWipeout(extension);
 
   if (extension_prefs_->IsExtensionBlacklisted(extension->id())) {
-    // Don't check the Blacklist yet because it's asynchronous (we do it at
-    // the end). This pre-emptive check is because we will always store the
-    // blacklisted state of *installed* extensions in prefs, and it's important
-    // not to re-enable blacklisted extensions.
+    // Only prefs is checked for the blacklist. We rely on callers to check the
+    // blacklist before calling into here, e.g. CrxInstaller checks before
+    // installation, we check when loading installed extensions.
     blacklisted_extensions_.Insert(extension);
   } else if (extension_prefs_->IsExtensionDisabled(extension->id())) {
     disabled_extensions_.Insert(extension);
@@ -2102,6 +2110,10 @@ void ExtensionService::AddExtension(const Extension* extension) {
     // All apps that are displayed in the launcher are ordered by their ordinals
     // so we must ensure they have valid ordinals.
     if (extension->RequiresSortOrdinal()) {
+      if (!extension->ShouldDisplayInNewTabPage()) {
+        extension_prefs_->extension_sorting()->MarkExtensionAsHidden(
+            extension->id());
+      }
       extension_prefs_->extension_sorting()->EnsureValidOrdinals(
           extension->id(), syncer::StringOrdinal());
     }
@@ -2218,7 +2230,7 @@ void ExtensionService::InitializePermissions(const Extension* extension) {
   if (is_extension_upgrade) {
     // Other than for unpacked extensions, CrxInstaller should have guaranteed
     // that we aren't downgrading.
-    if (extension->location() != Manifest::LOAD)
+    if (!Manifest::IsUnpackedLocation(extension->location()))
       CHECK_GE(extension->version()->CompareTo(*(old->version())), 0);
 
     // Extensions get upgraded if the privileges are allowed to increase or
@@ -2748,6 +2760,12 @@ void ExtensionService::Observe(int type,
       }
       break;
     }
+    case chrome::NOTIFICATION_UPGRADE_RECOMMENDED: {
+      // Notify extensions that chrome update is available.
+      extensions::RuntimeEventRouter::DispatchOnBrowserUpdateAvailableEvent(
+          profile_);
+      break;
+    }
 
     default:
       NOTREACHED() << "Unexpected notification type.";
@@ -2775,7 +2793,7 @@ ExtensionIdSet ExtensionService::GetAppIds() const {
 }
 
 bool ExtensionService::IsBackgroundPageReady(const Extension* extension) const {
-  if (!extension->has_persistent_background_page())
+  if (!extensions::BackgroundInfo::HasPersistentBackgroundPage(extension))
     return true;
   ExtensionRuntimeDataMap::const_iterator it =
       extension_runtime_data_.find(extension->id());
@@ -2784,7 +2802,7 @@ bool ExtensionService::IsBackgroundPageReady(const Extension* extension) const {
 }
 
 void ExtensionService::SetBackgroundPageReady(const Extension* extension) {
-  DCHECK(extension->has_background_page());
+  DCHECK(extensions::BackgroundInfo::HasBackgroundPage(extension));
   extension_runtime_data_[extension->id()].background_page_ready = true;
   content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_EXTENSION_BACKGROUND_PAGE_READY,
@@ -3016,7 +3034,7 @@ bool ExtensionService::ShouldDelayExtensionUpdate(
   if (!old)
     return false;
 
-  if (old->has_persistent_background_page()) {
+  if (extensions::BackgroundInfo::HasPersistentBackgroundPage(old)) {
     // Delay installation if the extension listens for the onUpdateAvailable
     // event.
     return system_->event_router()->ExtensionHasEventListener(
@@ -3100,6 +3118,8 @@ void ExtensionService::ManageBlacklist(
       continue;
     blacklisted_extensions_.Remove(*it);
     AddExtension(extension);
+    UMA_HISTOGRAM_ENUMERATION("ExtensionBlacklist.UnblacklistInstalled",
+                              extension->location(), Manifest::NUM_LOCATIONS);
   }
 
   for (std::set<std::string>::iterator it = not_yet_blacklisted.begin();
@@ -3110,6 +3130,8 @@ void ExtensionService::ManageBlacklist(
       continue;
     blacklisted_extensions_.Insert(extension);
     UnloadExtension(*it, extension_misc::UNLOAD_REASON_BLACKLIST);
+    UMA_HISTOGRAM_ENUMERATION("ExtensionBlacklist.BlacklistInstalled",
+                              extension->location(), Manifest::NUM_LOCATIONS);
   }
 
   IdentifyAlertableExtensions();

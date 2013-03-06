@@ -211,6 +211,7 @@
       var result = event.dispatch_(args, listenerIDs);
       if (result)
         DCHECK(!result.validationErrors, result.validationErrors);
+      return result;
     };
 
     if (eventArgumentMassagers[name])

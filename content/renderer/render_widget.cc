@@ -304,6 +304,7 @@ bool RenderWidget::OnMessageReceived(const IPC::Message& message) {
     IPC_MESSAGE_HANDLER(ViewMsg_UpdateScreenRects, OnUpdateScreenRects)
 #if defined(OS_ANDROID)
     IPC_MESSAGE_HANDLER(ViewMsg_ImeBatchStateChanged, OnImeBatchStateChanged)
+    IPC_MESSAGE_HANDLER(ViewMsg_ShowImeIfNeeded, OnShowImeIfNeeded)
 #endif
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
@@ -328,6 +329,7 @@ bool RenderWidget::Send(IPC::Message* message) {
 }
 
 void RenderWidget::Resize(const gfx::Size& new_size,
+                          const gfx::Size& physical_backing_size,
                           const gfx::Rect& resizer_rect,
                           bool is_fullscreen,
                           ResizeAck resize_ack) {
@@ -339,7 +341,10 @@ void RenderWidget::Resize(const gfx::Size& new_size,
   if (!webwidget_)
     return;
 
-  // Remember the rect where the resize corner will be drawn.
+  if (compositor_)
+    compositor_->setViewportSize(new_size, physical_backing_size);
+
+  physical_backing_size_ = physical_backing_size;
   resizer_rect_ = resizer_rect;
 
   // NOTE: We may have entered fullscreen mode without changing our size.
@@ -413,9 +418,11 @@ void RenderWidget::OnCreatingNewAck() {
 }
 
 void RenderWidget::OnResize(const gfx::Size& new_size,
+                            const gfx::Size& physical_backing_size,
                             const gfx::Rect& resizer_rect,
                             bool is_fullscreen) {
-  Resize(new_size, resizer_rect, is_fullscreen, SEND_RESIZE_ACK);
+  Resize(new_size, physical_backing_size, resizer_rect, is_fullscreen,
+         SEND_RESIZE_ACK);
 }
 
 void RenderWidget::OnChangeResizeRect(const gfx::Rect& resizer_rect) {
@@ -625,13 +632,13 @@ void RenderWidget::OnHandleInputEvent(const WebKit::WebInputEvent* input_event,
       base::StringPrintf("Event.Latency.Renderer.%s",
                          GetEventName(input_event->type));
   base::HistogramBase* counter_for_type =
-      base::Histogram::FactoryTimeGet(
+      base::Histogram::FactoryGet(
           name_for_event,
-          base::TimeDelta::FromMilliseconds(0),
-          base::TimeDelta::FromMilliseconds(1000000),
+          0,
+          1000000,
           100,
           base::HistogramBase::kUmaTargetedHistogramFlag);
-  counter_for_type->AddTime(base::TimeDelta::FromMicroseconds(delta));
+  counter_for_type->Add(delta);
 
   bool prevent_default = false;
   if (WebInputEvent::isMouseEventType(input_event->type)) {
@@ -924,10 +931,11 @@ void RenderWidget::AnimateIfNeeded() {
                            &RenderWidget::AnimationCallback);
     animation_update_pending_ = false;
     if (is_accelerated_compositing_active_ && compositor_) {
-      compositor_->layer_tree_host()->updateAnimations(
-          base::TimeTicks::Now());
+      compositor_->Animate(base::TimeTicks::Now());
     } else {
-      webwidget_->animate(0.0);
+      double frame_begin_time =
+        (base::TimeTicks::Now() - base::TimeTicks()).InSecondsF();
+      webwidget_->animate(frame_begin_time);
     }
     return;
   }
@@ -1200,7 +1208,7 @@ void RenderWidget::DoDeferredUpdate() {
 void RenderWidget::Composite() {
   DCHECK(is_accelerated_compositing_active_);
   if (compositor_)  // TODO(jamesr): Figure out how this can be null.
-    compositor_->composite();
+    compositor_->Composite();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -1287,13 +1295,30 @@ void RenderWidget::didScrollRect(int dx, int dy,
 void RenderWidget::didAutoResize(const WebSize& new_size) {
   if (size_.width() != new_size.width || size_.height() != new_size.height) {
     size_ = new_size;
-    need_update_rect_for_auto_resize_ = true;
     // If we don't clear PaintAggregator after changing autoResize state, then
     // we might end up in a situation where bitmap_rect is larger than the
     // view_size. By clearing PaintAggregator, we ensure that we don't end up
     // with invalid damage rects.
     paint_aggregator_.ClearPendingUpdate();
+
+    AutoResizeCompositor();
+
+    if (RenderThreadImpl::current()->short_circuit_size_updates()) {
+      setWindowRect(WebRect(rootWindowRect().x,
+                            rootWindowRect().y,
+                            new_size.width,
+                            new_size.height));
+    } else {
+      need_update_rect_for_auto_resize_ = true;
+    }
   }
+}
+
+void RenderWidget::AutoResizeCompositor() {
+  physical_backing_size_ = gfx::ToCeiledSize(gfx::ScaleSize(size_,
+      device_scale_factor_));
+  if (compositor_)
+    compositor_->setViewportSize(size_, physical_backing_size_);
 }
 
 void RenderWidget::didActivateCompositor(int input_handler_identifier) {
@@ -1341,17 +1366,23 @@ void RenderWidget::initializeLayerTreeView(
     WebKit::WebLayerTreeViewClient* client,
     const WebKit::WebLayer& root_layer,
     const WebKit::WebLayerTreeView::Settings& settings) {
-  compositor_ = RenderWidgetCompositor::Create(this, client, settings);
+  compositor_ = RenderWidgetCompositor::Create(this, settings);
   if (!compositor_)
     return;
 
   compositor_->setRootLayer(root_layer);
+  compositor_->setViewportSize(size_, physical_backing_size_);
   if (init_complete_)
     compositor_->setSurfaceReady();
 }
 
 WebKit::WebLayerTreeView* RenderWidget::layerTreeView() {
   return compositor_.get();
+}
+
+void RenderWidget::suppressCompositorScheduling(bool enable) {
+  if (compositor_)
+    compositor_->SetSuppressScheduleComposite(enable);
 }
 
 void RenderWidget::willBeginCompositorFrame() {
@@ -1530,8 +1561,15 @@ void RenderWidget::setToolTipText(const WebKit::WebString& text,
 
 void RenderWidget::setWindowRect(const WebRect& pos) {
   if (did_show_) {
-    Send(new ViewHostMsg_RequestMove(routing_id_, pos));
-    SetPendingWindowRect(pos);
+    if (!RenderThreadImpl::current()->short_circuit_size_updates()) {
+      Send(new ViewHostMsg_RequestMove(routing_id_, pos));
+      SetPendingWindowRect(pos);
+    } else {
+      WebSize new_size(pos.width, pos.height);
+      Resize(new_size, new_size, WebRect(), is_fullscreen_, NO_RESIZE_ACK);
+      view_screen_rect_ = pos;
+      window_screen_rect_ = pos;
+    }
   } else {
     initial_pos_ = pos;
   }
@@ -1772,6 +1810,10 @@ void RenderWidget::OnUpdateScreenRects(const gfx::Rect& view_screen_rect,
 void RenderWidget::OnImeBatchStateChanged(bool is_begin) {
   Send(new ViewHostMsg_ImeBatchStateChanged_ACK(routing_id(), is_begin));
 }
+
+void RenderWidget::OnShowImeIfNeeded() {
+  UpdateTextInputState(SHOW_IME_IF_NEEDED);
+}
 #endif
 
 void RenderWidget::SetDeviceScaleFactor(float device_scale_factor) {
@@ -1871,7 +1913,6 @@ static bool IsDateTimeInput(ui::TextInputType type) {
       type == ui::TEXT_INPUT_TYPE_TIME ||
       type == ui::TEXT_INPUT_TYPE_WEEK;
 }
-
 
 void RenderWidget::UpdateTextInputState(ShowIme show_ime) {
   if (handling_ime_event_)
@@ -1986,6 +2027,8 @@ COMPILE_ASSERT(int(WebKit::WebTextInputTypeTextArea) == \
                int(ui::TEXT_INPUT_TYPE_TEXT_AREA), mismatching_enums);
 COMPILE_ASSERT(int(WebKit::WebTextInputTypeContentEditable) == \
                int(ui::TEXT_INPUT_TYPE_CONTENT_EDITABLE), mismatching_enums);
+COMPILE_ASSERT(int(WebKit::WebTextInputTypeDateTimeField) == \
+               int(ui::TEXT_INPUT_TYPE_DATE_TIME_FIELD), mismatching_enums);
 
 ui::TextInputType RenderWidget::WebKitToUiTextInputType(
     WebKit::WebTextInputType type) {
@@ -2087,7 +2130,7 @@ void RenderWidget::CleanupWindowInPluginMoves(gfx::PluginWindowHandle window) {
 void RenderWidget::GetRenderingStats(
     WebKit::WebRenderingStatsImpl& stats) const {
   if (compositor_)
-    compositor_->layer_tree_host()->renderingStats(&stats.rendering_stats);
+    compositor_->GetRenderingStats(&stats.rendering_stats);
 
   stats.rendering_stats.numAnimationFrames +=
       software_stats_.numAnimationFrames;

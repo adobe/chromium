@@ -22,7 +22,8 @@ class CC_EXPORT PictureLayerTilingSet {
   // Shallow copies all data (except client and bounds from other).
   void CloneAll(
      const PictureLayerTilingSet& other,
-     const Region& invalidation);
+     const Region& invalidation,
+     float minimum_contents_scale);
   void Clone(const PictureLayerTiling* tiling, const Region& invalidation);
 
   void SetLayerBounds(gfx::Size layer_bounds);
@@ -53,8 +54,6 @@ class CC_EXPORT PictureLayerTilingSet {
       gfx::Rect viewport_in_content_space,
       gfx::Size last_layer_bounds,
       gfx::Size current_layer_bounds,
-      gfx::Size last_layer_content_bounds,
-      gfx::Size current_layer_content_bounds,
       float last_layer_contents_scale,
       float current_layer_contents_scale,
       const gfx::Transform& last_screen_transform,

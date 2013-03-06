@@ -26,7 +26,6 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/net/chrome_cookie_notification_details.h"
-#include "chrome/browser/prefs/pref_registry_syncable.h"
 #include "chrome/browser/prefs/pref_service_syncable.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/signin_manager.h"
@@ -57,6 +56,7 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/time_format.h"
 #include "chrome/common/url_constants.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
@@ -249,8 +249,6 @@ void ProfileSyncService::TrySyncDatatypePrefRecovery() {
   // set kSyncKeepEverythingSynced.
   PrefService* const pref_service = profile_->GetPrefs();
   if (!pref_service)
-    return;
-  if (sync_prefs_.HasKeepEverythingSynced())
     return;
   const syncer::ModelTypeSet registered_types = GetRegisteredDataTypes();
   if (sync_prefs_.GetPreferredDataTypes(registered_types).Size() > 1)
@@ -499,6 +497,11 @@ void ProfileSyncService::StartUp() {
   if (backend_.get()) {
     backend_->UpdateRegisteredInvalidationIds(
         invalidator_registrar_->GetAllRegisteredIds());
+    for (AckHandleReplayQueue::const_iterator it = ack_replay_queue_.begin();
+         it != ack_replay_queue_.end(); ++it) {
+      backend_->AcknowledgeInvalidation(it->first, it->second);
+    }
+    ack_replay_queue_.clear();
   }
 
   if (!sync_global_error_.get()) {
@@ -532,6 +535,18 @@ void ProfileSyncService::UpdateRegisteredInvalidationIds(
 void ProfileSyncService::UnregisterInvalidationHandler(
     syncer::InvalidationHandler* handler) {
   invalidator_registrar_->UnregisterHandler(handler);
+}
+
+void ProfileSyncService::AcknowledgeInvalidation(
+    const invalidation::ObjectId& id,
+    const syncer::AckHandle& ack_handle) {
+  if (backend_.get()) {
+    backend_->AcknowledgeInvalidation(id, ack_handle);
+  } else {
+    // If |backend_| is NULL, save the acknowledgements to replay when
+    // it's created and initialized.
+    ack_replay_queue_.push_back(std::make_pair(id, ack_handle));
+  }
 }
 
 syncer::InvalidatorState ProfileSyncService::GetInvalidatorState() const {
@@ -1328,7 +1343,7 @@ void ProfileSyncService::UpdateSelectedTypesHistogram(
   // Only log the data types that are shown in the sync settings ui.
   // Note: the order of these types must match the ordering of
   // the respective types in ModelType
-  const browser_sync::user_selectable_type::UserSelectableSyncType
+const browser_sync::user_selectable_type::UserSelectableSyncType
       user_selectable_types[] = {
     browser_sync::user_selectable_type::BOOKMARKS,
     browser_sync::user_selectable_type::PREFERENCES,
@@ -1337,11 +1352,11 @@ void ProfileSyncService::UpdateSelectedTypesHistogram(
     browser_sync::user_selectable_type::THEMES,
     browser_sync::user_selectable_type::TYPED_URLS,
     browser_sync::user_selectable_type::EXTENSIONS,
-    browser_sync::user_selectable_type::SESSIONS,
-    browser_sync::user_selectable_type::APPS
+    browser_sync::user_selectable_type::APPS,
+    browser_sync::user_selectable_type::PROXY_TABS
   };
 
-  COMPILE_ASSERT(25 == syncer::MODEL_TYPE_COUNT, UpdateCustomConfigHistogram);
+  COMPILE_ASSERT(26 == syncer::MODEL_TYPE_COUNT, UpdateCustomConfigHistogram);
 
   if (!sync_everything) {
     const syncer::ModelTypeSet current_types = GetPreferredDataTypes();
@@ -1383,7 +1398,8 @@ void ProfileSyncService::RefreshSpareBootstrapToken(
 }
 #endif
 
-void ProfileSyncService::OnUserChoseDatatypes(bool sync_everything,
+void ProfileSyncService::OnUserChoseDatatypes(
+    bool sync_everything,
     syncer::ModelTypeSet chosen_types) {
   if (!backend_.get() && !HasUnrecoverableError()) {
     NOTREACHED();
@@ -1696,9 +1712,6 @@ void ProfileSyncService::SetEncryptionPassphrase(const std::string& passphrase,
            passphrase_required_reason_ == syncer::REASON_DECRYPTION)) <<
          "Can not set explicit passphrase when decryption is needed.";
 
-  if (type == EXPLICIT)
-    UMA_HISTOGRAM_BOOLEAN("Sync.CustomPassphrase", true);
-
   DVLOG(1) << "Setting " << (type == EXPLICIT ? "explicit" : "implicit")
            << " passphrase for encryption.";
   if (passphrase_required_reason_ == syncer::REASON_ENCRYPTION) {
@@ -1734,7 +1747,6 @@ void ProfileSyncService::EnableEncryptEverything() {
   // problems around cancelling encryption in the background (crbug.com/119649).
   if (!encrypt_everything_)
     encryption_pending_ = true;
-  UMA_HISTOGRAM_BOOLEAN("Sync.EncryptAllData", true);
 }
 
 bool ProfileSyncService::encryption_pending() const {

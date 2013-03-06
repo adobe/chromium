@@ -13,6 +13,8 @@
 #include "net/http/http_response_headers.h"
 #include "net/quic/congestion_control/receive_algorithm_interface.h"
 #include "net/quic/congestion_control/send_algorithm_interface.h"
+#include "net/quic/crypto/quic_decrypter.h"
+#include "net/quic/crypto/quic_encrypter.h"
 #include "net/quic/quic_client_session.h"
 #include "net/quic/quic_connection.h"
 #include "net/quic/quic_connection_helper.h"
@@ -114,7 +116,9 @@ class QuicHttpStreamTest : public ::testing::TestWithParam<bool> {
         use_closing_stream_(false),
         read_buffer_(new IOBufferWithSize(4096)),
         guid_(2),
-        framer_(QuicDecrypter::Create(kNULL), QuicEncrypter::Create(kNULL)),
+        framer_(kQuicVersion1,
+                QuicDecrypter::Create(kNULL),
+                QuicEncrypter::Create(kNULL)),
         creator_(guid_, &framer_, &random_) {
     IPAddressNumber ip;
     CHECK(ParseIPLiteralToNumber("192.0.2.33", &ip));
@@ -451,6 +455,66 @@ TEST_F(QuicHttpStreamTest, SendPostRequest) {
 
   // Since the body has already arrived, this should return immediately.
   EXPECT_EQ(static_cast<int>(strlen(kResponseBody)),
+            stream_->ReadResponseBody(read_buffer_.get(), read_buffer_->size(),
+                                      callback_.callback()));
+
+  EXPECT_TRUE(stream_->IsResponseBodyComplete());
+  EXPECT_TRUE(AtEof());
+}
+
+TEST_F(QuicHttpStreamTest, SendChunkedPostRequest) {
+  SetRequestString("POST", "/");
+  size_t chunk_size = strlen(kUploadData);
+  AddWrite(SYNCHRONOUS, ConstructDataPacket(1, !kFin, 0, request_data_));
+  AddWrite(SYNCHRONOUS, ConstructDataPacket(2, !kFin, request_data_.length(),
+                                            kUploadData));
+  AddWrite(SYNCHRONOUS, ConstructDataPacket(3, kFin,
+                                            request_data_.length() + chunk_size,
+                                            kUploadData));
+  AddWrite(SYNCHRONOUS, ConstructAckPacket(4, 2, 3));
+
+  Initialize();
+
+  UploadDataStream upload_data_stream(UploadDataStream::CHUNKED, 0);
+  upload_data_stream.AppendChunk(kUploadData, chunk_size, false);
+
+  request_.method = "POST";
+  request_.url = GURL("http://www.google.com/");
+  request_.upload_data_stream = &upload_data_stream;
+  ASSERT_EQ(OK, request_.upload_data_stream->Init(CompletionCallback()));
+
+  ASSERT_EQ(OK, stream_->InitializeStream(&request_, net_log_,
+                                          callback_.callback()));
+  ASSERT_EQ(ERR_IO_PENDING, stream_->SendRequest(headers_, &response_,
+                                                 callback_.callback()));
+  EXPECT_EQ(&response_, stream_->GetResponseInfo());
+
+  upload_data_stream.AppendChunk(kUploadData, chunk_size, true);
+
+  // Ack both packets in the request.
+  scoped_ptr<QuicEncryptedPacket> ack(ConstructAckPacket(1, 2, 1));
+  ProcessPacket(*ack);
+
+  // Send the response headers (but not the body).
+  SetResponseString("200 OK", "");
+  scoped_ptr<QuicEncryptedPacket> resp(
+      ConstructDataPacket(2, !kFin, 0, response_data_));
+  ProcessPacket(*resp);
+
+  // Since the headers have already arrived, this should return immediately.
+  ASSERT_EQ(OK, stream_->ReadResponseHeaders(callback_.callback()));
+  ASSERT_TRUE(response_.headers != NULL);
+  EXPECT_EQ(200, response_.headers->response_code());
+  EXPECT_TRUE(response_.headers->HasHeaderValue("Content-Type", "text/plain"));
+
+  // Send the response body.
+  const char kResponseBody[] = "Hello world!";
+  scoped_ptr<QuicEncryptedPacket> resp_body(
+      ConstructDataPacket(3, kFin, response_data_.length(), kResponseBody));
+  ProcessPacket(*resp_body);
+
+  // Since the body has already arrived, this should return immediately.
+  ASSERT_EQ(static_cast<int>(strlen(kResponseBody)),
             stream_->ReadResponseBody(read_buffer_.get(), read_buffer_->size(),
                                       callback_.callback()));
 

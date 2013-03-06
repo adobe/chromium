@@ -18,10 +18,13 @@
 #include "webkit/fileapi/syncable/local_file_sync_status.h"
 #include "webkit/fileapi/syncable/syncable_file_system_util.h"
 
-using sync_file_system::FileChange;
-using sync_file_system::FileChangeList;
+using fileapi::FileSystemContext;
+using fileapi::FileSystemFileUtil;
+using fileapi::FileSystemOperationContext;
+using fileapi::FileSystemURL;
+using fileapi::FileSystemURLSet;
 
-namespace fileapi {
+namespace sync_file_system {
 
 namespace {
 const base::FilePath::CharType kDatabaseName[] =
@@ -37,7 +40,8 @@ class LocalFileChangeTracker::TrackerDB {
 
   SyncStatusCode MarkDirty(const std::string& url);
   SyncStatusCode ClearDirty(const std::string& url);
-  SyncStatusCode GetDirtyEntries(std::queue<FileSystemURL>* dirty_files);
+  SyncStatusCode GetDirtyEntries(
+      std::queue<FileSystemURL>* dirty_files);
 
  private:
   enum RecoveryOption {
@@ -89,33 +93,33 @@ void LocalFileChangeTracker::OnEndUpdate(const FileSystemURL& url) {}
 
 void LocalFileChangeTracker::OnCreateFile(const FileSystemURL& url) {
   RecordChange(url, FileChange(FileChange::FILE_CHANGE_ADD_OR_UPDATE,
-                               sync_file_system::SYNC_FILE_TYPE_FILE));
+                               SYNC_FILE_TYPE_FILE));
 }
 
 void LocalFileChangeTracker::OnCreateFileFrom(const FileSystemURL& url,
                                               const FileSystemURL& src) {
   RecordChange(url, FileChange(FileChange::FILE_CHANGE_ADD_OR_UPDATE,
-                               sync_file_system::SYNC_FILE_TYPE_FILE));
+                               SYNC_FILE_TYPE_FILE));
 }
 
 void LocalFileChangeTracker::OnRemoveFile(const FileSystemURL& url) {
   RecordChange(url, FileChange(FileChange::FILE_CHANGE_DELETE,
-                               sync_file_system::SYNC_FILE_TYPE_FILE));
+                               SYNC_FILE_TYPE_FILE));
 }
 
 void LocalFileChangeTracker::OnModifyFile(const FileSystemURL& url) {
   RecordChange(url, FileChange(FileChange::FILE_CHANGE_ADD_OR_UPDATE,
-                               sync_file_system::SYNC_FILE_TYPE_FILE));
+                               SYNC_FILE_TYPE_FILE));
 }
 
 void LocalFileChangeTracker::OnCreateDirectory(const FileSystemURL& url) {
   RecordChange(url, FileChange(FileChange::FILE_CHANGE_ADD_OR_UPDATE,
-                               sync_file_system::SYNC_FILE_TYPE_DIRECTORY));
+                               SYNC_FILE_TYPE_DIRECTORY));
 }
 
 void LocalFileChangeTracker::OnRemoveDirectory(const FileSystemURL& url) {
   RecordChange(url, FileChange(FileChange::FILE_CHANGE_DELETE,
-                               sync_file_system::SYNC_FILE_TYPE_DIRECTORY));
+                               SYNC_FILE_TYPE_DIRECTORY));
 }
 
 void LocalFileChangeTracker::GetNextChangedURLs(
@@ -214,7 +218,7 @@ SyncStatusCode LocalFileChangeTracker::CollectLastDirtyChanges(
     return status;
 
   FileSystemFileUtil* file_util =
-      file_system_context->GetFileUtil(kFileSystemTypeSyncable);
+      file_system_context->GetFileUtil(fileapi::kFileSystemTypeSyncable);
   DCHECK(file_util);
   scoped_ptr<FileSystemOperationContext> context(
       new FileSystemOperationContext(file_system_context));
@@ -225,20 +229,20 @@ SyncStatusCode LocalFileChangeTracker::CollectLastDirtyChanges(
   while (!dirty_files.empty()) {
     const FileSystemURL url = dirty_files.front();
     dirty_files.pop();
-    DCHECK_EQ(url.type(), kFileSystemTypeSyncable);
+    DCHECK_EQ(url.type(), fileapi::kFileSystemTypeSyncable);
 
     switch (file_util->GetFileInfo(context.get(), url,
                                    &file_info, &platform_path)) {
       case base::PLATFORM_FILE_OK: {
         if (!file_info.is_directory) {
           RecordChange(url, FileChange(FileChange::FILE_CHANGE_ADD_OR_UPDATE,
-                                       sync_file_system::SYNC_FILE_TYPE_FILE));
+                                       SYNC_FILE_TYPE_FILE));
           break;
         }
 
         RecordChange(url, FileChange(
             FileChange::FILE_CHANGE_ADD_OR_UPDATE,
-            sync_file_system::SYNC_FILE_TYPE_DIRECTORY));
+            SYNC_FILE_TYPE_DIRECTORY));
 
         // Push files and directories in this directory into |dirty_files|.
         scoped_ptr<FileSystemFileUtil::AbstractFileEnumerator> enumerator(
@@ -255,12 +259,12 @@ SyncStatusCode LocalFileChangeTracker::CollectLastDirtyChanges(
       case base::PLATFORM_FILE_ERROR_NOT_FOUND: {
         // File represented by |url| has already been deleted. Since we cannot
         // figure out if this file was directory or not from the URL, file
-        // type is treated as sync_file_system::SYNC_FILE_TYPE_UNKNOWN.
+        // type is treated as SYNC_FILE_TYPE_UNKNOWN.
         //
         // NOTE: Directory to have been reverted (that is, ADD -> DELETE) is
         // also treated as FILE_CHANGE_DELETE.
         RecordChange(url, FileChange(FileChange::FILE_CHANGE_DELETE,
-                                     sync_file_system::SYNC_FILE_TYPE_UNKNOWN));
+                                     SYNC_FILE_TYPE_UNKNOWN));
         break;
       }
       case base::PLATFORM_FILE_ERROR_FAILED:
@@ -301,7 +305,8 @@ SyncStatusCode LocalFileChangeTracker::TrackerDB::Init(
   if (db_.get() && db_status_ == SYNC_STATUS_OK)
     return SYNC_STATUS_OK;
 
-  std::string path = FilePathToString(base_path_.Append(kDatabaseName));
+  std::string path = fileapi::FilePathToString(
+      base_path_.Append(kDatabaseName));
   leveldb::Options options;
   options.create_if_missing = true;
   leveldb::DB* db;
@@ -420,4 +425,4 @@ SyncStatusCode LocalFileChangeTracker::TrackerDB::GetDirtyEntries(
   return SYNC_STATUS_OK;
 }
 
-}  // namespace fileapi
+}  // namespace sync_file_system

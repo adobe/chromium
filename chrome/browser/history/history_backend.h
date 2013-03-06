@@ -321,6 +321,14 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
                          int max_result_count);
   void DeleteOldSegmentData();
 
+  void IncreaseSegmentDuration(const GURL& url,
+                               base::Time time,
+                               base::TimeDelta delta);
+
+  void QuerySegmentDuration(scoped_refptr<QuerySegmentUsageRequest> request,
+                            const base::Time from_time,
+                            int max_result_count);
+
   // Keyword search terms ------------------------------------------------------
 
   void SetKeywordSearchTermsForURL(const GURL& url,
@@ -436,6 +444,11 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
 
   // Calls ExpireHistoryBackend::ExpireHistoryForTimes and commits the change.
   void ExpireHistoryForTimes(const std::vector<base::Time>& times);
+
+  // Calls ExpireHistoryBetween() once for each element in the vector.
+  // The fields of |ExpireHistoryArgs| map directly to the arguments of
+  // of ExpireHistoryBetween().
+  void ExpireHistory(const std::vector<ExpireHistoryArgs>& expire_list);
 
   // Bookmarks -----------------------------------------------------------------
 

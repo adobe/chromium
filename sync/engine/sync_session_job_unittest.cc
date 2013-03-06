@@ -57,7 +57,8 @@ class SyncSessionJobTest : public testing::Test {
         std::vector<SyncEngineEventListener*>(),
         NULL,  // |debug_info_getter|
         NULL,  // |traffic_recorder|
-        true   /* |enable keystore encryption| */));
+        true,  // |enable keystore encryption|
+        "fake_invalidator_client_id"));
     context_->set_routing_info(routes_);
   }
 
@@ -96,7 +97,6 @@ class SyncSessionJobTest : public testing::Test {
     EXPECT_EQ(job->scheduled_start(), clone->scheduled_start());
     EXPECT_EQ(job->start_step(), clone->start_step());
     EXPECT_EQ(job->end_step(), clone->end_step());
-    EXPECT_FALSE(clone->is_canary());
   }
 
  private:
@@ -109,7 +109,7 @@ class SyncSessionJobTest : public testing::Test {
 
 TEST_F(SyncSessionJobTest, Clone) {
   SyncSessionJob job1(SyncSessionJob::NUDGE, TimeTicks::Now(),
-      NewLocalSession().Pass(), ConfigurationParams(), FROM_HERE);
+      NewLocalSession().Pass(), ConfigurationParams());
 
   sessions::test_util::SimulateSuccess(job1.mutable_session(),
                                        job1.start_step(),
@@ -118,52 +118,33 @@ TEST_F(SyncSessionJobTest, Clone) {
   ModelSafeRoutingInfo new_routes;
   new_routes[AUTOFILL] = GROUP_PASSIVE;
   context()->set_routing_info(new_routes);
-  const tracked_objects::Location from_here1(FROM_HERE);
   scoped_ptr<SyncSessionJob> clone1 = job1.Clone();
-  scoped_ptr<SyncSessionJob> clone1_loc = job1.CloneFromLocation(from_here1);
 
   ExpectClonesBase(&job1, clone1.get());
-  ExpectClonesBase(&job1, clone1_loc.get());
   EXPECT_NE(job1.session(), clone1->session());
-  EXPECT_EQ(job1.from_location().ToString(),
-            clone1->from_location().ToString());
-  EXPECT_NE(job1.session(), clone1_loc->session());
-  EXPECT_EQ(from_here1.ToString(), clone1_loc->from_location().ToString());
 
   context()->set_routing_info(routes());
-  clone1->GrantCanaryPrivilege();
   sessions::test_util::SimulateSuccess(clone1->mutable_session(),
                                        clone1->start_step(),
                                        clone1->end_step());
   clone1->Finish(false);
-  const tracked_objects::Location from_here2(FROM_HERE);
   scoped_ptr<SyncSessionJob> clone2 = clone1->Clone();
-  scoped_ptr<SyncSessionJob> clone2_loc(clone1->CloneFromLocation(from_here2));
 
   ExpectClonesBase(clone1.get(), clone2.get());
-  ExpectClonesBase(clone1.get(), clone2_loc.get());
   EXPECT_NE(clone1->session(), clone2->session());
-  EXPECT_EQ(clone1->from_location().ToString(),
-            clone2->from_location().ToString());
   EXPECT_NE(clone1->session(), clone2->session());
-  EXPECT_EQ(from_here2.ToString(), clone2_loc->from_location().ToString());
 
   clone1.reset();
-  clone1_loc.reset();
   ExpectClonesBase(&job1, clone2.get());
   EXPECT_NE(job1.session(), clone2->session());
-  EXPECT_EQ(job1.from_location().ToString(),
-            clone2->from_location().ToString());
 }
 
 TEST_F(SyncSessionJobTest, CloneAfterEarlyExit) {
   SyncSessionJob job1(SyncSessionJob::NUDGE, TimeTicks::Now(),
-      NewLocalSession().Pass(), ConfigurationParams(), FROM_HERE);
+      NewLocalSession().Pass(), ConfigurationParams());
   job1.Finish(true);
   scoped_ptr<SyncSessionJob> job2 = job1.Clone();
-  scoped_ptr<SyncSessionJob> job2_loc = job1.CloneFromLocation(FROM_HERE);
   ExpectClonesBase(&job1, job2.get());
-  ExpectClonesBase(&job1, job2_loc.get());
 }
 
 TEST_F(SyncSessionJobTest, CloneAndAbandon) {
@@ -171,7 +152,7 @@ TEST_F(SyncSessionJobTest, CloneAndAbandon) {
   SyncSession* session_ptr = session.get();
 
   SyncSessionJob job1(SyncSessionJob::NUDGE, TimeTicks::Now(),
-      session.Pass(), ConfigurationParams(), FROM_HERE);
+      session.Pass(), ConfigurationParams());
   ModelSafeRoutingInfo new_routes;
   new_routes[AUTOFILL] = GROUP_PASSIVE;
   context()->set_routing_info(new_routes);
@@ -185,7 +166,7 @@ TEST_F(SyncSessionJobTest, CloneAndAbandon) {
 // Tests interaction between Finish and sync cycle success / failure.
 TEST_F(SyncSessionJobTest, Finish) {
   SyncSessionJob job1(SyncSessionJob::NUDGE, TimeTicks::Now(),
-      NewLocalSession().Pass(), ConfigurationParams(), FROM_HERE);
+      NewLocalSession().Pass(), ConfigurationParams());
 
   sessions::test_util::SimulateSuccess(job1.mutable_session(),
                                        job1.start_step(),
@@ -215,7 +196,7 @@ TEST_F(SyncSessionJobTest, FinishCallsReadyTask) {
       new SyncSession(context(), delegate(), info));
 
   SyncSessionJob job1(SyncSessionJob::CONFIGURATION, TimeTicks::Now(),
-      session.Pass(), params, FROM_HERE);
+      session.Pass(), params);
   sessions::test_util::SimulateSuccess(job1.mutable_session(),
                                        job1.start_step(),
                                        job1.end_step());

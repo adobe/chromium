@@ -61,6 +61,7 @@
 #include "extensions/common/constants.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
+#include "net/proxy/proxy_resolver_v8.h"
 #include "third_party/sqlite/sqlite3.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -91,7 +92,7 @@ int GetMessagePrefixID(bool is_app,
                        bool is_extension,
                        bool is_incognito,
                        bool is_prerender,
-                       bool is_instant_preview,
+                       bool is_instant_overlay,
                        bool is_background) {
   if (is_app) {
     if (is_background) {
@@ -108,8 +109,8 @@ int GetMessagePrefixID(bool is_app,
       return IDS_TASK_MANAGER_EXTENSION_PREFIX;
   } else if (is_prerender) {
     return IDS_TASK_MANAGER_PRERENDER_PREFIX;
-  } else if (is_instant_preview) {
-    return IDS_TASK_MANAGER_INSTANT_PREVIEW_PREFIX;
+  } else if (is_instant_overlay) {
+    return IDS_TASK_MANAGER_INSTANT_OVERLAY_PREFIX;
   } else {
     return IDS_TASK_MANAGER_TAB_PREFIX;
   }
@@ -161,7 +162,7 @@ bool IsContentsInstant(WebContents* web_contents) {
   for (chrome::BrowserIterator it; !it.done(); it.Next()) {
     if (it->instant_controller() &&
         it->instant_controller()->instant()->
-            GetPreviewContents() == web_contents) {
+            GetOverlayContents() == web_contents) {
       return true;
     }
   }
@@ -305,7 +306,7 @@ TaskManagerTabContentsResource::TaskManagerTabContentsResource(
           web_contents->GetRenderViewHost()),
       web_contents_(web_contents),
       profile_(Profile::FromBrowserContext(web_contents->GetBrowserContext())),
-      is_instant_preview_(IsContentsInstant(web_contents)) {
+      is_instant_overlay_(IsContentsInstant(web_contents)) {
   if (!prerender_icon_) {
     ResourceBundle& rb = ResourceBundle::GetSharedInstance();
     prerender_icon_ = rb.GetImageSkiaNamed(IDR_PRERENDER);
@@ -316,8 +317,8 @@ TaskManagerTabContentsResource::~TaskManagerTabContentsResource() {
 }
 
 void TaskManagerTabContentsResource::InstantCommitted() {
-  DCHECK(is_instant_preview_);
-  is_instant_preview_ = false;
+  DCHECK(is_instant_overlay_);
+  is_instant_overlay_ = false;
 }
 
 bool TaskManagerTabContentsResource::HostsExtension() const {
@@ -346,7 +347,7 @@ string16 TaskManagerTabContentsResource::GetTitle() const {
       HostsExtension(),
       profile_->IsOffTheRecord(),
       IsContentsPrerendering(web_contents_),
-      is_instant_preview_,
+      is_instant_overlay_,
       false);
   return l10n_util::GetStringFUTF16(message_id, tab_title);
 }
@@ -419,18 +420,18 @@ void TaskManagerTabContentsResourceProvider::StartUpdating() {
   updating_ = true;
 
   // The contents that are tracked by this resource provider are those that
-  // are tab contents (WebContents serving as a tab in a Browser), instant
+  // are tab contents (WebContents serving as a tab in a Browser), Instant
   // pages, prerender pages, and background printed pages.
 
   // Add all the existing WebContentses.
   for (TabContentsIterator iterator; !iterator.done(); iterator.Next())
     Add(*iterator);
 
-  // Add all the instant pages.
+  // Add all the Instant pages.
   for (chrome::BrowserIterator it; !it.done(); it.Next()) {
     if (it->instant_controller() &&
-        it->instant_controller()->instant()->GetPreviewContents()) {
-      Add(it->instant_controller()->instant()->GetPreviewContents());
+        it->instant_controller()->instant()->GetOverlayContents()) {
+      Add(it->instant_controller()->instant()->GetOverlayContents());
     }
   }
 
@@ -501,7 +502,7 @@ void TaskManagerTabContentsResourceProvider::Add(WebContents* web_contents) {
     return;
 
   // The contents that are tracked by this resource provider are those that
-  // are tab contents (WebContents serving as a tab in a Browser), instant
+  // are tab contents (WebContents serving as a tab in a Browser), Instant
   // pages, prerender pages, and background printed pages.
   if (!chrome::FindBrowserWithWebContents(web_contents) &&
       !IsContentsPrerendering(web_contents) &&
@@ -1211,83 +1212,53 @@ void TaskManagerChildProcessResourceProvider::StartUpdating() {
   DCHECK(!updating_);
   updating_ = true;
 
-  // Register for notifications to get new child processes.
-  registrar_.Add(this, content::NOTIFICATION_CHILD_PROCESS_HOST_CONNECTED,
-                 content::NotificationService::AllBrowserContextsAndSources());
-  registrar_.Add(this, content::NOTIFICATION_CHILD_PROCESS_HOST_DISCONNECTED,
-                 content::NotificationService::AllBrowserContextsAndSources());
-
   // Get the existing child processes.
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
       base::Bind(
           &TaskManagerChildProcessResourceProvider::RetrieveChildProcessData,
           this));
+
+  BrowserChildProcessObserver::Add(this);
 }
 
 void TaskManagerChildProcessResourceProvider::StopUpdating() {
   DCHECK(updating_);
   updating_ = false;
 
-  // Unregister for notifications to get new plugin processes.
-  registrar_.Remove(
-      this, content::NOTIFICATION_CHILD_PROCESS_HOST_CONNECTED,
-      content::NotificationService::AllBrowserContextsAndSources());
-  registrar_.Remove(
-      this,
-      content::NOTIFICATION_CHILD_PROCESS_HOST_DISCONNECTED,
-      content::NotificationService::AllBrowserContextsAndSources());
-
   // Delete all the resources.
   STLDeleteContainerPairSecondPointers(resources_.begin(), resources_.end());
 
   resources_.clear();
   pid_to_resources_.clear();
+
+  BrowserChildProcessObserver::Remove(this);
 }
 
-void TaskManagerChildProcessResourceProvider::Observe(
-    int type,
-    const content::NotificationSource& source,
-    const content::NotificationDetails& details) {
-  content::ChildProcessData data =
-      *content::Details<content::ChildProcessData>(details).ptr();
-  switch (type) {
-    case content::NOTIFICATION_CHILD_PROCESS_HOST_CONNECTED:
-      Add(data);
-      break;
-    case content::NOTIFICATION_CHILD_PROCESS_HOST_DISCONNECTED:
-      Remove(data);
-      break;
-    default:
-      NOTREACHED() << "Unexpected notification.";
-      return;
-  }
-}
+void TaskManagerChildProcessResourceProvider::BrowserChildProcessHostConnected(
+    const content::ChildProcessData& data) {
+  DCHECK(updating_);
 
-void TaskManagerChildProcessResourceProvider::Add(
-    const content::ChildProcessData& child_process_data) {
-  if (!updating_)
-    return;
   // Workers are handled by TaskManagerWorkerResourceProvider.
-  if (child_process_data.type == content::PROCESS_TYPE_WORKER)
+  if (data.type == content::PROCESS_TYPE_WORKER)
     return;
-  if (resources_.count(child_process_data.handle)) {
+  if (resources_.count(data.handle)) {
     // The case may happen that we have added a child_process_info as part of
     // the iteration performed during StartUpdating() call but the notification
     // that it has connected was not fired yet. So when the notification
     // happens, we already know about this plugin and just ignore it.
     return;
   }
-  AddToTaskManager(child_process_data);
+  AddToTaskManager(data);
 }
 
-void TaskManagerChildProcessResourceProvider::Remove(
-    const content::ChildProcessData& child_process_data) {
-  if (!updating_)
+void TaskManagerChildProcessResourceProvider::
+BrowserChildProcessHostDisconnected(const content::ChildProcessData& data) {
+  DCHECK(updating_);
+
+  if (data.type == content::PROCESS_TYPE_WORKER)
     return;
-  if (child_process_data.type == content::PROCESS_TYPE_WORKER)
-    return;
-  ChildProcessMap::iterator iter = resources_.find(child_process_data.handle);
+  ChildProcessMap::iterator iter = resources_.find(data.handle);
   if (iter == resources_.end()) {
     // ChildProcessData disconnection notifications are asynchronous, so we
     // might be notified for a plugin we don't know anything about (if it was
@@ -1330,6 +1301,8 @@ void TaskManagerChildProcessResourceProvider::RetrieveChildProcessData() {
     // Only add processes which are already started, since we need their handle.
     if (iter.GetData().handle == base::kNullProcessHandle)
       continue;
+    if (iter.GetData().type == content::PROCESS_TYPE_WORKER)
+      continue;
     child_processes.push_back(iter.GetData());
   }
   // Now notify the UI thread that we have retrieved information about child
@@ -1345,7 +1318,7 @@ void TaskManagerChildProcessResourceProvider::RetrieveChildProcessData() {
 void TaskManagerChildProcessResourceProvider::ChildProcessDataRetreived(
     const std::vector<content::ChildProcessData>& child_processes) {
   for (size_t i = 0; i < child_processes.size(); ++i)
-    Add(child_processes[i]);
+    AddToTaskManager(child_processes[i]);
 
   content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_TASK_MANAGER_CHILD_PROCESSES_DATA_READY,
@@ -1715,15 +1688,11 @@ bool TaskManagerBrowserProcessResource::ReportsV8MemoryStats() const {
 }
 
 size_t TaskManagerBrowserProcessResource::GetV8MemoryAllocated() const {
-  v8::HeapStatistics stats;
-  v8::V8::GetHeapStatistics(&stats);
-  return stats.total_heap_size();
+  return net::ProxyResolverV8::GetTotalHeapSize();
 }
 
 size_t TaskManagerBrowserProcessResource::GetV8MemoryUsed() const {
-  v8::HeapStatistics stats;
-  v8::V8::GetHeapStatistics(&stats);
-  return stats.used_heap_size();
+  return net::ProxyResolverV8::GetUsedHeapSize();
 }
 
 ////////////////////////////////////////////////////////////////////////////////

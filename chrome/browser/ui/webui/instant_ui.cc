@@ -9,13 +9,13 @@
 #include "base/stringprintf.h"
 #include "base/time.h"
 #include "chrome/browser/instant/instant_controller.h"
-#include "chrome/browser/prefs/pref_registry_syncable.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_instant_controller.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_data_source.h"
 #include "content/public/browser/web_ui_message_handler.h"
@@ -58,6 +58,7 @@ class InstantUIMessageHandler
   void GetPreferenceValue(const base::ListValue* args);
   void SetPreferenceValue(const base::ListValue* args);
   void GetDebugInfo(const base::ListValue* value);
+  void ClearDebugInfo(const base::ListValue* value);
 
   DISALLOW_COPY_AND_ASSIGN(InstantUIMessageHandler);
 };
@@ -78,6 +79,10 @@ void InstantUIMessageHandler::RegisterMessages() {
   web_ui()->RegisterMessageCallback(
       "getDebugInfo",
       base::Bind(&InstantUIMessageHandler::GetDebugInfo,
+                 base::Unretained(this)));
+  web_ui()->RegisterMessageCallback(
+      "clearDebugInfo",
+      base::Bind(&InstantUIMessageHandler::ClearDebugInfo,
                  base::Unretained(this)));
 }
 
@@ -133,6 +138,19 @@ void InstantUIMessageHandler::GetDebugInfo(const base::ListValue* args) {
   data.Set("entries", entries);
 
   web_ui()->CallJavascriptFunction("instantConfig.getDebugInfoResult", data);
+#endif
+}
+
+void InstantUIMessageHandler::ClearDebugInfo(const base::ListValue* args) {
+#if !defined(OS_ANDROID)
+  if (!web_ui()->GetWebContents())
+    return;
+  Browser* browser = chrome::FindBrowserWithWebContents(
+      web_ui()->GetWebContents());
+  if (!browser || !browser->instant_controller())
+    return;
+
+  browser->instant_controller()->instant()->ClearDebugEvents();
 #endif
 }
 

@@ -27,6 +27,7 @@ class BrowserOptions(optparse.Values):
     self.extra_wpr_args = []
     self.show_stdout = False
     self.extensions_to_load = []
+    self.cros_desktop = False
 
     self.cros_remote = None
     self.wpr_mode = wpr_modes.WPR_OFF
@@ -95,6 +96,11 @@ class BrowserOptions(optparse.Values):
     group.add_option('--show-stdout',
         action='store_true',
         help='When possible, will display the stdout of the process')
+    # --cros-desktop is linux only.
+    if sys.platform.startswith('linux'):
+      group.add_option('--cros-desktop',
+          action='store_true',
+          help='Run ChromeOS desktop')
     parser.add_option_group(group)
 
     # Page set options
@@ -115,6 +121,14 @@ class BrowserOptions(optparse.Values):
         'what is specified by --page-repeat and --pageset-repeat.')
     parser.add_option_group(group)
 
+    group = optparse.OptionGroup(parser, 'Web Page Replay options')
+    group.add_option('--allow-live-sites',
+        dest='allow_live_sites', action='store_true',
+        help='Run against live sites if the Web Page Replay archives don\'t '
+             'exist. Without this flag, the benchmark will just fail instead '
+             'of running against live sites.')
+    parser.add_option_group(group)
+
     # Debugging options
     group = optparse.OptionGroup(parser, 'When things go wrong')
     group.add_option(
@@ -123,6 +137,15 @@ class BrowserOptions(optparse.Values):
     group.add_option(
       '-v', '--verbose', action='count', dest='verbosity',
       help='Increase verbosity level (repeat as needed)')
+    parser.add_option_group(group)
+
+    # Platform options
+    group = optparse.OptionGroup(parser, 'Platform options')
+    group.add_option('--no-performance-mode', action='store_true',
+        help='Some platforms run on "full performance mode" where the '
+        'benchmark is executed at maximum CPU speed in order to minimize noise '
+        '(specially important for dashboards / continuous builds). '
+        'This option prevents Telemetry from tweaking such platform settings.')
     parser.add_option_group(group)
 
     real_parse = parser.parse_args

@@ -4,71 +4,30 @@
  */
 
 #include <fcntl.h>
+#include <string.h>
 #include <gmock/gmock.h>
 #include <ppapi/c/ppb_file_io.h>
 #include <ppapi/c/pp_errors.h>
 #include <ppapi/c/pp_instance.h>
 
+#include "mock_util.h"
 #include "nacl_io/mount_html5fs.h"
 #include "nacl_io/osdirent.h"
 #include "pepper_interface_mock.h"
 
 using ::testing::_;
 using ::testing::DoAll;
+using ::testing::Invoke;
 using ::testing::Return;
 using ::testing::SetArgPointee;
 using ::testing::StrEq;
+using ::testing::WithArgs;
 
 namespace {
 
-ACTION_TEMPLATE(CallCallback,
-                HAS_1_TEMPLATE_PARAMS(int, k),
-                AND_1_VALUE_PARAMS(result)) {
-  PP_CompletionCallback callback = std::tr1::get<k>(args);
-  if (callback.func) {
-    (*callback.func)(callback.user_data, result);
-  }
-
-  // Dummy return value.
-  return 0;
-}
-
-MATCHER_P(IsEqualToVar, var, "") {
-  if (arg.type != var.type)
-    return false;
-
-  switch (arg.type) {
-    case PP_VARTYPE_BOOL:
-      return arg.value.as_bool == var.value.as_bool;
-
-    case PP_VARTYPE_INT32:
-      return arg.value.as_int == var.value.as_int;
-
-    case PP_VARTYPE_DOUBLE:
-      return arg.value.as_double == var.value.as_double;
-
-    case PP_VARTYPE_STRING:
-      return arg.value.as_id == var.value.as_id;
-
-    case PP_VARTYPE_UNDEFINED:
-    case PP_VARTYPE_NULL:
-      return true;
-
-    case PP_VARTYPE_ARRAY:
-    case PP_VARTYPE_ARRAY_BUFFER:
-    case PP_VARTYPE_DICTIONARY:
-    case PP_VARTYPE_OBJECT:
-    default:
-      // Not supported.
-      return false;
-  }
-}
-
-
 class MountHtml5FsMock : public MountHtml5Fs {
  public:
-  explicit MountHtml5FsMock(StringMap_t map, PepperInterfaceMock* ppapi)
-      : MountHtml5Fs() {
+  MountHtml5FsMock(StringMap_t map, PepperInterfaceMock* ppapi) {
     Init(1, map, ppapi);
   }
 
@@ -170,6 +129,21 @@ void MountHtml5FsNodeTest::SetUp() {
 void MountHtml5FsNodeTest::TearDown() {
   mnt_->ReleaseNode(node_);
   delete mnt_;
+}
+
+void ReadEntriesAction(const PP_ArrayOutput& output) {
+  const int fileref_resource_1 = 238;
+  const int fileref_resource_2 = 239;
+
+  std::vector<PP_DirectoryEntry_Dev> entries;
+  PP_DirectoryEntry_Dev entry1 = { fileref_resource_1, PP_FILETYPE_REGULAR };
+  PP_DirectoryEntry_Dev entry2 = { fileref_resource_2, PP_FILETYPE_REGULAR };
+  entries.push_back(entry1);
+  entries.push_back(entry2);
+
+  void* dest = output.GetDataBuffer(
+      output.user_data, 2, sizeof(PP_DirectoryEntry_Dev));
+  memcpy(dest, &entries[0], sizeof(PP_DirectoryEntry_Dev) * 2);
 }
 
 }  // namespace
@@ -299,16 +273,6 @@ TEST_F(MountHtml5FsNodeTest, GetDents) {
   const int fileref_resource_1 = 238;
   const int fileref_resource_2 = 239;
 
-  PP_DirectoryEntry_Dev directory_entry_1 = {
-    fileref_resource_1, PP_FILETYPE_REGULAR
-  };
-  PP_DirectoryEntry_Dev directory_entry_2 = {
-    fileref_resource_2, PP_FILETYPE_REGULAR
-  };
-  PP_DirectoryEntry_Dev directory_entry_end = {
-    0, PP_FILETYPE_REGULAR,
-  };
-
   const int fileref_name_id_1 = 240;
   const char fileref_name_cstr_1[] = "bar";
   PP_Var fileref_name_1;
@@ -327,12 +291,8 @@ TEST_F(MountHtml5FsNodeTest, GetDents) {
 
   EXPECT_CALL(*dir_reader, Create(fileref_resource_))
       .WillOnce(Return(dir_reader_resource));
-  EXPECT_CALL(*dir_reader, GetNextEntry(dir_reader_resource, _, _))
-      .WillOnce(DoAll(SetArgPointee<1>(directory_entry_1),
-                      Return(int32_t(PP_OK))))
-      .WillOnce(DoAll(SetArgPointee<1>(directory_entry_2),
-                      Return(int32_t(PP_OK))))
-      .WillOnce(DoAll(SetArgPointee<1>(directory_entry_end),
+  EXPECT_CALL(*dir_reader, ReadEntries(dir_reader_resource, _, _))
+      .WillOnce(DoAll(WithArgs<1>(Invoke(ReadEntriesAction)),
                       Return(int32_t(PP_OK))));
 
   EXPECT_CALL(*fileref_, GetName(fileref_resource_1))
@@ -346,6 +306,8 @@ TEST_F(MountHtml5FsNodeTest, GetDents) {
       .WillOnce(Return(fileref_name_cstr_2));
 
   EXPECT_CALL(*ppapi_, ReleaseResource(dir_reader_resource));
+  EXPECT_CALL(*ppapi_, ReleaseResource(fileref_resource_1));
+  EXPECT_CALL(*ppapi_, ReleaseResource(fileref_resource_2));
 
   struct dirent dirents[2];
   memset(&dirents[0], 0, sizeof(dirents));

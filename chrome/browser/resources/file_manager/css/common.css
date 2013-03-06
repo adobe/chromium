@@ -115,7 +115,6 @@ input.common[type='checkbox']::after {
 .buttonbar {
   display: -webkit-box;
   height: 29px;
-  line-height: 29px;
 }
 
 .buttonbar.right {
@@ -394,4 +393,8 @@ input[type='submit'][disabled]:hover {
   border-radius: 2px;
   height: 10px;
   margin: -1px;
+}
+
+.progress-track.smoothed {
+  -webkit-transition: width 1s linear;
 }

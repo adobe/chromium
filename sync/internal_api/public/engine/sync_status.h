@@ -93,12 +93,18 @@ struct SYNC_EXPORT SyncStatus {
   // Per-datatype throttled status.
   ModelTypeSet throttled_types;
 
-  // The unique identifer for this client.
-  std::string unique_id;
+  // The unique identifer for the sync store.
+  std::string sync_id;
+
+  // The unique identifier for the invalidation client.
+  std::string invalidator_client_id;
 
   // Counters grouped by model type
   std::vector<int> num_entries_by_type;
   std::vector<int> num_to_delete_entries_by_type;
+
+  // Time of next retry if sync scheduler is throttled or in backoff.
+  base::Time retry_time;
 };
 
 }  // namespace syncer

@@ -98,7 +98,6 @@ void PictureLayerImpl::appendQuads(QuadSink& quadSink,
       gfx::QuadF(rect),
       clipped);
   bool isAxisAlignedInTarget = !clipped && target_quad.IsRectilinear();
-  bool useAA = !isAxisAlignedInTarget;
 
   bool isPixelAligned = isAxisAlignedInTarget && drawTransform().IsIdentityOrIntegerTranslation();
   PictureLayerTiling::LayerDeviceAlignment layerDeviceAlignment =
@@ -185,11 +184,6 @@ void PictureLayerImpl::appendQuads(QuadSink& quadSink,
     gfx::Rect opaque_rect = iter->opaque_rect();
     opaque_rect.Intersect(content_rect);
 
-    bool outside_left_edge = geometry_rect.x() == content_rect.x();
-    bool outside_top_edge = geometry_rect.y() == content_rect.y();
-    bool outside_right_edge = geometry_rect.right() == content_rect.right();
-    bool outside_bottom_edge = geometry_rect.bottom() == content_rect.bottom();
-
     scoped_ptr<TileDrawQuad> quad = TileDrawQuad::Create();
     quad->SetNew(sharedQuadState,
                  geometry_rect,
@@ -197,11 +191,7 @@ void PictureLayerImpl::appendQuads(QuadSink& quadSink,
                  resource,
                  texture_rect,
                  iter.texture_size(),
-                 iter->contents_swizzled(),
-                 outside_left_edge && useAA,
-                 outside_top_edge && useAA,
-                 outside_right_edge && useAA,
-                 outside_bottom_edge && useAA);
+                 iter->contents_swizzled());
     quadSink.append(quad.PassAs<DrawQuad>(), appendQuadsData);
 
     if (!seen_tilings.size() || seen_tilings.back() != iter.CurrentTiling())
@@ -244,8 +234,6 @@ void PictureLayerImpl::updateTilePriorities() {
       viewport_in_content_space,
       last_bounds_,
       bounds(),
-      last_content_bounds_,
-      contentBounds(),
       last_content_scale_,
       contentsScaleX(),
       last_screen_space_transform_,
@@ -256,7 +244,6 @@ void PictureLayerImpl::updateTilePriorities() {
 
   last_screen_space_transform_ = current_screen_space_transform;
   last_bounds_ = bounds();
-  last_content_bounds_ = contentBounds();
   last_content_scale_ = contentsScaleX();
 }
 
@@ -281,7 +268,7 @@ void PictureLayerImpl::calculateContentsScale(
     return;
   }
 
-  float min_contents_scale = layerTreeImpl()->settings().minimumContentsScale;
+  float min_contents_scale = MinimumContentsScale();
   float min_page_scale = layerTreeImpl()->min_page_scale_factor();
   float min_device_scale = 1.f;
   float min_source_scale =
@@ -323,11 +310,7 @@ skia::RefPtr<SkPicture> PictureLayerImpl::getPicture() {
 
 scoped_refptr<Tile> PictureLayerImpl::CreateTile(PictureLayerTiling* tiling,
                                                  gfx::Rect content_rect) {
-  // Ensure there is a recording for this tile.
-  gfx::Rect layer_rect = gfx::ToEnclosingRect(
-      gfx::ScaleRect(content_rect, 1.f / tiling->contents_scale()));
-  layer_rect.Intersect(gfx::Rect(bounds()));
-  if (!pile_->recorded_region().Contains(layer_rect))
+  if (!pile_->CanRaster(tiling->contents_scale(), content_rect))
     return scoped_refptr<Tile>();
 
   return make_scoped_refptr(new Tile(
@@ -337,7 +320,8 @@ scoped_refptr<Tile> PictureLayerImpl::CreateTile(PictureLayerTiling* tiling,
       GL_RGBA,
       content_rect,
       contentsOpaque() ? content_rect : gfx::Rect(),
-      tiling->contents_scale()));
+      tiling->contents_scale(),
+      id()));
 }
 
 void PictureLayerImpl::UpdatePile(Tile* tile) {
@@ -411,15 +395,32 @@ void PictureLayerImpl::SyncFromActiveLayer(const PictureLayerImpl* other) {
   raster_device_scale_ = other->raster_device_scale_;
   raster_source_scale_ = other->raster_source_scale_;
 
-  tilings_->CloneAll(*other->tilings_, invalidation_);
+  // Add synthetic invalidations for any recordings that were dropped.  As
+  // tiles are updated to point to this new pile, this will force the dropping
+  // of tiles that can no longer be rastered.  This is not ideal, but is a
+  // trade-off for memory (use the same pile as much as possible, by switching
+  // during DidBecomeActive) and for time (don't bother checking every tile
+  // during activation to see if the new pile can still raster it).
+  //
+  // TODO(enne): Clean up this double loop.
+  for (int x = 0; x < pile_->num_tiles_x(); ++x) {
+    for (int y = 0; y < pile_->num_tiles_y(); ++y) {
+      bool previously_had = other->pile_->HasRecordingAt(x, y);
+      bool now_has = pile_->HasRecordingAt(x, y);
+      if (now_has || !previously_had)
+        continue;
+      gfx::Rect layer_rect = pile_->tile_bounds(x, y);
+      invalidation_.Union(layer_rect);
+    }
+  }
+
+  tilings_->CloneAll(*other->tilings_, invalidation_, MinimumContentsScale());
   DCHECK(bounds() == tilings_->LayerBounds());
 
   // It's a sad but unfortunate fact that PicturePile tiling edges do not line
   // up with PictureLayerTiling edges.  Tiles can only be added if they are
   // entirely covered by recordings (that may come from multiple PicturePile
-  // tiles).  This check happens in this class's CreateTile() call.  Tiles
-  // are not removed (even if they cannot be rerecorded) unless they are
-  // invalidated.
+  // tiles).  This check happens in this class's CreateTile() call.
   for (int x = 0; x < pile_->num_tiles_x(); ++x) {
     for (int y = 0; y < pile_->num_tiles_y(); ++y) {
       bool previously_had = other->pile_->HasRecordingAt(x, y);
@@ -435,7 +436,7 @@ void PictureLayerImpl::SyncFromActiveLayer(const PictureLayerImpl* other) {
 void PictureLayerImpl::SyncTiling(
     const PictureLayerTiling* tiling,
     const Region& pending_layer_invalidation) {
-  if (!drawsContent())
+  if (!drawsContent() || tiling->contents_scale() < MinimumContentsScale())
     return;
   tilings_->Clone(tiling, pending_layer_invalidation);
 }
@@ -517,7 +518,7 @@ bool PictureLayerImpl::areVisibleResourcesReady() const {
 }
 
 PictureLayerTiling* PictureLayerImpl::AddTiling(float contents_scale) {
-  DCHECK(contents_scale >= layerTreeImpl()->settings().minimumContentsScale);
+  DCHECK(contents_scale >= MinimumContentsScale());
 
   PictureLayerTiling* tiling = tilings_->AddTiling(contents_scale);
 
@@ -672,7 +673,7 @@ void PictureLayerImpl::CalculateRasterContentsScale(
   float low_res_factor = layerTreeImpl()->settings().lowResContentsScaleFactor;
   *low_res_raster_contents_scale = std::max(
       *raster_contents_scale * low_res_factor,
-      layerTreeImpl()->settings().minimumContentsScale);
+      MinimumContentsScale());
 }
 
 void PictureLayerImpl::CleanUpTilingsOnActiveLayer(
@@ -754,6 +755,20 @@ PictureLayerImpl* PictureLayerImpl::ActiveTwin() const {
   if (twin)
     DCHECK_EQ(id(), twin->id());
   return twin;
+}
+
+float PictureLayerImpl::MinimumContentsScale() const {
+  float setting_min = layerTreeImpl()->settings().minimumContentsScale;
+
+  // If the contents scale is less than 1 / width (also for height),
+  // then it will end up having less than one pixel of content in that
+  // dimension.  Bump the minimum contents scale up in this case to prevent
+  // this from happening.
+  int min_dimension = std::min(bounds().width(), bounds().height());
+  if (!min_dimension)
+    return setting_min;
+
+  return std::max(1.f / min_dimension, setting_min);
 }
 
 void PictureLayerImpl::getDebugBorderProperties(

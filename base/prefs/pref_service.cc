@@ -21,8 +21,6 @@
 #include "base/value_conversions.h"
 #include "build/build_config.h"
 
-using content::BrowserContext;
-
 namespace {
 
 class ReadErrorHandler : public PersistentPrefStore::ReadErrorDelegate {
@@ -271,6 +269,12 @@ const base::Value* PrefService::GetUserPrefValue(const char* path) const {
   }
 
   return value;
+}
+
+void PrefService::SetDefaultPrefValue(const char* path,
+                                      base::Value* value) {
+  DCHECK(CalledOnValidThread());
+  pref_registry_->SetDefaultPrefValue(path, value);
 }
 
 const base::Value* PrefService::GetDefaultPrefValue(const char* path) const {

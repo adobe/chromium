@@ -87,6 +87,8 @@ ActionChoice.prototype.initDom_ = function() {
   this.dom_.setAttribute('loading', '');
 
   this.document_.querySelectorAll('.choices input')[0].focus();
+
+  util.disableBrowserShortcutKeys(this.document_);
 };
 
 /**
@@ -221,8 +223,8 @@ ActionChoice.prototype.renderPreview_ = function(entries, count) {
                             ThumbnailLoader.LoaderType.IMAGE,
                             metadata).load(
             box,
-            ThumbnailLoader.OptimizationMode.DISCARD_DETACHED,
             ThumbnailLoader.FillMode.FILL,
+            ThumbnailLoader.OptimizationMode.NEVER_DISCARD,
             onSuccess,
             onError,
             onError);

@@ -16,6 +16,9 @@
 #include "base/observer_list.h"
 #include "base/time.h"
 #include "chrome/browser/chromeos/cros/burn_library.h"
+#include "chrome/browser/chromeos/cros/network_library.h"
+#include "chrome/browser/chromeos/imageburner/burn_device_handler.h"
+#include "chromeos/disks/disk_mount_manager.h"
 #include "googleurl/src/gurl.h"
 #include "net/url_request/url_fetcher_delegate.h"
 
@@ -101,7 +104,6 @@ class StateMachine {
     INITIAL,
     DOWNLOADING,
     BURNING,
-    CANCELLED
   };
 
   State state() { return state_; }
@@ -134,7 +136,6 @@ class StateMachine {
 
   void OnSuccess();
   void OnError(int error_message_id);
-  void OnCancelation();
 
   void OnStateChanged() {
     FOR_EACH_OBSERVER(Observer, observers_, OnBurnStateChanged(state_));
@@ -178,27 +179,30 @@ class StateMachine {
 // TODO(hidehiko): Simplify the relationship among this class, BurnLibrary,
 // BurnController and helper classes defined above.
 class BurnManager : public net::URLFetcherDelegate,
-                    public BurnLibrary::Observer {
+                    public BurnLibrary::Observer,
+                    public NetworkLibrary::NetworkManagerObserver {
  public:
 
   // Interface for classes that need to observe events for the burning image
   // tasks.
   class Observer {
    public:
+    // Triggered when a burnable device is added.
+    virtual void OnDeviceAdded(const disks::DiskMountManager::Disk& disk) = 0;
+
+    // Triggered when a burnable device is removed.
+    virtual void OnDeviceRemoved(const disks::DiskMountManager::Disk& disk) = 0;
+
+    // Triggered when a network is detected.
+    virtual void OnNetworkDetected() = 0;
+
     // Triggered when the creating a ImageDir is done.
     // The status of the creating the directory is passed to |success|.
     virtual void OnImageDirCreated(bool success) = 0;
 
     // Triggered when the fetching of the config file is done.
-    // If it is successfully done, |success| is set to true, and
-    // |image_file_name| and |image_download_url| is set to the name of
-    // of the image file for this device, and the url to download the file
-    // respectively.
-    // If failed, |success| is set to false, and remaining two arguments
-    // are set to empty.
-    virtual void OnConfigFileFetched(bool success,
-                                     const std::string& image_file_name,
-                                     const GURL& image_download_url) = 0;
+    // The result status of the fetch is passed to |success|.
+    virtual void OnConfigFileFetched(bool success) = 0;
 
     // Triggered during the image file downloading periodically.
     // |estimated_remaining_time| is the remaining duration to download the
@@ -234,19 +238,50 @@ class BurnManager : public net::URLFetcherDelegate,
   // Remove an observer.
   void RemoveObserver(Observer* observer);
 
+  // Returns devices on which we can burn recovery image.
+  std::vector<disks::DiskMountManager::Disk> GetBurnableDevices();
+
+  // Returns true if some network is connected.
+  bool IsNetworkConnected() const;
+
+  // Cancels a currently running task of burning recovery image.
+  // Note: currently we only support Cancel method, which may look asymmetry
+  // because there is no method to start the task. It is just because that
+  // we are on the way of refactoring.
+  // TODO(hidehiko): Introduce Start method, which actually starts a whole
+  // image burning task, including config/image file fetching and unzipping.
+  void Cancel();
+
+  // Error is usually detected by all existing Burn handlers, but only first
+  // one that calls this method should actually process it.
+  // The |message_id| is the id for human readable error message, although
+  // here is not the place to handle UI.
+  // TODO(hidehiko): Replace it with semantical enum value.
+  // Note: currently, due to some implementation reasons, the errors can be
+  // observed in outside classes, and this method is public to be accessed from
+  // them.
+  // TODO(hidehiko): Refactor the structure.
+  void OnError(int message_id);
+
   // Creates URL image should be fetched from.
   // Must be called from UI thread.
   void FetchConfigFile();
 
   // Fetch a zipped recovery image.
-  void FetchImage(const GURL& image_url, const base::FilePath& file_path);
+  void FetchImage();
 
-  // Burns the image of given |source_path| and |image_name| to the
-  // |target_file_path| and |target_device_path|.
-  void DoBurn(const base::FilePath& source_path,
-              const std::string& image_name);
+  // Burns the image of |zip_image_file_path_| and |image_file_name|
+  // to |target_device_path_| and |target_file_path_|.
+  // TODO(hidehiko): The name "Burn" sounds confusing because there are two
+  // meaning here.
+  // 1) In wider sense, Burn means a whole process, including config/image
+  //    file fetching, or file unzipping.
+  // 2) In narrower sense, Burn means just write the image onto a device.
+  // To avoid such a confusion, rename the method.
+  void DoBurn();
 
   // Cancels the image burning.
+  // TODO(hidehiko): Rename this method along with the renaming of DoBurn.
   void CancelBurnImage();
 
   // Cancel fetching image.
@@ -263,6 +298,8 @@ class BurnManager : public net::URLFetcherDelegate,
                                    BurnEvent event,
                                    const ImageBurnStatus& status) OVERRIDE;
 
+  // NetworkLibrary::NetworkManagerObserver interface.
+  virtual void OnNetworkManagerChanged(NetworkLibrary* obj) OVERRIDE;
 
   // Creates directory image will be downloaded to.
   // Must be called from FILE thread.
@@ -296,9 +333,13 @@ class BurnManager : public net::URLFetcherDelegate,
   void OnImageDirCreated(bool success);
   void ConfigFileFetched(bool fetched, const std::string& content);
 
-  base::WeakPtrFactory<BurnManager> weak_ptr_factory_;
+  void NotifyDeviceAdded(const disks::DiskMountManager::Disk& disk);
+  void NotifyDeviceRemoved(const disks::DiskMountManager::Disk& disk);
+
+  BurnDeviceHandler device_handler_;
 
   base::FilePath image_dir_;
+  base::FilePath zip_image_file_path_;
   base::FilePath target_device_path_;
   base::FilePath target_file_path_;
 
@@ -316,6 +357,10 @@ class BurnManager : public net::URLFetcherDelegate,
   int64 bytes_image_download_progress_last_reported_;
 
   ObserverList<Observer> observers_;
+
+  // Note: This should remain the last member so it'll be destroyed and
+  // invalidate its weak pointers before any other members are destroyed.
+  base::WeakPtrFactory<BurnManager> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(BurnManager);
 };

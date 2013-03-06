@@ -4,6 +4,7 @@
 
 #include "cc/layer_tree_host.h"
 
+#include "base/bind.h"
 #include "base/command_line.h"
 #include "base/debug/trace_event.h"
 #include "base/message_loop.h"
@@ -43,7 +44,6 @@ RendererCapabilities::RendererCapabilities()
     , usingSetVisibility(false)
     , usingSwapCompleteCallback(false)
     , usingGpuMemoryManager(false)
-    , usingDiscardBackbuffer(false)
     , usingEglImage(false)
     , allowPartialTextureUpdates(false)
     , usingOffscreenContext3d(false)
@@ -90,9 +90,8 @@ LayerTreeHost::LayerTreeHost(LayerTreeHostClient* client, const LayerTreeSetting
     , m_backgroundColor(SK_ColorWHITE)
     , m_hasTransparentBackground(false)
     , m_partialTextureUpdateRequests(0)
+    , m_animationRegistrar(AnimationRegistrar::create())
 {
-    if (m_settings.acceleratedAnimationEnabled)
-        m_animationRegistrar = AnimationRegistrar::create();
     numLayerTreeInstances++;
 }
 
@@ -342,7 +341,10 @@ void LayerTreeHost::finishCommitOnImplThread(LayerTreeHostImpl* hostImpl)
 void LayerTreeHost::willCommit()
 {
     m_client->willCommit();
+}
 
+void LayerTreeHost::updateHudLayer()
+{
     if (m_debugState.showHudInfo()) {
         if (!m_hudLayer)
             m_hudLayer = HeadsUpDisplayLayer::create();
@@ -372,7 +374,11 @@ scoped_ptr<InputHandler> LayerTreeHost::createInputHandler()
 
 scoped_ptr<LayerTreeHostImpl> LayerTreeHost::createLayerTreeHostImpl(LayerTreeHostImplClient* client)
 {
-    return LayerTreeHostImpl::create(m_settings, client, m_proxy.get());
+    DCHECK(m_proxy->isImplThread());
+    scoped_ptr<LayerTreeHostImpl> hostImpl(LayerTreeHostImpl::create(m_settings, client, m_proxy.get()));
+    if (m_settings.calculateTopControlsPosition && hostImpl->topControlsManager())
+        m_topControlsManagerWeakPtr = hostImpl->topControlsManager()->AsWeakPtr();
+    return hostImpl.Pass();
 }
 
 void LayerTreeHost::didLoseOutputSurface()
@@ -595,11 +601,11 @@ void LayerTreeHost::updateLayers(Layer* rootLayer, ResourceUpdateQueue& queue)
     LayerList updateList;
 
     {
-        if (m_settings.pageScalePinchZoomEnabled) {
-            Layer* rootScroll = findFirstScrollableLayer(rootLayer);
-            if (rootScroll)
-                rootScroll->setImplTransform(m_implTransform);
-        }
+        Layer* rootScroll = findFirstScrollableLayer(rootLayer);
+        if (rootScroll)
+            rootScroll->setImplTransform(m_implTransform);
+
+        updateHudLayer();
 
         TRACE_EVENT0("cc", "LayerTreeHost::updateLayers::calcDrawEtc");
         LayerTreeHostCommon::calculateDrawProperties(rootLayer, deviceViewportSize(), m_deviceScaleFactor, m_pageScaleFactor, rendererCapabilities().maxTextureSize, m_settings.canUseLCDText, updateList);
@@ -832,6 +838,16 @@ void LayerTreeHost::setDeviceScaleFactor(float deviceScaleFactor)
     m_deviceScaleFactor = deviceScaleFactor;
 
     setNeedsCommit();
+}
+
+void LayerTreeHost::enableHidingTopControls(bool enable)
+{
+    if (!m_settings.calculateTopControlsPosition)
+        return;
+
+    m_proxy->implThread()->postTask(
+        base::Bind(&TopControlsManager::enable_hiding_top_controls,
+                   m_topControlsManagerWeakPtr, enable));
 }
 
 bool LayerTreeHost::blocksPendingCommit() const

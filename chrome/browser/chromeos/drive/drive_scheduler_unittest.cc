@@ -148,6 +148,22 @@ class DriveSchedulerTest : public testing::Test {
   scoped_ptr<FakeDriveUploader> fake_uploader_;
 };
 
+TEST_F(DriveSchedulerTest, GetAboutResource) {
+  ConnectToWifi();
+
+  google_apis::GDataErrorCode error = google_apis::GDATA_OTHER_ERROR;
+  scoped_ptr<google_apis::AboutResource> about_resource;
+  scheduler_->GetAboutResource(
+      base::Bind(
+          &google_apis::test_util::CopyResultsFromGetAboutResourceCallback,
+          &error,
+          &about_resource));
+
+  google_apis::test_util::RunBlockingPoolTask();
+  ASSERT_EQ(google_apis::HTTP_SUCCESS, error);
+  ASSERT_TRUE(about_resource);
+}
+
 TEST_F(DriveSchedulerTest, GetAppList) {
   ConnectToWifi();
 
@@ -169,7 +185,7 @@ TEST_F(DriveSchedulerTest, GetAccountMetadata) {
   ConnectToWifi();
 
   google_apis::GDataErrorCode error = google_apis::GDATA_OTHER_ERROR;
-  scoped_ptr<google_apis::AccountMetadataFeed> account_metadata;
+  scoped_ptr<google_apis::AccountMetadata> account_metadata;
 
   scheduler_->GetAccountMetadata(
       base::Bind(
@@ -326,7 +342,8 @@ TEST_F(DriveSchedulerTest, AddNewDirectory) {
 }
 
 TEST_F(DriveSchedulerTest, GetResourceEntryPriority) {
-  ConnectToWifi();
+  // Disconnect from the network to prevent jobs from starting.
+  ConnectToNone();
 
   std::string resource_1("file:1_file_resource_id");
   std::string resource_2("file:2_file_resource_id");
@@ -342,7 +359,7 @@ TEST_F(DriveSchedulerTest, GetResourceEntryPriority) {
                  resource_1));
   scheduler_->GetResourceEntry(
       resource_2,  // resource ID
-      DriveClientContext(USER_INITIATED),
+      DriveClientContext(PREFETCH),
       base::Bind(&CopyResourceIdFromGetResourceEntryCallback,
                  &resource_ids,
                  resource_2));
@@ -358,13 +375,16 @@ TEST_F(DriveSchedulerTest, GetResourceEntryPriority) {
       base::Bind(&CopyResourceIdFromGetResourceEntryCallback,
                  &resource_ids,
                  resource_4));
+
+  // Reconnect to the network to start all jobs.
+  ConnectToWifi();
   google_apis::test_util::RunBlockingPoolTask();
 
   ASSERT_EQ(resource_ids.size(), 4ul);
   ASSERT_EQ(resource_ids[0], resource_1);
-  ASSERT_EQ(resource_ids[1], resource_2);
-  ASSERT_EQ(resource_ids[2], resource_4);
-  ASSERT_EQ(resource_ids[3], resource_3);
+  ASSERT_EQ(resource_ids[1], resource_4);
+  ASSERT_EQ(resource_ids[2], resource_3);
+  ASSERT_EQ(resource_ids[3], resource_2);
 }
 
 TEST_F(DriveSchedulerTest, GetResourceEntryNoConnection) {
@@ -418,7 +438,7 @@ TEST_F(DriveSchedulerTest, DownloadFileCellularDisabled) {
       google_apis::GetContentCallback());
   // Metadata should still work
   google_apis::GDataErrorCode metadata_error = google_apis::GDATA_OTHER_ERROR;
-  scoped_ptr<google_apis::AccountMetadataFeed> account_metadata;
+  scoped_ptr<google_apis::AccountMetadata> account_metadata;
 
   // Try to get the metadata
   scheduler_->GetAccountMetadata(
@@ -476,7 +496,7 @@ TEST_F(DriveSchedulerTest, DownloadFileWimaxDisabled) {
       google_apis::GetContentCallback());
   // Metadata should still work
   google_apis::GDataErrorCode metadata_error = google_apis::GDATA_OTHER_ERROR;
-  scoped_ptr<google_apis::AccountMetadataFeed> account_metadata;
+  scoped_ptr<google_apis::AccountMetadata> account_metadata;
 
   // Try to get the metadata
   scheduler_->GetAccountMetadata(
@@ -534,7 +554,7 @@ TEST_F(DriveSchedulerTest, DownloadFileCellularEnabled) {
       google_apis::GetContentCallback());
   // Metadata should still work
   google_apis::GDataErrorCode metadata_error = google_apis::GDATA_OTHER_ERROR;
-  scoped_ptr<google_apis::AccountMetadataFeed> account_metadata;
+  scoped_ptr<google_apis::AccountMetadata> account_metadata;
 
   // Try to get the metadata
   scheduler_->GetAccountMetadata(
@@ -584,7 +604,7 @@ TEST_F(DriveSchedulerTest, DownloadFileWimaxEnabled) {
       google_apis::GetContentCallback());
   // Metadata should still work
   google_apis::GDataErrorCode metadata_error = google_apis::GDATA_OTHER_ERROR;
-  scoped_ptr<google_apis::AccountMetadataFeed> account_metadata;
+  scoped_ptr<google_apis::AccountMetadata> account_metadata;
 
   // Try to get the metadata
   scheduler_->GetAccountMetadata(

@@ -6,7 +6,12 @@ package org.chromium.android_webview.test;
 
 import android.content.Context;
 import android.os.Build;
+import android.os.SystemClock;
+import android.test.suitebuilder.annotation.LargeTest;
+import android.test.suitebuilder.annotation.MediumTest;
 import android.test.suitebuilder.annotation.SmallTest;
+import android.util.Pair;
+import android.view.MotionEvent;
 import android.webkit.WebSettings;
 
 import org.apache.http.Header;
@@ -16,6 +21,8 @@ import org.chromium.android_webview.AwContents;
 import org.chromium.android_webview.AwSettings;
 import org.chromium.android_webview.test.util.CommonResources;
 import org.chromium.android_webview.test.util.ImagePageGenerator;
+import org.chromium.android_webview.test.util.JavascriptEventObserver;
+import org.chromium.android_webview.test.util.VideoTestWebServer;
 import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.TestFileUtil;
@@ -30,6 +37,7 @@ import org.chromium.content.browser.test.util.HistoryUtils;
 import org.chromium.net.test.util.TestWebServer;
 import org.chromium.ui.gfx.DeviceDisplayInfo;
 
+import java.util.concurrent.Callable;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.ArrayList;
@@ -91,7 +99,7 @@ public class AwSettingsTest extends AndroidWebViewTestBase {
 
         protected abstract T getCurrentValue();
 
-        protected abstract void setCurrentValue(T value);
+        protected abstract void setCurrentValue(T value) throws Throwable;
 
         protected abstract void doEnsureSettingHasValue(T value) throws Throwable;
 
@@ -121,6 +129,11 @@ public class AwSettingsTest extends AndroidWebViewTestBase {
                 mContentViewClient.getOnPageFinishedHelper(),
                 mContentViewClient.getOnReceivedErrorHelper(),
                 url);
+        }
+
+        protected String executeJavaScriptAndWaitForResult(String script) throws Throwable {
+            return AwSettingsTest.this.executeJavaScriptAndWaitForResult(
+                    mAwContents, mContentViewClient, script);
         }
 
         private void ensureSettingHasValue(T value) throws Throwable {
@@ -188,8 +201,7 @@ public class AwSettingsTest extends AndroidWebViewTestBase {
         protected void doEnsureSettingHasValue(Boolean value) throws Throwable {
             String oldTitle = getTitleOnUiThread();
             String newTitle = oldTitle + "_modified";
-            executeJavaScriptAndWaitForResult(
-                mAwContents, mContentViewClient, getScript(newTitle));
+            executeJavaScriptAndWaitForResult(getScript(newTitle));
             assertEquals(value == ENABLED ? newTitle : oldTitle, getTitleOnUiThread());
         }
 
@@ -853,14 +865,40 @@ public class AwSettingsTest extends AndroidWebViewTestBase {
                 AwContents awContents,
                 TestAwContentsClient contentViewClient) throws Throwable {
             super(awContents, contentViewClient, true);
+            mNeedToWaitForFontSizeChange = false;
+            loadDataSync(getData());
+        }
+
+        @Override
+        protected void setCurrentValue(T value) throws Throwable {
+            mNeedToWaitForFontSizeChange = false;
+            if (value != getCurrentValue()) {
+                mOldFontSize = getActualFontSize();
+                mNeedToWaitForFontSizeChange = true;
+            }
         }
 
         protected float getActualFontSize() throws Throwable {
-            loadDataSync(getData());
-            // Retrieve font size after the native callback has fired, not in body.onload.
-            // The latter can fire prior to Font autosizer adjustments.
-            executeJavaScriptAndWaitForResult(
-                mAwContents, mContentViewClient, "setTitleToActualFontSize()");
+            if (!mNeedToWaitForFontSizeChange) {
+                executeJavaScriptAndWaitForResult("setTitleToActualFontSize()");
+            } else {
+                final float oldFontSize = mOldFontSize;
+                assertTrue(CriteriaHelper.pollForCriteria(new Criteria() {
+                        @Override
+                        public boolean isSatisfied() {
+                            try {
+                                executeJavaScriptAndWaitForResult("setTitleToActualFontSize()");
+                                float newFontSize = Float.parseFloat(getTitleOnUiThread());
+                                return newFontSize != oldFontSize;
+                            } catch (Throwable t) {
+                                t.printStackTrace();
+                                fail("Failed to getTitleOnUiThread: " + t.toString());
+                                return false;
+                            }
+                        }
+                    }, TEST_TIMEOUT, CHECK_INTERVAL));
+                mNeedToWaitForFontSizeChange = false;
+            }
             return Float.parseFloat(getTitleOnUiThread());
         }
 
@@ -884,6 +922,9 @@ public class AwSettingsTest extends AndroidWebViewTestBase {
             sb.append("</p></body></html>");
             return sb.toString();
         }
+
+        private boolean mNeedToWaitForFontSizeChange;
+        private float mOldFontSize;
     }
 
     class AwSettingsLayoutAlgorithmTestHelper extends
@@ -895,6 +936,7 @@ public class AwSettingsTest extends AndroidWebViewTestBase {
             super(awContents, contentViewClient);
             // Font autosizing doesn't step in for narrow layout widths.
             mContentSettings.setUseWideViewPort(true);
+            mAwSettings.setEnableFixedLayoutMode(true);
         }
 
         @Override
@@ -913,7 +955,8 @@ public class AwSettingsTest extends AndroidWebViewTestBase {
         }
 
         @Override
-        protected void setCurrentValue(LayoutAlgorithm value) {
+        protected void setCurrentValue(LayoutAlgorithm value) throws Throwable {
+            super.setCurrentValue(value);
             mContentSettings.setLayoutAlgorithm(value);
         }
 
@@ -957,7 +1000,8 @@ public class AwSettingsTest extends AndroidWebViewTestBase {
         }
 
         @Override
-        protected void setCurrentValue(Integer value) {
+        protected void setCurrentValue(Integer value) throws Throwable {
+            super.setCurrentValue(value);
             mContentSettings.setTextZoom(value);
             mAwSettings.setTextZoom(value);
         }
@@ -1008,7 +1052,8 @@ public class AwSettingsTest extends AndroidWebViewTestBase {
         }
 
         @Override
-        protected void setCurrentValue(Integer value) {
+        protected void setCurrentValue(Integer value) throws Throwable {
+            super.setCurrentValue(value);
             mContentSettings.setTextZoom(value);
             // This is to verify that AwSettings will not affect font boosting by Autosizer.
             mAwSettings.setTextZoom(-1);
@@ -1151,7 +1196,7 @@ public class AwSettingsTest extends AndroidWebViewTestBase {
     // "viewport" tag is ignored, and the layout width is set to device width in DIP pixels.
     // We specify a very high width value to make sure that it doesn't intersect with
     // device screen widths (in DIP pixels).
-    class AwSettingsUseWideViewportTestHelper extends AwSettingsTestHelper<Boolean> {
+    class AwSettingsUseWideViewportTestHelper extends AwSettingsWithSettingsTestHelper<Boolean> {
         static private final String VIEWPORT_TAG_LAYOUT_WIDTH = "3000";
 
         AwSettingsUseWideViewportTestHelper(
@@ -1178,6 +1223,7 @@ public class AwSettingsTest extends AndroidWebViewTestBase {
         @Override
         protected void setCurrentValue(Boolean value) {
             mContentSettings.setUseWideViewPort(value);
+            mAwSettings.setEnableFixedLayoutMode(value);
         }
 
         @Override
@@ -1197,6 +1243,74 @@ public class AwSettingsTest extends AndroidWebViewTestBase {
                     "</head>" +
                     "<body onload='document.title=document.body.clientWidth'></body></html>";
         }
+    }
+
+    class AwSettingsLoadWithOverviewModeTestHelper extends AwSettingsTestHelper<Boolean> {
+        private static final float DEFAULT_PAGE_SCALE = 1.0f;
+
+        AwSettingsLoadWithOverviewModeTestHelper(
+                AwContents awContents,
+                TestAwContentsClient contentViewClient,
+                boolean withViewPortTag) throws Throwable {
+            super(awContents, contentViewClient, true);
+            mWithViewPortTag = withViewPortTag;
+            mContentSettings.setUseWideViewPort(true);
+            mAwContents.getSettings().setEnableFixedLayoutMode(true);
+        }
+
+        @Override
+        protected Boolean getAlteredValue() {
+            return ENABLED;
+        }
+
+        @Override
+        protected Boolean getInitialValue() {
+            return DISABLED;
+        }
+
+        @Override
+        protected Boolean getCurrentValue() {
+            return mContentSettings.getLoadWithOverviewMode();
+        }
+
+        @Override
+        protected void setCurrentValue(Boolean value) {
+            mExpectScaleChange = mContentSettings.getLoadWithOverviewMode() != value;
+            if (mExpectScaleChange) {
+                mOnScaleChangedCallCount =
+                        mContentViewClient.getOnScaleChangedHelper().getCallCount();
+            }
+            mContentSettings.setLoadWithOverviewMode(value);
+            mAwContents.getSettings().resetScrollAndScaleState();
+        }
+
+        @Override
+        protected void doEnsureSettingHasValue(Boolean value) throws Throwable {
+            loadDataSync(getData());
+            if (mExpectScaleChange) {
+                mContentViewClient.getOnScaleChangedHelper().
+                        waitForCallback(mOnScaleChangedCallCount);
+                mExpectScaleChange = false;
+            }
+            float currentScale = AwSettingsTest.this.getScaleOnUiThread(mAwContents);
+            if (value) {
+                assertTrue("Expected: " + currentScale + " < " + DEFAULT_PAGE_SCALE,
+                        currentScale < DEFAULT_PAGE_SCALE);
+            } else {
+                assertEquals(DEFAULT_PAGE_SCALE, currentScale);
+            }
+        }
+
+        private String getData() {
+            return "<html><head>" +
+                    (mWithViewPortTag ? "<meta name='viewport' content='width=3000' />" : "") +
+                    "</head>" +
+                    "<body></body></html>";
+        }
+
+        private final boolean mWithViewPortTag;
+        private boolean mExpectScaleChange;
+        private int mOnScaleChangedCallCount;
     }
 
     // The test verifies that JavaScript is disabled upon WebView
@@ -1911,12 +2025,8 @@ public class AwSettingsTest extends AndroidWebViewTestBase {
         }
     }
 
-    /*
     @SmallTest
     @Feature({"AndroidWebView", "Preferences"})
-    http://crbug.com/171492
-    */
-    @DisabledTest
     public void testLayoutAlgorithmWithTwoViews() throws Throwable {
         ViewPair views = createViews();
         runPerViewSettingsTest(
@@ -2216,13 +2326,8 @@ public class AwSettingsTest extends AndroidWebViewTestBase {
         }
     }
 
-    /*
-     * @SmallTest
-     * @Feature({"AndroidWebView", "Preferences"})
-     * This test is temporary disabled to prevent bot redness after WK patch lands
-     * BUG=177684
-     */
-    @DisabledTest
+    @SmallTest
+    @Feature({"AndroidWebView", "Preferences"})
     public void testUseWideViewportWithTwoViews() throws Throwable {
         ViewPair views = createViews();
         runPerViewSettingsTest(
@@ -2276,6 +2381,7 @@ public class AwSettingsTest extends AndroidWebViewTestBase {
                 Math.abs(displayWidth - actualWidth) <= 1);
 
         settings.setUseWideViewPort(true);
+        awContents.getSettings().setEnableFixedLayoutMode(true);
         // When UseWideViewPort is on, "meta viewport" tag is used.
         // If there is no viewport tag, or width isn't specified,
         // then layout width is set to max(980, <device-width-in-DIP-pixels>)
@@ -2289,6 +2395,187 @@ public class AwSettingsTest extends AndroidWebViewTestBase {
         loadDataSync(
                 awContents, onPageFinishedHelper, pageViewportSpecifiedWidth, "text/html", false);
         assertEquals(viewportTagSpecifiedWidth, getTitleOnUiThread(awContents));
+    }
+
+    @MediumTest
+    @Feature({"AndroidWebView", "Preferences"})
+    public void testUseWideViewportControlsDoubleTabToZoom() throws Throwable {
+        final TestAwContentsClient contentClient = new TestAwContentsClient();
+        final AwTestContainerView testContainerView =
+                createAwTestContainerViewOnMainSync(contentClient);
+        final AwContents awContents = testContainerView.getAwContents();
+        ContentSettings settings = getContentSettingsOnUiThread(awContents);
+        CallbackHelper onPageFinishedHelper = contentClient.getOnPageFinishedHelper();
+
+        final String page = "<html><body>Page Text</body></html>";
+        assertFalse(settings.getUseWideViewPort());
+        loadDataSync(awContents, onPageFinishedHelper, page, "text/html", false);
+        final float initialScale = getScaleOnUiThread(awContents);
+        simulateDoubleTapCenterOfWebViewOnUiThread(testContainerView);
+        Thread.sleep(1000);
+        assertEquals(initialScale, getScaleOnUiThread(awContents));
+
+        settings.setUseWideViewPort(true);
+        awContents.getSettings().setEnableFixedLayoutMode(true);
+        loadDataSync(awContents, onPageFinishedHelper, page, "text/html", false);
+        int onScaleChangedCallCount = contentClient.getOnScaleChangedHelper().getCallCount();
+        simulateDoubleTapCenterOfWebViewOnUiThread(testContainerView);
+        contentClient.getOnScaleChangedHelper().waitForCallback(onScaleChangedCallCount);
+        final float zoomedOutScale = getScaleOnUiThread(awContents);
+        assertTrue("zoomedOut: " + zoomedOutScale + ", initial: " + initialScale,
+                zoomedOutScale < initialScale);
+    }
+
+    @SmallTest
+    @Feature({"AndroidWebView", "Preferences"})
+    public void testLoadWithOverviewModeWithTwoViews() throws Throwable {
+        ViewPair views = createViews();
+        runPerViewSettingsTest(
+                new AwSettingsLoadWithOverviewModeTestHelper(
+                        views.getContents0(), views.getClient0(), false),
+                new AwSettingsLoadWithOverviewModeTestHelper(
+                        views.getContents1(), views.getClient1(), false));
+    }
+
+    @SmallTest
+    @Feature({"AndroidWebView", "Preferences"})
+    public void testLoadWithOverviewModeViewportTagWithTwoViews() throws Throwable {
+        ViewPair views = createViews();
+        runPerViewSettingsTest(
+                new AwSettingsLoadWithOverviewModeTestHelper(
+                        views.getContents0(), views.getClient0(), true),
+                new AwSettingsLoadWithOverviewModeTestHelper(
+                        views.getContents1(), views.getClient1(), true));
+    }
+
+    @SmallTest
+    @Feature({"AndroidWebView", "Preferences"})
+    // Verify that LoadViewOverviewMode doesn't affect pages with initial scale
+    // set in the viewport tag.
+    public void testLoadWithOverviewModeViewportScale() throws Throwable {
+        final TestAwContentsClient contentClient = new TestAwContentsClient();
+        final AwTestContainerView testContainerView =
+                createAwTestContainerViewOnMainSync(contentClient);
+        final AwContents awContents = testContainerView.getAwContents();
+        ContentSettings settings = getContentSettingsOnUiThread(awContents);
+        CallbackHelper onPageFinishedHelper = contentClient.getOnPageFinishedHelper();
+
+        final int pageScale = 2;
+        final String page = "<html><head>" +
+                "<meta name='viewport' content='width=3000, initial-scale=" + pageScale +
+                "' /></head>" +
+                "<body></body></html>";
+
+        assertFalse(settings.getUseWideViewPort());
+        assertFalse(settings.getLoadWithOverviewMode());
+        loadDataSync(awContents, onPageFinishedHelper, page, "text/html", false);
+        assertEquals(1.0f, getScaleOnUiThread(awContents));
+
+        settings.setUseWideViewPort(true);
+        awContents.getSettings().setEnableFixedLayoutMode(true);
+        settings.setLoadWithOverviewMode(true);
+        awContents.getSettings().resetScrollAndScaleState();
+        int onScaleChangedCallCount = contentClient.getOnScaleChangedHelper().getCallCount();
+        loadDataSync(awContents, onPageFinishedHelper, page, "text/html", false);
+        contentClient.getOnScaleChangedHelper().waitForCallback(onScaleChangedCallCount);
+        assertEquals((float)pageScale, getScaleOnUiThread(awContents));
+    }
+
+    public void testSetInitialScale() throws Throwable {
+        final TestAwContentsClient contentClient = new TestAwContentsClient();
+        final AwTestContainerView testContainerView =
+                createAwTestContainerViewOnMainSync(contentClient);
+        final AwContents awContents = testContainerView.getAwContents();
+        final AwSettings awSettings = getAwSettingsOnUiThread(awContents);
+        CallbackHelper onPageFinishedHelper = contentClient.getOnPageFinishedHelper();
+
+        final String page = "<html><body>" +
+                "<p style='height:1000px;width:1000px'>testSetInitialScale</p>" +
+                "</body></html>";
+        final float defaultScale =
+            getInstrumentation().getTargetContext().getResources().getDisplayMetrics().density;
+
+        assertEquals(defaultScale, getPixelScaleOnUiThread(awContents), .01f);
+        loadDataSync(awContents, onPageFinishedHelper, page, "text/html", false);
+        assertEquals(defaultScale, getPixelScaleOnUiThread(awContents), .01f);
+
+        int onScaleChangedCallCount = contentClient.getOnScaleChangedHelper().getCallCount();
+        awSettings.setInitialPageScale(50);
+        loadDataSync(awContents, onPageFinishedHelper, page, "text/html", false);
+        contentClient.getOnScaleChangedHelper().waitForCallback(onScaleChangedCallCount);
+        assertEquals(0.5f, getPixelScaleOnUiThread(awContents), .01f);
+
+        onScaleChangedCallCount = contentClient.getOnScaleChangedHelper().getCallCount();
+        awSettings.setInitialPageScale(500);
+        loadDataSync(awContents, onPageFinishedHelper, page, "text/html", false);
+        contentClient.getOnScaleChangedHelper().waitForCallback(onScaleChangedCallCount);
+        assertEquals(5.0f, getPixelScaleOnUiThread(awContents), .01f);
+
+        onScaleChangedCallCount = contentClient.getOnScaleChangedHelper().getCallCount();
+        awSettings.setInitialPageScale(0);
+        loadDataSync(awContents, onPageFinishedHelper, page, "text/html", false);
+        contentClient.getOnScaleChangedHelper().waitForCallback(onScaleChangedCallCount);
+        assertEquals(defaultScale, getPixelScaleOnUiThread(awContents), .01f);
+    }
+
+    /**
+     * Run video test.
+     * @param requiredUserGesture the settings of MediaPlaybackRequiresUserGesture.
+     * @param waitTime time for waiting event happen, -1 means forever.
+     * @return true if the event happened,
+     * @throws Throwable throw exception if timeout.
+     */
+    private boolean runVideoTest(final boolean requiredUserGesture, long waitTime)
+            throws Throwable {
+        final JavascriptEventObserver observer = new JavascriptEventObserver();
+        TestAwContentsClient client = new TestAwContentsClient();
+        final AwContents awContents = createAwTestContainerViewOnMainSync(client).getAwContents();
+        getInstrumentation().runOnMainSync(new Runnable() {
+            @Override
+            public void run() {
+                ContentSettings contentSettings =
+                        awContents.getContentViewCore().getContentSettings();
+                contentSettings.setJavaScriptEnabled(true);
+                contentSettings.setMediaPlaybackRequiresUserGesture(requiredUserGesture);
+                observer.register(awContents.getContentViewCore(), "javaObserver");
+            }
+        });
+        VideoTestWebServer webServer = new VideoTestWebServer();
+        try {
+            String data = "<html><head><script>" +
+                "addEventListener('DOMContentLoaded', function() { " +
+                "  document.getElementById('video').addEventListener('play', function() { " +
+                "    javaObserver.notifyJava(); " +
+                "  }, false); " +
+                "}, false); " +
+                "</script></head><body>" +
+                "<video id='video' autoplay control src='" +
+                webServer.getOnePixelOneFrameWebmURL() + "' /> </body></html>";
+            loadDataAsync(awContents, data, "text/html", false);
+            if (waitTime == -1) {
+                observer.waitForEvent();
+                return true;
+            }
+            else {
+                return observer.waitForEvent(waitTime);
+            }
+        } finally {
+            if (webServer != null && webServer.getTestWebServer() != null)
+                webServer.getTestWebServer().shutdown();
+        }
+    }
+
+    @LargeTest
+    @Feature({"AndroidWebView", "Preferences"})
+    public void testMediaPlaybackWithoutUserGesture() throws Throwable {
+        assertTrue(runVideoTest(false, -1));
+    }
+
+    @SmallTest
+    @Feature({"AndroidWebView", "Preferences"})
+    public void testMediaPlaybackWithUserGesture() throws Throwable {
+        // Wait for 5 second to see if video played.
+        assertFalse(runVideoTest(true, 5000));
     }
 
     static class ViewPair {
@@ -2414,5 +2701,55 @@ public class AwSettingsTest extends AndroidWebViewTestBase {
      */
     private void resetResourceContext() {
         AndroidProtocolHandler.setResourceContextForTesting(null);
+    }
+
+    /**
+     * Returns pure page scale.
+     */
+    private float getScaleOnUiThread(final AwContents awContents) throws Throwable {
+        return runTestOnUiThreadAndGetResult(new Callable<Float>() {
+            @Override
+            public Float call() throws Exception {
+                return awContents.getContentViewCore().getScale();
+            }
+        });
+    }
+
+    /**
+     * Returns page scale multiplied by the screen density.
+     */
+    private float getPixelScaleOnUiThread(final AwContents awContents) throws Throwable {
+        return runTestOnUiThreadAndGetResult(new Callable<Float>() {
+            @Override
+            public Float call() throws Exception {
+                return awContents.getScale();
+            }
+        });
+    }
+
+    private void simulateDoubleTapCenterOfWebViewOnUiThread(final AwTestContainerView webView)
+            throws Throwable {
+        final AwContents awContents = webView.getAwContents();
+        runTestOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                long firstTapTime = SystemClock.uptimeMillis();
+                float x = (float)(webView.getRight() - webView.getLeft()) / 2;
+                float y = (float)(webView.getBottom() - webView.getTop()) / 2;
+                awContents.onTouchEvent(MotionEvent.obtain(
+                        firstTapTime, firstTapTime, MotionEvent.ACTION_DOWN,
+                        x, y, 0));
+                awContents.onTouchEvent(MotionEvent.obtain(
+                        firstTapTime, firstTapTime, MotionEvent.ACTION_UP,
+                        x, y, 0));
+                long secondTapTime = firstTapTime + 200;
+                awContents.onTouchEvent(MotionEvent.obtain(
+                        secondTapTime, secondTapTime, MotionEvent.ACTION_DOWN,
+                        x, y, 0));
+                awContents.onTouchEvent(MotionEvent.obtain(
+                        secondTapTime, secondTapTime, MotionEvent.ACTION_UP,
+                        x, y, 0));
+            }
+        });
     }
 }

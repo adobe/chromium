@@ -6,6 +6,7 @@ package org.chromium.android_webview.test;
 
 import android.content.Context;
 import android.graphics.Picture;
+import android.net.http.SslError;
 import android.os.Message;
 import android.view.KeyEvent;
 import android.view.View;
@@ -63,6 +64,11 @@ class NullContentsClient extends AwContentsClient {
     @Override
     public void onReceivedHttpAuthRequest(AwHttpAuthHandler handler, String host, String realm) {
         handler.cancel();
+    }
+
+    @Override
+    public void onReceivedSslError(ValueCallback<Boolean> callback, SslError error) {
+        callback.onReceiveValue(false);
     }
 
     @Override
@@ -145,5 +151,14 @@ class NullContentsClient extends AwContentsClient {
     @Override
     public void onShowCustomView(View view,
            int requestedOrientation, WebChromeClient.CustomViewCallback callback) {
+    }
+
+    @Override
+    public void onScaleChangedScaled(float oldScale, float newScale) {
+    }
+
+    @Override
+    protected View getVideoLoadingProgressView() {
+        return null;
     }
 }

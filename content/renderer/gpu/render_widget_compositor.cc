@@ -4,6 +4,8 @@
 
 #include "content/renderer/gpu/render_widget_compositor.h"
 
+#include <limits>
+
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/string_number_conversions.h"
@@ -15,11 +17,11 @@
 #include "cc/layer_tree_host.h"
 #include "cc/switches.h"
 #include "cc/thread_impl.h"
+#include "content/public/common/content_switches.h"
 #include "content/renderer/gpu/compositor_thread.h"
 #include "content/renderer/render_thread_impl.h"
-#include "third_party/WebKit/Source/Platform/chromium/public/WebLayerTreeViewClient.h"
-#include "third_party/WebKit/Source/Platform/chromium/public/WebSharedGraphicsContext3D.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebSize.h"
+#include "ui/gl/gl_switches.h"
 #include "webkit/compositor_bindings/web_layer_impl.h"
 #include "webkit/compositor_bindings/web_to_ccinput_handler_adapter.h"
 
@@ -78,23 +80,48 @@ bool GetSwitchValueAsFloat(
 // static
 scoped_ptr<RenderWidgetCompositor> RenderWidgetCompositor::Create(
       RenderWidget* widget,
-      WebKit::WebLayerTreeViewClient* client,
       WebKit::WebLayerTreeView::Settings web_settings) {
-  scoped_ptr<RenderWidgetCompositor> comp(
-      new RenderWidgetCompositor(widget, client));
+  scoped_ptr<RenderWidgetCompositor> compositor(
+      new RenderWidgetCompositor(widget));
 
   CommandLine* cmd = CommandLine::ForCurrentProcess();
 
   cc::LayerTreeSettings settings;
-  settings.acceleratePainting = web_settings.acceleratePainting;
-  settings.renderVSyncEnabled = web_settings.renderVSyncEnabled;
-  settings.perTilePaintingEnabled = web_settings.perTilePaintingEnabled;
+  settings.acceleratePainting =
+      cmd->HasSwitch(switches::kEnableAcceleratedPainting);
+  settings.renderVSyncEnabled = !cmd->HasSwitch(switches::kDisableGpuVsync);
+  settings.perTilePaintingEnabled =
+      cmd->HasSwitch(cc::switches::kEnablePerTilePainting);
   settings.acceleratedAnimationEnabled =
-      web_settings.acceleratedAnimationEnabled;
-  settings.pageScalePinchZoomEnabled = web_settings.pageScalePinchZoomEnabled;
-  settings.refreshRate = web_settings.refreshRate;
-  settings.defaultTileSize = web_settings.defaultTileSize;
-  settings.maxUntiledLayerSize = web_settings.maxUntiledLayerSize;
+      !cmd->HasSwitch(cc::switches::kDisableThreadedAnimation);
+
+  int default_tile_width = settings.defaultTileSize.width();
+  if (cmd->HasSwitch(switches::kDefaultTileWidth)) {
+    GetSwitchValueAsInt(*cmd, switches::kDefaultTileWidth, 1,
+                        std::numeric_limits<int>::max(), &default_tile_width);
+  }
+  int default_tile_height = settings.defaultTileSize.height();
+  if (cmd->HasSwitch(switches::kDefaultTileHeight)) {
+    GetSwitchValueAsInt(*cmd, switches::kDefaultTileHeight, 1,
+                        std::numeric_limits<int>::max(), &default_tile_height);
+  }
+  settings.defaultTileSize = gfx::Size(default_tile_width, default_tile_height);
+
+  int max_untiled_layer_width = settings.maxUntiledLayerSize.width();
+  if (cmd->HasSwitch(switches::kMaxUntiledLayerWidth)) {
+    GetSwitchValueAsInt(*cmd, switches::kMaxUntiledLayerWidth, 1,
+                        std::numeric_limits<int>::max(),
+                        &max_untiled_layer_width);
+  }
+  int max_untiled_layer_height = settings.maxUntiledLayerSize.height();
+  if (cmd->HasSwitch(switches::kMaxUntiledLayerHeight)) {
+    GetSwitchValueAsInt(*cmd, switches::kMaxUntiledLayerHeight, 1,
+                        std::numeric_limits<int>::max(),
+                        &max_untiled_layer_height);
+  }
+
+  settings.maxUntiledLayerSize = gfx::Size(max_untiled_layer_width,
+                                           max_untiled_layer_height);
 
   settings.rightAlignedSchedulingEnabled =
       cmd->HasSwitch(cc::switches::kEnableRightAlignedScheduling);
@@ -148,11 +175,15 @@ scoped_ptr<RenderWidgetCompositor> RenderWidgetCompositor::Create(
   settings.showOverdrawInTracing =
       cmd->HasSwitch(cc::switches::kTraceOverdraw);
 
-  settings.initialDebugState.showFPSCounter = web_settings.showFPSCounter;
-  settings.initialDebugState.showPaintRects = web_settings.showPaintRects;
+  settings.initialDebugState.showFPSCounter =
+      cmd->HasSwitch(switches::kShowFPSCounter);
+  settings.initialDebugState.showPaintRects =
+      cmd->HasSwitch(switches::kShowPaintRects);
+  settings.initialDebugState.showDebugBorders =
+      cmd->HasSwitch(switches::kShowCompositedLayerBorders);
   settings.initialDebugState.showPlatformLayerTree =
-      web_settings.showPlatformLayerTree;
-  settings.initialDebugState.showDebugBorders = web_settings.showDebugBorders;
+      cmd->HasSwitch(switches::kShowCompositedLayerTree);
+
   settings.initialDebugState.showPropertyChangedRects =
       cmd->HasSwitch(cc::switches::kShowPropertyChangedRects);
   settings.initialDebugState.showSurfaceDamageRects =
@@ -166,7 +197,7 @@ scoped_ptr<RenderWidgetCompositor> RenderWidgetCompositor::Create(
   settings.initialDebugState.showNonOccludingRects =
       cmd->HasSwitch(cc::switches::kShowNonOccludingRects);
   settings.initialDebugState.setRecordRenderingStats(
-      web_settings.recordRenderingStats);
+      cmd->HasSwitch(switches::kEnableGpuBenchmarking));
   settings.initialDebugState.traceAllRenderedFrames =
       cmd->HasSwitch(cc::switches::kTraceAllRenderedFrames);
 
@@ -207,19 +238,51 @@ scoped_ptr<RenderWidgetCompositor> RenderWidgetCompositor::Create(
   settings.solidColorScrollbarThicknessDIP = 3;
 #endif
 
-  if (!comp->initialize(settings))
+  if (!compositor->initialize(settings))
     return scoped_ptr<RenderWidgetCompositor>();
 
-  return comp.Pass();
+  return compositor.Pass();
 }
 
-RenderWidgetCompositor::RenderWidgetCompositor(
-    RenderWidget* widget, WebKit::WebLayerTreeViewClient* client)
-  : widget_(widget),
-    client_(client) {
+RenderWidgetCompositor::RenderWidgetCompositor(RenderWidget* widget)
+  : suppress_schedule_composite_(false),
+    widget_(widget) {
 }
 
 RenderWidgetCompositor::~RenderWidgetCompositor() {}
+
+void RenderWidgetCompositor::SetSuppressScheduleComposite(bool suppress) {
+  if (suppress_schedule_composite_ == suppress)
+    return;
+
+  if (suppress)
+    TRACE_EVENT_ASYNC_BEGIN0("gpu",
+        "RenderWidgetCompositor::SetSuppressScheduleComposite", this);
+  else
+    TRACE_EVENT_ASYNC_END0("gpu",
+        "RenderWidgetCompositor::SetSuppressScheduleComposite", this);
+  suppress_schedule_composite_ = suppress;
+}
+
+void RenderWidgetCompositor::Animate(base::TimeTicks time) {
+  layer_tree_host_->updateAnimations(time);
+}
+
+void RenderWidgetCompositor::Composite() {
+  layer_tree_host_->composite();
+}
+
+void RenderWidgetCompositor::GetRenderingStats(cc::RenderingStats* stats) {
+  layer_tree_host_->renderingStats(stats);
+}
+
+skia::RefPtr<SkPicture> RenderWidgetCompositor::CapturePicture() {
+  return layer_tree_host_->capturePicture();
+}
+
+void RenderWidgetCompositor::EnableHidingTopControls(bool enable) {
+  layer_tree_host_->enableHidingTopControls(enable);
+}
 
 bool RenderWidgetCompositor::initialize(cc::LayerTreeSettings settings) {
   scoped_ptr<cc::Thread> impl_thread;
@@ -322,25 +385,8 @@ bool RenderWidgetCompositor::commitRequested() const {
   return layer_tree_host_->commitRequested();
 }
 
-void RenderWidgetCompositor::composite() {
-  layer_tree_host_->composite();
-}
-
-void RenderWidgetCompositor::updateAnimations(double frame_begin_time_sec) {
-  base::TimeTicks frame_begin_time =
-    base::TimeTicks::FromInternalValue(frame_begin_time_sec *
-                                       base::Time::kMicrosecondsPerSecond);
-  layer_tree_host_->updateAnimations(frame_begin_time);
-}
-
 void RenderWidgetCompositor::didStopFlinging() {
   layer_tree_host_->didStopFlinging();
-}
-
-void RenderWidgetCompositor::registerForAnimations(WebKit::WebLayer* layer) {
-  cc::Layer* cc_layer = static_cast<WebKit::WebLayerImpl*>(layer)->layer();
-  cc_layer->layerAnimationController()->setAnimationRegistrar(
-      layer_tree_host_->animationRegistrar());
 }
 
 bool RenderWidgetCompositor::compositeAndReadback(void *pixels,
@@ -389,36 +435,32 @@ void RenderWidgetCompositor::didBeginFrame() {
   widget_->InstrumentDidBeginFrame();
 }
 
-// TODO(jamesr): This should go through WebWidget
 void RenderWidgetCompositor::animate(double monotonic_frame_begin_time) {
-  client_->updateAnimations(monotonic_frame_begin_time);
+  widget_->webwidget()->animate(monotonic_frame_begin_time);
 }
 
-// Can delete from WebLayerTreeViewClient
 void RenderWidgetCompositor::layout() {
   widget_->webwidget()->layout();
 }
 
-// TODO(jamesr): This should go through WebWidget
 void RenderWidgetCompositor::applyScrollAndScale(gfx::Vector2d scroll_delta,
                                                  float page_scale) {
-  client_->applyScrollAndScale(scroll_delta, page_scale);
+  widget_->webwidget()->applyScrollAndScale(scroll_delta, page_scale);
 }
 
 scoped_ptr<cc::OutputSurface> RenderWidgetCompositor::createOutputSurface() {
   return widget_->CreateOutputSurface();
 }
 
-// TODO(jamesr): This should go through WebWidget
 void RenderWidgetCompositor::didRecreateOutputSurface(bool success) {
-  client_->didRecreateOutputSurface(success);
+  if (!success)
+    widget_->webwidget()->didExitCompositingMode();
 }
 
-// TODO(jamesr): This should go through WebWidget
 scoped_ptr<cc::InputHandler> RenderWidgetCompositor::createInputHandler() {
   scoped_ptr<cc::InputHandler> ret;
   scoped_ptr<WebKit::WebInputHandler> web_handler(
-      client_->createInputHandler());
+      widget_->webwidget()->createInputHandler());
   if (web_handler)
      ret = WebKit::WebToCCInputHandlerAdapter::create(web_handler.Pass());
   return ret.Pass();
@@ -441,82 +483,20 @@ void RenderWidgetCompositor::didCompleteSwapBuffers() {
   widget_->didCompleteSwapBuffers();
 }
 
-// TODO(jamesr): This goes through WebViewImpl just to do suppression, refactor
-// that piece out.
 void RenderWidgetCompositor::scheduleComposite() {
-  client_->scheduleComposite();
+  if (!suppress_schedule_composite_)
+    widget_->scheduleComposite();
 }
-
-class RenderWidgetCompositor::MainThreadContextProvider
-    : public cc::ContextProvider {
- public:
-  virtual bool InitializeOnMainThread() OVERRIDE { return true; }
-  virtual bool BindToCurrentThread() OVERRIDE { return true; }
-
-  virtual WebKit::WebGraphicsContext3D* Context3d() OVERRIDE {
-    return WebKit::WebSharedGraphicsContext3D::mainThreadContext();
-  }
-  virtual class GrContext* GrContext() OVERRIDE {
-    return WebKit::WebSharedGraphicsContext3D::mainThreadGrContext();
-  }
-
-  virtual void VerifyContexts() OVERRIDE {}
-
- protected:
-  virtual ~MainThreadContextProvider() {}
-};
 
 scoped_refptr<cc::ContextProvider>
 RenderWidgetCompositor::OffscreenContextProviderForMainThread() {
-  if (!contexts_main_thread_)
-    contexts_main_thread_ = new MainThreadContextProvider;
-  return contexts_main_thread_;
+  return RenderThreadImpl::current()->OffscreenContextProviderForMainThread();
 }
-
-class RenderWidgetCompositor::CompositorThreadContextProvider
-    : public cc::ContextProvider {
- public:
-  CompositorThreadContextProvider() : destroyed_(false) {}
-
-  virtual bool InitializeOnMainThread() OVERRIDE {
-    return WebKit::WebSharedGraphicsContext3D::createCompositorThreadContext();
-  }
-  virtual bool BindToCurrentThread() OVERRIDE {
-    return Context3d()->makeContextCurrent();
-  }
-
-  virtual WebKit::WebGraphicsContext3D* Context3d() OVERRIDE {
-    return WebKit::WebSharedGraphicsContext3D::compositorThreadContext();
-  }
-  virtual class GrContext* GrContext() OVERRIDE {
-    return WebKit::WebSharedGraphicsContext3D::compositorThreadGrContext();
-  }
-
-  virtual void VerifyContexts() OVERRIDE {
-    if (Context3d() && !Context3d()->isContextLost())
-      return;
-    base::AutoLock lock(destroyed_lock_);
-    destroyed_ = true;
-  }
-  bool DestroyedOnMainThread() {
-    base::AutoLock lock(destroyed_lock_);
-    return destroyed_;
-  }
-
- protected:
-  virtual ~CompositorThreadContextProvider() {}
-
- private:
-  base::Lock destroyed_lock_;
-  bool destroyed_;
-};
 
 scoped_refptr<cc::ContextProvider>
 RenderWidgetCompositor::OffscreenContextProviderForCompositorThread() {
-  if (!contexts_compositor_thread_ ||
-      contexts_compositor_thread_->DestroyedOnMainThread())
-    contexts_compositor_thread_ = new CompositorThreadContextProvider;
-  return contexts_compositor_thread_;
+  return RenderThreadImpl::current()->
+      OffscreenContextProviderForCompositorThread();
 }
 
 }  // namespace content

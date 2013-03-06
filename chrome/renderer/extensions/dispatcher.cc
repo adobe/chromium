@@ -12,6 +12,7 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/extensions/api/extension_api.h"
+#include "chrome/common/extensions/background_info.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_messages.h"
 #include "chrome/common/extensions/manifest.h"
@@ -168,7 +169,7 @@ class LazyBackgroundPageNativeHandler : public ChromeV8Extension {
       return false;
 
     ExtensionHelper* helper = ExtensionHelper::Get(render_view);
-    return (extension && extension->has_lazy_background_page() &&
+    return (extension && BackgroundInfo::HasLazyBackgroundPage(extension) &&
             helper->view_type() == chrome::VIEW_TYPE_EXTENSION_BACKGROUND_PAGE);
   }
 };
@@ -447,7 +448,7 @@ void Dispatcher::OnMessageInvoke(const std::string& extension_id,
   // Tell the browser process when an event has been dispatched with a lazy
   // background page active.
   const Extension* extension = extensions_.GetByID(extension_id);
-  if (extension && extension->has_lazy_background_page() &&
+  if (extension && BackgroundInfo::HasLazyBackgroundPage(extension) &&
       function_name == kEventDispatchFunction) {
     RenderView* background_view =
         ExtensionHelper::GetBackgroundPage(extension_id);
@@ -609,7 +610,7 @@ void Dispatcher::RegisterNativeHandlers(ModuleSystem* module_system,
   module_system->RegisterNativeHandler("page_capture",
       scoped_ptr<NativeHandler>(new PageCaptureCustomBindings()));
   module_system->RegisterNativeHandler("runtime",
-      scoped_ptr<NativeHandler>(new RuntimeCustomBindings(context)));
+      scoped_ptr<NativeHandler>(new RuntimeCustomBindings(this, context)));
   module_system->RegisterNativeHandler("tabs",
       scoped_ptr<NativeHandler>(new TabsCustomBindings()));
   module_system->RegisterNativeHandler("tts",
@@ -655,6 +656,8 @@ void Dispatcher::PopulateSourceMap() {
                              IDR_DECLARATIVE_CONTENT_CUSTOM_BINDINGS_JS);
   source_map_.RegisterSource("declarativeWebRequest",
                              IDR_DECLARATIVE_WEBREQUEST_CUSTOM_BINDINGS_JS);
+  source_map_.RegisterSource("downloads",
+                             IDR_DOWNLOADS_CUSTOM_BINDINGS_JS);
   source_map_.RegisterSource(
       "experimental.mediaGalleries",
       IDR_EXPERIMENTAL_MEDIA_GALLERIES_CUSTOM_BINDINGS_JS);
@@ -699,6 +702,8 @@ void Dispatcher::PopulateSourceMap() {
   // Platform app sources that are not API-specific..
   source_map_.RegisterSource("tagWatcher", IDR_TAG_WATCHER_JS);
   source_map_.RegisterSource("webview", IDR_WEB_VIEW_JS);
+  source_map_.RegisterSource("webview.experimental",
+                             IDR_WEB_VIEW_EXPERIMENTAL_JS);
   source_map_.RegisterSource("denyWebview", IDR_WEB_VIEW_DENY_JS);
   source_map_.RegisterSource("platformApp", IDR_PLATFORM_APP_JS);
   source_map_.RegisterSource("injectAppTitlebar", IDR_INJECT_APP_TITLEBAR_JS);
@@ -783,8 +788,8 @@ void Dispatcher::DidCreateScriptContext(
 
   int manifest_version = extension ? extension->manifest_version() : 1;
   bool send_request_disabled =
-      (extension && extension->location() == Manifest::LOAD &&
-       extension->has_lazy_background_page());
+      (extension && Manifest::IsUnpackedLocation(extension->location()) &&
+       BackgroundInfo::HasLazyBackgroundPage(extension));
   module_system->RegisterNativeHandler("process",
       scoped_ptr<NativeHandler>(new ProcessInfoNativeHandler(
           this, context->GetExtensionID(),
@@ -833,6 +838,10 @@ void Dispatcher::DidCreateScriptContext(
   if (context_type == Feature::BLESSED_EXTENSION_CONTEXT) {
     bool has_permission = extension->HasAPIPermission(APIPermission::kWebView);
     module_system->Require(has_permission ? "webview" : "denyWebview");
+    if (has_permission &&
+        Feature::GetCurrentChannel() <= chrome::VersionInfo::CHANNEL_DEV) {
+      module_system->Require("webview.experimental");
+    }
   }
 
   context->set_module_system(module_system.Pass());

@@ -198,6 +198,8 @@ util.recurseAndResolveEntries = function(entries, recurse, successCallback) {
 
 /**
  * Utility function to invoke callback once for each entry in dirEntry.
+ * callback is called with 'null' after all entries are visited to indicate
+ * the end of the directory scan.
  *
  * @param {DirectoryEntry} dirEntry The directory entry to enumerate.
  * @param {function(Entry)} callback The function to invoke for each entry in
@@ -643,6 +645,8 @@ util.traverseTree = function(root, callback, max_depth, opt_filter) {
 
 /**
  * Traverses a tree up to a certain depth, and calls a callback for each entry.
+ * callback is called with 'null' after all entries are visited to indicate
+ * the end of the traversal.
  * @param {FileEntry} root Root entry.
  * @param {function(Entry):boolean} callback The callback is called for each
  *     entry, and then once with null passed. If callback returns false once,
@@ -1242,4 +1246,19 @@ util.boardIs = function(boardPrefix) {
   var board = str('CHROMEOS_RELEASE_BOARD');
   var pattern = new RegExp('^' + boardPrefix, 'i');
   return board.match(pattern) != null;
+};
+
+/**
+ * Disabled browser shortcus key events on the given document.
+ * @param {Element} element Element to be disabled browser shortcut keys on.
+ */
+util.disableBrowserShortcutKeys = function(element) {
+  element.addEventListener('keydown', function(e) {
+    switch (util.getKeyModifiers(e) + e.keyCode) {
+      case 'Ctrl-79':  // Disable native Ctrl-O (open file).
+      case 'Ctrl-83':  // Disable native Ctrl-S (save as).
+      case 'Ctrl-85':  // Disable native Ctrl-U (view source).
+        e.preventDefault();
+    }
+  });
 };

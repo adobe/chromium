@@ -63,9 +63,26 @@ const AwHitTestData& AwRenderViewHostExt::GetLastHitTestData() const {
   return last_hit_test_data_;
 }
 
+void AwRenderViewHostExt::SetEnableFixedLayoutMode(bool enable) {
+  DCHECK(CalledOnValidThread());
+  Send(new AwViewMsg_SetEnableFixedLayoutMode(web_contents()->GetRoutingID(),
+                                              enable));
+}
+
 void AwRenderViewHostExt::SetTextZoomLevel(double level) {
   DCHECK(CalledOnValidThread());
   Send(new AwViewMsg_SetTextZoomLevel(web_contents()->GetRoutingID(), level));
+}
+
+void AwRenderViewHostExt::ResetScrollAndScaleState() {
+  DCHECK(CalledOnValidThread());
+  Send(new AwViewMsg_ResetScrollAndScaleState(web_contents()->GetRoutingID()));
+}
+
+void AwRenderViewHostExt::SetInitialPageScale(double page_scale_factor) {
+  DCHECK(CalledOnValidThread());
+  Send(new AwViewMsg_SetInitialPageScale(web_contents()->GetRoutingID(),
+                                         page_scale_factor));
 }
 
 void AwRenderViewHostExt::RenderViewGone(base::TerminationStatus status) {

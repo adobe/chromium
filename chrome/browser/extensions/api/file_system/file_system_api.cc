@@ -12,6 +12,7 @@
 #include "base/string_util.h"
 #include "base/sys_string_conversions.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/extensions/api/file_handlers/app_file_handler_util.h"
 #include "chrome/browser/extensions/shell_window_registry.h"
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/ui/chrome_select_file_policy.h"
@@ -22,6 +23,7 @@
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_view.h"
 #include "grit/generated_resources.h"
 #include "net/base/mime_util.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -39,7 +41,8 @@ using fileapi::IsolatedContext;
 
 const char kInvalidParameters[] = "Invalid parameters";
 const char kSecurityError[] = "Security error";
-const char kInvalidCallingPage[] = "Invalid calling page";
+const char kInvalidCallingPage[] = "Invalid calling page. This function can't "
+    "be called from a background page.";
 const char kUserCancelled[] = "User cancelled";
 const char kWritableFileError[] = "Invalid file for writing";
 const char kRequiresFileSystemWriteError[] =
@@ -299,27 +302,18 @@ void FileSystemEntryFunction::RegisterFileSystemAndSendResponse(
       fileapi::IsolatedContext::GetInstance();
   DCHECK(isolated_context);
 
-  std::string registered_name;
-  std::string filesystem_id = isolated_context->RegisterFileSystemForPath(
-      fileapi::kFileSystemTypeNativeLocal, path, &registered_name);
-
-  content::ChildProcessSecurityPolicy* policy =
-      content::ChildProcessSecurityPolicy::GetInstance();
-  int renderer_id = render_view_host_->GetProcess()->GetID();
-  policy->GrantReadFileSystem(renderer_id, filesystem_id);
-  if (entry_type == WRITABLE)
-    policy->GrantWriteFileSystem(renderer_id, filesystem_id);
-
-  // We only need file level access for reading FileEntries. Saving FileEntries
-  // just needs the file system to have read/write access, which is granted
-  // above if required.
-  if (!policy->CanReadFile(renderer_id, path))
-    policy->GrantReadFile(renderer_id, path);
+  bool writable = entry_type == WRITABLE;
+  extensions::app_file_handler_util::GrantedFileEntry file_entry =
+      extensions::app_file_handler_util::CreateFileEntry(profile(),
+          GetExtension()->id(), render_view_host_->GetProcess()->GetID(), path,
+          writable);
 
   DictionaryValue* dict = new DictionaryValue();
   SetResult(dict);
-  dict->SetString("fileSystemId", filesystem_id);
-  dict->SetString("baseName", registered_name);
+  dict->SetString("fileSystemId", file_entry.filesystem_id);
+  dict->SetString("baseName", file_entry.registered_name);
+  dict->SetString("id", file_entry.id);
+
   SendResponse(true);
 }
 
@@ -390,7 +384,8 @@ class FileSystemChooseEntryFunction::FilePicker
     select_file_dialog_ = ui::SelectFileDialog::Create(
         this, new ChromeSelectFilePolicy(web_contents));
     gfx::NativeWindow owning_window = web_contents ?
-        platform_util::GetTopLevel(web_contents->GetNativeView()) : NULL;
+        platform_util::GetTopLevel(web_contents->GetView()->GetNativeView()) :
+        NULL;
 
     if (g_skip_picker_for_test) {
       if (g_path_to_be_picked_for_test) {

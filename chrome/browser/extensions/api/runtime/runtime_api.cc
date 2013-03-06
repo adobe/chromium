@@ -14,6 +14,7 @@
 #include "chrome/browser/extensions/updater/extension_updater.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/common/extensions/background_info.h"
 #include "chrome/common/extensions/extension.h"
 #include "googleurl/src/gurl.h"
 
@@ -24,6 +25,8 @@ namespace {
 const char kOnStartupEvent[] = "runtime.onStartup";
 const char kOnInstalledEvent[] = "runtime.onInstalled";
 const char kOnUpdateAvailableEvent[] = "runtime.onUpdateAvailable";
+const char kOnBrowserUpdateAvailableEvent[] =
+    "runtime.onBrowserUpdateAvailable";
 const char kNoBackgroundPageError[] = "You do not have a background page.";
 const char kPageLoadError[] = "Background page failed to load.";
 const char kInstallReason[] = "reason";
@@ -58,7 +61,8 @@ static void DispatchOnStartupEventImpl(
   // If it fails to load the first time, don't bother trying again.
   const Extension* extension =
       system->extension_service()->extensions()->GetByID(extension_id);
-  if (extension && extension->has_persistent_background_page() && first_call &&
+  if (extension && BackgroundInfo::HasPersistentBackgroundPage(extension) &&
+      first_call &&
       system->lazy_background_task_queue()->
           ShouldEnqueueTask(profile, extension)) {
     system->lazy_background_task_queue()->AddPendingTask(
@@ -129,6 +133,20 @@ void RuntimeEventRouter::DispatchOnUpdateAvailableEvent(
   DCHECK(system->event_router());
   scoped_ptr<Event> event(new Event(kOnUpdateAvailableEvent, args.Pass()));
   system->event_router()->DispatchEventToExtension(extension_id, event.Pass());
+}
+
+// static
+void RuntimeEventRouter::DispatchOnBrowserUpdateAvailableEvent(
+    Profile* profile) {
+  ExtensionSystem* system = ExtensionSystem::Get(profile);
+  if (!system)
+    return;
+
+  scoped_ptr<ListValue> args(new ListValue);
+  DCHECK(system->event_router());
+  scoped_ptr<Event> event(new Event(kOnBrowserUpdateAvailableEvent,
+                                    args.Pass()));
+  system->event_router()->BroadcastEvent(event.Pass());
 }
 
 bool RuntimeGetBackgroundPageFunction::RunImpl() {

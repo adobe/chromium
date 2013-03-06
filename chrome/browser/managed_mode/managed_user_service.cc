@@ -10,12 +10,12 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/managed_mode/managed_mode_site_list.h"
-#include "chrome/browser/prefs/pref_registry_syncable.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension_set.h"
 #include "chrome/common/pref_names.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/browser_thread.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -103,6 +103,20 @@ bool ManagedUserService::IsElevated() const {
   if (pref_service->GetString(prefs::kManagedModeLocalPassphrase).empty())
     return true;
   return is_elevated_;
+}
+
+void ManagedUserService::RequestAuthorization(
+    content::WebContents* web_contents,
+    const PassphraseCheckedCallback& callback) {
+  PrefService* pref_service = profile_->GetPrefs();
+
+  // If there is no passphrase set, we do not need to ask for authentication.
+  if (pref_service->GetString(prefs::kManagedModeLocalPassphrase).empty()) {
+    callback.Run(true);
+    return;
+  }
+  // Is deleted automatically when the dialog is closed.
+  new ManagedUserPassphraseDialog(web_contents, callback);
 }
 
 // static
@@ -364,6 +378,12 @@ void ManagedUserService::Init() {
       base::Bind(
           &ManagedUserService::OnDefaultFilteringBehaviorChanged,
           base::Unretained(this)));
+
+  // TODO(bauerb): Setting the default value here does not currently trigger
+  // the proper notification. Once that is fixed use SetDefaultPrefValue
+  // instead.
+  if (!profile_->GetPrefs()->HasPrefPath(prefs::kForceSafeSearch))
+    profile_->GetPrefs()->SetBoolean(prefs::kForceSafeSearch, true);
 
   // Initialize the filter.
   OnDefaultFilteringBehaviorChanged();

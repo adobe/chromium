@@ -16,3 +16,14 @@ ProfileSyncServiceSessionTest.ValidTabs
 
 # http://crbug.com/139652
 BackgroundApplicationListModelTest.RandomTest
+
+# http://crbug.com/179427
+ExtensionPrefsDelayedInstallInfo.DelayedInstallInfo
+ExtensionServiceTest.*
+
+# http://crbug.com/180335
+AutocompleteActionPredictorTest.RecommendActionURL
+
+# http://crbug.com/180467
+HttpNetworkTransactionSpdy3Test.*
+SpdyNetworkTransactionSpdy3Test.*

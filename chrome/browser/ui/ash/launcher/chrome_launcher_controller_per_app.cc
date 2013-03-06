@@ -6,6 +6,7 @@
 
 #include <vector>
 
+#include "ash/ash_switches.h"
 #include "ash/launcher/launcher_model.h"
 #include "ash/launcher/launcher_util.h"
 #include "ash/shell.h"
@@ -29,6 +30,7 @@
 #include "chrome/browser/ui/ash/launcher/app_shortcut_launcher_item_controller.h"
 #include "chrome/browser/ui/ash/launcher/chrome_launcher_app_menu_item.h"
 #include "chrome/browser/ui/ash/launcher/chrome_launcher_app_menu_item_browser.h"
+#include "chrome/browser/ui/ash/launcher/chrome_launcher_app_menu_item_tab.h"
 #include "chrome/browser/ui/ash/launcher/launcher_app_tab_helper.h"
 #include "chrome/browser/ui/ash/launcher/launcher_application_menu_item_model.h"
 #include "chrome/browser/ui/ash/launcher/launcher_context_menu.h"
@@ -48,6 +50,7 @@
 #include "chrome/browser/web_applications/web_app.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/extensions/api/icons/icons_handler.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_resource.h"
 #include "chrome/common/pref_names.h"
@@ -816,6 +819,7 @@ void ChromeLauncherControllerPerApp::UpdateAppState(
           ash::STATUS_ACTIVE : ash::STATUS_RUNNING);
     }
   }
+  UpdateBrowserItemStatus();
 }
 
 void ChromeLauncherControllerPerApp::SetRefocusURLPatternForTest(
@@ -887,10 +891,9 @@ ui::MenuModel* ChromeLauncherControllerPerApp::CreateContextMenu(
   return new LauncherContextMenu(this, &item, root_window);
 }
 
-ui::MenuModel* ChromeLauncherControllerPerApp::CreateApplicationMenu(
+ash::LauncherMenuModel* ChromeLauncherControllerPerApp::CreateApplicationMenu(
     const ash::LauncherItem& item) {
-  return new LauncherApplicationMenuItemModel(
-      GetApplicationList(item));
+  return new LauncherApplicationMenuItemModel(GetApplicationList(item));
 }
 
 ash::LauncherID ChromeLauncherControllerPerApp::GetIDByWindow(
@@ -1051,11 +1054,11 @@ ChromeLauncherAppMenuItems ChromeLauncherControllerPerApp::GetApplicationList(
 
   std::string app_id = id_to_item_controller_map_[item.id]->app_id();
   ash::LauncherID id = GetLauncherIDForAppID(app_id);
+  // If there is no launcher item (e.g. for panels), return an empty list.
+  if (!id)
+    return ChromeLauncherAppMenuItems().Pass();
 
-  // If there is no such an item pinned to the launcher, no menu gets created.
-  DCHECK(id);
   DCHECK(id_to_item_controller_map_[id]);
-
   return id_to_item_controller_map_[id]->GetApplicationList();
 }
 
@@ -1154,20 +1157,41 @@ ChromeLauncherControllerPerApp::CreateAppShortcutLauncherItemWithType(
 
 void ChromeLauncherControllerPerApp::UpdateBrowserItemStatus() {
   // Determine the new browser's active state and change if necessary.
-  int browser_index = ash::launcher::GetBrowserItemIndex(*model_);
+  size_t browser_index = ash::launcher::GetBrowserItemIndex(*model_);
   DCHECK(browser_index >= 0);
   ash::LauncherItem browser_item = model_->items()[browser_index];
-  ash::LauncherItemStatus browser_status = browser_item.status;
-  // See if the active window is a browser.
+  ash::LauncherItemStatus browser_status = ash::STATUS_CLOSED;
+
   aura::Window* window = ash::wm::GetActiveWindow();
-  if (window && chrome::FindBrowserWithWindow(window)) {
-    browser_status = ash::STATUS_ACTIVE;
-  } else if (!BrowserList::GetInstance(
-                 chrome::HOST_DESKTOP_TYPE_ASH)->empty()) {
-    browser_status = ash::STATUS_RUNNING;
-  } else {
-    browser_status = ash::STATUS_CLOSED;
+  if (window) {
+    // Check if the active browser / tab is a browser which is not an app,
+    // a windowed app, a popup or any other item which is not a browser of
+    // interest.
+    Browser* browser = chrome::FindBrowserWithWindow(window);
+    if (IsBrowserRepresentedInBrowserList(browser)) {
+      browser_status = ash::STATUS_ACTIVE;
+      const ash::LauncherItems& items = model_->items();
+      // If another launcher item has claimed to be active, we don't.
+      for (size_t i = 0;
+           i < items.size() && browser_status == ash::STATUS_ACTIVE; ++i) {
+        if (i != browser_index && items[i].status == ash::STATUS_ACTIVE)
+          browser_status = ash::STATUS_RUNNING;
+      }
+    }
   }
+
+  if (browser_status == ash::STATUS_CLOSED) {
+    const BrowserList* ash_browser_list =
+        BrowserList::GetInstance(chrome::HOST_DESKTOP_TYPE_ASH);
+    for (BrowserList::const_reverse_iterator it =
+             ash_browser_list->begin_last_active();
+         it != ash_browser_list->end_last_active() &&
+         browser_status == ash::STATUS_CLOSED; ++it) {
+      if (IsBrowserRepresentedInBrowserList(*it))
+        browser_status = ash::STATUS_RUNNING;
+    }
+  }
+
   if (browser_status != browser_item.status) {
     browser_item.status = browser_status;
     model_->Set(browser_index, browser_item);
@@ -1390,7 +1414,7 @@ ash::LauncherID ChromeLauncherControllerPerApp::InsertAppLauncherItem(
   ash::LauncherItem item;
   item.type = launcher_item_type;
   item.is_incognito = false;
-  item.image = Extension::GetDefaultIcon(true);
+  item.image = extensions::IconsInfo::GetDefaultAppIcon();
 
   WebContents* active_tab = GetLastActiveWebContents(app_id);
   if (active_tab) {
@@ -1432,34 +1456,64 @@ ChromeLauncherControllerPerApp::GetBrowserApplicationList() {
   bool found_tabbed_browser = false;
   // Add the application name to the menu.
   items.push_back(new ChromeLauncherAppMenuItem(
-      l10n_util::GetStringFUTF16(IDS_LAUNCHER_CHROME_BROWSER_NAME,
-          l10n_util::GetStringUTF16(IDS_PRODUCT_NAME)), NULL));
+      l10n_util::GetStringUTF16(IDS_PRODUCT_NAME), NULL, false));
   const BrowserList* ash_browser_list =
       BrowserList::GetInstance(chrome::HOST_DESKTOP_TYPE_ASH);
-  int index = 1;
-  for (BrowserList::const_reverse_iterator it =
-           ash_browser_list->begin_last_active();
-       it != ash_browser_list->end_last_active(); ++it, ++index) {
+  for (BrowserList::const_iterator it = ash_browser_list->begin();
+       it != ash_browser_list->end(); ++it) {
     Browser* browser = *it;
+    // Make sure that the browser was already shown and had a proper window.
+    if (std::find(ash_browser_list->begin_last_active(),
+                  ash_browser_list->end_last_active(),
+                  browser) == ash_browser_list->end_last_active() ||
+        !browser->window())
+      continue;
     if (browser->is_type_tabbed())
       found_tabbed_browser = true;
-    else if (browser->is_app() &&
-             browser->is_type_popup() &&
-             GetLauncherIDForAppID(web_app::GetExtensionIdFromApplicationName(
-                                       browser->app_name())) > 0)
+    else if (!IsBrowserRepresentedInBrowserList(browser))
       continue;
     TabStripModel* tab_strip = browser->tab_strip_model();
-    WebContents* web_contents =
-        tab_strip->GetWebContentsAt(tab_strip->active_index());
-    gfx::Image app_icon = GetAppListIcon(web_contents);
-    items.push_back(new ChromeLauncherAppMenuItemBrowser(
-        web_contents->GetTitle(),
-        app_icon.IsEmpty() ? NULL : &app_icon,
-        browser));
+    if (!CommandLine::ForCurrentProcess()->HasSwitch(
+            ash::switches::kAshEnableFullBrowserListInLauncher)) {
+      WebContents* web_contents =
+          tab_strip->GetWebContentsAt(tab_strip->active_index());
+      gfx::Image app_icon = GetAppListIcon(web_contents);
+      items.push_back(new ChromeLauncherAppMenuItemBrowser(
+          web_contents->GetTitle(),
+          app_icon.IsEmpty() ? NULL : &app_icon,
+          browser,
+          items.size() == 1));
+    } else {
+      // TODO(skuhne): If we go with this experiment - remove the unused
+      // ChromeLauncherAppMenuItemBrowser class - we might also want to add a
+      // unit test that all browser tabs are enumerated and browsers separated.
+      for (int index = 0; index  < tab_strip->count(); ++index) {
+        content::WebContents* web_contents =
+            tab_strip->GetWebContentsAt(index);
+        gfx::Image app_icon = GetAppListIcon(web_contents);
+        // Check if we need to insert a separator in front.
+        bool leading_separator = !index;
+        items.push_back(new ChromeLauncherAppMenuItemTab(
+            web_contents->GetTitle(),
+            app_icon.IsEmpty() ? NULL : &app_icon,
+            web_contents,
+            leading_separator));
+      }
+    }
   }
   // If only windowed applications are open, we return an empty list to
   // enforce the creation of a new browser.
   if (!found_tabbed_browser)
     items.clear();
   return items.Pass();
+}
+
+bool ChromeLauncherControllerPerApp::IsBrowserRepresentedInBrowserList(
+    Browser* browser) {
+  return (browser &&
+          (browser->is_type_tabbed() ||
+           !browser->is_app() ||
+           !browser->is_type_popup() ||
+           GetLauncherIDForAppID(web_app::GetExtensionIdFromApplicationName(
+               browser->app_name())) <= 0));
 }

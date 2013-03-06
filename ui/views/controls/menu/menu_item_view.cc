@@ -312,13 +312,13 @@ MenuItemView* MenuItemView::AppendMenuItemFromModel(ui::MenuModel* model,
                                                     int index,
                                                     int id) {
   gfx::Image icon;
+  model->GetIconAt(index, &icon);
   string16 label;
   ui::MenuSeparatorType separator_style = ui::NORMAL_SEPARATOR;
   MenuItemView::Type type;
   ui::MenuModel::ItemType menu_type = model->GetTypeAt(index);
   switch (menu_type) {
     case ui::MenuModel::TYPE_COMMAND:
-      model->GetIconAt(index, &icon);
       type = MenuItemView::NORMAL;
       label = model->GetLabelAt(index);
       break;
@@ -331,11 +331,11 @@ MenuItemView* MenuItemView::AppendMenuItemFromModel(ui::MenuModel* model,
       label = model->GetLabelAt(index);
       break;
     case ui::MenuModel::TYPE_SEPARATOR:
+      icon = gfx::Image();
       type = MenuItemView::SEPARATOR;
       separator_style = model->GetSeparatorTypeAt(index);
       break;
     case ui::MenuModel::TYPE_SUBMENU:
-      model->GetIconAt(index, &icon);
       type = MenuItemView::SUBMENU;
       label = model->GetLabelAt(index);
       break;
@@ -560,6 +560,8 @@ void MenuItemView::Layout() {
       gfx::Size size = icon_view_->GetPreferredSize();
       int x = config.item_left_margin + left_icon_margin_ +
               (icon_area_width_ - size.width()) / 2;
+      if (type_ == CHECKBOX || type_ == RADIO)
+        x = label_start_;
       int y =
           (height() + GetTopMargin() - GetBottomMargin() - size.height()) / 2;
       icon_view_->SetPosition(gfx::Point(x, y));
@@ -601,7 +603,8 @@ MenuItemView::MenuItemView(MenuItemView* parent,
       left_icon_margin_(0),
       right_icon_margin_(0),
       requested_menu_position_(POSITION_BEST_FIT),
-      actual_menu_position_(requested_menu_position_) {
+      actual_menu_position_(requested_menu_position_),
+      use_right_margin_(true) {
   Init(parent, command, type, NULL);
 }
 
@@ -789,6 +792,8 @@ void MenuItemView::PaintButtonCommon(gfx::Canvas* canvas,
                                         &override_color)) {
     canvas->DrawColor(override_color);
   } else if (render_selection) {
+    // TODO(erg): The following doesn't actually get the focused menu item
+    // background for times when we want to match the native OS.
     if (ui::NativeTheme::IsNewMenuStyleEnabled()) {
       gfx::Rect item_bounds(0, 0, width(), height());
       AdjustBoundsForRTLUI(&item_bounds);
@@ -830,7 +835,13 @@ void MenuItemView::PaintButtonCommon(gfx::Canvas* canvas,
   const gfx::Font& font = GetFont();
   int accel_width = parent_menu_item_->GetSubmenu()->max_accelerator_width();
   int label_start = label_start_ + left_icon_margin_ + right_icon_margin_;
-  int width = this->width() - item_right_margin_ - label_start - accel_width;
+  if ((type_ == CHECKBOX || type_ == RADIO) && icon_view_)
+    label_start += icon_view_->size().width() + config.icon_to_label_padding;
+
+  int width = this->width() - label_start - accel_width -
+      (!GetDelegate() ||
+       GetDelegate()->ShouldReserveSpaceForSubmenuIndicator() ?
+          item_right_margin_ : config.arrow_to_edge_padding);
   gfx::Rect text_bounds(label_start, top_margin, width, available_height);
   text_bounds.set_x(GetMirroredXForRect(text_bounds));
   int flags = GetDrawStringFlags();

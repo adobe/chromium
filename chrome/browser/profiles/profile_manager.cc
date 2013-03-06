@@ -77,8 +77,6 @@ using content::UserMetricsAction;
 
 namespace {
 
-static bool did_perform_profile_import = false;
-
 // Profiles that should be deleted on shutdown.
 std::vector<base::FilePath>& ProfilesToDelete() {
   CR_DEFINE_STATIC_LOCAL(std::vector<base::FilePath>, profiles_to_delete, ());
@@ -146,6 +144,12 @@ void OnOpenWindowForNewProfile(
     const ProfileManager::CreateCallback& callback,
     Profile* profile,
     Profile::CreateStatus status) {
+  // Invoke the callback before we open a window for this new profile, so the
+  // callback has a chance to update the profile state first (to do things like
+  // sign in the profile).
+  if (!callback.is_null())
+    callback.Run(profile, status);
+
   if (status == Profile::CREATE_STATUS_INITIALIZED) {
 
     ProfileManager::FindOrCreateNewWindowForProfile(
@@ -155,8 +159,6 @@ void OnOpenWindowForNewProfile(
         desktop_type,
         false);
   }
-  if (!callback.is_null())
-    callback.Run(profile, status);
 }
 
 #if defined(OS_CHROMEOS)
@@ -661,18 +663,12 @@ bool ProfileManager::IsImportProcess(const CommandLine& command_line) {
           command_line.HasSwitch(switches::kImportFromFile));
 }
 
-// static
-bool ProfileManager::DidPerformProfileImport() {
-  return did_perform_profile_import;
-}
-
 void ProfileManager::SetWillImport() {
   will_import_ = true;
 }
 
 void ProfileManager::OnImportFinished(Profile* profile) {
   will_import_ = false;
-  did_perform_profile_import = true;
   DCHECK(profile);
 
 #if !defined(OS_CHROMEOS)

@@ -237,6 +237,9 @@ const int kImmersiveBarHeight = 2;
 const SkColor kImmersiveActiveTabColor = SkColorSetRGB(235, 235, 235);
 const SkColor kImmersiveInactiveTabColor = SkColorSetRGB(190, 190, 190);
 
+// Number of steps in the immersive mode loading animation.
+const int kImmersiveLoadingStepCount = 32;
+
 // Scale to resize the current favicon by when projecting.
 const double kProjectingFaviconResizeScale = 0.75;
 
@@ -439,6 +442,7 @@ Tab::Tab(TabController* controller)
       dragging_(false),
       favicon_hiding_offset_(0),
       loading_animation_frame_(0),
+      immersive_loading_step_(0),
       should_display_crashed_favicon_(false),
       theme_provider_(NULL),
       ALLOW_THIS_IN_INITIALIZER_LIST(hover_controller_(this)),
@@ -498,6 +502,11 @@ void Tab::SetData(const TabRendererData& data) {
 
   if (data_.IsCrashed()) {
     if (!should_display_crashed_favicon_ && !IsPerformingCrashAnimation()) {
+      // Crash animation overrides the other icon animations.
+      old.audio_state = TabRendererData::AUDIO_STATE_NONE;
+      data_.audio_state = TabRendererData::AUDIO_STATE_NONE;
+      data_.capture_state = TabRendererData::CAPTURE_STATE_NONE;
+      old.capture_state = TabRendererData::CAPTURE_STATE_NONE;
 #if defined(OS_CHROMEOS)
       // On Chrome OS, we reload killed tabs automatically when the user
       // switches to them.  Don't display animations for these unless they're
@@ -510,21 +519,25 @@ void Tab::SetData(const TabRendererData& data) {
       StartCrashAnimation();
 #endif
     }
-  } else if ((data_.capture_state == TabRendererData::CAPTURE_STATE_NONE) &&
-             (old.capture_state != TabRendererData::CAPTURE_STATE_NONE)) {
-    StopRecordingAnimation();
-  } else if ((data_.capture_state != TabRendererData::CAPTURE_STATE_NONE) &&
-             (old.capture_state == TabRendererData::CAPTURE_STATE_NONE)) {
+  } else if (!data_.CaptureActive() && old.CaptureActive()) {
+    StopIconAnimation();
+    if (data_.AudioActive())
+      StartAudioPlayingAnimation();
+  } else if (data_.CaptureActive() && !old.CaptureActive()) {
+    // Capture indicator overrides the audio indicator if presently shown.
+    old.audio_state = TabRendererData::AUDIO_STATE_NONE;
+    data_.audio_state = TabRendererData::AUDIO_STATE_NONE;
     StartRecordingAnimation();
-  } else if ((data_.audio_state == TabRendererData::AUDIO_STATE_NONE) &&
-             (old.audio_state != TabRendererData::AUDIO_STATE_NONE)) {
-    StopAudioPlayingAnimation();
-  } else if ((data_.audio_state != TabRendererData::AUDIO_STATE_NONE) &&
-             (old.audio_state == TabRendererData::AUDIO_STATE_NONE)) {
-    StartAudioPlayingAnimation();
+  } else if (!data_.CaptureActive()) {
+    // Start or stop the audio indicator only if not capturing.
+    if (!data_.AudioActive() && old.AudioActive()) {
+      StopIconAnimation();
+    } else if (data_.AudioActive() && !old.AudioActive()) {
+      StartAudioPlayingAnimation();
+    }
   } else {
     if (IsPerformingCrashAnimation())
-      StopCrashAnimation();
+      StopIconAnimation();
     ResetCrashedFavicon();
   }
 
@@ -727,7 +740,7 @@ void Tab::OnPaint(gfx::Canvas* canvas) {
   }
 
   if (controller() && controller()->IsImmersiveStyle())
-    PaintTabImmersive(canvas);
+    PaintImmersiveTab(canvas);
   else
     PaintTab(canvas);
 
@@ -863,8 +876,10 @@ bool Tab::HasHitTestMask() const {
 void Tab::GetHitTestMask(gfx::Path* path) const {
   // When the window is maximized we don't want to shave off the edges or top
   // shadow of the tab, such that the user can click anywhere along the top
-  // edge of the screen to select a tab.
-  bool include_top_shadow = GetWidget() && GetWidget()->IsMaximized();
+  // edge of the screen to select a tab. Ditto for immersive fullscreen.
+  const views::Widget* widget = GetWidget();
+  bool include_top_shadow =
+      widget && (widget->IsMaximized() || widget->IsFullscreen());
   TabResources::GetHitTestMask(width(), height(), include_top_shadow, path);
 }
 
@@ -1090,21 +1105,41 @@ void Tab::PaintTab(gfx::Canvas* canvas) {
   }
 }
 
-void Tab::PaintTabImmersive(gfx::Canvas* canvas) {
-  // The main bar is as wide as the normal tab's horizontal top line.
-  // This top line of the tab extends a few pixels left and right of the
-  // center image due to pixels in the rounded corner images.
-  const int kBarPadding = 1;
-  int main_bar_left = tab_active_.l_width - kBarPadding;
-  int main_bar_right = width() - tab_active_.r_width + kBarPadding;
-
+void Tab::PaintImmersiveTab(gfx::Canvas* canvas) {
   // Draw a gray rectangle to represent the tab. This works for mini-tabs as
   // well as regular ones. The active tab has a brigher bar.
   SkColor color =
       IsActive() ? kImmersiveActiveTabColor : kImmersiveInactiveTabColor;
-  gfx::Rect main_bar_rect(
-      main_bar_left, 0, main_bar_right - main_bar_left, kImmersiveBarHeight);
-  canvas->FillRect(main_bar_rect, color);
+  gfx::Rect bar_rect = GetImmersiveBarRect();
+  canvas->FillRect(bar_rect, color);
+
+  // Paint network activity indicator.
+  // TODO(jamescook): Replace this placeholder animation with a real one.
+  // For now, let's go with a Cylon eye effect, but in blue.
+  if (data().network_state != TabRendererData::NETWORK_STATE_NONE) {
+    const SkColor kEyeColor = SkColorSetRGB(71, 138, 217);
+    int eye_width = bar_rect.width() / 3;
+    int eye_offset = bar_rect.width() * immersive_loading_step_ /
+        kImmersiveLoadingStepCount;
+    if (eye_offset + eye_width < bar_rect.width()) {
+      // Draw a single indicator strip because it fits inside |bar_rect|.
+      gfx::Rect eye_rect(
+          bar_rect.x() + eye_offset, 0, eye_width, kImmersiveBarHeight);
+      canvas->FillRect(eye_rect, kEyeColor);
+    } else {
+      // Draw two indicators to simulate the eye "wrapping around" to the left
+      // side. The first part fills the remainder of the bar.
+      int right_eye_width = bar_rect.width() - eye_offset;
+      gfx::Rect right_eye_rect(
+          bar_rect.x() + eye_offset, 0, right_eye_width, kImmersiveBarHeight);
+      canvas->FillRect(right_eye_rect, kEyeColor);
+      // The second part parts the remaining |eye_width| on the left.
+      int left_eye_width = eye_offset + eye_width - bar_rect.width();
+      gfx::Rect left_eye_rect(
+          bar_rect.x(), 0, left_eye_width, kImmersiveBarHeight);
+      canvas->FillRect(left_eye_rect, kEyeColor);
+    }
+  }
 }
 
 void Tab::PaintTabBackground(gfx::Canvas* canvas) {
@@ -1494,7 +1529,7 @@ void Tab::PaintTitle(gfx::Canvas* canvas, SkColor title_color) {
 }
 
 void Tab::AdvanceLoadingAnimation(TabRendererData::NetworkState old_state,
-                                      TabRendererData::NetworkState state) {
+                                  TabRendererData::NetworkState state) {
   static bool initialized = false;
   static int loading_animation_frame_count = 0;
   static int waiting_animation_frame_count = 0;
@@ -1530,14 +1565,26 @@ void Tab::AdvanceLoadingAnimation(TabRendererData::NetworkState old_state,
         (loading_animation_frame_ / waiting_to_loading_frame_count_ratio);
   }
 
-  if (state != TabRendererData::NETWORK_STATE_NONE) {
+  if (state == TabRendererData::NETWORK_STATE_WAITING) {
     loading_animation_frame_ = (loading_animation_frame_ + 1) %
-        ((state == TabRendererData::NETWORK_STATE_WAITING) ?
-            waiting_animation_frame_count : loading_animation_frame_count);
+        waiting_animation_frame_count;
+    // Waiting steps backwards.
+    immersive_loading_step_ =
+        (immersive_loading_step_ - 1 + kImmersiveLoadingStepCount) %
+            kImmersiveLoadingStepCount;
+  } else if (state == TabRendererData::NETWORK_STATE_LOADING) {
+    loading_animation_frame_ = (loading_animation_frame_ + 1) %
+        loading_animation_frame_count;
+    immersive_loading_step_ = (immersive_loading_step_ + 1) %
+        kImmersiveLoadingStepCount;
   } else {
     loading_animation_frame_ = 0;
+    immersive_loading_step_ = 0;
   }
-  ScheduleIconPaint();
+  if (controller() && controller()->IsImmersiveStyle())
+    SchedulePaintInRect(GetImmersiveBarRect());
+  else
+    ScheduleIconPaint();
 }
 
 int Tab::IconCapacity() const {
@@ -1595,15 +1642,16 @@ void Tab::ResetCrashedFavicon() {
   should_display_crashed_favicon_ = false;
 }
 
+void Tab::StopIconAnimation() {
+  if (!icon_animation_.get())
+    return;
+  icon_animation_->Stop();
+  icon_animation_.reset();
+}
+
 void Tab::StartCrashAnimation() {
   icon_animation_.reset(new FaviconCrashAnimation(this));
   icon_animation_->Start();
-}
-
-void Tab::StopCrashAnimation() {
-  if (!icon_animation_.get())
-    return;
-  icon_animation_.reset();
 }
 
 void Tab::StartRecordingAnimation() {
@@ -1614,26 +1662,12 @@ void Tab::StartRecordingAnimation() {
   icon_animation_.reset(animation);
 }
 
-void Tab::StopRecordingAnimation() {
-  if (!icon_animation_.get())
-    return;
-  icon_animation_->Stop();
-  icon_animation_.reset();
-}
-
 void Tab::StartAudioPlayingAnimation() {
   ui::ThrobAnimation* animation = new ui::ThrobAnimation(this);
   animation->SetTweenType(ui::Tween::LINEAR);
   animation->SetThrobDuration(2000);
   animation->StartThrobbing(-1);
   icon_animation_.reset(animation);
-}
-
-void Tab::StopAudioPlayingAnimation() {
-  if (!icon_animation_.get())
-    return;
-  icon_animation_->Stop();
-  icon_animation_.reset();
 }
 
 bool Tab::IsPerformingCrashAnimation() const {
@@ -1651,6 +1685,17 @@ void Tab::ScheduleIconPaint() {
     bounds.set_height(height() - bounds.y());
   bounds.set_x(GetMirroredXForRect(bounds));
   SchedulePaintInRect(bounds);
+}
+
+gfx::Rect Tab::GetImmersiveBarRect() const {
+  // The main bar is as wide as the normal tab's horizontal top line.
+  // This top line of the tab extends a few pixels left and right of the
+  // center image due to pixels in the rounded corner images.
+  const int kBarPadding = 1;
+  int main_bar_left = tab_active_.l_width - kBarPadding;
+  int main_bar_right = width() - tab_active_.r_width + kBarPadding;
+  return gfx::Rect(
+      main_bar_left, 0, main_bar_right - main_bar_left, kImmersiveBarHeight);
 }
 
 ////////////////////////////////////////////////////////////////////////////////

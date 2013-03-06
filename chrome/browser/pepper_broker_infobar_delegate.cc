@@ -28,6 +28,11 @@
 const char kPpapiBrokerLearnMoreUrl[] =
     "https://support.google.com/chrome/?p=ib_pepper_broker";
 
+#if defined(OS_CHROMEOS)
+const char kNetflixPluginFileName[] = "libnetflixplugin2.so";
+const char kWidevinePluginFileName[] = "libwidevinecdmadapter.so";
+#endif
+
 using content::OpenURLParams;
 using content::Referrer;
 using content::WebContents;
@@ -48,6 +53,19 @@ void PepperBrokerInfoBarDelegate::Create(
 
   TabSpecificContentSettings* tab_content_settings =
       TabSpecificContentSettings::FromWebContents(web_contents);
+
+#if defined(OS_CHROMEOS)
+  // On ChromeOS, we're ok with granting broker access to Netflix and Widevine
+  // plugin, since it can only come installed with the OS.
+  base::FilePath plugin_file_name = plugin_path.BaseName();
+  if (plugin_file_name.value() == FILE_PATH_LITERAL(kNetflixPluginFileName) ||
+      plugin_file_name.value() == FILE_PATH_LITERAL(kWidevinePluginFileName)) {
+    tab_content_settings->SetPepperBrokerAllowed(true);
+    callback.Run(true);
+    return;
+  }
+#endif
+
   HostContentSettingsMap* content_settings =
       profile->GetHostContentSettingsMap();
   ContentSetting setting =

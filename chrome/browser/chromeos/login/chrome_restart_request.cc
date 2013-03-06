@@ -4,18 +4,24 @@
 
 #include "chrome/browser/chromeos/login/chrome_restart_request.h"
 
+#include <vector>
+
 #include "ash/ash_switches.h"
+#include "base/chromeos/chromeos_version.h"
 #include "base/command_line.h"
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
 #include "base/prefs/json_pref_store.h"
 #include "base/prefs/pref_service.h"
+#include "base/process_util.h"
 #include "base/stringprintf.h"
+#include "base/strings/string_split.h"
 #include "base/timer.h"
 #include "base/values.h"
 #include "cc/switches.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/url_constants.h"
@@ -77,13 +83,15 @@ std::string DeriveCommandLine(const GURL& start_url,
       ::switches::kDisableSeccompFilterSandbox,
       ::switches::kDisableSeccompSandbox,
       ::switches::kEnableAcceleratedOverflowScroll,
+      ::switches::kEnableBrowserPluginCompositing,
       ::switches::kEnableCompositingForFixedPosition,
+      ::switches::kEnableGestureTapHighlight,
       ::switches::kEnableLogging,
       ::switches::kEnablePinch,
-      ::switches::kEnableGestureTapHighlight,
       ::switches::kEnableViewport,
       ::switches::kForceDeviceScaleFactor,
       ::switches::kGpuStartupDialog,
+      ::switches::kHasChromeOSDiamondKey,
       ::switches::kHasChromeOSKeyboard,
       ::switches::kLoginProfile,
       ::switches::kNaturalScrollDefault,
@@ -92,7 +100,7 @@ std::string DeriveCommandLine(const GURL& start_url,
       ::switches::kPpapiFlashInProcess,
       ::switches::kPpapiFlashPath,
       ::switches::kPpapiFlashVersion,
-      ::switches::kPpapiOutOfProcess,
+      ::switches::kPpapiInProcess,
       ::switches::kRendererStartupDialog,
 #if defined(USE_XI2_MT)
       ::switches::kTouchCalibration,
@@ -148,7 +156,28 @@ std::string DeriveCommandLine(const GURL& start_url,
             ::switches::kRegisterPepperPlugins).c_str());
   }
 
+  // TODO(zelidrag): Remove this hack that get us around compositing bug from
+  // http://crbug.com/179256 once that bug is resolved.
+  if (command_line->HasSwitch(::switches::kForceAppMode)) {
+    std::string switch_to_remove("--");
+    switch_to_remove.append(cc::switches::kEnablePartialSwap);
+    cmd_line_str = cmd_line_str.replace(cmd_line_str.find(switch_to_remove),
+                                        switch_to_remove.length(), "");
+  }
+
   return cmd_line_str;
+}
+
+// Simulates a session manager restart by launching give command line
+// and exit current process.
+void ReLaunch(const std::string& command_line) {
+  std::vector<std::string> argv;
+
+  // This is not a proper way to get |argv| but it's good enough for debugging.
+  base::SplitString(command_line, ' ', &argv);
+
+  base::LaunchProcess(argv, base::LaunchOptions(), NULL);
+  chrome::AttemptUserExit();
 }
 
 // Empty function that run by the local state task runner to ensure last
@@ -250,6 +279,24 @@ std::string GetOffTheRecordCommandLine(
                            command_line);
 }
 
+std::string GetKioskAppCommandLine(const std::string& app_id) {
+  base::DictionaryValue app_switches;
+  app_switches.SetString(::switches::kForceAppMode, std::string());
+  app_switches.SetString(::switches::kAppId, app_id);
+  app_switches.SetString(::switches::kLoginUser, std::string());
+  // TODO(zelidrag): Move the next switch to /sbin/session_manager_setup.sh
+  // instead once http://crbug.com/179256 is resolved.
+  app_switches.SetString(::switches::kEnableBrowserPluginCompositing,
+                         std::string());
+
+  const CommandLine& browser_command_line = *CommandLine::ForCurrentProcess();
+  CommandLine new_command_line(browser_command_line.GetProgram());
+  return DeriveCommandLine(GURL(),
+                           browser_command_line,
+                           app_switches,
+                           &new_command_line);
+}
+
 void RestartChrome(const std::string& command_line) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
@@ -258,6 +305,12 @@ void RestartChrome(const std::string& command_line) {
     NOTREACHED() << "Request chrome restart for more than once.";
   }
   restart_requested = true;
+
+  if (!base::chromeos::IsRunningOnChromeOS()) {
+    // Relaunch chrome without session manager on dev box.
+    ReLaunch(command_line);
+    return;
+  }
 
   // ChromeRestartRequest deletes itself after request sent to session manager.
   (new ChromeRestartRequest(command_line))->Start();

@@ -323,6 +323,10 @@ const char kWebKitPluginsEnabled[] = "webkit.webprefs.plugins_enabled";
 // Boolean which specifies whether the bookmark bar is visible on all tabs.
 const char kShowBookmarkBar[] = "bookmark_bar.show_on_all_tabs";
 
+// Boolean which specifies whether the apps shortcut is visible on the bookmark
+// bar.
+const char kShowAppsShortcutInBookmarkBar[] = "bookmark_bar.show_apps_shortcut";
+
 // Boolean which specifies the ids of the bookmark nodes that are expanded in
 // the bookmark editor.
 const char kBookmarkEditorExpandedNodes[] = "bookmark_editor.expanded_nodes";
@@ -983,6 +987,15 @@ const char kPluginsEnabledNaCl[] = "plugins.enabled_nacl";
 // want to do so only once.
 const char kPluginsMigratedToPepperFlash[] = "plugins.migrated_to_pepper_flash";
 
+// In the early stage of component-updated PPAPI Flash, we did field trials in
+// which it was set to disabled by default. The corresponding settings item may
+// remain in some users' profiles. Currently it affects both the bundled and
+// component-updated PPAPI Flash (since the two share the same enable/disable
+// state). We want to remove this item to get those users to use PPAPI Flash.
+// We will want to do so only once.
+const char kPluginsRemovedOldComponentPepperFlashSettings[] =
+    "plugins.removed_old_component_pepper_flash_settings";
+
 #if !defined(OS_ANDROID)
 // Whether about:plugins is shown in the details mode or not.
 const char kPluginsShowDetails[] = "plugins.show_details";
@@ -1560,6 +1573,10 @@ const char kWasRestarted[] = "was.restarted";
 #if defined(OS_WIN)
 // On Windows 8 chrome can restart in desktop or in metro mode.
 const char kRestartSwitchMode[] = "restart.switch_mode";
+
+// Whether to show the app list on a browser relaunch. Used when switching out
+// of metro mode after a user gesture requests showing the app list.
+const char kRestartWithAppList[] = "app_list.show_on_relaunch";
 #endif
 
 // Number of keywords.
@@ -1710,6 +1727,9 @@ const char kDevToolsVSplitLocation[] = "devtools.v_split_location";
 const char kSpdyProxyAuthEnabled[] = "spdy_proxy.enabled";
 #endif
 
+// Boolean which stores if the user is allowed to signin to chrome.
+const char kSigninAllowed[] = "signin.allowed";
+
 // 64-bit integer serialization of the base::Time when the last sync occurred.
 const char kSyncLastSyncedTime[] = "sync.last_synced_time";
 
@@ -1742,6 +1762,7 @@ const char kSyncSyncedNotifications[] = "sync.synced_notifications";
 const char kSyncDictionary[] = "sync.dictionary";
 const char kSyncFaviconImages[] = "sync.favicon_images";
 const char kSyncFaviconTracking[] = "sync.favicon_tracking";
+const char kSyncTabs[] = "sync.tabs";
 
 // Boolean used by enterprise configuration management in order to lock down
 // sync.
@@ -2217,6 +2238,8 @@ const char kWorkspaceCyclerMinBrightness[] =
     "workspace_cycler.min_brightness";
 const char kWorkspaceCyclerBackgroundOpacity[] =
     "workspace_cycler.background_opacity";
+const char kWorkspaceCyclerDesktopWorkspaceBrightness[] =
+    "workspace_cycler.desktop_workspace_brightness";
 const char kWorkspaceCyclerDistanceToInitiateCycling[] =
     "workspace_cycler.distance_to_initiate_cycling";
 const char kWorkspaceCyclerScrollDistanceToCycleToNextWorkspace[] =
@@ -2270,6 +2293,8 @@ const char kRailStartProportion[] =
     "gesture.rail_start_proportion";
 const char kSemiLongPressTimeInSeconds[] =
     "gesture.semi_long_press_time_in_seconds";
+const char kTabScrubActivationDelayInMS[] =
+    "gesture.tab_scrub_activation_delay_in_ms";
 const char kFlingAccelerationCurveCoefficient0[] =
     "gesture.fling_acceleration_curve_coefficient_0";
 const char kFlingAccelerationCurveCoefficient1[] =
@@ -2322,10 +2347,8 @@ const char kRLZBrand[] = "rlz.brand";
 const char kRLZDisabled[] = "rlz.disabled";
 #endif
 
-#if defined(ENABLE_APP_LIST)
 // The directory in user data dir that contains the profile to be used with the
 // app launcher.
 extern const char kAppListProfile[] = "app_list.profile";
-#endif
 
 }  // namespace prefs

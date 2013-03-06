@@ -16,6 +16,7 @@
 #include "chrome/browser/sessions/session_tab_helper.h"
 #include "chrome/browser/ssl/ssl_tab_helper.h"
 #include "chrome/browser/translate/translate_tab_helper.h"
+#include "chrome/browser/ui/alternate_error_tab_observer.h"
 #include "chrome/browser/ui/android/window_android_helper.h"
 #include "chrome/browser/ui/autofill/tab_autofill_manager_delegate.h"
 #include "chrome/browser/ui/blocked_content/blocked_content_tab_helper.h"
@@ -25,6 +26,7 @@
 #include "chrome/browser/ui/prefs/prefs_tab_helper.h"
 #include "chrome/browser/ui/sync/tab_contents_synced_tab_delegate.h"
 #include "chrome/browser/ui/tab_contents/core_tab_helper.h"
+#include "chrome/browser/ui/toolbar/toolbar_model_impl.h"
 #include "chrome/browser/view_type_utils.h"
 #include "content/public/browser/android/content_view_core.h"
 #include "content/public/browser/web_contents.h"
@@ -56,6 +58,7 @@ void BrowserTabContents::AttachTabHelpers(WebContents* contents) {
   // helpers may rely on that.
   SessionTabHelper::CreateForWebContents(contents);
 
+  AlternateErrorPageTabObserver::CreateForWebContents(contents);
   autofill::TabAutofillManagerDelegate::CreateForWebContents(contents);
   AutofillManager::CreateForWebContentsAndDelegate(
       contents,
@@ -103,6 +106,14 @@ TabAndroid::TabAndroid() : tab_id_(-1) {
 }
 
 TabAndroid::~TabAndroid() {
+}
+
+content::WebContents* TabAndroid::GetWebContents() {
+  return NULL;
+}
+
+ToolbarModel::SecurityLevel TabAndroid::GetSecurityLevel() {
+  return ToolbarModelImpl::GetSecurityLevelForWebContents(GetWebContents());
 }
 
 void TabAndroid::RunExternalProtocolDialog(const GURL& url) {

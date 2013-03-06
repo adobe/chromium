@@ -570,7 +570,8 @@ void GLES2TraceImplementation::ShaderBinary(
 }
 
 void GLES2TraceImplementation::ShaderSource(
-    GLuint shader, GLsizei count, const char** str, const GLint* length) {
+    GLuint shader, GLsizei count, const GLchar* const* str,
+    const GLint* length) {
   TRACE_EVENT_BINARY_EFFICIENT0("gpu", "GLES2Trace::ShaderSource");
   gl_->ShaderSource(shader, count, str, length);
 }
@@ -1152,6 +1153,11 @@ void GLES2TraceImplementation::AsyncTexImage2DCHROMIUM(
       pixels);
 }
 
+void GLES2TraceImplementation::WaitAsyncTexImage2DCHROMIUM(GLenum target) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu", "GLES2Trace::WaitAsyncTexImage2DCHROMIUM");  // NOLINT
+  gl_->WaitAsyncTexImage2DCHROMIUM(target);
+}
+
 void GLES2TraceImplementation::DiscardFramebufferEXT(
     GLenum target, GLsizei count, const GLenum* attachments) {
   TRACE_EVENT_BINARY_EFFICIENT0("gpu", "GLES2Trace::DiscardFramebufferEXT");
@@ -1162,6 +1168,11 @@ void GLES2TraceImplementation::LoseContextCHROMIUM(
     GLenum current, GLenum other) {
   TRACE_EVENT_BINARY_EFFICIENT0("gpu", "GLES2Trace::LoseContextCHROMIUM");
   gl_->LoseContextCHROMIUM(current, other);
+}
+
+void GLES2TraceImplementation::WaitSyncPointCHROMIUM(GLuint sync_point) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu", "GLES2Trace::WaitSyncPointCHROMIUM");
+  gl_->WaitSyncPointCHROMIUM(sync_point);
 }
 
 #endif  // GPU_COMMAND_BUFFER_CLIENT_GLES2_TRACE_IMPLEMENTATION_IMPL_AUTOGEN_H_

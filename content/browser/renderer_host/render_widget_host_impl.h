@@ -41,6 +41,7 @@ class TimeTicks;
 
 namespace cc {
 class CompositorFrame;
+class CompositorFrameAck;
 }
 
 namespace ui {
@@ -388,6 +389,10 @@ class CONTENT_EXPORT RenderWidgetHostImpl : virtual public RenderWidgetHost,
       int gpu_host_id,
       const AcceleratedSurfaceMsg_BufferPresented_Params& params);
 
+  // Called by the view in response to OnSwapCompositorFrame.
+  static void SendSwapCompositorFrameAck(
+      int32 route_id, int renderer_host_id, const cc::CompositorFrameAck& ack);
+
   // Called by the view in response to AcceleratedSurfaceBuffersSwapped for
   // platforms that support deferred GPU process descheduling. This does
   // nothing if the compositor thread is enabled.
@@ -684,6 +689,9 @@ class CONTENT_EXPORT RenderWidgetHostImpl : virtual public RenderWidgetHost,
 
   // The current size of the RenderWidget.
   gfx::Size current_size_;
+
+  // The size of the view's backing surface in non-DPI-adjusted pixels.
+  gfx::Size physical_backing_size_;
 
   // The size we last sent as requested size to the renderer. |current_size_|
   // is only updated once the resize message has been ack'd. This on the other

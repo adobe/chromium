@@ -152,11 +152,26 @@ namespace net {
 const int32 kSpdyVersion2 = 2;
 const int32 kSpdyVersion3 = 3;
 
+// A SPDY stream id is a 31 bit entity.
+typedef uint32 SpdyStreamId;
+
+// Specifies the stream ID used to denote the current session (for
+// flow control).
+const SpdyStreamId kSessionFlowControlStreamId = 0;
+
 // Initial window size for a Spdy stream
 const int32 kSpdyStreamInitialWindowSize = 64 * 1024;  // 64 KBytes
 
-// Maximum window size for a Spdy stream
-const int32 kSpdyStreamMaximumWindowSize = 0x7FFFFFFF;  // Max signed 32bit int
+// Initial window size for a Spdy session
+//
+// TODO(akalin): Update this once we settle on the correct session
+// initial window size.
+//
+// TODO(akalin): Upstream this.
+const int32 kSpdySessionInitialWindowSize = 64 * 1024;  // 64 KBytes
+
+// Maximum window size for a Spdy stream or session.
+const int32 kSpdyMaximumWindowSize = 0x7FFFFFFF;  // Max signed 32bit int
 
 // SPDY 2 dictionary.
 // This is just a hacked dictionary to use for shrinking HTTP-like headers.
@@ -445,9 +460,6 @@ enum SpdyGoAwayStatus {
   GOAWAY_NUM_STATUS_CODES = 3
 };
 
-// A SPDY stream id is a 31 bit entity.
-typedef uint32 SpdyStreamId;
-
 // A SPDY priority is a number between 0 and 7 (inclusive).
 // SPDY priority range is version-dependant. For SPDY 2 and below, priority is a
 // number between 0 and 3.
@@ -458,36 +470,6 @@ typedef uint8 SpdyCredentialSlot;
 typedef std::map<std::string, std::string> SpdyNameValueBlock;
 
 typedef uint32 SpdyPingId;
-
-// -------------------------------------------------------------------------
-// These structures mirror the protocol structure definitions.
-
-// For the control data structures, we pack so that sizes match the
-// protocol over-the-wire sizes.
-#pragma pack(push)
-#pragma pack(1)
-
-// A special structure for the 8 bit flags and 24 bit length fields.
-union FlagsAndLength {
-  uint8 flags_[4];  // 8 bits
-  uint32 length_;   // 24 bits
-};
-
-// The basic SPDY Frame structure.
-struct SpdyFrameBlock {
-  union {
-    struct {
-      uint16 version_;
-      uint16 type_;
-    } control_;
-    struct {
-      SpdyStreamId stream_id_;
-    } data_;
-  };
-  FlagsAndLength flags_length_;
-};
-
-#pragma pack(pop)
 
 class SpdyFrame;
 typedef SpdyFrame SpdySerializedFrame;
@@ -765,7 +747,7 @@ class SpdyWindowUpdateIR : public SpdyFrameWithStreamIdIR {
   int32 delta() const { return delta_; }
   void set_delta(int32 delta) {
     DCHECK_LT(0, delta);
-    DCHECK_LE(delta, kSpdyStreamMaximumWindowSize);
+    DCHECK_LE(delta, kSpdyMaximumWindowSize);
     delta_ = delta;
   }
 
@@ -810,14 +792,6 @@ class SpdyCredentialIR : public SpdyFrameIR {
 // All Spdy Frame types derive from this SpdyFrame class.
 class SpdyFrame {
  public:
-  // Create a SpdyFrame for a given sized buffer.
-  explicit SpdyFrame(size_t size) : frame_(NULL), owns_buffer_(true) {
-    DCHECK_GE(size, sizeof(struct SpdyFrameBlock));
-    char* buffer = new char[size];
-    memset(buffer, 0, size);
-    frame_ = reinterpret_cast<struct SpdyFrameBlock*>(buffer);
-  }
-
   // Create a SpdyFrame using a pre-created buffer.
   // If |owns_buffer| is true, this class takes ownership of the buffer
   // and will delete it on cleanup.  The buffer must have been created using
@@ -825,38 +799,32 @@ class SpdyFrame {
   // If |owns_buffer| is false, the caller retains ownership of the buffer and
   // is responsible for making sure the buffer outlives this frame.  In other
   // words, this class does NOT create a copy of the buffer.
-  SpdyFrame(char* data, bool owns_buffer)
-      : frame_(reinterpret_cast<struct SpdyFrameBlock*>(data)),
+  SpdyFrame(char* data, size_t size, bool owns_buffer)
+      : frame_(data),
+        size_(size),
         owns_buffer_(owns_buffer) {
     DCHECK(frame_);
   }
 
   ~SpdyFrame() {
     if (owns_buffer_) {
-      char* buffer = reinterpret_cast<char*>(frame_);
-      delete [] buffer;
+      delete [] frame_;
     }
     frame_ = NULL;
   }
 
   // Provides access to the frame bytes, which is a buffer containing
   // the frame packed as expected for sending over the wire.
-  char* data() const { return reinterpret_cast<char*>(frame_); }
+  char* data() const { return frame_; }
 
-  uint32 length() const {
-    return ntohl(frame_->flags_length_.length_) & kLengthMask;
-  }
-
-  // The size of the SpdyFrameBlock structure.
-  // Every SpdyFrame* class has a static size() method for accessing
-  // the size of the data structure which will be sent over the wire.
-  // Note:  this is not the same as sizeof(SpdyFrame).
-  enum { kHeaderSize = sizeof(struct SpdyFrameBlock) };
+  // Returns the actual size of the underlying buffer.
+  size_t size() const { return size_; }
 
  protected:
-  SpdyFrameBlock* frame_;
+  char* frame_;
 
  private:
+  size_t size_;
   bool owns_buffer_;
   DISALLOW_COPY_AND_ASSIGN(SpdyFrame);
 };

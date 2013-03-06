@@ -4,16 +4,72 @@
 
 #include "chrome/browser/google_apis/drive_api_operations.h"
 
+#include "base/bind.h"
+#include "base/callback.h"
 #include "base/json/json_writer.h"
 #include "base/values.h"
+#include "chrome/browser/google_apis/drive_api_parser.h"
+#include "chrome/browser/google_apis/operation_util.h"
+#include "content/public/browser/browser_thread.h"
+
+using content::BrowserThread;
 
 namespace google_apis {
 namespace {
 
 const char kContentTypeApplicationJson[] = "application/json";
 const char kDirectoryMimeType[] = "application/vnd.google-apps.folder";
-// etag matching header.
-const char kIfMatchAllHeader[] = "If-Match: *";
+const char kParentLinkKind[] = "drive#fileLink";
+
+// Parses the JSON value to a resource typed |T| and runs |callback| on the UI
+// thread once parsing is done.
+template<typename T>
+void ParseJsonAndRun(
+    const base::Callback<void(GDataErrorCode, scoped_ptr<T>)>& callback,
+    GDataErrorCode error,
+    scoped_ptr<base::Value> value) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK(!callback.is_null());
+
+  scoped_ptr<T> resource;
+  if (value) {
+    resource = T::CreateFrom(*value);
+    if (!resource) {
+      // Failed to parse the JSON value, although the JSON value is available,
+      // so let the callback know the parsing error.
+      error = GDATA_PARSE_ERROR;
+    }
+  }
+
+  callback.Run(error, resource.Pass());
+}
+
+// Parses the JSON value to FileResource instance and runs |callback| on the
+// UI thread once parsing is done.
+// This is customized version of ParseJsonAndRun defined above to adapt the
+// remaining response type.
+void ParseFileResourceWithUploadRangeAndRun(
+    const drive::UploadRangeCallback& callback,
+    const UploadRangeResponse& response,
+    scoped_ptr<base::Value> value) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK(!callback.is_null());
+
+  scoped_ptr<FileResource> file_resource;
+  if (value) {
+    file_resource = FileResource::CreateFrom(*value);
+    if (!file_resource) {
+      callback.Run(
+          UploadRangeResponse(GDATA_PARSE_ERROR,
+                              response.start_position_received,
+                              response.end_position_received),
+          scoped_ptr<FileResource>());
+      return;
+    }
+  }
+
+  callback.Run(response, file_resource.Pass());
+}
 
 }  // namespace
 
@@ -23,8 +79,9 @@ GetAboutOperation::GetAboutOperation(
     OperationRegistry* registry,
     net::URLRequestContextGetter* url_request_context_getter,
     const DriveApiUrlGenerator& url_generator,
-    const GetDataCallback& callback)
-    : GetDataOperation(registry, url_request_context_getter, callback),
+    const GetAboutResourceCallback& callback)
+    : GetDataOperation(registry, url_request_context_getter,
+                       base::Bind(&ParseJsonAndRun<AboutResource>, callback)),
       url_generator_(url_generator) {
   DCHECK(!callback.is_null());
 }
@@ -104,8 +161,9 @@ GetFileOperation::GetFileOperation(
     net::URLRequestContextGetter* url_request_context_getter,
     const DriveApiUrlGenerator& url_generator,
     const std::string& file_id,
-    const GetDataCallback& callback)
-    : GetDataOperation(registry, url_request_context_getter, callback),
+    const FileResourceCallback& callback)
+    : GetDataOperation(registry, url_request_context_getter,
+                       base::Bind(&ParseJsonAndRun<FileResource>, callback)),
       url_generator_(url_generator),
       file_id_(file_id) {
   DCHECK(!callback.is_null());
@@ -127,8 +185,9 @@ CreateDirectoryOperation::CreateDirectoryOperation(
     const DriveApiUrlGenerator& url_generator,
     const std::string& parent_resource_id,
     const std::string& directory_name,
-    const GetDataCallback& callback)
-    : GetDataOperation(registry, url_request_context_getter, callback),
+    const FileResourceCallback& callback)
+    : GetDataOperation(registry, url_request_context_getter,
+                       base::Bind(&ParseJsonAndRun<FileResource>, callback)),
       url_generator_(url_generator),
       parent_resource_id_(parent_resource_id),
       directory_name_(directory_name) {
@@ -195,7 +254,7 @@ net::URLFetcher::RequestType RenameResourceOperation::GetRequestType() const {
 std::vector<std::string>
 RenameResourceOperation::GetExtraRequestHeaders() const {
   std::vector<std::string> headers;
-  headers.push_back(kIfMatchAllHeader);
+  headers.push_back(util::kIfMatchAllHeader);
   return headers;
 }
 
@@ -212,6 +271,47 @@ bool RenameResourceOperation::GetContentData(std::string* upload_content_type,
   base::JSONWriter::Write(&root, upload_content);
 
   DVLOG(1) << "RenameResource data: " << *upload_content_type << ", ["
+           << *upload_content << "]";
+  return true;
+}
+
+//=========================== CopyResourceOperation ============================
+
+CopyResourceOperation::CopyResourceOperation(
+    OperationRegistry* registry,
+    net::URLRequestContextGetter* url_request_context_getter,
+    const DriveApiUrlGenerator& url_generator,
+    const std::string& resource_id,
+    const std::string& new_name,
+    const FileResourceCallback& callback)
+    : GetDataOperation(registry, url_request_context_getter,
+                       base::Bind(&ParseJsonAndRun<FileResource>, callback)),
+      url_generator_(url_generator),
+      resource_id_(resource_id),
+      new_name_(new_name) {
+  DCHECK(!callback.is_null());
+}
+
+CopyResourceOperation::~CopyResourceOperation() {
+}
+
+net::URLFetcher::RequestType CopyResourceOperation::GetRequestType() const {
+  return net::URLFetcher::POST;
+}
+
+GURL CopyResourceOperation::GetURL() const {
+  return url_generator_.GetFileCopyUrl(resource_id_);
+}
+
+bool CopyResourceOperation::GetContentData(std::string* upload_content_type,
+                                           std::string* upload_content) {
+  *upload_content_type = kContentTypeApplicationJson;
+
+  base::DictionaryValue root;
+  root.SetString("title", new_name_);
+  base::JSONWriter::Write(&root, upload_content);
+
+  DVLOG(1) << "CopyResource data: " << *upload_content_type << ", ["
            << *upload_content << "]";
   return true;
 }
@@ -304,6 +404,144 @@ GURL DeleteResourceOperation::GetURL() const {
 
 net::URLFetcher::RequestType DeleteResourceOperation::GetRequestType() const {
   return net::URLFetcher::DELETE_REQUEST;
+}
+
+//======================= InitiateUploadNewFileOperation =======================
+
+InitiateUploadNewFileOperation::InitiateUploadNewFileOperation(
+    OperationRegistry* registry,
+    net::URLRequestContextGetter* url_request_context_getter,
+    const DriveApiUrlGenerator& url_generator,
+    const base::FilePath& drive_file_path,
+    const std::string& content_type,
+    int64 content_length,
+    const std::string& parent_resource_id,
+    const std::string& title,
+    const InitiateUploadCallback& callback)
+    : InitiateUploadOperationBase(registry,
+                                  url_request_context_getter,
+                                  callback,
+                                  drive_file_path,
+                                  content_type,
+                                  content_length),
+      url_generator_(url_generator),
+      parent_resource_id_(parent_resource_id),
+      title_(title) {
+}
+
+InitiateUploadNewFileOperation::~InitiateUploadNewFileOperation() {}
+
+GURL InitiateUploadNewFileOperation::GetURL() const {
+  return url_generator_.GetInitiateUploadNewFileUrl();
+}
+
+net::URLFetcher::RequestType
+InitiateUploadNewFileOperation::GetRequestType() const {
+  return net::URLFetcher::POST;
+}
+
+bool InitiateUploadNewFileOperation::GetContentData(
+    std::string* upload_content_type,
+    std::string* upload_content) {
+  *upload_content_type = kContentTypeApplicationJson;
+
+  base::DictionaryValue root;
+  root.SetString("title", title_);
+
+  // Fill parent link.
+  {
+    scoped_ptr<base::DictionaryValue> parent(new base::DictionaryValue);
+    parent->SetString("kind", kParentLinkKind);
+    parent->SetString("id", parent_resource_id_);
+
+    scoped_ptr<base::ListValue> parents(new base::ListValue);
+    parents->Append(parent.release());
+
+    root.Set("parents", parents.release());
+  }
+
+  base::JSONWriter::Write(&root, upload_content);
+
+  DVLOG(1) << "InitiateUploadNewFile data: " << *upload_content_type << ", ["
+           << *upload_content << "]";
+  return true;
+}
+
+//===================== InitiateUploadExistingFileOperation ====================
+
+InitiateUploadExistingFileOperation::InitiateUploadExistingFileOperation(
+    OperationRegistry* registry,
+    net::URLRequestContextGetter* url_request_context_getter,
+    const DriveApiUrlGenerator& url_generator,
+    const base::FilePath& drive_file_path,
+    const std::string& content_type,
+    int64 content_length,
+    const std::string& resource_id,
+    const std::string& etag,
+    const InitiateUploadCallback& callback)
+    : InitiateUploadOperationBase(registry,
+                                  url_request_context_getter,
+                                  callback,
+                                  drive_file_path,
+                                  content_type,
+                                  content_length),
+      url_generator_(url_generator),
+      resource_id_(resource_id),
+      etag_(etag) {
+}
+
+InitiateUploadExistingFileOperation::~InitiateUploadExistingFileOperation() {}
+
+GURL InitiateUploadExistingFileOperation::GetURL() const {
+  return url_generator_.GetInitiateUploadExistingFileUrl(resource_id_);
+}
+
+net::URLFetcher::RequestType
+InitiateUploadExistingFileOperation::GetRequestType() const {
+  return net::URLFetcher::PUT;
+}
+
+std::vector<std::string>
+InitiateUploadExistingFileOperation::GetExtraRequestHeaders() const {
+  std::vector<std::string> headers(
+      InitiateUploadOperationBase::GetExtraRequestHeaders());
+  headers.push_back(util::GenerateIfMatchHeader(etag_));
+  return headers;
+}
+
+//============================ ResumeUploadOperation ===========================
+
+ResumeUploadOperation::ResumeUploadOperation(
+    OperationRegistry* registry,
+    net::URLRequestContextGetter* url_request_context_getter,
+    UploadMode upload_mode,
+    const base::FilePath& drive_file_path,
+    const GURL& upload_location,
+    int64 start_position,
+    int64 end_position,
+    int64 content_length,
+    const std::string& content_type,
+    const scoped_refptr<net::IOBuffer>& buf,
+    const UploadRangeCallback& callback)
+    : ResumeUploadOperationBase(registry,
+                                url_request_context_getter,
+                                upload_mode,
+                                drive_file_path,
+                                upload_location,
+                                start_position,
+                                end_position,
+                                content_length,
+                                content_type,
+                                buf),
+      callback_(callback) {
+  DCHECK(!callback_.is_null());
+}
+
+ResumeUploadOperation::~ResumeUploadOperation() {}
+
+void ResumeUploadOperation::OnRangeOperationComplete(
+    const UploadRangeResponse& response, scoped_ptr<base::Value> value) {
+  ParseFileResourceWithUploadRangeAndRun(callback_, response, value.Pass());
 }
 
 }  // namespace drive

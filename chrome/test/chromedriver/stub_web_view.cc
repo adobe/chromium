@@ -15,6 +15,10 @@ std::string StubWebView::GetId() {
   return id_;
 }
 
+Status StubWebView::ConnectIfNecessary() {
+  return Status(kOk);
+}
+
 Status StubWebView::Close() {
   return Status(kOk);
 }
@@ -60,5 +64,13 @@ Status StubWebView::WaitForPendingNavigations(const std::string& frame_id) {
 }
 
 Status StubWebView::GetMainFrame(std::string* frame_id) {
+  return Status(kOk);
+}
+
+JavaScriptDialogManager* StubWebView::GetJavaScriptDialogManager() {
+  return NULL;
+}
+
+Status StubWebView::CaptureScreenshot(std::string* screenshot) {
   return Status(kOk);
 }

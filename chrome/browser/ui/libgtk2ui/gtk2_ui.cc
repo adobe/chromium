@@ -14,6 +14,7 @@
 #include "chrome/browser/themes/theme_properties.h"
 #include "chrome/browser/ui/libgtk2ui/chrome_gtk_frame.h"
 #include "chrome/browser/ui/libgtk2ui/gtk2_util.h"
+#include "chrome/browser/ui/libgtk2ui/native_theme_gtk2.h"
 #include "chrome/browser/ui/libgtk2ui/select_file_dialog_impl.h"
 #include "chrome/browser/ui/libgtk2ui/skia_utils_gtk2.h"
 #include "grit/theme_resources.h"
@@ -332,6 +333,10 @@ bool Gtk2UI::GetColor(int id, SkColor* color) const {
   }
 
   return false;
+}
+
+ui::NativeTheme* Gtk2UI::GetNativeTheme() const {
+  return NativeThemeGtk2::instance();
 }
 
 ui::SelectFileDialog* Gtk2UI::CreateSelectFileDialog(

@@ -797,8 +797,9 @@ IPC_MESSAGE_ROUTED0(ViewMsg_Close)
 // the view's current size.  The generated ViewHostMsg_PaintRect message will
 // have the IS_RESIZE_ACK flag set. It also receives the resizer rect so that
 // we don't have to fetch it every time WebKit asks for it.
-IPC_MESSAGE_ROUTED3(ViewMsg_Resize,
+IPC_MESSAGE_ROUTED4(ViewMsg_Resize,
                     gfx::Size /* new_size */,
+                    gfx::Size /* physical_backing_size */,
                     gfx::Rect /* resizer_rect */,
                     bool /* is_fullscreen */)
 
@@ -1353,6 +1354,12 @@ IPC_MESSAGE_ROUTED0(ViewMsg_UndoScrollFocusedEditableNodeIntoView)
 IPC_MESSAGE_ROUTED1(ViewMsg_ImeBatchStateChanged,
     bool /* is_begin */)
 
+// Notifies the renderer whether hiding the top controls is enabled.
+IPC_MESSAGE_ROUTED1(ViewMsg_EnableHidingTopControls,
+                    bool /* enable */)
+
+IPC_MESSAGE_ROUTED0(ViewMsg_ShowImeIfNeeded)
+
 #elif defined(OS_MACOSX)
 // Let the RenderView know its window has changed visibility.
 IPC_MESSAGE_ROUTED1(ViewMsg_SetWindowVisibility,
@@ -1377,6 +1384,10 @@ IPC_MESSAGE_ROUTED2(ViewMsg_PluginImeCompositionCompleted,
 IPC_MESSAGE_ROUTED1(ViewMsg_SelectPopupMenuItem,
                     int /* selected index, -1 means no selection */)
 #endif
+
+// Sent by the browser as a reply to ViewHostMsg_SwapCompositorFrame.
+IPC_MESSAGE_ROUTED1(ViewMsg_SwapCompositorFrameAck,
+                    cc::CompositorFrameAck /* ack */)
 
 // -----------------------------------------------------------------------------
 // Messages sent from the renderer to the browser.
@@ -2099,8 +2110,6 @@ IPC_MESSAGE_ROUTED5(ViewHostMsg_CompositorSurfaceBuffersSwapped,
 
 IPC_MESSAGE_ROUTED1(ViewHostMsg_SwapCompositorFrame,
                     cc::CompositorFrame /* frame */)
-IPC_MESSAGE_ROUTED1(ViewHostMsg_SwapCompositorFrameAck,
-                    cc::CompositorFrameAck /* ack */)
 
 // Opens a file asynchronously. The response returns a file descriptor
 // and an error code from base/platform_file.h.

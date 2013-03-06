@@ -7,8 +7,10 @@
 
 #include "cc/cc_export.h"
 #include "cc/layer.h"
+#include "cc/transferable_resource.h"
 
 namespace cc {
+class DelegatedFrameData;
 
 class CC_EXPORT DelegatedRendererLayer : public Layer {
  public:
@@ -16,12 +18,31 @@ class CC_EXPORT DelegatedRendererLayer : public Layer {
 
   virtual scoped_ptr<LayerImpl> createLayerImpl(LayerTreeImpl* tree_impl)
       OVERRIDE;
+  virtual void pushPropertiesTo(LayerImpl* impl) OVERRIDE;
+  virtual bool drawsContent() const OVERRIDE;
+
+  // Set the size at which the frame should be displayed, with the origin at the
+  // layer's origin. This must always contain at least the layer's bounds. A
+  // value of (0, 0) implies that the frame should be displayed to fit exactly
+  // in the layer's bounds.
+  void SetDisplaySize(gfx::Size size);
+
+  void SetFrameData(scoped_ptr<DelegatedFrameData> frame_data);
+
+  // Passes ownership of any unused resources that had been given by the child
+  // compositor to the given array, so they can be given back to the child.
+  void TakeUnusedResourcesForChildCompositor(TransferableResourceArray* array);
 
  protected:
   DelegatedRendererLayer();
+  virtual ~DelegatedRendererLayer();
 
  private:
-  virtual ~DelegatedRendererLayer();
+  scoped_ptr<DelegatedFrameData> frame_data_;
+  gfx::RectF damage_in_frame_;
+  gfx::Size frame_size_;
+  gfx::Size display_size_;
+  TransferableResourceArray unused_resources_for_child_compositor_;
 };
 
 }

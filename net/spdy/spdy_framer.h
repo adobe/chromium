@@ -213,7 +213,7 @@ class NET_EXPORT_PRIVATE SpdyFramerVisitorInterface {
 
   // Called when a WINDOW_UPDATE frame has been parsed.
   virtual void OnWindowUpdate(SpdyStreamId stream_id,
-                              int delta_window_size) = 0;
+                              uint32 delta_window_size) = 0;
 
   // Called after a control frame has been compressed to allow the visitor
   // to record compression statistics.
@@ -465,10 +465,6 @@ class NET_EXPORT_PRIVATE SpdyFramer {
   // On failure, returns NULL.
   SpdyFrame* CompressFrame(const SpdyFrame& frame);
 
-  // Create a copy of a frame.
-  // Returned frame must be freed with "delete".
-  SpdyFrame* DuplicateFrame(const SpdyFrame& frame);
-
   // For ease of testing and experimentation we can tweak compression on/off.
   void set_enable_compression(bool value) {
     enable_compression_ = value;
@@ -481,7 +477,7 @@ class NET_EXPORT_PRIVATE SpdyFramer {
 
   // Returns the (minimum) size of frames (sans variable-length portions).
   size_t GetDataFrameMinimumSize() const;
-  size_t GetControlFrameMinimumSize() const;
+  size_t GetControlFrameHeaderSize() const;
   size_t GetSynStreamMinimumSize() const;
   size_t GetSynReplyMinimumSize() const;
   size_t GetRstStreamSize() const;
@@ -520,6 +516,8 @@ class NET_EXPORT_PRIVATE SpdyFramer {
   FRIEND_TEST_ALL_PREFIXES(SpdyFramerTest, ReadLargeSettingsFrame);
   FRIEND_TEST_ALL_PREFIXES(SpdyFramerTest,
                            ReadLargeSettingsFrameInSmallChunks);
+  FRIEND_TEST_ALL_PREFIXES(SpdyFramerTest, ControlFrameAtMaxSizeLimit);
+  FRIEND_TEST_ALL_PREFIXES(SpdyFramerTest, ControlFrameTooLarge);
   friend class net::HttpNetworkLayer;  // This is temporary for the server.
   friend class net::HttpNetworkTransactionTest;
   friend class net::HttpProxyClientSocketPoolTest;
@@ -601,7 +599,18 @@ class NET_EXPORT_PRIVATE SpdyFramer {
   // layer. We chose the framing layer, but this can be changed (or removed)
   // if necessary later down the line.
   size_t GetControlFrameBufferMaxSize() const {
-     return (spdy_version_ == 2) ? 64 * 1024 : 16 * 1024 * 1024;
+    // The theoretical maximum for SPDY3 and earlier is (2^24 - 1) +
+    // 8, since the length field does not count the size of the
+    // header.
+    if (spdy_version_ == kSpdyVersion2) {
+      return 64 * 1024;
+    }
+    if (spdy_version_ == kSpdyVersion3) {
+      return 16 * 1024 * 1024;
+    }
+    // The theoretical maximum for SPDY4 is 2^16 - 1, as the length
+    // field does count the size of the header.
+    return 16 * 1024;
   }
 
   // The size of the control frame buffer.
@@ -613,11 +622,7 @@ class NET_EXPORT_PRIVATE SpdyFramer {
   SpdyState state_;
   SpdyState previous_state_;
   SpdyError error_code_;
-  size_t remaining_data_;
-
-  // The number of bytes remaining to read from the current control frame's
-  // payload.
-  size_t remaining_control_payload_;
+  size_t remaining_data_length_;
 
   // The number of bytes remaining to read from the current control frame's
   // headers. Note that header data blocks (for control types that have them)
@@ -635,7 +640,7 @@ class NET_EXPORT_PRIVATE SpdyFramer {
   // The flags field of the frame currently being read.
   uint8 current_frame_flags_;
 
-  // The length field of the frame currently being read.
+  // The total length of the frame currently being read, including frame header.
   uint32 current_frame_length_;
 
   // The stream ID field of the frame currently being read, if applicable.

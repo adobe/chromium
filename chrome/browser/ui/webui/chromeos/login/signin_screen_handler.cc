@@ -28,6 +28,7 @@
 #include "chrome/browser/chromeos/login/base_login_display_host.h"
 #include "chrome/browser/chromeos/login/error_screen_actor.h"
 #include "chrome/browser/chromeos/login/hwid_checker.h"
+#include "chrome/browser/chromeos/login/managed/locally_managed_user_creation_flow.h"
 #include "chrome/browser/chromeos/login/screen_locker.h"
 #include "chrome/browser/chromeos/login/user.h"
 #include "chrome/browser/chromeos/login/webui_login_display.h"
@@ -262,13 +263,13 @@ void RecordNetworkPortalDetectorStats(const std::string& service_path) {
 
 void EnableLazyDetection() {
   NetworkPortalDetector* detector = NetworkPortalDetector::GetInstance();
-  if (detector)
+  if (NetworkPortalDetector::IsEnabled() && detector)
     detector->EnableLazyDetection();
 }
 
 void DisableLazyDetection() {
   NetworkPortalDetector* detector = NetworkPortalDetector::GetInstance();
-  if (detector)
+  if (NetworkPortalDetector::IsEnabled() && detector)
     detector->DisableLazyDetection();
 }
 
@@ -526,7 +527,7 @@ void SigninScreenHandler::UpdateUIState(UIState ui_state,
       break;
     case UI_STATE_LOCALLY_MANAGED_USER_CREATION:
       ui_state_ = UI_STATE_LOCALLY_MANAGED_USER_CREATION;
-      ShowScreen(OobeUI::kScreenManagedUserCreation, params);
+      ShowScreen(OobeUI::kScreenManagedUserCreationDialog, params);
       break;
     default:
       NOTREACHED();
@@ -551,7 +552,15 @@ void SigninScreenHandler::UpdateStateInternal(
                << "reason=" << reason << ", "
                << "force_update=" << force_update;
   update_state_closure_.Cancel();
-  if (state == NetworkStateInformer::OFFLINE && is_first_update_state_call_) {
+
+  // Delay UpdateStateInternal() call in the following cases:
+  // 1. this is the first call and it's about offline state of the
+  //   current network. This can happen because device is just powered
+  //   up and network stack isn't ready now.
+  // 2. proxy auth ui is displayed. UpdateStateCall() is delayed to
+  //    prevent screen change behind proxy auth ui.
+  if ((state == NetworkStateInformer::OFFLINE && is_first_update_state_call_) ||
+      has_pending_auth_ui_) {
     is_first_update_state_call_ = false;
     update_state_closure_.Reset(
         base::Bind(
@@ -631,77 +640,92 @@ void SigninScreenHandler::UpdateStateInternal(
     error_screen_actor_->HideCaptivePortal();
 
   if (!is_online && is_gaia_signin && !offline_login_active_) {
-    LOG(WARNING) << "Show offline message: state=" << state << ", "
-                 << "network_id=" << network_id << ", "
-                 << "reason=" << reason << ", "
-                 << "is_under_captive_portal=" << is_under_captive_portal;
-
-    // Record portal detection stats only if we're going to show or
-    // change state of the error screen.
-    RecordNetworkPortalDetectorStats(service_path);
-
-    if (is_proxy_error) {
-      error_screen_actor_->ShowProxyError();
-    } else if (is_under_captive_portal) {
-      // Do not bother a user with obsessive captive portal showing. This
-      // check makes captive portal being shown only once: either when error
-      // screen is shown for the first time or when switching from another
-      // error screen (offline, proxy).
-      if (!IsGaiaLogin() ||
-          (error_screen_actor_->state() !=
-           ErrorScreenActor::STATE_CAPTIVE_PORTAL_ERROR)) {
-        error_screen_actor_->FixCaptivePortal();
-      }
-      std::string network_name = GetNetworkName(service_path);
-      error_screen_actor_->ShowCaptivePortalError(network_name);
-    } else if (is_gaia_loading_timeout) {
-      error_screen_actor_->ShowTimeoutError();
-    } else {
-      error_screen_actor_->ShowOfflineError();
-    }
-
-    bool guest_signin_allowed = IsGuestSigninAllowed() &&
-        IsSigninScreenError(error_screen_actor_->state());
-    error_screen_actor_->AllowGuestSignin(guest_signin_allowed);
-
-    bool offline_login_allowed = IsOfflineLoginAllowed() &&
-        IsSigninScreenError(error_screen_actor_->state()) &&
-        error_screen_actor_->state() != ErrorScreenActor::STATE_TIMEOUT_ERROR;
-    error_screen_actor_->AllowOfflineLogin(offline_login_allowed);
-
-    if (GetCurrentScreen() != OobeUI::SCREEN_ERROR_MESSAGE) {
-      DictionaryValue params;
-      params.SetInteger("lastNetworkType", static_cast<int>(connection_type));
-      error_screen_actor_->Show(OobeUI::SCREEN_GAIA_SIGNIN, &params);
-    }
-
-    EnableLazyDetection();
+    SetupAndShowOfflineMessage(state, service_path, connection_type, reason,
+                               is_proxy_error, is_under_captive_portal,
+                               is_gaia_loading_timeout);
   } else {
-    if (IsSigninScreenHiddenByError()) {
-      LOG(WARNING) << "Hide offline message. state=" << state << ", "
-                   << "network_id=" << network_id << ", "
-                   << "reason=" << reason;
-      error_screen_actor_->Hide();
-
-      // Forces a reload for Gaia screen on hiding error message.
-      if (is_gaia_signin && !is_gaia_reloaded) {
-        ReloadGaiaScreen();
-        is_gaia_reloaded = true;
-      }
-    }
-
-    DisableLazyDetection();
+    HideOfflineMessage(state, service_path, reason, is_gaia_signin,
+                       is_gaia_reloaded);
   }
+}
+
+void SigninScreenHandler::SetupAndShowOfflineMessage(
+    NetworkStateInformer:: State state,
+    const std::string& service_path,
+    ConnectionType connection_type,
+    const std::string& reason,
+    bool is_proxy_error,
+    bool is_under_captive_portal,
+    bool is_gaia_loading_timeout) {
+  std::string network_id = GetNetworkUniqueId(service_path);
+  LOG(WARNING) << "Show offline message: state=" << state << ", "
+               << "network_id=" << network_id << ", "
+               << "reason=" << reason << ", "
+               << "is_under_captive_portal=" << is_under_captive_portal;
+
+  // Record portal detection stats only if we're going to show or
+  // change state of the error screen.
+  RecordNetworkPortalDetectorStats(service_path);
+
+  if (is_proxy_error) {
+    error_screen_actor_->ShowProxyError();
+  } else if (is_under_captive_portal) {
+    // Do not bother a user with obsessive captive portal showing. This
+    // check makes captive portal being shown only once: either when error
+    // screen is shown for the first time or when switching from another
+    // error screen (offline, proxy).
+    if (!IsGaiaLogin() ||
+        (error_screen_actor_->state() !=
+         ErrorScreenActor::STATE_CAPTIVE_PORTAL_ERROR)) {
+      error_screen_actor_->FixCaptivePortal();
+    }
+    std::string network_name = GetNetworkName(service_path);
+    error_screen_actor_->ShowCaptivePortalError(network_name);
+  } else if (is_gaia_loading_timeout) {
+    error_screen_actor_->ShowTimeoutError();
+  } else {
+    error_screen_actor_->ShowOfflineError();
+  }
+
+  bool guest_signin_allowed = IsGuestSigninAllowed() &&
+      IsSigninScreenError(error_screen_actor_->state());
+  error_screen_actor_->AllowGuestSignin(guest_signin_allowed);
+
+  bool offline_login_allowed = IsOfflineLoginAllowed() &&
+      IsSigninScreenError(error_screen_actor_->state()) &&
+      error_screen_actor_->state() != ErrorScreenActor::STATE_TIMEOUT_ERROR;
+  error_screen_actor_->AllowOfflineLogin(offline_login_allowed);
+
+  if (GetCurrentScreen() != OobeUI::SCREEN_ERROR_MESSAGE) {
+    DictionaryValue params;
+    params.SetInteger("lastNetworkType", static_cast<int>(connection_type));
+    error_screen_actor_->Show(OobeUI::SCREEN_GAIA_SIGNIN, &params);
+  }
+  EnableLazyDetection();
+}
+
+void SigninScreenHandler::HideOfflineMessage(NetworkStateInformer::State state,
+                                             const std::string& service_path,
+                                             const std::string& reason,
+                                             bool is_gaia_signin,
+                                             bool is_gaia_reloaded) {
+  if (IsSigninScreenHiddenByError()) {
+    std::string network_id = GetNetworkUniqueId(service_path);
+    LOG(WARNING) << "Hide offline message. state=" << state << ", "
+                 << "network_id=" << network_id << ", "
+                 << "reason=" << reason;
+    error_screen_actor_->Hide();
+
+    // Forces a reload for Gaia screen on hiding error message.
+    if (is_gaia_signin && !is_gaia_reloaded)
+      ReloadGaiaScreen();
+  }
+  DisableLazyDetection();
 }
 
 void SigninScreenHandler::ReloadGaiaScreen() {
   LOG(WARNING) << "Reload auth extension frame.";
   web_ui()->CallJavascriptFunction("login.GaiaSigninScreen.doReload");
-}
-
-void SigninScreenHandler::ScheduleGaiaFrameReload() {
-  LOG(WARNING) << "Shedule retry for auth extension frame.";
-  web_ui()->CallJavascriptFunction("login.GaiaSigninScreen.scheduleRetry");
 }
 
 void SigninScreenHandler::Initialize() {
@@ -838,6 +862,9 @@ void SigninScreenHandler::RegisterMessages() {
   web_ui()->RegisterMessageCallback("tryCreateLocallyManagedUser",
       base::Bind(&SigninScreenHandler::HandleTryCreateLocallyManagedUser,
                  base::Unretained(this)));
+  web_ui()->RegisterMessageCallback("runLocallyManagedUserCreationFlow",
+      base::Bind(&SigninScreenHandler::HandleRunLocallyManagedUserCreationFlow,
+                 base::Unretained(this)));
 }
 
 void SigninScreenHandler::HandleGetUsers(const base::ListValue* args) {
@@ -847,6 +874,10 @@ void SigninScreenHandler::HandleGetUsers(const base::ListValue* args) {
 void SigninScreenHandler::ClearAndEnablePassword() {
   base::FundamentalValue force_online(false);
   web_ui()->CallJavascriptFunction("cr.ui.Oobe.resetSigninUI", force_online);
+}
+
+void SigninScreenHandler::ClearUserPodPassword() {
+  web_ui()->CallJavascriptFunction("cr.ui.Oobe.clearUserPodPassword");
 }
 
 void SigninScreenHandler::OnLoginSuccess(const std::string& username) {
@@ -913,6 +944,11 @@ void SigninScreenHandler::ShowErrorScreen(LoginDisplay::SigninError error_id) {
   }
 }
 
+void SigninScreenHandler::ShowSigninUI(const std::string& email) {
+  base::StringValue email_value(email);
+  web_ui()->CallJavascriptFunction("cr.ui.Oobe.showSigninUI", email_value);
+}
+
 void SigninScreenHandler::ShowGaiaPasswordChanged(const std::string& username) {
   email_ = username;
   password_changed_for_.insert(email_);
@@ -968,12 +1004,21 @@ void SigninScreenHandler::Observe(int type,
       break;
     }
     case chrome::NOTIFICATION_AUTH_SUPPLIED:
-    case chrome::NOTIFICATION_AUTH_CANCELLED: {
       has_pending_auth_ui_ = false;
-
-      // Schedules reload after auth ui is dismissed when gaia is shown.
-      if (ui_state_ == UI_STATE_GAIA_SIGNIN)
-        ScheduleGaiaFrameReload();
+      if (IsSigninScreenHiddenByError()) {
+        // Hide error screen and reload auth extension.
+        HideOfflineMessage(network_state_informer_->state(),
+                           network_state_informer_->last_network_service_path(),
+                           ErrorScreenActor::kErrorReasonProxyAuthSupplied,
+                           true, false);
+      } else if (ui_state_ == UI_STATE_GAIA_SIGNIN) {
+        // Reload auth extension as credentials are supplied.
+        ReloadGaiaScreen();
+      }
+      break;
+    case chrome::NOTIFICATION_AUTH_CANCELLED: {
+      // Don't reload auth extension if proxy auth dialog was cancelled.
+      has_pending_auth_ui_ = false;
       break;
     }
     default:
@@ -1538,6 +1583,7 @@ void SigninScreenHandler::HandleUnlockOnLoginSuccess(
 
 void SigninScreenHandler::HandleLoginScreenUpdate(
     const base::ListValue* args) {
+  LOG(INFO) << "Auth extension frame is loaded";
   UpdateStateInternal(network_state_informer_->state(),
                       network_state_informer_->last_network_service_path(),
                       network_state_informer_->last_network_type(),
@@ -1564,10 +1610,6 @@ void SigninScreenHandler::HandleShowGaiaFrameError(
                         network_state_informer_->last_network_type(),
                         reason,
                         false);
-
-    // Schedules a reload of the Gaia frame if there is no pending auth ui.
-    if (!has_pending_auth_ui_)
-      ScheduleGaiaFrameReload();
   }
 }
 
@@ -1647,6 +1689,53 @@ void SigninScreenHandler::HandleTryCreateLocallyManagedUser(
 
   if (delegate_)
     delegate_->CreateLocallyManagedUser(name, password);
+}
+
+void SigninScreenHandler::HandleRunLocallyManagedUserCreationFlow(
+    const base::ListValue* args) {
+  if (!delegate_)
+    return;
+  DCHECK(args && args->GetSize() == 4);
+
+  string16 new_user_name;
+  std::string new_user_password;
+  std::string custodian_username;
+  std::string custodian_password;
+  if (!args->GetString(0, &new_user_name) ||
+      !args->GetString(1, &new_user_password) ||
+      !args->GetString(2, &custodian_username) ||
+      !args->GetString(3, &custodian_password)) {
+    NOTREACHED();
+    return;
+  }
+
+  new_user_name = CollapseWhitespace(new_user_name, true);
+  if (NULL != UserManager::Get()->FindLocallyManagedUser(new_user_name)) {
+    web_ui()->CallJavascriptFunction(
+        "login.ManagedUserCreationScreen.managedUserNameError",
+        base::StringValue(new_user_name),
+        base::StringValue(l10n_util::GetStringFUTF16(
+            IDS_CREATE_LOCALLY_MANAGED_USER_CREATE_USERNAME_ALREADY_EXISTS,
+            new_user_name)));
+    return;
+  }
+
+  // TODO(antrim): Any other password checks here?
+  if (new_user_password.length() == 0) {
+    web_ui()->CallJavascriptFunction(
+        "login.ManagedUserCreationScreen.showPasswordError",
+        base::StringValue(l10n_util::GetStringUTF16(
+            IDS_CREATE_LOCALLY_MANAGED_USER_CREATE_PASSWORD_TOO_SHORT)));
+    return;
+  }
+
+  custodian_username = gaia::SanitizeEmail(custodian_username);
+
+  UserFlow* flow =
+      new LocallyManagedUserCreationFlow(new_user_name, new_user_password);
+  UserManager::Get()->SetUserFlow(custodian_username, flow);
+
+  delegate_->Login(custodian_username, custodian_password);
 }
 
 void SigninScreenHandler::StartClearingDnsCache() {

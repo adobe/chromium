@@ -171,7 +171,7 @@ gfx::ImageSkia* VistaWindowResources::images_[];
 class ConstrainedWindowFrameView : public views::NonClientFrameView,
                                    public views::ButtonListener {
  public:
-  ConstrainedWindowFrameView(ConstrainedWindowViews* container,
+  ConstrainedWindowFrameView(views::Widget* container,
                              bool browser_is_off_the_record);
   virtual ~ConstrainedWindowFrameView();
 
@@ -238,7 +238,7 @@ class ConstrainedWindowFrameView : public views::NonClientFrameView,
   // Loads the appropriate set of WindowResources for the frame view.
   void InitWindowResources();
 
-  ConstrainedWindowViews* container_;
+  views::Widget* container_;
 
   bool browser_is_off_the_record_;
 
@@ -291,7 +291,7 @@ const SkColor kContentsBorderShadow = SkColorSetARGB(51, 0, 0, 0);
 }  // namespace
 
 ConstrainedWindowFrameView::ConstrainedWindowFrameView(
-    ConstrainedWindowViews* container, bool browser_is_off_the_record)
+    views::Widget* container, bool browser_is_off_the_record)
     : NonClientFrameView(),
       container_(container),
       browser_is_off_the_record_(browser_is_off_the_record),
@@ -390,7 +390,7 @@ void ConstrainedWindowFrameView::OnThemeChanged() {
 void ConstrainedWindowFrameView::ButtonPressed(
     views::Button* sender, const ui::Event& event) {
   if (sender == close_button_)
-    container_->CloseWebContentsModalDialog();
+    container_->Close();
 }
 
 int ConstrainedWindowFrameView::NonClientBorderThickness() const {
@@ -548,7 +548,7 @@ class ConstrainedWindowFrameViewAsh : public ash::CustomFrameViewAsh {
         container_(NULL) {
   }
 
-  void Init(ConstrainedWindowViews* container) {
+  void Init(views::Widget* container) {
     container_ = container;
     ash::CustomFrameViewAsh::Init(container);
     // Always use "active" look.
@@ -559,83 +559,40 @@ class ConstrainedWindowFrameViewAsh : public ash::CustomFrameViewAsh {
   virtual void ButtonPressed(views::Button* sender,
                              const ui::Event& event) OVERRIDE {
     if (sender == close_button())
-      container_->CloseWebContentsModalDialog();
+      container_->Close();
   }
 
  private:
-  ConstrainedWindowViews* container_;  // not owned
+  views::Widget* container_;  // not owned
   DISALLOW_COPY_AND_ASSIGN(ConstrainedWindowFrameViewAsh);
 };
 #endif  // defined(USE_ASH)
 
-ConstrainedWindowViews::ConstrainedWindowViews(
-    gfx::NativeView parent,
-    bool off_the_record,
-    views::WidgetDelegate* widget_delegate)
-    : off_the_record_(off_the_record) {
-  views::Widget::InitParams params(views::Widget::InitParams::TYPE_WINDOW);
+views::Widget* CreateWebContentsModalDialogViews(
+    views::WidgetDelegate* widget_delegate,
+    gfx::NativeView parent) {
+  views::Widget* dialog = new views::Widget;
+
+  views::Widget::InitParams params;
   params.delegate = widget_delegate;
   params.child = true;
-
   params.parent = parent;
 
-#if defined(USE_ASH)
-  // Ash window headers can be transparent.
-  params.transparent = true;
-#endif
+  dialog->Init(params);
 
-  Init(params);
-}
-
-ConstrainedWindowViews::~ConstrainedWindowViews() {
-}
-
-void ConstrainedWindowViews::ShowWebContentsModalDialog() {
-  Show();
-  FocusWebContentsModalDialog();
-}
-
-void ConstrainedWindowViews::CloseWebContentsModalDialog() {
-  Close();
-}
-
-void ConstrainedWindowViews::FocusWebContentsModalDialog() {
-  if (widget_delegate() && widget_delegate()->GetInitiallyFocusedView())
-    widget_delegate()->GetInitiallyFocusedView()->RequestFocus();
-#if defined(USE_ASH)
-  // We don't necessarily have a RootWindow yet.
-  if (GetNativeView()->GetRootWindow())
-    GetNativeView()->Focus();
-#endif
-}
-
-void ConstrainedWindowViews::PulseWebContentsModalDialog() {
-}
-
-NativeWebContentsModalDialog ConstrainedWindowViews::GetNativeDialog() {
-  return GetNativeView();
-}
-
-ConstrainedWindowViews* ConstrainedWindowViews::Create(
-    content::WebContents* web_contents,
-    views::WidgetDelegate* widget_delegate) {
-  WebContentsModalDialogManager* manager =
-      WebContentsModalDialogManager::FromWebContents(web_contents);
-  ConstrainedWindowViews* dialog = new ConstrainedWindowViews(
-      web_contents->GetNativeView(),
-      web_contents->GetBrowserContext()->IsOffTheRecord(),
-      widget_delegate);
-  manager->AddDialog(dialog);
   return dialog;
 }
 
-views::NonClientFrameView* ConstrainedWindowViews::CreateNonClientFrameView() {
+views::NonClientFrameView* CreateConstrainedStyleNonClientFrameView(
+    views::Widget* widget,
+    content::BrowserContext* browser_context) {
   if (views::DialogDelegate::UseNewStyle())
-    return views::DialogDelegate::CreateNewStyleFrameView(this);
+    return views::DialogDelegate::CreateNewStyleFrameView(widget);
 #if defined(USE_ASH)
   ConstrainedWindowFrameViewAsh* frame = new ConstrainedWindowFrameViewAsh;
-  frame->Init(this);
+  frame->Init(widget);
   return frame;
 #endif
-  return new ConstrainedWindowFrameView(this, off_the_record_);
+  return new ConstrainedWindowFrameView(widget,
+                                        browser_context->IsOffTheRecord());
 }

@@ -144,9 +144,9 @@ struct CommandInfo {
 
 // A table of CommandInfo for all the commands.
 const CommandInfo g_command_info[] = {
-  #define GLES2_CMD_OP(name) {                                            \
-    name::kArgFlags,                                                      \
-    sizeof(name) / sizeof(CommandBufferEntry) - 1, },  /* NOLINT */       \
+  #define GLES2_CMD_OP(name) {                                             \
+    cmds::name::kArgFlags,                                                 \
+    sizeof(cmds::name) / sizeof(CommandBufferEntry) - 1, },  /* NOLINT */  \
 
   GLES2_COMMAND_LIST(GLES2_CMD_OP)
 
@@ -349,10 +349,10 @@ class ScopedTextureUploadTimer {
 };
 
 // Encapsulates an OpenGL texture.
-class Texture {
+class BackTexture {
  public:
-  explicit Texture(GLES2DecoderImpl* decoder);
-  ~Texture();
+  explicit BackTexture(GLES2DecoderImpl* decoder);
+  ~BackTexture();
 
   // Create a new render texture.
   void Create();
@@ -389,14 +389,14 @@ class Texture {
   size_t bytes_allocated_;
   GLuint id_;
   gfx::Size size_;
-  DISALLOW_COPY_AND_ASSIGN(Texture);
+  DISALLOW_COPY_AND_ASSIGN(BackTexture);
 };
 
 // Encapsulates an OpenGL render buffer of any format.
-class RenderBuffer {
+class BackRenderbuffer {
  public:
-  explicit RenderBuffer(GLES2DecoderImpl* decoder);
-  ~RenderBuffer();
+  explicit BackRenderbuffer(GLES2DecoderImpl* decoder);
+  ~BackRenderbuffer();
 
   // Create a new render buffer.
   void Create();
@@ -425,24 +425,24 @@ class RenderBuffer {
   MemoryTypeTracker memory_tracker_;
   size_t bytes_allocated_;
   GLuint id_;
-  DISALLOW_COPY_AND_ASSIGN(RenderBuffer);
+  DISALLOW_COPY_AND_ASSIGN(BackRenderbuffer);
 };
 
 // Encapsulates an OpenGL frame buffer.
-class FrameBuffer {
+class BackFramebuffer {
  public:
-  explicit FrameBuffer(GLES2DecoderImpl* decoder);
-  ~FrameBuffer();
+  explicit BackFramebuffer(GLES2DecoderImpl* decoder);
+  ~BackFramebuffer();
 
   // Create a new frame buffer.
   void Create();
 
   // Attach a color render buffer to a frame buffer.
-  void AttachRenderTexture(Texture* texture);
+  void AttachRenderTexture(BackTexture* texture);
 
   // Attach a render buffer to a frame buffer. Note that this unbinds any
   // currently bound frame buffer.
-  void AttachRenderBuffer(GLenum target, RenderBuffer* render_buffer);
+  void AttachRenderBuffer(GLenum target, BackRenderbuffer* render_buffer);
 
   // Destroy the frame buffer. This must be explicitly called before destroying
   // this object.
@@ -462,7 +462,7 @@ class FrameBuffer {
  private:
   GLES2DecoderImpl* decoder_;
   GLuint id_;
-  DISALLOW_COPY_AND_ASSIGN(FrameBuffer);
+  DISALLOW_COPY_AND_ASSIGN(BackFramebuffer);
 };
 
 // }  // anonymous namespace.
@@ -540,6 +540,31 @@ class GLES2DecoderImpl : public GLES2Decoder {
   virtual gfx::GLContext* GetGLContext() OVERRIDE { return context_.get(); }
   virtual ContextGroup* GetContextGroup() OVERRIDE { return group_.get(); }
   virtual void RestoreState() const OVERRIDE;
+
+  virtual void RestoreActiveTexture() const OVERRIDE {
+    state_.RestoreActiveTexture();
+  }
+  virtual void RestoreAttribute(unsigned index) const OVERRIDE {
+    state_.RestoreAttribute(index);
+  }
+  virtual void RestoreBufferBindings() const OVERRIDE {
+    state_.RestoreBufferBindings();
+  }
+  virtual void RestoreGlobalState() const OVERRIDE {
+    state_.RestoreGlobalState();
+  }
+  virtual void RestoreProgramBindings() const OVERRIDE {
+    state_.RestoreProgramBindings();
+  }
+  virtual void RestoreRenderbufferBindings() const OVERRIDE {
+    state_.RestoreRenderbufferBindings();
+  }
+  virtual void RestoreTextureUnitBindings(unsigned unit) const OVERRIDE {
+    state_.RestoreTextureUnitBindings(unit);
+  }
+  virtual void RestoreFramebufferBindings() const OVERRIDE;
+  virtual void RestoreTextureState(unsigned service_id) const OVERRIDE;
+
   virtual QueryManager* GetQueryManager() OVERRIDE {
     return query_manager_.get();
   }
@@ -548,16 +573,12 @@ class GLES2DecoderImpl : public GLES2Decoder {
   }
   virtual bool ProcessPendingQueries() OVERRIDE;
 
-  virtual void SetGLError(GLenum error,
-                          const char* function_name,
-                          const char* msg);
-  virtual void SetGLErrorInvalidEnum(const char* function_name,
-                                     GLenum value,
-                                     const char* label);
   virtual void SetResizeCallback(
       const base::Callback<void(gfx::Size)>& callback) OVERRIDE;
 
   virtual void SetMsgCallback(const MsgCallback& callback) OVERRIDE;
+  virtual void SetWaitSyncPointCallback(
+      const WaitSyncPointCallback& callback) OVERRIDE;
 
   virtual void SetStreamTextureManager(StreamTextureManager* manager) OVERRIDE;
 
@@ -597,9 +618,9 @@ class GLES2DecoderImpl : public GLES2Decoder {
   friend class ScopedGLErrorSuppressor;
   friend class ScopedResolvedFrameBufferBinder;
   friend class ScopedTextureUploadTimer;
-  friend class Texture;
-  friend class RenderBuffer;
-  friend class FrameBuffer;
+  friend class BackTexture;
+  friend class BackRenderbuffer;
+  friend class BackFramebuffer;
 
   // Initialize or re-initialize the shader translator.
   bool InitializeShaderTranslator();
@@ -644,6 +665,10 @@ class GLES2DecoderImpl : public GLES2Decoder {
     return group_->shader_manager();
   }
 
+  const TextureManager* texture_manager() const {
+    return group_->texture_manager();
+  }
+
   TextureManager* texture_manager() {
     return group_->texture_manager();
   }
@@ -676,22 +701,22 @@ class GLES2DecoderImpl : public GLES2Decoder {
     return offscreen_target_samples_ > 1;
   }
 
-  // Creates a TextureInfo for the given texture.
-  TextureManager::TextureInfo* CreateTextureInfo(
+  // Creates a Texture for the given texture.
+  Texture* CreateTexture(
       GLuint client_id, GLuint service_id) {
-    return texture_manager()->CreateTextureInfo(client_id, service_id);
+    return texture_manager()->CreateTexture(client_id, service_id);
   }
 
   // Gets the texture info for the given texture. Returns NULL if none exists.
-  TextureManager::TextureInfo* GetTextureInfo(GLuint client_id) {
-    TextureManager::TextureInfo* info =
-        texture_manager()->GetTextureInfo(client_id);
+  Texture* GetTexture(GLuint client_id) const {
+    Texture* info =
+        texture_manager()->GetTexture(client_id);
     return info;
   }
 
   // Deletes the texture info for the given texture.
-  void RemoveTextureInfo(GLuint client_id) {
-    texture_manager()->RemoveTextureInfo(client_id);
+  void RemoveTexture(GLuint client_id) {
+    texture_manager()->RemoveTexture(client_id);
   }
 
   // Get the size (in pixels) of the currently bound frame buffer (either FBO
@@ -804,7 +829,7 @@ class GLES2DecoderImpl : public GLES2Decoder {
   // Extra validation for async tex(Sub)Image2D.
   bool ValidateAsyncTransfer(
       const char* function_name,
-      TextureManager::TextureInfo* info,
+      Texture* info,
       GLenum target,
       GLint level,
       const void * data);
@@ -844,15 +869,15 @@ class GLES2DecoderImpl : public GLES2Decoder {
 
   void DoTraceEndCHROMIUM(void);
 
-  // Creates a ProgramInfo for the given program.
-  ProgramManager::ProgramInfo* CreateProgramInfo(
+  // Creates a Program for the given program.
+  Program* CreateProgram(
       GLuint client_id, GLuint service_id) {
-    return program_manager()->CreateProgramInfo(client_id, service_id);
+    return program_manager()->CreateProgram(client_id, service_id);
   }
 
   // Gets the program info for the given program. Returns NULL if none exists.
-  ProgramManager::ProgramInfo* GetProgramInfo(GLuint client_id) {
-    return program_manager()->GetProgramInfo(client_id);
+  Program* GetProgram(GLuint client_id) {
+    return program_manager()->GetProgram(client_id);
   }
 
 #if defined(NDEBUG)
@@ -885,11 +910,11 @@ class GLES2DecoderImpl : public GLES2Decoder {
 
   // Gets the program info for the given program. If it's not a program
   // generates a GL error. Returns NULL if not program.
-  ProgramManager::ProgramInfo* GetProgramInfoNotShader(
+  Program* GetProgramInfoNotShader(
       GLuint client_id, const char* function_name) {
-    ProgramManager::ProgramInfo* info = GetProgramInfo(client_id);
+    Program* info = GetProgram(client_id);
     if (!info) {
-      if (GetShaderInfo(client_id)) {
+      if (GetShader(client_id)) {
         SetGLError(
             GL_INVALID_OPERATION, function_name, "shader passed for program");
       } else {
@@ -901,27 +926,27 @@ class GLES2DecoderImpl : public GLES2Decoder {
   }
 
 
-  // Creates a ShaderInfo for the given shader.
-  ShaderManager::ShaderInfo* CreateShaderInfo(
+  // Creates a Shader for the given shader.
+  Shader* CreateShader(
       GLuint client_id,
       GLuint service_id,
       GLenum shader_type) {
-    return shader_manager()->CreateShaderInfo(
+    return shader_manager()->CreateShader(
         client_id, service_id, shader_type);
   }
 
   // Gets the shader info for the given shader. Returns NULL if none exists.
-  ShaderManager::ShaderInfo* GetShaderInfo(GLuint client_id) {
-    return shader_manager()->GetShaderInfo(client_id);
+  Shader* GetShader(GLuint client_id) {
+    return shader_manager()->GetShader(client_id);
   }
 
   // Gets the shader info for the given shader. If it's not a shader generates a
   // GL error. Returns NULL if not shader.
-  ShaderManager::ShaderInfo* GetShaderInfoNotProgram(
+  Shader* GetShaderInfoNotProgram(
       GLuint client_id, const char* function_name) {
-    ShaderManager::ShaderInfo* info = GetShaderInfo(client_id);
+    Shader* info = GetShader(client_id);
     if (!info) {
-      if (GetProgramInfo(client_id)) {
+      if (GetProgram(client_id)) {
         SetGLError(
             GL_INVALID_OPERATION, function_name, "program passed for shader");
       } else {
@@ -934,57 +959,57 @@ class GLES2DecoderImpl : public GLES2Decoder {
   }
 
   // Creates a buffer info for the given buffer.
-  void CreateBufferInfo(GLuint client_id, GLuint service_id) {
-    return buffer_manager()->CreateBufferInfo(client_id, service_id);
+  void CreateBuffer(GLuint client_id, GLuint service_id) {
+    return buffer_manager()->CreateBuffer(client_id, service_id);
   }
 
   // Gets the buffer info for the given buffer.
-  BufferManager::BufferInfo* GetBufferInfo(GLuint client_id) {
-    BufferManager::BufferInfo* info =
-        buffer_manager()->GetBufferInfo(client_id);
+  Buffer* GetBuffer(GLuint client_id) {
+    Buffer* info =
+        buffer_manager()->GetBuffer(client_id);
     return info;
   }
 
   // Removes any buffers in the VertexAtrribInfos and BufferInfos. This is used
   // on glDeleteBuffers so we can make sure the user does not try to render
   // with deleted buffers.
-  void RemoveBufferInfo(GLuint client_id);
+  void RemoveBuffer(GLuint client_id);
 
   // Creates a framebuffer info for the given framebuffer.
-  void CreateFramebufferInfo(GLuint client_id, GLuint service_id) {
-    return framebuffer_manager()->CreateFramebufferInfo(client_id, service_id);
+  void CreateFramebuffer(GLuint client_id, GLuint service_id) {
+    return framebuffer_manager()->CreateFramebuffer(client_id, service_id);
   }
 
   // Gets the framebuffer info for the given framebuffer.
-  FramebufferManager::FramebufferInfo* GetFramebufferInfo(
+  Framebuffer* GetFramebuffer(
       GLuint client_id) {
-    FramebufferManager::FramebufferInfo* info =
-        framebuffer_manager()->GetFramebufferInfo(client_id);
+    Framebuffer* info =
+        framebuffer_manager()->GetFramebuffer(client_id);
     return info;
   }
 
   // Removes the framebuffer info for the given framebuffer.
-  void RemoveFramebufferInfo(GLuint client_id) {
-    framebuffer_manager()->RemoveFramebufferInfo(client_id);
+  void RemoveFramebuffer(GLuint client_id) {
+    framebuffer_manager()->RemoveFramebuffer(client_id);
   }
 
   // Creates a renderbuffer info for the given renderbuffer.
-  void CreateRenderbufferInfo(GLuint client_id, GLuint service_id) {
-    return renderbuffer_manager()->CreateRenderbufferInfo(
+  void CreateRenderbuffer(GLuint client_id, GLuint service_id) {
+    return renderbuffer_manager()->CreateRenderbuffer(
         client_id, service_id);
   }
 
   // Gets the renderbuffer info for the given renderbuffer.
-  RenderbufferManager::RenderbufferInfo* GetRenderbufferInfo(
+  Renderbuffer* GetRenderbuffer(
       GLuint client_id) {
-    RenderbufferManager::RenderbufferInfo* info =
-        renderbuffer_manager()->GetRenderbufferInfo(client_id);
+    Renderbuffer* info =
+        renderbuffer_manager()->GetRenderbuffer(client_id);
     return info;
   }
 
   // Removes the renderbuffer info for the given renderbuffer.
-  void RemoveRenderbufferInfo(GLuint client_id) {
-    renderbuffer_manager()->RemoveRenderbufferInfo(client_id);
+  void RemoveRenderbuffer(GLuint client_id) {
+    renderbuffer_manager()->RemoveRenderbuffer(client_id);
   }
 
   // Gets the vertex attrib manager for the given vertex array.
@@ -1026,12 +1051,12 @@ class GLES2DecoderImpl : public GLES2Decoder {
 
   // Clear any uncleared level in texture.
   // Returns false if there was a generated GL error.
-  bool ClearTexture(TextureManager::TextureInfo* info);
+  bool ClearTexture(Texture* info);
 
   // Clears any uncleared attachments attached to the given frame buffer.
   // Returns false if there was a generated GL error.
   void ClearUnclearedAttachments(
-      GLenum target, FramebufferManager::FramebufferInfo* info);
+      GLenum target, Framebuffer* info);
 
   // overridden from GLES2Decoder
   virtual bool ClearLevel(unsigned service_id,
@@ -1057,7 +1082,7 @@ class GLES2DecoderImpl : public GLES2Decoder {
 
   // Check if a framebuffer meets our requirements.
   bool CheckFramebufferValid(
-      FramebufferManager::FramebufferInfo* framebuffer,
+      Framebuffer* framebuffer,
       GLenum target,
       const char* func_name);
 
@@ -1314,26 +1339,22 @@ class GLES2DecoderImpl : public GLES2Decoder {
   // false if pname is unknown.
   bool GetNumValuesReturnedForGLGet(GLenum pname, GLsizei* num_values);
 
-  // Gets the GLError and stores it in our wrapper. Effectively
-  // this lets us peek at the error without losing it.
-  GLenum PeekGLError();
-
-  // Copies the real GL errors to the wrapper. This is so we can
-  // make sure there are no native GL errors before calling some GL function
-  // so that on return we know any error generated was for that specific
-  // command.
-  void CopyRealGLErrorsToWrapper();
-
-  // Clear all real GL errors. This is to prevent the client from seeing any
-  // errors caused by GL calls that it was not responsible for issuing.
-  void ClearRealGLErrors();
-
+  virtual void SetGLError(unsigned error,
+                          const char* function_name,
+                          const char* msg) OVERRIDE;
+  virtual void SetGLErrorInvalidEnum(const char* function_name,
+                                     unsigned value,
+                                     const char* label) OVERRIDE;
   // Generates a GL error for a bad parameter.
-  void SetGLErrorInvalidParam(
-      GLenum error,
+  virtual void SetGLErrorInvalidParam(
+      unsigned error,
       const char* function_name,
-      GLenum pname,
-      GLint param);
+      unsigned pname,
+      int param) OVERRIDE;
+
+  virtual unsigned PeekGLError() OVERRIDE;
+  virtual void CopyRealGLErrorsToWrapper() OVERRIDE;
+  virtual void ClearRealGLErrors() OVERRIDE;
 
   // Checks if the current program and vertex attributes are valid for drawing.
   bool IsDrawValid(
@@ -1367,7 +1388,7 @@ class GLES2DecoderImpl : public GLES2Decoder {
       int32 offset, GLsizei primcount);
 
   // Gets the buffer id for a given target.
-  BufferManager::BufferInfo* GetBufferInfoForTarget(GLenum target) {
+  Buffer* GetBufferInfoForTarget(GLenum target) {
     DCHECK(target == GL_ARRAY_BUFFER || target == GL_ELEMENT_ARRAY_BUFFER);
     if (target == GL_ARRAY_BUFFER) {
       return state_.bound_array_buffer;
@@ -1377,9 +1398,9 @@ class GLES2DecoderImpl : public GLES2Decoder {
   }
 
   // Gets the texture id for a given target.
-  TextureManager::TextureInfo* GetTextureInfoForTarget(GLenum target) {
+  Texture* GetTextureInfoForTarget(GLenum target) {
     TextureUnit& unit = state_.texture_units[state_.active_texture_unit];
-    TextureManager::TextureInfo* info = NULL;
+    Texture* info = NULL;
     switch (target) {
       case GL_TEXTURE_2D:
         info = unit.bound_texture_2d;
@@ -1406,9 +1427,9 @@ class GLES2DecoderImpl : public GLES2Decoder {
     return info;
   }
 
-  TextureManager::TextureInfo* GetTextureInfoForTargetUnlessDefault(
+  Texture* GetTextureInfoForTargetUnlessDefault(
       GLenum target) {
-    TextureManager::TextureInfo* info = GetTextureInfoForTarget(target);
+    Texture* info = GetTextureInfoForTarget(target);
     if (!info)
       return NULL;
     if (info == texture_manager()->GetDefaultTextureInfo(target))
@@ -1435,9 +1456,9 @@ class GLES2DecoderImpl : public GLES2Decoder {
   }
 
   // Gets the framebuffer info for a particular target.
-  FramebufferManager::FramebufferInfo* GetFramebufferInfoForTarget(
+  Framebuffer* GetFramebufferInfoForTarget(
       GLenum target) {
-    FramebufferManager::FramebufferInfo* info = NULL;
+    Framebuffer* info = NULL;
     switch (target) {
       case GL_FRAMEBUFFER:
       case GL_DRAW_FRAMEBUFFER_EXT:
@@ -1453,9 +1474,9 @@ class GLES2DecoderImpl : public GLES2Decoder {
     return info;
   }
 
-  RenderbufferManager::RenderbufferInfo* GetRenderbufferInfoForTarget(
+  Renderbuffer* GetRenderbufferInfoForTarget(
       GLenum target) {
-    RenderbufferManager::RenderbufferInfo* info = NULL;
+    Renderbuffer* info = NULL;
     switch (target) {
       case GL_RENDERBUFFER:
         info = state_.bound_renderbuffer;
@@ -1504,7 +1525,7 @@ class GLES2DecoderImpl : public GLES2Decoder {
     const char* function_name,
     GLenum target, GLint level, GLint xoffset, GLint yoffset,
     GLsizei width, GLsizei height, GLenum format,
-    TextureManager::TextureInfo* texture);
+    Texture* texture);
 
   void LogMessage(const std::string& msg);
   void RenderWarning(const std::string& msg);
@@ -1531,14 +1552,14 @@ class GLES2DecoderImpl : public GLES2Decoder {
            surface_->DeferDraws();
   }
 
-  void ForceCompileShaderIfPending(ShaderManager::ShaderInfo* info);
+  void ForceCompileShaderIfPending(Shader* info);
 
   // Generate a member function prototype for each command in an automated and
   // typesafe way.
   #define GLES2_CMD_OP(name) \
      Error Handle ## name(             \
-       uint32 immediate_data_size,          \
-       const gles2::name& args);            \
+       uint32 immediate_data_size,     \
+       const cmds::name& args);        \
 
   GLES2_COMMAND_LIST(GLES2_CMD_OP)
 
@@ -1549,7 +1570,7 @@ class GLES2DecoderImpl : public GLES2Decoder {
   scoped_refptr<gfx::GLContext> context_;
 
   // The ContextGroup for this decoder uses to track resources.
-  ContextGroup::Ref group_;
+  scoped_refptr<ContextGroup> group_;
 
   // All the state for this context.
   ContextState state_;
@@ -1575,7 +1596,7 @@ class GLES2DecoderImpl : public GLES2Decoder {
   bool unpack_unpremultiply_alpha_;
 
   // Default vertex attribs manager, used when no VAOs are bound.
-  VertexAttribManager::Ref default_vertex_attrib_manager_;
+  scoped_refptr<VertexAttribManager> default_vertex_attrib_manager_;
 
   // The buffer we bind to attrib 0 since OpenGL requires it (ES does not).
   GLuint attrib_0_buffer_id_;
@@ -1603,11 +1624,11 @@ class GLES2DecoderImpl : public GLES2Decoder {
   // depth and stencil buffers are separate. With regular GL there is a single
   // packed depth stencil buffer in offscreen_target_depth_render_buffer_.
   // offscreen_target_stencil_render_buffer_ is unused.
-  scoped_ptr<FrameBuffer> offscreen_target_frame_buffer_;
-  scoped_ptr<Texture> offscreen_target_color_texture_;
-  scoped_ptr<RenderBuffer> offscreen_target_color_render_buffer_;
-  scoped_ptr<RenderBuffer> offscreen_target_depth_render_buffer_;
-  scoped_ptr<RenderBuffer> offscreen_target_stencil_render_buffer_;
+  scoped_ptr<BackFramebuffer> offscreen_target_frame_buffer_;
+  scoped_ptr<BackTexture> offscreen_target_color_texture_;
+  scoped_ptr<BackRenderbuffer> offscreen_target_color_render_buffer_;
+  scoped_ptr<BackRenderbuffer> offscreen_target_depth_render_buffer_;
+  scoped_ptr<BackRenderbuffer> offscreen_target_stencil_render_buffer_;
   GLenum offscreen_target_color_format_;
   GLenum offscreen_target_depth_format_;
   GLenum offscreen_target_stencil_format_;
@@ -1615,13 +1636,14 @@ class GLES2DecoderImpl : public GLES2Decoder {
   GLboolean offscreen_target_buffer_preserved_;
 
   // The copy that is saved when SwapBuffers is called.
-  scoped_ptr<FrameBuffer> offscreen_saved_frame_buffer_;
-  scoped_ptr<Texture> offscreen_saved_color_texture_;
-  TextureManager::TextureInfo::Ref offscreen_saved_color_texture_info_;
+  scoped_ptr<BackFramebuffer> offscreen_saved_frame_buffer_;
+  scoped_ptr<BackTexture> offscreen_saved_color_texture_;
+  scoped_refptr<Texture>
+      offscreen_saved_color_texture_info_;
 
   // The copy that is used as the destination for multi-sample resolves.
-  scoped_ptr<FrameBuffer> offscreen_resolved_frame_buffer_;
-  scoped_ptr<Texture> offscreen_resolved_color_texture_;
+  scoped_ptr<BackFramebuffer> offscreen_resolved_frame_buffer_;
+  scoped_ptr<BackTexture> offscreen_resolved_color_texture_;
   GLenum offscreen_saved_color_format_;
 
   scoped_ptr<QueryManager> query_manager_;
@@ -1631,6 +1653,7 @@ class GLES2DecoderImpl : public GLES2Decoder {
   base::Callback<void(gfx::Size)> resize_callback_;
 
   MsgCallback msg_callback_;
+  WaitSyncPointCallback wait_sync_point_callback_;
 
   StreamTextureManager* stream_texture_manager_;
   scoped_ptr<gfx::AsyncPixelTransferDelegate> async_pixel_transfer_delegate_;
@@ -1664,7 +1687,7 @@ class GLES2DecoderImpl : public GLES2Decoder {
 
   // Cached from ContextGroup
   const Validators* validators_;
-  FeatureInfo::Ref feature_info_;
+  scoped_refptr<FeatureInfo> feature_info_;
 
   // This indicates all the following texSubImage2D calls that are part of the
   // failed texImage2D call should be ignored.
@@ -1779,9 +1802,10 @@ ScopedResolvedFrameBufferBinder::ScopedResolvedFrameBufferBinder(
   if (internal) {
     if (!decoder_->offscreen_resolved_frame_buffer_.get()) {
       decoder_->offscreen_resolved_frame_buffer_.reset(
-          new FrameBuffer(decoder_));
+          new BackFramebuffer(decoder_));
       decoder_->offscreen_resolved_frame_buffer_->Create();
-      decoder_->offscreen_resolved_color_texture_.reset(new Texture(decoder_));
+      decoder_->offscreen_resolved_color_texture_.reset(
+          new BackTexture(decoder_));
       decoder_->offscreen_resolved_color_texture_->Create();
 
       DCHECK(decoder_->offscreen_saved_color_format_);
@@ -1837,21 +1861,21 @@ ScopedTextureUploadTimer::~ScopedTextureUploadTimer() {
       base::TimeTicks::HighResNow() - begin_time_;
 }
 
-Texture::Texture(GLES2DecoderImpl* decoder)
+BackTexture::BackTexture(GLES2DecoderImpl* decoder)
     : decoder_(decoder),
       memory_tracker_(decoder->memory_tracker(), MemoryTracker::kUnmanaged),
       bytes_allocated_(0),
       id_(0) {
 }
 
-Texture::~Texture() {
+BackTexture::~BackTexture() {
   // This does not destroy the render texture because that would require that
   // the associated GL context was current. Just check that it was explicitly
   // destroyed.
   DCHECK_EQ(id_, 0u);
 }
 
-void Texture::Create() {
+void BackTexture::Create() {
   ScopedGLErrorSuppressor suppressor(decoder_);
   Destroy();
   glGenTextures(1, &id_);
@@ -1874,7 +1898,8 @@ void Texture::Create() {
   memory_tracker_.TrackMemAlloc(bytes_allocated_);
 }
 
-bool Texture::AllocateStorage(const gfx::Size& size, GLenum format, bool zero) {
+bool BackTexture::AllocateStorage(
+    const gfx::Size& size, GLenum format, bool zero) {
   DCHECK_NE(id_, 0u);
   ScopedGLErrorSuppressor suppressor(decoder_);
   ScopedTexture2DBinder binder(decoder_, id_);
@@ -1914,7 +1939,7 @@ bool Texture::AllocateStorage(const gfx::Size& size, GLenum format, bool zero) {
   return success;
 }
 
-void Texture::Copy(const gfx::Size& size, GLenum format) {
+void BackTexture::Copy(const gfx::Size& size, GLenum format) {
   DCHECK_NE(id_, 0u);
   ScopedGLErrorSuppressor suppressor(decoder_);
   ScopedTexture2DBinder binder(decoder_, id_);
@@ -1927,7 +1952,7 @@ void Texture::Copy(const gfx::Size& size, GLenum format) {
                    0);  // border
 }
 
-void Texture::Destroy() {
+void BackTexture::Destroy() {
   if (id_ != 0) {
     ScopedGLErrorSuppressor suppressor(decoder_);
     glDeleteTextures(1, &id_);
@@ -1937,32 +1962,32 @@ void Texture::Destroy() {
   bytes_allocated_ = 0;
 }
 
-void Texture::Invalidate() {
+void BackTexture::Invalidate() {
   id_ = 0;
 }
 
-RenderBuffer::RenderBuffer(GLES2DecoderImpl* decoder)
+BackRenderbuffer::BackRenderbuffer(GLES2DecoderImpl* decoder)
     : decoder_(decoder),
       memory_tracker_(decoder->memory_tracker(), MemoryTracker::kUnmanaged),
       bytes_allocated_(0),
       id_(0) {
 }
 
-RenderBuffer::~RenderBuffer() {
+BackRenderbuffer::~BackRenderbuffer() {
   // This does not destroy the render buffer because that would require that
   // the associated GL context was current. Just check that it was explicitly
   // destroyed.
   DCHECK_EQ(id_, 0u);
 }
 
-void RenderBuffer::Create() {
+void BackRenderbuffer::Create() {
   ScopedGLErrorSuppressor suppressor(decoder_);
   Destroy();
   glGenRenderbuffersEXT(1, &id_);
 }
 
-bool RenderBuffer::AllocateStorage(const gfx::Size& size, GLenum format,
-                                   GLsizei samples) {
+bool BackRenderbuffer::AllocateStorage(const gfx::Size& size, GLenum format,
+                                       GLsizei samples) {
   ScopedGLErrorSuppressor suppressor(decoder_);
   ScopedRenderBufferBinder binder(decoder_, id_);
 
@@ -2005,7 +2030,7 @@ bool RenderBuffer::AllocateStorage(const gfx::Size& size, GLenum format,
   return success;
 }
 
-void RenderBuffer::Destroy() {
+void BackRenderbuffer::Destroy() {
   if (id_ != 0) {
     ScopedGLErrorSuppressor suppressor(decoder_);
     glDeleteRenderbuffersEXT(1, &id_);
@@ -2015,29 +2040,29 @@ void RenderBuffer::Destroy() {
   bytes_allocated_ = 0;
 }
 
-void RenderBuffer::Invalidate() {
+void BackRenderbuffer::Invalidate() {
   id_ = 0;
 }
 
-FrameBuffer::FrameBuffer(GLES2DecoderImpl* decoder)
+BackFramebuffer::BackFramebuffer(GLES2DecoderImpl* decoder)
     : decoder_(decoder),
       id_(0) {
 }
 
-FrameBuffer::~FrameBuffer() {
+BackFramebuffer::~BackFramebuffer() {
   // This does not destroy the frame buffer because that would require that
   // the associated GL context was current. Just check that it was explicitly
   // destroyed.
   DCHECK_EQ(id_, 0u);
 }
 
-void FrameBuffer::Create() {
+void BackFramebuffer::Create() {
   ScopedGLErrorSuppressor suppressor(decoder_);
   Destroy();
   glGenFramebuffersEXT(1, &id_);
 }
 
-void FrameBuffer::AttachRenderTexture(Texture* texture) {
+void BackFramebuffer::AttachRenderTexture(BackTexture* texture) {
   DCHECK_NE(id_, 0u);
   ScopedGLErrorSuppressor suppressor(decoder_);
   ScopedFrameBufferBinder binder(decoder_, id_);
@@ -2049,8 +2074,8 @@ void FrameBuffer::AttachRenderTexture(Texture* texture) {
                             0);
 }
 
-void FrameBuffer::AttachRenderBuffer(GLenum target,
-                                     RenderBuffer* render_buffer) {
+void BackFramebuffer::AttachRenderBuffer(GLenum target,
+                                         BackRenderbuffer* render_buffer) {
   DCHECK_NE(id_, 0u);
   ScopedGLErrorSuppressor suppressor(decoder_);
   ScopedFrameBufferBinder binder(decoder_, id_);
@@ -2061,7 +2086,7 @@ void FrameBuffer::AttachRenderBuffer(GLenum target,
                                attach_id);
 }
 
-void FrameBuffer::Destroy() {
+void BackFramebuffer::Destroy() {
   if (id_ != 0) {
     ScopedGLErrorSuppressor suppressor(decoder_);
     glDeleteFramebuffersEXT(1, &id_);
@@ -2069,11 +2094,11 @@ void FrameBuffer::Destroy() {
   }
 }
 
-void FrameBuffer::Invalidate() {
+void BackFramebuffer::Invalidate() {
   id_ = 0;
 }
 
-GLenum FrameBuffer::CheckStatus() {
+GLenum BackFramebuffer::CheckStatus() {
   DCHECK_NE(id_, 0u);
   ScopedGLErrorSuppressor suppressor(decoder_);
   ScopedFrameBufferBinder binder(decoder_, id_);
@@ -2229,7 +2254,7 @@ bool GLES2DecoderImpl::Initialize(
   for (uint32 tt = 0; tt < state_.texture_units.size(); ++tt) {
     glActiveTexture(GL_TEXTURE0 + tt);
     // We want the last bind to be 2D.
-    TextureManager::TextureInfo* info;
+    Texture* info;
     if (features().oes_egl_image_external) {
       info = texture_manager()->GetDefaultTextureInfo(GL_TEXTURE_EXTERNAL_OES);
       state_.texture_units[tt].bound_texture_external_oes = info;
@@ -2350,30 +2375,30 @@ bool GLES2DecoderImpl::Initialize(
 
     // Create the target frame buffer. This is the one that the client renders
     // directly to.
-    offscreen_target_frame_buffer_.reset(new FrameBuffer(this));
+    offscreen_target_frame_buffer_.reset(new BackFramebuffer(this));
     offscreen_target_frame_buffer_->Create();
     // Due to GLES2 format limitations, either the color texture (for
     // non-multisampling) or the color render buffer (for multisampling) will be
     // attached to the offscreen frame buffer.  The render buffer has more
     // limited formats available to it, but the texture can't do multisampling.
     if (IsOffscreenBufferMultisampled()) {
-      offscreen_target_color_render_buffer_.reset(new RenderBuffer(this));
+      offscreen_target_color_render_buffer_.reset(new BackRenderbuffer(this));
       offscreen_target_color_render_buffer_->Create();
     } else {
-      offscreen_target_color_texture_.reset(new Texture(this));
+      offscreen_target_color_texture_.reset(new BackTexture(this));
       offscreen_target_color_texture_->Create();
     }
-    offscreen_target_depth_render_buffer_.reset(new RenderBuffer(this));
+    offscreen_target_depth_render_buffer_.reset(new BackRenderbuffer(this));
     offscreen_target_depth_render_buffer_->Create();
-    offscreen_target_stencil_render_buffer_.reset(new RenderBuffer(this));
+    offscreen_target_stencil_render_buffer_.reset(new BackRenderbuffer(this));
     offscreen_target_stencil_render_buffer_->Create();
 
     // Create the saved offscreen texture. The target frame buffer is copied
     // here when SwapBuffers is called.
-    offscreen_saved_frame_buffer_.reset(new FrameBuffer(this));
+    offscreen_saved_frame_buffer_.reset(new BackFramebuffer(this));
     offscreen_saved_frame_buffer_->Create();
     //
-    offscreen_saved_color_texture_.reset(new Texture(this));
+    offscreen_saved_color_texture_.reset(new BackTexture(this));
     offscreen_saved_color_texture_->Create();
 
     // Allocate the render buffers at their initial size and check the status
@@ -2490,6 +2515,10 @@ bool GLES2DecoderImpl::InitializeShaderTranslator() {
       group_->max_fragment_uniform_vectors();
   resources.MaxDrawBuffers = 1;
 
+#if (ANGLE_SH_VERSION >= 110)
+  resources.FragmentPrecisionHigh = 1;
+#endif
+
   if (force_webgl_glsl_validation_) {
     resources.OES_standard_derivatives = derivatives_explicitly_enabled_;
   } else {
@@ -2542,14 +2571,14 @@ bool GLES2DecoderImpl::InitializeShaderTranslator() {
 
 bool GLES2DecoderImpl::GenBuffersHelper(GLsizei n, const GLuint* client_ids) {
   for (GLsizei ii = 0; ii < n; ++ii) {
-    if (GetBufferInfo(client_ids[ii])) {
+    if (GetBuffer(client_ids[ii])) {
       return false;
     }
   }
   scoped_array<GLuint> service_ids(new GLuint[n]);
   glGenBuffersARB(n, service_ids.get());
   for (GLsizei ii = 0; ii < n; ++ii) {
-    CreateBufferInfo(client_ids[ii], service_ids[ii]);
+    CreateBuffer(client_ids[ii], service_ids[ii]);
   }
   return true;
 }
@@ -2557,14 +2586,14 @@ bool GLES2DecoderImpl::GenBuffersHelper(GLsizei n, const GLuint* client_ids) {
 bool GLES2DecoderImpl::GenFramebuffersHelper(
     GLsizei n, const GLuint* client_ids) {
   for (GLsizei ii = 0; ii < n; ++ii) {
-    if (GetFramebufferInfo(client_ids[ii])) {
+    if (GetFramebuffer(client_ids[ii])) {
       return false;
     }
   }
   scoped_array<GLuint> service_ids(new GLuint[n]);
   glGenFramebuffersEXT(n, service_ids.get());
   for (GLsizei ii = 0; ii < n; ++ii) {
-    CreateFramebufferInfo(client_ids[ii], service_ids[ii]);
+    CreateFramebuffer(client_ids[ii], service_ids[ii]);
   }
   return true;
 }
@@ -2572,28 +2601,28 @@ bool GLES2DecoderImpl::GenFramebuffersHelper(
 bool GLES2DecoderImpl::GenRenderbuffersHelper(
     GLsizei n, const GLuint* client_ids) {
   for (GLsizei ii = 0; ii < n; ++ii) {
-    if (GetRenderbufferInfo(client_ids[ii])) {
+    if (GetRenderbuffer(client_ids[ii])) {
       return false;
     }
   }
   scoped_array<GLuint> service_ids(new GLuint[n]);
   glGenRenderbuffersEXT(n, service_ids.get());
   for (GLsizei ii = 0; ii < n; ++ii) {
-    CreateRenderbufferInfo(client_ids[ii], service_ids[ii]);
+    CreateRenderbuffer(client_ids[ii], service_ids[ii]);
   }
   return true;
 }
 
 bool GLES2DecoderImpl::GenTexturesHelper(GLsizei n, const GLuint* client_ids) {
   for (GLsizei ii = 0; ii < n; ++ii) {
-    if (GetTextureInfo(client_ids[ii])) {
+    if (GetTexture(client_ids[ii])) {
       return false;
     }
   }
   scoped_array<GLuint> service_ids(new GLuint[n]);
   glGenTextures(n, service_ids.get());
   for (GLsizei ii = 0; ii < n; ++ii) {
-    CreateTextureInfo(client_ids[ii], service_ids[ii]);
+    CreateTexture(client_ids[ii], service_ids[ii]);
   }
   return true;
 }
@@ -2601,13 +2630,13 @@ bool GLES2DecoderImpl::GenTexturesHelper(GLsizei n, const GLuint* client_ids) {
 void GLES2DecoderImpl::DeleteBuffersHelper(
     GLsizei n, const GLuint* client_ids) {
   for (GLsizei ii = 0; ii < n; ++ii) {
-    BufferManager::BufferInfo* buffer = GetBufferInfo(client_ids[ii]);
+    Buffer* buffer = GetBuffer(client_ids[ii]);
     if (buffer && !buffer->IsDeleted()) {
       state_.vertex_attrib_manager->Unbind(buffer);
       if (state_.bound_array_buffer == buffer) {
         state_.bound_array_buffer = NULL;
       }
-      RemoveBufferInfo(client_ids[ii]);
+      RemoveBuffer(client_ids[ii]);
     }
   }
 }
@@ -2618,8 +2647,8 @@ void GLES2DecoderImpl::DeleteFramebuffersHelper(
      features().chromium_framebuffer_multisample;
 
   for (GLsizei ii = 0; ii < n; ++ii) {
-    FramebufferManager::FramebufferInfo* framebuffer =
-        GetFramebufferInfo(client_ids[ii]);
+    Framebuffer* framebuffer =
+        GetFramebuffer(client_ids[ii]);
     if (framebuffer && !framebuffer->IsDeleted()) {
       if (framebuffer == state_.bound_draw_framebuffer) {
         state_.bound_draw_framebuffer = NULL;
@@ -2635,7 +2664,7 @@ void GLES2DecoderImpl::DeleteFramebuffersHelper(
         glBindFramebufferEXT(target, GetBackbufferServiceId());
       }
       OnFboChanged();
-      RemoveFramebufferInfo(client_ids[ii]);
+      RemoveFramebuffer(client_ids[ii]);
     }
   }
 }
@@ -2645,8 +2674,8 @@ void GLES2DecoderImpl::DeleteRenderbuffersHelper(
   bool supports_separate_framebuffer_binds =
      features().chromium_framebuffer_multisample;
   for (GLsizei ii = 0; ii < n; ++ii) {
-    RenderbufferManager::RenderbufferInfo* renderbuffer =
-        GetRenderbufferInfo(client_ids[ii]);
+    Renderbuffer* renderbuffer =
+        GetRenderbuffer(client_ids[ii]);
     if (renderbuffer && !renderbuffer->IsDeleted()) {
       if (state_.bound_renderbuffer == renderbuffer) {
         state_.bound_renderbuffer = NULL;
@@ -2668,7 +2697,7 @@ void GLES2DecoderImpl::DeleteRenderbuffersHelper(
         }
       }
       clear_state_dirty_ = true;
-      RemoveRenderbufferInfo(client_ids[ii]);
+      RemoveRenderbuffer(client_ids[ii]);
     }
   }
 }
@@ -2678,7 +2707,7 @@ void GLES2DecoderImpl::DeleteTexturesHelper(
   bool supports_separate_framebuffer_binds =
      features().chromium_framebuffer_multisample;
   for (GLsizei ii = 0; ii < n; ++ii) {
-    TextureManager::TextureInfo* texture = GetTextureInfo(client_ids[ii]);
+    Texture* texture = GetTexture(client_ids[ii]);
     if (texture && !texture->IsDeleted()) {
       if (texture->IsAttachedToFramebuffer()) {
         clear_state_dirty_ = true;
@@ -2711,7 +2740,7 @@ void GLES2DecoderImpl::DeleteTexturesHelper(
         ReleaseIOSurfaceForTexture(service_id);
       }
 #endif
-      RemoveTextureInfo(client_ids[ii]);
+      RemoveTexture(client_ids[ii]);
     }
   }
 }
@@ -2760,7 +2789,7 @@ void GLES2DecoderImpl::ReleaseCurrent() {
 }
 
 void GLES2DecoderImpl::RestoreCurrentRenderbufferBindings() {
-  RenderbufferManager::RenderbufferInfo* renderbuffer =
+  Renderbuffer* renderbuffer =
       GetRenderbufferInfoForTarget(GL_RENDERBUFFER);
   glBindRenderbufferEXT(
       GL_RENDERBUFFER, renderbuffer ? renderbuffer->service_id() : 0);
@@ -2768,7 +2797,7 @@ void GLES2DecoderImpl::RestoreCurrentRenderbufferBindings() {
 
 static void RebindCurrentFramebuffer(
     GLenum target,
-    FramebufferManager::FramebufferInfo* info,
+    Framebuffer* info,
     GLuint back_buffer_service_id) {
   GLuint framebuffer_id = info ? info->service_id() : 0;
 
@@ -2814,7 +2843,7 @@ void GLES2DecoderImpl::RestoreCurrentTexture2DBindings() {
 }
 
 bool GLES2DecoderImpl::CheckFramebufferValid(
-    FramebufferManager::FramebufferInfo* framebuffer,
+    Framebuffer* framebuffer,
     GLenum target, const char* func_name) {
   if (!framebuffer) {
     if (backbuffer_needs_clear_bits_) {
@@ -2890,10 +2919,10 @@ bool GLES2DecoderImpl::CheckBoundFramebuffersValid(const char* func_name) {
 }
 
 gfx::Size GLES2DecoderImpl::GetBoundReadFrameBufferSize() {
-  FramebufferManager::FramebufferInfo* framebuffer =
+  Framebuffer* framebuffer =
       GetFramebufferInfoForTarget(GL_READ_FRAMEBUFFER_EXT);
   if (framebuffer != NULL) {
-    const FramebufferManager::FramebufferInfo::Attachment* attachment =
+    const Framebuffer::Attachment* attachment =
         framebuffer->GetAttachment(GL_COLOR_ATTACHMENT0);
     if (attachment) {
       return gfx::Size(attachment->width(), attachment->height());
@@ -2907,7 +2936,7 @@ gfx::Size GLES2DecoderImpl::GetBoundReadFrameBufferSize() {
 }
 
 GLenum GLES2DecoderImpl::GetBoundReadFrameBufferInternalFormat() {
-  FramebufferManager::FramebufferInfo* framebuffer =
+  Framebuffer* framebuffer =
       GetFramebufferInfoForTarget(GL_READ_FRAMEBUFFER_EXT);
   if (framebuffer != NULL) {
     return framebuffer->GetColorAttachmentFormat();
@@ -2919,7 +2948,7 @@ GLenum GLES2DecoderImpl::GetBoundReadFrameBufferInternalFormat() {
 }
 
 GLenum GLES2DecoderImpl::GetBoundDrawFrameBufferInternalFormat() {
-  FramebufferManager::FramebufferInfo* framebuffer =
+  Framebuffer* framebuffer =
       GetFramebufferInfoForTarget(GL_DRAW_FRAMEBUFFER_EXT);
   if (framebuffer != NULL) {
     return framebuffer->GetColorAttachmentFormat();
@@ -2978,6 +3007,11 @@ void GLES2DecoderImpl::SetMsgCallback(const MsgCallback& callback) {
   msg_callback_ = callback;
 }
 
+void GLES2DecoderImpl::SetWaitSyncPointCallback(
+    const WaitSyncPointCallback& callback) {
+  wait_sync_point_callback_ = callback;
+}
+
 void GLES2DecoderImpl::SetStreamTextureManager(StreamTextureManager* manager) {
   stream_texture_manager_ = manager;
 }
@@ -2994,8 +3028,8 @@ void GLES2DecoderImpl::SetAsyncPixelTransferDelegate(
 
 bool GLES2DecoderImpl::GetServiceTextureId(uint32 client_texture_id,
                                            uint32* service_texture_id) {
-  TextureManager::TextureInfo* texture =
-      texture_manager()->GetTextureInfo(client_texture_id);
+  Texture* texture =
+      texture_manager()->GetTexture(client_texture_id);
   if (texture) {
     *service_texture_id = texture->service_id();
     return true;
@@ -3166,7 +3200,7 @@ bool GLES2DecoderImpl::SetParent(GLES2Decoder* new_parent,
     GLuint service_id = offscreen_saved_color_texture_->id();
     GLuint client_id = 0;
     if (parent_->texture_manager()->GetClientId(service_id, &client_id)) {
-      parent_->texture_manager()->RemoveTextureInfo(client_id);
+      parent_->texture_manager()->RemoveTexture(client_id);
     }
   }
 
@@ -3186,13 +3220,13 @@ bool GLES2DecoderImpl::SetParent(GLES2Decoder* new_parent,
     GLuint service_id = offscreen_saved_color_texture_->id();
 
     // Replace texture info when ID is already in use by parent.
-    if (new_parent_impl->texture_manager()->GetTextureInfo(
+    if (new_parent_impl->texture_manager()->GetTexture(
         new_parent_texture_id))
-      new_parent_impl->texture_manager()->RemoveTextureInfo(
+      new_parent_impl->texture_manager()->RemoveTexture(
           new_parent_texture_id);
 
     offscreen_saved_color_texture_info_ =
-        new_parent_impl->CreateTextureInfo(new_parent_texture_id, service_id);
+        new_parent_impl->CreateTexture(new_parent_texture_id, service_id);
     offscreen_saved_color_texture_info_->SetNotOwned();
     new_parent_impl->texture_manager()->
        SetInfoTarget(offscreen_saved_color_texture_info_, GL_TEXTURE_2D);
@@ -3353,7 +3387,7 @@ bool GLES2DecoderImpl::ResizeOffscreenFrameBuffer(const gfx::Size& size) {
 }
 
 error::Error GLES2DecoderImpl::HandleResizeCHROMIUM(
-    uint32 immediate_data_size, const gles2::ResizeCHROMIUM& c) {
+    uint32 immediate_data_size, const cmds::ResizeCHROMIUM& c) {
   if (!offscreen_target_frame_buffer_.get() && surface_->DeferDraws())
     return error::kDeferCommandUntilLater;
 
@@ -3423,10 +3457,10 @@ error::Error GLES2DecoderImpl::DoCommand(
           (arg_count - info_arg_count) * sizeof(CommandBufferEntry);  // NOLINT
       switch (command) {
         #define GLES2_CMD_OP(name)                                 \
-          case name::kCmdId:                                       \
+          case cmds::name::kCmdId:                                 \
             result = Handle ## name(                               \
                 immediate_data_size,                               \
-                *static_cast<const name*>(cmd_data));              \
+                *static_cast<const gles2::cmds::name*>(cmd_data)); \
             break;                                                 \
 
         GLES2_COMMAND_LIST(GLES2_CMD_OP)
@@ -3454,28 +3488,28 @@ error::Error GLES2DecoderImpl::DoCommand(
   return result;
 }
 
-void GLES2DecoderImpl::RemoveBufferInfo(GLuint client_id) {
-  buffer_manager()->RemoveBufferInfo(client_id);
+void GLES2DecoderImpl::RemoveBuffer(GLuint client_id) {
+  buffer_manager()->RemoveBuffer(client_id);
 }
 
 bool GLES2DecoderImpl::CreateProgramHelper(GLuint client_id) {
-  if (GetProgramInfo(client_id)) {
+  if (GetProgram(client_id)) {
     return false;
   }
   GLuint service_id = glCreateProgram();
   if (service_id != 0) {
-    CreateProgramInfo(client_id, service_id);
+    CreateProgram(client_id, service_id);
   }
   return true;
 }
 
 bool GLES2DecoderImpl::CreateShaderHelper(GLenum type, GLuint client_id) {
-  if (GetShaderInfo(client_id)) {
+  if (GetShader(client_id)) {
     return false;
   }
   GLuint service_id = glCreateShader(type);
   if (service_id != 0) {
-    CreateShaderInfo(client_id, service_id, type);
+    CreateShader(client_id, service_id, type);
   }
   return true;
 }
@@ -3502,10 +3536,10 @@ void GLES2DecoderImpl::DoActiveTexture(GLenum texture_unit) {
 }
 
 void GLES2DecoderImpl::DoBindBuffer(GLenum target, GLuint client_id) {
-  BufferManager::BufferInfo* info = NULL;
+  Buffer* info = NULL;
   GLuint service_id = 0;
   if (client_id != 0) {
-    info = GetBufferInfo(client_id);
+    info = GetBuffer(client_id);
     if (!info) {
       if (!group_->bind_generates_resource()) {
         LOG(ERROR) << "glBindBuffer: id not generated by glGenBuffers";
@@ -3515,8 +3549,8 @@ void GLES2DecoderImpl::DoBindBuffer(GLenum target, GLuint client_id) {
 
       // It's a new id so make a buffer info for it.
       glGenBuffersARB(1, &service_id);
-      CreateBufferInfo(client_id, service_id);
-      info = GetBufferInfo(client_id);
+      CreateBuffer(client_id, service_id);
+      info = GetBuffer(client_id);
       IdAllocatorInterface* id_allocator =
           group_->GetIdAllocator(id_namespaces::kBuffers);
       id_allocator->MarkAsUsed(client_id);
@@ -3551,7 +3585,7 @@ bool GLES2DecoderImpl::BoundFramebufferHasColorAttachmentWithAlpha() {
 }
 
 bool GLES2DecoderImpl::BoundFramebufferHasDepthAttachment() {
-  FramebufferManager::FramebufferInfo* framebuffer =
+  Framebuffer* framebuffer =
       GetFramebufferInfoForTarget(GL_DRAW_FRAMEBUFFER_EXT);
   if (framebuffer) {
     return framebuffer->HasDepthAttachment();
@@ -3563,7 +3597,7 @@ bool GLES2DecoderImpl::BoundFramebufferHasDepthAttachment() {
 }
 
 bool GLES2DecoderImpl::BoundFramebufferHasStencilAttachment() {
-  FramebufferManager::FramebufferInfo* framebuffer =
+  Framebuffer* framebuffer =
       GetFramebufferInfoForTarget(GL_DRAW_FRAMEBUFFER_EXT);
   if (framebuffer) {
     return framebuffer->HasStencilAttachment();
@@ -3605,17 +3639,45 @@ GLuint GLES2DecoderImpl::GetBackbufferServiceId() const {
 }
 
 void GLES2DecoderImpl::RestoreState() const {
-  // TODO: Restore multisample bindings
+  // Restore the Framebuffer first because of bugs in Intel drivers.
+  // Intel drivers incorrectly clip the viewport settings to
+  // the size of the current framebuffer object.
+  RestoreFramebufferBindings();
+  state_.RestoreState();
+}
+
+void GLES2DecoderImpl::RestoreFramebufferBindings() const {
   GLuint service_id = state_.bound_draw_framebuffer ?
       state_.bound_draw_framebuffer->service_id() :
       GetBackbufferServiceId();
-  glBindFramebufferEXT(GL_FRAMEBUFFER, service_id);
+  if (!features().chromium_framebuffer_multisample) {
+    glBindFramebufferEXT(GL_FRAMEBUFFER, service_id);
+  } else {
+    glBindFramebufferEXT(GL_DRAW_FRAMEBUFFER, service_id);
+    service_id = state_.bound_read_framebuffer ?
+        state_.bound_read_framebuffer->service_id() :
+        GetBackbufferServiceId();
+    glBindFramebufferEXT(GL_READ_FRAMEBUFFER, service_id);
+  }
   OnFboChanged();
 
-  // Restore gl states after bind framebuffer, to ensure the gl states
-  // applied to right FBO
-  // gman: There is no framebuffer state so this is a bug in the driver
-  state_.RestoreState();
+}
+
+void GLES2DecoderImpl::RestoreTextureState(unsigned service_id) const {
+  GLuint client_id = 0;
+  if (texture_manager()->GetClientId(service_id, &client_id)) {
+    Texture* texture = GetTexture(client_id);
+    glBindTexture(GL_TEXTURE_2D, service_id);
+    glTexParameteri(
+        GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, texture->wrap_s());
+    glTexParameteri(
+        GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, texture->wrap_t());
+    glTexParameteri(
+        GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, texture->min_filter());
+    glTexParameteri(
+        GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, texture->mag_filter());
+    RestoreTextureUnitBindings(state_.active_texture_unit);
+  }
 }
 
 void GLES2DecoderImpl::OnFboChanged() const {
@@ -3625,10 +3687,10 @@ void GLES2DecoderImpl::OnFboChanged() const {
 }
 
 void GLES2DecoderImpl::DoBindFramebuffer(GLenum target, GLuint client_id) {
-  FramebufferManager::FramebufferInfo* info = NULL;
+  Framebuffer* info = NULL;
   GLuint service_id = 0;
   if (client_id != 0) {
-    info = GetFramebufferInfo(client_id);
+    info = GetFramebuffer(client_id);
     if (!info) {
       if (!group_->bind_generates_resource()) {
          LOG(ERROR)
@@ -3639,8 +3701,8 @@ void GLES2DecoderImpl::DoBindFramebuffer(GLenum target, GLuint client_id) {
 
       // It's a new id so make a framebuffer info for it.
       glGenFramebuffersEXT(1, &service_id);
-      CreateFramebufferInfo(client_id, service_id);
-      info = GetFramebufferInfo(client_id);
+      CreateFramebuffer(client_id, service_id);
+      info = GetFramebuffer(client_id);
       IdAllocatorInterface* id_allocator =
           group_->GetIdAllocator(id_namespaces::kFramebuffers);
       id_allocator->MarkAsUsed(client_id);
@@ -3671,10 +3733,10 @@ void GLES2DecoderImpl::DoBindFramebuffer(GLenum target, GLuint client_id) {
 }
 
 void GLES2DecoderImpl::DoBindRenderbuffer(GLenum target, GLuint client_id) {
-  RenderbufferManager::RenderbufferInfo* info = NULL;
+  Renderbuffer* info = NULL;
   GLuint service_id = 0;
   if (client_id != 0) {
-    info = GetRenderbufferInfo(client_id);
+    info = GetRenderbuffer(client_id);
     if (!info) {
       if (!group_->bind_generates_resource()) {
         LOG(ERROR)
@@ -3685,8 +3747,8 @@ void GLES2DecoderImpl::DoBindRenderbuffer(GLenum target, GLuint client_id) {
 
       // It's a new id so make a renderbuffer info for it.
       glGenRenderbuffersEXT(1, &service_id);
-      CreateRenderbufferInfo(client_id, service_id);
-      info = GetRenderbufferInfo(client_id);
+      CreateRenderbuffer(client_id, service_id);
+      info = GetRenderbuffer(client_id);
       IdAllocatorInterface* id_allocator =
           group_->GetIdAllocator(id_namespaces::kRenderbuffers);
       id_allocator->MarkAsUsed(client_id);
@@ -3701,10 +3763,10 @@ void GLES2DecoderImpl::DoBindRenderbuffer(GLenum target, GLuint client_id) {
 }
 
 void GLES2DecoderImpl::DoBindTexture(GLenum target, GLuint client_id) {
-  TextureManager::TextureInfo* info = NULL;
+  Texture* info = NULL;
   GLuint service_id = 0;
   if (client_id != 0) {
-    info = GetTextureInfo(client_id);
+    info = GetTexture(client_id);
     if (!info) {
       if (!group_->bind_generates_resource()) {
          LOG(ERROR) << "glBindTexture: id not generated by glGenTextures";
@@ -3715,8 +3777,8 @@ void GLES2DecoderImpl::DoBindTexture(GLenum target, GLuint client_id) {
       // It's a new id so make a texture info for it.
       glGenTextures(1, &service_id);
       DCHECK_NE(0u, service_id);
-      CreateTextureInfo(client_id, service_id);
-      info = GetTextureInfo(client_id);
+      CreateTexture(client_id, service_id);
+      info = GetTexture(client_id);
       IdAllocatorInterface* id_allocator =
           group_->GetIdAllocator(id_namespaces::kTextures);
       id_allocator->MarkAsUsed(client_id);
@@ -3786,7 +3848,7 @@ void GLES2DecoderImpl::DoDisableVertexAttribArray(GLuint index) {
 void GLES2DecoderImpl::DoDiscardFramebufferEXT(GLenum target,
                                                GLsizei numAttachments,
                                                const GLenum* attachments) {
-  FramebufferManager::FramebufferInfo* framebuffer =
+  Framebuffer* framebuffer =
       GetFramebufferInfoForTarget(GL_FRAMEBUFFER);
 
   // Validates the attachments. If one of them fails
@@ -3840,7 +3902,7 @@ void GLES2DecoderImpl::DoEnableVertexAttribArray(GLuint index) {
 }
 
 void GLES2DecoderImpl::DoGenerateMipmap(GLenum target) {
-  TextureManager::TextureInfo* info = GetTextureInfoForTarget(target);
+  Texture* info = GetTextureInfoForTarget(target);
   if (!info ||
       !texture_manager()->CanGenerateMipmaps(info)) {
     SetGLError(GL_INVALID_OPERATION,
@@ -4044,7 +4106,7 @@ bool GLES2DecoderImpl::GetHelper(
     // case GL_DRAW_FRAMEBUFFER_BINDING_EXT: (same as GL_FRAMEBUFFER_BINDING)
       *num_written = 1;
       if (params) {
-        FramebufferManager::FramebufferInfo* framebuffer =
+        Framebuffer* framebuffer =
             GetFramebufferInfoForTarget(GL_FRAMEBUFFER);
         if (framebuffer) {
           GLuint client_id = 0;
@@ -4059,7 +4121,7 @@ bool GLES2DecoderImpl::GetHelper(
     case GL_READ_FRAMEBUFFER_BINDING_EXT:
       *num_written = 1;
       if (params) {
-        FramebufferManager::FramebufferInfo* framebuffer =
+        Framebuffer* framebuffer =
             GetFramebufferInfoForTarget(GL_READ_FRAMEBUFFER_EXT);
         if (framebuffer) {
           GLuint client_id = 0;
@@ -4074,7 +4136,7 @@ bool GLES2DecoderImpl::GetHelper(
     case GL_RENDERBUFFER_BINDING:
       *num_written = 1;
       if (params) {
-        RenderbufferManager::RenderbufferInfo* renderbuffer =
+        Renderbuffer* renderbuffer =
             GetRenderbufferInfoForTarget(GL_RENDERBUFFER);
         if (renderbuffer) {
           GLuint client_id = 0;
@@ -4243,7 +4305,7 @@ void GLES2DecoderImpl::DoGetIntegerv(GLenum pname, GLint* params) {
 
 void GLES2DecoderImpl::DoGetProgramiv(
     GLuint program_id, GLenum pname, GLint* params) {
-  ProgramManager::ProgramInfo* info = GetProgramInfoNotShader(
+  Program* info = GetProgramInfoNotShader(
       program_id, "glGetProgramiv");
   if (!info) {
     return;
@@ -4265,7 +4327,7 @@ void GLES2DecoderImpl::DoBindAttribLocation(
     SetGLError(GL_INVALID_VALUE, "glBindAttribLocation", "index out of range");
     return;
   }
-  ProgramManager::ProgramInfo* info = GetProgramInfoNotShader(
+  Program* info = GetProgramInfoNotShader(
       program, "glBindAttribLocation");
   if (!info) {
     return;
@@ -4275,7 +4337,7 @@ void GLES2DecoderImpl::DoBindAttribLocation(
 }
 
 error::Error GLES2DecoderImpl::HandleBindAttribLocation(
-    uint32 immediate_data_size, const gles2::BindAttribLocation& c) {
+    uint32 immediate_data_size, const cmds::BindAttribLocation& c) {
   GLuint program = static_cast<GLuint>(c.program);
   GLuint index = static_cast<GLuint>(c.index);
   uint32 name_size = c.data_size;
@@ -4290,7 +4352,7 @@ error::Error GLES2DecoderImpl::HandleBindAttribLocation(
 }
 
 error::Error GLES2DecoderImpl::HandleBindAttribLocationImmediate(
-    uint32 immediate_data_size, const gles2::BindAttribLocationImmediate& c) {
+    uint32 immediate_data_size, const cmds::BindAttribLocationImmediate& c) {
   GLuint program = static_cast<GLuint>(c.program);
   GLuint index = static_cast<GLuint>(c.index);
   uint32 name_size = c.data_size;
@@ -4305,7 +4367,7 @@ error::Error GLES2DecoderImpl::HandleBindAttribLocationImmediate(
 }
 
 error::Error GLES2DecoderImpl::HandleBindAttribLocationBucket(
-    uint32 immediate_data_size, const gles2::BindAttribLocationBucket& c) {
+    uint32 immediate_data_size, const cmds::BindAttribLocationBucket& c) {
   GLuint program = static_cast<GLuint>(c.program);
   GLuint index = static_cast<GLuint>(c.index);
   Bucket* bucket = GetBucket(c.name_bucket_id);
@@ -4339,7 +4401,7 @@ void GLES2DecoderImpl::DoBindUniformLocationCHROMIUM(
                "glBindUniformLocationCHROMIUM", "location out of range");
     return;
   }
-  ProgramManager::ProgramInfo* info = GetProgramInfoNotShader(
+  Program* info = GetProgramInfoNotShader(
       program, "glBindUniformLocationCHROMIUM");
   if (!info) {
     return;
@@ -4351,7 +4413,7 @@ void GLES2DecoderImpl::DoBindUniformLocationCHROMIUM(
 }
 
 error::Error GLES2DecoderImpl::HandleBindUniformLocationCHROMIUM(
-    uint32 immediate_data_size, const gles2::BindUniformLocationCHROMIUM& c) {
+    uint32 immediate_data_size, const cmds::BindUniformLocationCHROMIUM& c) {
   GLuint program = static_cast<GLuint>(c.program);
   GLint location = static_cast<GLint>(c.location);
   uint32 name_size = c.data_size;
@@ -4367,7 +4429,7 @@ error::Error GLES2DecoderImpl::HandleBindUniformLocationCHROMIUM(
 
 error::Error GLES2DecoderImpl::HandleBindUniformLocationCHROMIUMImmediate(
     uint32 immediate_data_size,
-    const gles2::BindUniformLocationCHROMIUMImmediate& c) {
+    const cmds::BindUniformLocationCHROMIUMImmediate& c) {
   GLuint program = static_cast<GLuint>(c.program);
   GLint location = static_cast<GLint>(c.location);
   uint32 name_size = c.data_size;
@@ -4383,7 +4445,7 @@ error::Error GLES2DecoderImpl::HandleBindUniformLocationCHROMIUMImmediate(
 
 error::Error GLES2DecoderImpl::HandleBindUniformLocationCHROMIUMBucket(
     uint32 immediate_data_size,
-    const gles2::BindUniformLocationCHROMIUMBucket& c) {
+    const cmds::BindUniformLocationCHROMIUMBucket& c) {
   GLuint program = static_cast<GLuint>(c.program);
   GLint location = static_cast<GLint>(c.location);
   Bucket* bucket = GetBucket(c.name_bucket_id);
@@ -4399,10 +4461,10 @@ error::Error GLES2DecoderImpl::HandleBindUniformLocationCHROMIUMBucket(
 }
 
 error::Error GLES2DecoderImpl::HandleDeleteShader(
-    uint32 immediate_data_size, const gles2::DeleteShader& c) {
+    uint32 immediate_data_size, const cmds::DeleteShader& c) {
   GLuint client_id = c.shader;
   if (client_id) {
-    ShaderManager::ShaderInfo* info = GetShaderInfo(client_id);
+    Shader* info = GetShader(client_id);
     if (info) {
       if (!info->IsDeleted()) {
         glDeleteShader(info->service_id());
@@ -4416,10 +4478,10 @@ error::Error GLES2DecoderImpl::HandleDeleteShader(
 }
 
 error::Error GLES2DecoderImpl::HandleDeleteProgram(
-    uint32 immediate_data_size, const gles2::DeleteProgram& c) {
+    uint32 immediate_data_size, const cmds::DeleteProgram& c) {
   GLuint client_id = c.program;
   if (client_id) {
-    ProgramManager::ProgramInfo* info = GetProgramInfo(client_id);
+    Program* info = GetProgram(client_id);
     if (info) {
       if (!info->IsDeleted()) {
         program_manager()->MarkAsDeleted(shader_manager(), info);
@@ -4440,7 +4502,7 @@ void GLES2DecoderImpl::DoDeleteSharedIdsCHROMIUM(
 }
 
 error::Error GLES2DecoderImpl::HandleDeleteSharedIdsCHROMIUM(
-    uint32 immediate_data_size, const gles2::DeleteSharedIdsCHROMIUM& c) {
+    uint32 immediate_data_size, const cmds::DeleteSharedIdsCHROMIUM& c) {
   GLuint namespace_id = static_cast<GLuint>(c.namespace_id);
   GLsizei n = static_cast<GLsizei>(c.n);
   uint32 data_size;
@@ -4476,7 +4538,7 @@ void GLES2DecoderImpl::DoGenSharedIdsCHROMIUM(
 }
 
 error::Error GLES2DecoderImpl::HandleGenSharedIdsCHROMIUM(
-    uint32 immediate_data_size, const gles2::GenSharedIdsCHROMIUM& c) {
+    uint32 immediate_data_size, const cmds::GenSharedIdsCHROMIUM& c) {
   GLuint namespace_id = static_cast<GLuint>(c.namespace_id);
   GLuint id_offset = static_cast<GLuint>(c.id_offset);
   GLsizei n = static_cast<GLsizei>(c.n);
@@ -4514,7 +4576,7 @@ void GLES2DecoderImpl::DoRegisterSharedIdsCHROMIUM(
 }
 
 error::Error GLES2DecoderImpl::HandleRegisterSharedIdsCHROMIUM(
-    uint32 immediate_data_size, const gles2::RegisterSharedIdsCHROMIUM& c) {
+    uint32 immediate_data_size, const cmds::RegisterSharedIdsCHROMIUM& c) {
   GLuint namespace_id = static_cast<GLuint>(c.namespace_id);
   GLsizei n = static_cast<GLsizei>(c.n);
   uint32 data_size;
@@ -4550,7 +4612,7 @@ error::Error GLES2DecoderImpl::DoClear(GLbitfield mask) {
 void GLES2DecoderImpl::DoFramebufferRenderbuffer(
     GLenum target, GLenum attachment, GLenum renderbuffertarget,
     GLuint client_renderbuffer_id) {
-  FramebufferManager::FramebufferInfo* framebuffer_info =
+  Framebuffer* framebuffer_info =
       GetFramebufferInfoForTarget(target);
   if (!framebuffer_info) {
     SetGLError(GL_INVALID_OPERATION,
@@ -4558,9 +4620,9 @@ void GLES2DecoderImpl::DoFramebufferRenderbuffer(
     return;
   }
   GLuint service_id = 0;
-  RenderbufferManager::RenderbufferInfo* info = NULL;
+  Renderbuffer* info = NULL;
   if (client_renderbuffer_id) {
-    info = GetRenderbufferInfo(client_renderbuffer_id);
+    info = GetRenderbuffer(client_renderbuffer_id);
     if (!info) {
       SetGLError(GL_INVALID_OPERATION,
                  "glFramebufferRenderbuffer", "unknown renderbuffer");
@@ -4620,7 +4682,7 @@ void GLES2DecoderImpl::DoSampleCoverage(GLclampf value, GLboolean invert) {
 
 // Assumes framebuffer is complete.
 void GLES2DecoderImpl::ClearUnclearedAttachments(
-    GLenum target, FramebufferManager::FramebufferInfo* info) {
+    GLenum target, Framebuffer* info) {
   if (target == GL_READ_FRAMEBUFFER_EXT) {
     // bind this to the DRAW point, clear then bind back to READ
     // TODO(gman): I don't think there is any guarantee that an FBO that
@@ -4663,7 +4725,7 @@ void GLES2DecoderImpl::ClearUnclearedAttachments(
 
   if (target == GL_READ_FRAMEBUFFER_EXT) {
     glBindFramebufferEXT(GL_READ_FRAMEBUFFER_EXT, info->service_id());
-    FramebufferManager::FramebufferInfo* framebuffer =
+    Framebuffer* framebuffer =
         GetFramebufferInfoForTarget(GL_DRAW_FRAMEBUFFER_EXT);
     GLuint service_id =
         framebuffer ? framebuffer->service_id() : GetBackbufferServiceId();
@@ -4684,7 +4746,7 @@ void GLES2DecoderImpl::RestoreClearState() {
 }
 
 GLenum GLES2DecoderImpl::DoCheckFramebufferStatus(GLenum target) {
-  FramebufferManager::FramebufferInfo* framebuffer =
+  Framebuffer* framebuffer =
       GetFramebufferInfoForTarget(target);
   if (!framebuffer) {
     return GL_FRAMEBUFFER_COMPLETE;
@@ -4699,7 +4761,7 @@ GLenum GLES2DecoderImpl::DoCheckFramebufferStatus(GLenum target) {
 void GLES2DecoderImpl::DoFramebufferTexture2D(
     GLenum target, GLenum attachment, GLenum textarget,
     GLuint client_texture_id, GLint level) {
-  FramebufferManager::FramebufferInfo* framebuffer_info =
+  Framebuffer* framebuffer_info =
       GetFramebufferInfoForTarget(target);
   if (!framebuffer_info) {
     SetGLError(GL_INVALID_OPERATION,
@@ -4707,9 +4769,9 @@ void GLES2DecoderImpl::DoFramebufferTexture2D(
     return;
   }
   GLuint service_id = 0;
-  TextureManager::TextureInfo* info = NULL;
+  Texture* info = NULL;
   if (client_texture_id) {
-    info = GetTextureInfo(client_texture_id);
+    info = GetTexture(client_texture_id);
     if (!info) {
       SetGLError(GL_INVALID_OPERATION,
                  "glFramebufferTexture2D", "unknown texture");
@@ -4737,7 +4799,7 @@ void GLES2DecoderImpl::DoFramebufferTexture2D(
 
 void GLES2DecoderImpl::DoGetFramebufferAttachmentParameteriv(
     GLenum target, GLenum attachment, GLenum pname, GLint* params) {
-  FramebufferManager::FramebufferInfo* framebuffer_info =
+  Framebuffer* framebuffer_info =
       GetFramebufferInfoForTarget(target);
   if (!framebuffer_info) {
     SetGLError(GL_INVALID_OPERATION,
@@ -4768,7 +4830,7 @@ void GLES2DecoderImpl::DoGetFramebufferAttachmentParameteriv(
 
 void GLES2DecoderImpl::DoGetRenderbufferParameteriv(
     GLenum target, GLenum pname, GLint* params) {
-  RenderbufferManager::RenderbufferInfo* renderbuffer =
+  Renderbuffer* renderbuffer =
       GetRenderbufferInfoForTarget(GL_RENDERBUFFER);
   if (!renderbuffer) {
     SetGLError(GL_INVALID_OPERATION,
@@ -4821,7 +4883,7 @@ void GLES2DecoderImpl::DoRenderbufferStorageMultisample(
     return;
   }
 
-  RenderbufferManager::RenderbufferInfo* renderbuffer =
+  Renderbuffer* renderbuffer =
       GetRenderbufferInfoForTarget(GL_RENDERBUFFER);
   if (!renderbuffer) {
     SetGLError(GL_INVALID_OPERATION,
@@ -4878,7 +4940,7 @@ void GLES2DecoderImpl::DoRenderbufferStorageMultisample(
 
 void GLES2DecoderImpl::DoRenderbufferStorage(
   GLenum target, GLenum internalformat, GLsizei width, GLsizei height) {
-  RenderbufferManager::RenderbufferInfo* renderbuffer =
+  Renderbuffer* renderbuffer =
       GetRenderbufferInfoForTarget(GL_RENDERBUFFER);
   if (!renderbuffer) {
     SetGLError(GL_INVALID_OPERATION,
@@ -4923,7 +4985,7 @@ void GLES2DecoderImpl::DoRenderbufferStorage(
 
 void GLES2DecoderImpl::DoLinkProgram(GLuint program) {
   TRACE_EVENT0("gpu", "GLES2DecoderImpl::DoLinkProgram");
-  ProgramManager::ProgramInfo* info = GetProgramInfoNotShader(
+  Program* info = GetProgramInfoNotShader(
       program, "glLinkProgram");
   if (!info) {
     return;
@@ -4951,7 +5013,7 @@ void GLES2DecoderImpl::DoLinkProgram(GLuint program) {
 
 void GLES2DecoderImpl::DoTexParameterf(
     GLenum target, GLenum pname, GLfloat param) {
-  TextureManager::TextureInfo* info = GetTextureInfoForTarget(target);
+  Texture* info = GetTextureInfoForTarget(target);
   if (!info) {
     SetGLError(GL_INVALID_VALUE, "glTexParameterf", "unknown texture");
     return;
@@ -4969,7 +5031,7 @@ void GLES2DecoderImpl::DoTexParameterf(
 
 void GLES2DecoderImpl::DoTexParameteri(
     GLenum target, GLenum pname, GLint param) {
-  TextureManager::TextureInfo* info = GetTextureInfoForTarget(target);
+  Texture* info = GetTextureInfoForTarget(target);
   if (!info) {
     SetGLError(GL_INVALID_VALUE, "glTexParameteri", "unknown texture");
     return;
@@ -4990,7 +5052,7 @@ void GLES2DecoderImpl::DoTexParameteri(
 
 void GLES2DecoderImpl::DoTexParameterfv(
     GLenum target, GLenum pname, const GLfloat* params) {
-  TextureManager::TextureInfo* info = GetTextureInfoForTarget(target);
+  Texture* info = GetTextureInfoForTarget(target);
   if (!info) {
     SetGLError(GL_INVALID_VALUE, "glTexParameterfv", "unknown texture");
     return;
@@ -5008,7 +5070,7 @@ void GLES2DecoderImpl::DoTexParameterfv(
 
 void GLES2DecoderImpl::DoTexParameteriv(
   GLenum target, GLenum pname, const GLint* params) {
-  TextureManager::TextureInfo* info = GetTextureInfoForTarget(target);
+  Texture* info = GetTextureInfoForTarget(target);
   if (!info) {
     SetGLError(GL_INVALID_VALUE, "glTexParameteriv", "unknown texture");
     return;
@@ -5170,7 +5232,7 @@ bool GLES2DecoderImpl::PrepForSetUniformByLocation(
     return false;
   }
   GLint array_index = -1;
-  const ProgramManager::ProgramInfo::UniformInfo* info =
+  const Program::UniformInfo* info =
       state_.current_program->GetUniformInfoByFakeLocation(
           fake_location, real_location, &array_index);
   if (!info) {
@@ -5399,7 +5461,7 @@ void GLES2DecoderImpl::DoUniformMatrix4fv(
 
 void GLES2DecoderImpl::DoUseProgram(GLuint program) {
   GLuint service_id = 0;
-  ProgramManager::ProgramInfo* info = NULL;
+  Program* info = NULL;
   if (program) {
     info = GetProgramInfoNotShader(program, "glUseProgram");
     if (!info) {
@@ -5442,7 +5504,7 @@ uint32 GLES2DecoderImpl::GetGLError() {
   return error;
 }
 
-GLenum GLES2DecoderImpl::PeekGLError() {
+unsigned GLES2DecoderImpl::PeekGLError() {
   GLenum error = glGetError();
   if (error != GL_NO_ERROR) {
     SetGLError(error, "", "");
@@ -5451,7 +5513,7 @@ GLenum GLES2DecoderImpl::PeekGLError() {
 }
 
 void GLES2DecoderImpl::SetGLError(
-    GLenum error, const char* function_name, const char* msg) {
+    unsigned error, const char* function_name, const char* msg) {
   if (msg) {
     last_error_ = msg;
     LogMessage(GetLogPrefix() + ": " + std::string("GL ERROR :") +
@@ -5462,17 +5524,17 @@ void GLES2DecoderImpl::SetGLError(
 }
 
 void GLES2DecoderImpl::SetGLErrorInvalidEnum(
-    const char* function_name, GLenum value, const char* label) {
+    const char* function_name, unsigned value, const char* label) {
   SetGLError(GL_INVALID_ENUM, function_name,
              (std::string(label) + " was " +
               GLES2Util::GetStringEnum(value)).c_str());
 }
 
 void GLES2DecoderImpl::SetGLErrorInvalidParam(
-    GLenum error,
+    unsigned error,
     const char* function_name,
-    GLenum pname,
-    GLint param) {
+    unsigned pname,
+    int param) {
   if (error == GL_INVALID_ENUM) {
     SetGLError(
         GL_INVALID_ENUM, function_name,
@@ -5525,9 +5587,9 @@ void GLES2DecoderImpl::PerformanceWarning(const std::string& msg) {
 }
 
 void GLES2DecoderImpl::ForceCompileShaderIfPending(
-    ShaderManager::ShaderInfo* info) {
+    Shader* info) {
   if (info->compilation_status() ==
-      ShaderManager::ShaderInfo::PENDING_DEFERRED_COMPILE) {
+      Shader::PENDING_DEFERRED_COMPILE) {
     ShaderTranslator* translator = NULL;
     if (use_shader_translator_) {
       translator = info->shader_type() == GL_VERTEX_SHADER ?
@@ -5566,17 +5628,17 @@ bool GLES2DecoderImpl::SetBlackTextureForNonRenderableTextures() {
     return false;
   }
   bool textures_set = false;
-  const ProgramManager::ProgramInfo::SamplerIndices& sampler_indices =
+  const Program::SamplerIndices& sampler_indices =
      state_.current_program->sampler_indices();
   for (size_t ii = 0; ii < sampler_indices.size(); ++ii) {
-    const ProgramManager::ProgramInfo::UniformInfo* uniform_info =
+    const Program::UniformInfo* uniform_info =
         state_.current_program->GetUniformInfo(sampler_indices[ii]);
     DCHECK(uniform_info);
     for (size_t jj = 0; jj < uniform_info->texture_units.size(); ++jj) {
       GLuint texture_unit_index = uniform_info->texture_units[jj];
       if (texture_unit_index < state_.texture_units.size()) {
         TextureUnit& texture_unit = state_.texture_units[texture_unit_index];
-        TextureManager::TextureInfo* texture_info =
+        Texture* texture_info =
             texture_unit.GetInfoForSamplerType(uniform_info->type);
         if (!texture_info || !texture_manager()->CanRender(texture_info)) {
           textures_set = true;
@@ -5600,17 +5662,17 @@ bool GLES2DecoderImpl::SetBlackTextureForNonRenderableTextures() {
 
 void GLES2DecoderImpl::RestoreStateForNonRenderableTextures() {
   DCHECK(state_.current_program);
-  const ProgramManager::ProgramInfo::SamplerIndices& sampler_indices =
+  const Program::SamplerIndices& sampler_indices =
      state_.current_program->sampler_indices();
   for (size_t ii = 0; ii < sampler_indices.size(); ++ii) {
-    const ProgramManager::ProgramInfo::UniformInfo* uniform_info =
+    const Program::UniformInfo* uniform_info =
         state_.current_program->GetUniformInfo(sampler_indices[ii]);
     DCHECK(uniform_info);
     for (size_t jj = 0; jj < uniform_info->texture_units.size(); ++jj) {
       GLuint texture_unit_index = uniform_info->texture_units[jj];
       if (texture_unit_index < state_.texture_units.size()) {
         TextureUnit& texture_unit = state_.texture_units[texture_unit_index];
-        TextureManager::TextureInfo* texture_info =
+        Texture* texture_info =
             uniform_info->type == GL_SAMPLER_2D ?
                 texture_unit.bound_texture_2d :
                 texture_unit.bound_texture_cube_map;
@@ -5638,17 +5700,17 @@ bool GLES2DecoderImpl::ClearUnclearedTextures() {
 
   // 1: Check all textures we are about to render with.
   if (state_.current_program) {
-    const ProgramManager::ProgramInfo::SamplerIndices& sampler_indices =
+    const Program::SamplerIndices& sampler_indices =
        state_.current_program->sampler_indices();
     for (size_t ii = 0; ii < sampler_indices.size(); ++ii) {
-      const ProgramManager::ProgramInfo::UniformInfo* uniform_info =
+      const Program::UniformInfo* uniform_info =
           state_.current_program->GetUniformInfo(sampler_indices[ii]);
       DCHECK(uniform_info);
       for (size_t jj = 0; jj < uniform_info->texture_units.size(); ++jj) {
         GLuint texture_unit_index = uniform_info->texture_units[jj];
         if (texture_unit_index < state_.texture_units.size()) {
           TextureUnit& texture_unit = state_.texture_units[texture_unit_index];
-          TextureManager::TextureInfo* texture_info =
+          Texture* texture_info =
               texture_unit.GetInfoForSamplerType(uniform_info->type);
           if (texture_info && !texture_info->SafeToRenderFrom()) {
             if (!texture_manager()->ClearRenderableLevels(this, texture_info)) {
@@ -5685,8 +5747,8 @@ bool GLES2DecoderImpl::IsDrawValid(
       state_.vertex_attrib_manager->GetEnabledVertexAttribInfos();
   for (VertexAttribManager::VertexAttribInfoList::const_iterator it =
        infos.begin(); it != infos.end(); ++it) {
-    const VertexAttribManager::VertexAttribInfo* info = *it;
-    const ProgramManager::ProgramInfo::VertexAttribInfo* attrib_info =
+    const VertexAttrib* info = *it;
+    const Program::VertexAttrib* attrib_info =
         state_.current_program->GetAttribInfoByLocation(info->index());
     if (attrib_info) {
       divisor0 |= (info->divisor() == 0);
@@ -5733,8 +5795,8 @@ bool GLES2DecoderImpl::SimulateAttrib0(
   if (gfx::GetGLImplementation() == gfx::kGLImplementationEGLGLES2)
     return true;
 
-  const VertexAttribManager::VertexAttribInfo* info =
-      state_.vertex_attrib_manager->GetVertexAttribInfo(0);
+  const VertexAttrib* info =
+      state_.vertex_attrib_manager->GetVertexAttrib(0);
   // If it's enabled or it's not used then we don't need to do anything.
   bool attrib_0_used =
       state_.current_program->GetAttribInfoByLocation(0) != NULL;
@@ -5796,10 +5858,10 @@ bool GLES2DecoderImpl::SimulateAttrib0(
 }
 
 void GLES2DecoderImpl::RestoreStateForAttrib(GLuint attrib) {
-  const VertexAttribManager::VertexAttribInfo* info =
-      state_.vertex_attrib_manager->GetVertexAttribInfo(attrib);
+  const VertexAttrib* info =
+      state_.vertex_attrib_manager->GetVertexAttrib(attrib);
   const void* ptr = reinterpret_cast<const void*>(info->offset());
-  BufferManager::BufferInfo* buffer_info = info->buffer();
+  Buffer* buffer_info = info->buffer();
   glBindBuffer(GL_ARRAY_BUFFER, buffer_info ? buffer_info->service_id() : 0);
   glVertexAttribPointer(
       attrib, info->size(), info->type(), info->normalized(), info->gl_stride(),
@@ -5849,8 +5911,8 @@ bool GLES2DecoderImpl::SimulateFixedAttribs(
       state_.vertex_attrib_manager->GetEnabledVertexAttribInfos();
   for (VertexAttribManager::VertexAttribInfoList::const_iterator it =
        infos.begin(); it != infos.end(); ++it) {
-    const VertexAttribManager::VertexAttribInfo* info = *it;
-    const ProgramManager::ProgramInfo::VertexAttribInfo* attrib_info =
+    const VertexAttrib* info = *it;
+    const Program::VertexAttrib* attrib_info =
         state_.current_program->GetAttribInfoByLocation(info->index());
     GLuint max_accessed = info->MaxVertexAccessed(primcount,
                                                   max_vertex_accessed);
@@ -5897,8 +5959,8 @@ bool GLES2DecoderImpl::SimulateFixedAttribs(
   GLintptr offset = 0;
   for (VertexAttribManager::VertexAttribInfoList::const_iterator it =
            infos.begin(); it != infos.end(); ++it) {
-    const VertexAttribManager::VertexAttribInfo* info = *it;
-    const ProgramManager::ProgramInfo::VertexAttribInfo* attrib_info =
+    const VertexAttrib* info = *it;
+    const Program::VertexAttrib* attrib_info =
         state_.current_program->GetAttribInfoByLocation(info->index());
     GLuint max_accessed = info->MaxVertexAccessed(primcount,
                                                   max_vertex_accessed);
@@ -6013,7 +6075,7 @@ error::Error GLES2DecoderImpl::DoDrawArrays(
 }
 
 error::Error GLES2DecoderImpl::HandleDrawArrays(
-    uint32 immediate_data_size, const gles2::DrawArrays& c) {
+    uint32 immediate_data_size, const cmds::DrawArrays& c) {
   return DoDrawArrays("glDrawArrays",
                       false,
                       static_cast<GLenum>(c.mode),
@@ -6023,7 +6085,7 @@ error::Error GLES2DecoderImpl::HandleDrawArrays(
 }
 
 error::Error GLES2DecoderImpl::HandleDrawArraysInstancedANGLE(
-    uint32 immediate_data_size, const gles2::DrawArraysInstancedANGLE& c) {
+    uint32 immediate_data_size, const cmds::DrawArraysInstancedANGLE& c) {
   if (!features().angle_instanced_arrays) {
     SetGLError(GL_INVALID_OPERATION,
                "glDrawArraysInstancedANGLE", "function not available");
@@ -6128,7 +6190,7 @@ error::Error GLES2DecoderImpl::DoDrawElements(
 }
 
 error::Error GLES2DecoderImpl::HandleDrawElements(
-    uint32 immediate_data_size, const gles2::DrawElements& c) {
+    uint32 immediate_data_size, const cmds::DrawElements& c) {
   return DoDrawElements("glDrawElements",
                         false,
                         static_cast<GLenum>(c.mode),
@@ -6139,7 +6201,7 @@ error::Error GLES2DecoderImpl::HandleDrawElements(
 }
 
 error::Error GLES2DecoderImpl::HandleDrawElementsInstancedANGLE(
-    uint32 immediate_data_size, const gles2::DrawElementsInstancedANGLE& c) {
+    uint32 immediate_data_size, const cmds::DrawElementsInstancedANGLE& c) {
   if (!features().angle_instanced_arrays) {
     SetGLError(GL_INVALID_OPERATION,
                "glDrawElementsInstancedANGLE", "function not available");
@@ -6157,7 +6219,7 @@ error::Error GLES2DecoderImpl::HandleDrawElementsInstancedANGLE(
 GLuint GLES2DecoderImpl::DoGetMaxValueInBufferCHROMIUM(
     GLuint buffer_id, GLsizei count, GLenum type, GLuint offset) {
   GLuint max_vertex_accessed = 0;
-  BufferManager::BufferInfo* info = GetBufferInfo(buffer_id);
+  Buffer* info = GetBuffer(buffer_id);
   if (!info) {
     // TODO(gman): Should this be a GL error or a command buffer error?
     SetGLError(GL_INVALID_VALUE,
@@ -6180,7 +6242,7 @@ GLuint GLES2DecoderImpl::DoGetMaxValueInBufferCHROMIUM(
 error::Error GLES2DecoderImpl::ShaderSourceHelper(
     GLuint client_id, const char* data, uint32 data_size) {
   std::string str(data, data + data_size);
-  ShaderManager::ShaderInfo* info = GetShaderInfoNotProgram(
+  Shader* info = GetShaderInfoNotProgram(
       client_id, "glShaderSource");
   if (!info) {
     return error::kNoError;
@@ -6192,7 +6254,7 @@ error::Error GLES2DecoderImpl::ShaderSourceHelper(
 }
 
 error::Error GLES2DecoderImpl::HandleShaderSource(
-    uint32 immediate_data_size, const gles2::ShaderSource& c) {
+    uint32 immediate_data_size, const cmds::ShaderSource& c) {
   uint32 data_size = c.data_size;
   const char* data = GetSharedMemoryAs<const char*>(
       c.data_shm_id, c.data_shm_offset, data_size);
@@ -6203,7 +6265,7 @@ error::Error GLES2DecoderImpl::HandleShaderSource(
 }
 
 error::Error GLES2DecoderImpl::HandleShaderSourceImmediate(
-  uint32 immediate_data_size, const gles2::ShaderSourceImmediate& c) {
+  uint32 immediate_data_size, const cmds::ShaderSourceImmediate& c) {
   uint32 data_size = c.data_size;
   const char* data = GetImmediateDataAs<const char*>(
       c, data_size, immediate_data_size);
@@ -6214,7 +6276,7 @@ error::Error GLES2DecoderImpl::HandleShaderSourceImmediate(
 }
 
 error::Error GLES2DecoderImpl::HandleShaderSourceBucket(
-  uint32 immediate_data_size, const gles2::ShaderSourceBucket& c) {
+  uint32 immediate_data_size, const cmds::ShaderSourceBucket& c) {
   Bucket* bucket = GetBucket(c.data_bucket_id);
   if (!bucket || bucket->size() == 0) {
     return error::kInvalidArguments;
@@ -6226,7 +6288,7 @@ error::Error GLES2DecoderImpl::HandleShaderSourceBucket(
 
 void GLES2DecoderImpl::DoCompileShader(GLuint client_id) {
   TRACE_EVENT0("gpu", "GLES2DecoderImpl::DoCompileShader");
-  ShaderManager::ShaderInfo* info = GetShaderInfoNotProgram(
+  Shader* info = GetShaderInfoNotProgram(
       client_id, "glCompileShader");
   if (!info) {
     return;
@@ -6242,7 +6304,7 @@ void GLES2DecoderImpl::DoCompileShader(GLuint client_id) {
 
 void GLES2DecoderImpl::DoGetShaderiv(
     GLuint shader, GLenum pname, GLint* params) {
-  ShaderManager::ShaderInfo* info = GetShaderInfoNotProgram(
+  Shader* info = GetShaderInfoNotProgram(
       shader, "glGetShaderiv");
   if (!info) {
     return;
@@ -6269,11 +6331,11 @@ void GLES2DecoderImpl::DoGetShaderiv(
 }
 
 error::Error GLES2DecoderImpl::HandleGetShaderSource(
-    uint32 immediate_data_size, const gles2::GetShaderSource& c) {
+    uint32 immediate_data_size, const cmds::GetShaderSource& c) {
   GLuint shader = c.shader;
   uint32 bucket_id = static_cast<uint32>(c.bucket_id);
   Bucket* bucket = CreateBucket(bucket_id);
-  ShaderManager::ShaderInfo* info = GetShaderInfoNotProgram(
+  Shader* info = GetShaderInfoNotProgram(
       shader, "glGetShaderSource");
   if (!info || !info->source()) {
     bucket->SetSize(0);
@@ -6285,12 +6347,12 @@ error::Error GLES2DecoderImpl::HandleGetShaderSource(
 
 error::Error GLES2DecoderImpl::HandleGetTranslatedShaderSourceANGLE(
     uint32 immediate_data_size,
-    const gles2::GetTranslatedShaderSourceANGLE& c) {
+    const cmds::GetTranslatedShaderSourceANGLE& c) {
   GLuint shader = c.shader;
 
   uint32 bucket_id = static_cast<uint32>(c.bucket_id);
   Bucket* bucket = CreateBucket(bucket_id);
-  ShaderManager::ShaderInfo* info = GetShaderInfoNotProgram(
+  Shader* info = GetShaderInfoNotProgram(
       shader, "glTranslatedGetShaderSourceANGLE");
   if (!info) {
     bucket->SetSize(0);
@@ -6304,11 +6366,11 @@ error::Error GLES2DecoderImpl::HandleGetTranslatedShaderSourceANGLE(
 }
 
 error::Error GLES2DecoderImpl::HandleGetProgramInfoLog(
-    uint32 immediate_data_size, const gles2::GetProgramInfoLog& c) {
+    uint32 immediate_data_size, const cmds::GetProgramInfoLog& c) {
   GLuint program = c.program;
   uint32 bucket_id = static_cast<uint32>(c.bucket_id);
   Bucket* bucket = CreateBucket(bucket_id);
-  ProgramManager::ProgramInfo* info = GetProgramInfoNotShader(
+  Program* info = GetProgramInfoNotShader(
       program, "glGetProgramInfoLog");
   if (!info || !info->log_info()) {
     bucket->SetFromString("");
@@ -6319,11 +6381,11 @@ error::Error GLES2DecoderImpl::HandleGetProgramInfoLog(
 }
 
 error::Error GLES2DecoderImpl::HandleGetShaderInfoLog(
-    uint32 immediate_data_size, const gles2::GetShaderInfoLog& c) {
+    uint32 immediate_data_size, const cmds::GetShaderInfoLog& c) {
   GLuint shader = c.shader;
   uint32 bucket_id = static_cast<uint32>(c.bucket_id);
   Bucket* bucket = CreateBucket(bucket_id);
-  ShaderManager::ShaderInfo* info = GetShaderInfoNotProgram(
+  Shader* info = GetShaderInfoNotProgram(
       shader, "glGetShaderInfoLog");
   if (!info || !info->log_info()) {
     bucket->SetFromString("");
@@ -6338,49 +6400,49 @@ bool GLES2DecoderImpl::DoIsEnabled(GLenum cap) {
 }
 
 bool GLES2DecoderImpl::DoIsBuffer(GLuint client_id) {
-  const BufferManager::BufferInfo* buffer = GetBufferInfo(client_id);
+  const Buffer* buffer = GetBuffer(client_id);
   return buffer && buffer->IsValid() && !buffer->IsDeleted();
 }
 
 bool GLES2DecoderImpl::DoIsFramebuffer(GLuint client_id) {
-  const FramebufferManager::FramebufferInfo* framebuffer =
-      GetFramebufferInfo(client_id);
+  const Framebuffer* framebuffer =
+      GetFramebuffer(client_id);
   return framebuffer && framebuffer->IsValid() && !framebuffer->IsDeleted();
 }
 
 bool GLES2DecoderImpl::DoIsProgram(GLuint client_id) {
   // IsProgram is true for programs as soon as they are created, until they are
   // deleted and no longer in use.
-  const ProgramManager::ProgramInfo* program = GetProgramInfo(client_id);
+  const Program* program = GetProgram(client_id);
   return program != NULL && !program->IsDeleted();
 }
 
 bool GLES2DecoderImpl::DoIsRenderbuffer(GLuint client_id) {
-  const RenderbufferManager::RenderbufferInfo* renderbuffer =
-      GetRenderbufferInfo(client_id);
+  const Renderbuffer* renderbuffer =
+      GetRenderbuffer(client_id);
   return renderbuffer && renderbuffer->IsValid() && !renderbuffer->IsDeleted();
 }
 
 bool GLES2DecoderImpl::DoIsShader(GLuint client_id) {
   // IsShader is true for shaders as soon as they are created, until they
   // are deleted and not attached to any programs.
-  const ShaderManager::ShaderInfo* shader = GetShaderInfo(client_id);
+  const Shader* shader = GetShader(client_id);
   return shader != NULL && !shader->IsDeleted();
 }
 
 bool GLES2DecoderImpl::DoIsTexture(GLuint client_id) {
-  const TextureManager::TextureInfo* texture = GetTextureInfo(client_id);
+  const Texture* texture = GetTexture(client_id);
   return texture && texture->IsValid() && !texture->IsDeleted();
 }
 
 void GLES2DecoderImpl::DoAttachShader(
     GLuint program_client_id, GLint shader_client_id) {
-  ProgramManager::ProgramInfo* program_info = GetProgramInfoNotShader(
+  Program* program_info = GetProgramInfoNotShader(
       program_client_id, "glAttachShader");
   if (!program_info) {
     return;
   }
-  ShaderManager::ShaderInfo* shader_info = GetShaderInfoNotProgram(
+  Shader* shader_info = GetShaderInfoNotProgram(
       shader_client_id, "glAttachShader");
   if (!shader_info) {
     return;
@@ -6396,12 +6458,12 @@ void GLES2DecoderImpl::DoAttachShader(
 
 void GLES2DecoderImpl::DoDetachShader(
     GLuint program_client_id, GLint shader_client_id) {
-  ProgramManager::ProgramInfo* program_info = GetProgramInfoNotShader(
+  Program* program_info = GetProgramInfoNotShader(
       program_client_id, "glDetachShader");
   if (!program_info) {
     return;
   }
-  ShaderManager::ShaderInfo* shader_info = GetShaderInfoNotProgram(
+  Shader* shader_info = GetShaderInfoNotProgram(
       shader_client_id, "glDetachShader");
   if (!shader_info) {
     return;
@@ -6415,7 +6477,7 @@ void GLES2DecoderImpl::DoDetachShader(
 }
 
 void GLES2DecoderImpl::DoValidateProgram(GLuint program_client_id) {
-  ProgramManager::ProgramInfo* info = GetProgramInfoNotShader(
+  Program* info = GetProgramInfoNotShader(
       program_client_id, "glValidateProgram");
   if (!info) {
     return;
@@ -6425,15 +6487,15 @@ void GLES2DecoderImpl::DoValidateProgram(GLuint program_client_id) {
 
 void GLES2DecoderImpl::DoGetVertexAttribfv(
     GLuint index, GLenum pname, GLfloat* params) {
-  VertexAttribManager::VertexAttribInfo* info =
-      state_.vertex_attrib_manager->GetVertexAttribInfo(index);
+  VertexAttrib* info =
+      state_.vertex_attrib_manager->GetVertexAttrib(index);
   if (!info) {
     SetGLError(GL_INVALID_VALUE, "glGetVertexAttribfv", "index out of range");
     return;
   }
   switch (pname) {
     case GL_VERTEX_ATTRIB_ARRAY_BUFFER_BINDING: {
-        BufferManager::BufferInfo* buffer = info->buffer();
+        Buffer* buffer = info->buffer();
         if (buffer && !buffer->IsDeleted()) {
           GLuint client_id;
           buffer_manager()->GetClientId(buffer->service_id(), &client_id);
@@ -6475,15 +6537,15 @@ void GLES2DecoderImpl::DoGetVertexAttribfv(
 
 void GLES2DecoderImpl::DoGetVertexAttribiv(
     GLuint index, GLenum pname, GLint* params) {
-  VertexAttribManager::VertexAttribInfo* info =
-      state_.vertex_attrib_manager->GetVertexAttribInfo(index);
+  VertexAttrib* info =
+      state_.vertex_attrib_manager->GetVertexAttrib(index);
   if (!info) {
     SetGLError(GL_INVALID_VALUE, "glGetVertexAttribiv", "index out of range");
     return;
   }
   switch (pname) {
     case GL_VERTEX_ATTRIB_ARRAY_BUFFER_BINDING: {
-        BufferManager::BufferInfo* buffer = info->buffer();
+        Buffer* buffer = info->buffer();
         if (buffer && !buffer->IsDeleted()) {
           GLuint client_id;
           buffer_manager()->GetClientId(buffer->service_id(), &client_id);
@@ -6595,7 +6657,7 @@ void GLES2DecoderImpl::DoVertexAttrib4fv(GLuint index, const GLfloat* v) {
 }
 
 error::Error GLES2DecoderImpl::HandleVertexAttribPointer(
-    uint32 immediate_data_size, const gles2::VertexAttribPointer& c) {
+    uint32 immediate_data_size, const cmds::VertexAttribPointer& c) {
 
   if (!state_.bound_array_buffer || state_.bound_array_buffer->IsDeleted()) {
     if (state_.vertex_attrib_manager == default_vertex_attrib_manager_) {
@@ -6681,7 +6743,7 @@ void GLES2DecoderImpl::DoViewport(GLint x, GLint y, GLsizei width,
 }
 
 error::Error GLES2DecoderImpl::HandleVertexAttribDivisorANGLE(
-    uint32 immediate_data_size, const gles2::VertexAttribDivisorANGLE& c) {
+    uint32 immediate_data_size, const cmds::VertexAttribDivisorANGLE& c) {
   if (!features().angle_instanced_arrays) {
     SetGLError(GL_INVALID_OPERATION,
                "glVertexAttribDivisorANGLE", "function not available");
@@ -6702,7 +6764,7 @@ error::Error GLES2DecoderImpl::HandleVertexAttribDivisorANGLE(
 }
 
 error::Error GLES2DecoderImpl::HandleReadPixels(
-    uint32 immediate_data_size, const gles2::ReadPixels& c) {
+    uint32 immediate_data_size, const cmds::ReadPixels& c) {
   if (ShouldDeferReads())
     return error::kDeferCommandUntilLater;
   GLint x = c.x;
@@ -6715,7 +6777,7 @@ error::Error GLES2DecoderImpl::HandleReadPixels(
     SetGLError(GL_INVALID_VALUE, "glReadPixels", "dimensions < 0");
     return error::kNoError;
   }
-  typedef gles2::ReadPixels::Result Result;
+  typedef cmds::ReadPixels::Result Result;
   uint32 pixels_size;
   if (!GLES2Util::ComputeImageDataSizes(
       width, height, format, type, state_.pack_alignment, &pixels_size,
@@ -6856,7 +6918,7 @@ error::Error GLES2DecoderImpl::HandleReadPixels(
 }
 
 error::Error GLES2DecoderImpl::HandlePixelStorei(
-    uint32 immediate_data_size, const gles2::PixelStorei& c) {
+    uint32 immediate_data_size, const cmds::PixelStorei& c) {
   GLenum pname = c.pname;
   GLenum param = c.param;
   if (!validators_->pixel_store.IsValid(pname)) {
@@ -6904,7 +6966,7 @@ error::Error GLES2DecoderImpl::HandlePixelStorei(
 }
 
 error::Error GLES2DecoderImpl::HandlePostSubBufferCHROMIUM(
-    uint32 immediate_data_size, const gles2::PostSubBufferCHROMIUM& c) {
+    uint32 immediate_data_size, const cmds::PostSubBufferCHROMIUM& c) {
   TRACE_EVENT0("gpu", "GLES2DecoderImpl::HandlePostSubBufferCHROMIUM");
   if (!surface_->HasExtension("GL_CHROMIUM_post_sub_buffer")) {
     SetGLError(GL_INVALID_OPERATION,
@@ -6926,7 +6988,7 @@ error::Error GLES2DecoderImpl::GetAttribLocationHelper(
     SetGLError(GL_INVALID_VALUE, "glGetAttribLocation", "Invalid character");
     return error::kNoError;
   }
-  ProgramManager::ProgramInfo* info = GetProgramInfoNotShader(
+  Program* info = GetProgramInfoNotShader(
       client_id, "glGetAttribLocation");
   if (!info) {
     return error::kNoError;
@@ -6951,7 +7013,7 @@ error::Error GLES2DecoderImpl::GetAttribLocationHelper(
 }
 
 error::Error GLES2DecoderImpl::HandleGetAttribLocation(
-    uint32 immediate_data_size, const gles2::GetAttribLocation& c) {
+    uint32 immediate_data_size, const cmds::GetAttribLocation& c) {
   uint32 name_size = c.data_size;
   const char* name = GetSharedMemoryAs<const char*>(
       c.name_shm_id, c.name_shm_offset, name_size);
@@ -6964,7 +7026,7 @@ error::Error GLES2DecoderImpl::HandleGetAttribLocation(
 }
 
 error::Error GLES2DecoderImpl::HandleGetAttribLocationImmediate(
-    uint32 immediate_data_size, const gles2::GetAttribLocationImmediate& c) {
+    uint32 immediate_data_size, const cmds::GetAttribLocationImmediate& c) {
   uint32 name_size = c.data_size;
   const char* name = GetImmediateDataAs<const char*>(
       c, name_size, immediate_data_size);
@@ -6977,7 +7039,7 @@ error::Error GLES2DecoderImpl::HandleGetAttribLocationImmediate(
 }
 
 error::Error GLES2DecoderImpl::HandleGetAttribLocationBucket(
-    uint32 immediate_data_size, const gles2::GetAttribLocationBucket& c) {
+    uint32 immediate_data_size, const cmds::GetAttribLocationBucket& c) {
   Bucket* bucket = GetBucket(c.name_bucket_id);
   if (!bucket) {
     return error::kInvalidArguments;
@@ -6997,7 +7059,7 @@ error::Error GLES2DecoderImpl::GetUniformLocationHelper(
     SetGLError(GL_INVALID_VALUE, "glGetUniformLocation", "Invalid character");
     return error::kNoError;
   }
-  ProgramManager::ProgramInfo* info = GetProgramInfoNotShader(
+  Program* info = GetProgramInfoNotShader(
       client_id, "glUniformLocation");
   if (!info) {
     return error::kNoError;
@@ -7022,7 +7084,7 @@ error::Error GLES2DecoderImpl::GetUniformLocationHelper(
 }
 
 error::Error GLES2DecoderImpl::HandleGetUniformLocation(
-    uint32 immediate_data_size, const gles2::GetUniformLocation& c) {
+    uint32 immediate_data_size, const cmds::GetUniformLocation& c) {
   uint32 name_size = c.data_size;
   const char* name = GetSharedMemoryAs<const char*>(
       c.name_shm_id, c.name_shm_offset, name_size);
@@ -7035,7 +7097,7 @@ error::Error GLES2DecoderImpl::HandleGetUniformLocation(
 }
 
 error::Error GLES2DecoderImpl::HandleGetUniformLocationImmediate(
-    uint32 immediate_data_size, const gles2::GetUniformLocationImmediate& c) {
+    uint32 immediate_data_size, const cmds::GetUniformLocationImmediate& c) {
   uint32 name_size = c.data_size;
   const char* name = GetImmediateDataAs<const char*>(
       c, name_size, immediate_data_size);
@@ -7048,7 +7110,7 @@ error::Error GLES2DecoderImpl::HandleGetUniformLocationImmediate(
 }
 
 error::Error GLES2DecoderImpl::HandleGetUniformLocationBucket(
-    uint32 immediate_data_size, const gles2::GetUniformLocationBucket& c) {
+    uint32 immediate_data_size, const cmds::GetUniformLocationBucket& c) {
   Bucket* bucket = GetBucket(c.name_bucket_id);
   if (!bucket) {
     return error::kInvalidArguments;
@@ -7062,7 +7124,7 @@ error::Error GLES2DecoderImpl::HandleGetUniformLocationBucket(
 }
 
 error::Error GLES2DecoderImpl::HandleGetString(
-    uint32 immediate_data_size, const gles2::GetString& c) {
+    uint32 immediate_data_size, const cmds::GetString& c) {
   GLenum name = static_cast<GLenum>(c.name);
   if (!validators_->string_type.IsValid(name)) {
     SetGLErrorInvalidEnum("glGetString", name, "name");
@@ -7129,7 +7191,7 @@ void GLES2DecoderImpl::DoBufferData(
     SetGLError(GL_INVALID_VALUE, "glBufferData", "size < 0");
     return;
   }
-  BufferManager::BufferInfo* info = GetBufferInfoForTarget(target);
+  Buffer* info = GetBufferInfoForTarget(target);
   if (!info) {
     SetGLError(GL_INVALID_VALUE, "glBufferData", "unknown buffer");
     return;
@@ -7160,7 +7222,7 @@ void GLES2DecoderImpl::DoBufferData(
 }
 
 error::Error GLES2DecoderImpl::HandleBufferData(
-    uint32 immediate_data_size, const gles2::BufferData& c) {
+    uint32 immediate_data_size, const cmds::BufferData& c) {
   GLenum target = static_cast<GLenum>(c.target);
   GLsizeiptr size = static_cast<GLsizeiptr>(c.size);
   uint32 data_shm_id = static_cast<uint32>(c.data_shm_id);
@@ -7178,7 +7240,7 @@ error::Error GLES2DecoderImpl::HandleBufferData(
 }
 
 error::Error GLES2DecoderImpl::HandleBufferDataImmediate(
-    uint32 immediate_data_size, const gles2::BufferDataImmediate& c) {
+    uint32 immediate_data_size, const cmds::BufferDataImmediate& c) {
   GLenum target = static_cast<GLenum>(c.target);
   GLsizeiptr size = static_cast<GLsizeiptr>(c.size);
   const void* data = GetImmediateDataAs<const void*>(
@@ -7193,7 +7255,7 @@ error::Error GLES2DecoderImpl::HandleBufferDataImmediate(
 
 void GLES2DecoderImpl::DoBufferSubData(
   GLenum target, GLintptr offset, GLsizeiptr size, const GLvoid * data) {
-  BufferManager::BufferInfo* info = GetBufferInfoForTarget(target);
+  Buffer* info = GetBufferInfoForTarget(target);
   if (!info) {
     SetGLError(GL_INVALID_VALUE, "glBufferSubData", "unknown buffer");
     return;
@@ -7244,7 +7306,7 @@ bool GLES2DecoderImpl::ClearLevel(
     RestoreClearState();
 
     glDeleteFramebuffersEXT(1, &fb);
-    FramebufferManager::FramebufferInfo* framebuffer =
+    Framebuffer* framebuffer =
         GetFramebufferInfoForTarget(GL_DRAW_FRAMEBUFFER_EXT);
     GLuint fb_service_id =
         framebuffer ? framebuffer->service_id() : GetBackbufferServiceId();
@@ -7299,7 +7361,7 @@ bool GLES2DecoderImpl::ClearLevel(
     }
     y += tile_height;
   }
-  TextureManager::TextureInfo* info = GetTextureInfoForTarget(bind_target);
+  Texture* info = GetTextureInfoForTarget(bind_target);
   glBindTexture(bind_target, info ? info->service_id() : 0);
   return true;
 }
@@ -7403,7 +7465,7 @@ bool GLES2DecoderImpl::ValidateCompressedTexSubDimensions(
     const char* function_name,
     GLenum target, GLint level, GLint xoffset, GLint yoffset,
     GLsizei width, GLsizei height, GLenum format,
-    TextureManager::TextureInfo* texture) {
+    Texture* texture) {
   if (xoffset < 0 || yoffset < 0) {
     SetGLError(
         GL_INVALID_VALUE, function_name, "xoffset or yoffset < 0");
@@ -7472,7 +7534,7 @@ error::Error GLES2DecoderImpl::DoCompressedTexImage2D(
                "glCompressedTexImage2D", "dimensions out of range");
     return error::kNoError;
   }
-  TextureManager::TextureInfo* info = GetTextureInfoForTarget(target);
+  Texture* info = GetTextureInfoForTarget(target);
   if (!info) {
     SetGLError(GL_INVALID_VALUE,
                "glCompressedTexImage2D", "unknown texture target");
@@ -7522,7 +7584,7 @@ error::Error GLES2DecoderImpl::DoCompressedTexImage2D(
 }
 
 error::Error GLES2DecoderImpl::HandleCompressedTexImage2D(
-    uint32 immediate_data_size, const gles2::CompressedTexImage2D& c) {
+    uint32 immediate_data_size, const cmds::CompressedTexImage2D& c) {
   GLenum target = static_cast<GLenum>(c.target);
   GLint level = static_cast<GLint>(c.level);
   GLenum internal_format = static_cast<GLenum>(c.internalformat);
@@ -7545,7 +7607,7 @@ error::Error GLES2DecoderImpl::HandleCompressedTexImage2D(
 }
 
 error::Error GLES2DecoderImpl::HandleCompressedTexImage2DImmediate(
-    uint32 immediate_data_size, const gles2::CompressedTexImage2DImmediate& c) {
+    uint32 immediate_data_size, const cmds::CompressedTexImage2DImmediate& c) {
   GLenum target = static_cast<GLenum>(c.target);
   GLint level = static_cast<GLint>(c.level);
   GLenum internal_format = static_cast<GLenum>(c.internalformat);
@@ -7563,7 +7625,7 @@ error::Error GLES2DecoderImpl::HandleCompressedTexImage2DImmediate(
 }
 
 error::Error GLES2DecoderImpl::HandleCompressedTexImage2DBucket(
-    uint32 immediate_data_size, const gles2::CompressedTexImage2DBucket& c) {
+    uint32 immediate_data_size, const cmds::CompressedTexImage2DBucket& c) {
   GLenum target = static_cast<GLenum>(c.target);
   GLint level = static_cast<GLint>(c.level);
   GLenum internal_format = static_cast<GLenum>(c.internalformat);
@@ -7587,7 +7649,7 @@ error::Error GLES2DecoderImpl::HandleCompressedTexImage2DBucket(
 
 error::Error GLES2DecoderImpl::HandleCompressedTexSubImage2DBucket(
     uint32 immediate_data_size,
-    const gles2::CompressedTexSubImage2DBucket& c) {
+    const cmds::CompressedTexSubImage2DBucket& c) {
   GLenum target = static_cast<GLenum>(c.target);
   GLint level = static_cast<GLint>(c.level);
   GLint xoffset = static_cast<GLint>(c.xoffset);
@@ -7701,7 +7763,7 @@ bool GLES2DecoderImpl::ValidateTexImage2D(
         function_name, "can not supply data for depth or stencil textures");
     return false;
   }
-  TextureManager::TextureInfo* info = GetTextureInfoForTarget(target);
+  Texture* info = GetTextureInfoForTarget(target);
   if (!info) {
     SetGLError(GL_INVALID_OPERATION,
                function_name, "unknown texture for target");
@@ -7736,7 +7798,7 @@ void GLES2DecoderImpl::DoTexImage2D(
     return;
   }
 
-  TextureManager::TextureInfo* info = GetTextureInfoForTarget(target);
+  Texture* info = GetTextureInfoForTarget(target);
   GLsizei tex_width = 0;
   GLsizei tex_height = 0;
   GLenum tex_type = 0;
@@ -7787,7 +7849,7 @@ void GLES2DecoderImpl::DoTexImage2D(
 }
 
 error::Error GLES2DecoderImpl::HandleTexImage2D(
-    uint32 immediate_data_size, const gles2::TexImage2D& c) {
+    uint32 immediate_data_size, const cmds::TexImage2D& c) {
   TRACE_EVENT0("gpu", "GLES2DecoderImpl::HandleTexImage2D");
   tex_image_2d_failed_ = true;
   GLenum target = static_cast<GLenum>(c.target);
@@ -7822,7 +7884,7 @@ error::Error GLES2DecoderImpl::HandleTexImage2D(
 }
 
 error::Error GLES2DecoderImpl::HandleTexImage2DImmediate(
-    uint32 immediate_data_size, const gles2::TexImage2DImmediate& c) {
+    uint32 immediate_data_size, const cmds::TexImage2DImmediate& c) {
   GLenum target = static_cast<GLenum>(c.target);
   GLint level = static_cast<GLint>(c.level);
   GLint internal_format = static_cast<GLint>(c.internalformat);
@@ -7858,7 +7920,7 @@ void GLES2DecoderImpl::DoCompressedTexSubImage2D(
   GLenum format,
   GLsizei image_size,
   const void * data) {
-  TextureManager::TextureInfo* info = GetTextureInfoForTarget(target);
+  Texture* info = GetTextureInfoForTarget(target);
   if (!info) {
     SetGLError(GL_INVALID_OPERATION,
                "glCompressedTexSubImage2D", "unknown texture for target");
@@ -7929,7 +7991,7 @@ void GLES2DecoderImpl::DoCopyTexImage2D(
     GLsizei height,
     GLint border) {
   DCHECK(!ShouldDeferReads());
-  TextureManager::TextureInfo* info = GetTextureInfoForTarget(target);
+  Texture* info = GetTextureInfoForTarget(target);
   if (!info) {
     SetGLError(GL_INVALID_OPERATION,
                "glCopyTexImage2D", "unknown texture for target");
@@ -8045,7 +8107,7 @@ void GLES2DecoderImpl::DoCopyTexSubImage2D(
     GLsizei width,
     GLsizei height) {
   DCHECK(!ShouldDeferReads());
-  TextureManager::TextureInfo* info = GetTextureInfoForTarget(target);
+  Texture* info = GetTextureInfoForTarget(target);
   if (!info) {
     SetGLError(GL_INVALID_OPERATION,
                "glCopyTexSubImage2D", "unknown texture for target");
@@ -8167,7 +8229,7 @@ bool GLES2DecoderImpl::ValidateTexSubImage2D(
     SetGLErrorInvalidEnum(function_name, type, "type");
     return false;
   }
-  TextureManager::TextureInfo* info = GetTextureInfoForTarget(target);
+  Texture* info = GetTextureInfoForTarget(target);
   if (!info) {
     SetGLError(GL_INVALID_OPERATION,
                function_name, "unknown texture for target");
@@ -8229,7 +8291,7 @@ error::Error GLES2DecoderImpl::DoTexSubImage2D(
       xoffset, yoffset, width, height, format, type, data)) {
     return error;
   }
-  TextureManager::TextureInfo* info = GetTextureInfoForTarget(target);
+  Texture* info = GetTextureInfoForTarget(target);
   GLsizei tex_width = 0;
   GLsizei tex_height = 0;
   bool ok = info->GetLevelSize(target, level, &tex_width, &tex_height);
@@ -8262,7 +8324,7 @@ error::Error GLES2DecoderImpl::DoTexSubImage2D(
 }
 
 error::Error GLES2DecoderImpl::HandleTexSubImage2D(
-    uint32 immediate_data_size, const gles2::TexSubImage2D& c) {
+    uint32 immediate_data_size, const cmds::TexSubImage2D& c) {
   TRACE_EVENT0("gpu", "GLES2DecoderImpl::HandleTexSubImage2D");
   GLboolean internal = static_cast<GLboolean>(c.internal);
   if (internal == GL_TRUE && tex_image_2d_failed_)
@@ -8289,7 +8351,7 @@ error::Error GLES2DecoderImpl::HandleTexSubImage2D(
 }
 
 error::Error GLES2DecoderImpl::HandleTexSubImage2DImmediate(
-    uint32 immediate_data_size, const gles2::TexSubImage2DImmediate& c) {
+    uint32 immediate_data_size, const cmds::TexSubImage2DImmediate& c) {
   GLboolean internal = static_cast<GLboolean>(c.internal);
   if (internal == GL_TRUE && tex_image_2d_failed_)
     return error::kNoError;
@@ -8315,10 +8377,10 @@ error::Error GLES2DecoderImpl::HandleTexSubImage2DImmediate(
 }
 
 error::Error GLES2DecoderImpl::HandleGetVertexAttribPointerv(
-    uint32 immediate_data_size, const gles2::GetVertexAttribPointerv& c) {
+    uint32 immediate_data_size, const cmds::GetVertexAttribPointerv& c) {
   GLuint index = static_cast<GLuint>(c.index);
   GLenum pname = static_cast<GLenum>(c.pname);
-  typedef gles2::GetVertexAttribPointerv::Result Result;
+  typedef cmds::GetVertexAttribPointerv::Result Result;
   Result* result = GetSharedMemoryAs<Result*>(
         c.pointer_shm_id, c.pointer_shm_offset, Result::ComputeSize(1));
   if (!result) {
@@ -8339,7 +8401,7 @@ error::Error GLES2DecoderImpl::HandleGetVertexAttribPointerv(
   }
   result->SetNumResults(1);
   *result->GetData() =
-      state_.vertex_attrib_manager->GetVertexAttribInfo(index)->offset();
+      state_.vertex_attrib_manager->GetVertexAttrib(index)->offset();
   return error::kNoError;
 }
 
@@ -8365,7 +8427,7 @@ bool GLES2DecoderImpl::GetUniformSetup(
   *result_pointer = result;
   // Set the result size to 0 so the client does not have to check for success.
   result->SetNumResults(0);
-  ProgramManager::ProgramInfo* info = GetProgramInfoNotShader(
+  Program* info = GetProgramInfoNotShader(
       program, "glGetUniform");
   if (!info) {
     return false;
@@ -8377,7 +8439,7 @@ bool GLES2DecoderImpl::GetUniformSetup(
   }
   *service_id = info->service_id();
   GLint array_index = -1;
-  const ProgramManager::ProgramInfo::UniformInfo* uniform_info =
+  const Program::UniformInfo* uniform_info =
       info->GetUniformInfoByFakeLocation(
           fake_location, real_location, &array_index);
   if (!uniform_info) {
@@ -8403,7 +8465,7 @@ bool GLES2DecoderImpl::GetUniformSetup(
 }
 
 error::Error GLES2DecoderImpl::HandleGetUniformiv(
-    uint32 immediate_data_size, const gles2::GetUniformiv& c) {
+    uint32 immediate_data_size, const cmds::GetUniformiv& c) {
   GLuint program = c.program;
   GLint fake_location = c.location;
   GLuint service_id;
@@ -8416,19 +8478,19 @@ error::Error GLES2DecoderImpl::HandleGetUniformiv(
       &error, &real_location, &service_id, &result, &result_type)) {
     glGetUniformiv(
         service_id, real_location,
-        static_cast<gles2::GetUniformiv::Result*>(result)->GetData());
+        static_cast<cmds::GetUniformiv::Result*>(result)->GetData());
   }
   return error;
 }
 
 error::Error GLES2DecoderImpl::HandleGetUniformfv(
-    uint32 immediate_data_size, const gles2::GetUniformfv& c) {
+    uint32 immediate_data_size, const cmds::GetUniformfv& c) {
   GLuint program = c.program;
   GLint fake_location = c.location;
   GLuint service_id;
   GLint real_location = -1;
   Error error;
-  typedef gles2::GetUniformfv::Result Result;
+  typedef cmds::GetUniformfv::Result Result;
   Result* result;
   GLenum result_type;
   if (GetUniformSetup(
@@ -8452,10 +8514,10 @@ error::Error GLES2DecoderImpl::HandleGetUniformfv(
 }
 
 error::Error GLES2DecoderImpl::HandleGetShaderPrecisionFormat(
-    uint32 immediate_data_size, const gles2::GetShaderPrecisionFormat& c) {
+    uint32 immediate_data_size, const cmds::GetShaderPrecisionFormat& c) {
   GLenum shader_type = static_cast<GLenum>(c.shadertype);
   GLenum precision_type = static_cast<GLenum>(c.precisiontype);
-  typedef gles2::GetShaderPrecisionFormat::Result Result;
+  typedef cmds::GetShaderPrecisionFormat::Result Result;
   Result* result = GetSharedMemoryAs<Result*>(
       c.result_shm_id, c.result_shm_offset, sizeof(*result));
   if (!result) {
@@ -8502,15 +8564,15 @@ error::Error GLES2DecoderImpl::HandleGetShaderPrecisionFormat(
 }
 
 error::Error GLES2DecoderImpl::HandleGetAttachedShaders(
-    uint32 immediate_data_size, const gles2::GetAttachedShaders& c) {
+    uint32 immediate_data_size, const cmds::GetAttachedShaders& c) {
   uint32 result_size = c.result_size;
   GLuint program = static_cast<GLuint>(c.program);
-  ProgramManager::ProgramInfo* info = GetProgramInfoNotShader(
+  Program* info = GetProgramInfoNotShader(
       program, "glGetAttachedShaders");
   if (!info) {
     return error::kNoError;
   }
-  typedef gles2::GetAttachedShaders::Result Result;
+  typedef cmds::GetAttachedShaders::Result Result;
   uint32 max_count = Result::ComputeMaxResults(result_size);
   Result* result = GetSharedMemoryAs<Result*>(
       c.result_shm_id, c.result_shm_offset, Result::ComputeSize(max_count));
@@ -8536,11 +8598,11 @@ error::Error GLES2DecoderImpl::HandleGetAttachedShaders(
 }
 
 error::Error GLES2DecoderImpl::HandleGetActiveUniform(
-    uint32 immediate_data_size, const gles2::GetActiveUniform& c) {
+    uint32 immediate_data_size, const cmds::GetActiveUniform& c) {
   GLuint program = c.program;
   GLuint index = c.index;
   uint32 name_bucket_id = c.name_bucket_id;
-  typedef gles2::GetActiveUniform::Result Result;
+  typedef cmds::GetActiveUniform::Result Result;
   Result* result = GetSharedMemoryAs<Result*>(
       c.result_shm_id, c.result_shm_offset, sizeof(*result));
   if (!result) {
@@ -8550,12 +8612,12 @@ error::Error GLES2DecoderImpl::HandleGetActiveUniform(
   if (result->success != 0) {
     return error::kInvalidArguments;
   }
-  ProgramManager::ProgramInfo* info = GetProgramInfoNotShader(
+  Program* info = GetProgramInfoNotShader(
       program, "glGetActiveUniform");
   if (!info) {
     return error::kNoError;
   }
-  const ProgramManager::ProgramInfo::UniformInfo* uniform_info =
+  const Program::UniformInfo* uniform_info =
       info->GetUniformInfo(index);
   if (!uniform_info) {
     SetGLError(GL_INVALID_VALUE, "glGetActiveUniform", "index out of range");
@@ -8570,11 +8632,11 @@ error::Error GLES2DecoderImpl::HandleGetActiveUniform(
 }
 
 error::Error GLES2DecoderImpl::HandleGetActiveAttrib(
-    uint32 immediate_data_size, const gles2::GetActiveAttrib& c) {
+    uint32 immediate_data_size, const cmds::GetActiveAttrib& c) {
   GLuint program = c.program;
   GLuint index = c.index;
   uint32 name_bucket_id = c.name_bucket_id;
-  typedef gles2::GetActiveAttrib::Result Result;
+  typedef cmds::GetActiveAttrib::Result Result;
   Result* result = GetSharedMemoryAs<Result*>(
       c.result_shm_id, c.result_shm_offset, sizeof(*result));
   if (!result) {
@@ -8584,12 +8646,12 @@ error::Error GLES2DecoderImpl::HandleGetActiveAttrib(
   if (result->success != 0) {
     return error::kInvalidArguments;
   }
-  ProgramManager::ProgramInfo* info = GetProgramInfoNotShader(
+  Program* info = GetProgramInfoNotShader(
       program, "glGetActiveAttrib");
   if (!info) {
     return error::kNoError;
   }
-  const ProgramManager::ProgramInfo::VertexAttribInfo* attrib_info =
+  const Program::VertexAttrib* attrib_info =
       info->GetAttribInfo(index);
   if (!attrib_info) {
     SetGLError(GL_INVALID_VALUE, "glGetActiveAttrib", "index out of range");
@@ -8604,7 +8666,7 @@ error::Error GLES2DecoderImpl::HandleGetActiveAttrib(
 }
 
 error::Error GLES2DecoderImpl::HandleShaderBinary(
-    uint32 immediate_data_size, const gles2::ShaderBinary& c) {
+    uint32 immediate_data_size, const cmds::ShaderBinary& c) {
 #if 1  // No binary shader support.
   SetGLError(GL_INVALID_OPERATION, "glShaderBinary", "not supported");
   return error::kNoError;
@@ -8633,7 +8695,7 @@ error::Error GLES2DecoderImpl::HandleShaderBinary(
   }
   scoped_array<GLuint> service_ids(new GLuint[n]);
   for (GLsizei ii = 0; ii < n; ++ii) {
-    ShaderManager::ShaderInfo* info = GetShaderInfo(shaders[ii]);
+    Shader* info = GetShader(shaders[ii]);
     if (!info) {
       SetGLError(GL_INVALID_VALUE, "glShaderBinary", "unknown shader");
       return error::kNoError;
@@ -8646,7 +8708,7 @@ error::Error GLES2DecoderImpl::HandleShaderBinary(
 }
 
 error::Error GLES2DecoderImpl::HandleSwapBuffers(
-    uint32 immediate_data_size, const gles2::SwapBuffers& c) {
+    uint32 immediate_data_size, const cmds::SwapBuffers& c) {
   bool is_offscreen = !!offscreen_target_frame_buffer_.get();
 
   int this_frame_number = frame_number_++;
@@ -8752,12 +8814,12 @@ error::Error GLES2DecoderImpl::HandleSwapBuffers(
 }
 
 error::Error GLES2DecoderImpl::HandleEnableFeatureCHROMIUM(
-    uint32 immediate_data_size, const gles2::EnableFeatureCHROMIUM& c) {
+    uint32 immediate_data_size, const cmds::EnableFeatureCHROMIUM& c) {
   Bucket* bucket = GetBucket(c.bucket_id);
   if (!bucket || bucket->size() == 0) {
     return error::kInvalidArguments;
   }
-  typedef gles2::EnableFeatureCHROMIUM::Result Result;
+  typedef cmds::EnableFeatureCHROMIUM::Result Result;
   Result* result = GetSharedMemoryAs<Result*>(
       c.result_shm_id, c.result_shm_offset, sizeof(*result));
   if (!result) {
@@ -8800,16 +8862,16 @@ error::Error GLES2DecoderImpl::HandleEnableFeatureCHROMIUM(
 
 error::Error GLES2DecoderImpl::HandleGetRequestableExtensionsCHROMIUM(
     uint32 immediate_data_size,
-    const gles2::GetRequestableExtensionsCHROMIUM& c) {
+    const cmds::GetRequestableExtensionsCHROMIUM& c) {
   Bucket* bucket = CreateBucket(c.bucket_id);
-  FeatureInfo::Ref info(new FeatureInfo());
+  scoped_refptr<FeatureInfo> info(new FeatureInfo());
   info->Initialize(disallowed_features_, NULL);
   bucket->SetFromString(info->extensions().c_str());
   return error::kNoError;
 }
 
 error::Error GLES2DecoderImpl::HandleRequestExtensionCHROMIUM(
-    uint32 immediate_data_size, const gles2::RequestExtensionCHROMIUM& c) {
+    uint32 immediate_data_size, const cmds::RequestExtensionCHROMIUM& c) {
   Bucket* bucket = GetBucket(c.bucket_id);
   if (!bucket || bucket->size() == 0) {
     return error::kInvalidArguments;
@@ -8840,7 +8902,7 @@ error::Error GLES2DecoderImpl::HandleRequestExtensionCHROMIUM(
 }
 
 error::Error GLES2DecoderImpl::HandleGetMultipleIntegervCHROMIUM(
-    uint32 immediate_data_size, const gles2::GetMultipleIntegervCHROMIUM& c) {
+    uint32 immediate_data_size, const cmds::GetMultipleIntegervCHROMIUM& c) {
   GLuint count = c.count;
   uint32 pnames_size;
   if (!SafeMultiplyUint32(count, sizeof(GLenum), &pnames_size)) {
@@ -8917,17 +8979,17 @@ error::Error GLES2DecoderImpl::HandleGetMultipleIntegervCHROMIUM(
 }
 
 error::Error GLES2DecoderImpl::HandleGetProgramInfoCHROMIUM(
-    uint32 immediate_data_size, const gles2::GetProgramInfoCHROMIUM& c) {
+    uint32 immediate_data_size, const cmds::GetProgramInfoCHROMIUM& c) {
   GLuint program = static_cast<GLuint>(c.program);
   uint32 bucket_id = c.bucket_id;
   Bucket* bucket = CreateBucket(bucket_id);
   bucket->SetSize(sizeof(ProgramInfoHeader));  // in case we fail.
-  ProgramManager::ProgramInfo* info = NULL;
-  info = GetProgramInfo(program);
+  Program* info = NULL;
+  info = GetProgram(program);
   if (!info || !info->IsValid()) {
     return error::kNoError;
   }
-  info->GetProgramInfo(program_manager(), bucket);
+  info->GetProgram(program_manager(), bucket);
   return error::kNoError;
 }
 
@@ -8993,7 +9055,7 @@ void GLES2DecoderImpl::LoseContext(uint32 reset_status) {
 }
 
 error::Error GLES2DecoderImpl::HandleLoseContextCHROMIUM(
-    uint32 immediate_data_size, const gles2::LoseContextCHROMIUM& c) {
+    uint32 immediate_data_size, const cmds::LoseContextCHROMIUM& c) {
   GLenum current = static_cast<GLenum>(c.current);
   GLenum other = static_cast<GLenum>(c.other);
   if (!validators_->reset_status.IsValid(current)) {
@@ -9006,6 +9068,15 @@ error::Error GLES2DecoderImpl::HandleLoseContextCHROMIUM(
   reset_status_ = current;
   current_decoder_error_ = error::kLostContext;
   return error::kLostContext;
+}
+
+error::Error GLES2DecoderImpl::HandleWaitSyncPointCHROMIUM(
+    uint32 immediate_data_size, const cmds::WaitSyncPointCHROMIUM& c) {
+  if (wait_sync_point_callback_.is_null())
+    return error::kNoError;
+
+  return wait_sync_point_callback_.Run(c.sync_point) ?
+      error::kNoError : error::kDeferCommandUntilLater;
 }
 
 bool GLES2DecoderImpl::GenQueriesEXTHelper(
@@ -9044,7 +9115,7 @@ bool GLES2DecoderImpl::ProcessPendingQueries() {
 }
 
 error::Error GLES2DecoderImpl::HandleBeginQueryEXT(
-    uint32 immediate_data_size, const gles2::BeginQueryEXT& c) {
+    uint32 immediate_data_size, const cmds::BeginQueryEXT& c) {
   GLenum target = static_cast<GLenum>(c.target);
   GLuint client_id = static_cast<GLuint>(c.id);
   int32 sync_shm_id = static_cast<int32>(c.sync_data_shm_id);
@@ -9116,7 +9187,7 @@ error::Error GLES2DecoderImpl::HandleBeginQueryEXT(
 }
 
 error::Error GLES2DecoderImpl::HandleEndQueryEXT(
-    uint32 immediate_data_size, const gles2::EndQueryEXT& c) {
+    uint32 immediate_data_size, const cmds::EndQueryEXT& c) {
   GLenum target = static_cast<GLenum>(c.target);
   uint32 submit_count = static_cast<GLuint>(c.submit_count);
 
@@ -9219,7 +9290,7 @@ void GLES2DecoderImpl::EmulateVertexArrayState() {
   }
 
   // Setup the element buffer
-  BufferManager::BufferInfo* element_array_buffer =
+  Buffer* element_array_buffer =
       state_.vertex_attrib_manager->element_array_buffer();
   glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,
       element_array_buffer ? element_array_buffer->service_id() : 0);
@@ -9233,7 +9304,7 @@ bool GLES2DecoderImpl::DoIsVertexArrayOES(GLuint client_id) {
 
 error::Error GLES2DecoderImpl::HandleCreateStreamTextureCHROMIUM(
     uint32 immediate_data_size,
-    const gles2::CreateStreamTextureCHROMIUM& c) {
+    const cmds::CreateStreamTextureCHROMIUM& c) {
   if (!features().chromium_stream_texture) {
     SetGLError(GL_INVALID_OPERATION,
                "glOpenStreamTextureCHROMIUM", ""
@@ -9242,15 +9313,15 @@ error::Error GLES2DecoderImpl::HandleCreateStreamTextureCHROMIUM(
   }
 
   uint32 client_id = c.client_id;
-  typedef gles2::CreateStreamTextureCHROMIUM::Result Result;
+  typedef cmds::CreateStreamTextureCHROMIUM::Result Result;
   Result* result = GetSharedMemoryAs<Result*>(
       c.result_shm_id, c.result_shm_offset, sizeof(*result));
 
   if (!result)
     return error::kOutOfBounds;
   *result = GL_ZERO;
-  TextureManager::TextureInfo* info =
-      texture_manager()->GetTextureInfo(client_id);
+  Texture* info =
+      texture_manager()->GetTexture(client_id);
   if (!info) {
     SetGLError(GL_INVALID_VALUE,
                "glCreateStreamTextureCHROMIUM", ""
@@ -9292,10 +9363,10 @@ error::Error GLES2DecoderImpl::HandleCreateStreamTextureCHROMIUM(
 
 error::Error GLES2DecoderImpl::HandleDestroyStreamTextureCHROMIUM(
     uint32 immediate_data_size,
-    const gles2::DestroyStreamTextureCHROMIUM& c) {
+    const cmds::DestroyStreamTextureCHROMIUM& c) {
   GLuint client_id = c.texture;
-  TextureManager::TextureInfo* info =
-      texture_manager()->GetTextureInfo(client_id);
+  Texture* info =
+      texture_manager()->GetTexture(client_id);
   if (info && info->IsStreamTexture()) {
     if (!stream_texture_manager_)
       return error::kInvalidArguments;
@@ -9355,7 +9426,7 @@ void GLES2DecoderImpl::DoTexImageIOSurface2DCHROMIUM(
 
   // Default target might be conceptually valid, but disallow it to avoid
   // accidents.
-  TextureManager::TextureInfo* info = GetTextureInfoForTargetUnlessDefault(
+  Texture* info = GetTextureInfoForTargetUnlessDefault(
       target);
   if (!info) {
     SetGLError(GL_INVALID_OPERATION,
@@ -9462,8 +9533,8 @@ static GLenum ExtractFormatFromStorageFormat(GLenum internalformat) {
 void GLES2DecoderImpl::DoCopyTextureCHROMIUM(
     GLenum target, GLuint source_id, GLuint dest_id, GLint level,
     GLenum internal_format) {
-  TextureManager::TextureInfo* dest_info = GetTextureInfo(dest_id);
-  TextureManager::TextureInfo* source_info = GetTextureInfo(source_id);
+  Texture* dest_info = GetTexture(dest_id);
+  Texture* source_info = GetTexture(source_id);
 
   if (!source_info || !dest_info) {
     SetGLError(GL_INVALID_VALUE, "glCopyTextureCHROMIUM", "unknown texture id");
@@ -9504,7 +9575,7 @@ void GLES2DecoderImpl::DoCopyTextureCHROMIUM(
   if (!copy_texture_CHROMIUM_.get()) {
     CopyRealGLErrorsToWrapper();
     copy_texture_CHROMIUM_.reset(new CopyTextureCHROMIUMResourceManager());
-    copy_texture_CHROMIUM_->Initialize();
+    copy_texture_CHROMIUM_->Initialize(this);
     RestoreCurrentFramebufferBindings();
     if (PeekGLError() != GL_NO_ERROR)
       return;
@@ -9548,31 +9619,15 @@ void GLES2DecoderImpl::DoCopyTextureCHROMIUM(
     texture_manager()->SetLevelCleared(dest_info, GL_TEXTURE_2D, level, true);
   }
 
-  clear_state_dirty_ = true;
-  glViewport(0, 0, source_width, source_height);
-  copy_texture_CHROMIUM_->DoCopyTexture(target, source_info->service_id(),
+  copy_texture_CHROMIUM_->DoCopyTexture(this,
+                                        source_info->target(),
+                                        dest_info->target(),
+                                        source_info->service_id(),
                                         dest_info->service_id(), level,
+                                        source_width, source_height,
                                         unpack_flip_y_,
                                         unpack_premultiply_alpha_,
                                         unpack_unpremultiply_alpha_);
-  glViewport(
-      state_.viewport_x, state_.viewport_y,
-      state_.viewport_width, state_.viewport_height);
-
-  // Restore all of the state touched by the extension.
-  if (state_.current_program)
-    glUseProgram(state_.current_program->service_id());
-  else
-    glUseProgram(0);
-
-  RestoreCurrentFramebufferBindings();
-  RestoreCurrentTexture2DBindings();
-  RestoreStateForAttrib(
-      CopyTextureCHROMIUMResourceManager::kVertexPositionAttrib);
-  RestoreStateForAttrib(
-      CopyTextureCHROMIUMResourceManager::kVertexTextureAttrib);
-
-  ApplyDirtyState();
 }
 
 static GLenum ExtractTypeFromStorageFormat(GLenum internalformat) {
@@ -9633,7 +9688,7 @@ void GLES2DecoderImpl::DoTexStorage2DEXT(
         GL_INVALID_VALUE, "glTexStorage2DEXT", "dimensions out of range");
     return;
   }
-  TextureManager::TextureInfo* info = GetTextureInfoForTarget(target);
+  Texture* info = GetTextureInfoForTarget(target);
   if (!info) {
     SetGLError(GL_INVALID_OPERATION,
                "glTexStorage2DEXT", "unknown texture for target");
@@ -9693,7 +9748,7 @@ void GLES2DecoderImpl::DoTexStorage2DEXT(
 }
 
 error::Error GLES2DecoderImpl::HandleGenMailboxCHROMIUM(
-    uint32 immediate_data_size, const gles2::GenMailboxCHROMIUM& c) {
+    uint32 immediate_data_size, const cmds::GenMailboxCHROMIUM& c) {
   MailboxName name;
   mailbox_manager()->GenerateMailboxName(&name);
   uint32 bucket_id = static_cast<uint32>(c.bucket_id);
@@ -9707,7 +9762,7 @@ error::Error GLES2DecoderImpl::HandleGenMailboxCHROMIUM(
 
 void GLES2DecoderImpl::DoProduceTextureCHROMIUM(GLenum target,
                                                 const GLbyte* mailbox) {
-  TextureManager::TextureInfo* info = GetTextureInfoForTarget(target);
+  Texture* info = GetTextureInfoForTarget(target);
   if (!info) {
     SetGLError(GL_INVALID_OPERATION,
                "glProduceTextureCHROMIUM", "unknown texture for target");
@@ -9738,7 +9793,7 @@ void GLES2DecoderImpl::DoProduceTextureCHROMIUM(GLenum target,
 
 void GLES2DecoderImpl::DoConsumeTextureCHROMIUM(GLenum target,
                                                 const GLbyte* mailbox) {
-  TextureManager::TextureInfo* info = GetTextureInfoForTarget(target);
+  Texture* info = GetTextureInfoForTarget(target);
   if (!info) {
     SetGLError(GL_INVALID_OPERATION,
                "glConsumeTextureCHROMIUM", "unknown texture for target");
@@ -9799,7 +9854,7 @@ void GLES2DecoderImpl::DoBindTexImage2DCHROMIUM(
 
   // Default target might be conceptually valid, but disallow it to avoid
   // accidents.
-  TextureManager::TextureInfo* info = GetTextureInfoForTargetUnlessDefault(
+  Texture* info = GetTextureInfoForTargetUnlessDefault(
       target);
   if (!info) {
     SetGLError(GL_INVALID_OPERATION,
@@ -9842,7 +9897,7 @@ void GLES2DecoderImpl::DoReleaseTexImage2DCHROMIUM(
 
   // Default target might be conceptually valid, but disallow it to avoid
   // accidents.
-  TextureManager::TextureInfo* info = GetTextureInfoForTargetUnlessDefault(
+  Texture* info = GetTextureInfoForTargetUnlessDefault(
       target);
   if (!info) {
     SetGLError(GL_INVALID_OPERATION,
@@ -9870,7 +9925,7 @@ void GLES2DecoderImpl::DoReleaseTexImage2DCHROMIUM(
 }
 
 error::Error GLES2DecoderImpl::HandleTraceBeginCHROMIUM(
-    uint32 immediate_data_size, const gles2::TraceBeginCHROMIUM& c) {
+    uint32 immediate_data_size, const cmds::TraceBeginCHROMIUM& c) {
   Bucket* bucket = GetBucket(c.bucket_id);
   if (!bucket || bucket->size() == 0) {
     return error::kInvalidArguments;
@@ -9900,7 +9955,7 @@ void GLES2DecoderImpl::DoTraceEndCHROMIUM() {
 
 bool GLES2DecoderImpl::ValidateAsyncTransfer(
     const char* function_name,
-    TextureManager::TextureInfo* info,
+    Texture* info,
     GLenum target,
     GLint level,
     const void * data) {
@@ -9929,7 +9984,7 @@ bool GLES2DecoderImpl::ValidateAsyncTransfer(
 }
 
 error::Error GLES2DecoderImpl::HandleAsyncTexImage2DCHROMIUM(
-    uint32 immediate_data_size, const gles2::AsyncTexImage2DCHROMIUM& c) {
+    uint32 immediate_data_size, const cmds::AsyncTexImage2DCHROMIUM& c) {
   TRACE_EVENT0("gpu", "GLES2DecoderImpl::HandleAsyncTexImage2DCHROMIUM");
   GLenum target = static_cast<GLenum>(c.target);
   GLint level = static_cast<GLint>(c.level);
@@ -9967,7 +10022,7 @@ error::Error GLES2DecoderImpl::HandleAsyncTexImage2DCHROMIUM(
   }
 
   // Extra async validation.
-  TextureManager::TextureInfo* info = GetTextureInfoForTarget(target);
+  Texture* info = GetTextureInfoForTarget(target);
   if (!ValidateAsyncTransfer(
       "glAsyncTexImage2DCHROMIUM", info, target, level, pixels))
     return error::kNoError;
@@ -9986,7 +10041,7 @@ error::Error GLES2DecoderImpl::HandleAsyncTexImage2DCHROMIUM(
 
   // We know the memory/size is safe, so get the real shared memory since
   // it might need to be duped to prevent use-after-free of the memory.
-  Buffer buffer = GetSharedMemoryBuffer(c.pixels_shm_id);
+  gpu::Buffer buffer = GetSharedMemoryBuffer(c.pixels_shm_id);
   base::SharedMemory* shared_memory = buffer.shared_memory;
   uint32 shm_size = buffer.size;
   uint32 shm_data_offset = c.pixels_shm_offset;
@@ -10021,7 +10076,7 @@ error::Error GLES2DecoderImpl::HandleAsyncTexImage2DCHROMIUM(
 }
 
 error::Error GLES2DecoderImpl::HandleAsyncTexSubImage2DCHROMIUM(
-    uint32 immediate_data_size, const gles2::AsyncTexSubImage2DCHROMIUM& c) {
+    uint32 immediate_data_size, const cmds::AsyncTexSubImage2DCHROMIUM& c) {
   TRACE_EVENT0("gpu", "GLES2DecoderImpl::HandleAsyncTexSubImage2DCHROMIUM");
   GLenum target = static_cast<GLenum>(c.target);
   GLint level = static_cast<GLint>(c.level);
@@ -10051,7 +10106,7 @@ error::Error GLES2DecoderImpl::HandleAsyncTexSubImage2DCHROMIUM(
   }
 
   // Extra async validation.
-  TextureManager::TextureInfo* info = GetTextureInfoForTarget(target);
+  Texture* info = GetTextureInfoForTarget(target);
   if (!ValidateAsyncTransfer(
          "glAsyncTexSubImage2DCHROMIUM", info, target, level, pixels))
     return error::kNoError;
@@ -10072,7 +10127,7 @@ error::Error GLES2DecoderImpl::HandleAsyncTexSubImage2DCHROMIUM(
 
   // We know the memory/size is safe, so get the real shared memory since
   // it might need to be duped to prevent use-after-free of the memory.
-  Buffer buffer = GetSharedMemoryBuffer(c.data_shm_id);
+  gpu::Buffer buffer = GetSharedMemoryBuffer(c.data_shm_id);
   base::SharedMemory* shared_memory = buffer.shared_memory;
   uint32 shm_size = buffer.size;
   uint32 shm_data_offset = c.data_shm_offset;
@@ -10093,6 +10148,26 @@ error::Error GLES2DecoderImpl::HandleAsyncTexSubImage2DCHROMIUM(
                                        shm_data_offset, shm_data_size};
   async_pixel_transfer_delegate_->AsyncTexSubImage2D(
       info->GetAsyncTransferState(), tex_params, mem_params);
+  return error::kNoError;
+}
+
+error::Error GLES2DecoderImpl::HandleWaitAsyncTexImage2DCHROMIUM(
+    uint32 immediate_data_size, const cmds::WaitAsyncTexImage2DCHROMIUM& c) {
+  TRACE_EVENT0("gpu", "GLES2DecoderImpl::HandleWaitAsyncTexImage2DCHROMIUM");
+  GLenum target = static_cast<GLenum>(c.target);
+
+  if (GL_TEXTURE_2D != target) {
+    SetGLError(GL_INVALID_ENUM, "glWaitAsyncTexImage2DCHROMIUM", "target");
+    return error::kNoError;
+  }
+  Texture* info = GetTextureInfoForTarget(target);
+  if (!info) {
+      SetGLError(GL_INVALID_OPERATION,
+                 "glWaitAsyncTexImage2DCHROMIUM", "unknown texture");
+    return error::kNoError;
+  }
+  async_pixel_transfer_delegate_->WaitForTransferCompletion(
+      info->GetAsyncTransferState());
   return error::kNoError;
 }
 

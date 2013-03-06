@@ -30,10 +30,13 @@ class ScreenPositionClient;
 
 namespace views {
 class DesktopActivationClient;
-class DesktopCursorClient;
 class DesktopDispatcherClient;
 class X11DesktopWindowMoveClient;
 class X11WindowEventFilter;
+
+namespace corewm {
+class CursorManager;
+}
 
 class VIEWS_EXPORT DesktopRootWindowHostLinux
     : public DesktopRootWindowHost,
@@ -131,9 +134,6 @@ class VIEWS_EXPORT DesktopRootWindowHostLinux
   virtual void SetOpacity(unsigned char opacity) OVERRIDE;
   virtual void SetWindowIcons(const gfx::ImageSkia& window_icon,
                               const gfx::ImageSkia& app_icon) OVERRIDE;
-  virtual void SetAccessibleName(const string16& name) OVERRIDE;
-  virtual void SetAccessibleRole(ui::AccessibilityTypes::Role role) OVERRIDE;
-  virtual void SetAccessibleState(ui::AccessibilityTypes::State state) OVERRIDE;
   virtual void InitModalType(ui::ModalType modal_type) OVERRIDE;
   virtual void FlashFrame(bool flash_frame) OVERRIDE;
   virtual void OnNativeWidgetFocus() OVERRIDE;
@@ -202,7 +202,7 @@ class VIEWS_EXPORT DesktopRootWindowHostLinux
   scoped_ptr<aura::client::DefaultCaptureClient> capture_client_;
   scoped_ptr<aura::client::FocusClient> focus_client_;
   scoped_ptr<DesktopActivationClient> activation_client_;
-  scoped_ptr<DesktopCursorClient> cursor_client_;
+  scoped_ptr<views::corewm::CursorManager> cursor_client_;
   scoped_ptr<DesktopDispatcherClient> dispatcher_client_;
   scoped_ptr<aura::client::ScreenPositionClient> position_client_;
 

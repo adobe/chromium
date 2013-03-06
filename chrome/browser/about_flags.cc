@@ -10,6 +10,7 @@
 #include <set>
 #include <utility>
 
+#include "apps/switches.h"
 #include "base/command_line.h"
 #include "base/memory/singleton.h"
 #include "base/prefs/pref_service.h"
@@ -527,7 +528,8 @@ const Experiment kExperiments[] = {
     IDS_FLAGS_ENABLE_INSTANT_EXTENDED_API,
     IDS_FLAGS_ENABLE_INSTANT_EXTENDED_API_DESCRIPTION,
     kOsDesktop,
-    SINGLE_VALUE_TYPE(switches::kEnableInstantExtendedAPI)
+    ENABLE_DISABLE_VALUE_TYPE(switches::kEnableInstantExtendedAPI,
+                              switches::kDisableInstantExtendedAPI)
   },
   {
     "static-ip-config",
@@ -700,6 +702,13 @@ const Experiment kExperiments[] = {
     kOsWin | kOsLinux | kOsCrOS,
     SINGLE_VALUE_TYPE(ash::switches::kAshDisablePerAppLauncher)
   },
+  {
+    "ash-enable-full-browser-list-in-launcher",
+    IDS_FLAGS_ASH_ENABLE_FULL_BROWSER_LIST_IN_LAUNCHER_NAME,
+    IDS_FLAGS_ASH_ENABLE_FULL_BROWSER_LIST_IN_LAUNCHER_DESCRIPTION,
+    kOsWin | kOsLinux | kOsCrOS,
+    SINGLE_VALUE_TYPE(ash::switches::kAshEnableFullBrowserListInLauncher)
+  },
 #endif
   {
     "per-tile-painting",
@@ -787,6 +796,13 @@ const Experiment kExperiments[] = {
     IDS_FLAGS_ENABLE_DEVTOOLS_EXPERIMENTS_DESCRIPTION,
     kOsDesktop,
     SINGLE_VALUE_TYPE(switches::kEnableDevToolsExperiments)
+  },
+  {
+    "silent-debugger-extension-api",
+    IDS_FLAGS_SILENT_DEBUGGER_EXTENSION_API_NAME,
+    IDS_FLAGS_SILENT_DEBUGGER_EXTENSION_API_DESCRIPTION,
+    kOsDesktop,
+    SINGLE_VALUE_TYPE(switches::kSilentDebuggerExtensionAPI)
   },
   {
     "enable-suggestions-ntp",
@@ -1013,13 +1029,21 @@ const Experiment kExperiments[] = {
     kOsCrOS,
     SINGLE_VALUE_TYPE(switches::kEnableAppMode),
   },
+  {
+    "force-fullscreen-app",
+    IDS_FLAGS_FORCE_FULLSCREEN_APP_NAME,
+    IDS_FLAGS_FORCE_FULLSCREEN_APP_DESCRIPTION,
+    kOsCrOS,
+    SINGLE_VALUE_TYPE(switches::kForceFullscreenApp),
+  },
 #endif  // defined(OS_CHROMEOS)
   {
-    "enable-views-textfield",
-    IDS_FLAGS_ENABLE_VIEWS_TEXTFIELD_NAME,
-    IDS_FLAGS_ENABLE_VIEWS_TEXTFIELD_DESCRIPTION,
+    "views-textfield",
+    IDS_FLAGS_VIEWS_TEXTFIELD_NAME,
+    IDS_FLAGS_VIEWS_TEXTFIELD_DESCRIPTION,
     kOsWin,
-    SINGLE_VALUE_TYPE(switches::kEnableViewsTextfield),
+    ENABLE_DISABLE_VALUE_TYPE(switches::kEnableViewsTextfield,
+                              switches::kDisableViewsTextfield),
   },
   {
     "old-checkbox-style",
@@ -1083,11 +1107,11 @@ const Experiment kExperiments[] = {
     kOsCrOS,
     SINGLE_VALUE_TYPE(ash::switches::kAshEnableWorkspaceScrubbing),
   },
-  { "ash-immersive-mode",
-    IDS_FLAGS_ASH_IMMERSIVE_MODE_NAME,
-    IDS_FLAGS_ASH_IMMERSIVE_MODE_DESCRIPTION,
+  { "ash-disable-immersive-mode",
+    IDS_FLAGS_ASH_DISABLE_IMMERSIVE_MODE_NAME,
+    IDS_FLAGS_ASH_DISABLE_IMMERSIVE_MODE_DESCRIPTION,
     kOsCrOS,
-    SINGLE_VALUE_TYPE(ash::switches::kAshImmersiveMode),
+    SINGLE_VALUE_TYPE(ash::switches::kAshDisableImmersiveMode),
   },
 #if defined(OS_LINUX)
   { "ash-enable-memory-monitor",
@@ -1160,18 +1184,18 @@ const Experiment kExperiments[] = {
     SINGLE_VALUE_TYPE(switches::kPerformanceMonitorGathering)
   },
   {
-    "disable-native-autofill-ui",
-    IDS_FLAGS_DISABLE_NATIVE_AUTOFILL_UI_NAME,
-    IDS_FLAGS_DISABLE_NATIVE_AUTOFILL_UI_DESCRIPTION,
+    "enable-native-autofill-ui",
+    IDS_FLAGS_ENABLE_NATIVE_AUTOFILL_UI_NAME,
+    IDS_FLAGS_ENABLE_NATIVE_AUTOFILL_UI_DESCRIPTION,
     kOsDesktop,
-    SINGLE_VALUE_TYPE(switches::kDisableNativeAutofillUi)
+    SINGLE_VALUE_TYPE(switches::kEnableNativeAutofillUi)
   },
   {
     "show-app-list-shortcut",
     IDS_FLAGS_SHOW_APP_LIST_SHORTCUT_NAME,
     IDS_FLAGS_SHOW_APP_LIST_SHORTCUT_DESCRIPTION,
     kOsWin,
-    SINGLE_VALUE_TYPE(switches::kShowAppListShortcut)
+    SINGLE_VALUE_TYPE(apps::switches::kShowAppListShortcut)
   },
   {
     "enable-experimental-form-filling",
@@ -1189,11 +1213,11 @@ const Experiment kExperiments[] = {
   },
 #if defined(USE_AURA)
   {
-    "enable-overscroll-history-navigation",
-    IDS_FLAGS_ENABLE_OVERSCROLL_HISTORY_NAVIGATION_NAME,
-    IDS_FLAGS_ENABLE_OVERSCROLL_HISTORY_NAVIGATION_DESCRIPTION,
+    "disable-overscroll-history-navigation",
+    IDS_FLAGS_DISABLE_OVERSCROLL_HISTORY_NAVIGATION_NAME,
+    IDS_FLAGS_DISABLE_OVERSCROLL_HISTORY_NAVIGATION_DESCRIPTION,
     kOsAll,
-    SINGLE_VALUE_TYPE(switches::kEnableOverscrollHistoryNavigation)
+    SINGLE_VALUE_TYPE(switches::kDisableOverscrollHistoryNavigation)
   },
 #endif
   {
@@ -1247,6 +1271,22 @@ const Experiment kExperiments[] = {
     kOsAndroid,
     MULTI_VALUE_TYPE(kImplSidePaintingChoices)
   },
+  {
+    "track-active-visit-time",
+    IDS_FLAGS_TRACK_ACTIVE_VISIT_TIME_NAME,
+    IDS_FLAGS_TRACK_ACTIVE_VISIT_TIME_DESCRIPTION,
+    kOsWin,
+    SINGLE_VALUE_TYPE(switches::kTrackActiveVisitTime)
+  },
+#if defined(OS_ANDROID)
+  {
+    "disable-gesture-requirement-for-media-playback",
+    IDS_FLAGS_DISABLE_GESTURE_REQUIREMENT_FOR_MEDIA_PLAYBACK_NAME,
+    IDS_FLAGS_DISABLE_GESTURE_REQUIREMENT_FOR_MEDIA_PLAYBACK_DESCRIPTION,
+    kOsAndroid,
+    SINGLE_VALUE_TYPE(switches::kDisableGestureRequirementForMediaPlayback)
+  },
+#endif
 };
 
 const Experiment* experiments = kExperiments;

@@ -18,6 +18,8 @@
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/signin/signin_manager.h"
+#include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/signin/signin_ui_util.h"
 #include "chrome/browser/task_manager/task_manager.h"
 #include "chrome/browser/ui/browser.h"
@@ -53,6 +55,7 @@
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/image/image_skia.h"
+#include "ui/native_theme/native_theme.h"
 
 #if defined(OS_WIN)
 #include "base/win/metro.h"
@@ -455,7 +458,7 @@ WrenchMenuModel::WrenchMenuModel()
 
 void WrenchMenuModel::Build(bool is_new_menu, bool supports_new_separators) {
 #if defined(USE_AURA)
-  if (is_new_menu)
+  if (is_new_menu && !ui::NativeTheme::IsNewMenuStyleEnabled())
     AddSeparator(ui::SPACING_SEPARATOR);
 #endif
 
@@ -501,7 +504,7 @@ void WrenchMenuModel::Build(bool is_new_menu, bool supports_new_separators) {
   AddSubMenuWithStringId(IDC_BOOKMARKS_MENU, IDS_BOOKMARKS_MENU,
                          bookmark_sub_menu_model_.get());
 
-  if (chrome::search::IsInstantExtendedAPIEnabled(browser_->profile())) {
+  if (chrome::search::IsInstantExtendedAPIEnabled()) {
     recent_tabs_sub_menu_model_.reset(new RecentTabsSubMenuModel(provider_,
                                                                  browser_,
                                                                  NULL));
@@ -550,11 +553,15 @@ void WrenchMenuModel::Build(bool is_new_menu, bool supports_new_separators) {
 
 #if !defined(OS_CHROMEOS)
   // No "Sign in to Chromium..." menu item on ChromeOS.
-  const string16 short_product_name =
-      l10n_util::GetStringUTF16(IDS_SHORT_PRODUCT_NAME);
-  AddItem(IDC_SHOW_SYNC_SETUP, l10n_util::GetStringFUTF16(
-      IDS_SYNC_MENU_PRE_SYNCED_LABEL, short_product_name));
-  AddSeparator(ui::NORMAL_SEPARATOR);
+  SigninManager* signin = SigninManagerFactory::GetForProfile(
+      browser_->profile()->GetOriginalProfile());
+  if (signin && signin->IsSigninAllowed()) {
+    const string16 short_product_name =
+        l10n_util::GetStringUTF16(IDS_SHORT_PRODUCT_NAME);
+    AddItem(IDC_SHOW_SYNC_SETUP, l10n_util::GetStringFUTF16(
+        IDS_SYNC_MENU_PRE_SYNCED_LABEL, short_product_name));
+    AddSeparator(ui::NORMAL_SEPARATOR);
+  }
 #endif
 
   AddItemWithStringId(IDC_OPTIONS, IDS_SETTINGS);
@@ -618,8 +625,10 @@ void WrenchMenuModel::Build(bool is_new_menu, bool supports_new_separators) {
     AddItemWithStringId(IDC_EXIT, IDS_EXIT);
   }
 
-  if (is_new_menu && supports_new_separators)
+  if (is_new_menu && supports_new_separators &&
+      !ui::NativeTheme::IsNewMenuStyleEnabled()) {
     AddSeparator(ui::SPACING_SEPARATOR);
+  }
 }
 
 void WrenchMenuModel::AddGlobalErrorMenuItems() {

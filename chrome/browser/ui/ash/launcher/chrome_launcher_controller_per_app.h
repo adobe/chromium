@@ -254,7 +254,7 @@ class ChromeLauncherControllerPerApp : public ash::LauncherModelObserver,
   virtual string16 GetTitle(const ash::LauncherItem& item) OVERRIDE;
   virtual ui::MenuModel* CreateContextMenu(
       const ash::LauncherItem& item, aura::RootWindow* root) OVERRIDE;
-  virtual ui::MenuModel* CreateApplicationMenu(
+  virtual ash::LauncherMenuModel* CreateApplicationMenu(
       const ash::LauncherItem& item) OVERRIDE;
   virtual ash::LauncherID GetIDByWindow(aura::Window* window) OVERRIDE;
   virtual bool IsDraggable(const ash::LauncherItem& item) OVERRIDE;
@@ -398,6 +398,10 @@ class ChromeLauncherControllerPerApp : public ash::LauncherModelObserver,
   // TODO(skuhne): Move to wherever the BrowserLauncherItemController
   // functionality moves to.
   ChromeLauncherAppMenuItems GetBrowserApplicationList();
+
+  // Returns true when the given |browser| is listed in the browser application
+  // list.
+  bool IsBrowserRepresentedInBrowserList(Browser* browser);
 
   ash::LauncherModel* model_;
 

@@ -207,11 +207,11 @@ struct CommonMailboxObjects {
         m_releaseMailbox2 = base::Bind(&MockMailboxCallback::Release,
                                        base::Unretained(&m_mockCallback),
                                        m_mailboxName2);
-        Mailbox m1;
-        m1.setName(reinterpret_cast<const int8*>(m_mailboxName1.data()));
+        gpu::Mailbox m1;
+        m1.SetName(reinterpret_cast<const int8*>(m_mailboxName1.data()));
         m_mailbox1 = TextureMailbox(m1, m_releaseMailbox1, m_syncPoint1);
-        Mailbox m2;
-        m2.setName(reinterpret_cast<const int8*>(m_mailboxName2.data()));
+        gpu::Mailbox m2;
+        m2.SetName(reinterpret_cast<const int8*>(m_mailboxName2.data()));
         m_mailbox2 = TextureMailbox(m2, m_releaseMailbox2, m_syncPoint2);
     }
 
@@ -480,7 +480,7 @@ TEST_F(TextureLayerImplWithMailboxTest, testCallbackOnInUseResource)
     // Transfer some resources to the parent.
     ResourceProvider::ResourceIdArray resourceIdsToTransfer;
     resourceIdsToTransfer.push_back(id);
-    TransferableResourceList list;
+    TransferableResourceArray list;
     provider->prepareSendToParent(resourceIdsToTransfer, &list);
     EXPECT_TRUE(provider->inUseByConsumer(id));
     EXPECT_CALL(m_testData.m_mockCallback, Release(_, _)).Times(0);

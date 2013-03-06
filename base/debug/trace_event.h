@@ -69,8 +69,42 @@
 // Defines visibility for classes in trace_event_internal.h
 #define TRACE_EVENT_API_CLASS_EXPORT BASE_EXPORT
 
+// The thread buckets for the sampling profiler.
+TRACE_EVENT_API_CLASS_EXPORT extern TRACE_EVENT_API_ATOMIC_WORD g_trace_state0;
+TRACE_EVENT_API_CLASS_EXPORT extern TRACE_EVENT_API_ATOMIC_WORD g_trace_state1;
+TRACE_EVENT_API_CLASS_EXPORT extern TRACE_EVENT_API_ATOMIC_WORD g_trace_state2;
+#define TRACE_EVENT_API_THREAD_BUCKET(thread_bucket)                           \
+  g_trace_state##thread_bucket
+
 ////////////////////////////////////////////////////////////////////////////////
 
 #include "base/debug/trace_event_internal.h"
+
+namespace base {
+namespace debug {
+
+template<typename IDType> class TraceScopedTrackableObject {
+ public:
+  TraceScopedTrackableObject(const char* category, const char* name, IDType id)
+    : category_(category),
+      name_(name),
+      id_(id) {
+    TRACE_EVENT_OBJECT_CREATED_WITH_ID(category_, name_, id_);
+  }
+
+  ~TraceScopedTrackableObject() {
+    TRACE_EVENT_OBJECT_DELETED_WITH_ID(category_, name_, id_);
+  }
+
+ private:
+  const char* category_;
+  const char* name_;
+  IDType id_;
+
+  DISALLOW_COPY_AND_ASSIGN(TraceScopedTrackableObject);
+};
+
+} // namespace debug
+} // namespace base
 
 #endif /* BASE_DEBUG_TRACE_EVENT_H_ */

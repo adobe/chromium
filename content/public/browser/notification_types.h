@@ -155,14 +155,6 @@ enum NotificationType {
   // pointer.
   NOTIFICATION_WEB_CONTENTS_RENDER_VIEW_HOST_CREATED,
 
-  // Notification than an interstitial has become associated with a tab. The
-  // source is the WebContents, the details not used.
-  NOTIFICATION_INTERSTITIAL_ATTACHED,
-
-  // Notification than an interstitial has become detached from a tab. The
-  // source is the WebContents, the details not used.
-  NOTIFICATION_INTERSTITIAL_DETACHED,
-
   // Indicates that a RenderProcessHost was created and its handle is now
   // available. The source will be the RenderProcessHost that corresponds to
   // the process.
@@ -249,58 +241,6 @@ enum NotificationType {
   // renderer in response to a dom automation controller action. The source is
   // the RenderViewHost, and the details is a DomOperationNotificationDetails.
   NOTIFICATION_DOM_OPERATION_RESPONSE,
-
-  // Indicates that the render view host has received a "load complete"
-  // accessibility notification. The source is the RenderViewHost,
-  // the details are not used.
-  NOTIFICATION_ACCESSIBILITY_LOAD_COMPLETE,
-
-  // Indicates that the render view host has received a "layout complete"
-  // accessibility notification. The source is the RenderViewHost,
-  // the details are not used.
-  NOTIFICATION_ACCESSIBILITY_LAYOUT_COMPLETE,
-
-  // Indicates that the render view host has received an accessibility
-  // notification. other than the ones covered above.
-  // The source is the RenderViewHost, the details are not used.
-  NOTIFICATION_ACCESSIBILITY_OTHER,
-
-  // Child Processes ---------------------------------------------------------
-
-  // This notification is sent when a child process host has connected to a
-  // child process.  There is no usable source, since it is sent from an
-  // ephemeral task; register for AllSources() to receive this notification.
-  // The details are in a Details<ChildProcessData>.
-  NOTIFICATION_CHILD_PROCESS_HOST_CONNECTED,
-
-  // This message is sent after a ChildProcessHost is disconnected from the
-  // child process.  There is no usable source, since it is sent from an
-  // ephemeral task; register for AllSources() to receive this notification.
-  // The details are in a Details<ChildProcessData>.
-  NOTIFICATION_CHILD_PROCESS_HOST_DISCONNECTED,
-
-  // This message is sent when a child process disappears
-  // unexpectedly as a result of a crash.  There is no usable
-  // source, since it is sent from an ephemeral task; register for
-  // AllSources() to receive this notification.  The details are in
-  // a Details<ChildProcessData>.
-  NOTIFICATION_CHILD_PROCESS_CRASHED,
-
-  // This message indicates that an instance of a particular child was
-  // created in a page.  (If one page contains several regions rendered by
-  // the same child, this notification will occur once for each region
-  // during the page load.)
-  //
-  // There is no usable source, since it is sent from an ephemeral task;
-  // register for AllSources() to receive this notification.  The details are
-  // in a Details<ChildProcessData>.
-  NOTIFICATION_CHILD_INSTANCE_CREATED,
-
-  // Miscellaneous -------------------------------------------------------------
-
-  // Sent before the repost form warning is brought up.
-  // The source is a NavigationController.
-  NOTIFICATION_REPOST_WARNING_SHOWN,
 
   // Custom notifications used by the embedder should start from here.
   NOTIFICATION_CONTENT_END,

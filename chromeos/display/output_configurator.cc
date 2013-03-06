@@ -226,10 +226,15 @@ void CreateFrameBuffer(Display* display,
                        CrtcConfig* config1,
                        CrtcConfig* config2) {
   TRACE_EVENT0("chromeos", "OutputConfigurator::CreateFrameBuffer");
-  VLOG(1) << "CreateFrameBuffer " << width << " by " << height;
+
+  int current_width = DisplayWidth(display, DefaultScreen(display));
+  int current_height = DisplayHeight(display, DefaultScreen(display));
+  VLOG(1) << "CreateFrameBuffer " << width << " x " << height
+          << " (current=" << current_width << " x " << current_height << ")";
+  if (width ==  current_width && height == current_height)
+    return;
 
   DestroyUnusedCrtcs(display, screen, window, config1, config2);
-
   int mm_width = width * kPixelsToMmScale;
   int mm_height = height * kPixelsToMmScale;
   XRRSetScreenSize(display, window, width, height, mm_width, mm_height);
@@ -526,7 +531,9 @@ bool IsOutputAspectPreservingScaling(Display* display,
 }  // namespace
 
 OutputConfigurator::OutputConfigurator()
-    : is_running_on_chrome_os_(base::chromeos::IsRunningOnChromeOS()),
+    // If we aren't running on ChromeOS (like linux desktop),
+    // don't try to configure display.
+    : configure_display_(base::chromeos::IsRunningOnChromeOS()),
       is_panel_fitting_enabled_(false),
       connected_output_count_(0),
       xrandr_event_base_(0),
@@ -543,7 +550,7 @@ OutputConfigurator::~OutputConfigurator() {
 void OutputConfigurator::Init(bool is_panel_fitting_enabled,
                               uint32 background_color_argb) {
   TRACE_EVENT0("chromeos", "OutputConfigurator::Init");
-  if (!is_running_on_chrome_os_)
+  if (!configure_display_)
     return;
   is_panel_fitting_enabled_ = is_panel_fitting_enabled;
 
@@ -613,10 +620,14 @@ void OutputConfigurator::Init(bool is_panel_fitting_enabled,
       SetIsProjecting(is_projecting);
 }
 
+void OutputConfigurator::Stop() {
+  configure_display_ = false;
+}
+
 bool OutputConfigurator::CycleDisplayMode() {
   TRACE_EVENT0("chromeos", "OutputConfigurator::CycleDisplayMode");
   VLOG(1) << "CycleDisplayMode";
-  if (!is_running_on_chrome_os_)
+  if (!configure_display_)
     return false;
 
   bool did_change = false;
@@ -643,10 +654,12 @@ bool OutputConfigurator::CycleDisplayMode() {
   XRRFreeScreenResources(screen);
   XUngrabServer(display);
 
-  if (did_change)
+  if (did_change) {
     NotifyOnDisplayChanged();
-  else
-    FOR_EACH_OBSERVER(Observer, observers_, OnDisplayModeChangeFailed());
+  } else {
+    FOR_EACH_OBSERVER(
+        Observer, observers_, OnDisplayModeChangeFailed(next_state));
+  }
   return did_change;
 }
 
@@ -654,7 +667,7 @@ bool OutputConfigurator::ScreenPowerSet(bool power_on, bool all_displays) {
   TRACE_EVENT0("chromeos", "OutputConfigurator::ScreenPowerSet");
   VLOG(1) << "OutputConfigurator::SetScreensOn " << power_on
           << " all displays " << all_displays;
-  if (!is_running_on_chrome_os_)
+  if (!configure_display_)
     return false;
 
   bool success = false;
@@ -748,10 +761,12 @@ bool OutputConfigurator::SetDisplayMode(OutputState new_state) {
   XRRFreeScreenResources(screen);
   XUngrabServer(display);
 
-  if (output_state_ == new_state)
+  if (output_state_ == new_state) {
     NotifyOnDisplayChanged();
-  else
-    FOR_EACH_OBSERVER(Observer, observers_, OnDisplayModeChangeFailed());
+  } else {
+    FOR_EACH_OBSERVER(
+        Observer, observers_, OnDisplayModeChangeFailed(new_state));
+  }
   return true;
 }
 
@@ -759,8 +774,9 @@ bool OutputConfigurator::Dispatch(const base::NativeEvent& event) {
   TRACE_EVENT0("chromeos", "OutputConfigurator::Dispatch");
   if (event->type - xrandr_event_base_ == RRScreenChangeNotify)
     XRRUpdateConfiguration(event);
-  // Ignore this event if the Xrandr extension isn't supported.
-  if (!is_running_on_chrome_os_ ||
+  // Ignore this event if the Xrandr extension isn't supported, or
+  // the device is being shutdown.
+  if (!configure_display_ ||
       (event->type - xrandr_event_base_ != RRNotify)) {
     return true;
   }
@@ -821,6 +837,9 @@ void OutputConfigurator::ConfigureOutputs() {
   if (success) {
     output_state_ = new_state;
     NotifyOnDisplayChanged();
+  } else {
+    FOR_EACH_OBSERVER(
+        Observer, observers_, OnDisplayModeChangeFailed(new_state));
   }
   chromeos::DBusThreadManager::Get()->GetPowerManagerClient()->
       SetIsProjecting(is_projecting);
@@ -1051,8 +1070,11 @@ bool OutputConfigurator::FindOrCreateMirrorMode(Display* display,
     for (int j = 0; j < internal_info->nmode; j++) {
       internal_mode_id = internal_info->modes[j];
       XRRModeInfo* internal_mode = ModeInfoForID(screen, internal_mode_id);
+      bool is_internal_interlaced = internal_mode->modeFlags & RR_Interlace;
+      bool is_external_interlaced = external_mode->modeFlags & RR_Interlace;
       if (internal_mode->width == external_mode->width &&
-          internal_mode->height == external_mode->height) {
+          internal_mode->height == external_mode->height &&
+          is_internal_interlaced == is_external_interlaced) {
         *internal_mirror_mode = internal_mode_id;
         *external_mirror_mode = external_mode_id;
         return true;  // Mirror mode found
@@ -1063,9 +1085,11 @@ bool OutputConfigurator::FindOrCreateMirrorMode(Display* display,
     if (try_creating) {
       // We can downscale by 1.125, and upscale indefinitely
       // Downscaling looks ugly, so, can fit == can upscale
+      // Also, internal panels don't support fitting interlaced modes
       bool can_fit =
           internal_native_mode->width >= external_mode->width &&
-          internal_native_mode->height >= external_mode->height;
+          internal_native_mode->height >= external_mode->height &&
+          !(external_mode->modeFlags & RR_Interlace);
       if (can_fit) {
         XRRAddOutputMode(display, internal_output_id, external_mode_id);
         *internal_mirror_mode = *external_mirror_mode = external_mode_id;

@@ -12,9 +12,9 @@
 #include "base/message_loop.h"
 #include "base/metrics/histogram.h"
 #include "base/prefs/pref_service.h"
-#include "base/string_split.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
+#include "base/strings/string_split.h"
 #include "base/values.h"
 #include "chrome/browser/api/infobars/infobar_service.h"
 #include "chrome/browser/browser_process.h"
@@ -227,9 +227,10 @@ void TranslateManager::SetSupportedLanguages(const std::string& language_list) {
   std::set<std::string>* supported_languages = supported_languages_.Pointer();
   supported_languages->clear();
   // ... and replace it with the values we just fetched from the server.
-  DictionaryValue::key_iterator iter = target_languages->begin_keys();
-  for (; iter != target_languages->end_keys(); ++iter)
-    supported_languages_.Pointer()->insert(*iter);
+  for (DictionaryValue::Iterator iter(*target_languages); !iter.IsAtEnd();
+       iter.Advance()) {
+    supported_languages_.Pointer()->insert(iter.key());
+  }
 }
 
 // static

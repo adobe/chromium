@@ -14,6 +14,8 @@
 #include "chrome/common/extensions/api/extension_action/browser_action_handler.h"
 #include "chrome/common/extensions/api/extension_action/page_action_handler.h"
 #include "chrome/common/extensions/api/i18n/default_locale_handler.h"
+#include "chrome/common/extensions/api/icons/icons_handler.h"
+#include "chrome/common/extensions/background_info.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_manifest_constants.h"
 #include "chrome/common/extensions/manifest.h"
@@ -32,18 +34,15 @@ class ExtensionFileUtilTest : public testing::Test {
  protected:
   virtual void SetUp() OVERRIDE {
     testing::Test::SetUp();
-    extensions::ManifestHandler::Register(
-        keys::kBrowserAction,
-        make_linked_ptr(new extensions::BrowserActionHandler));
-    linked_ptr<extensions::PageActionHandler> page_action_handler(
-        new extensions::PageActionHandler);
-    extensions::ManifestHandler::Register(keys::kPageAction,
-                                          page_action_handler);
-    extensions::ManifestHandler::Register(keys::kPageActions,
-                                          page_action_handler);
-    extensions::ManifestHandler::Register(
-        keys::kDefaultLocale,
-        make_linked_ptr(new extensions::DefaultLocaleHandler));
+    (new extensions::BackgroundManifestHandler)->Register();
+    (new extensions::BrowserActionHandler)->Register();
+    (new extensions::DefaultLocaleHandler)->Register();
+    (new extensions::IconsHandler)->Register();
+    (new extensions::PageActionHandler)->Register();
+  }
+
+  virtual void TearDown() OVERRIDE {
+    extensions::ManifestHandler::ClearRegistryForTesting();
   }
 };
 
@@ -136,7 +135,7 @@ TEST_F(ExtensionFileUtilTest, LoadExtensionWithValidLocales) {
 
   std::string error;
   scoped_refptr<Extension> extension(extension_file_util::LoadExtension(
-      install_dir, Manifest::LOAD, Extension::NO_FLAGS, &error));
+      install_dir, Manifest::UNPACKED, Extension::NO_FLAGS, &error));
   ASSERT_TRUE(extension != NULL);
   EXPECT_EQ("The first extension that I made.", extension->description());
 }
@@ -152,7 +151,7 @@ TEST_F(ExtensionFileUtilTest, LoadExtensionWithoutLocalesFolder) {
 
   std::string error;
   scoped_refptr<Extension> extension(extension_file_util::LoadExtension(
-      install_dir, Manifest::LOAD, Extension::NO_FLAGS, &error));
+      install_dir, Manifest::UNPACKED, Extension::NO_FLAGS, &error));
   ASSERT_FALSE(extension == NULL);
   EXPECT_TRUE(error.empty());
 }
@@ -226,7 +225,7 @@ TEST_F(ExtensionFileUtilTest,
 
   std::string error;
   scoped_refptr<Extension> extension(extension_file_util::LoadExtension(
-      install_dir, Manifest::LOAD, Extension::NO_FLAGS, &error));
+      install_dir, Manifest::UNPACKED, Extension::NO_FLAGS, &error));
   ASSERT_TRUE(extension == NULL);
   ASSERT_FALSE(error.empty());
   ASSERT_STREQ("Manifest file is missing or unreadable.", error.c_str());
@@ -243,7 +242,7 @@ TEST_F(ExtensionFileUtilTest, LoadExtensionGivesHelpfullErrorOnBadManifest) {
 
   std::string error;
   scoped_refptr<Extension> extension(extension_file_util::LoadExtension(
-      install_dir, Manifest::LOAD, Extension::NO_FLAGS, &error));
+      install_dir, Manifest::UNPACKED, Extension::NO_FLAGS, &error));
   ASSERT_TRUE(extension == NULL);
   ASSERT_FALSE(error.empty());
   ASSERT_STREQ("Manifest is not valid JSON.  "
@@ -259,7 +258,7 @@ TEST_F(ExtensionFileUtilTest, FailLoadingNonUTF8Scripts) {
 
   std::string error;
   scoped_refptr<Extension> extension(extension_file_util::LoadExtension(
-      install_dir, Manifest::LOAD, Extension::NO_FLAGS, &error));
+      install_dir, Manifest::UNPACKED, Extension::NO_FLAGS, &error));
   ASSERT_TRUE(extension == NULL);
   ASSERT_STREQ("Could not load file 'bad_encoding.js' for content script. "
                "It isn't UTF-8 encoded.", error.c_str());
@@ -429,7 +428,7 @@ TEST_F(ExtensionFileUtilTest, ValidateThemeUTF8) {
           "}", non_ascii_file.c_str());
   std::string error;
   scoped_refptr<Extension> extension = LoadExtensionManifest(
-      kManifest, temp.path(), Manifest::LOAD, 0, &error);
+      kManifest, temp.path(), Manifest::UNPACKED, 0, &error);
   ASSERT_TRUE(extension.get()) << error;
 
   std::vector<extensions::InstallWarning> warnings;
@@ -461,7 +460,7 @@ TEST_F(ExtensionFileUtilTest, MAYBE_BackgroundScriptsMustExist) {
   std::string error;
   std::vector<extensions::InstallWarning> warnings;
   scoped_refptr<Extension> extension = LoadExtensionManifest(
-      value.get(), temp.path(), Manifest::LOAD, 0, &error);
+      value.get(), temp.path(), Manifest::UNPACKED, 0, &error);
   ASSERT_TRUE(extension.get()) << error;
 
   EXPECT_FALSE(extension_file_util::ValidateExtension(extension,
@@ -474,8 +473,8 @@ TEST_F(ExtensionFileUtilTest, MAYBE_BackgroundScriptsMustExist) {
   scripts->Clear();
   scripts->Append(new base::StringValue("http://google.com/foo.js"));
 
-  extension = LoadExtensionManifest(value.get(), temp.path(), Manifest::LOAD,
-                                    0, &error);
+  extension = LoadExtensionManifest(value.get(), temp.path(),
+                                    Manifest::UNPACKED, 0, &error);
   ASSERT_TRUE(extension.get()) << error;
 
   warnings.clear();
@@ -589,7 +588,7 @@ TEST_F(ExtensionFileUtilTest, CheckZeroLengthImageFile) {
 
   std::string error;
   scoped_refptr<Extension> extension(extension_file_util::LoadExtension(
-      ext_dir, Manifest::LOAD, Extension::NO_FLAGS, &error));
+      ext_dir, Manifest::UNPACKED, Extension::NO_FLAGS, &error));
   ASSERT_TRUE(extension == NULL);
   ASSERT_STREQ("Could not load extension icon 'icon.png'.",
       error.c_str());
@@ -601,7 +600,7 @@ TEST_F(ExtensionFileUtilTest, CheckZeroLengthImageFile) {
       .AppendASCII("gggggggggggggggggggggggggggggggg");
 
   scoped_refptr<Extension> extension2(extension_file_util::LoadExtension(
-      ext_dir, Manifest::LOAD, Extension::NO_FLAGS, &error));
+      ext_dir, Manifest::UNPACKED, Extension::NO_FLAGS, &error));
   ASSERT_TRUE(extension2 == NULL);
   ASSERT_STREQ("Could not load icon 'icon.png' for browser action.",
       error.c_str());
@@ -613,7 +612,7 @@ TEST_F(ExtensionFileUtilTest, CheckZeroLengthImageFile) {
       .AppendASCII("hhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhh");
 
   scoped_refptr<Extension> extension3(extension_file_util::LoadExtension(
-      ext_dir, Manifest::LOAD, Extension::NO_FLAGS, &error));
+      ext_dir, Manifest::UNPACKED, Extension::NO_FLAGS, &error));
   ASSERT_TRUE(extension3 == NULL);
   ASSERT_STREQ("Could not load icon 'icon.png' for page action.",
       error.c_str());

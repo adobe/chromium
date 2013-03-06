@@ -51,8 +51,12 @@ const char Textfield::kViewClassName[] = "views/Textfield";
 // static
 bool Textfield::IsViewsTextfieldEnabled() {
 #if defined(OS_WIN) && !defined(USE_AURA)
-  return CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kEnableViewsTextfield);
+  CommandLine* command_line = CommandLine::ForCurrentProcess();
+  if (command_line->HasSwitch(switches::kDisableViewsTextfield))
+    return false;
+  if (command_line->HasSwitch(switches::kEnableViewsTextfield))
+    return true;
+  return false;
 #endif
   return true;
 }
@@ -494,9 +498,7 @@ bool Textfield::SkipDefaultKeyEventProcessing(const ui::KeyEvent& e) {
   if (key == ui::VKEY_BACK)
     return true;  // We'll handle BackSpace ourselves.
 
-#if defined(USE_AURA)
-  NOTIMPLEMENTED();
-#elif defined(OS_WIN)
+#if defined(OS_WIN) && !defined(USE_AURA)
   // We don't translate accelerators for ALT + NumPad digit on Windows, they are
   // used for entering special characters.  We do translate alt-home.
   if (e.IsAltDown() && (key != ui::VKEY_HOME) &&

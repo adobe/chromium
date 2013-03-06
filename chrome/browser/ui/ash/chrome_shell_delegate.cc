@@ -58,6 +58,21 @@ ChromeShellDelegate::~ChromeShellDelegate() {
     instance_ = NULL;
 }
 
+// static
+bool ChromeShellDelegate::UseImmersiveFullscreen() {
+#if defined(OS_CHROMEOS)
+  // Kiosk mode needs the whole screen.
+  CommandLine* command_line = CommandLine::ForCurrentProcess();
+  return !command_line->HasSwitch(switches::kKioskMode) &&
+      !command_line->HasSwitch(ash::switches::kAshDisableImmersiveMode);
+#endif
+  return false;
+}
+
+bool ChromeShellDelegate::IsRunningInForcedAppMode() const {
+  return chrome::IsRunningInForcedAppMode();
+}
+
 void ChromeShellDelegate::UnlockScreen() {
   // This is used only for testing thus far.
   NOTIMPLEMENTED();
@@ -85,22 +100,24 @@ void ChromeShellDelegate::NewWindow(bool is_incognito) {
 }
 
 void ChromeShellDelegate::ToggleMaximized() {
+  // Only toggle if the user has a window open.
   aura::Window* window = ash::wm::GetActiveWindow();
   if (!window)
     return;
+
+  // TODO(jamescook): If immersive mode replaces fullscreen, rename this
+  // function and the interface to ToggleFullscreen.
+  if (UseImmersiveFullscreen()) {
+    chrome::ToggleFullscreenMode(GetTargetBrowser());
+    return;
+  }
+
   // Get out of fullscreen when in fullscreen mode.
   if (ash::wm::IsWindowFullscreen(window)) {
     chrome::ToggleFullscreenMode(GetTargetBrowser());
     return;
   }
   ash::wm::ToggleMaximizedWindow(window);
-  if (CommandLine::ForCurrentProcess()->
-        HasSwitch(ash::switches::kAshImmersiveMode)) {
-    // Experiment with automatically entering immersive mode when the user
-    // presses the F4 maximize key.
-    window->SetProperty(ash::internal::kImmersiveModeKey,
-                        ash::wm::IsWindowMaximized(window));
-  }
 }
 
 void ChromeShellDelegate::RestoreTab() {

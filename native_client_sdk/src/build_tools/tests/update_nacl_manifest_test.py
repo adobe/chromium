@@ -559,8 +559,10 @@ mac,canary,21.0.1156.0,2012-05-30 12:14:21.305090"""
     self._ReadUploadedManifest()
     p18_bundle = self.uploaded_manifest.GetBundle(B18_R1_NONE.name)
     self.assertEqual(p18_bundle.stability, POST_STABLE)
+    self.assertEqual(p18_bundle.recommended, 'no')
     p19_bundle = self.uploaded_manifest.GetBundle(B19_R1_NONE.name)
     self.assertEqual(p19_bundle.stability, STABLE)
+    self.assertEqual(p19_bundle.recommended, 'yes')
 
   def testDontPushIfNoChange(self):
     # Make an online manifest that already has this bundle.
@@ -645,6 +647,30 @@ mac,canary,21.0.1156.0,2012-05-30 12:14:21.305090"""
 
     uploaded_bundle = self.uploaded_manifest.GetBundle('pepper_26')
     self.assertEqual(2, len(uploaded_bundle.GetHostOSArchives()))
+
+  def testKeepBundleOrder(self):
+    # This is a regression test: when a bundle is skipped (because it isn't
+    # newer than the online bundle), it was added to the end of the list.
+
+    # Make an online manifest that already has B18.
+    online_manifest = MakeManifest(B18_0_1025_163_R1_MLW)
+    self.files.AddOnlineManifest(online_manifest.GetDataAsString())
+
+    self.manifest = MakeManifest(B18_R1_NONE, B19_R1_NONE)
+    self.history.Add(OS_MLW, STABLE, V18_0_1025_163)
+    self.history.Add(OS_MLW, STABLE, V19_0_1084_41)
+    self.files.Add(B18_0_1025_163_R1_MLW)
+    self.files.Add(B19_0_1084_41_R1_MLW)
+
+    self._MakeDelegate()
+    self._Run(OS_MLW)
+    self._ReadUploadedManifest()
+
+    # Bundle 18 should be before bundle 19.
+    bundles = self.uploaded_manifest.GetBundles()
+    self.assertEqual(2, len(bundles))
+    self.assertEqual('pepper_18', bundles[0].name)
+    self.assertEqual('pepper_19', bundles[1].name)
 
 
 class TestUpdateVitals(unittest.TestCase):

@@ -25,6 +25,11 @@ namespace {
 const int kMaxThrottleCount = 5;
 }
 
+const int DriveScheduler::kMaxJobCount[] = {
+  5,  // METADATA_QUEUE
+  1,  // FILE_QUEUE
+};
+
 DriveScheduler::JobInfo::JobInfo(JobType in_job_type)
     : job_type(in_job_type),
       job_id(-1),
@@ -47,8 +52,7 @@ DriveScheduler::QueueEntry::~QueueEntry() {
 bool DriveScheduler::QueueEntry::Compare(
     const DriveScheduler::QueueEntry* left,
     const DriveScheduler::QueueEntry* right) {
-  return (right->context.type == BACKGROUND &&
-          left->context.type != BACKGROUND);
+  return (left->context.type < right->context.type);
 }
 
 DriveScheduler::DriveScheduler(
@@ -65,7 +69,7 @@ DriveScheduler::DriveScheduler(
       weak_ptr_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   for (int i = 0; i < NUM_QUEUES; ++i) {
-    job_loop_is_running_[i] = false;
+    jobs_running_[i] = 0;
   }
 }
 
@@ -101,6 +105,19 @@ void DriveScheduler::GetAccountMetadata(
   QueueJob(new_job.Pass());
 
   StartJobLoop(GetJobQueueType(TYPE_GET_ACCOUNT_METADATA));
+}
+
+void DriveScheduler::GetAboutResource(
+    const google_apis::GetAboutResourceCallback& callback) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK(!callback.is_null());
+
+  scoped_ptr<QueueEntry> new_job(new QueueEntry(TYPE_GET_ABOUT_RESOURCE));
+  new_job->get_about_resource_callback = callback;
+
+  QueueJob(new_job.Pass());
+
+  StartJobLoop(GetJobQueueType(TYPE_GET_ABOUT_RESOURCE));
 }
 
 void DriveScheduler::GetAppList(
@@ -316,7 +333,7 @@ void DriveScheduler::QueueJob(scoped_ptr<QueueEntry> job) {
 void DriveScheduler::StartJobLoop(QueueType queue_type) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  if (!job_loop_is_running_[queue_type])
+  if (jobs_running_[queue_type] < kMaxJobCount[queue_type])
     DoJobLoop(queue_type);
 }
 
@@ -324,18 +341,16 @@ void DriveScheduler::DoJobLoop(QueueType queue_type) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   if (queue_[queue_type].empty()) {
-    // Note that |queue_| is not cleared so the sync loop can resume.
-    job_loop_is_running_[queue_type] = false;
     return;
   }
 
   // Check if we should defer based on the first item in the queue
   if (ShouldStopJobLoop(queue_type, queue_[queue_type].front()->context)) {
-    job_loop_is_running_[queue_type] = false;
     return;
   }
 
-  job_loop_is_running_[queue_type] = true;
+  // Increment the number of jobs.
+  ++jobs_running_[queue_type];
 
   // Should copy before calling queue_.pop_front().
   scoped_ptr<QueueEntry> queue_entry(queue_[queue_type].front());
@@ -349,6 +364,14 @@ void DriveScheduler::DoJobLoop(QueueType queue_type) {
   QueueEntry* entry = queue_entry.get();
 
   switch (job_info.job_type) {
+    case TYPE_GET_ABOUT_RESOURCE: {
+      drive_service_->GetAboutResource(
+          base::Bind(&DriveScheduler::OnGetAboutResourceJobDone,
+                     weak_ptr_factory_.GetWeakPtr(),
+                     base::Passed(&queue_entry)));
+    }
+    break;
+
     case TYPE_GET_ACCOUNT_METADATA: {
       drive_service_->GetAccountMetadata(
           base::Bind(&DriveScheduler::OnGetAccountMetadataJobDone,
@@ -491,13 +514,23 @@ bool DriveScheduler::ShouldStopJobLoop(QueueType queue_type,
   if (net::NetworkChangeNotifier::IsOffline())
     return true;
 
-  if (queue_type == FILE_QUEUE && context.type == BACKGROUND) {
-    // Should stop if the current connection is on cellular network, and
-    // fetching is disabled over cellular.
-    if (profile_->GetPrefs()->GetBoolean(prefs::kDisableDriveOverCellular) &&
-        net::NetworkChangeNotifier::IsConnectionCellular(
-            net::NetworkChangeNotifier::GetConnectionType()))
-      return true;
+  // Should stop background jobs if the current connection is on cellular
+  // network, and fetching is disabled over cellular.
+  bool should_stop_on_cellular_network = false;
+  switch (context.type) {
+    case USER_INITIATED:
+      should_stop_on_cellular_network = false;
+      break;
+    case BACKGROUND:
+    case PREFETCH:
+      should_stop_on_cellular_network = (queue_type == FILE_QUEUE);
+      break;
+  }
+  if (should_stop_on_cellular_network &&
+      profile_->GetPrefs()->GetBoolean(prefs::kDisableDriveOverCellular) &&
+      net::NetworkChangeNotifier::IsConnectionCellular(
+          net::NetworkChangeNotifier::GetConnectionType())) {
+    return true;
   }
 
   return false;
@@ -546,6 +579,9 @@ scoped_ptr<DriveScheduler::QueueEntry> DriveScheduler::OnJobDone(
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   QueueType queue_type = GetJobQueueType(queue_entry->job_info.job_type);
+
+  // Decrement the number of jobs for this queue.
+  --jobs_running_[queue_type];
 
   // Retry, depending on the error.
   if (error == DRIVE_FILE_ERROR_THROTTLED) {
@@ -607,10 +643,27 @@ void DriveScheduler::OnGetResourceEntryJobDone(
                  base::Passed(&entry)));
 }
 
+void DriveScheduler::OnGetAboutResourceJobDone(
+    scoped_ptr<QueueEntry> queue_entry,
+    google_apis::GDataErrorCode error,
+    scoped_ptr<google_apis::AboutResource> about_resource) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
+  DriveFileError drive_error(util::GDataToDriveFileError(error));
+
+  scoped_ptr<QueueEntry> job_info = OnJobDone(queue_entry.Pass(), drive_error);
+
+  if (!job_info)
+    return;
+
+  // Handle the callback.
+  job_info->get_about_resource_callback.Run(error, about_resource.Pass());
+}
+
 void DriveScheduler::OnGetAccountMetadataJobDone(
     scoped_ptr<QueueEntry> queue_entry,
     google_apis::GDataErrorCode error,
-    scoped_ptr<google_apis::AccountMetadataFeed> account_metadata) {
+    scoped_ptr<google_apis::AccountMetadata> account_metadata) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   DriveFileError drive_error(util::GDataToDriveFileError(error));
@@ -707,6 +760,7 @@ void DriveScheduler::OnConnectionTypeChanged(
 
 DriveScheduler::QueueType DriveScheduler::GetJobQueueType(JobType type) {
   switch (type) {
+    case TYPE_GET_ABOUT_RESOURCE:
     case TYPE_GET_ACCOUNT_METADATA:
     case TYPE_GET_APP_LIST:
     case TYPE_GET_RESOURCE_LIST:

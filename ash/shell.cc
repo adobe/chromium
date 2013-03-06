@@ -40,6 +40,7 @@
 #include "ash/wm/app_list_controller.h"
 #include "ash/wm/ash_activation_controller.h"
 #include "ash/wm/ash_focus_rules.h"
+#include "ash/wm/ash_native_cursor_manager.h"
 #include "ash/wm/base_layout_manager.h"
 #include "ash/wm/capture_controller.h"
 #include "ash/wm/coordinate_conversion.h"
@@ -105,6 +106,7 @@
 #if defined(OS_CHROMEOS)
 #include "ash/ash_constants.h"
 #include "ash/display/display_change_observer_x11.h"
+#include "ash/display/display_error_dialog.h"
 #include "ash/display/output_configurator_animation.h"
 #include "base/chromeos/chromeos_version.h"
 #include "base/message_pump_aurax11.h"
@@ -198,6 +200,9 @@ Shell::Shell(ShellDelegate* delegate)
 #if defined(OS_CHROMEOS)
       output_configurator_(new chromeos::OutputConfigurator()),
 #endif  // defined(OS_CHROMEOS)
+      native_cursor_manager_(new AshNativeCursorManager),
+      cursor_manager_(scoped_ptr<views::corewm::NativeCursorManager>(
+          native_cursor_manager_)),
       browser_context_(NULL),
       simulate_modal_window_open_for_testing_(false) {
   DCHECK(delegate_.get());
@@ -299,17 +304,19 @@ Shell::~Shell() {
   // because they might have registered ActivationChangeObserver.
   activation_controller_.reset();
 
-  DCHECK(instance_ == this);
-  instance_ = NULL;
-
 #if defined(OS_CHROMEOS)
   if (display_change_observer_.get())
     output_configurator_->RemoveObserver(display_change_observer_.get());
   if (output_configurator_animation_.get())
     output_configurator_->RemoveObserver(output_configurator_animation_.get());
+  if (display_error_observer_.get())
+    output_configurator_->RemoveObserver(display_error_observer_.get());
   base::MessagePumpAuraX11::Current()->RemoveDispatcherForRootWindow(
       output_configurator());
 #endif  // defined(OS_CHROMEOS)
+
+  DCHECK(instance_ == this);
+  instance_ = NULL;
 }
 
 // static
@@ -414,8 +421,10 @@ void Shell::Init() {
     // observer gets invoked after the root windows are configured.
     output_configurator_->AddObserver(display_change_observer_.get());
     output_configurator_animation_.reset(
-        new internal::OutputConfiguratorAnimation()),
+        new internal::OutputConfiguratorAnimation());
+    display_error_observer_.reset(new internal::DisplayErrorObserver());
     output_configurator_->AddObserver(output_configurator_animation_.get());
+    output_configurator_->AddObserver(display_error_observer_.get());
     display_change_observer_->OnDisplayModeChanged();
   }
 #endif
@@ -556,7 +565,7 @@ void Shell::Init() {
   if (!command_line->HasSwitch(views::corewm::switches::kNoDropShadows)) {
     resize_shadow_controller_.reset(new internal::ResizeShadowController());
     shadow_controller_.reset(
-        new views::corewm::ShadowController(GetPrimaryRootWindow()));
+        new views::corewm::ShadowController(activation_client_));
   }
 
   // Create system_tray_notifier_ before the delegate.
@@ -847,12 +856,6 @@ void Shell::InitRootWindowForSecondaryDisplay(aura::RootWindow* root) {
 void Shell::DoInitialWorkspaceAnimation() {
   return GetPrimaryRootWindowController()->workspace_controller()->
       DoInitialAnimation();
-}
-
-message_center::MessageCenter* Shell::message_center() {
-  if (!message_center_.get())
-    message_center_.reset(new message_center::MessageCenter());
-  return message_center_.get();
 }
 
 void Shell::InitRootWindowController(

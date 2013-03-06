@@ -16,6 +16,7 @@
 #include "base/threading/thread.h"
 #include "base/threading/worker_pool.h"
 #include "base/utf_string_conversions.h"
+#include "content/browser/browser_main_loop.h"
 #include "content/browser/child_process_security_policy_impl.h"
 #include "content/browser/dom_storage/dom_storage_context_impl.h"
 #include "content/browser/dom_storage/session_storage_namespace_impl.h"
@@ -29,7 +30,6 @@
 #include "content/browser/renderer_host/render_process_host_impl.h"
 #include "content/browser/renderer_host/render_view_host_delegate.h"
 #include "content/browser/renderer_host/render_widget_helper.h"
-#include "content/browser/web_contents/web_contents_impl.h"
 #include "content/common/child_process_host_impl.h"
 #include "content/common/child_process_messages.h"
 #include "content/common/desktop_notification_messages.h"
@@ -46,8 +46,9 @@
 #include "content/public/common/url_constants.h"
 #include "ipc/ipc_channel_handle.h"
 #include "ipc/ipc_platform_file.h"
+#include "media/audio/audio_manager.h"
 #include "media/audio/audio_manager_base.h"
-#include "media/audio/audio_util.h"
+#include "media/audio/audio_parameters.h"
 #include "media/base/media_log_event.h"
 #include "net/base/io_buffer.h"
 #include "net/base/keygen_handler.h"
@@ -200,22 +201,6 @@ class OpenChannelToPpapiBrokerCallback
   int routing_id_;
   int request_id_;
 };
-
-void RaiseInfobarForBlocked3DContentOnUIThread(
-    int render_process_id,
-    int render_view_id,
-    const GURL& url,
-    content::ThreeDAPIType requester) {
-  RenderViewHost* rvh = RenderViewHost::FromID(
-      render_process_id, render_view_id);
-  if (!rvh)
-    return;
-  WebContentsImpl* web_contents = static_cast<WebContentsImpl*>(
-      WebContents::FromRenderViewHost(rvh));
-  if (!web_contents)
-    return;
-  web_contents->DidBlock3DAPIs(url, requester);
-}
 
 }  // namespace
 
@@ -793,17 +778,22 @@ void RenderMessageFilter::OnGetCPUUsage(int* cpu_usage) {
   *cpu_usage = cpu_usage_;
 }
 
+// TODO(xians): refactor the API to return input and output AudioParameters.
 void RenderMessageFilter::OnGetAudioHardwareConfig(
     int* output_buffer_size, int* output_sample_rate, int* input_sample_rate,
     media::ChannelLayout* input_channel_layout) {
-  *output_buffer_size = media::GetAudioHardwareBufferSize();
-  *output_sample_rate = media::GetAudioHardwareSampleRate();
+  media::AudioManager* audio_manager = BrowserMainLoop::GetAudioManager();
+  const media::AudioParameters output_parameters =
+      audio_manager->GetDefaultOutputStreamParameters();
+  *output_buffer_size = output_parameters.frames_per_buffer();
+  *output_sample_rate = output_parameters.sample_rate();
 
   // TODO(henrika): add support for all available input devices.
-  *input_sample_rate = media::GetAudioInputHardwareSampleRate(
-      media::AudioManagerBase::kDefaultDeviceId);
-  *input_channel_layout = media::GetAudioInputHardwareChannelLayout(
-      media::AudioManagerBase::kDefaultDeviceId);
+  const media::AudioParameters input_parameters =
+      audio_manager->GetInputStreamParameters(
+          media::AudioManagerBase::kDefaultDeviceId);
+  *input_sample_rate = input_parameters.sample_rate();
+  *input_channel_layout = input_parameters.channel_layout();
 }
 
 void RenderMessageFilter::OnGetMonitorColorProfile(std::vector<char>* profile) {
@@ -1074,17 +1064,8 @@ void RenderMessageFilter::OnAre3DAPIsBlocked(int render_view_id,
                                              const GURL& top_origin_url,
                                              ThreeDAPIType requester,
                                              bool* blocked) {
-  GpuDataManagerImpl::DomainBlockStatus block_status =
-      GpuDataManagerImpl::GetInstance()->Are3DAPIsBlocked(top_origin_url);
-  *blocked = (block_status !=
-              GpuDataManagerImpl::DOMAIN_BLOCK_STATUS_NOT_BLOCKED);
-  if (*blocked) {
-    BrowserThread::PostTask(
-        BrowserThread::UI, FROM_HERE,
-        base::Bind(&RaiseInfobarForBlocked3DContentOnUIThread,
-                   render_process_id_, render_view_id,
-                   top_origin_url, requester));
-  }
+  *blocked = GpuDataManagerImpl::GetInstance()->Are3DAPIsBlocked(
+      top_origin_url, render_process_id_, render_view_id, requester);
 }
 
 void RenderMessageFilter::OnDidLose3DContext(

@@ -53,12 +53,6 @@ enum DialogSection {
   SECTION_SHIPPING,
 };
 
-// Termination actions for the dialog.
-enum DialogAction {
-  ACTION_CANCEL,
-  ACTION_SUBMIT,
-};
-
 // A notification to show in the autofill dialog. Ranges from information to
 // seriously scary security messages, and will give you the color it should be
 // displayed (if you ask it).
@@ -66,6 +60,8 @@ class DialogNotification {
  public:
   enum Type {
     NONE,
+    AUTOCHECKOUT_ERROR,
+    EXPLANATORY_MESSAGE,
     REQUIRED_ACTION,
     SECURITY_WARNING,
     VALIDATION_ERROR,
@@ -83,6 +79,9 @@ class DialogNotification {
 
   // Whether this notification has an arrow pointing up at the account chooser.
   bool HasArrow() const;
+
+  // Whether this notifications has the "Save details to wallet" checkbox.
+  bool HasCheckbox() const;
 
   const string16& display_text() const { return display_text_; }
 

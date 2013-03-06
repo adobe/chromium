@@ -29,7 +29,7 @@ class ChromeDesktopImpl : public ChromeImpl {
 
   virtual Status Launch(const base::FilePath& chrome_exe,
                         const base::ListValue* chrome_args,
-                        const std::string& landing_url);
+                        const base::ListValue* chrome_extensions);
 
   // Overridden from ChromeImpl:
   virtual Status Quit() OVERRIDE;
@@ -37,11 +37,15 @@ class ChromeDesktopImpl : public ChromeImpl {
  private:
   base::ProcessHandle process_;
   base::ScopedTempDir user_data_dir_;
+  base::ScopedTempDir extension_dir_;
 };
 
 namespace internal {
 Status ProcessCommandLineArgs(const base::ListValue* args,
                               CommandLine* command);
+Status ProcessExtensions(const base::ListValue* extensions,
+                         const base::FilePath& temp_dir,
+                         CommandLine* command);
 }  // namespace internal
 
 #endif  // CHROME_TEST_CHROMEDRIVER_CHROME_DESKTOP_IMPL_H_

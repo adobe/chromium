@@ -3,7 +3,6 @@
 // found in the LICENSE file.
 
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/automation/automation_util.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/extensions/extension_host.h"
 #include "chrome/browser/extensions/extension_process_manager.h"
@@ -39,8 +38,9 @@ class ProcessManagementTest : public ExtensionBrowserTest {
 }  // namespace
 
 
-// TODO(nasko): crbug.com/173137
-#if defined(OS_WIN)
+// TODO(nasko): Timeouts on Windows: crbug.com/173137
+// V8 error on Linux: https://code.google.com/p/v8/issues/detail?id=2533
+#if defined(OS_WIN) || defined(OS_LINUX)
 #define MAYBE_ProcessOverflow DISABLED_ProcessOverflow
 #else
 #define MAYBE_ProcessOverflow ProcessOverflow

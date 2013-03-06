@@ -28,6 +28,7 @@ class DriveScheduler
  public:
   // Enum representing the type of job.
   enum JobType {
+    TYPE_GET_ABOUT_RESOURCE,
     TYPE_GET_ACCOUNT_METADATA,
     TYPE_GET_APP_LIST,
     TYPE_GET_RESOURCE_LIST,
@@ -94,6 +95,10 @@ class DriveScheduler
   // Adds a GetAppList operation to the queue.
   // |callback| must not be null.
   void GetAppList(const google_apis::GetAppListCallback& callback);
+
+  // Adds a GetAboutResource operation to the queue.
+  // |callback| must not be null.
+  void GetAboutResource(const google_apis::GetAboutResourceCallback& callback);
 
   // Adds a GetResourceList operation to the queue.
   // |callback| must not be null.
@@ -170,6 +175,8 @@ class DriveScheduler
     NUM_QUEUES
   };
 
+  static const int kMaxJobCount[NUM_QUEUES];
+
   // Represents a single entry in the job queue.
   struct QueueEntry {
     explicit QueueEntry(JobType in_job_type);
@@ -241,6 +248,11 @@ class DriveScheduler
     // Used by:
     //   TYPE_GET_ACCOUNT_METADATA,
     google_apis::GetAccountMetadataCallback get_account_metadata_callback;
+
+    // Callback for operations that take a GetAboutResourceCallback.
+    // Used by:
+    //   TYPE_GET_ABOUT_RESOURCE,
+    google_apis::GetAboutResourceCallback get_about_resource_callback;
 
     // Callback for operations that take a GetAppListCallback.
     // Used by:
@@ -315,11 +327,17 @@ class DriveScheduler
       google_apis::GDataErrorCode error,
       scoped_ptr<google_apis::ResourceEntry> entry);
 
+  // Callback for job finishing with a GetAboutResourceCallback.
+  void OnGetAboutResourceJobDone(
+      scoped_ptr<QueueEntry> queue_entry,
+      google_apis::GDataErrorCode error,
+      scoped_ptr<google_apis::AboutResource> about_resource);
+
   // Callback for job finishing with a GetAccountMetadataCallback.
   void OnGetAccountMetadataJobDone(
       scoped_ptr<QueueEntry> queue_entry,
       google_apis::GDataErrorCode error,
-      scoped_ptr<google_apis::AccountMetadataFeed> account_metadata);
+      scoped_ptr<google_apis::AccountMetadata> account_metadata);
 
   // Callback for job finishing with a GetAppListCallback.
   void OnGetAppListJobDone(
@@ -354,9 +372,8 @@ class DriveScheduler
   // For testing only.  Disables throttling so that testing is faster.
   void SetDisableThrottling(bool disable) { disable_throttling_ = disable; }
 
-  // True when there is a job running.  Indicates that new jobs should wait to
-  // be executed.
-  bool job_loop_is_running_[NUM_QUEUES];
+  // Number of jobs in flight for each queue.
+  int jobs_running_[NUM_QUEUES];
 
   // Next value that should be assigned as a job id.
   int next_job_id_;

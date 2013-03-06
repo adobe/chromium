@@ -11,7 +11,6 @@
 #include "ash/ash_export.h"
 #include "ash/shelf_types.h"
 #include "ash/system/user/login_status.h"
-#include "ash/wm/cursor_manager.h"
 #include "ash/wm/system_modal_container_event_filter_delegate.h"
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
@@ -23,6 +22,7 @@
 #include "ui/gfx/insets.h"
 #include "ui/gfx/screen.h"
 #include "ui/gfx/size.h"
+#include "ui/views/corewm/cursor_manager.h"
 
 class CommandLine;
 
@@ -64,13 +64,10 @@ class WindowModalityController;
 }
 }
 
-namespace message_center {
-class MessageCenter;
-}
-
 namespace ash {
 
 class AcceleratorController;
+class AshNativeCursorManager;
 class CapsLockDelegate;
 class DesktopBackgroundController;
 class DisplayController;
@@ -102,6 +99,7 @@ class ActivationController;
 class AppListController;
 class CaptureController;
 class DisplayChangeObserverX11;
+class DisplayErrorObserver;
 class DisplayManager;
 class DragDropController;
 class EventClientImpl;
@@ -327,7 +325,7 @@ class ASH_EXPORT Shell
   internal::EventTransformationHandler* event_transformation_handler() {
     return event_transformation_handler_.get();
   }
-  CursorManager* cursor_manager() { return &cursor_manager_; }
+  views::corewm::CursorManager* cursor_manager() { return &cursor_manager_; }
 
   ShellDelegate* delegate() { return delegate_.get(); }
 
@@ -433,14 +431,14 @@ class ASH_EXPORT Shell
   internal::OutputConfiguratorAnimation* output_configurator_animation() {
     return output_configurator_animation_.get();
   }
+  internal::DisplayErrorObserver* display_error_observer() {
+    return display_error_observer_.get();
+  }
 #endif  // defined(OS_CHROMEOS)
 
   RootWindowHostFactory* root_window_host_factory() {
     return root_window_host_factory_.get();
   }
-
-  // MessageCenter is a global list of currently displayed notifications.
-  message_center::MessageCenter* message_center();
 
  private:
   FRIEND_TEST_ALL_PREFIXES(ExtendedDesktopTest, TestCursor);
@@ -578,14 +576,16 @@ class ASH_EXPORT Shell
   scoped_ptr<chromeos::OutputConfigurator> output_configurator_;
   scoped_ptr<internal::OutputConfiguratorAnimation>
       output_configurator_animation_;
+  scoped_ptr<internal::DisplayErrorObserver> display_error_observer_;
 
   // Receives output change events and udpates the display manager.
   scoped_ptr<internal::DisplayChangeObserverX11> display_change_observer_;
 #endif  // defined(OS_CHROMEOS)
 
-  scoped_ptr<message_center::MessageCenter> message_center_;
-
-  CursorManager cursor_manager_;
+  // |native_cursor_manager_| is owned by |cursor_manager_|, but we keep a
+  // pointer to vend to test code.
+  AshNativeCursorManager* native_cursor_manager_;
+  views::corewm::CursorManager cursor_manager_;
 
   ObserverList<ShellObserver> observers_;
 

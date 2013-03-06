@@ -15,15 +15,15 @@
 #include "remoting/host/ipc_constants.h"
 #include "remoting/host/sas_injector.h"
 #include "remoting/host/win/worker_process_launcher.h"
-#include "remoting/host/win/wts_console_monitor.h"
 #include "remoting/host/win/wts_session_process_delegate.h"
+#include "remoting/host/win/wts_terminal_monitor.h"
 
 using base::win::ScopedHandle;
 
 namespace {
 
 // The security descriptor of the daemon IPC endpoint. It gives full access
-// to LocalSystem and denies access by anyone else.
+// to SYSTEM and denies access by anyone else.
 const char kDaemonIpcSecurityDescriptor[] = "O:SYG:SYD:(A;;GA;;;SY)";
 
 // The command line parameters that should be copied from the service's command
@@ -39,21 +39,21 @@ DesktopSessionWin::DesktopSessionWin(
     scoped_refptr<AutoThreadTaskRunner> io_task_runner,
     DaemonProcess* daemon_process,
     int id,
-    WtsConsoleMonitor* monitor)
+    WtsTerminalMonitor* monitor)
     : DesktopSession(daemon_process, id),
       main_task_runner_(main_task_runner),
       io_task_runner_(io_task_runner),
       monitor_(monitor) {
   DCHECK(main_task_runner_->BelongsToCurrentThread());
 
-  monitor_->AddWtsConsoleObserver(this);
+  monitor_->AddWtsTerminalObserver(net::IPEndPoint(), this);
 }
 
 DesktopSessionWin::~DesktopSessionWin() {
   DCHECK(main_task_runner_->BelongsToCurrentThread());
 
   launcher_.reset();
-  monitor_->RemoveWtsConsoleObserver(this);
+  monitor_->RemoveWtsTerminalObserver(this);
 }
 
 void DesktopSessionWin::OnChannelConnected(int32 peer_pid) {
@@ -82,6 +82,12 @@ bool DesktopSessionWin::OnMessageReceived(const IPC::Message& message) {
                         OnInjectSas)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
+
+  if (!handled) {
+    LOG(ERROR) << "Received unexpected IPC type: " << message.type();
+    RestartDesktopProcess(FROM_HERE);
+  }
+
   return handled;
 }
 

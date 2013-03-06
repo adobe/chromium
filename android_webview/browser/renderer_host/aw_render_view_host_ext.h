@@ -50,9 +50,21 @@ class AwRenderViewHostExt : public content::WebContentsObserver,
   // the corresponding public WebView API is as well.
   const AwHitTestData& GetLastHitTestData() const;
 
+  // Set whether fixed layout mode is enabled. Must be updated together
+  // with WebSettings.viewport_enabled.
+  // TODO(mnaganov): Leave only one setting. See the comments on
+  //   https://bugs.webkit.org/show_bug.cgi?id=109946
+  void SetEnableFixedLayoutMode(bool enable);
+
   // Sets the zoom level for text only. Used in layout modes other than
   // Text Autosizing.
   void SetTextZoomLevel(double level);
+
+  void ResetScrollAndScaleState();
+
+  // Sets the initial page scale. This overrides initial scale set by
+  // the meta viewport tag.
+  void SetInitialPageScale(double page_scale_factor);
 
  private:
   // content::WebContentsObserver implementation.

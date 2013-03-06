@@ -122,6 +122,35 @@ MetadataCache.createFull = function() {
 };
 
 /**
+ * Clones metadata entry. Metadata entries may contain scalars, arrays,
+ * hash arrays and Date object. Other objects are not supported.
+ * @param {Object} metadata Metadata object.
+ * @return {Object} Cloned entry.
+ */
+MetadataCache.cloneMetadata = function(metadata) {
+  if (metadata instanceof Array) {
+    var result = [];
+    for (var index = 0; index < metadata.length; index++) {
+      result[index] = MetadataCache.cloneMetadata(metadata[index]);
+    }
+    return result;
+  } else if (metadata instanceof Date) {
+    var result = new Date();
+    result.setTime(metadata.getTime());
+    return result;
+  } else if (metadata instanceof Object) {  // Hash array only.
+    var result = {};
+    for (var property in metadata) {
+      if (metadata.hasOwnProperty(property))
+        result[property] = MetadataCache.cloneMetadata(metadata[property]);
+    }
+    return result;
+  } else {
+    return metadata;
+  }
+};
+
+/**
  * @return {boolean} Whether all providers are ready.
  */
 MetadataCache.prototype.isInitialized = function() {
@@ -355,7 +384,7 @@ MetadataCache.prototype.clearRecursively = function(item, type) {
   var keys = Object.keys(this.cache_);
   var url = this.itemToUrl_(item);
 
-  for (entryUrl in keys) {
+  for (var entryUrl in keys) {
     if (entryUrl.substring(0, url.length) === url) {
       if (type === '*') {
         this.cache_[entryUrl].properties = {};

@@ -30,7 +30,6 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/download/download_item_model.h"
 #include "chrome/browser/extensions/tab_helper.h"
-#include "chrome/browser/prefs/pref_registry_syncable.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/themes/theme_properties.h"
@@ -64,7 +63,7 @@
 #include "chrome/browser/ui/gtk/gtk_window_util.h"
 #include "chrome/browser/ui/gtk/infobars/infobar_container_gtk.h"
 #include "chrome/browser/ui/gtk/infobars/infobar_gtk.h"
-#include "chrome/browser/ui/gtk/instant_preview_controller_gtk.h"
+#include "chrome/browser/ui/gtk/instant_overlay_controller_gtk.h"
 #include "chrome/browser/ui/gtk/location_bar_view_gtk.h"
 #include "chrome/browser/ui/gtk/nine_box.h"
 #include "chrome/browser/ui/gtk/one_click_signin_bubble_gtk.h"
@@ -83,6 +82,7 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/download_manager.h"
 #include "content/public/browser/native_web_keyboard_event.h"
 #include "content/public/browser/notification_service.h"
@@ -120,18 +120,12 @@ const int kLoadingAnimationFrameTimeMs = 30;
 
 const char* kBrowserWindowKey = "__BROWSER_WINDOW_GTK__";
 
-// The frame border is only visible in restored mode and is hardcoded to 4 px
-// on each side regardless of the system window border size.
-const int kFrameBorderThickness = 4;
 // While resize areas on Windows are normally the same size as the window
 // borders, our top area is shrunk by 1 px to make it easier to move the window
 // around with our thinner top grabbable strip.  (Incidentally, our side and
 // bottom resize areas don't match the frame border thickness either -- they
 // span the whole nonclient area, so there's no "dead zone" for the mouse.)
 const int kTopResizeAdjust = 1;
-// In the window corners, the resize areas don't actually expand bigger, but
-// the 16 px at the end of each edge triggers diagonal resizing.
-const int kResizeAreaCornerSize = 16;
 // The thickness of the shadow around the toolbar+web content area.  There are
 // actually a couple pixels more that should overlap the toolbar and web
 // content area, but we don't use those pixels.
@@ -864,6 +858,10 @@ void BrowserWindowGtk::ExitFullscreen() {
     gtk_window_maximize(window_);
 }
 
+bool BrowserWindowGtk::ShouldHideUIForFullscreen() const {
+  return IsFullscreen();
+}
+
 bool BrowserWindowGtk::IsFullscreen() const {
   return (state_ & GDK_WINDOW_STATE_FULLSCREEN);
 }
@@ -1145,7 +1143,7 @@ bool BrowserWindowGtk::GetConstrainedWindowTopY(int* top_y) {
 
 void BrowserWindowGtk::ShowAvatarBubble(WebContents* web_contents,
                                         const gfx::Rect& rect) {
-  GtkWidget* widget = web_contents->GetContentNativeView();
+  GtkWidget* widget = web_contents->GetView()->GetContentNativeView();
   new AvatarMenuBubbleGtk(browser_.get(), widget,
       BubbleGtk::ANCHOR_TOP_LEFT, &rect);
 }
@@ -1161,7 +1159,7 @@ void BrowserWindowGtk::ShowPasswordGenerationBubble(
     autofill::PasswordGenerator* password_generator) {
   WebContents* web_contents =
       browser_->tab_strip_model()->GetActiveWebContents();
-  if (!web_contents || !web_contents->GetContentNativeView()) {
+  if (!web_contents || !web_contents->GetView()->GetContentNativeView()) {
     return;
   }
 
@@ -1666,8 +1664,8 @@ void BrowserWindowGtk::InitWidgets() {
   gtk_box_pack_end(GTK_BOX(window_vbox_), render_area_event_box_,
                    TRUE, TRUE, 0);
 
-  instant_preview_controller_.reset(
-      new InstantPreviewControllerGtk(this, contents_container_.get()));
+  instant_overlay_controller_.reset(
+      new InstantOverlayControllerGtk(this, contents_container_.get()));
 
   if (IsBookmarkBarSupported()) {
     bookmark_bar_.reset(new BookmarkBarGtk(this,
@@ -1757,6 +1755,7 @@ void BrowserWindowGtk::SetBackgroundColor() {
 }
 
 void BrowserWindowGtk::UpdateWindowShape(int width, int height) {
+  using gtk_window_util::kFrameBorderThickness;
   GdkRegion* mask = GetWindowShape(width, height);
   gdk_window_shape_combine_region(
       gtk_widget_get_window(GTK_WIDGET(window_)), mask, 0, 0);
@@ -1910,7 +1909,7 @@ void BrowserWindowGtk::MaybeShowBookmarkBar(bool animate) {
     bookmark_bar_->SetPageNavigator(browser_.get());
 
   BookmarkBar::State state = browser_->bookmark_bar_state();
-  if (contents_container_->HasPreview() && state == BookmarkBar::DETACHED)
+  if (contents_container_->HasOverlay() && state == BookmarkBar::DETACHED)
     state = BookmarkBar::HIDDEN;
 
   toolbar_->UpdateForBookmarkBarVisibility(state == BookmarkBar::DETACHED);
@@ -1984,8 +1983,10 @@ gboolean BrowserWindowGtk::OnKeyPress(GtkWidget* widget, GdkEventKey* event) {
   WebContents* current_web_contents =
       browser()->tab_strip_model()->GetActiveWebContents();
   // The current tab might not have a render view if it crashed.
-  if (!current_web_contents || !current_web_contents->GetContentNativeView() ||
-      !gtk_widget_is_focus(current_web_contents->GetContentNativeView())) {
+  if (!current_web_contents ||
+      !current_web_contents->GetView()->GetContentNativeView() ||
+      !gtk_widget_is_focus(
+          current_web_contents->GetView()->GetContentNativeView())) {
     int command_id = GetCustomCommandId(event);
     if (command_id == -1)
       command_id = GetPreHandleCommandId(event);
@@ -2189,54 +2190,8 @@ bool BrowserWindowGtk::GetWindowEdge(int x, int y, GdkWindowEdge* edge) {
   if (IsMaximized() || IsFullscreen())
     return false;
 
-  if (x < kFrameBorderThickness) {
-    // Left edge.
-    if (y < kResizeAreaCornerSize - kTopResizeAdjust) {
-      *edge = GDK_WINDOW_EDGE_NORTH_WEST;
-    } else if (y < bounds_.height() - kResizeAreaCornerSize) {
-      *edge = GDK_WINDOW_EDGE_WEST;
-    } else {
-      *edge = GDK_WINDOW_EDGE_SOUTH_WEST;
-    }
-    return true;
-  } else if (x < bounds_.width() - kFrameBorderThickness) {
-    if (y < kFrameBorderThickness - kTopResizeAdjust) {
-      // Top edge.
-      if (x < kResizeAreaCornerSize) {
-        *edge = GDK_WINDOW_EDGE_NORTH_WEST;
-      } else if (x < bounds_.width() - kResizeAreaCornerSize) {
-        *edge = GDK_WINDOW_EDGE_NORTH;
-      } else {
-        *edge = GDK_WINDOW_EDGE_NORTH_EAST;
-      }
-    } else if (y < bounds_.height() - kFrameBorderThickness) {
-      // Ignore the middle content area.
-      return false;
-    } else {
-      // Bottom edge.
-      if (x < kResizeAreaCornerSize) {
-        *edge = GDK_WINDOW_EDGE_SOUTH_WEST;
-      } else if (x < bounds_.width() - kResizeAreaCornerSize) {
-        *edge = GDK_WINDOW_EDGE_SOUTH;
-      } else {
-        *edge = GDK_WINDOW_EDGE_SOUTH_EAST;
-      }
-    }
-    return true;
-  } else {
-    // Right edge.
-    if (y < kResizeAreaCornerSize - kTopResizeAdjust) {
-      *edge = GDK_WINDOW_EDGE_NORTH_EAST;
-    } else if (y < bounds_.height() - kResizeAreaCornerSize) {
-      *edge = GDK_WINDOW_EDGE_EAST;
-    } else {
-      *edge = GDK_WINDOW_EDGE_SOUTH_EAST;
-    }
-    return true;
-  }
-
-  NOTREACHED();
-  return false;
+  return gtk_window_util::GetWindowEdge(
+      bounds_.size(), kTopResizeAdjust, x, y, edge);
 }
 
 bool BrowserWindowGtk::UseCustomFrame() const {

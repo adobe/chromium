@@ -20,8 +20,8 @@
 #include "base/metrics/statistics_recorder.h"
 #include "base/path_service.h"
 #include "base/prefs/pref_service.h"
-#include "base/string_split.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_split.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/api/infobars/infobar_service.h"
@@ -47,6 +47,7 @@
 #include "chrome/browser/sessions/session_service.h"
 #include "chrome/browser/sessions/session_service_factory.h"
 #include "chrome/browser/shell_integration.h"
+#include "chrome/browser/ui/app_list/app_list_service.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_list.h"
@@ -101,10 +102,6 @@
 
 #if defined(OS_WIN)
 #include "base/win/windows_version.h"
-#endif
-
-#if defined(ENABLE_APP_LIST)
-#include "chrome/browser/ui/app_list/app_list_util.h"
 #endif
 
 using content::ChildProcessSecurityPolicy;
@@ -194,6 +191,10 @@ bool GetAppLaunchContainer(
 
   // The extension with id |app_id| may have been uninstalled.
   if (!extension)
+    return false;
+
+  // Don't launch platform apps in incognito mode.
+  if (profile->IsOffTheRecord() && extension->is_platform_app())
     return false;
 
   // Look at preferences to find the right launch container.  If no
@@ -334,13 +335,11 @@ bool StartupBrowserCreatorImpl::Launch(Profile* profile,
   if (command_line_.HasSwitch(switches::kDumpHistogramsOnExit))
     base::StatisticsRecorder::set_dump_on_exit(true);
 
-#if defined(ENABLE_APP_LIST)
-  chrome::InitAppList(profile);
+  AppListService::InitAll(profile);
   if (command_line_.HasSwitch(switches::kShowAppList)) {
-    chrome::ShowAppList(profile);
+    AppListService::Get()->ShowAppList(profile);
     return true;
   }
-#endif
 
   // Open the required browser windows and tabs. First, see if
   // we're being run as an application window. If so, the user
@@ -401,12 +400,8 @@ void StartupBrowserCreatorImpl::ExtractOptionalAppWindowSize(
   }
 }
 
-bool StartupBrowserCreatorImpl::IsAppLaunch(Profile* profile,
-                                            std::string* app_url,
+bool StartupBrowserCreatorImpl::IsAppLaunch(std::string* app_url,
                                             std::string* app_id) {
-  // Don't launch apps in incognito mode.
-  if (profile->IsOffTheRecord())
-    return false;
   if (command_line_.HasSwitch(switches::kApp)) {
     if (app_url)
       *app_url = command_line_.GetSwitchValueASCII(switches::kApp);
@@ -426,7 +421,7 @@ bool StartupBrowserCreatorImpl::OpenApplicationTab(Profile* profile) {
   // function will open an app that should be in a tab, there is no need
   // to look at the app URL.  OpenApplicationWindow() will open app url
   // shortcuts.
-  if (!IsAppLaunch(profile, NULL, &app_id) || app_id.empty())
+  if (!IsAppLaunch(NULL, &app_id) || app_id.empty())
     return false;
 
   extension_misc::LaunchContainer launch_container;
@@ -453,7 +448,7 @@ bool StartupBrowserCreatorImpl::OpenApplicationWindow(
     *out_app_contents = NULL;
 
   std::string url_string, app_id;
-  if (!IsAppLaunch(profile, &url_string, &app_id))
+  if (!IsAppLaunch(&url_string, &app_id))
     return false;
 
   // This can fail if the app_id is invalid.  It can also fail if the

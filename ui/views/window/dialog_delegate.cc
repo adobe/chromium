@@ -11,7 +11,7 @@
 #include "ui/base/ui_base_switches.h"
 #include "ui/views/bubble/bubble_border.h"
 #include "ui/views/bubble/bubble_frame_view.h"
-#include "ui/views/controls/button/text_button.h"
+#include "ui/views/controls/button/label_button.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_observer.h"
 #include "ui/views/window/dialog_client_view.h"
@@ -88,6 +88,10 @@ View* DialogDelegate::CreateExtraView() {
   return NULL;
 }
 
+View* DialogDelegate::CreateTitlebarExtraView() {
+  return NULL;
+}
+
 View* DialogDelegate::CreateFootnoteView() {
   return NULL;
 }
@@ -145,6 +149,12 @@ NonClientFrameView* DialogDelegate::CreateNewStyleFrameView(Widget* widget) {
   frame->SetBubbleBorder(
       new BubbleBorder(BubbleBorder::FLOAT, BubbleBorder::SMALL_SHADOW, color));
   frame->SetTitle(widget->widget_delegate()->GetWindowTitle());
+  DialogDelegate* delegate = widget->widget_delegate()->AsDialogDelegate();
+  if (delegate) {
+    View* titlebar_view = delegate->CreateTitlebarExtraView();
+    if (titlebar_view)
+      frame->SetTitlebarExtraView(titlebar_view);
+  }
   frame->SetShowCloseButton(true);
   frame->set_can_drag(true);
   return frame;

@@ -7,11 +7,14 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/ui/views/constrained_window_views.h"
 #include "chrome/browser/ui/views/unhandled_keyboard_event_handler.h"
+#include "chrome/browser/ui/web_contents_modal_dialog_manager.h"
 #include "content/public/browser/native_web_keyboard_event.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_view.h"
 #include "ui/gfx/size.h"
 #include "ui/views/controls/webview/webview.h"
 #include "ui/views/view.h"
+#include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_delegate.h"
 #include "ui/web_dialogs/web_dialog_delegate.h"
 #include "ui/web_dialogs/web_dialog_ui.h"
@@ -38,7 +41,7 @@ class ConstrainedWebDialogDelegateViews
 
   // WebDialogWebContentsDelegate interface.
   virtual void CloseContents(WebContents* source) OVERRIDE {
-    window_->CloseWebContentsModalDialog();
+    window_->Close();
   }
 
   // contents::WebContentsDelegate
@@ -54,15 +57,15 @@ class ConstrainedWebDialogDelegateViews
     return window_->GetNativeView();
   }
 
-  void set_window(ConstrainedWindowViews* window) { window_ = window; }
-  ConstrainedWindowViews* window() const { return window_; }
+  void set_window(views::Widget* window) { window_ = window; }
+  views::Widget* window() const { return window_; }
 
  private:
   // Converts keyboard events on the WebContents to accelerators.
   UnhandledKeyboardEventHandler unhandled_keyboard_event_handler_;
 
   views::WebView* view_;
-  ConstrainedWindowViews* window_;
+  views::Widget* window_;
 
   DISALLOW_COPY_AND_ASSIGN(ConstrainedWebDialogDelegateViews);
 };
@@ -95,7 +98,7 @@ class ConstrainedWebDialogDelegateViewViews
     return impl_->ReleaseWebContentsOnDialogClose();
   }
   virtual NativeWebContentsModalDialog GetNativeDialog() OVERRIDE {
-    return impl_->window()->GetNativeDialog();
+    return impl_->window()->GetNativeView();
   }
   virtual WebContents* GetWebContents() OVERRIDE {
     return impl_->GetWebContents();
@@ -123,6 +126,14 @@ class ConstrainedWebDialogDelegateViewViews
   virtual views::View* GetContentsView() OVERRIDE {
     return this;
   }
+  // TODO(wittman): Remove this override once we move to the new style frame
+  // view on all dialogs.
+  virtual views::NonClientFrameView* CreateNonClientFrameView(
+      views::Widget* widget) OVERRIDE {
+    return CreateConstrainedStyleNonClientFrameView(
+        widget,
+        GetWebContents()->GetBrowserContext());
+  }
 
   virtual ui::ModalType GetModalType() const OVERRIDE {
 #if defined(USE_ASH)
@@ -148,7 +159,7 @@ class ConstrainedWebDialogDelegateViewViews
       const ui::Accelerator& accelerator) OVERRIDE {
     // Pressing ESC closes the dialog.
     DCHECK_EQ(ui::VKEY_ESCAPE, accelerator.key_code());
-    impl_->window()->CloseWebContentsModalDialog();
+    impl_->window()->Close();
     return true;
   }
   virtual gfx::Size GetPreferredSize() OVERRIDE {
@@ -162,11 +173,11 @@ class ConstrainedWebDialogDelegateViewViews
     return gfx::Size();
   }
 
-  void SetWindow(ConstrainedWindowViews* window) {
+  void SetWindow(views::Widget* window) {
     impl_->set_window(window);
   }
 
-  ConstrainedWindowViews* GetWindow() {
+  views::Widget* GetWindow() {
     return impl_->window();
   }
 
@@ -201,8 +212,13 @@ ConstrainedWebDialogDelegate* CreateConstrainedWebDialog(
   ConstrainedWebDialogDelegateViewViews* constrained_delegate =
       new ConstrainedWebDialogDelegateViewViews(
           browser_context, delegate, tab_delegate);
-  ConstrainedWindowViews* window =
-      ConstrainedWindowViews::Create(web_contents, constrained_delegate);
+  views::Widget* window =
+      CreateWebContentsModalDialogViews(
+          constrained_delegate,
+          web_contents->GetView()->GetNativeView());
+  WebContentsModalDialogManager* web_contents_modal_dialog_manager =
+      WebContentsModalDialogManager::FromWebContents(web_contents);
+  web_contents_modal_dialog_manager->ShowDialog(window->GetNativeView());
   constrained_delegate->SetWindow(window);
   return constrained_delegate;
 }

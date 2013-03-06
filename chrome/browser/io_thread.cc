@@ -15,9 +15,9 @@
 #include "base/prefs/pref_registry_simple.h"
 #include "base/prefs/pref_service.h"
 #include "base/stl_util.h"
-#include "base/string_split.h"
 #include "base/string_util.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_split.h"
 #include "base/threading/thread.h"
 #include "base/threading/worker_pool.h"
 #include "build/build_config.h"
@@ -649,24 +649,20 @@ void IOThread::InitializeNetworkOptions(const CommandLine& command_line) {
   if (command_line.HasSwitch(switches::kIgnoreUrlFetcherCertRequests))
     net::URLFetcher::SetIgnoreCertificateRequests(true);
 
-  bool used_spdy_switch = false;
   if (command_line.HasSwitch(switches::kUseSpdy)) {
     std::string spdy_mode =
         command_line.GetSwitchValueASCII(switches::kUseSpdy);
     EnableSpdy(spdy_mode);
-    used_spdy_switch = true;
-  }
-  if (command_line.HasSwitch(switches::kEnableSpdy3)) {
+  } else if (command_line.HasSwitch(switches::kEnableSpdy31)) {
+    net::HttpStreamFactory::EnableNpnSpdy31();
+  } else if (command_line.HasSwitch(switches::kEnableSpdy3)) {
     net::HttpStreamFactory::EnableNpnSpdy3();
-    used_spdy_switch = true;
   } else if (command_line.HasSwitch(switches::kEnableNpn)) {
     net::HttpStreamFactory::EnableNpnSpdy();
-    used_spdy_switch = true;
   } else if (command_line.HasSwitch(switches::kEnableNpnHttpOnly)) {
     net::HttpStreamFactory::EnableNpnHttpOnly();
-    used_spdy_switch = true;
-  }
-  if (!used_spdy_switch) {
+  } else {
+    // Use SPDY/3 by default.
     net::HttpStreamFactory::EnableNpnSpdy3();
   }
 }

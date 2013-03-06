@@ -57,7 +57,6 @@
             'RandomizedBaseAddress': '1',
             'DataExecutionPrevention': '0',
             'AdditionalLibraryDirectories': [
-              '<(DEPTH)/third_party/platformsdk_win7/files/Lib',
               '<(PRODUCT_DIR)/lib'
             ],
             'DelayLoadDLLs': [],
@@ -235,6 +234,13 @@
                     '<(PRODUCT_DIR)/nacl64.exe',
                     '<(PRODUCT_DIR)/nacl_irt_x86_32.nexe',
                   ],
+                  'variables': {
+                    'target_arch_flag': '--target_arch=x64',
+                  },
+                }, {
+                  'variables': {
+                    'target_arch_flag': '--target_arch=x86',
+                  },
                 }],
               ],
               'inputs': [
@@ -267,6 +273,7 @@
                 '<(enable_hidpi_flag)',
                 '<(enable_touch_ui_flag)',
                 '<(component_build_flag)',
+                '<(target_arch_flag)',
                 # TODO(sgk):  may just use environment variables
                 #'--distribution=$(CHROMIUM_BUILD)',
                 '--distribution=_google_chrome',

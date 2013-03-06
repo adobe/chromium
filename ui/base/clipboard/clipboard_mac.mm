@@ -49,6 +49,15 @@ NSPasteboard* GetPasteboard() {
   return pasteboard;
 }
 
+void WriteDataImpl(NSPasteboard* pb,
+                   NSString* format,
+                   const char* data_data,
+                   size_t data_len) {
+  [pb addTypes:[NSArray arrayWithObject:format] owner:nil];
+  [pb setData:[NSData dataWithBytes:data_data length:data_len]
+      forType:format];
+}
+
 }  // namespace
 
 Clipboard::FormatType::FormatType() : data_(nil) {
@@ -212,16 +221,22 @@ void Clipboard::WriteBitmap(const char* pixel_data, const char* size_data) {
 void Clipboard::WriteData(const FormatType& format,
                           const char* data_data,
                           size_t data_len) {
-  NSPasteboard* pb = GetPasteboard();
-  [pb addTypes:[NSArray arrayWithObject:format.ToNSString()] owner:nil];
-  [pb setData:[NSData dataWithBytes:data_data length:data_len]
-      forType:format.ToNSString()];
+  WriteDataImpl(GetPasteboard(), format.ToNSString(), data_data, data_len);
 }
 
 void Clipboard::WriteSourceTag(SourceTag tag) {
+  if (tag != SourceTag())
+    WriteSourceTag(GetPasteboard(), tag);
+}
+
+// static
+void Clipboard::WriteSourceTag(NSPasteboard* pb, SourceTag tag) {
   if (tag != SourceTag()) {
     ObjectMapParam binary = SourceTag2Binary(tag);
-    WriteData(GetSourceTagFormatType(), &binary[0], binary.size());
+    WriteDataImpl(pb,
+                  GetSourceTagFormatType().ToNSString(),
+                  &binary[0],
+                  binary.size());
   }
 }
 
@@ -293,6 +308,7 @@ void Clipboard::ReadAvailableTypes(Clipboard::Buffer buffer,
 void Clipboard::ReadText(Clipboard::Buffer buffer, string16* result) const {
   DCHECK(CalledOnValidThread());
   DCHECK_EQ(buffer, BUFFER_STANDARD);
+  ReportAction(buffer, READ_TEXT);
   NSPasteboard* pb = GetPasteboard();
   NSString* contents = [pb stringForType:NSStringPboardType];
 
@@ -305,6 +321,7 @@ void Clipboard::ReadAsciiText(Clipboard::Buffer buffer,
                               std::string* result) const {
   DCHECK(CalledOnValidThread());
   DCHECK_EQ(buffer, BUFFER_STANDARD);
+  ReportAction(buffer, READ_TEXT);
   NSPasteboard* pb = GetPasteboard();
   NSString* contents = [pb stringForType:NSStringPboardType];
 
@@ -348,6 +365,7 @@ void Clipboard::ReadHTML(Clipboard::Buffer buffer, string16* markup,
 void Clipboard::ReadRTF(Buffer buffer, std::string* result) const {
   DCHECK(CalledOnValidThread());
   DCHECK_EQ(buffer, BUFFER_STANDARD);
+  ReportAction(buffer, READ_TEXT);
 
   return ReadData(GetRtfFormatType(), result);
 }

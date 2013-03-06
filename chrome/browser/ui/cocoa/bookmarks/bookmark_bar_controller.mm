@@ -229,7 +229,6 @@ void RecordAppLaunch(Profile* profile, GURL url) {
 @synthesize lastState = lastState_;
 @synthesize isAnimationRunning = isAnimationRunning_;
 @synthesize delegate = delegate_;
-@synthesize isEmpty = isEmpty_;
 @synthesize stateAnimationsEnabled = stateAnimationsEnabled_;
 @synthesize innerContentAnimationsEnabled = innerContentAnimationsEnabled_;
 
@@ -457,13 +456,14 @@ void RecordAppLaunch(Profile* profile, GURL url) {
   NSRect frame = [[self view] frame];
   NSRect buttonViewFrame = NSMakeRect(0, 0, NSWidth(frame), NSHeight(frame));
 
+  // Add padding to the detached bookmark bar.
   // The state of our morph (if any); 1 is total bubble, 0 is the regular bar.
   CGFloat morph = [self detachedMorphProgress];
-
-  // Add padding to the detached bookmark bar.
-  buttonViewFrame = NSInsetRect(buttonViewFrame,
-                                morph * bookmarks::kNTPBookmarkBarPadding,
-                                morph * bookmarks::kNTPBookmarkBarPadding);
+  CGFloat padding = chrome::search::IsInstantExtendedAPIEnabled()
+                    ? bookmarks::kSearchNTPBookmarkBarPadding
+                    : bookmarks::kNTPBookmarkBarPadding;
+  buttonViewFrame =
+      NSInsetRect(buttonViewFrame, morph * padding, morph * padding);
 
   [buttonView_ setFrame:buttonViewFrame];
 }
@@ -575,7 +575,7 @@ void RecordAppLaunch(Profile* profile, GURL url) {
   [sender highlight:NO];
 }
 
--(void)cleanupAfterMenuFlashThread:(id)sender {
+- (void)cleanupAfterMenuFlashThread:(id)sender {
   [self closeFolderAndStopTrackingMenus];
 
   // Items retained by doMenuFlashOnSeparateThread below.
@@ -647,6 +647,7 @@ void RecordAppLaunch(Profile* profile, GURL url) {
 
   if (!animate)
     [self closeFolderAndStopTrackingMenus];
+  bookmark_utils::RecordBookmarkLaunch([self bookmarkLaunchLocation]);
 }
 
 // Common function to open a bookmark folder of any type.
@@ -654,6 +655,9 @@ void RecordAppLaunch(Profile* profile, GURL url) {
   DCHECK([sender isKindOfClass:[BookmarkButton class]]);
   DCHECK([[sender cell] isKindOfClass:[BookmarkButtonCell class]]);
 
+  // Only record the action if it's the initial folder being opened.
+  if (!showFolderMenus_)
+    bookmark_utils::RecordBookmarkFolderOpen([self bookmarkLaunchLocation]);
   showFolderMenus_ = !showFolderMenus_;
 
   if (sender == offTheSideButton_)
@@ -662,7 +666,6 @@ void RecordAppLaunch(Profile* profile, GURL url) {
   // Toggle presentation of bar folder menus.
   [folderTarget_ openBookmarkFolderFromButton:sender];
 }
-
 
 // Click on a bookmark folder button.
 - (IBAction)openBookmarkFolderFromButton:(id)sender {
@@ -875,6 +878,12 @@ void RecordAppLaunch(Profile* profile, GURL url) {
   return (AnimatableView*)[self view];
 }
 
+- (bookmark_utils::BookmarkLaunchLocation)bookmarkLaunchLocation {
+  return currentState_ == BookmarkBar::DETACHED ?
+      bookmark_utils::LAUNCH_DETACHED_BAR :
+      bookmark_utils::LAUNCH_ATTACHED_BAR;
+}
+
 // Position the off-the-side chevron to the left of the otherBookmarks button,
 // unless it's hidden in which case it's right aligned on top of it.
 - (void)positionOffTheSideButton {
@@ -1009,7 +1018,6 @@ void RecordAppLaunch(Profile* profile, GURL url) {
   // Update everything else.
   [self layoutSubviews];
   [self frameDidChange];
-  [self updateNoItemContainerVisibility];
 }
 
 // (Private)
@@ -1036,7 +1044,10 @@ void RecordAppLaunch(Profile* profile, GURL url) {
     [[self backgroundGradientView] setShowsDivider:YES];
     [[self view] setHidden:NO];
     AnimatableView* view = [self animatableView];
-    [view animateToNewHeight:chrome::kNTPBookmarkBarHeight
+    CGFloat newHeight = chrome::search::IsInstantExtendedAPIEnabled()
+                        ? bookmarks::kSearchNewTabBookmarkBarHeight
+                        : chrome::kNTPBookmarkBarHeight;
+    [view animateToNewHeight:newHeight
                     duration:kBookmarkBarAnimationDuration];
   } else if ([self isAnimatingFromState:BookmarkBar::DETACHED
                                 toState:BookmarkBar::SHOW]) {
@@ -1170,6 +1181,8 @@ void RecordAppLaunch(Profile* profile, GURL url) {
     case BookmarkBar::SHOW:
       return bookmarks::kBookmarkBarHeight;
     case BookmarkBar::DETACHED:
+      if (chrome::search::IsInstantExtendedAPIEnabled())
+        return bookmarks::kSearchNewTabBookmarkBarHeight;
       return chrome::kNTPBookmarkBarHeight;
     case BookmarkBar::HIDDEN:
       return 0;
@@ -1257,15 +1270,7 @@ void RecordAppLaunch(Profile* profile, GURL url) {
 // appropriate) the "no items" container (text which says "bookmarks
 // go here").
 - (void)showOrHideNoItemContainerForNode:(const BookmarkNode*)node {
-  isEmpty_ = node->empty();
-  [[self view] setNeedsDisplay:YES];
-  [self updateNoItemContainerVisibility];
-}
-
-- (void)updateNoItemContainerVisibility {
-  BOOL hideNoItemWarning = !isEmpty_ ||
-      ([self shouldShowAtBottomWhenDetached] &&
-       currentState_ == BookmarkBar::DETACHED);
+  BOOL hideNoItemWarning = !node->empty();
   [[buttonView_ noItemContainer] setHidden:hideNoItemWarning];
 }
 
@@ -1572,7 +1577,7 @@ void RecordAppLaunch(Profile* profile, GURL url) {
 // tricks (e.g. sending an extra mouseExited: to the button) don't
 // fix the problem.
 // http://crbug.com/129338
--(void)unhighlightBookmark:(const BookmarkNode*)node {
+- (void)unhighlightBookmark:(const BookmarkNode*)node {
   // Only relevant if context menu was opened from a button on the
   // bookmark bar.
   const BookmarkNode* parent = node->parent();
@@ -2295,13 +2300,6 @@ static BOOL ValueInRangeInclusive(CGFloat low, CGFloat value, CGFloat high) {
 
 // (BookmarkBarState protocol)
 - (BOOL)isVisible {
-  if ([self shouldShowAtBottomWhenDetached] &&
-      currentState_ == BookmarkBar::DETACHED &&
-      [self currentTabContentsHeight] <
-          chrome::search::kMinContentHeightForBottomBookmarkBar) {
-    return NO;
-  }
-
   return barIsEnabled_ && (currentState_ == BookmarkBar::SHOW ||
                            currentState_ == BookmarkBar::DETACHED ||
                            lastState_ == BookmarkBar::SHOW ||
@@ -2364,10 +2362,6 @@ static BOOL ValueInRangeInclusive(CGFloat low, CGFloat value, CGFloat high) {
 
 - (ui::ThemeProvider*)themeProvider {
   return ThemeServiceFactory::GetForProfile(browser_->profile());
-}
-
-- (BOOL)shouldShowAtBottomWhenDetached {
-  return NO;
 }
 
 #pragma mark BookmarkButtonDelegate Protocol

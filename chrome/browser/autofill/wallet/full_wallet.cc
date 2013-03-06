@@ -99,7 +99,7 @@ scoped_ptr<FullWallet>
   }
 
   scoped_ptr<Address> billing_address =
-      Address::CreateAddressWithID(*billing_address_dict);
+      Address::CreateAddress(*billing_address_dict);
   if (!billing_address.get()) {
     DLOG(ERROR) << "Response from Google wallet has malformed billing address";
     return scoped_ptr<FullWallet>();
@@ -121,6 +121,13 @@ scoped_ptr<FullWallet>
                                                billing_address.Pass(),
                                                shipping_address.Pass(),
                                                required_actions));
+}
+
+bool FullWallet::HasRequiredAction(RequiredAction action) const {
+  DCHECK(ActionAppliesToFullWallet(action));
+  return std::find(required_actions_.begin(),
+                   required_actions_.end(),
+                   action) != required_actions_.end();
 }
 
 bool FullWallet::operator==(const FullWallet& other) const {

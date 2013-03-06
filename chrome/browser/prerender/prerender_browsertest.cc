@@ -289,7 +289,7 @@ class TestPrerenderContents : public PrerenderContents {
   virtual bool AddAliasURL(const GURL& url) OVERRIDE {
     // Prevent FINAL_STATUS_UNSUPPORTED_SCHEME when navigating to about:crash in
     // the PrerenderRendererCrash test.
-    if (url.spec() != chrome::kChromeUICrashURL)
+    if (url.spec() != content::kChromeUICrashURL)
       return PrerenderContents::AddAliasURL(url);
     return true;
   }
@@ -1965,7 +1965,7 @@ IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, MAYBE_PrerenderRendererCrash) {
   ASSERT_TRUE(GetPrerenderContents()->prerender_contents());
   GetPrerenderContents()->prerender_contents()->GetController().
       LoadURL(
-          GURL(chrome::kChromeUICrashURL),
+          GURL(content::kChromeUICrashURL),
           content::Referrer(),
           content::PAGE_TRANSITION_TYPED,
           std::string());
@@ -2459,6 +2459,20 @@ IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, PrerenderEvents) {
   EXPECT_TRUE(DidReceivePrerenderStartEventForLinkNumber(0));
   EXPECT_TRUE(DidReceivePrerenderStopEventForLinkNumber(0));
   EXPECT_FALSE(HadPrerenderEventErrors());
+}
+
+// Cancels the prerender of a page with its own prerender.  The second prerender
+// should never be started.
+IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest,
+                       PrerenderCancelPrerenderWithPrerender) {
+  PrerenderTestURL("files/prerender/prerender_infinite_a.html",
+                   FINAL_STATUS_CANCELLED,
+                   1);
+  // Post a task to cancel all the prerenders.
+  MessageLoop::current()->PostTask(
+      FROM_HERE, base::Bind(&CancelAllPrerenders, GetPrerenderManager()));
+  content::RunMessageLoop();
+  EXPECT_TRUE(GetPrerenderContents() == NULL);
 }
 
 // PrerenderBrowserTest.PrerenderEventsNoLoad may pass flakily on regression,

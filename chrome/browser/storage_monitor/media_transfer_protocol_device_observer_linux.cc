@@ -6,8 +6,8 @@
 
 #include "base/files/file_path.h"
 #include "base/stl_util.h"
-#include "base/string_split.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_split.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/storage_monitor/media_storage_util.h"
 #include "chrome/browser/storage_monitor/removable_device_constants.h"
@@ -113,7 +113,6 @@ void GetStorageInfo(const std::string& storage_name,
   if (label)
     *label = GetDeviceLabelFromStorageInfo(*storage_info);
 
-
   if (location)
     *location = GetDeviceLocationFromStorageName(storage_name);
 }
@@ -164,7 +163,7 @@ MediaTransferProtocolDeviceObserverLinux::GetInstance() {
 
 bool MediaTransferProtocolDeviceObserverLinux::GetStorageInfoForPath(
     const base::FilePath& path,
-    RemovableStorageNotifications::StorageInfo* storage_info) const {
+    StorageInfo* storage_info) const {
   if (!path.IsAbsolute())
     return false;
 
@@ -187,7 +186,7 @@ bool MediaTransferProtocolDeviceObserverLinux::GetStorageInfoForPath(
 }
 
 void MediaTransferProtocolDeviceObserverLinux::SetNotifications(
-    RemovableStorageNotifications::Receiver* notifications) {
+    StorageMonitor::Receiver* notifications) {
   notifications_ = notifications;
 }
 
@@ -212,10 +211,9 @@ void MediaTransferProtocolDeviceObserverLinux::StorageChanged(
 
     DCHECK(!ContainsKey(storage_map_, location));
 
-    RemovableStorageNotifications::StorageInfo storage_info(
-        device_id, device_name, location);
+    StorageInfo storage_info(device_id, device_name, location);
     storage_map_[location] = storage_info;
-    notifications_->ProcessAttach(device_id, device_name, location);
+    notifications_->ProcessAttach(storage_info);
   } else {
     // Existing storage is detached.
     StorageLocationToInfoMap::iterator it =

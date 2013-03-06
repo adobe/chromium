@@ -207,13 +207,6 @@ class MockCookieStore : public net::CookieStore {
       callback.Run(GetCookiesWithOptions(url, options));
   }
 
-  virtual void GetCookiesWithInfoAsync(
-      const GURL& url,
-      const net::CookieOptions& options,
-      const GetCookieInfoCallback& callback) OVERRIDE {
-    ADD_FAILURE();
-  }
-
   virtual void DeleteCookieAsync(const GURL& url,
                                  const std::string& cookie_name,
                                  const base::Closure& callback) OVERRIDE {
@@ -256,10 +249,10 @@ class MockURLRequestContext : public net::URLRequestContext {
       : transport_security_state_() {
     set_cookie_store(cookie_store);
     set_transport_security_state(&transport_security_state_);
-    net::TransportSecurityState::DomainState state;
-    state.upgrade_expiry = base::Time::Now() +
-        base::TimeDelta::FromSeconds(1000);
-    transport_security_state_.EnableHost("upgrademe.com", state);
+    base::Time expiry = base::Time::Now() + base::TimeDelta::FromDays(1000);
+    bool include_subdomains = false;
+    transport_security_state_.AddHSTS("upgrademe.com", expiry,
+                                      include_subdomains);
   }
 
   virtual ~MockURLRequestContext() {}

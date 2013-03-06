@@ -38,15 +38,22 @@ size_t textureSize(const gfx::Size& size, WGC3Denum format)
 }
 
 struct Texture {
-    Texture(const gfx::Size& size, WGC3Denum format)
-        : size(size)
-        , format(format)
-        , data(new uint8_t[textureSize(size, format)])
+    Texture()
+        : format(0)
+        , filter(GL_NEAREST_MIPMAP_LINEAR)
     {
+    }
+
+    void reallocate(const gfx::Size& size, WGC3Denum format)
+    {
+        this->size = size;
+        this->format = format;
+        this->data.reset(new uint8_t[textureSize(size, format)]);
     }
 
     gfx::Size size;
     WGC3Denum format;
+    WGC3Denum filter;
     scoped_array<uint8_t> data;
 };
 
@@ -134,7 +141,7 @@ public:
     virtual WebGLId createTexture()
     {
         WebGLId id = TestWebGraphicsContext3D::createTexture();
-        m_textures.add(id, scoped_ptr<Texture>());
+        m_textures.add(id, make_scoped_ptr(new Texture));
         return id;
     }
 
@@ -191,6 +198,17 @@ public:
         setPixels(xoffset, yoffset, width, height, pixels);
     }
 
+    virtual void texParameteri(WGC3Denum target, WGC3Denum param, WGC3Dint value)
+    {
+        ASSERT_TRUE(m_currentTexture);
+        ASSERT_EQ(target, GL_TEXTURE_2D);
+        Texture* texture = m_textures.get(m_currentTexture);
+        ASSERT_TRUE(texture);
+        if (param != GL_TEXTURE_MIN_FILTER)
+            return;
+        texture->filter = value;
+    }
+
     virtual void genMailboxCHROMIUM(WGC3Dbyte* mailbox) { return m_sharedData->genMailbox(mailbox); }
     virtual void produceTextureCHROMIUM(WGC3Denum target, const WGC3Dbyte* mailbox)
     {
@@ -224,6 +242,14 @@ public:
         memcpy(pixels, texture->data.get(), textureSize(size, format));
     }
 
+    WGC3Denum getTextureFilter()
+    {
+        DCHECK(m_currentTexture);
+        Texture* texture = m_textures.get(m_currentTexture);
+        DCHECK(texture);
+        return texture->filter;
+    }
+
     int textureCount()
     {
         return m_textures.size();
@@ -241,7 +267,9 @@ private:
     void allocateTexture(const gfx::Size& size, WGC3Denum format)
     {
         ASSERT_TRUE(m_currentTexture);
-        m_textures.set(m_currentTexture, make_scoped_ptr(new Texture(size, format)));
+        Texture* texture = m_textures.get(m_currentTexture);
+        ASSERT_TRUE(texture);
+        texture->reallocate(size, format);
     }
 
     void setPixels(int xoffset, int yoffset, int width, int height, const void* pixels)
@@ -249,6 +277,7 @@ private:
         ASSERT_TRUE(m_currentTexture);
         Texture* texture = m_textures.get(m_currentTexture);
         ASSERT_TRUE(texture);
+        ASSERT_TRUE(texture->data.get());
         ASSERT_TRUE(xoffset >= 0 && xoffset+width <= texture->size.width());
         ASSERT_TRUE(yoffset >= 0 && yoffset+height <= texture->size.height());
         ASSERT_TRUE(pixels);
@@ -299,6 +328,21 @@ public:
             ResourceProvider::ScopedReadLockSoftware lockSoftware(m_resourceProvider.get(), id);
             memcpy(pixels, lockSoftware.skBitmap()->getPixels(), lockSoftware.skBitmap()->getSize());
         }
+    }
+
+    void setResourceFilter(ResourceProvider* resourceProvider, ResourceProvider::ResourceId id, WGC3Denum filter)
+    {
+        ResourceProvider::ScopedSamplerGL sampler(resourceProvider, id, GL_TEXTURE_2D, filter);
+    }
+
+    WGC3Denum getResourceFilter(ResourceProvider* resourceProvider, ResourceProvider::ResourceId id)
+    {
+        DCHECK_EQ(GetParam(), ResourceProvider::GLTexture);
+        ResourceProvider::ScopedReadLockGL lockGL(resourceProvider, id);
+        EXPECT_NE(0u, lockGL.textureId());
+        ResourceProviderContext* context = static_cast<ResourceProviderContext*>(resourceProvider->graphicsContext3D());
+        context->bindTexture(GL_TEXTURE_2D, lockGL.textureId());
+        return context->getTextureFilter();
     }
 
     void expectNumResources(int count)
@@ -429,10 +473,11 @@ TEST_P(ResourceProviderTest, TransferResources)
         ResourceProvider::ResourceIdArray resourceIdsToTransfer;
         resourceIdsToTransfer.push_back(id1);
         resourceIdsToTransfer.push_back(id2);
-        TransferableResourceList list;
+        TransferableResourceArray list;
         childResourceProvider->prepareSendToParent(resourceIdsToTransfer, &list);
-        EXPECT_NE(0u, list.sync_point);
-        EXPECT_EQ(2u, list.resources.size());
+        ASSERT_EQ(2u, list.size());
+        EXPECT_NE(0u, list[0].sync_point);
+        EXPECT_NE(0u, list[1].sync_point);
         EXPECT_TRUE(childResourceProvider->inUseByConsumer(id1));
         EXPECT_TRUE(childResourceProvider->inUseByConsumer(id2));
         m_resourceProvider->receiveFromChild(childId, list);
@@ -459,10 +504,9 @@ TEST_P(ResourceProviderTest, TransferResources)
         // parent is a noop.
         ResourceProvider::ResourceIdArray resourceIdsToTransfer;
         resourceIdsToTransfer.push_back(id1);
-        TransferableResourceList list;
+        TransferableResourceArray list;
         childResourceProvider->prepareSendToParent(resourceIdsToTransfer, &list);
-        EXPECT_EQ(0u, list.sync_point);
-        EXPECT_EQ(0u, list.resources.size());
+        EXPECT_EQ(0u, list.size());
     }
 
     {
@@ -470,10 +514,11 @@ TEST_P(ResourceProviderTest, TransferResources)
         ResourceProvider::ResourceIdArray resourceIdsToTransfer;
         resourceIdsToTransfer.push_back(mappedId1);
         resourceIdsToTransfer.push_back(mappedId2);
-        TransferableResourceList list;
+        TransferableResourceArray list;
         m_resourceProvider->prepareSendToChild(childId, resourceIdsToTransfer, &list);
-        EXPECT_NE(0u, list.sync_point);
-        EXPECT_EQ(2u, list.resources.size());
+        ASSERT_EQ(2u, list.size());
+        EXPECT_NE(0u, list[0].sync_point);
+        EXPECT_NE(0u, list[1].sync_point);
         childResourceProvider->receiveFromParent(list);
     }
     EXPECT_FALSE(childResourceProvider->inUseByConsumer(id1));
@@ -500,10 +545,11 @@ TEST_P(ResourceProviderTest, TransferResources)
         ResourceProvider::ResourceIdArray resourceIdsToTransfer;
         resourceIdsToTransfer.push_back(id1);
         resourceIdsToTransfer.push_back(id2);
-        TransferableResourceList list;
+        TransferableResourceArray list;
         childResourceProvider->prepareSendToParent(resourceIdsToTransfer, &list);
-        EXPECT_NE(0u, list.sync_point);
-        EXPECT_EQ(2u, list.resources.size());
+        ASSERT_EQ(2u, list.size());
+        EXPECT_NE(0u, list[0].sync_point);
+        EXPECT_NE(0u, list[1].sync_point);
         EXPECT_TRUE(childResourceProvider->inUseByConsumer(id1));
         EXPECT_TRUE(childResourceProvider->inUseByConsumer(id2));
         m_resourceProvider->receiveFromChild(childId, list);
@@ -539,10 +585,10 @@ TEST_P(ResourceProviderTest, DeleteTransferredResources)
         // Transfer some resource to the parent.
         ResourceProvider::ResourceIdArray resourceIdsToTransfer;
         resourceIdsToTransfer.push_back(id);
-        TransferableResourceList list;
+        TransferableResourceArray list;
         childResourceProvider->prepareSendToParent(resourceIdsToTransfer, &list);
-        EXPECT_NE(0u, list.sync_point);
-        EXPECT_EQ(1u, list.resources.size());
+        ASSERT_EQ(1u, list.size());
+        EXPECT_NE(0u, list[0].sync_point);
         EXPECT_TRUE(childResourceProvider->inUseByConsumer(id));
         m_resourceProvider->receiveFromChild(childId, list);
     }
@@ -558,13 +604,68 @@ TEST_P(ResourceProviderTest, DeleteTransferredResources)
         EXPECT_NE(0u, mappedId);
         ResourceProvider::ResourceIdArray resourceIdsToTransfer;
         resourceIdsToTransfer.push_back(mappedId);
-        TransferableResourceList list;
+        TransferableResourceArray list;
         m_resourceProvider->prepareSendToChild(childId, resourceIdsToTransfer, &list);
-        EXPECT_NE(0u, list.sync_point);
-        EXPECT_EQ(1u, list.resources.size());
+        ASSERT_EQ(1u, list.size());
+        EXPECT_NE(0u, list[0].sync_point);
         childResourceProvider->receiveFromParent(list);
     }
     EXPECT_EQ(0u, childResourceProvider->numResources());
+}
+
+TEST_P(ResourceProviderTest, TextureFilters)
+{
+    // Resource transfer is only supported with GL textures for now.
+    if (GetParam() != ResourceProvider::GLTexture)
+        return;
+
+    scoped_ptr<OutputSurface> childOutputSurface(FakeOutputSurface::Create3d(ResourceProviderContext::create(m_sharedData.get()).PassAs<WebKit::WebGraphicsContext3D>()));
+    scoped_ptr<ResourceProvider> childResourceProvider(ResourceProvider::create(childOutputSurface.get()));
+
+    gfx::Size size(1, 1);
+    WGC3Denum format = GL_RGBA;
+    size_t pixelSize = textureSize(size, format);
+    ASSERT_EQ(4U, pixelSize);
+
+    ResourceProvider::ResourceId id = childResourceProvider->createResource(size, format, ResourceProvider::TextureUsageAny);
+    uint8_t data[4] = {1, 2, 3, 4};
+    gfx::Rect rect(gfx::Point(), size);
+    childResourceProvider->setPixels(id, data, rect, rect, gfx::Vector2d());
+    EXPECT_EQ(GL_LINEAR, getResourceFilter(childResourceProvider.get(), id));
+    setResourceFilter(childResourceProvider.get(), id, GL_NEAREST);
+    EXPECT_EQ(GL_NEAREST, getResourceFilter(childResourceProvider.get(), id));
+
+    int childId = m_resourceProvider->createChild();
+
+    {
+        // Transfer some resource to the parent.
+        ResourceProvider::ResourceIdArray resourceIdsToTransfer;
+        resourceIdsToTransfer.push_back(id);
+        TransferableResourceArray list;
+        childResourceProvider->prepareSendToParent(resourceIdsToTransfer, &list);
+        ASSERT_EQ(1u, list.size());
+        EXPECT_EQ(GL_NEAREST, list[0].filter);
+        m_resourceProvider->receiveFromChild(childId, list);
+    }
+    ResourceProvider::ResourceIdMap resourceMap = m_resourceProvider->getChildToParentMap(childId);
+    ResourceProvider::ResourceId mappedId = resourceMap[id];
+    EXPECT_NE(0u, mappedId);
+    EXPECT_EQ(GL_NEAREST, getResourceFilter(m_resourceProvider.get(), mappedId));
+    setResourceFilter(m_resourceProvider.get(), mappedId, GL_LINEAR);
+    EXPECT_EQ(GL_LINEAR, getResourceFilter(m_resourceProvider.get(), mappedId));
+    {
+        // Transfer resources back from the parent to the child.
+        ResourceProvider::ResourceIdArray resourceIdsToTransfer;
+        resourceIdsToTransfer.push_back(mappedId);
+        TransferableResourceArray list;
+        m_resourceProvider->prepareSendToChild(childId, resourceIdsToTransfer, &list);
+        ASSERT_EQ(1u, list.size());
+        EXPECT_EQ(GL_LINEAR, list[0].filter);
+        childResourceProvider->receiveFromParent(list);
+    }
+    EXPECT_EQ(GL_LINEAR, getResourceFilter(childResourceProvider.get(), id));
+    setResourceFilter(childResourceProvider.get(), id, GL_NEAREST);
+    EXPECT_EQ(GL_NEAREST, getResourceFilter(childResourceProvider.get(), id));
 }
 
 void ReleaseTextureMailbox(unsigned* releaseSyncPoint, unsigned syncPoint) {
@@ -580,7 +681,7 @@ TEST_P(ResourceProviderTest, TransferMailboxResources)
     context()->bindTexture(GL_TEXTURE_2D, texture);
     uint8_t data[4] = {1, 2, 3, 4};
     context()->texImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, &data);
-    Mailbox mailbox;
+    gpu::Mailbox mailbox;
     context()->genMailboxCHROMIUM(mailbox.name);
     context()->produceTextureCHROMIUM(GL_TEXTURE_2D, mailbox.name);
     unsigned syncPoint = context()->insertSyncPoint();
@@ -598,14 +699,14 @@ TEST_P(ResourceProviderTest, TransferMailboxResources)
         // Transfer the resource, expect the sync points to be consistent.
         ResourceProvider::ResourceIdArray resourceIdsToTransfer;
         resourceIdsToTransfer.push_back(resource);
-        TransferableResourceList list;
+        TransferableResourceArray list;
         m_resourceProvider->prepareSendToParent(resourceIdsToTransfer, &list);
-        EXPECT_LE(syncPoint, list.sync_point);
-        EXPECT_EQ(1u, list.resources.size());
-        EXPECT_EQ(0u, memcmp(mailbox.name, list.resources[0].mailbox.name, sizeof(mailbox.name)));
+        ASSERT_EQ(1u, list.size());
+        EXPECT_LE(syncPoint, list[0].sync_point);
+        EXPECT_EQ(0u, memcmp(mailbox.name, list[0].mailbox.name, sizeof(mailbox.name)));
         EXPECT_EQ(0u, releaseSyncPoint);
 
-        context()->waitSyncPoint(list.sync_point);
+        context()->waitSyncPoint(list[0].sync_point);
         unsigned otherTexture = context()->createTexture();
         context()->bindTexture(GL_TEXTURE_2D, otherTexture);
         context()->consumeTextureCHROMIUM(GL_TEXTURE_2D, mailbox.name);
@@ -614,8 +715,8 @@ TEST_P(ResourceProviderTest, TransferMailboxResources)
         EXPECT_EQ(0u, memcmp(data, testData, sizeof(data)));
         context()->produceTextureCHROMIUM(GL_TEXTURE_2D, mailbox.name);
         context()->deleteTexture(otherTexture);
-        list.sync_point = context()->insertSyncPoint();
-        EXPECT_LT(0u, list.sync_point);
+        list[0].sync_point = context()->insertSyncPoint();
+        EXPECT_LT(0u, list[0].sync_point);
 
         // Receive the resource, then delete it, expect the sync points to be consistent.
         m_resourceProvider->receiveFromParent(list);
@@ -623,7 +724,7 @@ TEST_P(ResourceProviderTest, TransferMailboxResources)
         EXPECT_EQ(0u, releaseSyncPoint);
 
         m_resourceProvider->deleteResource(resource);
-        EXPECT_LE(list.sync_point, releaseSyncPoint);
+        EXPECT_LE(list[0].sync_point, releaseSyncPoint);
     }
 
 
@@ -640,14 +741,14 @@ TEST_P(ResourceProviderTest, TransferMailboxResources)
         // Transfer the resource, expect the sync points to be consistent.
         ResourceProvider::ResourceIdArray resourceIdsToTransfer;
         resourceIdsToTransfer.push_back(resource);
-        TransferableResourceList list;
+        TransferableResourceArray list;
         m_resourceProvider->prepareSendToParent(resourceIdsToTransfer, &list);
-        EXPECT_LE(syncPoint, list.sync_point);
-        EXPECT_EQ(1u, list.resources.size());
-        EXPECT_EQ(0u, memcmp(mailbox.name, list.resources[0].mailbox.name, sizeof(mailbox.name)));
+        ASSERT_EQ(1u, list.size());
+        EXPECT_LE(syncPoint, list[0].sync_point);
+        EXPECT_EQ(0u, memcmp(mailbox.name, list[0].mailbox.name, sizeof(mailbox.name)));
         EXPECT_EQ(0u, releaseSyncPoint);
 
-        context()->waitSyncPoint(list.sync_point);
+        context()->waitSyncPoint(list[0].sync_point);
         unsigned otherTexture = context()->createTexture();
         context()->bindTexture(GL_TEXTURE_2D, otherTexture);
         context()->consumeTextureCHROMIUM(GL_TEXTURE_2D, mailbox.name);
@@ -656,8 +757,8 @@ TEST_P(ResourceProviderTest, TransferMailboxResources)
         EXPECT_EQ(0u, memcmp(data, testData, sizeof(data)));
         context()->produceTextureCHROMIUM(GL_TEXTURE_2D, mailbox.name);
         context()->deleteTexture(otherTexture);
-        list.sync_point = context()->insertSyncPoint();
-        EXPECT_LT(0u, list.sync_point);
+        list[0].sync_point = context()->insertSyncPoint();
+        EXPECT_LT(0u, list[0].sync_point);
 
         // Delete the resource, which shouldn't do anything.
         m_resourceProvider->deleteResource(resource);
@@ -666,7 +767,7 @@ TEST_P(ResourceProviderTest, TransferMailboxResources)
 
         // Then receive the resource which should release the mailbox, expect the sync points to be consistent.
         m_resourceProvider->receiveFromParent(list);
-        EXPECT_LE(list.sync_point, releaseSyncPoint);
+        EXPECT_LE(list[0].sync_point, releaseSyncPoint);
     }
 
     context()->waitSyncPoint(releaseSyncPoint);

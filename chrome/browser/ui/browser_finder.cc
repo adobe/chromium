@@ -16,14 +16,6 @@ using content::WebContents;
 
 namespace {
 
-// TODO(mad) eventually move this to host_desktop_type.h.
-#if defined(OS_CHROMEOS)
-chrome::HostDesktopType kDefaultHostDesktopType = chrome::HOST_DESKTOP_TYPE_ASH;
-#else
-chrome::HostDesktopType kDefaultHostDesktopType =
-    chrome::HOST_DESKTOP_TYPE_NATIVE;
-#endif
-
 
 // Type used to indicate to match anything.
 const int kMatchAny                     = 0;
@@ -163,6 +155,8 @@ Browser* FindBrowserWithID(SessionID::id_type desired_id) {
 }
 
 Browser* FindBrowserWithWindow(gfx::NativeWindow window) {
+  if (!window)
+    return NULL;
   for (BrowserIterator it; !it.done(); it.Next()) {
     Browser* browser = *it;
     if (browser->window() && browser->window()->GetNativeWindow() == window)
@@ -204,12 +198,21 @@ size_t GetTotalBrowserCount() {
   return count;
 }
 
-size_t GetBrowserCount(Profile* profile) {
-  return GetBrowserCountImpl(profile, kDefaultHostDesktopType, kMatchAny);
+size_t GetTotalBrowserCountForProfile(Profile* profile) {
+  size_t count = 0;
+  for (HostDesktopType t = HOST_DESKTOP_TYPE_FIRST; t < HOST_DESKTOP_TYPE_COUNT;
+       t = static_cast<HostDesktopType>(t + 1)) {
+    count += GetBrowserCount(profile, t);
+  }
+  return count;
 }
 
-size_t GetTabbedBrowserCount(Profile* profile) {
-  return GetBrowserCountImpl(profile, kDefaultHostDesktopType, kMatchTabbed);
+size_t GetBrowserCount(Profile* profile, HostDesktopType type) {
+  return GetBrowserCountImpl(profile, type, kMatchAny);
+}
+
+size_t GetTabbedBrowserCount(Profile* profile, HostDesktopType type) {
+  return GetBrowserCountImpl(profile, type, kMatchTabbed);
 }
 
 }  // namespace chrome

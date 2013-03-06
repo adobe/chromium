@@ -467,9 +467,12 @@ void ForEachMatchingFormField(const WebFormElement& form_element,
                               &control_elements);
 
   if (control_elements.size() != data.fields.size()) {
-    // This case should be reachable only for pathological websites and tests,
-    // which add or remove form fields while the user is interacting with the
-    // Autofill popup.
+    // This case should be reachable only for pathological websites, which add
+    // or remove form fields while the user is interacting with the Autofill
+    // popup.  I (isherman) am not aware of any such websites, and so am
+    // optimistically including a NOTREACHED().  If you ever trip this check,
+    // please file a bug against me.
+    NOTREACHED();
     return;
   }
 
@@ -605,21 +608,14 @@ bool IsSelectElement(const WebFormControlElement& element) {
 }
 
 bool IsCheckableElement(const WebInputElement* element) {
-  // Is static for improving performance.
-  CR_DEFINE_STATIC_LOCAL(WebString, kRadio, ("radio"));
-  CR_DEFINE_STATIC_LOCAL(WebString, kCheckbox, ("checkbox"));
-
   if (!element)
     return false;
 
-  WebString formControlType = element->formControlType();
-  return formControlType == kCheckbox || formControlType == kRadio;
+  return element->isCheckbox() || element->isRadioButton();
 }
 
 bool IsAutofillableInputElement(const WebInputElement* element) {
-  // TODO(ramankk): Uncomment IsCheckableElement part once we have solution
-  // for the observed performance regression.
-  return IsTextInput(element); // || IsCheckableElement(element);
+  return IsTextInput(element) || IsCheckableElement(element);
 }
 
 const string16 GetFormIdentifier(const WebFormElement& form) {

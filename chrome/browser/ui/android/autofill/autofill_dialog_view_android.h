@@ -24,12 +24,14 @@ class AutofillDialogViewAndroid : public AutofillDialogView {
   virtual void Show() OVERRIDE;
   virtual void Hide() OVERRIDE;
   virtual void UpdateAccountChooser() OVERRIDE;
+  virtual void UpdateButtonStrip() OVERRIDE;
   virtual void UpdateNotificationArea() OVERRIDE;
   virtual void UpdateSection(DialogSection section) OVERRIDE;
   virtual void GetUserInput(DialogSection section,
                             DetailOutputMap* output) OVERRIDE;
   virtual string16 GetCvc() OVERRIDE;
   virtual bool UseBillingForShipping() OVERRIDE;
+  virtual bool SaveDetailsInWallet() OVERRIDE;
   virtual bool SaveDetailsLocally() OVERRIDE;
   virtual const content::NavigationController& ShowSignIn() OVERRIDE;
   virtual void HideSignIn() OVERRIDE;

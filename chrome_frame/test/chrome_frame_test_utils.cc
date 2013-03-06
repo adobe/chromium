@@ -46,7 +46,8 @@ const DWORD kCrashServicePipeDesiredAccess = FILE_READ_DATA |
 
 const DWORD kCrashServicePipeFlagsAndAttributes = SECURITY_IDENTIFICATION |
                                                   SECURITY_SQOS_PRESENT;
-const int kCrashServiceStartupTimeoutMs = 500;
+const int kCrashServiceDetectTimeoutMs = 500;
+const int kCrashServiceStartupTimeoutMs = 1000;
 
 const wchar_t kIEImageName[] = L"iexplore.exe";
 const wchar_t kIEBrokerImageName[] = L"ieuser.exe";
@@ -260,7 +261,7 @@ int CloseAllIEWindows() {
           HWND window = NULL;
           // Check the class of the browser window to make sure we only close
           // IE windows.
-          if (browser->get_HWND(reinterpret_cast<SHANDLE_PTR*>(window))) {
+          if (browser->get_HWND(reinterpret_cast<SHANDLE_PTR*>(&window))) {
             wchar_t class_name[MAX_PATH];
             if (::GetClassName(window, class_name, arraysize(class_name))) {
               is_ie = _wcsicmp(class_name, L"IEFrame") == 0;
@@ -596,7 +597,7 @@ bool DetectRunningCrashService(int timeout_ms) {
 }
 
 base::ProcessHandle StartCrashService() {
-  if (DetectRunningCrashService(kCrashServiceStartupTimeoutMs)) {
+  if (DetectRunningCrashService(kCrashServiceDetectTimeoutMs)) {
     VLOG(1) << "crash_service.exe is already running. We will use the "
                "existing process and leave it running after tests complete.";
     return NULL;

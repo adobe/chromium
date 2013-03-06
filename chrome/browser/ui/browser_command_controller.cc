@@ -32,10 +32,9 @@
 #include "content/public/browser/native_web_keyboard_event.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
-#include "content/public/browser/notification_details.h"
-#include "content/public/browser/notification_source.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_observer.h"
 #include "content/public/common/content_restriction.h"
 #include "content/public/common/url_constants.h"
 #include "ui/base/keycodes/keyboard_codes.h"
@@ -200,6 +199,11 @@ BrowserCommandController::BrowserCommandController(
   profile_pref_registrar_.Add(
       prefs::kPrintingEnabled,
       base::Bind(&BrowserCommandController::UpdatePrintingState,
+                 base::Unretained(this)));
+  pref_signin_allowed_.Init(
+      prefs::kSigninAllowed,
+      profile()->GetOriginalProfile()->GetPrefs(),
+      base::Bind(&BrowserCommandController::OnSigninAllowedPrefChange,
                  base::Unretained(this)));
 
   InitCommandState();
@@ -642,7 +646,7 @@ void BrowserCommandController::ExecuteCommandWithDisposition(
       ShowDownloads(browser_);
       break;
     case IDC_MANAGE_EXTENSIONS:
-      ShowExtensions(browser_);
+      ShowExtensions(browser_, std::string());
       break;
     case IDC_OPTIONS:
       ShowSettings(browser_);
@@ -691,28 +695,6 @@ void BrowserCommandController::ExecuteCommandWithDisposition(
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// BrowserCommandController, content::NotificationObserver implementation:
-
-void BrowserCommandController::Observe(
-    int type,
-    const content::NotificationSource& source,
-    const content::NotificationDetails& details) {
-  switch (type) {
-    case content::NOTIFICATION_INTERSTITIAL_ATTACHED:
-      UpdateCommandsForTabState();
-      break;
-
-    case content::NOTIFICATION_INTERSTITIAL_DETACHED:
-      UpdateCommandsForTabState();
-      break;
-
-    default:
-      NOTREACHED() << "Got a notification we didn't register for.";
-  }
-}
-
-
-////////////////////////////////////////////////////////////////////////////////
 // BrowserCommandController, ProfileInfoCacheObserver implementation:
 
 void BrowserCommandController::OnProfileAdded(
@@ -740,6 +722,15 @@ void BrowserCommandController::OnProfileAvatarChanged(
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+// BrowserCommandController, SigninPrefObserver implementation:
+
+void BrowserCommandController::OnSigninAllowedPrefChange() {
+  // For unit tests, we don't have a window.
+  if (!window())
+    return;
+  UpdateShowSyncState(IsShowingMainUI());
+}
+
 // BrowserCommandController, TabStripModelObserver implementation:
 
 void BrowserCommandController::TabInsertedAt(WebContents* contents,
@@ -786,12 +777,34 @@ void BrowserCommandController::TabRestoreServiceDestroyed(
 ////////////////////////////////////////////////////////////////////////////////
 // BrowserCommandController, private:
 
-bool BrowserCommandController::IsShowingMainUI(bool is_fullscreen) {
-#if !defined(OS_MACOSX)
-  return browser_->is_type_tabbed() && !is_fullscreen;
-#else
-  return browser_->is_type_tabbed();
-#endif
+class BrowserCommandController::InterstitialObserver
+    : public content::WebContentsObserver {
+ public:
+  InterstitialObserver(BrowserCommandController* controller,
+                       content::WebContents* web_contents)
+      : WebContentsObserver(web_contents),
+        controller_(controller) {
+  }
+
+  using content::WebContentsObserver::web_contents;
+
+  virtual void DidAttachInterstitialPage() OVERRIDE {
+    controller_->UpdateCommandsForTabState();
+  }
+
+  virtual void DidDetachInterstitialPage() OVERRIDE {
+    controller_->UpdateCommandsForTabState();
+  }
+
+ private:
+  BrowserCommandController* controller_;
+
+  DISALLOW_COPY_AND_ASSIGN(InterstitialObserver);
+};
+
+bool BrowserCommandController::IsShowingMainUI() {
+  bool should_hide_ui = window() && window()->ShouldHideUIForFullscreen();
+  return browser_->is_type_tabbed() && !should_hide_ui;
 }
 
 void BrowserCommandController::InitCommandState() {
@@ -881,7 +894,7 @@ void BrowserCommandController::InitCommandState() {
                                         !profile()->IsGuestSession() &&
                                         !profile()->IsOffTheRecord());
 
-  command_updater_.UpdateCommandEnabled(IDC_SHOW_SIGNIN, true);
+  UpdateShowSyncState(true);
 
   // Initialize other commands based on the window type.
   bool normal_window = browser_->is_type_tabbed();
@@ -973,9 +986,7 @@ void BrowserCommandController::UpdateSharedCommandsForIncognitoAvailability(
 void BrowserCommandController::UpdateCommandsForIncognitoAvailability() {
   UpdateSharedCommandsForIncognitoAvailability(&command_updater_, profile());
 
-  const bool show_main_ui =
-      IsShowingMainUI(window() && window()->IsFullscreen());
-  if (!show_main_ui) {
+  if (!IsShowingMainUI()) {
     command_updater_.UpdateCommandEnabled(IDC_IMPORT_SETTINGS, false);
     command_updater_.UpdateCommandEnabled(IDC_OPTIONS, false);
   }
@@ -1072,12 +1083,10 @@ void BrowserCommandController::UpdateCommandsForBookmarkEditing() {
 }
 
 void BrowserCommandController::UpdateCommandsForBookmarkBar() {
-  const bool show_main_ui =
-      IsShowingMainUI(window() && window()->IsFullscreen());
   command_updater_.UpdateCommandEnabled(IDC_SHOW_BOOKMARK_BAR,
       browser_defaults::bookmarks_enabled &&
       !profile()->GetPrefs()->IsManagedPreference(prefs::kShowBookmarkBar) &&
-      show_main_ui);
+      IsShowingMainUI());
 }
 
 void BrowserCommandController::UpdateCommandsForFileSelectionDialogs() {
@@ -1087,8 +1096,7 @@ void BrowserCommandController::UpdateCommandsForFileSelectionDialogs() {
 
 void BrowserCommandController::UpdateCommandsForFullscreenMode(
     FullScreenMode fullscreen_mode) {
-  const bool show_main_ui =
-      IsShowingMainUI(fullscreen_mode != FULLSCREEN_DISABLED);
+  bool show_main_ui = IsShowingMainUI();
   bool main_not_fullscreen = show_main_ui &&
                              (fullscreen_mode == FULLSCREEN_DISABLED);
 
@@ -1116,6 +1124,7 @@ void BrowserCommandController::UpdateCommandsForFullscreenMode(
   // Show various bits of UI
   command_updater_.UpdateCommandEnabled(IDC_DEVELOPER_MENU, show_main_ui);
   command_updater_.UpdateCommandEnabled(IDC_FEEDBACK, show_main_ui);
+  UpdateShowSyncState(show_main_ui);
 
   // Settings page/subpages are forced to open in normal mode. We disable these
   // commands when incognito is forced.
@@ -1155,8 +1164,7 @@ void BrowserCommandController::UpdateCommandsForFullscreenMode(
 }
 
 void BrowserCommandController::UpdateCommandsForMultipleProfiles() {
-  bool show_main_ui = IsShowingMainUI(window() && window()->IsFullscreen());
-  bool enable = show_main_ui &&
+  bool enable = IsShowingMainUI() &&
       !profile()->IsOffTheRecord() &&
       profile_manager_ &&
       AvatarMenuModel::ShouldShowAvatarMenu();
@@ -1188,6 +1196,11 @@ void BrowserCommandController::UpdateSaveAsState() {
   command_updater_.UpdateCommandEnabled(IDC_SAVE_PAGE, CanSavePage(browser_));
 }
 
+void BrowserCommandController::UpdateShowSyncState(bool show_main_ui) {
+  command_updater_.UpdateCommandEnabled(
+      IDC_SHOW_SYNC_SETUP, show_main_ui && pref_signin_allowed_.GetValue());
+}
+
 // static
 void BrowserCommandController::UpdateOpenFileState(
     CommandUpdater* command_updater) {
@@ -1216,18 +1229,19 @@ void BrowserCommandController::UpdateCommandsForFind() {
 }
 
 void BrowserCommandController::AddInterstitialObservers(WebContents* contents) {
-  registrar_.Add(this, content::NOTIFICATION_INTERSTITIAL_ATTACHED,
-                 content::Source<WebContents>(contents));
-  registrar_.Add(this, content::NOTIFICATION_INTERSTITIAL_DETACHED,
-                 content::Source<WebContents>(contents));
+  interstitial_observers_.push_back(new InterstitialObserver(this, contents));
 }
 
 void BrowserCommandController::RemoveInterstitialObservers(
     WebContents* contents) {
-  registrar_.Remove(this, content::NOTIFICATION_INTERSTITIAL_ATTACHED,
-                    content::Source<WebContents>(contents));
-  registrar_.Remove(this, content::NOTIFICATION_INTERSTITIAL_DETACHED,
-                    content::Source<WebContents>(contents));
+  for (size_t i = 0; i < interstitial_observers_.size(); i++) {
+    if (interstitial_observers_[i]->web_contents() != contents)
+      continue;
+
+    delete interstitial_observers_[i];
+    interstitial_observers_.erase(interstitial_observers_.begin() + i);
+    return;
+  }
 }
 
 BrowserWindow* BrowserCommandController::window() {

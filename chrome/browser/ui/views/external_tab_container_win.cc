@@ -4,6 +4,10 @@
 
 #include "chrome/browser/ui/views/external_tab_container_win.h"
 
+#include <atlbase.h>
+#include <atlapp.h>
+#include <atlconv.h>
+#include <atlmisc.h>
 #include <string>
 
 #include "base/bind.h"
@@ -51,6 +55,7 @@
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_view.h"
 #include "content/public/common/bindings_policy.h"
 #include "content/public/common/frame_navigate_params.h"
 #include "content/public/common/page_transition_types.h"
@@ -69,7 +74,13 @@
 #include "ui/base/view_prop.h"
 #include "ui/views/controls/webview/webview.h"
 #include "ui/views/layout/grid_layout.h"
-#include "ui/views/win/hwnd_message_handler.h"
+#include "ui/views/widget/widget.h"
+#include "ui/views/win/hwnd_util.h"
+
+#if defined(USE_AURA)
+#include "ui/aura/root_window.h"
+#include "ui/views/widget/desktop_aura/desktop_native_widget_aura.h"
+#endif
 
 using content::BrowserThread;
 using content::LoadNotificationDetails;
@@ -80,15 +91,44 @@ using content::OpenURLParams;
 using content::RenderViewHost;
 using content::SSLStatus;
 using content::WebContents;
-using ui::ViewProp;
 using WebKit::WebCString;
 using WebKit::WebReferrerPolicy;
 using WebKit::WebSecurityPolicy;
 using WebKit::WebString;
 
+namespace {
+
 static const char kWindowObjectKey[] = "ChromeWindowObject";
 
-namespace {
+// The following helper functions exist to localize UI toolkit-specific code.
+
+void ShowNativeView(gfx::NativeView view) {
+#if !defined(USE_AURA)
+  ::ShowWindow(view, SW_SHOWNA);
+#endif
+}
+
+scoped_ptr<content::NativeWebKeyboardEvent> CreateKeyboardEvent(
+    const MSG& msg) {
+#if defined(USE_AURA)
+  // TODO(grt): confirm that this is a translated character event.
+  ui::KeyEvent key_event(msg, true);
+  return scoped_ptr<content::NativeWebKeyboardEvent>(
+      new content::NativeWebKeyboardEvent(&key_event));
+#else
+  return scoped_ptr<content::NativeWebKeyboardEvent>(
+      new content::NativeWebKeyboardEvent(msg));
+#endif
+}
+
+const MSG& MessageFromKeyboardEvent(
+    const content::NativeWebKeyboardEvent& event) {
+#if defined(USE_AURA)
+  return event.os_event->native_event();
+#else
+  return event.os_event;
+#endif
+}
 
 // Convert ui::MenuModel into a serializable form for Chrome Frame
 ContextMenuModel* ConvertMenuModel(const ui::MenuModel* ui_model) {
@@ -122,7 +162,7 @@ base::LazyInstance<ExternalTabContainerWin::PendingTabs>
 ExternalTabContainerWin::ExternalTabContainerWin(
     AutomationProvider* automation,
     AutomationResourceMessageFilter* filter)
-    : views::NativeWidgetWin(new views::Widget),
+    : widget_(NULL),
       automation_(automation),
       tab_contents_container_(NULL),
       tab_handle_(0),
@@ -130,12 +170,12 @@ ExternalTabContainerWin::ExternalTabContainerWin(
       automation_resource_message_filter_(filter),
       load_requests_via_automation_(false),
       handle_top_level_requests_(false),
+      route_all_top_level_navigations_(false),
       ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)),
       pending_(false),
       focus_manager_(NULL),
       external_tab_view_(NULL),
       unload_reply_message_(NULL),
-      route_all_top_level_navigations_(false),
       is_popup_window_(false) {
 }
 
@@ -166,29 +206,28 @@ bool ExternalTabContainerWin::Init(Profile* profile,
                                    const GURL& referrer,
                                    bool infobars_enabled,
                                    bool route_all_top_level_navigations) {
-  if (IsWindow(GetNativeView())) {
+  if (widget_) {
     NOTREACHED();
     return false;
   }
 
+  widget_ = new views::Widget();
+  widget_->AddObserver(this);
   load_requests_via_automation_ = load_requests_via_automation;
   handle_top_level_requests_ = handle_top_level_requests;
   route_all_top_level_navigations_ = route_all_top_level_navigations;
 
-  GetMessageHandler()->set_window_style(WS_POPUP | WS_CLIPCHILDREN);
-
   views::Widget::InitParams params(views::Widget::InitParams::TYPE_POPUP);
   params.bounds = bounds;
-  params.native_widget = this;
-  GetWidget()->Init(params);
-  if (!IsWindow(GetNativeView())) {
-    NOTREACHED();
-    return false;
-  }
+#if defined(USE_AURA)
+  params.native_widget = new views::DesktopNativeWidgetAura(widget_);
+#endif
+  widget_->Init(params);
+  HWND window = views::HWNDForWidget(widget_);
 
   // TODO(jcampan): limit focus traversal to contents.
 
-  prop_.reset(new ViewProp(GetNativeView(), kWindowObjectKey, this));
+  prop_.reset(new ui::ViewProp(window, kWindowObjectKey, this));
 
   if (existing_contents) {
     existing_contents->GetController().SetBrowserContext(profile);
@@ -242,15 +281,14 @@ bool ExternalTabContainerWin::Init(Profile* profile,
   // Note that it's important to do this before we call SetParent since
   // during the SetParent call we will otherwise get a WA_ACTIVATE call
   // that causes us to steal the current focus.
-  SetWindowLong(
-      GetNativeView(), GWL_STYLE,
-      (GetWindowLong(GetNativeView(), GWL_STYLE) & ~WS_POPUP) | style);
+  SetWindowLong(window, GWL_STYLE,
+                (GetWindowLong(window, GWL_STYLE) & ~WS_POPUP) | style);
 
   // Now apply the parenting and style
   if (parent)
-    SetParent(GetNativeView(), parent);
+    SetParent(window, parent);
 
-  ::ShowWindow(existing_contents->GetNativeView(), SW_SHOWNA);
+  ShowNativeView(existing_contents->GetView()->GetNativeView());
 
   LoadAccelerators();
   SetupExternalTabView();
@@ -262,6 +300,7 @@ bool ExternalTabContainerWin::Init(Profile* profile,
 void ExternalTabContainerWin::Uninitialize() {
   registrar_.RemoveAll();
   if (web_contents_.get()) {
+    tab_contents_container_->SetWebContents(NULL);
     UnregisterRenderViewHost(web_contents_->GetRenderViewHost());
 
     // Explicitly tell the RPH to shutdown, as doing so is the only thing that
@@ -283,8 +322,9 @@ void ExternalTabContainerWin::Uninitialize() {
     // more fitting.
     web_contents_->GetRenderProcessHost()->FastShutdownForPageCount(1);
 
-    if (GetWidget()->GetRootView())
-      GetWidget()->GetRootView()->RemoveAllChildViews(true);
+    if (widget_->GetRootView())
+      widget_->GetRootView()->RemoveAllChildViews(true);
+    widget_ = NULL;
 
     content::NotificationService::current()->Notify(
         chrome::NOTIFICATION_EXTERNAL_TAB_CLOSED,
@@ -307,7 +347,7 @@ void ExternalTabContainerWin::Uninitialize() {
 bool ExternalTabContainerWin::Reinitialize(
     AutomationProvider* automation_provider,
     AutomationResourceMessageFilter* filter,
-    gfx::NativeWindow parent_window) {
+    HWND parent_window) {
   if (!automation_provider || !filter) {
     NOTREACHED();
     return false;
@@ -322,7 +362,7 @@ bool ExternalTabContainerWin::Reinitialize(
                             weak_factory_.GetWeakPtr()));
 
   if (parent_window)
-    SetParent(GetNativeView(), parent_window);
+    SetParent(views::HWNDForWidget(widget_), parent_window);
   return true;
 }
 
@@ -330,8 +370,12 @@ WebContents* ExternalTabContainerWin::GetWebContents() const {
   return web_contents_.get();
 }
 
-gfx::NativeView ExternalTabContainerWin::GetExternalTabNativeView() const {
-  return GetNativeView();
+HWND ExternalTabContainerWin::GetExternalTabHWND() const {
+  return views::HWNDForWidget(widget_);
+}
+
+HWND ExternalTabContainerWin::GetContentHWND() const {
+  return views::HWNDForNativeWindow(web_contents_->GetView()->GetNativeView());
 }
 
 void ExternalTabContainerWin::SetTabHandle(int handle) {
@@ -388,8 +432,8 @@ void ExternalTabContainerWin::RunUnloadHandlers(IPC::Message* reply_message) {
 }
 
 void ExternalTabContainerWin::ProcessUnhandledAccelerator(const MSG& msg) {
-  NativeWebKeyboardEvent keyboard_event(msg);
-  unhandled_keyboard_event_handler_.HandleKeyboardEvent(keyboard_event,
+  scoped_ptr<NativeWebKeyboardEvent> keyboard_event(CreateKeyboardEvent(msg));
+  unhandled_keyboard_event_handler_.HandleKeyboardEvent(*keyboard_event,
                                                         focus_manager_);
 }
 
@@ -398,7 +442,7 @@ void ExternalTabContainerWin::FocusThroughTabTraversal(
     bool restore_focus_to_view) {
   DCHECK(web_contents_.get());
   if (web_contents_.get())
-    web_contents_->Focus();
+    web_contents_->GetView()->Focus();
 
   // The web_contents_ member can get destroyed in the context of the call to
   // WebContentsViewViews::Focus() above. This method eventually calls SetFocus
@@ -408,22 +452,6 @@ void ExternalTabContainerWin::FocusThroughTabTraversal(
     web_contents_->FocusThroughTabTraversal(reverse);
 }
 
-// static
-bool ExternalTabContainerWin::IsExternalTabContainer(HWND window) {
-  return ViewProp::GetValue(window, kWindowObjectKey) != NULL;
-}
-
-// static
-ExternalTabContainer*
-    ExternalTabContainerWin::GetExternalContainerFromNativeWindow(
-        gfx::NativeView native_window) {
-  ExternalTabContainer* tab_container = NULL;
-  if (native_window) {
-    tab_container = reinterpret_cast<ExternalTabContainer*>(
-        ViewProp::GetValue(native_window, kWindowObjectKey));
-  }
-  return tab_container;
-}
 ////////////////////////////////////////////////////////////////////////////////
 // ExternalTabContainer, content::WebContentsDelegate implementation:
 
@@ -718,7 +746,7 @@ bool ExternalTabContainerWin::HandleContextMenu(
     ConvertMenuModel(&external_context_menu_->menu_model()));
 
   POINT screen_pt = { params.x, params.y };
-  MapWindowPoints(GetNativeView(), HWND_DESKTOP, &screen_pt, 1);
+  MapWindowPoints(views::HWNDForWidget(widget_), HWND_DESKTOP, &screen_pt, 1);
 
   MiniContextMenuParams ipc_params;
   ipc_params.screen_x = screen_pt.x;
@@ -749,8 +777,9 @@ bool ExternalTabContainerWin::PreHandleKeyboardEvent(
 void ExternalTabContainerWin::HandleKeyboardEvent(
     content::WebContents* source,
     const NativeWebKeyboardEvent& event) {
-  ProcessUnhandledKeyStroke(event.os_event.hwnd, event.os_event.message,
-                            event.os_event.wParam, event.os_event.lParam);
+  const MSG& message = MessageFromKeyboardEvent(event);
+  ProcessUnhandledKeyStroke(message.hwnd, message.message,
+                            message.wParam, message.lParam);
 }
 
 void ExternalTabContainerWin::BeforeUnloadFired(WebContents* tab,
@@ -949,30 +978,23 @@ void ExternalTabContainerWin::Observe(
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// ExternalTabContainer, views::NativeWidgetWin overrides:
+// WidgetObserver overrides:
 
-bool ExternalTabContainerWin::PreHandleMSG(UINT message,
-                                           WPARAM w_param,
-                                           LPARAM l_param,
-                                           LRESULT* result) {
-  if (message == WM_DESTROY) {
-    prop_.reset();
-    Uninitialize();
-  }
-  return false;
+void ExternalTabContainerWin::OnWidgetCreated(views::Widget* widget) {
+  DCHECK_EQ(widget_, widget);
+  // Grab a reference here which will be released in OnWidgetDestroyed.
+  AddRef();
 }
 
-void ExternalTabContainerWin::PostHandleMSG(UINT message,
-                                            WPARAM w_param,
-                                            LPARAM l_param) {
-    // Grab a reference here which will be released in OnFinalMessage
-  if (message == WM_CREATE)
-    AddRef();
+void ExternalTabContainerWin::OnWidgetDestroying(views::Widget* widget) {
+  DCHECK_EQ(widget_, widget);
+  Uninitialize();
+  prop_.reset();
 }
 
-void ExternalTabContainerWin::OnFinalMessage(HWND window) {
-  GetWidget()->OnNativeWidgetDestroyed();
-  // Release the reference which we grabbed in WM_CREATE.
+void ExternalTabContainerWin::OnWidgetDestroyed(views::Widget* widget) {
+  DCHECK_EQ(widget_, static_cast<views::Widget*>(NULL));
+  // Release the reference which we grabbed in OnWidgetCreated.
   Release();
 }
 
@@ -1143,7 +1165,7 @@ void ExternalTabContainerWin::LoadAccelerators() {
 
   CopyAcceleratorTable(accelerator_table, accelerators, count);
 
-  focus_manager_ = GetWidget()->GetFocusManager();
+  focus_manager_ = widget_->GetFocusManager();
   DCHECK(focus_manager_);
 
   // Let's fill our own accelerator table.
@@ -1221,7 +1243,7 @@ void ExternalTabContainerWin::SetupExternalTabView() {
   layout->AddView(info_bar_container);
   layout->StartRow(1, 0);
   layout->AddView(tab_contents_container_);
-  GetWidget()->SetContentsView(external_tab_view_);
+  widget_->SetContentsView(external_tab_view_);
   // Note that SetWebContents must be called after AddChildView is called
   tab_contents_container_->SetWebContents(web_contents());
 }
@@ -1235,17 +1257,13 @@ ExternalTabContainer* ExternalTabContainer::Create(
 
 // static
 ExternalTabContainer* ExternalTabContainer::GetContainerForTab(
-    HWND tab_window) {
-  HWND parent_window = ::GetParent(tab_window);
-  if (!::IsWindow(parent_window)) {
+    content::WebContents* web_contents) {
+  HWND parent_window = views::HWNDForNativeWindow(
+      web_contents->GetView()->GetTopLevelNativeWindow());
+  if (!::IsWindow(parent_window))
     return NULL;
-  }
-  if (!ExternalTabContainerWin::IsExternalTabContainer(parent_window)) {
-    return NULL;
-  }
-  ExternalTabContainer* container = reinterpret_cast<ExternalTabContainer*>(
-      ViewProp::GetValue(parent_window, kWindowObjectKey));
-  return container;
+  return reinterpret_cast<ExternalTabContainerWin*>(
+      ui::ViewProp::GetValue(parent_window, kWindowObjectKey));
 }
 
 // static
@@ -1282,6 +1300,6 @@ WebContents* TemporaryPopupExternalTabContainerWin::OpenURLFromTab(
   WebContents* new_contents =
       ExternalTabContainerWin::OpenURLFromTab(source, forward_params);
   // support only one navigation for a dummy tab before it is killed.
-  ::DestroyWindow(GetNativeView());
+  widget_->CloseNow();
   return new_contents;
 }

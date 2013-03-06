@@ -28,19 +28,17 @@
 
 #define FPL FILE_PATH_LITERAL
 
+using fileapi::FileSystemContext;
+using fileapi::FileSystemURL;
+using fileapi::FileSystemURLSet;
+
 // This tests LocalFileSyncContext behavior in multi-thread /
 // multi-file-system-context environment.
 // Basic combined tests (single-thread / single-file-system-context)
 // that involve LocalFileSyncContext are also in
 // syncable_file_system_unittests.cc.
 
-using sync_file_system::FileChange;
-using sync_file_system::FileChangeList;
-using sync_file_system::LocalFileSyncInfo;
-using sync_file_system::SyncFileMetadata;
-using sync_file_system::SyncFileType;
-
-namespace fileapi {
+namespace sync_file_system {
 
 namespace {
 const char kOrigin1[] = "http://example.com";
@@ -57,7 +55,7 @@ class LocalFileSyncContextTest : public testing::Test {
         has_inflight_prepare_for_sync_(false) {}
 
   virtual void SetUp() OVERRIDE {
-    EXPECT_TRUE(fileapi::RegisterSyncableFileSystem(kServiceName));
+    EXPECT_TRUE(RegisterSyncableFileSystem(kServiceName));
 
     io_thread_.reset(new base::Thread("Thread_IO"));
     io_thread_->StartWithOptions(
@@ -72,7 +70,7 @@ class LocalFileSyncContextTest : public testing::Test {
   }
 
   virtual void TearDown() OVERRIDE {
-    EXPECT_TRUE(fileapi::RevokeSyncableFileSystem(kServiceName));
+    EXPECT_TRUE(RevokeSyncableFileSystem(kServiceName));
     io_thread_->Stop();
     file_thread_->Stop();
   }
@@ -308,21 +306,23 @@ TEST_F(LocalFileSyncContextTest, MultipleFileSystemContexts) {
 
   SyncFileMetadata metadata;
   FileChangeList changes;
-  EXPECT_EQ(SYNC_STATUS_OK, PrepareForSync(file_system1.file_system_context(),
-                                           kURL1, &metadata, &changes));
+  EXPECT_EQ(SYNC_STATUS_OK,
+            PrepareForSync(file_system1.file_system_context(), kURL1,
+                           &metadata, &changes));
   EXPECT_EQ(1U, changes.size());
   EXPECT_TRUE(changes.list().back().IsFile());
   EXPECT_TRUE(changes.list().back().IsAddOrUpdate());
-  EXPECT_EQ(sync_file_system::SYNC_FILE_TYPE_FILE, metadata.file_type);
+  EXPECT_EQ(SYNC_FILE_TYPE_FILE, metadata.file_type);
   EXPECT_EQ(0, metadata.size);
 
   changes.clear();
-  EXPECT_EQ(SYNC_STATUS_OK, PrepareForSync(file_system2.file_system_context(),
-                                           kURL2, &metadata, &changes));
+  EXPECT_EQ(SYNC_STATUS_OK,
+            PrepareForSync(file_system2.file_system_context(), kURL2,
+                           &metadata, &changes));
   EXPECT_EQ(1U, changes.size());
   EXPECT_FALSE(changes.list().back().IsFile());
   EXPECT_TRUE(changes.list().back().IsAddOrUpdate());
-  EXPECT_EQ(sync_file_system::SYNC_FILE_TYPE_DIRECTORY, metadata.file_type);
+  EXPECT_EQ(SYNC_FILE_TYPE_DIRECTORY, metadata.file_type);
   EXPECT_EQ(0, metadata.size);
 
   sync_context_->ShutdownOnUIThread();
@@ -352,17 +352,17 @@ TEST_F(LocalFileSyncContextTest, PrepareSyncWhileWriting) {
 
   // Until the operation finishes PrepareForSync should return BUSY error.
   SyncFileMetadata metadata;
-  metadata.file_type = sync_file_system::SYNC_FILE_TYPE_UNKNOWN;
+  metadata.file_type = SYNC_FILE_TYPE_UNKNOWN;
   FileChangeList changes;
   EXPECT_EQ(SYNC_STATUS_FILE_BUSY,
             PrepareForSync(file_system.file_system_context(),
                            kURL1, &metadata, &changes));
-  EXPECT_EQ(sync_file_system::SYNC_FILE_TYPE_FILE, metadata.file_type);
+  EXPECT_EQ(SYNC_FILE_TYPE_FILE, metadata.file_type);
 
   // Register PrepareForSync method to be invoked when kURL1 becomes
   // syncable. (Actually this may be done after all operations are done
   // on IO thread in this test.)
-  metadata.file_type = sync_file_system::SYNC_FILE_TYPE_UNKNOWN;
+  metadata.file_type = SYNC_FILE_TYPE_UNKNOWN;
   changes.clear();
   sync_context_->RegisterURLForWaitingSync(
       kURL1, GetPrepareForSyncClosure(file_system.file_system_context(),
@@ -381,7 +381,7 @@ TEST_F(LocalFileSyncContextTest, PrepareSyncWhileWriting) {
   EXPECT_EQ(1U, changes.size());
   EXPECT_TRUE(changes.list().back().IsFile());
   EXPECT_TRUE(changes.list().back().IsAddOrUpdate());
-  EXPECT_EQ(sync_file_system::SYNC_FILE_TYPE_FILE, metadata.file_type);
+  EXPECT_EQ(SYNC_FILE_TYPE_FILE, metadata.file_type);
   EXPECT_EQ(1, metadata.size);
 
   sync_context_->ShutdownOnUIThread();
@@ -434,20 +434,20 @@ TEST_F(LocalFileSyncContextTest, ApplyRemoteChangeForDeletion) {
 
   // Now let's apply remote deletion changes.
   FileChange change(FileChange::FILE_CHANGE_DELETE,
-                    sync_file_system::SYNC_FILE_TYPE_FILE);
+                    SYNC_FILE_TYPE_FILE);
   EXPECT_EQ(SYNC_STATUS_OK,
             ApplyRemoteChange(file_system.file_system_context(),
                               change, base::FilePath(), kFile,
-                              sync_file_system::SYNC_FILE_TYPE_FILE));
+                              SYNC_FILE_TYPE_FILE));
 
   // The implementation doesn't check file type for deletion, and it must be ok
   // even if we don't know if the deletion change was for a file or a directory.
   change = FileChange(FileChange::FILE_CHANGE_DELETE,
-                      sync_file_system::SYNC_FILE_TYPE_UNKNOWN);
+                      SYNC_FILE_TYPE_UNKNOWN);
   EXPECT_EQ(SYNC_STATUS_OK,
             ApplyRemoteChange(file_system.file_system_context(),
                               change, base::FilePath(), kDir,
-                              sync_file_system::SYNC_FILE_TYPE_DIRECTORY));
+                              SYNC_FILE_TYPE_DIRECTORY));
 
   // Check the directory/files are deleted successfully.
   EXPECT_EQ(base::PLATFORM_FILE_ERROR_NOT_FOUND,
@@ -544,11 +544,11 @@ TEST_F(LocalFileSyncContextTest, ApplyRemoteChangeForAddOrUpdate) {
 
   // Apply the remote change to kFile1 (which will update the file).
   FileChange change(FileChange::FILE_CHANGE_ADD_OR_UPDATE,
-                    sync_file_system::SYNC_FILE_TYPE_FILE);
+                    SYNC_FILE_TYPE_FILE);
   EXPECT_EQ(SYNC_STATUS_OK,
             ApplyRemoteChange(file_system.file_system_context(),
                               change, kFilePath1, kFile1,
-                              sync_file_system::SYNC_FILE_TYPE_FILE));
+                              SYNC_FILE_TYPE_FILE));
 
   // Check if the usage has been increased by (kTestFileData1 - kTestFileData0).
   const int updated_size =
@@ -561,29 +561,29 @@ TEST_F(LocalFileSyncContextTest, ApplyRemoteChangeForAddOrUpdate) {
   // directory respectively).
   // They are non-existent yet so their expected file type (the last
   // parameter of ApplyRemoteChange) are
-  // sync_file_system::SYNC_FILE_TYPE_UNKNOWN.
+  // SYNC_FILE_TYPE_UNKNOWN.
   change = FileChange(FileChange::FILE_CHANGE_ADD_OR_UPDATE,
-                      sync_file_system::SYNC_FILE_TYPE_FILE);
+                      SYNC_FILE_TYPE_FILE);
   EXPECT_EQ(SYNC_STATUS_OK,
             ApplyRemoteChange(file_system.file_system_context(),
                               change, kFilePath2, kFile2,
-                              sync_file_system::SYNC_FILE_TYPE_UNKNOWN));
+                              SYNC_FILE_TYPE_UNKNOWN));
 
   change = FileChange(FileChange::FILE_CHANGE_ADD_OR_UPDATE,
-                      sync_file_system::SYNC_FILE_TYPE_DIRECTORY);
+                      SYNC_FILE_TYPE_DIRECTORY);
   EXPECT_EQ(SYNC_STATUS_OK,
             ApplyRemoteChange(file_system.file_system_context(),
                               change, base::FilePath(), kDir,
-                              sync_file_system::SYNC_FILE_TYPE_UNKNOWN));
+                              SYNC_FILE_TYPE_UNKNOWN));
 
   // This should not happen, but calling ApplyRemoteChange
   // with wrong file type will result in error.
   change = FileChange(FileChange::FILE_CHANGE_ADD_OR_UPDATE,
-                      sync_file_system::SYNC_FILE_TYPE_FILE);
+                      SYNC_FILE_TYPE_FILE);
   EXPECT_NE(SYNC_STATUS_OK,
             ApplyRemoteChange(file_system.file_system_context(),
                               change, kFilePath1, kDir,
-                              sync_file_system::SYNC_FILE_TYPE_DIRECTORY));
+                              SYNC_FILE_TYPE_DIRECTORY));
 
   // Creating a file/directory must have increased the usage more than
   // the size of kTestFileData2.
@@ -608,4 +608,4 @@ TEST_F(LocalFileSyncContextTest, ApplyRemoteChangeForAddOrUpdate) {
   file_system.TearDown();
 }
 
-}  // namespace fileapi
+}  // namespace sync_file_system

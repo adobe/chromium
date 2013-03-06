@@ -27,6 +27,7 @@
 #include "chrome/browser/extensions/api/font_settings/font_settings_api.h"
 #include "chrome/browser/extensions/api/history/history_api.h"
 #include "chrome/browser/extensions/api/i18n/i18n_api.h"
+#include "chrome/browser/extensions/api/icons/icons_api.h"
 #include "chrome/browser/extensions/api/identity/identity_api.h"
 #include "chrome/browser/extensions/api/idle/idle_manager_factory.h"
 #include "chrome/browser/extensions/api/input/input.h"
@@ -45,6 +46,7 @@
 #include "chrome/browser/extensions/api/web_navigation/web_navigation_api.h"
 #include "chrome/browser/extensions/csp_parser.h"
 #include "chrome/browser/extensions/extension_system_factory.h"
+#include "chrome/browser/extensions/install_tracker_factory.h"
 #include "chrome/browser/extensions/manifest_url_parser.h"
 #include "chrome/browser/extensions/web_accessible_resources_parser.h"
 #include "chrome/browser/favicon/favicon_service_factory.h"
@@ -52,7 +54,7 @@
 #include "chrome/browser/google/google_url_tracker_factory.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/history/shortcuts_backend_factory.h"
-#include "chrome/browser/media_gallery/media_galleries_preferences_factory.h"
+#include "chrome/browser/media_galleries/media_galleries_preferences_factory.h"
 #include "chrome/browser/notifications/desktop_notification_service_factory.h"
 #if !defined(OS_ANDROID)
 #include "chrome/browser/notifications/sync_notifier/chrome_notifier_service_factory.h"
@@ -273,8 +275,10 @@ void ProfileDependencyManager::AssertFactoriesBuilt() {
   extensions::FontSettingsAPI::GetFactoryInstance();
   extensions::HistoryAPI::GetFactoryInstance();
   extensions::I18nAPI::GetFactoryInstance();
+  extensions::IconsAPI::GetFactoryInstance();
   extensions::IdentityAPI::GetFactoryInstance();
   extensions::IdleManagerFactory::GetInstance();
+  extensions::InstallTrackerFactory::GetInstance();
 #if defined(TOOLKIT_VIEWS)
   extensions::InputAPI::GetFactoryInstance();
 #endif

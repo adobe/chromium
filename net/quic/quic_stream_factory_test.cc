@@ -10,6 +10,8 @@
 #include "net/http/http_response_headers.h"
 #include "net/http/http_response_info.h"
 #include "net/http/http_util.h"
+#include "net/quic/crypto/quic_decrypter.h"
+#include "net/quic/crypto/quic_encrypter.h"
 #include "net/quic/quic_http_stream.h"
 #include "net/quic/test_tools/mock_clock.h"
 #include "net/quic/test_tools/mock_random.h"
@@ -36,14 +38,16 @@ class QuicStreamFactoryTest : public ::testing::Test {
                                                            clock_,
                                                            &random_generator_,
                                                            host));
-    QuicFramer framer(QuicDecrypter::Create(kNULL),
+    QuicFramer framer(kQuicVersion1,
+                      QuicDecrypter::Create(kNULL),
                       QuicEncrypter::Create(kNULL));
     return scoped_ptr<QuicEncryptedPacket>(framer.EncryptPacket(1, *chlo));
   }
 
   scoped_ptr<QuicEncryptedPacket> ConstructShlo() {
     scoped_ptr<QuicPacket> shlo(ConstructHandshakePacket(0xDEADBEEF, kSHLO));
-    QuicFramer framer(QuicDecrypter::Create(kNULL),
+    QuicFramer framer(kQuicVersion1,
+                      QuicDecrypter::Create(kNULL),
                       QuicEncrypter::Create(kNULL));
     return scoped_ptr<QuicEncryptedPacket>(framer.EncryptPacket(1, *shlo));
   }
@@ -85,7 +89,8 @@ class QuicStreamFactoryTest : public ::testing::Test {
     feedback.tcp.accumulated_number_of_lost_packets = 0;
     feedback.tcp.receive_window = 16000;
 
-    QuicFramer framer(QuicDecrypter::Create(kNULL),
+    QuicFramer framer(kQuicVersion1,
+                      QuicDecrypter::Create(kNULL),
                       QuicEncrypter::Create(kNULL));
     QuicFrames frames;
     frames.push_back(QuicFrame(&ack));
@@ -121,7 +126,8 @@ class QuicStreamFactoryTest : public ::testing::Test {
   scoped_ptr<QuicEncryptedPacket> ConstructPacket(
       const QuicPacketHeader& header,
       const QuicFrame& frame) {
-    QuicFramer framer(QuicDecrypter::Create(kNULL),
+    QuicFramer framer(kQuicVersion1,
+                      QuicDecrypter::Create(kNULL),
                       QuicEncrypter::Create(kNULL));
     QuicFrames frames;
     frames.push_back(frame);

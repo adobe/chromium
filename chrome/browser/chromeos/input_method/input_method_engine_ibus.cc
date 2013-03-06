@@ -4,12 +4,15 @@
 
 #include "chrome/browser/chromeos/input_method/input_method_engine_ibus.h"
 
+#define XK_MISCELLANY
+#include <X11/keysymdef.h>
 #include <map>
 
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/string_util.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/chromeos/input_method/ibus_keymap.h"
 #include "chrome/browser/chromeos/input_method/input_method_configuration.h"
 #include "chrome/browser/chromeos/input_method/input_method_manager.h"
@@ -364,6 +367,29 @@ void InputMethodEngineIBus::KeyEventDone(input_method::KeyEventHandle* key_data,
   delete callback;
 }
 
+bool InputMethodEngineIBus::DeleteSurroundingText(int context_id,
+                                                  int offset,
+                                                  size_t number_of_chars,
+                                                  std::string* error) {
+  const uint32 kBackSpaceKeyCode = 14;
+
+  if (!active_) {
+    *error = kErrorNotActive;
+    return false;
+  }
+  if (context_id != context_id_ || context_id_ == -1) {
+    *error = kErrorWrongContext;
+    return false;
+  }
+  if (offset < 0 && static_cast<size_t>(-1 * offset) != size_t(number_of_chars))
+    return false;  // Currently we can only support preceding text.
+
+  // TODO(nona): Return false if there is ongoing composition.
+  for (size_t i = 0; i < number_of_chars; ++i)
+    GetCurrentService()->ForwardKeyEvent(XK_BackSpace, kBackSpaceKeyCode, 0U);
+  return true;
+}
+
 void InputMethodEngineIBus::FocusIn() {
   focused_ = true;
   if (!active_)
@@ -392,6 +418,10 @@ void InputMethodEngineIBus::Enable() {
   active_ = true;
   observer_->OnActivate(engine_id_);
   FocusIn();
+
+  // Calls RequireSurroundingText once here to notify ibus-daemon to send
+  // surrounding text to this engine.
+  GetCurrentService()->RequireSurroundingText();
 }
 
 void InputMethodEngineIBus::Disable() {
@@ -470,10 +500,13 @@ void InputMethodEngineIBus::CandidateClicked(uint32 index,
       engine_id_, candidate_ids_.at(index), pressed_button);
 }
 
-void InputMethodEngineIBus::SetSurroundingText(
-    const std::string& text,
-    uint32 cursor_pos,
-    uint32 anchor_pos) {
+void InputMethodEngineIBus::SetSurroundingText(const std::string& text,
+                                               uint32 cursor_pos,
+                                               uint32 anchor_pos) {
+  observer_->OnSurroundingTextChanged(engine_id_,
+                                      text,
+                                      static_cast<int>(cursor_pos),
+                                      static_cast<int>(anchor_pos));
 }
 
 IBusEngineService* InputMethodEngineIBus::GetCurrentService() {

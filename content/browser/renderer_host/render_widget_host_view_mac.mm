@@ -38,6 +38,7 @@
 #include "content/common/gpu/gpu_messages.h"
 #include "content/common/plugin_messages.h"
 #include "content/common/view_messages.h"
+#include "content/port/browser/render_widget_host_view_frame_subscriber.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/native_web_keyboard_event.h"
 #import "content/public/browser/render_widget_host_view_mac_delegate.h"
@@ -975,30 +976,63 @@ void RenderWidgetHostViewMac::CopyFromCompositingSurface(
 
   scoped_callback_runner.Release();
 
-  // Convert |src_subrect| from the views coordinate (upper-left origin) into
-  // the OpenGL coordinate (lower-left origin).
-  gfx::Rect src_gl_subrect = src_subrect;
-  src_gl_subrect.set_y(GetViewBounds().height() - src_subrect.bottom());
-
-  gfx::Rect src_pixel_gl_subrect = gfx::ToEnclosingRect(
-      gfx::ScaleRect(src_gl_subrect, scale));
-  compositing_iosurface_->CopyTo(
-      src_pixel_gl_subrect,
-      dst_pixel_size,
-      output,
-      callback);
+  compositing_iosurface_->CopyTo(GetScaledOpenGLPixelRect(src_subrect),
+                                 ScaleFactor(cocoa_view_),
+                                 dst_pixel_size,
+                                 output,
+                                 callback);
 }
 
 void RenderWidgetHostViewMac::CopyFromCompositingSurfaceToVideoFrame(
       const gfx::Rect& src_subrect,
       const scoped_refptr<media::VideoFrame>& target,
       const base::Callback<void(bool)>& callback) {
-  NOTIMPLEMENTED();
-  callback.Run(false);
+  base::ScopedClosureRunner scoped_callback_runner(base::Bind(callback, false));
+  if (!render_widget_host_->is_accelerated_compositing_active() ||
+      !compositing_iosurface_.get() ||
+      !compositing_iosurface_->HasIOSurface())
+    return;
+
+  if (!target) {
+    NOTREACHED();
+    return;
+  }
+
+  if (target->format() != media::VideoFrame::YV12 &&
+      target->format() != media::VideoFrame::I420) {
+    NOTREACHED();
+    return;
+  }
+
+  if (src_subrect.IsEmpty())
+    return;
+
+  scoped_callback_runner.Release();
+  compositing_iosurface_->CopyToVideoFrame(
+      GetScaledOpenGLPixelRect(src_subrect),
+      ScaleFactor(cocoa_view_),
+      target,
+      callback);
 }
 
 bool RenderWidgetHostViewMac::CanCopyToVideoFrame() const {
-  return false;
+  return (!render_widget_host_->GetBackingStore(false) &&
+          render_widget_host_->is_accelerated_compositing_active() &&
+          compositing_iosurface_.get() &&
+          compositing_iosurface_->HasIOSurface());
+}
+
+bool RenderWidgetHostViewMac::CanSubscribeFrame() const {
+  return true;
+}
+
+void RenderWidgetHostViewMac::BeginFrameSubscription(
+    RenderWidgetHostViewFrameSubscriber* subscriber) {
+  frame_subscriber_.reset(subscriber);
+}
+
+void RenderWidgetHostViewMac::EndFrameSubscription() {
+  frame_subscriber_.reset();
 }
 
 // Sets whether or not to accept first responder status.
@@ -1114,7 +1148,8 @@ bool RenderWidgetHostViewMac::CompositorSwapBuffers(uint64 surface_handle,
   // later.
   if (!about_to_validate_and_paint_) {
     compositing_iosurface_->DrawIOSurface(cocoa_view_,
-                                          ScaleFactor(cocoa_view_));
+                                          ScaleFactor(cocoa_view_),
+                                          frame_subscriber_.get());
   }
   return true;
 }
@@ -1125,6 +1160,8 @@ void RenderWidgetHostViewMac::AckPendingSwapBuffers() {
     if (pending_swap_buffers_acks_.front().first != 0) {
       AcceleratedSurfaceMsg_BufferPresented_Params ack_params;
       ack_params.sync_point = 0;
+      if (compositing_iosurface_.get())
+        ack_params.renderer_id = compositing_iosurface_->GetRendererID();
       RenderWidgetHostImpl::AcknowledgeBufferPresent(
           pending_swap_buffers_acks_.front().first,
           pending_swap_buffers_acks_.front().second,
@@ -1688,6 +1725,15 @@ void RenderWidgetHostViewMac::OnAcceleratedSurfaceBuffersSwapped(
   params.window = window;
   params.surface_handle = surface_handle;
   AcceleratedSurfaceBuffersSwapped(params, 0);
+}
+
+gfx::Rect RenderWidgetHostViewMac::GetScaledOpenGLPixelRect(
+    const gfx::Rect& rect) {
+  gfx::Rect src_gl_subrect = rect;
+  src_gl_subrect.set_y(GetViewBounds().height() - rect.bottom());
+
+  return gfx::ToEnclosingRect(gfx::ScaleRect(src_gl_subrect,
+                                             ScaleFactor(cocoa_view_)));
 }
 
 }  // namespace content
@@ -2431,7 +2477,7 @@ void RenderWidgetHostViewMac::OnAcceleratedSurfaceBuffersSwapped(
     }
 
     renderWidgetHostView_->compositing_iosurface_->DrawIOSurface(
-        self, ScaleFactor(self));
+        self, ScaleFactor(self), renderWidgetHostView_->frame_subscriber());
     return;
   }
 
@@ -3319,6 +3365,20 @@ extern NSString *NSTextInputReplacementRangeAttributeName;
   if (renderWidgetHostView_->render_widget_host_->IsRenderView()) {
     static_cast<RenderViewHostImpl*>(
         renderWidgetHostView_->render_widget_host_)->PasteAndMatchStyle();
+  }
+}
+
+- (void)selectAll:(id)sender {
+  // editCommand_helper_ adds implementations for most NSResponder methods
+  // dynamically. But the renderer side only sends selection results back to
+  // the browser if they were triggered by a keyboard event or went through
+  // one of the Select methods on RWH. Since selectAll: is called from the
+  // menu handler, neither is true.
+  // Explicitly call SelectAll() here to make sure the renderer returns
+  // selection results.
+  if (renderWidgetHostView_->render_widget_host_->IsRenderView()) {
+    static_cast<RenderViewHostImpl*>(
+        renderWidgetHostView_->render_widget_host_)->SelectAll();
   }
 }
 

@@ -7,6 +7,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
+#include "chrome/common/extensions/api/icons/icons_handler.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_manifest_constants.h"
@@ -16,6 +17,7 @@
 #include "extensions/common/install_warning.h"
 
 namespace errors = extension_manifest_errors;
+namespace keys = extension_manifest_keys;
 
 namespace extensions {
 
@@ -25,11 +27,15 @@ ScriptBadgeHandler::ScriptBadgeHandler() {
 ScriptBadgeHandler::~ScriptBadgeHandler() {
 }
 
+const std::vector<std::string> ScriptBadgeHandler::PrerequisiteKeys() const {
+  return SingleKey(keys::kIcons);
+}
+
 bool ScriptBadgeHandler::Parse(Extension* extension, string16* error) {
   scoped_ptr<ActionInfo> action_info(new ActionInfo);
 
   // Provide a default script badge if one isn't declared in the manifest.
-  if (!extension->manifest()->HasKey(extension_manifest_keys::kScriptBadge)) {
+  if (!extension->manifest()->HasKey(keys::kScriptBadge)) {
     SetActionInfoDefaults(extension, action_info.get());
     ActionInfo::SetScriptBadgeInfo(extension, action_info.release());
     return true;
@@ -45,8 +51,7 @@ bool ScriptBadgeHandler::Parse(Extension* extension, string16* error) {
   }
 
   const DictionaryValue* dict = NULL;
-  if (!extension->manifest()->GetDictionary(
-          extension_manifest_keys::kScriptBadge, &dict)) {
+  if (!extension->manifest()->GetDictionary(keys::kScriptBadge, &dict)) {
     *error = ASCIIToUTF16(errors::kInvalidScriptBadge);
     return false;
   }
@@ -80,7 +85,7 @@ bool ScriptBadgeHandler::Parse(Extension* extension, string16* error) {
   return true;
 }
 
-bool ScriptBadgeHandler::AlwaysParseForType(Manifest::Type type) {
+bool ScriptBadgeHandler::AlwaysParseForType(Manifest::Type type) const {
   return type == Manifest::TYPE_EXTENSION;
 }
 
@@ -89,7 +94,7 @@ void ScriptBadgeHandler::SetActionInfoDefaults(const Extension* extension,
   info->default_title = extension->name();
   info->default_icon.Clear();
   for (size_t i = 0; i < extension_misc::kNumScriptBadgeIconSizes; ++i) {
-    std::string path = extension->icons().Get(
+    std::string path = IconsInfo::GetIcons(extension).Get(
         extension_misc::kScriptBadgeIconSizes[i],
         ExtensionIconSet::MATCH_BIGGER);
     if (!path.empty()) {
@@ -97,6 +102,10 @@ void ScriptBadgeHandler::SetActionInfoDefaults(const Extension* extension,
           extension_misc::kScriptBadgeIconSizes[i], path);
     }
   }
+}
+
+const std::vector<std::string> ScriptBadgeHandler::Keys() const {
+  return SingleKey(keys::kScriptBadge);
 }
 
 }  // namespace extensions

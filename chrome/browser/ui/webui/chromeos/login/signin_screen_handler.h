@@ -43,6 +43,7 @@ class User;
 class LoginDisplayWebUIHandler {
  public:
   virtual void ClearAndEnablePassword() = 0;
+  virtual void ClearUserPodPassword() = 0;
   virtual void OnLoginSuccess(const std::string& username) = 0;
   virtual void OnUserRemoved(const std::string& username) = 0;
   virtual void OnUserImageChanged(const User& user) = 0;
@@ -54,6 +55,7 @@ class LoginDisplayWebUIHandler {
                          HelpAppLauncher::HelpTopic help_topic_id) = 0;
   virtual void ShowErrorScreen(LoginDisplay::SigninError error_id) = 0;
   virtual void ShowGaiaPasswordChanged(const std::string& username) = 0;
+  virtual void ShowSigninUI(const std::string& email) = 0;
   virtual void ShowPasswordChangedDialog(bool show_password_error) = 0;
   // Show siginin screen for the given credentials.
   virtual void ShowSigninScreenForCreds(const std::string& username,
@@ -206,8 +208,19 @@ class SigninScreenHandler
                            ConnectionType connection_type,
                            const std::string reason,
                            bool force_update);
+  void SetupAndShowOfflineMessage(NetworkStateInformer::State state,
+                                  const std::string& service_path,
+                                  ConnectionType connection_type,
+                                  const std::string& reason,
+                                  bool is_proxy_error,
+                                  bool is_under_captive_portal,
+                                  bool is_gaia_loading_timeout);
+  void HideOfflineMessage(NetworkStateInformer::State state,
+                          const std::string& service_path,
+                          const std::string& reason,
+                          bool is_gaia_signin,
+                          bool is_gaia_reloaded);
   void ReloadGaiaScreen();
-  void ScheduleGaiaFrameReload();
 
   // BaseScreenHandler implementation:
   virtual void GetLocalizedStrings(
@@ -220,6 +233,7 @@ class SigninScreenHandler
 
   // BaseLoginUIHandler implementation:
   virtual void ClearAndEnablePassword() OVERRIDE;
+  virtual void ClearUserPodPassword() OVERRIDE;
   virtual void OnLoginSuccess(const std::string& username) OVERRIDE;
   virtual void OnUserRemoved(const std::string& username) OVERRIDE;
   virtual void OnUserImageChanged(const User& user) OVERRIDE;
@@ -230,6 +244,7 @@ class SigninScreenHandler
                          const std::string& help_link_text,
                          HelpAppLauncher::HelpTopic help_topic_id) OVERRIDE;
   virtual void ShowGaiaPasswordChanged(const std::string& username) OVERRIDE;
+  virtual void ShowSigninUI(const std::string& email) OVERRIDE;
   virtual void ShowPasswordChangedDialog(bool show_password_error) OVERRIDE;
   virtual void ShowErrorScreen(LoginDisplay::SigninError error_id) OVERRIDE;
   virtual void ShowSigninScreenForCreds(const std::string& username,
@@ -298,6 +313,7 @@ class SigninScreenHandler
   void HandleShowLocallyManagedUserCreationScreen(const base::ListValue* args);
   void HandleCheckLocallyManagedUserName(const base::ListValue* args);
   void HandleTryCreateLocallyManagedUser(const base::ListValue* args);
+  void HandleRunLocallyManagedUserCreationFlow(const base::ListValue* args);
 
   // Fills |user_dict| with information about |user|.
   void FillUserDictionary(User* user,

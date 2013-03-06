@@ -106,8 +106,11 @@ MONITOR2 g_monitor_2 = {
 
 base::FilePath GetAppDataDir() {
   base::FilePath file_path;
-  if (!PathService::Get(base::DIR_LOCAL_APP_DATA_LOW, &file_path)) {
-    LOG(ERROR) << "Can't get DIR_LOCAL_APP_DATA_LOW";
+  base::win::Version version = base::win::GetVersion();
+  int path_id = (version >= base::win::VERSION_VISTA) ?
+                base::DIR_LOCAL_APP_DATA_LOW : base::DIR_LOCAL_APP_DATA;
+  if (!PathService::Get(path_id, &file_path)) {
+    LOG(ERROR) << "Can't get DIR_LOCAL_APP_DATA";
     return base::FilePath();
   }
   return file_path.Append(kAppDataDir);
@@ -406,11 +409,9 @@ BOOL WINAPI Monitor2StartDocPort(HANDLE port_handle,
   const wchar_t* kUsageKey = L"dr";
   // Set appropriate key to 1 to let Omaha record usage.
   base::win::RegKey key;
-  if (key.Create(HKEY_CURRENT_USER, kKeyLocation,
-                 KEY_SET_VALUE) != ERROR_SUCCESS) {
-    LOG(ERROR) << "Unable to open key to log usage";
-  }
-  if (key.WriteValue(kUsageKey, L"1") != ERROR_SUCCESS) {
+  if (key.Create(HKEY_CURRENT_USER, kGoogleUpdateClientStateKey,
+                 KEY_SET_VALUE) != ERROR_SUCCESS ||
+      key.WriteValue(kUsageKey, L"1") != ERROR_SUCCESS) {
     LOG(ERROR) << "Unable to set usage key";
   }
   if (port_handle == NULL) {

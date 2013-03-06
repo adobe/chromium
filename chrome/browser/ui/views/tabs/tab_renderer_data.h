@@ -7,11 +7,12 @@
 
 #include "base/process_util.h"
 #include "base/string16.h"
+#include "chrome/browser/ui/views/chrome_views_export.h"
 #include "googleurl/src/gurl.h"
 #include "ui/gfx/image/image_skia.h"
 
 // Wraps the state needed by the renderers.
-struct TabRendererData {
+struct CHROME_VIEWS_EXPORT TabRendererData {
   // Different types of network activity for a tab. The NetworkState of a tab
   // may be used to alter the UI (e.g. show different kinds of loading
   // animations).
@@ -46,6 +47,14 @@ struct TabRendererData {
     return (crashed_status == base::TERMINATION_STATUS_PROCESS_WAS_KILLED ||
             crashed_status == base::TERMINATION_STATUS_PROCESS_CRASHED ||
             crashed_status == base::TERMINATION_STATUS_ABNORMAL_TERMINATION);
+  }
+
+  bool AudioActive() const {
+    return audio_state != AUDIO_STATE_NONE;
+  }
+
+  bool CaptureActive() const {
+    return capture_state != CAPTURE_STATE_NONE;
   }
 
   // Returns true if the TabRendererData is same as given |data|.

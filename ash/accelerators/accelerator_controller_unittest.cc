@@ -14,6 +14,7 @@
 #include "ash/system/keyboard_brightness/keyboard_brightness_control_delegate.h"
 #include "ash/system/tray/system_tray_delegate.h"
 #include "ash/test/ash_test_base.h"
+#include "ash/test/display_manager_test_api.h"
 #include "ash/test/test_shell_delegate.h"
 #include "ash/volume_control_delegate.h"
 #include "ash/wm/window_util.h"
@@ -313,8 +314,8 @@ class AcceleratorControllerTest : public test::AshTestBase {
 
  protected:
   void EnableInternalDisplay() {
-    Shell::GetInstance()->display_manager()->
-        SetFirstDisplayAsInternalDisplayForTest();
+    test::DisplayManagerTestApi(Shell::GetInstance()->display_manager()).
+        SetFirstDisplayAsInternalDisplay();
   }
 
   static AcceleratorController* GetController();
@@ -437,6 +438,8 @@ TEST_F(AcceleratorControllerTest, WindowSnap) {
     gfx::Rect snap_left = window->bounds();
     GetController()->PerformAction(WINDOW_SNAP_LEFT, dummy);
     EXPECT_NE(window->bounds().ToString(), snap_left.ToString());
+    GetController()->PerformAction(WINDOW_SNAP_LEFT, dummy);
+    EXPECT_NE(window->bounds().ToString(), snap_left.ToString());
 
     // It should cycle back to the first snapped position.
     GetController()->PerformAction(WINDOW_SNAP_LEFT, dummy);
@@ -445,6 +448,8 @@ TEST_F(AcceleratorControllerTest, WindowSnap) {
   {
     GetController()->PerformAction(WINDOW_SNAP_RIGHT, dummy);
     gfx::Rect snap_right = window->bounds();
+    GetController()->PerformAction(WINDOW_SNAP_RIGHT, dummy);
+    EXPECT_NE(window->bounds().ToString(), snap_right.ToString());
     GetController()->PerformAction(WINDOW_SNAP_RIGHT, dummy);
     EXPECT_NE(window->bounds().ToString(), snap_right.ToString());
 

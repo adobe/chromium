@@ -11,14 +11,14 @@
 #include "ui/gfx/native_widget_types.h"
 #include "ui/views/window/dialog_delegate.h"
 
-class ConstrainedWindowViews;
-
 namespace content {
 class WebContents;
+class BrowserContext;
 }
 
 namespace views {
 class MessageBoxView;
+class Widget;
 }
 
 // Displays a tab-modal dialog, i.e. a dialog that will block the current page
@@ -40,6 +40,8 @@ class TabModalConfirmDialogViews : public TabModalConfirmDialog,
 
   // views::WidgetDelegate:
   virtual views::View* GetContentsView() OVERRIDE;
+  virtual views::NonClientFrameView* CreateNonClientFrameView(
+      views::Widget* widget) OVERRIDE;
   virtual views::Widget* GetWidget() OVERRIDE;
   virtual const views::Widget* GetWidget() const OVERRIDE;
   virtual void DeleteDelegate() OVERRIDE;
@@ -60,7 +62,8 @@ class TabModalConfirmDialogViews : public TabModalConfirmDialog,
   // The message box view whose commands we handle.
   views::MessageBoxView* message_box_view_;
 
-  ConstrainedWindowViews* dialog_;
+  views::Widget* dialog_;
+  content::BrowserContext* browser_context_;
 
   DISALLOW_COPY_AND_ASSIGN(TabModalConfirmDialogViews);
 };

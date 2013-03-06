@@ -9,18 +9,23 @@
 
 // TODO(kochi): Further split gdata_operations.h and include only necessary
 // headers. http://crbug.com/141469
-// DownloadActionCallback/InitiateUploadParams/ResulmeUploadParams
+// DownloadActionCallback
 #include "chrome/browser/google_apis/base_operations.h"
-#include "chrome/browser/google_apis/gdata_wapi_operations.h"
 
 class Profile;
 
+namespace net {
+class IOBuffer;
+}  // namespace net
+
 namespace google_apis {
 
+class AboutResource;
+class AccountMetadata;
 class AppList;
-class AccountMetadataFeed;
-class ResourceList;
 class OperationRegistry;
+class ResourceEntry;
+class ResourceList;
 
 // Observer interface for DriveServiceInterface.
 class DriveServiceObserver {
@@ -50,13 +55,23 @@ typedef base::Callback<void(GDataErrorCode error,
 
 // Callback used for GetAccountMetadata().
 typedef base::Callback<void(GDataErrorCode error,
-                            scoped_ptr<AccountMetadataFeed> account_metadata)>
+                            scoped_ptr<AccountMetadata> account_metadata)>
     GetAccountMetadataCallback;
 
+// Callback used for GetAboutResource().
+typedef base::Callback<void(GDataErrorCode error,
+                            scoped_ptr<AboutResource> about_resource)>
+    GetAboutResourceCallback;
+
 // Callback used for GetApplicationInfo().
-typedef base::Callback<void(GDataErrorCode erro,
+typedef base::Callback<void(GDataErrorCode error,
                             scoped_ptr<AppList> app_list)>
     GetAppListCallback;
+
+// Callback used for ResumeUpload() and GetUploadStatus().
+typedef base::Callback<void(
+    const UploadRangeResponse& response,
+    scoped_ptr<ResourceEntry> new_entry)> UploadRangeCallback;
 
 // Callback used for AuthorizeApp(). |open_url| is used to open the target
 // file with the authorized app.
@@ -153,6 +168,11 @@ class DriveServiceInterface {
   // |callback| must not be null.
   virtual void GetAccountMetadata(
       const GetAccountMetadataCallback& callback) = 0;
+
+  // Gets the about resource information from the server.
+  // Upon completion, invokes |callback| with results on the calling thread.
+  // |callback| must not be null.
+  virtual void GetAboutResource(const GetAboutResourceCallback& callback) = 0;
 
   // Gets the application information from the server.
   // Upon completion, invokes |callback| with results on the calling thread.
@@ -258,8 +278,16 @@ class DriveServiceInterface {
 
   // Resumes uploading of a document/file on the calling thread.
   // |callback| must not be null.
-  virtual void ResumeUpload(const ResumeUploadParams& params,
-                            const UploadRangeCallback& callback) = 0;
+  virtual void ResumeUpload(
+      UploadMode upload_mode,
+      const base::FilePath& drive_file_path,
+      const GURL& upload_url,
+      int64 start_position,
+      int64 end_position,
+      int64 content_length,
+      const std::string& content_type,
+      const scoped_refptr<net::IOBuffer>& buf,
+      const UploadRangeCallback& callback) = 0;
 
   // Gets the current status of the uploading to |upload_url| from the server.
   // |upload_mode|, |drive_file_path| and |content_length| should be set to

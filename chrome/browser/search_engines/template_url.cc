@@ -44,7 +44,6 @@ const char kLanguageParameter[] = "language";
 const char kInputEncodingParameter[] = "inputEncoding";
 const char kOutputEncodingParameter[] = "outputEncoding";
 
-const char kGoogleAcceptedSuggestionParameter[] = "google:acceptedSuggestion";
 const char kGoogleAssistedQueryStatsParameter[] = "google:assistedQueryStats";
 
 // Host/Domain Google searches are relative to.
@@ -62,6 +61,8 @@ const char kGoogleInstantExtendedEnabledKey[] =
     "google:instantExtendedEnabledKey";
 const char kGoogleInstantExtendedEnabledKeyFull[] =
     "{google:instantExtendedEnabledKey}";
+const char kGoogleOmniboxStartMarginParameter[] =
+    "google:omniboxStartMarginParameter";
 const char kGoogleOriginalQueryForSuggestionParameter[] =
     "google:originalQueryForSuggestion";
 const char kGoogleRLZParameter[] = "google:RLZ";
@@ -150,7 +151,8 @@ std::string FindSearchTermsKey(const std::string& params) {
 TemplateURLRef::SearchTermsArgs::SearchTermsArgs(const string16& search_terms)
     : search_terms(search_terms),
       accepted_suggestion(NO_SUGGESTIONS_AVAILABLE),
-      cursor_position(string16::npos) {
+      cursor_position(string16::npos),
+      omnibox_start_margin(-1) {
 }
 
 
@@ -286,14 +288,6 @@ std::string TemplateURLRef::ReplaceSearchTermsUsingTermsData(
         }
         break;
 
-      case GOOGLE_ACCEPTED_SUGGESTION: {
-        std::string value("f");
-        if (search_terms_args.accepted_suggestion >= 0)
-          value = base::IntToString(search_terms_args.accepted_suggestion);
-        url.insert(i->index, "aq=" + value + "&");
-        break;
-      }
-
       case GOOGLE_BASE_URL:
         url.insert(i->index, search_terms_data.GoogleBaseURLValue());
         break;
@@ -315,6 +309,13 @@ std::string TemplateURLRef::ReplaceSearchTermsUsingTermsData(
 
       case GOOGLE_INSTANT_EXTENDED_ENABLED:
         url.insert(i->index, search_terms_data.InstantExtendedEnabledParam());
+        break;
+
+      case GOOGLE_OMNIBOX_START_MARGIN:
+        if (search_terms_args.omnibox_start_margin >= 0) {
+          url.insert(i->index, "es_sm=" +
+              base::IntToString(search_terms_args.omnibox_start_margin) + "&");
+        }
         break;
 
       case GOOGLE_ORIGINAL_QUERY_FOR_SUGGESTION:
@@ -468,12 +469,14 @@ bool TemplateURLRef::HasGoogleBaseURLs() const {
   return false;
 }
 
-bool TemplateURLRef::ExtractSearchTermsFromURL(const GURL& url,
-                                               string16* search_terms) const {
+bool TemplateURLRef::ExtractSearchTermsFromURL(
+    const GURL& url,
+    string16* search_terms,
+    const SearchTermsData& search_terms_data) const {
   DCHECK(search_terms);
   search_terms->clear();
 
-  ParseIfNecessary();
+  ParseIfNecessaryUsingTermsData(search_terms_data);
 
   // We need a search term in the template URL to extract something.
   if (search_term_key_.empty())
@@ -484,7 +487,8 @@ bool TemplateURLRef::ExtractSearchTermsFromURL(const GURL& url,
 
   // Fill-in the replacements. We don't care about search terms in the pattern,
   // so we use the empty string.
-  GURL pattern(ReplaceSearchTerms(SearchTermsArgs(string16())));
+  GURL pattern(ReplaceSearchTermsUsingTermsData(SearchTermsArgs(string16()),
+                                                search_terms_data));
   // Host, path and port must match.
   if (url.port() != pattern.port() ||
       url.host() != host_ ||
@@ -560,8 +564,6 @@ bool TemplateURLRef::ParseParameter(size_t start,
   } else if (parameter == kOutputEncodingParameter) {
     if (!optional)
       url->insert(start, kOutputEncodingType);
-  } else if (parameter == kGoogleAcceptedSuggestionParameter) {
-    replacements->push_back(Replacement(GOOGLE_ACCEPTED_SUGGESTION, start));
   } else if (parameter == kGoogleAssistedQueryStatsParameter) {
     replacements->push_back(Replacement(GOOGLE_ASSISTED_QUERY_STATS, start));
   } else if (parameter == kGoogleBaseURLParameter) {
@@ -577,6 +579,8 @@ bool TemplateURLRef::ParseParameter(size_t start,
                                         start));
   } else if (parameter == kGoogleInstantExtendedEnabledKey) {
     url->insert(start, google_util::kInstantExtendedAPIParam);
+  } else if (parameter == kGoogleOmniboxStartMarginParameter) {
+    replacements->push_back(Replacement(GOOGLE_OMNIBOX_START_MARGIN, start));
   } else if (parameter == kGoogleOriginalQueryForSuggestionParameter) {
     replacements->push_back(Replacement(GOOGLE_ORIGINAL_QUERY_FOR_SUGGESTION,
                                         start));
@@ -828,15 +832,25 @@ const std::string& TemplateURL::GetURL(size_t index) const {
       data_.alternate_urls[index] : url();
 }
 
-bool TemplateURL::ExtractSearchTermsFromURL(const GURL& url,
-                                            string16* search_terms) {
+bool TemplateURL::ExtractSearchTermsFromURL(
+    const GURL& url,
+    string16* search_terms) {
+  UIThreadSearchTermsData search_terms_data(profile_);
+  return ExtractSearchTermsFromURLUsingTermsData(url, search_terms,
+                                                 search_terms_data);
+}
+
+bool TemplateURL::ExtractSearchTermsFromURLUsingTermsData(
+    const GURL& url,
+    string16* search_terms,
+    const SearchTermsData& search_terms_data) {
   DCHECK(search_terms);
   search_terms->clear();
 
   // Then try to match with every pattern.
   for (size_t i = 0; i < URLCount(); ++i) {
     TemplateURLRef ref(this, i);
-    if (ref.ExtractSearchTermsFromURL(url, search_terms)) {
+    if (ref.ExtractSearchTermsFromURL(url, search_terms, search_terms_data)) {
       // If ExtractSearchTermsFromURL() returns true and |search_terms| is empty
       // it means the pattern matched but no search terms were present. In this
       // case we fail immediately without looking for matches in subsequent
@@ -849,6 +863,19 @@ bool TemplateURL::ExtractSearchTermsFromURL(const GURL& url,
     }
   }
   return false;
+}
+
+bool TemplateURL::IsSearchURL(const GURL& url) {
+  UIThreadSearchTermsData search_terms_data(profile_);
+  return IsSearchURLUsingTermsData(url, search_terms_data);
+}
+
+bool TemplateURL::IsSearchURLUsingTermsData(
+    const GURL& url,
+    const SearchTermsData& search_terms_data) {
+  string16 search_terms;
+  return ExtractSearchTermsFromURLUsingTermsData(
+      url, &search_terms, search_terms_data) && !search_terms.empty();
 }
 
 bool TemplateURL::HasSearchTermsReplacementKey(const GURL& url) const {

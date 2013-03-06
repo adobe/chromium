@@ -86,6 +86,9 @@ class DefaultTransportFactory
     return 0;
   }
 
+  void WaitSyncPoint(uint32 sync_point) OVERRIDE {
+  }
+
   // We don't generate lost context events, so we don't need to keep track of
   // observers
   virtual void AddObserver(ImageTransportFactoryObserver* observer) OVERRIDE {
@@ -465,6 +468,12 @@ class GpuProcessTransportFactory
     return shared_contexts_main_thread_->Context3d()->insertSyncPoint();
   }
 
+  virtual void WaitSyncPoint(uint32 sync_point) OVERRIDE {
+    if (!shared_contexts_main_thread_)
+      return;
+    shared_contexts_main_thread_->Context3d()->waitSyncPoint(sync_point);
+  }
+
   virtual void AddObserver(ImageTransportFactoryObserver* observer) OVERRIDE {
     observer_list_.AddObserver(observer);
   }
@@ -668,13 +677,10 @@ void ImageTransportFactory::Initialize() {
   if (command_line->HasSwitch(switches::kTestCompositor)) {
     ui::SetupTestCompositor();
   }
-  if (ui::IsTestCompositorEnabled()) {
+  if (ui::IsTestCompositorEnabled())
     g_factory = new DefaultTransportFactory();
-    WebKitPlatformSupportImpl::SetOffscreenContextFactoryForTest(
-        CreateTestContext);
-  } else {
+  else
     g_factory = new GpuProcessTransportFactory();
-  }
   ui::ContextFactory::SetInstance(g_factory->AsContextFactory());
 }
 

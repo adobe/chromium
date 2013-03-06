@@ -53,9 +53,6 @@ public class ContentVideoView extends FrameLayout implements MediaPlayerControl,
     private static final int MEDIA_ERROR = 100;
     private static final int MEDIA_INFO = 200;
 
-    // Type needs to be kept in sync with surface_texture_peer.h.
-    private static final int SET_VIDEO_SURFACE_TEXTURE = 1;
-
     /** The video is streamed and its container is not valid for progressive
      * playback i.e the video's index (e.g moov atom) is not at the start of the
      * file.
@@ -96,7 +93,7 @@ public class ContentVideoView extends FrameLayout implements MediaPlayerControl,
     private VideoSurfaceView mVideoSurfaceView;
 
     // Progress view when the video is loading.
-    private ProgressView mProgressView;
+    private View mProgressView;
 
     private Surface mSurface = null;
 
@@ -190,7 +187,7 @@ public class ContentVideoView extends FrameLayout implements MediaPlayerControl,
         this(context, 0);
     }
 
-    public ContentVideoView(Context context, int nativeContentVideoView) {
+    private ContentVideoView(Context context, int nativeContentVideoView) {
         super(context);
         initResources(context);
 
@@ -199,7 +196,6 @@ public class ContentVideoView extends FrameLayout implements MediaPlayerControl,
 
         mCurrentBufferPercentage = 0;
         mVideoSurfaceView = new VideoSurfaceView(context);
-        mProgressView = new ProgressView(context);
     }
 
     private static void initResources(Context context) {
@@ -217,6 +213,12 @@ public class ContentVideoView extends FrameLayout implements MediaPlayerControl,
                 ViewGroup.LayoutParams.WRAP_CONTENT,
                 Gravity.CENTER);
         this.addView(mVideoSurfaceView, layoutParams);
+        View progressView = sDelegate.getVideoLoadingProgressView();
+        if (progressView != null) {
+            mProgressView = progressView;
+        } else {
+            mProgressView = new ProgressView(getContext());
+        }
         this.addView(mProgressView, layoutParams);
         mVideoSurfaceView.setZOrderOnTop(true);
         mVideoSurfaceView.setOnKeyListener(this);
@@ -330,10 +332,6 @@ public class ContentVideoView extends FrameLayout implements MediaPlayerControl,
         mVideoSurfaceView.setFocusable(true);
         mVideoSurfaceView.setFocusableInTouchMode(true);
         if (isInPlaybackState() && mMediaController != null) {
-            if (mMediaController.isShowing()) {
-                // ensure the controller will get repositioned later
-                mMediaController.hide();
-            }
             mMediaController.show();
         }
     }

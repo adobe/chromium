@@ -36,8 +36,9 @@ void InstantPage::SetPopupBounds(const gfx::Rect& bounds) {
   Send(new ChromeViewMsg_SearchBoxPopupResize(routing_id(), bounds));
 }
 
-void InstantPage::SetMarginSize(const int start, const int end) {
-  Send(new ChromeViewMsg_SearchBoxMarginChange(routing_id(), start, end));
+void InstantPage::SetOmniboxBounds(const gfx::Rect& bounds) {
+  Send(new ChromeViewMsg_SearchBoxMarginChange(
+      routing_id(), bounds.x(), bounds.width()));
 }
 
 void InstantPage::InitializeFonts() {
@@ -241,11 +242,12 @@ void InstantPage::OnStopCapturingKeyStrokes(int page_id) {
 
 void InstantPage::OnSearchBoxNavigate(int page_id,
                                       const GURL& url,
-                                      content::PageTransition transition) {
+                                      content::PageTransition transition,
+                                      WindowOpenDisposition disposition) {
   if (contents()->IsActiveEntry(page_id)) {
     OnInstantSupportDetermined(page_id, true);
     if (ShouldProcessNavigateToURL())
-      delegate_->NavigateToURL(contents(), url, transition);
+      delegate_->NavigateToURL(contents(), url, transition, disposition);
   }
 }
 

@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <comdef.h>
 #include <iomanip>
 #include <windows.h>
 #include <winspool.h>
@@ -30,8 +31,6 @@
 
 namespace {
 
-const wchar_t kVersionKey[] = L"pv";
-const wchar_t kNameKey[] = L"name";
 const wchar_t kNameValue[] = L"GCP Virtual Driver";
 const wchar_t kUninstallRegistry[] =
     L"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\"
@@ -62,9 +61,17 @@ const char kRegisterSwitch[] = "register";
 const char kUninstallSwitch[] = "uninstall";
 const char kUnregisterSwitch[] = "unregister";
 
+// Google update related constants.
+const wchar_t kVersionKey[] = L"pv";
+const wchar_t kNameKey[] = L"name";
+const DWORD kInstallerResultFailedCustomError = 1;
+const wchar_t kRegValueLastInstallerResult[] = L"LastInstallerResult";
+const wchar_t kRegValueLastInstallerResultUIString[] =
+    L"LastInstallerResultUIString";
+
 void SetGoogleUpdateKeys() {
   base::win::RegKey key;
-  if (key.Create(HKEY_LOCAL_MACHINE, cloud_print::kKeyLocation,
+  if (key.Create(HKEY_LOCAL_MACHINE, cloud_print::kGoogleUpdateClientsKey,
                  KEY_SET_VALUE) != ERROR_SUCCESS) {
     LOG(ERROR) << "Unable to open key";
   }
@@ -90,9 +97,25 @@ void SetGoogleUpdateKeys() {
   }
 }
 
+void SetGoogleUpdateError(const string16& message) {
+  LOG(ERROR) << message;
+  base::win::RegKey key;
+  if (key.Create(HKEY_LOCAL_MACHINE, cloud_print::kGoogleUpdateClientStateKey,
+                 KEY_SET_VALUE) != ERROR_SUCCESS) {
+    LOG(ERROR) << "Unable to open key";
+  }
+
+  if (key.WriteValue(kRegValueLastInstallerResult,
+                     kInstallerResultFailedCustomError) != ERROR_SUCCESS ||
+      key.WriteValue(kRegValueLastInstallerResultUIString,
+                     message.c_str()) != ERROR_SUCCESS) {
+      LOG(ERROR) << "Unable to set registry keys";
+  }
+}
+
 void DeleteGoogleUpdateKeys() {
   base::win::RegKey key;
-  if (key.Open(HKEY_LOCAL_MACHINE, cloud_print::kKeyLocation,
+  if (key.Open(HKEY_LOCAL_MACHINE, cloud_print::kGoogleUpdateClientsKey,
                DELETE) != ERROR_SUCCESS) {
     LOG(ERROR) << "Unable to open key to delete";
     return;
@@ -250,9 +273,8 @@ UINT CALLBACK CabinetCallback(PVOID data,
   return NO_ERROR;
 }
 
-void ReadyPpdDependencies(const base::FilePath& destination) {
-  base::win::Version version = base::win::GetVersion();
-  if (version >= base::win::VERSION_VISTA) {
+void ReadyDriverDependencies(const base::FilePath& destination) {
+  if (base::win::GetVersion() >= base::win::VERSION_VISTA) {
     // GetCorePrinterDrivers and GetPrinterDriverPackagePath only exist on
     // Vista and later. Winspool.drv must be delayloaded so these calls don't
     // create problems on XP.
@@ -266,33 +288,55 @@ void ReadyPpdDependencies(const base::FilePath& destination) {
     SetupIterateCabinet(package_path, 0, &CabinetCallback,
                         &base::FilePath(destination));
   } else {
-    // PS driver files are in the sp3 cab.
+    // Driver files are in the sp3 cab.
     base::FilePath package_path;
     PathService::Get(base::DIR_WINDOWS, &package_path);
     package_path = package_path.Append(L"Driver Cache\\i386\\sp3.cab");
     SetupIterateCabinet(package_path.value().c_str(), 0, &CabinetCallback,
                         &base::FilePath(destination));
 
-    // The XPS driver files are just sitting uncompressed in the driver cache.
-    base::FilePath xps_path;
-    PathService::Get(base::DIR_WINDOWS, &xps_path);
-    xps_path = xps_path.Append(L"Driver Cache\\i386");
-    xps_path = xps_path.Append(kDriverName);
-    file_util::CopyFile(xps_path, destination.Append(kDriverName));
+    // Copy the rest from the driver cache or system dir.
+    base::FilePath driver_cache_path;
+    PathService::Get(base::DIR_WINDOWS, &driver_cache_path);
+    driver_cache_path = driver_cache_path.Append(L"Driver Cache\\i386");
+    for (size_t i = 0; i < arraysize(kDependencyList); ++i) {
+      base::FilePath dst_path = destination.Append(kDependencyList[i]);
+      if (!file_util::PathExists(dst_path)) {
+        base::FilePath src_path = driver_cache_path.Append(kDependencyList[i]);
+        if (!file_util::PathExists(src_path))
+          src_path = GetSystemPath(kDependencyList[i]);
+        file_util::CopyFile(src_path, dst_path);
+      }
+    }
   }
 }
 
-HRESULT InstallPpd(const base::FilePath& install_path) {
+HRESULT InstallDriver(const base::FilePath& install_path) {
   base::ScopedTempDir temp_path;
   if (!temp_path.CreateUniqueTempDir())
     return HRESULT_FROM_WIN32(ERROR_CANNOT_MAKE);
-  ReadyPpdDependencies(temp_path.path());
+  ReadyDriverDependencies(temp_path.path());
+
+  std::vector<string16> dependent_array;
+  // Add all files. AddPrinterDriverEx will removes unnecessary.
+  for (size_t i = 0; i < arraysize(kDependencyList); ++i) {
+    base::FilePath file_path = temp_path.path().Append(kDependencyList[i]);
+    if (file_util::PathExists(file_path))
+      dependent_array.push_back(file_path.value());
+    else
+      LOG(WARNING) << "File is missing: " << file_path.BaseName().value();
+  }
 
   // Set up paths for the files we depend on.
   base::FilePath data_file = install_path.Append(kDataFileName);
   base::FilePath xps_path = temp_path.path().Append(kDriverName);
   base::FilePath ui_path = temp_path.path().Append(kUiDriverName);
   base::FilePath ui_help_path = temp_path.path().Append(kHelpName);
+
+  if (!file_util::PathExists(xps_path)) {
+    SetGoogleUpdateError(cloud_print::LoadLocalString(IDS_ERROR_NO_XPS));
+    return HRESULT_FROM_WIN32(ERROR_BAD_DRIVER);
+  }
 
   DRIVER_INFO_6 driver_info = {0};
   // Set up supported print system version.  Must be 3.
@@ -305,12 +349,6 @@ HRESULT InstallPpd(const base::FilePath& install_path) {
   driver_info.pDriverPath = const_cast<LPWSTR>(xps_path.value().c_str());
   driver_info.pConfigFile = const_cast<LPWSTR>(ui_path.value().c_str());
 
-  std::vector<string16> dependent_array;
-  // Add all files. AddPrinterDriverEx will removes unnecessary.
-  for (size_t i = 0; i < arraysize(kDependencyList); ++i) {
-    dependent_array.push_back(
-        temp_path.path().Append(kDependencyList[i]).value());
-  }
   string16 dependent_files(JoinString(dependent_array, L'\n'));
   dependent_files.push_back(L'\n');
   std::replace(dependent_files.begin(), dependent_files.end(), L'\n', L'\0');
@@ -333,7 +371,7 @@ HRESULT InstallPpd(const base::FilePath& install_path) {
   return S_OK;
 }
 
-HRESULT UninstallPpd() {
+HRESULT UninstallDriver() {
   int tries = 3;
   string16 driver_name = cloud_print::LoadLocalString(IDS_DRIVER_NAME);
   while (!DeletePrinterDriverEx(NULL,
@@ -462,15 +500,15 @@ HRESULT RegisterVirtualDriver(const base::FilePath& install_path) {
     return HRESULT_FROM_WIN32(ERROR_OLD_WIN_VERSION);
   }
 
-  result = RegisterPortMonitor(true, install_path);
+  result = InstallDriver(install_path);
   if (FAILED(result)) {
-    LOG(ERROR) << "Unable to register port monitor.";
+    LOG(ERROR) << "Unable to install driver.";
     return result;
   }
 
-  result = InstallPpd(install_path);
+  result = RegisterPortMonitor(true, install_path);
   if (FAILED(result)) {
-    LOG(ERROR) << "Unable to install Ppd.";
+    LOG(ERROR) << "Unable to register port monitor.";
     return result;
   }
 
@@ -503,9 +541,9 @@ HRESULT TryUnregisterVirtualDriver() {
     LOG(ERROR) << "Unable to delete printer.";
     return result;
   }
-  result = UninstallPpd();
+  result = UninstallDriver();
   if (FAILED(result)) {
-    LOG(ERROR) << "Unable to remove PPD.";
+    LOG(ERROR) << "Unable to remove driver.";
     return result;
   }
   // The second argument is ignored if the first is false.
@@ -647,7 +685,8 @@ int WINAPI WinMain(__in  HINSTANCE hInstance,
   CommandLine::Init(0, NULL);
   HRESULT retval = ExecuteCommands();
 
-  LOG(INFO) << "HRESULT=0x" << std::setbase(16) << retval;
+  LOG(INFO) << _com_error(retval).ErrorMessage() << " HRESULT=0x" <<
+               std::setbase(16) << retval;
 
   // Installer is silent by default as required by Google Update.
   if (CommandLine::ForCurrentProcess()->HasSwitch("verbose")) {

@@ -122,10 +122,15 @@ void AppListItemView::UpdateIcon() {
 
   gfx::ImageSkia resized(gfx::ImageSkiaOperations::CreateResizedImage(icon,
       skia::ImageOperations::RESIZE_BEST, icon_size_));
-  gfx::ImageSkia shadow(
-      gfx::ImageSkiaOperations::CreateImageWithDropShadow(resized,
-                                                          icon_shadows_));
-  icon_->SetImage(shadow);
+  if (model_->has_shadow()) {
+    gfx::ImageSkia shadow(
+        gfx::ImageSkiaOperations::CreateImageWithDropShadow(resized,
+                                                            icon_shadows_));
+    icon_->SetImage(shadow);
+    return;
+  };
+
+  icon_->SetImage(resized);
 }
 
 void AppListItemView::SetUIState(UIState state) {
@@ -220,7 +225,7 @@ void AppListItemView::OnPaint(gfx::Canvas* canvas) {
 
   gfx::Rect rect(GetContentsBounds());
 
-  if (model_->highlighted()) {
+  if (model_->highlighted() && !model_->is_installing()) {
     canvas->FillRect(rect, kHighlightedColor);
   } else if (hover_animation_->is_animating()) {
     int alpha = SkColorGetA(kHoverAndPushedColor) *

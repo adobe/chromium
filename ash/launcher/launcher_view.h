@@ -21,12 +21,9 @@
 
 namespace views {
 class BoundsAnimator;
+class MenuModelAdapter;
 class MenuRunner;
 class ViewModel;
-}
-
-namespace ui {
-class MenuModel;
 }
 
 namespace ash {
@@ -164,11 +161,6 @@ class ASH_EXPORT LauncherView : public views::View,
   // Toggles the overflow menu.
   void ToggleOverflowBubble();
 
-  // Update first launcher button's padding. This method adds padding to the
-  // first button to include the leading inset. It needs to be called once on
-  // button creation and every time when shelf alignment is changed.
-  void UpdateFirstButtonPadding();
-
   // Invoked after the fading out animation for item deletion is ended.
   void OnFadeOutAnimationEnded();
 
@@ -223,11 +215,11 @@ class ASH_EXPORT LauncherView : public views::View,
   virtual void ShowContextMenuForView(views::View* source,
                                       const gfx::Point& point) OVERRIDE;
 
-  // Show either a context or normal click menu of given |menu_model|.
+  // Show either a context or normal click menu of given |menu_model_adapter|.
   // If |context_menu| is set, the displayed menu is a context menu and not
   // a menu listing one or more running applications.
   // The |click_point| is only used for |context_menu|'s.
-  void ShowMenu(ui::MenuModel* menu_model,
+  void ShowMenu(scoped_ptr<views::MenuModelAdapter> menu_model_adapter,
                 views::View* source,
                 const gfx::Point& click_point,
                 bool context_menu);

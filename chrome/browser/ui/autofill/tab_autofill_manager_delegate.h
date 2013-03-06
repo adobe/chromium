@@ -5,11 +5,16 @@
 #ifndef CHROME_BROWSER_UI_AUTOFILL_TAB_AUTOFILL_MANAGER_DELEGATE_H_
 #define CHROME_BROWSER_UI_AUTOFILL_TAB_AUTOFILL_MANAGER_DELEGATE_H_
 
+#include "base/callback.h"
 #include "base/compiler_specific.h"
+#include "base/memory/weak_ptr.h"
+#include "chrome/browser/api/sync/profile_sync_service_observer.h"
 #include "chrome/browser/autofill/autofill_manager_delegate.h"
 #include "chrome/browser/ui/autofill/autofill_dialog_types.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/browser/web_contents_user_data.h"
+
+class AutofillPopupControllerImpl;
 
 namespace content {
 struct FrameNavigateParams;
@@ -24,18 +29,21 @@ class AutofillDialogControllerImpl;
 // Chrome implementation of AutofillManagerDelegate.
 class TabAutofillManagerDelegate
     : public AutofillManagerDelegate,
+      public ProfileSyncServiceObserver,
       public content::WebContentsUserData<TabAutofillManagerDelegate>,
       public content::WebContentsObserver {
  public:
-  virtual ~TabAutofillManagerDelegate() {}
+  virtual ~TabAutofillManagerDelegate();
 
   // AutofillManagerDelegate implementation.
   virtual InfoBarService* GetInfoBarService() OVERRIDE;
   virtual PersonalDataManager* GetPersonalDataManager() OVERRIDE;
   virtual PrefService* GetPrefs() OVERRIDE;
-  virtual ProfileSyncServiceBase* GetProfileSyncService() OVERRIDE;
   virtual void HideRequestAutocompleteDialog() OVERRIDE;
   virtual bool IsSavingPasswordsEnabled() const OVERRIDE;
+  virtual bool IsPasswordSyncEnabled() const OVERRIDE;
+  virtual void SetSyncStateChangedCallback(
+      const base::Closure& callback) OVERRIDE;
   virtual void OnAutocheckoutError() OVERRIDE;
   virtual void ShowAutofillSettings() OVERRIDE;
   virtual void ShowPasswordGenerationBubble(
@@ -54,7 +62,17 @@ class TabAutofillManagerDelegate
       DialogType dialog_type,
       const base::Callback<void(const FormStructure*)>& callback) OVERRIDE;
   virtual void RequestAutocompleteDialogClosed() OVERRIDE;
+  virtual void ShowAutofillPopup(const gfx::RectF& element_bounds,
+                                 const std::vector<string16>& values,
+                                 const std::vector<string16>& labels,
+                                 const std::vector<string16>& icons,
+                                 const std::vector<int>& identifiers,
+                                 AutofillPopupDelegate* delegate) OVERRIDE;
+  virtual void HideAutofillPopup() OVERRIDE;
   virtual void UpdateProgressBar(double value) OVERRIDE;
+
+  // ProfileSyncServiceObserver implementation.
+  virtual void OnStateChanged() OVERRIDE;
 
   // content::WebContentsObserver implementation.
   virtual void DidNavigateMainFrame(
@@ -65,8 +83,10 @@ class TabAutofillManagerDelegate
   explicit TabAutofillManagerDelegate(content::WebContents* web_contents);
   friend class content::WebContentsUserData<TabAutofillManagerDelegate>;
 
+  base::Closure sync_state_changed_callback_;
   content::WebContents* const web_contents_;
-  AutofillDialogControllerImpl* autofill_dialog_controller_;  // weak.
+  AutofillDialogControllerImpl* dialog_controller_;  // weak.
+  base::WeakPtr<AutofillPopupControllerImpl> popup_controller_;
 
   DISALLOW_COPY_AND_ASSIGN(TabAutofillManagerDelegate);
 };

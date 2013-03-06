@@ -22,12 +22,14 @@
 #include "webkit/fileapi/syncable/syncable_file_operation_runner.h"
 #include "webkit/fileapi/syncable/syncable_file_system_util.h"
 
-using sync_file_system::FileChangeList;
-using sync_file_system::LocalFileSyncInfo;
-using sync_file_system::SyncFileMetadata;
-using sync_file_system::SyncFileType;
+using fileapi::FileSystemContext;
+using fileapi::FileSystemFileUtil;
+using fileapi::FileSystemOperation;
+using fileapi::FileSystemOperationContext;
+using fileapi::FileSystemURL;
+using fileapi::LocalFileSystemOperation;
 
-namespace fileapi {
+namespace sync_file_system {
 
 namespace {
 const int kMaxConcurrentSyncableOperation = 3;
@@ -54,7 +56,9 @@ void LocalFileSyncContext::MaybeInitializeFileSystemContext(
   if (ContainsKey(file_system_contexts_, file_system_context)) {
     // The context has been already initialized. Just dispatch the callback
     // with SYNC_STATUS_OK.
-    ui_task_runner_->PostTask(FROM_HERE, base::Bind(callback, SYNC_STATUS_OK));
+    ui_task_runner_->PostTask(FROM_HERE,
+                              base::Bind(callback,
+                                         SYNC_STATUS_OK));
     return;
   }
 
@@ -150,7 +154,8 @@ void LocalFileSyncContext::PrepareForSync(
       FROM_HERE,
       base::Bind(&LocalFileSyncContext::DidGetWritingStatusForSync,
                  this, make_scoped_refptr(file_system_context),
-                 syncable ? SYNC_STATUS_OK : SYNC_STATUS_FILE_BUSY,
+                 syncable ? SYNC_STATUS_OK :
+                            SYNC_STATUS_FILE_BUSY,
                  url, callback));
 }
 
@@ -178,7 +183,7 @@ void LocalFileSyncContext::RegisterURLForWaitingSync(
 
 void LocalFileSyncContext::ApplyRemoteChange(
     FileSystemContext* file_system_context,
-    const sync_file_system::FileChange& change,
+    const FileChange& change,
     const base::FilePath& local_path,
     const FileSystemURL& url,
     const SyncStatusCallback& callback) {
@@ -201,22 +206,22 @@ void LocalFileSyncContext::ApplyRemoteChange(
       base::Bind(&LocalFileSyncContext::DidApplyRemoteChange,
                  this, url, callback);
   switch (change.change()) {
-    case sync_file_system::FileChange::FILE_CHANGE_ADD_OR_UPDATE:
+    case FileChange::FILE_CHANGE_ADD_OR_UPDATE:
       switch (change.file_type()) {
-        case sync_file_system::SYNC_FILE_TYPE_FILE:
+        case SYNC_FILE_TYPE_FILE:
           DCHECK(!local_path.empty());
           operation->CopyInForeignFile(local_path, url, operation_callback);
           break;
-        case sync_file_system::SYNC_FILE_TYPE_DIRECTORY:
+        case SYNC_FILE_TYPE_DIRECTORY:
           operation->CreateDirectory(
               url, false /* exclusive */, true /* recursive */,
               operation_callback);
           break;
-        case sync_file_system::SYNC_FILE_TYPE_UNKNOWN:
+        case SYNC_FILE_TYPE_UNKNOWN:
           NOTREACHED() << "File type unknown for ADD_OR_UPDATE change";
       }
       break;
-    case sync_file_system::FileChange::FILE_CHANGE_DELETE:
+    case FileChange::FILE_CHANGE_DELETE:
       operation->Remove(url, true /* recursive */, operation_callback);
       break;
   }
@@ -224,9 +229,9 @@ void LocalFileSyncContext::ApplyRemoteChange(
 
 void LocalFileSyncContext::RecordFakeLocalChange(
     FileSystemContext* file_system_context,
-    const fileapi::FileSystemURL& url,
-    const sync_file_system::FileChange& change,
-    const fileapi::SyncStatusCallback& callback) {
+    const FileSystemURL& url,
+    const FileChange& change,
+    const SyncStatusCallback& callback) {
   // This is called on UI thread and to be relayed to FILE thread.
   DCHECK(file_system_context);
   if (!file_system_context->task_runners()->file_task_runner()->
@@ -246,7 +251,8 @@ void LocalFileSyncContext::RecordFakeLocalChange(
 
   // Fire the callback on UI thread.
   ui_task_runner_->PostTask(FROM_HERE,
-                            base::Bind(callback, fileapi::SYNC_STATUS_OK));
+                            base::Bind(callback,
+                                       SYNC_STATUS_OK));
 }
 
 void LocalFileSyncContext::GetFileMetadata(
@@ -417,7 +423,8 @@ void LocalFileSyncContext::InitializeFileSystemContextOnIOThread(
     sync_status_->AddObserver(this);
   }
   file_system_context->set_sync_context(this);
-  DidInitialize(source_url, file_system_context, SYNC_STATUS_OK);
+  DidInitialize(source_url, file_system_context,
+                SYNC_STATUS_OK);
 }
 
 SyncStatusCode LocalFileSyncContext::InitializeChangeTrackerOnFileThread(
@@ -515,7 +522,8 @@ void LocalFileSyncContext::TryPrepareForLocalSync(
   DCHECK(urls);
 
   if (urls->empty()) {
-    callback.Run(SYNC_STATUS_NO_CHANGE_TO_SYNC, LocalFileSyncInfo());
+    callback.Run(SYNC_STATUS_NO_CHANGE_TO_SYNC,
+                 LocalFileSyncInfo());
     return;
   }
 
@@ -589,11 +597,11 @@ void LocalFileSyncContext::DidGetWritingStatusForSync(
 
   DCHECK(!file_info.is_symbolic_link);
 
-  SyncFileType file_type = sync_file_system::SYNC_FILE_TYPE_FILE;
+  SyncFileType file_type = SYNC_FILE_TYPE_FILE;
   if (file_error == base::PLATFORM_FILE_ERROR_NOT_FOUND)
-    file_type = sync_file_system::SYNC_FILE_TYPE_UNKNOWN;
+    file_type = SYNC_FILE_TYPE_UNKNOWN;
   else if (file_info.is_directory)
-    file_type = sync_file_system::SYNC_FILE_TYPE_DIRECTORY;
+    file_type = SYNC_FILE_TYPE_DIRECTORY;
 
   LocalFileSyncInfo sync_file_info;
   sync_file_info.url = url;
@@ -637,8 +645,7 @@ void LocalFileSyncContext::DidGetFileMetadata(
   SyncFileMetadata metadata;
   if (file_error == base::PLATFORM_FILE_OK) {
     metadata.file_type = file_info.is_directory ?
-        sync_file_system::SYNC_FILE_TYPE_DIRECTORY :
-        sync_file_system::SYNC_FILE_TYPE_FILE;
+        SYNC_FILE_TYPE_DIRECTORY : SYNC_FILE_TYPE_FILE;
     metadata.size = file_info.size;
     metadata.last_modified = file_info.last_modified;
   }
@@ -655,4 +662,4 @@ base::TimeDelta LocalFileSyncContext::NotifyChangesDuration() {
   return base::TimeDelta::FromSeconds(kNotifyChangesDurationInSec);
 }
 
-}  // namespace fileapi
+}  // namespace sync_file_system

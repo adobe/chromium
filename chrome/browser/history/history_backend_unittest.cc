@@ -27,6 +27,7 @@
 #include "chrome/browser/history/visit_filter.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/thumbnail_score.h"
 #include "chrome/tools/profiles/thumbnail-inl.h"
 #include "content/public/browser/notification_details.h"
@@ -38,6 +39,7 @@
 #include "ui/gfx/image/image.h"
 
 using base::Time;
+using base::TimeDelta;
 
 // This file only tests functionality where it is most convenient to call the
 // backend directly. Most of the history backend functions are tested by the
@@ -358,11 +360,6 @@ class HistoryBackendTest : public testing::Test {
   BookmarkModel bookmark_model_;
 
  protected:
-  bool loaded_;
-
- private:
-  friend class HistoryBackendTestDelegate;
-
   // testing::Test
   virtual void SetUp() {
     if (!file_util::CreateNewTempDirectory(FILE_PATH_LITERAL("BackendTest"),
@@ -374,6 +371,11 @@ class HistoryBackendTest : public testing::Test {
                                   &bookmark_model_);
     backend_->Init(std::string(), false);
   }
+
+  bool loaded_;
+
+ private:
+  friend class HistoryBackendTestDelegate;
 
   virtual void TearDown() {
     if (backend_.get())
@@ -2519,6 +2521,153 @@ TEST_F(HistoryBackendTest, ExpireHistoryForTimes) {
   EXPECT_FALSE(backend_->GetURL(args[2].url, &row));
   EXPECT_TRUE(backend_->GetURL(args[3].url, &row));
   EXPECT_FALSE(backend_->GetURL(args[4].url, &row));
+}
+
+TEST_F(HistoryBackendTest, ExpireHistory) {
+  ASSERT_TRUE(backend_.get());
+  // Since history operations are dependent on the local timezone, make all
+  // entries relative to a fixed, local reference time.
+  base::Time reference_time = base::Time::UnixEpoch().LocalMidnight() +
+                              base::TimeDelta::FromHours(12);
+
+  // Insert 4 entries into the database.
+  HistoryAddPageArgs args[4];
+  for (size_t i = 0; i < arraysize(args); ++i) {
+    args[i].url = GURL("http://example" + base::IntToString(i) + ".com");
+    args[i].time = reference_time + base::TimeDelta::FromDays(i);
+    backend_->AddPage(args[i]);
+  }
+
+  URLRow url_rows[4];
+  for (unsigned int i = 0; i < arraysize(args); ++i)
+    ASSERT_TRUE(backend_->GetURL(args[i].url, &url_rows[i]));
+
+  std::vector<ExpireHistoryArgs> expire_list;
+  VisitVector visits;
+
+  // Passing an empty map should be a no-op.
+  backend_->ExpireHistory(expire_list);
+  backend_->db()->GetAllVisitsInRange(base::Time(), base::Time(), 0, &visits);
+  EXPECT_EQ(4U, visits.size());
+
+  // Trying to delete an unknown URL with the time of the first visit should
+  // also be a no-op.
+  expire_list.resize(expire_list.size() + 1);
+  expire_list[0].SetTimeRangeForOneDay(args[0].time);
+  expire_list[0].urls.insert(GURL("http://google.does-not-exist"));
+  backend_->ExpireHistory(expire_list);
+  backend_->db()->GetAllVisitsInRange(base::Time(), base::Time(), 0, &visits);
+  EXPECT_EQ(4U, visits.size());
+
+  // Now add the first URL with the same time -- it should get deleted.
+  expire_list.back().urls.insert(url_rows[0].url());
+  backend_->ExpireHistory(expire_list);
+
+  backend_->db()->GetAllVisitsInRange(base::Time(), base::Time(), 0, &visits);
+  ASSERT_EQ(3U, visits.size());
+  EXPECT_EQ(visits[0].url_id, url_rows[1].id());
+  EXPECT_EQ(visits[1].url_id, url_rows[2].id());
+  EXPECT_EQ(visits[2].url_id, url_rows[3].id());
+
+  // The first recorded time should also get updated.
+  EXPECT_EQ(backend_->GetFirstRecordedTimeForTest(), args[1].time);
+
+  // Now delete the rest of the visits in one call.
+  for (unsigned int i = 1; i < arraysize(args); ++i) {
+    expire_list.resize(expire_list.size() + 1);
+    expire_list[i].SetTimeRangeForOneDay(args[i].time);
+    expire_list[i].urls.insert(args[i].url);
+  }
+  backend_->ExpireHistory(expire_list);
+
+  backend_->db()->GetAllVisitsInRange(base::Time(), base::Time(), 0, &visits);
+  ASSERT_EQ(0U, visits.size());
+}
+
+class HistoryBackendSegmentDurationTest : public HistoryBackendTest {
+ public:
+  HistoryBackendSegmentDurationTest() {}
+
+  virtual void SetUp() {
+    CommandLine::ForCurrentProcess()->AppendSwitch(
+        switches::kTrackActiveVisitTime);
+    HistoryBackendTest::SetUp();
+  }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(HistoryBackendSegmentDurationTest);
+};
+
+// Assertions around segment durations.
+TEST_F(HistoryBackendSegmentDurationTest, SegmentDuration) {
+  const GURL url1("http://www.google.com");
+  const GURL url2("http://www.foo.com/m");
+  const std::string segment1(VisitSegmentDatabase::ComputeSegmentName(url1));
+  const std::string segment2(VisitSegmentDatabase::ComputeSegmentName(url2));
+
+  Time segment_time(VisitSegmentDatabase::SegmentTime(Time::Now()));
+  URLRow url_info1(url1);
+  url_info1.set_visit_count(0);
+  url_info1.set_typed_count(0);
+  url_info1.set_last_visit(segment_time);
+  url_info1.set_hidden(false);
+  const URLID url1_id = backend_->db()->AddURL(url_info1);
+  EXPECT_NE(0, url1_id);
+
+  URLRow url_info2(url2);
+  url_info2.set_visit_count(0);
+  url_info2.set_typed_count(0);
+  url_info2.set_last_visit(Time());
+  url_info2.set_hidden(false);
+  const URLID url2_id = backend_->db()->AddURL(url_info2);
+  EXPECT_NE(0, url2_id);
+  EXPECT_NE(url1_id, url2_id);
+
+  // Should not have any segments for the urls.
+  EXPECT_EQ(0, backend_->db()->GetSegmentNamed(segment1));
+  EXPECT_EQ(0, backend_->db()->GetSegmentNamed(segment2));
+
+  // Update the duration, which should implicitly create the segments.
+  const TimeDelta segment1_time_delta(TimeDelta::FromHours(1));
+  const TimeDelta segment2_time_delta(TimeDelta::FromHours(2));
+  backend_->IncreaseSegmentDuration(url1, segment_time, segment1_time_delta);
+  backend_->IncreaseSegmentDuration(url2, segment_time, segment2_time_delta);
+
+  // Get the ids of the segments that were created.
+  const SegmentID segment1_id = backend_->db()->GetSegmentNamed(segment1);
+  EXPECT_NE(0, segment1_id);
+  const SegmentID segment2_id = backend_->db()->GetSegmentNamed(segment2);
+  EXPECT_NE(0, segment2_id);
+  EXPECT_NE(segment1_id, segment2_id);
+
+  // Make sure the values made it to the db.
+  SegmentDurationID segment1_duration_id;
+  TimeDelta fetched_delta;
+  EXPECT_TRUE(backend_->db()->GetSegmentDuration(
+                  segment1_id, segment_time, &segment1_duration_id,
+                  &fetched_delta));
+  EXPECT_NE(0, segment1_duration_id);
+  EXPECT_EQ(segment1_time_delta.InHours(), fetched_delta.InHours());
+
+  SegmentDurationID segment2_duration_id;
+  EXPECT_TRUE(backend_->db()->GetSegmentDuration(
+                  segment2_id, segment_time, &segment2_duration_id,
+                  &fetched_delta));
+  EXPECT_NE(0, segment2_duration_id);
+  EXPECT_NE(segment1_duration_id, segment2_duration_id);
+  EXPECT_EQ(segment2_time_delta.InHours(), fetched_delta.InHours());
+
+  // Query by duration. |url2| should be first as it has a longer view time.
+  ScopedVector<PageUsageData> data;
+  backend_->db()->QuerySegmentDuration(segment_time, 10, &data.get());
+  ASSERT_EQ(2u, data.size());
+  EXPECT_EQ(url2.spec(), data[0]->GetURL().spec());
+  EXPECT_EQ(url2_id, data[0]->GetID());
+  EXPECT_EQ(segment2_time_delta.InHours(), data[0]->duration().InHours());
+
+  EXPECT_EQ(url1.spec(), data[1]->GetURL().spec());
+  EXPECT_EQ(url1_id, data[1]->GetID());
+  EXPECT_EQ(segment1_time_delta.InHours(), data[1]->duration().InHours());
 }
 
 }  // namespace history

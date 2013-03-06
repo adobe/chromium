@@ -12,6 +12,7 @@
 #include "base/hash_tables.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "base/time.h"
 #include "cc/animation_events.h"
 #include "cc/cc_export.h"
@@ -43,15 +44,16 @@ struct hash<WebKit::WebGraphicsContext3D*> {
 namespace cc {
 
 class AnimationRegistrar;
+class HeadsUpDisplayLayer;
 class Layer;
 class LayerTreeHostImpl;
 class LayerTreeHostImplClient;
 class PrioritizedResourceManager;
 class PrioritizedResource;
+class Region;
 class ResourceProvider;
 class ResourceUpdateQueue;
-class HeadsUpDisplayLayer;
-class Region;
+class TopControlsManager;
 struct ScrollAndScaleSet;
 
 
@@ -66,7 +68,6 @@ struct CC_EXPORT RendererCapabilities {
     bool usingSetVisibility;
     bool usingSwapCompleteCallback;
     bool usingGpuMemoryManager;
-    bool usingDiscardBackbuffer;
     bool usingEglImage;
     bool allowPartialTextureUpdates;
     bool usingOffscreenContext3d;
@@ -191,6 +192,8 @@ public:
     void setDeviceScaleFactor(float);
     float deviceScaleFactor() const { return m_deviceScaleFactor; }
 
+    void enableHidingTopControls(bool enable);
+
     HeadsUpDisplayLayer* hudLayer() const { return m_hudLayer.get(); }
 
     Proxy* proxy() const { return m_proxy.get(); }
@@ -220,6 +223,7 @@ private:
     bool paintMasksForRenderSurface(Layer*, ResourceUpdateQueue&);
 
     void updateLayers(Layer*, ResourceUpdateQueue&);
+    void updateHudLayer();
     void triggerPrepaint();
 
     void prioritizeTextures(const LayerList&, OverdrawMetrics&); 
@@ -252,6 +256,8 @@ private:
 
     scoped_ptr<PrioritizedResourceManager> m_contentsTextureManager;
     scoped_ptr<PrioritizedResource> m_surfaceMemoryPlaceholder;
+
+    base::WeakPtr<TopControlsManager> m_topControlsManagerWeakPtr;
 
     LayerTreeSettings m_settings;
     LayerTreeDebugState m_debugState;

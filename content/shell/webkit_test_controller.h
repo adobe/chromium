@@ -16,7 +16,6 @@
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/render_view_host_observer.h"
 #include "content/public/browser/web_contents_observer.h"
-#include "ui/gfx/rect.h"
 #include "webkit/glue/webpreferences.h"
 
 class SkBitmap;
@@ -105,6 +104,9 @@ class WebKitTestController : public base::NonThreadSafe,
                              base::ProcessId plugin_pid) OVERRIDE;
   virtual void RenderViewCreated(RenderViewHost* render_view_host) OVERRIDE;
   virtual void RenderViewGone(base::TerminationStatus status) OVERRIDE;
+  virtual void DidNavigateMainFrame(
+      const LoadCommittedDetails& details,
+      const FrameNavigateParams& params) OVERRIDE;
   virtual void WebContentsDestroyed(WebContents* web_contents) OVERRIDE;
 
   // NotificationObserver implementation.
@@ -116,6 +118,8 @@ class WebKitTestController : public base::NonThreadSafe,
   static WebKitTestController* instance_;
 
   void TimeoutHandler();
+  void DiscardMainWindow();
+  void SendTestConfiguration();
 
   // Message handlers.
   void OnAudioDump(const std::vector<unsigned char>& audio_dump);
@@ -129,9 +133,8 @@ class WebKitTestController : public base::NonThreadSafe,
   void OnGoToOffset(int offset);
   void OnReload();
   void OnLoadURLForFrame(const GURL& url, const std::string& frame_name);
-  void OnSetClientWindowRect(const gfx::Rect& rect);
-  void OnSetFocus(bool focus);
   void OnCaptureSessionHistory();
+  void OnCloseRemainingWindows();
 
   scoped_ptr<WebKitTestResultPrinter> printer_;
 
@@ -141,6 +144,8 @@ class WebKitTestController : public base::NonThreadSafe,
   Shell* main_window_;
 
   int current_pid_;
+  bool prune_history_;
+  bool is_running_test_;
 
   bool is_compositing_test_;
 

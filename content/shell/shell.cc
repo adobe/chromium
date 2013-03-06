@@ -156,22 +156,22 @@ void Shell::LoadURLForFrame(const GURL& url, const std::string& frame_name) {
       PAGE_TRANSITION_TYPED | PAGE_TRANSITION_FROM_ADDRESS_BAR);
   params.frame_name = frame_name;
   web_contents_->GetController().LoadURLWithParams(params);
-  web_contents_->Focus();
+  web_contents_->GetView()->Focus();
 }
 
 void Shell::GoBackOrForward(int offset) {
   web_contents_->GetController().GoToOffset(offset);
-  web_contents_->Focus();
+  web_contents_->GetView()->Focus();
 }
 
 void Shell::Reload() {
   web_contents_->GetController().Reload(false);
-  web_contents_->Focus();
+  web_contents_->GetView()->Focus();
 }
 
 void Shell::Stop() {
   web_contents_->Stop();
-  web_contents_->Focus();
+  web_contents_->GetView()->Focus();
 }
 
 void Shell::UpdateNavigationControls() {
@@ -201,7 +201,7 @@ void Shell::CloseDevTools() {
 gfx::NativeView Shell::GetContentView() {
   if (!web_contents_.get())
     return NULL;
-  return web_contents_->GetNativeView();
+  return web_contents_->GetView()->GetNativeView();
 }
 
 WebContents* Shell::OpenURLFromTab(WebContents* source,
@@ -286,6 +286,14 @@ void Shell::RendererUnresponsive(WebContents* source) {
   if (!CommandLine::ForCurrentProcess()->HasSwitch(switches::kDumpRenderTree))
     return;
   WebKitTestController::Get()->RendererUnresponsive();
+}
+
+void Shell::ActivateContents(WebContents* contents) {
+  contents->GetRenderViewHost()->Focus();
+}
+
+void Shell::DeactivateContents(WebContents* contents) {
+  contents->GetRenderViewHost()->Blur();
 }
 
 void Shell::Observe(int type,

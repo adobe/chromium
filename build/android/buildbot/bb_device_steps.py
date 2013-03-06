@@ -59,7 +59,7 @@ INSTRUMENTATION_TESTS = dict((suite.name, suite) for suite in [
            None),
     ])
 
-VALID_TESTS = set(['ui', 'unit', 'webkit', 'webkit_layout'])
+VALID_TESTS = set(['chromedriver', 'ui', 'unit', 'webkit', 'webkit_layout'])
 
 
 
@@ -136,6 +136,26 @@ def RunTestSuites(options, suites):
   for suite in suites:
     buildbot_report.PrintNamedStep(suite)
     RunCmd(['build/android/run_tests.py', '-s', suite] + args)
+
+def RunBrowserTestSuite(options):
+  """Manages an invocation of run_browser_tests.py.
+
+  Args:
+    options: options object.
+  """
+  args = ['--verbose']
+  if options.target == 'Release':
+    args.append('--release')
+  if options.asan:
+    args.append('--tool=asan')
+  buildbot_report.PrintNamedStep(constants.BROWSERTEST_SUITE_NAME)
+  RunCmd(['build/android/run_browser_tests.py'] + args)
+
+def RunChromeDriverTests():
+  """Run all the steps for running chromedriver tests."""
+  buildbot_report.PrintNamedStep('chromedriver_annotation')
+  RunCmd(['chrome/test/chromedriver/run_buildbot_steps.py',
+          '--android-package=%s' % constants.CHROMIUM_TEST_SHELL_PACKAGE])
 
 
 def InstallApk(options, test, print_step=False):
@@ -245,6 +265,8 @@ def MainTestWrapper(options):
     test_obj = INSTRUMENTATION_TESTS[options.install]
     InstallApk(options, test_obj, print_step=True)
 
+  if 'chromedriver' in options.test_filter:
+    RunChromeDriverTests()
   if 'unit' in options.test_filter:
     RunTestSuites(options, gtest_config.STABLE_TEST_SUITES)
   if 'ui' in options.test_filter:
@@ -258,6 +280,7 @@ def MainTestWrapper(options):
 
   if options.experimental:
     RunTestSuites(options, gtest_config.EXPERIMENTAL_TEST_SUITES)
+    RunBrowserTestSuite(options)
 
   # Print logcat, kill logcat monitor
   buildbot_report.PrintNamedStep('logcat_dump')

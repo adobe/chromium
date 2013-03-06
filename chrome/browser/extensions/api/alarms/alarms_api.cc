@@ -5,6 +5,8 @@
 #include "chrome/browser/extensions/api/alarms/alarms_api.h"
 
 #include "base/strings/string_number_conversions.h"
+#include "base/time/clock.h"
+#include "base/time/default_clock.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/api/alarms/alarm_manager.h"
 #include "chrome/browser/extensions/extension_system.h"
@@ -52,7 +54,7 @@ bool ValidateAlarmCreateInfo(const std::string& alarm_name,
   if (create_info.delay_in_minutes.get()) {
     if (*create_info.delay_in_minutes < kReleaseDelayMinimum) {
       COMPILE_ASSERT(kReleaseDelayMinimum == 1, update_warning_message_below);
-      if (extension->location() == Manifest::LOAD)
+      if (Manifest::IsUnpackedLocation(extension->location()))
         warnings->push_back(ErrorUtils::FormatErrorMessage(
             "Alarm delay is less than minimum of 1 minutes."
             " In released .crx, alarm \"*\" will fire in approximately"
@@ -68,7 +70,7 @@ bool ValidateAlarmCreateInfo(const std::string& alarm_name,
   if (create_info.period_in_minutes.get()) {
     if (*create_info.period_in_minutes < kReleaseDelayMinimum) {
       COMPILE_ASSERT(kReleaseDelayMinimum == 1, update_warning_message_below);
-      if (extension->location() == Manifest::LOAD)
+      if (Manifest::IsUnpackedLocation(extension->location()))
         warnings->push_back(ErrorUtils::FormatErrorMessage(
             "Alarm period is less than minimum of 1 minutes."
             " In released .crx, alarm \"*\" will fire approximately"
@@ -88,7 +90,14 @@ bool ValidateAlarmCreateInfo(const std::string& alarm_name,
 }  // namespace
 
 AlarmsCreateFunction::AlarmsCreateFunction()
-    : now_(&base::Time::Now) {
+    : clock_(new base::DefaultClock()), owns_clock_(true) {}
+
+AlarmsCreateFunction::AlarmsCreateFunction(base::Clock* clock)
+    : clock_(clock), owns_clock_(false) {}
+
+AlarmsCreateFunction::~AlarmsCreateFunction() {
+  if (owns_clock_)
+    delete clock_;
 }
 
 bool AlarmsCreateFunction::RunImpl() {
@@ -108,9 +117,9 @@ bool AlarmsCreateFunction::RunImpl() {
   Alarm alarm(alarm_name,
               params->alarm_info,
               base::TimeDelta::FromMinutes(
-                  GetExtension()->location() == Manifest::LOAD ?
+                  Manifest::IsUnpackedLocation(GetExtension()->location()) ?
                   kDevDelayMinimum : kReleaseDelayMinimum),
-              now_);
+              clock_->Now());
   ExtensionSystem::Get(profile())->alarm_manager()->AddAlarm(
       extension_id(), alarm);
 

@@ -6,8 +6,8 @@
 
 #include "base/prefs/pref_service.h"
 #include "base/string_util.h"
-#include "chrome/browser/prefs/pref_registry_syncable.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 
 const char TranslatePrefs::kPrefTranslateLanguageBlacklist[] =
     "translate_language_blacklist";
@@ -166,30 +166,20 @@ bool TranslatePrefs::ShouldAutoTranslate(PrefService* user_prefs,
   return prefs.IsLanguageWhitelisted(original_language, target_language);
 }
 
-void TranslatePrefs::RegisterUserPrefs(PrefService* prefs,
-                                       PrefRegistrySyncable* registry) {
-  if (!prefs->FindPreference(kPrefTranslateLanguageBlacklist))
-    registry->RegisterListPref(kPrefTranslateLanguageBlacklist,
-                               PrefRegistrySyncable::SYNCABLE_PREF);
-  if (!prefs->FindPreference(kPrefTranslateSiteBlacklist))
-    registry->RegisterListPref(kPrefTranslateSiteBlacklist,
-                               PrefRegistrySyncable::SYNCABLE_PREF);
-  if (!prefs->FindPreference(kPrefTranslateWhitelists)) {
-    registry->RegisterDictionaryPref(kPrefTranslateWhitelists,
-                                     PrefRegistrySyncable::SYNCABLE_PREF);
-    MigrateTranslateWhitelists(prefs);
-  }
-  if (!prefs->FindPreference(kPrefTranslateDeniedCount))
-    registry->RegisterDictionaryPref(kPrefTranslateDeniedCount,
-                                     PrefRegistrySyncable::SYNCABLE_PREF);
-  if (!prefs->FindPreference(kPrefTranslateAcceptedCount))
-    registry->RegisterDictionaryPref(kPrefTranslateAcceptedCount,
-                                     PrefRegistrySyncable::SYNCABLE_PREF);
+void TranslatePrefs::RegisterUserPrefs(PrefRegistrySyncable* registry) {
+  registry->RegisterListPref(kPrefTranslateLanguageBlacklist,
+                             PrefRegistrySyncable::SYNCABLE_PREF);
+  registry->RegisterListPref(kPrefTranslateSiteBlacklist,
+                             PrefRegistrySyncable::SYNCABLE_PREF);
+  registry->RegisterDictionaryPref(kPrefTranslateWhitelists,
+                                   PrefRegistrySyncable::SYNCABLE_PREF);
+  registry->RegisterDictionaryPref(kPrefTranslateDeniedCount,
+                                   PrefRegistrySyncable::SYNCABLE_PREF);
+  registry->RegisterDictionaryPref(kPrefTranslateAcceptedCount,
+                                   PrefRegistrySyncable::SYNCABLE_PREF);
 }
 
-// TranslatePrefs: private, static: --------------------------------------------
-
-void TranslatePrefs::MigrateTranslateWhitelists(PrefService* user_prefs) {
+void TranslatePrefs::MigrateUserPrefs(PrefService* user_prefs) {
   // Old format of kPrefTranslateWhitelists
   // - original language -> list of target langs to auto-translate
   // - list of langs is in order of being enabled i.e. last in list is the
@@ -210,17 +200,21 @@ void TranslatePrefs::MigrateTranslateWhitelists(PrefService* user_prefs) {
   DictionaryValue* dict = update.Get();
   if (!dict || dict->empty())
     return;
-  for (DictionaryValue::key_iterator iter(dict->begin_keys());
-       iter != dict->end_keys(); ++iter) {
-    ListValue* list = NULL;
-    if (!dict->GetList(*iter, &list) || !list)
+  DictionaryValue::Iterator iter(*dict);
+  while (!iter.IsAtEnd()) {
+    const ListValue* list = NULL;
+    if (!iter.value().GetAsList(&list) || !list)
       break;  // Dictionary has either been migrated or new format.
+    std::string key = iter.key();
+    // Advance the iterator before removing the current element.
+    iter.Advance();
     std::string target_lang;
     if (list->empty() || !list->GetString(list->GetSize() - 1, &target_lang) ||
-        target_lang.empty())
-      dict->Remove(*iter, NULL);
-     else
-      dict->SetString(*iter, target_lang);
+        target_lang.empty()) {
+      dict->Remove(key, NULL);
+    } else {
+      dict->SetString(key, target_lang);
+    }
   }
 }
 

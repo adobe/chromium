@@ -219,6 +219,7 @@
         'base/layout_mac.mm',
         'base/models/button_menu_item_model.cc',
         'base/models/button_menu_item_model.h',
+        'base/models/combobox_model.cc',
         'base/models/combobox_model.h',
         'base/models/list_model.h',
         'base/models/list_model_observer.h',
@@ -516,8 +517,6 @@
         'gfx/vector3d_f.h',
         'gfx/video_decode_acceleration_support_mac.h',
         'gfx/video_decode_acceleration_support_mac.mm',
-        'notifications/notification_types.h',
-        'notifications/notification_types.cc',
         'webui/jstemplate_builder.cc',
         'webui/jstemplate_builder.h',
         'webui/web_ui_util.cc',
@@ -608,12 +607,6 @@
         ['use_aura==0 and toolkit_views==0', {
           'sources/': [
             ['exclude', '^base/gestures/*'],
-          ]
-        }],
-        ['use_aura==1 and use_ash==0 and OS=="linux"', {
-          'sources': [
-            'base/linux_ui.cc',
-            'base/linux_ui.h',
           ]
         }],
         ['use_glib == 1', {

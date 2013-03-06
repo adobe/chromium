@@ -29,8 +29,8 @@
 #include "base/process_util.h"
 #include "base/run_loop.h"
 #include "base/string_piece.h"
-#include "base/string_split.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_split.h"
 #include "base/sys_info.h"
 #include "base/sys_string_conversions.h"
 #include "base/threading/platform_thread.h"
@@ -92,8 +92,9 @@
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/service/service_process_control.h"
 #include "chrome/browser/shell_integration.h"
+#include "chrome/browser/three_d_api_observer.h"
 #include "chrome/browser/translate/translate_manager.h"
-#include "chrome/browser/ui/app_list/app_list_util.h"
+#include "chrome/browser/ui/app_list/app_list_service.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/host_desktop.h"
@@ -340,12 +341,10 @@ base::FilePath GetStartupProfilePath(const base::FilePath& user_data_dir,
         command_line.GetSwitchValuePath(switches::kProfileDirectory));
   }
 
-#if defined(ENABLE_APP_LIST)
   // If we are showing the app list then chrome isn't shown so load the app
   // list's profile rather than chrome's.
   if (command_line.HasSwitch(switches::kShowAppList))
-    return chrome::GetAppListProfilePath(user_data_dir);
-#endif
+    return AppListService::Get()->GetAppListProfilePath(user_data_dir);
 
   return g_browser_process->profile_manager()->GetLastUsedProfileDir(
       user_data_dir);
@@ -694,14 +693,22 @@ void ChromeBrowserMainParts::SetupMetricsAndFieldTrials() {
 void ChromeBrowserMainParts::StartMetricsRecording() {
   MetricsService* metrics = g_browser_process->metrics_service();
 
-  bool enable_benchmarking =
+  const bool enable_benchmarking =
       parsed_command_line_.HasSwitch(switches::kEnableBenchmarking);
   // TODO(stevet): This is a temporary histogram used to investigate an issue
   // with logging. Remove this when investigations are complete.
   UMA_HISTOGRAM_BOOLEAN("UMA.FieldTrialsEnabledBenchmarking",
                         enable_benchmarking);
-  if (parsed_command_line_.HasSwitch(switches::kMetricsRecordingOnly) ||
-      enable_benchmarking) {
+  // TODO(miu): Metrics reporting is disabled in DEBUG builds until ill-fired
+  // DCHECKs are fixed, and/or we reconsider whether metrics reporting should
+  // really ever be enabled for debug builds.  http://crbug.com/156979
+#if defined(NDEBUG)
+  const bool only_do_metrics_recording = enable_benchmarking ||
+      parsed_command_line_.HasSwitch(switches::kMetricsRecordingOnly);
+#else
+  const bool only_do_metrics_recording = true;
+#endif
+  if (only_do_metrics_recording) {
     // If we're testing then we don't care what the user preference is, we turn
     // on recording, but not reporting, otherwise tests fail.
     metrics->StartRecordingForTests();
@@ -1045,6 +1052,8 @@ void ChromeBrowserMainParts::PreBrowserStart() {
 #if !defined(OS_ANDROID)
   gpu_util::InstallBrowserMonitor();
 #endif
+
+  three_d_observer_.reset(new ThreeDAPIObserver());
 }
 
 void ChromeBrowserMainParts::PostBrowserStart() {
@@ -1474,8 +1483,13 @@ int ChromeBrowserMainParts::PreMainMessageLoopRunImpl() {
   // startup_watcher_ is deleted.
   startup_watcher_->Arm(base::TimeDelta::FromSeconds(300));
 
+  // On mobile, need for clean shutdown arises only when the application comes
+  // to foreground (i.e. MetricsService::OnAppEnterForeground is called).
+  // http://crbug.com/179143
+#if !defined(OS_ANDROID)
   // Start watching for a hang.
   MetricsService::LogNeedForCleanShutdown();
+#endif
 
 #if defined(OS_WIN)
   // We check this here because if the profile is OTR (chromeos possibility)
