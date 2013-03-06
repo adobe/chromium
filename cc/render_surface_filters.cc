@@ -4,10 +4,8 @@
 
 #include "cc/render_surface_filters.h"
 
-// Custom Filters
+// Custom filters.
 #include <iostream>
-#include "cc/gl_renderer.h"
-#include "third_party/khronos/GLES2/gl2.h"
 
 #include "base/logging.h"
 #include "base/string16.h"

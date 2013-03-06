@@ -2,11 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "cc/gl_renderer.h"
+#include "cc/custom_filter_renderer.h"
 
 #include <iostream>
 
-#include "cc/custom_filter_renderer.h"
+#include "cc/custom_filter_mesh.h"
+#include "cc/gl_renderer.h"
 #include "third_party/khronos/GLES2/gl2.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebCustomFilterProgram.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebCString.h"
@@ -26,6 +27,39 @@ CustomFilterRenderer::CustomFilterRenderer(WebKit::WebGraphicsContext3D* context
 
 CustomFilterRenderer::~CustomFilterRenderer()
 {
+}
+
+static int inx(int row, int column)
+{
+    return 4 * (column - 1) + (row - 1);
+}
+
+static void identityMatrix(float matrix[16])
+{
+    for (int i = 0; i < 16; i++)
+        matrix[i] = (i % 5 == 0) ? 1.0 : 0.0;
+}
+
+static void orthogonalProjectionMatrix(float matrix[16], float left, float right, float bottom, float top)
+{
+    // Start with an identity matrix.
+    identityMatrix(matrix);
+
+    float deltaX = right - left;
+    float deltaY = top - bottom;
+    if (!deltaX || !deltaY)
+        return;
+    matrix[inx(1, 1)] = 2.0 / deltaX;
+    matrix[inx(4, 1)] = -(right + left) / deltaX;
+    matrix[inx(2, 2)] = 2.0 / deltaY;
+    matrix[inx(4, 2)] = -(top + bottom) / deltaY;
+
+    // Use big enough near/far values, so that simple rotations of rather large objects will not
+    // get clipped. 10000 should cover most of the screen resolutions.
+    const float farValue = 10000;
+    const float nearValue = -10000;
+    matrix[inx(3, 3)] = -2.0 / (farValue - nearValue);
+    matrix[inx(4, 3)] = -(farValue + nearValue) / (farValue - nearValue);
 }
 
 static WebKit::WebGLId createShader(WebKit::WebGraphicsContext3D* context, WebKit::WGC3Denum type, const WebKit::WGC3Dchar* source)
@@ -178,8 +212,9 @@ void CustomFilterRenderer::render(const WebKit::WebFilterOperation& op, WebKit::
     // Bind projection matrix uniform.
     WebKit::WGC3Dint projectionMatrixLocation = GLC(m_context, m_context->getUniformLocation(program, "u_projectionMatrix"));
     float projectionMatrix[16];
-    for (int i = 0; i < 16; i++)
-        projectionMatrix[i] = (i % 5 == 0) ? 1.0 : 0.0;
+    identityMatrix(projectionMatrix);
+    // TODO(mvujovic): Enable the real projection matrix.
+    //orthogonalProjectionMatrix(projectionMatrix, -0.5, 0.5, -0.5, 0.5);
     GLC(m_context, m_context->uniformMatrix4fv(projectionMatrixLocation, 1, false, projectionMatrix));
 
     // Draw!
