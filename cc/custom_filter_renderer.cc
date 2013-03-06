@@ -191,6 +191,15 @@ void CustomFilterRenderer::render(const WebKit::WebFilterOperation& op, WebKit::
     GLC(m_context, m_context->drawElements(GL_TRIANGLES, mesh.indicesCount(), GL_UNSIGNED_SHORT, 0));
     std::cerr << "Draw elements!" << std::endl;
 
+    // Free resources.
+    m_context->deleteFramebuffer(frameBuffer);
+    m_context->deleteRenderbuffer(depthBuffer);
+    m_context->deleteShader(vertexShader);
+    m_context->deleteShader(fragmentShader);
+    m_context->deleteProgram(program);
+    m_context->deleteBuffer(vertexBuffer);
+    m_context->deleteBuffer(indexBuffer);
+
     // Flush.
     GLC(m_context, m_context->flush());
     std::cerr << "Flush custom filter m_context." << std::endl;
