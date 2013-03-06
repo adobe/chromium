@@ -9721,9 +9721,6 @@ void GLES2DecoderImpl::DoProduceTextureCHROMIUM(GLenum target,
     return;
   }
 
-  GLuint clientId = 0;
-  texture_manager()->GetClientId(info->service_id(), &clientId);
-  
   if (!group_->mailbox_manager()->ProduceTexture(
       target,
       *reinterpret_cast<const MailboxName*>(mailbox),
