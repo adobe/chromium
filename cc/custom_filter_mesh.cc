@@ -11,7 +11,7 @@ namespace cc {
 static bool s_dumpCustomFilterMeshBuffers = false;
 #endif
 
-CustomFilterMesh::CustomFilterMesh(unsigned columns, unsigned rows, const FloatRect& meshBox, CustomFilterMeshType meshType)
+CustomFilterMesh::CustomFilterMesh(unsigned columns, unsigned rows, const gfx::RectF& meshBox, CustomFilterMeshType meshType)
     : m_meshType(meshType)
     , m_points(columns + 1, rows + 1)
     , m_tiles(columns, rows)

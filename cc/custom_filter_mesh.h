@@ -14,6 +14,21 @@
 
 namespace cc {
 
+// This file is largely copied from WebKit's CustomFilterMeshGenerator.h/.cpp.
+//
+// These are the search/replace changes that were made when porting from WebKit to CC:
+//
+// CustomFilterMeshGenerator -> CustomFilterMesh
+// IntSize -> gfx::Size
+// FloatSize -> gfx::SizeF
+// FloatRect -> gfx::RectF
+// Vector -> std::vector
+// reserveCapacity -> reserve
+// append -> push_back
+//
+
+// Constants from WebKit's CustomFilterConstants.h:
+
 enum CustomFilterMeshConstants {
     // Vertex attribute sizes
     PositionAttribSize = 4,
@@ -32,34 +47,22 @@ enum CustomFilterMeshType {
     MeshTypeDetached
 };
 
-typedef gfx::Size IntSize;
-typedef gfx::SizeF FloatSize;
-typedef gfx::RectF FloatRect;
-
-// Changes from WebKit's CustomFilterMeshGenerator:
-//
-// CustomFilterMeshGenerator -> CustomFilterMesh
-// Vector -> std::vector
-// reserveCapacity -> reserve
-// append -> push_back
-//
-
 class CC_EXPORT CustomFilterMesh {
 public:
     // Lines and columns are the values passed in CSS. The result is vertex mesh that has 'rows' numbers of rows
     // and 'columns' number of columns with a total of 'rows + 1' * 'columns + 1' vertices.
     // MeshBox is the filtered area calculated defined using the border-box, padding-box, content-box or filter-box
     // attributes. A value of (0, 0, 1, 1) will cover the entire output surface.
-    CustomFilterMesh(unsigned columns, unsigned rows, const FloatRect& meshBox, CustomFilterMeshType);
+    CustomFilterMesh(unsigned columns, unsigned rows, const gfx::RectF& meshBox, CustomFilterMeshType);
     ~CustomFilterMesh();
 
     const std::vector<float>& vertices() const { return m_vertices; }
     const std::vector<uint16_t>& indices() const { return m_indices; }
 
-    const IntSize& points() const { return m_points; }
+    const gfx::Size& points() const { return m_points; }
     unsigned pointsCount() const { return m_points.width() * m_points.height(); }
 
-    const IntSize& tiles() const { return m_tiles; }
+    const gfx::Size& tiles() const { return m_tiles; }
     unsigned tilesCount() const { return m_tiles.width() * m_tiles.height(); }
 
     unsigned indicesCount() const
@@ -118,13 +121,13 @@ private:
     std::vector<uint16_t> m_indices;
 
     CustomFilterMeshType m_meshType;
-    IntSize m_points;
-    IntSize m_tiles;
-    FloatSize m_tileSizeInPixels;
-    FloatSize m_tileSizeInDeviceSpace;
-    FloatRect m_meshBox;
+    gfx::Size m_points;
+    gfx::Size m_tiles;
+    gfx::SizeF m_tileSizeInPixels;
+    gfx::SizeF m_tileSizeInDeviceSpace;
+    gfx::RectF m_meshBox;
 };
 
-} // namespace WebCore
+} // namespace cc
 
 #endif // CC_CUSTOM_FILTER_MESH_H
