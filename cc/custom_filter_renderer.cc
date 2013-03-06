@@ -162,40 +162,50 @@ void CustomFilterRenderer::render(const WebKit::WebFilterOperation& op, WebKit::
     WebKit::WebGLId vertexBuffer = GLC(m_context, m_context->createBuffer());
     // std::cerr << "Created vertex buffer." << std::endl;
     GLC(m_context, m_context->bindBuffer(GL_ARRAY_BUFFER, vertexBuffer));
-    const int numVertices = 6;
-    const int numComponentsPerVertexPosition = 4;
-    const int numComponentsPerVertexTexCoord = 2;
-    const int numComponentsPerVertex = numComponentsPerVertexPosition + numComponentsPerVertexTexCoord;
-    const int numComponents = numVertices * numComponentsPerVertex;
-    const int numBytesPerComponent = sizeof(float);
-    const int numBytesPerVertex = numComponentsPerVertex * numBytesPerComponent;
-    const int numBytes = numComponents * numBytesPerComponent;
-    const float f0 = -1.0;
-    const float f1 = 1.0;
-    const float t0 = 0.0;
-    const float t1 = 1.0;
-    const float vertices[numComponents] = {
-        f0, f0, f0, f1, t0, t0,
-        f1, f0, f0, f1, t1, t0,
-        f1, f1, f0, f1, t1, t1,
-        f0, f0, f0, f1, t0, t0,
-        f1, f1, f0, f1, t1, t1,
-        f0, f1, f0, f1, t0, t1
-    };
-    GLC(m_context, m_context->bufferData(GL_ARRAY_BUFFER, numBytes, vertices, GL_STATIC_DRAW));
+    // const int numVertices = 6;
+    // const int numComponentsPerVertexPosition = 4;
+    // const int numComponentsPerVertexTexCoord = 2;
+    // const int numComponentsPerVertex = numComponentsPerVertexPosition + numComponentsPerVertexTexCoord;
+    // const int numComponents = numVertices * numComponentsPerVertex;
+    // const int numBytesPerComponent = sizeof(float);
+    // const int numBytesPerVertex = numComponentsPerVertex * numBytesPerComponent;
+    // const int numBytes = numComponents * numBytesPerComponent;
+    // const float f0 = -1.0;
+    // const float f1 = 1.0;
+    // const float t0 = 0.0;
+    // const float t1 = 1.0;
+    // const float vertices[numComponents] = {
+    //     f0, f0, f0, f1, t0, t0,
+    //     f1, f0, f0, f1, t1, t0,
+    //     f1, f1, f0, f1, t1, t1,
+    //     f0, f0, f0, f1, t0, t0,
+    //     f1, f1, f0, f1, t1, t1,
+    //     f0, f1, f0, f1, t0, t1
+    // };
+    // GLC(m_context, m_context->bufferData(GL_ARRAY_BUFFER, numBytes, vertices, GL_STATIC_DRAW));
     // std::cerr << "Uploaded vertex data." << std::endl;
+    gfx::RectF meshBox(0.0, 0.0, 1.0, 1.0);
+    CustomFilterMesh mesh(1, 1, meshBox, MeshTypeAttached);
+    m_context->bufferData(GL_ARRAY_BUFFER, mesh.vertices().size() * sizeof(float), mesh.vertices().data(), GL_STATIC_DRAW);
+
+    // Set up index buffer.
+    WebKit::WebGLId indexBuffer = GLC(m_context, m_context->createBuffer());
+    m_context->bindBuffer(GL_ELEMENT_ARRAY_BUFFER, indexBuffer);
+    m_context->bufferData(GL_ELEMENT_ARRAY_BUFFER, mesh.indices().size() * sizeof(uint16_t), mesh.indices().data(), GL_STATIC_DRAW);
 
     // Bind attribute pointing to vertex positions.
     WebKit::WGC3Dint positionAttributeLocation = GLC(m_context, m_context->getAttribLocation(program, "a_position"));
     // std::cerr << "Found position attribute at location " << positionAttributeLocation << "." << std::endl;
-    GLC(m_context, m_context->vertexAttribPointer(positionAttributeLocation, numComponentsPerVertexPosition, GL_FLOAT, false, numBytesPerVertex, 0));
+    // HARDCODED_MESH: GLC(m_context, m_context->vertexAttribPointer(positionAttributeLocation, numComponentsPerVertexPosition, GL_FLOAT, false, numBytesPerVertex, 0));
+    GLC(m_context, m_context->vertexAttribPointer(positionAttributeLocation, PositionAttribSize, GL_FLOAT, false, mesh.floatsPerVertex() * sizeof(float), PositionAttribOffset));
     GLC(m_context, m_context->enableVertexAttribArray(positionAttributeLocation));
     // std::cerr << "Bound position attribute." << std::endl;
 
     // Bind attribute pointing to texture coordinates.
     WebKit::WGC3Dint texCoordLocation = GLC(m_context, m_context->getAttribLocation(program, "a_texCoord"));
     // std::cerr << "Found tex coord attribute at location " << texCoordLocation << "." << std::endl;
-    GLC(m_context, m_context->vertexAttribPointer(texCoordLocation, numComponentsPerVertexTexCoord, GL_FLOAT, false, numBytesPerVertex, numComponentsPerVertexPosition * numBytesPerComponent));
+    // HARDCODED_MESH: GLC(m_context, m_context->vertexAttribPointer(texCoordLocation, numComponentsPerVertexTexCoord, GL_FLOAT, false, numBytesPerVertex, numComponentsPerVertexPosition * numBytesPerComponent));
+    GLC(m_context, m_context->vertexAttribPointer(texCoordLocation, TexAttribSize, GL_FLOAT, false, mesh.floatsPerVertex() * sizeof(float), TexAttribOffset));
     GLC(m_context, m_context->enableVertexAttribArray(texCoordLocation));
     // std::cerr << "Bound tex coord attribute." << std::endl;
 
@@ -214,12 +224,14 @@ void CustomFilterRenderer::render(const WebKit::WebFilterOperation& op, WebKit::
     float projectionMatrix[16];
     identityMatrix(projectionMatrix);
     // TODO(mvujovic): Enable the real projection matrix.
-    //orthogonalProjectionMatrix(projectionMatrix, -0.5, 0.5, -0.5, 0.5);
+    orthogonalProjectionMatrix(projectionMatrix, -0.5, 0.5, -0.5, 0.5);
     GLC(m_context, m_context->uniformMatrix4fv(projectionMatrixLocation, 1, false, projectionMatrix));
 
     // Draw!
-    GLC(m_context, m_context->drawArrays(GL_TRIANGLES, 0, numVertices));
-    std::cerr << "Draw arrays!" << std::endl;
+    // GLC(m_context, m_context->drawArrays(GL_TRIANGLES, 0, numVertices));
+    // std::cerr << "Draw arrays!" << std::endl;
+    GLC(m_context, m_context->drawElements(GL_TRIANGLES, mesh.indicesCount(), GL_UNSIGNED_SHORT, 0));
+    std::cerr << "Draw elements!" << std::endl;
 
     // Flush.
     GLC(m_context, m_context->flush());
