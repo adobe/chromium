@@ -162,6 +162,8 @@ void CustomFilterRenderer::render(const WebKit::WebFilterOperation& op, WebKit::
     if ((CustomFilterMeshType)op.meshType() == MeshTypeDetached)
         unbindVertexAttribute(compiledProgram->triangleAttribLocation());
 
+    // TODO(mvujovic): Unbind built-in and custom uniforms.
+
     // Free resources.
     m_context->deleteFramebuffer(frameBuffer);
     m_context->deleteRenderbuffer(depthBuffer);
