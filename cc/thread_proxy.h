@@ -124,7 +124,7 @@ private:
         bool commitPending;
     };
     void forceBeginFrameOnImplThread(CompletionEvent*);
-    void beginFrameCompleteOnImplThread(CompletionEvent*, ResourceUpdateQueue*, scoped_refptr<cc::ContextProvider> offscreenContextProvider);
+    void beginFrameCompleteOnImplThread(CompletionEvent*, ResourceUpdateQueue*, scoped_refptr<cc::ContextProvider> offscreenContextProvider, scoped_refptr<cc::ContextProvider> customFilterContextProvider);
     void beginFrameAbortedOnImplThread();
     void requestReadbackOnImplThread(ReadbackRequest*);
     void requestStartPageScaleAnimationOnImplThread(gfx::Vector2d targetOffset, bool useAnchor, float scale, base::TimeDelta duration);
@@ -138,7 +138,8 @@ private:
     void manageTilesOnImplThread();
     void setFullRootLayerDamageOnImplThread();
     void acquireLayerTexturesForMainThreadOnImplThread(CompletionEvent*);
-    void recreateOutputSurfaceOnImplThread(CompletionEvent*, scoped_ptr<OutputSurface>, scoped_refptr<cc::ContextProvider> offscreenContextProvider, bool* recreateSucceeded, RendererCapabilities*);
+    void recreateOutputSurfaceOnImplThread(CompletionEvent*, scoped_ptr<OutputSurface>, scoped_refptr<cc::ContextProvider> offscreenContextProvider, scoped_refptr<cc::ContextProvider> customFitlerContextProvider, 
+        bool* recreateSucceeded, RendererCapabilities*);
     void renderingStatsOnImplThread(CompletionEvent*, RenderingStats*);
     ScheduledActionDrawAndSwapResult scheduledActionDrawAndSwapInternal(bool forcedDraw);
     void forceSerializeOnSwapBuffersOnImplThread(CompletionEvent*);
@@ -155,6 +156,7 @@ private:
     bool m_commitRequested; // Set only when setNeedsCommit is called.
     bool m_commitRequestSentToImplThread; // Set by setNeedsCommit and setNeedsAnimate.
     bool m_createdOffscreenContextProvider; // Set by beginFrame.
+    bool m_createdCustomFilterContextProvider; // Set by beginFrame.
     base::CancelableClosure m_outputSurfaceRecreationCallback;
     LayerTreeHost* m_layerTreeHost;
     bool m_rendererInitialized;

@@ -42,6 +42,7 @@ ThreadProxy::ThreadProxy(LayerTreeHost* layerTreeHost, scoped_ptr<Thread> implTh
     , m_commitRequested(false)
     , m_commitRequestSentToImplThread(false)
     , m_createdOffscreenContextProvider(false)
+    , m_createdCustomFilterContextProvider(false)
     , m_layerTreeHost(layerTreeHost)
     , m_rendererInitialized(false)
     , m_started(false)
@@ -233,6 +234,12 @@ bool ThreadProxy::recreateOutputSurface()
         if (!offscreenContextProvider->InitializeOnMainThread())
             return false;
     }
+    scoped_refptr<cc::ContextProvider> customFilterContextProvider;
+    if (m_createdCustomFilterContextProvider) {
+        customFilterContextProvider = m_layerTreeHost->client()->CustomFilterContextProviderForCompositorThread();
+        if (!customFilterContextProvider->InitializeOnMainThread())
+            return false;
+    }
 
     // Make a blocking call to recreateOutputSurfaceOnImplThread. The results of that
     // call are pushed into the recreateSucceeded and capabilities local
@@ -246,6 +253,7 @@ bool ThreadProxy::recreateOutputSurface()
                                              &completion,
                                              base::Passed(&outputSurface),
                                              offscreenContextProvider,
+                                             customFilterContextProvider,
                                              &recreateSucceeded,
                                              &capabilities));
     completion.wait();
@@ -319,6 +327,8 @@ void ThreadProxy::checkOutputSurfaceStatusOnImplThread()
         return;
     if (cc::ContextProvider* offscreenContexts = m_layerTreeHostImpl->resourceProvider()->offscreenContextProvider())
         offscreenContexts->VerifyContexts();
+    if (cc::ContextProvider* customFilterContexts = m_layerTreeHostImpl->resourceProvider()->customFilterContextProvider())
+        customFilterContexts->VerifyContexts();
     m_schedulerOnImplThread->didLoseOutputSurface();
 }
 
@@ -674,12 +684,18 @@ void ThreadProxy::beginFrame(scoped_ptr<BeginFrameAndCommitState> beginFrameStat
     }
 
     scoped_refptr<cc::ContextProvider> offscreenContextProvider;
+    scoped_refptr<cc::ContextProvider> customFilterContextProvider;
     if (m_RendererCapabilitiesMainThreadCopy.usingOffscreenContext3d && m_layerTreeHost->needsOffscreenContext()) {
         offscreenContextProvider = m_layerTreeHost->client()->OffscreenContextProviderForCompositorThread();
         if (offscreenContextProvider->InitializeOnMainThread())
             m_createdOffscreenContextProvider = true;
         else
             offscreenContextProvider = NULL;
+        customFilterContextProvider = m_layerTreeHost->client()->CustomFilterContextProviderForCompositorThread();
+        if (customFilterContextProvider->InitializeOnMainThread())
+            m_createdCustomFilterContextProvider = true;
+        else
+            customFilterContextProvider = NULL;
     }
 
     // Notify the impl thread that the beginFrame has completed. This will
@@ -693,7 +709,7 @@ void ThreadProxy::beginFrame(scoped_ptr<BeginFrameAndCommitState> beginFrameStat
 
         base::TimeTicks startTime = base::TimeTicks::HighResNow();
         CompletionEvent completion;
-        Proxy::implThread()->postTask(base::Bind(&ThreadProxy::beginFrameCompleteOnImplThread, m_implThreadWeakPtr, &completion, queue.release(), offscreenContextProvider));
+        Proxy::implThread()->postTask(base::Bind(&ThreadProxy::beginFrameCompleteOnImplThread, m_implThreadWeakPtr, &completion, queue.release(), offscreenContextProvider, customFilterContextProvider));
         completion.wait();
         base::TimeTicks endTime = base::TimeTicks::HighResNow();
 
@@ -705,7 +721,8 @@ void ThreadProxy::beginFrame(scoped_ptr<BeginFrameAndCommitState> beginFrameStat
     m_layerTreeHost->didBeginFrame();
 }
 
-void ThreadProxy::beginFrameCompleteOnImplThread(CompletionEvent* completion, ResourceUpdateQueue* rawQueue, scoped_refptr<cc::ContextProvider> offscreenContextProvider)
+void ThreadProxy::beginFrameCompleteOnImplThread(CompletionEvent* completion, ResourceUpdateQueue* rawQueue, scoped_refptr<cc::ContextProvider> offscreenContextProvider,
+    scoped_refptr<cc::ContextProvider> customFilterContextProvider)
 {
     scoped_ptr<ResourceUpdateQueue> queue(rawQueue);
 
@@ -722,6 +739,7 @@ void ThreadProxy::beginFrameCompleteOnImplThread(CompletionEvent* completion, Re
     }
 
     m_layerTreeHostImpl->resourceProvider()->setOffscreenContextProvider(offscreenContextProvider);
+    m_layerTreeHostImpl->resourceProvider()->setCustomFilterContextProvider(customFilterContextProvider);
 
     if (m_layerTreeHost->contentsTextureManager()->linkedEvictedBackingsExist()) {
         // Clear any uploads we were making to textures linked to evicted
@@ -1072,7 +1090,8 @@ size_t ThreadProxy::maxPartialTextureUpdates() const
     return ResourceUpdateController::maxPartialTextureUpdates();
 }
 
-void ThreadProxy::recreateOutputSurfaceOnImplThread(CompletionEvent* completion, scoped_ptr<OutputSurface> outputSurface, scoped_refptr<cc::ContextProvider> offscreenContextProvider, bool* recreateSucceeded, RendererCapabilities* capabilities)
+void ThreadProxy::recreateOutputSurfaceOnImplThread(CompletionEvent* completion, scoped_ptr<OutputSurface> outputSurface, scoped_refptr<cc::ContextProvider> offscreenContextProvider, 
+    scoped_refptr<cc::ContextProvider> customFilterContextProvider, bool* recreateSucceeded, RendererCapabilities* capabilities)
 {
     TRACE_EVENT0("cc", "ThreadProxy::recreateOutputSurfaceOnImplThread");
     DCHECK(isImplThread());
@@ -1081,9 +1100,13 @@ void ThreadProxy::recreateOutputSurfaceOnImplThread(CompletionEvent* completion,
     if (*recreateSucceeded) {
         *capabilities = m_layerTreeHostImpl->rendererCapabilities();
         m_layerTreeHostImpl->resourceProvider()->setOffscreenContextProvider(offscreenContextProvider);
+        m_layerTreeHostImpl->resourceProvider()->setCustomFilterContextProvider(customFilterContextProvider);
         m_schedulerOnImplThread->didRecreateOutputSurface();
-    } else if (offscreenContextProvider) {
-        offscreenContextProvider->VerifyContexts();
+    } else {
+        if (offscreenContextProvider)
+            offscreenContextProvider->VerifyContexts();
+        if (customFilterContextProvider)
+            customFilterContextProvider->VerifyContexts();
     }
     completion->signal();
 }
