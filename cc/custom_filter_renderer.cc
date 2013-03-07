@@ -64,18 +64,19 @@ static void orthogonalProjectionMatrix(float matrix[16], float left, float right
     matrix[inx(4, 3)] = -(farValue + nearValue) / (farValue - nearValue);
 }
 
-// void CustomFilterRenderer::bindProgramArrayParameters(int uniformLocation, WebKit::WebCustomFilterParameter* arrayParameter)
-// {
-//     assert(arrayParameter->type() == WebCustomFilterParameter::ParameterTypeArray);
+void CustomFilterRenderer::bindProgramArrayParameters(int uniformLocation, const WebKit::WebCustomFilterParameter& arrayParameter)
+{
+    assert(arrayParameter.type == WebKit::WebCustomFilterParameter::ParameterTypeArray);
 
-//     unsigned parameterSize = arrayParameter->size();
-//     Vector<GC3Dfloat> floatVector;
+    unsigned parameterSize = arrayParameter.values.size();
+    std::vector<WebKit::WGC3Dfloat> floatVector;
+    floatVector.reserve(parameterSize);
 
-//     for (unsigned i = 0; i < parameterSize; ++i)
-//         floatVector.append(arrayParameter->valueAt(i));
+    for (unsigned i = 0; i < parameterSize; ++i)
+        floatVector.push_back(arrayParameter.values[i]);
 
-//     GLC(m_context, m_context->uniform1fv(uniformLocation, parameterSize, floatVector.data()));
-// }
+    GLC(m_context, m_context->uniform1fv(uniformLocation, parameterSize, floatVector.data()));
+}
 
 void CustomFilterRenderer::bindProgramNumberParameters(int uniformLocation, const WebKit::WebCustomFilterParameter& numberParameter)
 {
@@ -130,7 +131,7 @@ void CustomFilterRenderer::bindProgramParameters(const WebKit::WebVector<WebKit:
             continue;
         switch (parameter.type) {
         case WebKit::WebCustomFilterParameter::ParameterTypeArray:
-            // bindProgramArrayParameters(uniformLocation, parameter);
+            bindProgramArrayParameters(uniformLocation, parameter);
             break;
         case WebKit::WebCustomFilterParameter::ParameterTypeNumber:
             bindProgramNumberParameters(uniformLocation, parameter);

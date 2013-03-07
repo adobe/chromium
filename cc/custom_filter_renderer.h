@@ -28,6 +28,7 @@ protected:
 private:
     DISALLOW_COPY_AND_ASSIGN(CustomFilterRenderer);
 
+    void bindProgramArrayParameters(int uniformLocation, const WebKit::WebCustomFilterParameter& arrayParameter);
     void bindProgramNumberParameters(int uniformLocation, const WebKit::WebCustomFilterParameter& numberParameter);
     void bindProgramParameters(const WebKit::WebVector<WebKit::WebCustomFilterParameter>& parameters, CustomFilterCompiledProgram* compiledProgram);
 
