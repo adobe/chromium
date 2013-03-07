@@ -94,6 +94,10 @@ class RenderWidgetCompositor : public WebKit::WebLayerTreeView,
       OffscreenContextProviderForMainThread() OVERRIDE;
   virtual scoped_refptr<cc::ContextProvider>
       OffscreenContextProviderForCompositorThread() OVERRIDE;
+  virtual scoped_refptr<cc::ContextProvider> 
+      CustomFilterContextProviderForMainThread() OVERRIDE;
+  virtual scoped_refptr<cc::ContextProvider> 
+      CustomFilterContextProviderForCompositorThread() OVERRIDE;
 
 private:
   explicit RenderWidgetCompositor(RenderWidget* widget);

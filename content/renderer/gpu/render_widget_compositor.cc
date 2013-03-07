@@ -499,4 +499,15 @@ RenderWidgetCompositor::OffscreenContextProviderForCompositorThread() {
       OffscreenContextProviderForCompositorThread();
 }
 
+scoped_refptr<cc::ContextProvider>
+RenderWidgetCompositor::CustomFilterContextProviderForMainThread() {
+  return RenderThreadImpl::current()->CustomFilterContextProviderForMainThread();
+}
+
+scoped_refptr<cc::ContextProvider>
+RenderWidgetCompositor::CustomFilterContextProviderForCompositorThread() {
+  return RenderThreadImpl::current()->
+      CustomFilterContextProviderForCompositorThread();
+}
+
 }  // namespace content

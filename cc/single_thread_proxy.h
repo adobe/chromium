@@ -74,13 +74,14 @@ private:
 
     bool commitAndComposite();
     void doCommit(scoped_ptr<ResourceUpdateQueue>);
-    bool doComposite(scoped_refptr<cc::ContextProvider> offscreenContextProvider);
+    bool doComposite(scoped_refptr<cc::ContextProvider> offscreenContextProvider, scoped_refptr<cc::ContextProvider> customFilterContextProvider);
     void didSwapFrame();
 
     // Accessed on main thread only.
     LayerTreeHost* m_layerTreeHost;
     bool m_outputSurfaceLost;
     bool m_createdOffscreenContextProvider;
+    bool m_createdCustomFilterContextProvider;
 
     // Holds on to the context between initializeContext() and initializeRenderer() calls. Shouldn't
     // be used for anything else.

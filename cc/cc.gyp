@@ -121,6 +121,7 @@
       'layer_tree_debug_state.h',
       'layer_tree_host.cc',
       'layer_tree_host.h',
+      'layer_tree_host_client.cc',
       'layer_tree_host_client.h',
       'layer_tree_host_common.cc',
       'layer_tree_host_common.h',

@@ -277,6 +277,9 @@ class CONTENT_EXPORT RenderThreadImpl : public RenderThread,
   scoped_refptr<cc::ContextProvider>
       OffscreenContextProviderForCompositorThread();
 
+  scoped_refptr<cc::ContextProvider> CustomFilterContextProviderForMainThread();
+  scoped_refptr<cc::ContextProvider> CustomFilterContextProviderForCompositorThread();
+
   // AudioRendererMixerManager instance which manages renderer side mixer
   // instances shared based on configured audio parameters.  Lazily created on
   // first call.
@@ -429,6 +432,11 @@ class CONTENT_EXPORT RenderThreadImpl : public RenderThread,
       shared_contexts_main_thread_;
   scoped_refptr<RendererContextProviderCommandBuffer>
       shared_contexts_compositor_thread_;
+
+  scoped_refptr<RendererContextProviderCommandBuffer>
+      shared_custom_filter_contexts_main_thread_;
+  scoped_refptr<RendererContextProviderCommandBuffer>
+      shared_custom_filter_contexts_compositor_thread_;
 
   ObserverList<RenderProcessObserver> observers_;
 

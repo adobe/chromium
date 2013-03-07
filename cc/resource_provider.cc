@@ -1154,4 +1154,10 @@ void ResourceProvider::setOffscreenContextProvider(scoped_refptr<cc::ContextProv
   m_offscreenContextProvider = offscreenContextProvider;
 }
 
+void ResourceProvider::setCustomFilterContextProvider(scoped_refptr<cc::ContextProvider> customFilterContextProvider) {
+  if (customFilterContextProvider)
+      customFilterContextProvider->BindToCurrentThread();
+  m_customFilterContextProvider = customFilterContextProvider;
+}
+
 }  // namespace cc

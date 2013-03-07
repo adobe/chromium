@@ -396,7 +396,10 @@ static inline SkBitmap applyFilters(GLRenderer* renderer, const WebKit::WebFilte
     // Make sure skia uses the correct GL context.
     offscreenContexts->Context3d()->makeContextCurrent();
 
-    SkBitmap source = RenderSurfaceFilters::apply(filters, lock.textureId(), sourceTextureResource->size(), offscreenContexts->Context3d(), offscreenContexts->GrContext(), 0);
+    cc::ContextProvider* customFilterContextProvider = renderer->resourceProvider()->customFilterContextProvider();
+    WebKit::WebGraphicsContext3D* customFilterContext = customFilterContextProvider ? customFilterContextProvider->Context3d() : 0;
+
+    SkBitmap source = RenderSurfaceFilters::apply(filters, lock.textureId(), sourceTextureResource->size(), offscreenContexts->Context3d(), offscreenContexts->GrContext(), customFilterContext);
 
     // Use the compositor's GL context again.
     renderer->resourceProvider()->graphicsContext3D()->makeContextCurrent();

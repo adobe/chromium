@@ -27,6 +27,7 @@ SingleThreadProxy::SingleThreadProxy(LayerTreeHost* layerTreeHost)
     , m_layerTreeHost(layerTreeHost)
     , m_outputSurfaceLost(false)
     , m_createdOffscreenContextProvider(false)
+    , m_createdCustomFilterContextProvider(false)
     , m_rendererInitialized(false)
     , m_nextFrameIsNewlyCommittedFrame(false)
     , m_insideDraw(false)
@@ -147,6 +148,12 @@ bool SingleThreadProxy::recreateOutputSurface()
         if (!offscreenContextProvider->InitializeOnMainThread())
             return false;
     }
+    scoped_refptr<cc::ContextProvider> customFilterContextProvider;
+    if (m_createdCustomFilterContextProvider) {
+        customFilterContextProvider = m_layerTreeHost->client()->CustomFilterContextProviderForMainThread();
+        if (!customFilterContextProvider->InitializeOnMainThread())
+            return false;
+    }
 
     bool initialized;
     {
@@ -157,8 +164,12 @@ bool SingleThreadProxy::recreateOutputSurface()
         if (initialized) {
             m_RendererCapabilitiesForMainThread = m_layerTreeHostImpl->rendererCapabilities();
             m_layerTreeHostImpl->resourceProvider()->setOffscreenContextProvider(offscreenContextProvider);
-        } else if (offscreenContextProvider) {
-            offscreenContextProvider->VerifyContexts();
+            m_layerTreeHostImpl->resourceProvider()->setCustomFilterContextProvider(customFilterContextProvider);
+        } else {
+            if (offscreenContextProvider)
+                offscreenContextProvider->VerifyContexts();
+            if (customFilterContextProvider)
+                customFilterContextProvider->VerifyContexts();
         }
     }
 
@@ -392,12 +403,18 @@ bool SingleThreadProxy::commitAndComposite()
         return false;
 
     scoped_refptr<cc::ContextProvider> offscreenContextProvider;
+    scoped_refptr<cc::ContextProvider> customFilterContextProvider;
     if (m_RendererCapabilitiesForMainThread.usingOffscreenContext3d && m_layerTreeHost->needsOffscreenContext()) {
         offscreenContextProvider = m_layerTreeHost->client()->OffscreenContextProviderForMainThread();
         if (offscreenContextProvider->InitializeOnMainThread())
             m_createdOffscreenContextProvider = true;
         else
             offscreenContextProvider = NULL;
+        customFilterContextProvider = m_layerTreeHost->client()->CustomFilterContextProviderForMainThread();
+        if (customFilterContextProvider->InitializeOnMainThread())
+            m_createdCustomFilterContextProvider = true;
+        else
+            customFilterContextProvider = NULL;
     }
 
     m_layerTreeHost->contentsTextureManager()->unlinkAndClearEvictedBackings();
@@ -407,12 +424,12 @@ bool SingleThreadProxy::commitAndComposite()
 
     m_layerTreeHost->willCommit();
     doCommit(queue.Pass());
-    bool result = doComposite(offscreenContextProvider);
+    bool result = doComposite(offscreenContextProvider, customFilterContextProvider);
     m_layerTreeHost->didBeginFrame();
     return result;
 }
 
-bool SingleThreadProxy::doComposite(scoped_refptr<cc::ContextProvider> offscreenContextProvider)
+bool SingleThreadProxy::doComposite(scoped_refptr<cc::ContextProvider> offscreenContextProvider, scoped_refptr<cc::ContextProvider> customFilterContextProvider)
 {
     DCHECK(!m_outputSurfaceLost);
     {
@@ -420,6 +437,7 @@ bool SingleThreadProxy::doComposite(scoped_refptr<cc::ContextProvider> offscreen
         base::AutoReset<bool> markInside(&m_insideDraw, true);
 
         m_layerTreeHostImpl->resourceProvider()->setOffscreenContextProvider(offscreenContextProvider);
+        m_layerTreeHostImpl->resourceProvider()->setCustomFilterContextProvider(customFilterContextProvider);
 
         if (!m_layerTreeHostImpl->visible())
             return false;

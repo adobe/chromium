@@ -269,6 +269,9 @@ public:
     cc::ContextProvider* offscreenContextProvider() { return m_offscreenContextProvider.get(); }
     void setOffscreenContextProvider(scoped_refptr<cc::ContextProvider> offscreenContextProvider);
 
+    cc::ContextProvider* customFilterContextProvider() { return m_customFilterContextProvider.get(); }
+    void setCustomFilterContextProvider(scoped_refptr<cc::ContextProvider> customFilterContextProvider);
+
 private:
     struct Resource {
         Resource();
@@ -341,6 +344,7 @@ private:
     GLenum m_bestTextureFormat;
 
     scoped_refptr<cc::ContextProvider> m_offscreenContextProvider;
+    scoped_refptr<cc::ContextProvider> m_customFilterContextProvider;
 
     base::ThreadChecker m_threadChecker;
 

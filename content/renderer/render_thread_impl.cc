@@ -954,6 +954,20 @@ RenderThreadImpl::OffscreenContextProviderForCompositorThread() {
   return shared_contexts_compositor_thread_;
 }
 
+scoped_refptr<cc::ContextProvider> RenderThreadImpl::CustomFilterContextProviderForMainThread() {
+  if (!shared_custom_filter_contexts_main_thread_ ||
+      shared_custom_filter_contexts_main_thread_->DestroyedOnMainThread())
+    shared_custom_filter_contexts_main_thread_ = new RendererContextProviderCommandBuffer;
+  return shared_custom_filter_contexts_main_thread_;
+}
+
+scoped_refptr<cc::ContextProvider> RenderThreadImpl::CustomFilterContextProviderForCompositorThread() {
+  if (!shared_custom_filter_contexts_compositor_thread_ ||
+      shared_custom_filter_contexts_compositor_thread_->DestroyedOnMainThread())
+    shared_custom_filter_contexts_compositor_thread_ = new RendererContextProviderCommandBuffer;
+  return shared_custom_filter_contexts_compositor_thread_;
+}
+
 AudioRendererMixerManager* RenderThreadImpl::GetAudioRendererMixerManager() {
   if (!audio_renderer_mixer_manager_.get()) {
     audio_renderer_mixer_manager_.reset(new AudioRendererMixerManager(

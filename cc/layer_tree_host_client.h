@@ -40,6 +40,10 @@ public:
     virtual scoped_refptr<cc::ContextProvider> OffscreenContextProviderForMainThread() = 0;
     virtual scoped_refptr<cc::ContextProvider> OffscreenContextProviderForCompositorThread() = 0;
 
+    // If the compositor doesn't support custom filters, it is safe to just return 0 here.
+    virtual scoped_refptr<cc::ContextProvider> CustomFilterContextProviderForMainThread();
+    virtual scoped_refptr<cc::ContextProvider> CustomFilterContextProviderForCompositorThread();
+
     // This hook is for testing.
     virtual void willRetryRecreateOutputSurface() {}
 
