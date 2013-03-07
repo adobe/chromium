@@ -6,6 +6,7 @@
 
 #include <iostream>
 
+#include "cc/custom_filter_compiled_program.h"
 #include "cc/custom_filter_mesh.h"
 #include "cc/gl_renderer.h"
 #include "third_party/khronos/GLES2/gl2.h"
@@ -62,42 +63,6 @@ static void orthogonalProjectionMatrix(float matrix[16], float left, float right
     matrix[inx(4, 3)] = -(farValue + nearValue) / (farValue - nearValue);
 }
 
-static WebKit::WebGLId createShader(WebKit::WebGraphicsContext3D* context, WebKit::WGC3Denum type, const WebKit::WGC3Dchar* source)
-{
-    WebKit::WebGLId shader = GLC(context, context->createShader(type));
-    // std::cerr << "Created shader with id " << shader << "." << std::endl;
-    GLC(context, context->shaderSource(shader, source));
-    GLC(context, context->compileShader(shader));
-    WebKit::WGC3Dint compileStatus = 0;
-    GLC(context, context->getShaderiv(shader, GL_COMPILE_STATUS, &compileStatus));
-    if (!compileStatus) {
-        std::cerr << "Failed to compile shader." << std::endl;
-        GLC(context, context->deleteShader(shader));
-        return 0;
-    } else {
-        // std::cerr << "Compiled shader." << std::endl;
-        return shader;
-    }
-}
-
-static WebKit::WebGLId createProgram(WebKit::WebGraphicsContext3D* context, WebKit::WebGLId vertexShader, WebKit::WebGLId fragmentShader)
-{
-    WebKit::WebGLId program = GLC(context, context->createProgram());
-    GLC(context, context->attachShader(program, vertexShader));
-    GLC(context, context->attachShader(program, fragmentShader));
-    GLC(context, context->linkProgram(program));
-    WebKit::WGC3Dint linkStatus = 0;
-    GLC(context, context->getProgramiv(program, GL_LINK_STATUS, &linkStatus));
-    if (!linkStatus) {
-        std::cerr << "Failed to link program." << std::endl;
-        GLC(context, context->deleteProgram(program));
-        return 0;
-    } else {
-        // std::cerr << "Linked program." << std::endl;
-        return program;
-    }    
-}
-
 void CustomFilterRenderer::render(const WebKit::WebFilterOperation& op, WebKit::WebGLId sourceTextureId, WebKit::WGC3Dsizei width, WebKit::WGC3Dsizei height, WebKit::WebGLId destinationTextureId)
 {
     std::cerr << "Applying custom filter with destination texture id " << destinationTextureId << " and source texture id " << sourceTextureId << "." << std::endl;
@@ -131,22 +96,10 @@ void CustomFilterRenderer::render(const WebKit::WebFilterOperation& op, WebKit::
     GLC(m_context, m_context->clearColor(1.0, 0.0, 0.0, 1.0));
     GLC(m_context, m_context->clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT));
 
-    // Set up vertex shader.
-    const WebKit::WebCString vertexShaderString = op.customFilterProgram()->vertexShader().utf8();
-    WebKit::WebGLId vertexShader = createShader(m_context, GL_VERTEX_SHADER, vertexShaderString.data());
-    if (!vertexShader)
-        return;
-
-    // Set up fragment shader.
-    const WebKit::WebCString fragmentShaderString = op.customFilterProgram()->fragmentShader().utf8();
-    WebKit::WebGLId fragmentShader = createShader(m_context, GL_FRAGMENT_SHADER, fragmentShaderString.data());
-    if (!fragmentShader)
-        return;
-
-    // Set up program.
-    WebKit::WebGLId program = createProgram(m_context, vertexShader, fragmentShader);
-    if (!program)
-        return;
+    scoped_ptr<CustomFilterCompiledProgram> compiledProgram = CustomFilterCompiledProgram::create(
+        m_context, op.customFilterProgram()->vertexShader(), op.customFilterProgram()->fragmentShader(), 
+        PROGRAM_TYPE_BLENDS_ELEMENT_TEXTURE); // TODO(mvujovic): Use the program type from WebCustomFilterProgram, when it's available there.
+    WebKit::WebGLId program = compiledProgram->program();
     GLC(m_context, m_context->useProgram(program));
 
     // Generate a mesh.
@@ -194,9 +147,6 @@ void CustomFilterRenderer::render(const WebKit::WebFilterOperation& op, WebKit::
     // Free resources.
     m_context->deleteFramebuffer(frameBuffer);
     m_context->deleteRenderbuffer(depthBuffer);
-    m_context->deleteShader(vertexShader);
-    m_context->deleteShader(fragmentShader);
-    m_context->deleteProgram(program);
     m_context->deleteBuffer(vertexBuffer);
     m_context->deleteBuffer(indexBuffer);
 

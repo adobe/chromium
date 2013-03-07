@@ -4,6 +4,8 @@
 
 #include "cc/custom_filter_compiled_program.h"
 
+#include <iostream>
+
 #include "cc/gl_renderer.h"
 #include "third_party/khronos/GLES2/gl2.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebCString.h"
@@ -63,6 +65,7 @@ WebKit::WebGLId CustomFilterCompiledProgram::compileShader(WebKit::WGC3Denum sha
     int compiled = 0;
     m_context->getShaderiv(shader, GL_COMPILE_STATUS, &compiled);
     if (!compiled) {
+        std::cerr << "Failed to compile shader." << std::endl; // CC-added code.
         // FIXME: This is an invalid shader. Throw some errors.
         // https://bugs.webkit.org/show_bug.cgi?id=74416
         m_context->deleteShader(shader);
@@ -82,6 +85,7 @@ WebKit::WebGLId CustomFilterCompiledProgram::linkProgram(WebKit::WebGLId vertexS
     int linked = 0;
     m_context->getProgramiv(program, GL_LINK_STATUS, &linked);
     if (!linked) {
+        std::cerr << "Failed to link program." << std::endl; // CC-added code.
         // FIXME: Invalid vertex/fragment shader combination. Throw some errors here.
         // https://bugs.webkit.org/show_bug.cgi?id=74416
         m_context->deleteProgram(program);
