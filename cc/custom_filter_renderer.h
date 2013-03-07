@@ -12,6 +12,8 @@
 
 namespace cc {
 
+class CustomFilterCompiledProgram;
+
 class CC_EXPORT CustomFilterRenderer {
 public:
     static scoped_ptr<CustomFilterRenderer> create(WebKit::WebGraphicsContext3D* context);
@@ -25,6 +27,9 @@ protected:
 
 private:
     DISALLOW_COPY_AND_ASSIGN(CustomFilterRenderer);
+
+    void bindProgramNumberParameters(int uniformLocation, const WebKit::WebCustomFilterParameter& numberParameter);
+    void bindProgramParameters(const WebKit::WebVector<WebKit::WebCustomFilterParameter>& parameters, CustomFilterCompiledProgram* compiledProgram);
 
     void bindVertexAttribute(WebKit::WGC3Duint attributeLocation, WebKit::WGC3Dint size, WebKit::WGC3Duint bytesPerVertex, WebKit::WGC3Duint offset);
     void unbindVertexAttribute(WebKit::WGC3Duint attributeLocation);
