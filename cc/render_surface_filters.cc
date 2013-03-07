@@ -4,10 +4,18 @@
 
 #include "cc/render_surface_filters.h"
 
+// Custom filters.
+#include <iostream>
+
 #include "base/logging.h"
 #include "skia/ext/refptr.h"
+#include "cc/custom_filter_renderer.h"
+#include "cc/transform_operations.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebFilterOperation.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebFilterOperations.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebCustomFilterParameter.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebCustomFilterProgram.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebGraphicsContext3D.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/effects/SkBlurImageFilter.h"
 #include "third_party/skia/include/effects/SkColorMatrixFilter.h"
@@ -259,6 +267,7 @@ public:
         m_source.setConfig(SkBitmap::kARGB_8888_Config, size.width(), size.height());
         skia::RefPtr<SkGrPixelRef> pixelRef = skia::AdoptRef(new SkGrPixelRef(texture.get()));
         m_source.setPixelRef(pixelRef.get());
+        std::cerr << "FilterBufferState Constructor: Source has texture with id " << texture->getTextureHandle() << "." <<  std::endl;
     }
 
     ~FilterBufferState() { }
@@ -288,16 +297,26 @@ public:
         return m_canvas.get();
     }
 
+    // Instead of drawing to a canvas, we can draw to the current texture directly.
+    GrTexture* currentTexture()
+    {
+        return m_scratchTextures[m_currentTexture].get();
+    }
+
     const SkBitmap& source() { return m_source; }
 
     void swap()
     {
-        m_canvas->flush();
-        m_canvas.clear();
-        m_device.clear();
+        if (m_canvas.get()) {
+            m_canvas->flush();
+            std::cerr << "Flush and destroy canvas." << std::endl;
+            m_canvas.clear();
+            m_device.clear();
+        }
 
         skia::RefPtr<SkGrPixelRef> pixelRef = skia::AdoptRef(new SkGrPixelRef(m_scratchTextures[m_currentTexture].get()));
         m_source.setPixelRef(pixelRef.get());
+        std::cerr << "Swap: Set source pixel ref to texture with id " << m_scratchTextures[m_currentTexture]->getTextureHandle() << "." << std::endl;
         m_currentTexture = 1 - m_currentTexture;
     }
 
@@ -308,6 +327,7 @@ private:
         m_device = skia::AdoptRef(new SkGpuDevice(m_grContext, m_scratchTextures[m_currentTexture].get()));
         m_canvas = skia::AdoptRef(new SkCanvas(m_device.get()));
         m_canvas->clear(0x0);
+        std::cerr << "Create canvas backed by texture id " << m_scratchTextures[m_currentTexture]->getTextureHandle() << "." << std::endl;
     }
 
     GrContext* m_grContext;
@@ -356,6 +376,7 @@ WebKit::WebFilterOperations RenderSurfaceFilters::optimize(const WebKit::WebFilt
         case WebKit::WebFilterOperation::FilterTypeBlur:
         case WebKit::WebFilterOperation::FilterTypeDropShadow:
         case WebKit::WebFilterOperation::FilterTypeZoom:
+        case WebKit::WebFilterOperation::FilterTypeCustom:
             newList.append(op);
             break;
         case WebKit::WebFilterOperation::FilterTypeBrightness:
@@ -376,7 +397,8 @@ WebKit::WebFilterOperations RenderSurfaceFilters::optimize(const WebKit::WebFilt
     return newList;
 }
 
-SkBitmap RenderSurfaceFilters::apply(const WebKit::WebFilterOperations& filters, unsigned textureId, gfx::SizeF size, GrContext* grContext)
+SkBitmap RenderSurfaceFilters::apply(const WebKit::WebFilterOperations& filters, unsigned textureId, const gfx::SizeF& size, WebKit::WebGraphicsContext3D* context3D, GrContext* grContext, 
+    WebKit::WebGraphicsContext3D* customFilterContext3D)
 {
     DCHECK(grContext);
 
@@ -387,9 +409,9 @@ SkBitmap RenderSurfaceFilters::apply(const WebKit::WebFilterOperations& filters,
 
     for (unsigned i = 0; i < optimizedFilters.size(); ++i) {
         const WebKit::WebFilterOperation& op = optimizedFilters.at(i);
-        SkCanvas* canvas = state.canvas();
         switch (op.type()) {
         case WebKit::WebFilterOperation::FilterTypeColorMatrix: {
+            SkCanvas* canvas = state.canvas();
             SkPaint paint;
             skia::RefPtr<SkColorMatrixFilter> filter = skia::AdoptRef(new SkColorMatrixFilter(op.matrix()));
             paint.setColorFilter(filter.get());
@@ -397,14 +419,17 @@ SkBitmap RenderSurfaceFilters::apply(const WebKit::WebFilterOperations& filters,
             break;
         }
         case WebKit::WebFilterOperation::FilterTypeBlur: {
+            SkCanvas* canvas = state.canvas();
             float stdDeviation = op.amount();
             skia::RefPtr<SkImageFilter> filter = skia::AdoptRef(new SkBlurImageFilter(stdDeviation, stdDeviation));
             SkPaint paint;
             paint.setImageFilter(filter.get());
             canvas->drawSprite(state.source(), 0, 0, &paint);
+            std::cerr << "Apply blur." << std::endl;
             break;
         }
         case WebKit::WebFilterOperation::FilterTypeDropShadow: {
+            SkCanvas* canvas = state.canvas();
             skia::RefPtr<SkImageFilter> blurFilter = skia::AdoptRef(new SkBlurImageFilter(op.amount(), op.amount()));
             skia::RefPtr<SkColorFilter> colorFilter = skia::AdoptRef(SkColorFilter::CreateModeFilter(op.dropShadowColor(), SkXfermode::kSrcIn_Mode));
             SkPaint paint;
@@ -418,6 +443,7 @@ SkBitmap RenderSurfaceFilters::apply(const WebKit::WebFilterOperations& filters,
             break;
         }
         case WebKit::WebFilterOperation::FilterTypeZoom: {
+            SkCanvas* canvas = state.canvas();
             SkPaint paint;
             skia::RefPtr<SkImageFilter> zoomFilter = skia::AdoptRef(
                 new SkMagnifierImageFilter(
@@ -443,9 +469,20 @@ SkBitmap RenderSurfaceFilters::apply(const WebKit::WebFilterOperations& filters,
         case WebKit::WebFilterOperation::FilterTypeOpacity:
             NOTREACHED();
             break;
+        case WebKit::WebFilterOperation::FilterTypeCustom: {
+            grContext->flush();
+            context3D->flush();
+            WebKit::WebGLId destinationTextureId = state.currentTexture()->getTextureHandle();
+            WebKit::WebGLId sourceTextureId = reinterpret_cast<GrTexture*>(state.source().getTexture())->getTextureHandle();
+            scoped_ptr<CustomFilterRenderer> customFilterRenderer = CustomFilterRenderer::create(customFilterContext3D);
+            customFilterRenderer->render(op, sourceTextureId, size.width(), size.height(), destinationTextureId);
+            break;
+        }
         }
         state.swap();
     }
+    grContext->flush();
+    context3D->flush();
     return state.source();
 }
 

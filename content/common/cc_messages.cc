@@ -41,6 +41,8 @@ void ParamTraits<WebKit::WebFilterOperation>::Write(
       WriteParam(m, p.zoomRect());
       WriteParam(m, p.amount());
       break;
+    case WebKit::WebFilterOperation::FilterTypeCustom:
+      break;
   }
 }
 
@@ -104,6 +106,8 @@ bool ParamTraits<WebKit::WebFilterOperation>::Read(
         success = true;
       }
       break;
+    case WebKit::WebFilterOperation::FilterTypeCustom:
+      break;
   }
   return success;
 }
@@ -145,6 +149,8 @@ void ParamTraits<WebKit::WebFilterOperation>::Log(
       LogParam(p.zoomRect(), l);
       l->append(", ");
       LogParam(p.amount(), l);
+      break;
+    case WebKit::WebFilterOperation::FilterTypeCustom:
       break;
   }
   l->append(")");

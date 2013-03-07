@@ -17,13 +17,14 @@ class SizeF;
 
 namespace WebKit {
 class WebFilterOperations;
+class WebGraphicsContext3D;
 }
 
 namespace cc {
 
 class CC_EXPORT RenderSurfaceFilters {
 public:
-    static SkBitmap apply(const WebKit::WebFilterOperations& filters, unsigned textureId, gfx::SizeF, GrContext*);
+    static SkBitmap apply(const WebKit::WebFilterOperations& filters, unsigned textureId, const gfx::SizeF&, WebKit::WebGraphicsContext3D*, GrContext*, WebKit::WebGraphicsContext3D*);
     static WebKit::WebFilterOperations optimize(const WebKit::WebFilterOperations& filters);
 
 private:
