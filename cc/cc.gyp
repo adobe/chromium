@@ -35,6 +35,8 @@
       'content_layer_updater.h',
       'contents_scaling_layer.cc',
       'contents_scaling_layer.h',
+      'custom_filter_compiled_program.cc',
+      'custom_filter_compiled_program.h',
       'custom_filter_mesh.cc',
       'custom_filter_mesh.h',
       'custom_filter_renderer.cc',
