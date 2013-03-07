@@ -26,6 +26,9 @@ protected:
 private:
     DISALLOW_COPY_AND_ASSIGN(CustomFilterRenderer);
 
+    void bindVertexAttribute(WebKit::WGC3Duint attributeLocation, WebKit::WGC3Dint size, WebKit::WGC3Duint bytesPerVertex, WebKit::WGC3Duint offset);
+    void unbindVertexAttribute(WebKit::WGC3Duint attributeLocation);
+
     WebKit::WebGraphicsContext3D* m_context;
 };
 

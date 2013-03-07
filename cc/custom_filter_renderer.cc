@@ -63,6 +63,20 @@ static void orthogonalProjectionMatrix(float matrix[16], float left, float right
     matrix[inx(4, 3)] = -(farValue + nearValue) / (farValue - nearValue);
 }
 
+void CustomFilterRenderer::bindVertexAttribute(WebKit::WGC3Duint attributeLocation, WebKit::WGC3Dint size, WebKit::WGC3Duint bytesPerVertex, WebKit::WGC3Duint offset)
+{
+    if (attributeLocation != -1) {
+        GLC(m_context, m_context->vertexAttribPointer(attributeLocation, size, GL_FLOAT, false, bytesPerVertex, offset));
+        GLC(m_context, m_context->enableVertexAttribArray(attributeLocation));
+    }
+}
+
+void CustomFilterRenderer::unbindVertexAttribute(WebKit::WGC3Duint attributeLocation)
+{
+    if (attributeLocation != -1)
+        GLC(m_context, m_context->disableVertexAttribArray(attributeLocation));
+}
+
 void CustomFilterRenderer::render(const WebKit::WebFilterOperation& op, WebKit::WebGLId sourceTextureId, WebKit::WGC3Dsizei width, WebKit::WGC3Dsizei height, WebKit::WebGLId destinationTextureId)
 {
     std::cerr << "Applying custom filter with destination texture id " << destinationTextureId << " and source texture id " << sourceTextureId << "." << std::endl;
@@ -116,15 +130,12 @@ void CustomFilterRenderer::render(const WebKit::WebFilterOperation& op, WebKit::
     m_context->bindBuffer(GL_ELEMENT_ARRAY_BUFFER, indexBuffer);
     m_context->bufferData(GL_ELEMENT_ARRAY_BUFFER, mesh.indices().size() * sizeof(uint16_t), mesh.indices().data(), GL_STATIC_DRAW);
 
-    // Bind attribute pointing to vertex positions.
-    WebKit::WGC3Dint positionAttributeLocation = GLC(m_context, m_context->getAttribLocation(program, "a_position"));
-    GLC(m_context, m_context->vertexAttribPointer(positionAttributeLocation, PositionAttribSize, GL_FLOAT, false, mesh.floatsPerVertex() * sizeof(float), PositionAttribOffset));
-    GLC(m_context, m_context->enableVertexAttribArray(positionAttributeLocation));
-
-    // Bind attribute pointing to texture coordinates.
-    WebKit::WGC3Dint texCoordLocation = GLC(m_context, m_context->getAttribLocation(program, "a_texCoord"));
-    GLC(m_context, m_context->vertexAttribPointer(texCoordLocation, TexAttribSize, GL_FLOAT, false, mesh.floatsPerVertex() * sizeof(float), TexAttribOffset));
-    GLC(m_context, m_context->enableVertexAttribArray(texCoordLocation));
+    // Bind all vertex attributes.
+    bindVertexAttribute(compiledProgram->positionAttribLocation(), PositionAttribSize, mesh.bytesPerVertex(), PositionAttribOffset);
+    bindVertexAttribute(compiledProgram->texAttribLocation(), TexAttribSize, mesh.bytesPerVertex(), TexAttribOffset);
+    bindVertexAttribute(compiledProgram->meshAttribLocation(), MeshAttribSize, mesh.bytesPerVertex(), MeshAttribOffset);
+    if ((CustomFilterMeshType)op.meshType() == MeshTypeDetached)
+        bindVertexAttribute(compiledProgram->triangleAttribLocation(), TriangleAttribSize, mesh.bytesPerVertex(), TriangleAttribOffset);
 
     // Bind source texture.
     glActiveTexture(GL_TEXTURE0);
@@ -143,6 +154,13 @@ void CustomFilterRenderer::render(const WebKit::WebFilterOperation& op, WebKit::
     // Draw!
     GLC(m_context, m_context->drawElements(GL_TRIANGLES, mesh.indicesCount(), GL_UNSIGNED_SHORT, 0));
     std::cerr << "Draw elements!" << std::endl;
+
+    // Unbind vertex attributes.
+    unbindVertexAttribute(compiledProgram->positionAttribLocation());
+    unbindVertexAttribute(compiledProgram->texAttribLocation());
+    unbindVertexAttribute(compiledProgram->meshAttribLocation());
+    if ((CustomFilterMeshType)op.meshType() == MeshTypeDetached)
+        unbindVertexAttribute(compiledProgram->triangleAttribLocation());
 
     // Free resources.
     m_context->deleteFramebuffer(frameBuffer);

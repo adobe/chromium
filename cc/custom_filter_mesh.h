@@ -79,6 +79,9 @@ public:
         return m_meshType == MeshTypeAttached ? AttachedMeshVertexSize : DetachedMeshVertexSize;
     }
 
+    // CC-added code.
+    unsigned bytesPerVertex() const { return floatsPerVertex() * sizeof(float); }
+
     unsigned verticesCount() const
     {
         return m_meshType == MeshTypeAttached ? pointsCount() : indicesCount();
