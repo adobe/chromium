@@ -75,7 +75,7 @@ void CustomFilterRenderer::bindProgramArrayParameters(int uniformLocation, const
     for (unsigned i = 0; i < parameterSize; ++i)
         floatVector.push_back(arrayParameter.values[i]);
 
-    GLC(m_context, m_context->uniform1fv(uniformLocation, parameterSize, floatVector.data()));
+    GLC(m_context, m_context->uniform1fv(uniformLocation, parameterSize, &floatVector[0]));
 }
 
 void CustomFilterRenderer::bindProgramNumberParameters(int uniformLocation, const WebKit::WebCustomFilterParameter& numberParameter)
@@ -231,6 +231,7 @@ void CustomFilterRenderer::render(const WebKit::WebFilterOperation& op, WebKit::
     orthogonalProjectionMatrix(projectionMatrix, -0.5, 0.5, -0.5, 0.5);
     GLC(m_context, m_context->uniformMatrix4fv(projectionMatrixLocation, 1, false, projectionMatrix));
 
+    // Bind author defined parameters.
     WebKit::WebVector<WebKit::WebCustomFilterParameter> parameters;
     op.customFilterParameters(parameters);
     bindProgramParameters(parameters, compiledProgram.get());
