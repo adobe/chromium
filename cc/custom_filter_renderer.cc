@@ -10,6 +10,7 @@
 #include "cc/custom_filter_mesh.h"
 #include "cc/gl_renderer.h"
 #include "third_party/khronos/GLES2/gl2.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebCustomFilterParameter.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebCustomFilterProgram.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebCString.h"
 
@@ -63,6 +64,85 @@ static void orthogonalProjectionMatrix(float matrix[16], float left, float right
     matrix[inx(4, 3)] = -(farValue + nearValue) / (farValue - nearValue);
 }
 
+void CustomFilterRenderer::bindProgramArrayParameters(int uniformLocation, const WebKit::WebCustomFilterParameter& arrayParameter)
+{
+    assert(arrayParameter.type == WebKit::WebCustomFilterParameter::ParameterTypeArray);
+
+    unsigned parameterSize = arrayParameter.values.size();
+    std::vector<WebKit::WGC3Dfloat> floatVector;
+    floatVector.reserve(parameterSize);
+
+    for (unsigned i = 0; i < parameterSize; ++i)
+        floatVector.push_back(arrayParameter.values[i]);
+
+    GLC(m_context, m_context->uniform1fv(uniformLocation, parameterSize, &floatVector[0]));
+}
+
+void CustomFilterRenderer::bindProgramNumberParameters(int uniformLocation, const WebKit::WebCustomFilterParameter& numberParameter)
+{
+    assert(numberParameter.type == WebKit::WebCustomFilterParameter::ParameterTypeNumber);
+
+    switch (numberParameter.values.size()) {
+    case 1:
+        GLC(m_context, m_context->uniform1f(uniformLocation, numberParameter.values[0]));
+        break;
+    case 2:
+        GLC(m_context, m_context->uniform2f(uniformLocation, numberParameter.values[0], numberParameter.values[1]));
+        break;
+    case 3:
+        GLC(m_context, m_context->uniform3f(uniformLocation, numberParameter.values[0], numberParameter.values[1], numberParameter.values[2]));
+        break;
+    case 4:
+        GLC(m_context, m_context->uniform4f(uniformLocation, numberParameter.values[0], numberParameter.values[1], numberParameter.values[2], numberParameter.values[3]));
+        break;
+    default:
+        NOTREACHED();
+    }
+}
+
+// void CustomFilterRenderer::bindProgramTransformParameter(int uniformLocation, CustomFilterTransformParameter* transformParameter)
+// {
+//     TransformationMatrix matrix;
+//     if (m_contextSize.width() && m_contextSize.height()) {
+//         // The viewport is a box with the size of 1 unit, so we are scaling up here to make sure that translations happen using real pixel
+//         // units. At the end we scale back down in order to map it back to the original box. Note that transforms come in reverse order, because it is
+//         // supposed to multiply to the left of the coordinates of the vertices.
+//         // Note that the origin (0, 0) of the viewport is in the middle of the context, so there's no need to change the origin of the transform
+//         // in order to rotate around the middle of mesh.
+//         matrix.scale3d(1.0 / m_contextSize.width(), 1.0 / m_contextSize.height(), 1);
+//         transformParameter->applyTransform(matrix, m_contextSize);
+//         matrix.scale3d(m_contextSize.width(), m_contextSize.height(), 1);
+//     }
+//     float glMatrix[16];
+//     matrix.toColumnMajorFloatArray(glMatrix);
+//     m_context->uniformMatrix4fv(uniformLocation, 1, false, &glMatrix[0]);
+// }
+
+void CustomFilterRenderer::bindProgramParameters(const WebKit::WebVector<WebKit::WebCustomFilterParameter>& parameters, CustomFilterCompiledProgram* compiledProgram)
+{
+    // FIXME: Find a way to reset uniforms that are not specified in CSS. This is needed to avoid using values
+    // set by other previous rendered filters.
+    // https://bugs.webkit.org/show_bug.cgi?id=76440
+    size_t parametersSize = parameters.size();
+    for (size_t i = 0; i < parametersSize; ++i) {
+        WebKit::WebCustomFilterParameter parameter = parameters[i];
+        int uniformLocation = compiledProgram->uniformLocationByName(parameter.name);
+        if (uniformLocation == -1)
+            continue;
+        switch (parameter.type) {
+        case WebKit::WebCustomFilterParameter::ParameterTypeArray:
+            bindProgramArrayParameters(uniformLocation, parameter);
+            break;
+        case WebKit::WebCustomFilterParameter::ParameterTypeNumber:
+            bindProgramNumberParameters(uniformLocation, parameter);
+            break;
+        case WebKit::WebCustomFilterParameter::ParameterTypeTransform:
+            // bindProgramTransformParameter(uniformLocation, static_cast<CustomFilterTransformParameter*>(parameter));
+            break;
+        }
+    }
+}
+
 void CustomFilterRenderer::bindVertexAttribute(WebKit::WGC3Duint attributeLocation, WebKit::WGC3Dint size, WebKit::WGC3Duint bytesPerVertex, WebKit::WGC3Duint offset)
 {
     if (attributeLocation != -1) {
@@ -107,7 +187,7 @@ void CustomFilterRenderer::render(const WebKit::WebFilterOperation& op, WebKit::
     GLC(m_context, m_context->viewport(0, 0, width, height));
 
     // Clear render buffers.
-    GLC(m_context, m_context->clearColor(1.0, 0.0, 0.0, 1.0));
+    GLC(m_context, m_context->clearColor(0.0, 0.0, 0.0, 0.0));
     GLC(m_context, m_context->clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT));
 
     scoped_ptr<CustomFilterCompiledProgram> compiledProgram = CustomFilterCompiledProgram::create(
@@ -150,6 +230,11 @@ void CustomFilterRenderer::render(const WebKit::WebFilterOperation& op, WebKit::
     float projectionMatrix[16];
     orthogonalProjectionMatrix(projectionMatrix, -0.5, 0.5, -0.5, 0.5);
     GLC(m_context, m_context->uniformMatrix4fv(projectionMatrixLocation, 1, false, projectionMatrix));
+
+    // Bind author defined parameters.
+    WebKit::WebVector<WebKit::WebCustomFilterParameter> parameters;
+    op.customFilterParameters(parameters);
+    bindProgramParameters(parameters, compiledProgram.get());
 
     // Draw!
     GLC(m_context, m_context->drawElements(GL_TRIANGLES, mesh.indicesCount(), GL_UNSIGNED_SHORT, 0));
