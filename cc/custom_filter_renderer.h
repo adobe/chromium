@@ -28,9 +28,10 @@ protected:
 private:
     DISALLOW_COPY_AND_ASSIGN(CustomFilterRenderer);
 
-    void bindProgramArrayParameters(int uniformLocation, const WebKit::WebCustomFilterParameter& arrayParameter);
-    void bindProgramNumberParameters(int uniformLocation, const WebKit::WebCustomFilterParameter& numberParameter);
-    void bindProgramParameters(const WebKit::WebVector<WebKit::WebCustomFilterParameter>& parameters, CustomFilterCompiledProgram* compiledProgram);
+    void bindProgramParameters(const WebKit::WebVector<WebKit::WebCustomFilterParameter>& parameters, CustomFilterCompiledProgram* compiledProgram, WebKit::WGC3Dsizei viewportWidth, WebKit::WGC3Dsizei viewportHeight);
+    void bindProgramArrayParameters(WebKit::WGC3Dint uniformLocation, const WebKit::WebCustomFilterParameter& arrayParameter);
+    void bindProgramNumberParameters(WebKit::WGC3Dint uniformLocation, const WebKit::WebCustomFilterParameter& numberParameter);
+    void bindProgramTransformParameter(WebKit::WGC3Dint uniformLocation, const WebKit::WebCustomFilterParameter& transformParameter, WebKit::WGC3Dsizei viewportWidth, WebKit::WGC3Dsizei viewportHeight);
 
     void bindVertexAttribute(WebKit::WGC3Duint attributeLocation, WebKit::WGC3Dint size, WebKit::WGC3Duint bytesPerVertex, WebKit::WGC3Duint offset);
     void unbindVertexAttribute(WebKit::WGC3Duint attributeLocation);
