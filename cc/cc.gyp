@@ -44,6 +44,8 @@
       'custom_filter_mesh.h',
       'custom_filter_renderer.cc',
       'custom_filter_renderer.h',
+      'custom_filter_program_impl.cc',
+      'custom_filter_program_impl.h',
       'damage_tracker.cc',
       'damage_tracker.h',
       'debug_border_draw_quad.cc',

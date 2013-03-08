@@ -634,7 +634,7 @@ void Layer::pushPropertiesTo(LayerImpl* layer)
     layer->setDrawCheckerboardForMissingTiles(m_drawCheckerboardForMissingTiles);
     layer->setForceRenderSurface(m_forceRenderSurface);
     layer->setDrawsContent(drawsContent());
-    layer->setFilters(filters());
+    layer->setFiltersFromLayer(filters());
     layer->setFilter(filter());
     layer->setBackgroundFilters(backgroundFilters());
     layer->setMasksToBounds(m_masksToBounds);

@@ -128,6 +128,8 @@ public:
     SkColor backgroundColor() const { return m_backgroundColor; }
 
     void setFilters(const WebKit::WebFilterOperations&);
+    // Helper function used to clone the CustomFilterOperations when moved from Layers to LayerImpls.
+    void setFiltersFromLayer(const WebKit::WebFilterOperations&);
     const WebKit::WebFilterOperations& filters() const { return m_filters; }
 
     void setBackgroundFilters(const WebKit::WebFilterOperations&);

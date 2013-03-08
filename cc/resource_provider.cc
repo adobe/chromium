@@ -1160,4 +1160,9 @@ void ResourceProvider::setCustomFilterContextProvider(scoped_refptr<cc::ContextP
   m_customFilterContextProvider = customFilterContextProvider;
 }
 
+scoped_refptr<CustomFilterProgramImpl> ResourceProvider::lookupCustomFilter(const WebKit::WebCustomFilterProgram* program)
+{
+    return CustomFilterProgramImpl::create(program);
+}
+
 }  // namespace cc

@@ -686,6 +686,28 @@ void LayerImpl::setFilters(const WebKit::WebFilterOperations& filters)
     noteLayerPropertyChangedForSubtree();
 }
 
+void LayerImpl::setFiltersFromLayer(const WebKit::WebFilterOperations& filters)
+{
+    if (m_filters == filters)
+        return;
+
+    DCHECK(!m_filter);
+    if (filters.hasCustomFilters()) {
+        WebKit::WebFilterOperations computedFilters = filters;
+        for (size_t i = 0; i < computedFilters.size(); ++i) {
+            WebKit::WebFilterOperation& op = computedFilters.at(i);
+            if (op.type() == WebKit::WebFilterOperation::FilterTypeCustom) {
+                scoped_refptr<CustomFilterProgramImpl> program = m_layerTreeImpl->resource_provider()->lookupCustomFilter(op.customFilterProgram());
+                op.setCustomFilterProgramClone(program.get());
+            }
+        }
+        m_filters = computedFilters;
+    } else {
+        m_filters = filters;
+    }
+    noteLayerPropertyChangedForSubtree();
+}
+
 void LayerImpl::setBackgroundFilters(const WebKit::WebFilterOperations& backgroundFilters)
 {
     if (m_backgroundFilters == backgroundFilters)

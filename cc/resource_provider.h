@@ -16,6 +16,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/threading/thread_checker.h"
 #include "cc/cc_export.h"
+#include "cc/custom_filter_program_impl.h"
 #include "cc/output_surface.h"
 #include "cc/texture_copier.h"
 #include "cc/texture_mailbox.h"
@@ -27,6 +28,7 @@
 
 namespace WebKit {
 class WebGraphicsContext3D;
+class WebCustomFilterProgram;
 }
 
 namespace gfx {
@@ -271,6 +273,8 @@ public:
 
     cc::ContextProvider* customFilterContextProvider() { return m_customFilterContextProvider.get(); }
     void setCustomFilterContextProvider(scoped_refptr<cc::ContextProvider> customFilterContextProvider);
+
+    scoped_refptr<CustomFilterProgramImpl> lookupCustomFilter(const WebKit::WebCustomFilterProgram*);
 
 private:
     struct Resource {
