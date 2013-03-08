@@ -100,25 +100,47 @@ void CustomFilterRenderer::bindProgramNumberParameters(int uniformLocation, cons
     }
 }
 
-// void CustomFilterRenderer::bindProgramTransformParameter(int uniformLocation, CustomFilterTransformParameter* transformParameter)
-// {
-//     TransformationMatrix matrix;
-//     if (m_contextSize.width() && m_contextSize.height()) {
-//         // The viewport is a box with the size of 1 unit, so we are scaling up here to make sure that translations happen using real pixel
-//         // units. At the end we scale back down in order to map it back to the original box. Note that transforms come in reverse order, because it is
-//         // supposed to multiply to the left of the coordinates of the vertices.
-//         // Note that the origin (0, 0) of the viewport is in the middle of the context, so there's no need to change the origin of the transform
-//         // in order to rotate around the middle of mesh.
-//         matrix.scale3d(1.0 / m_contextSize.width(), 1.0 / m_contextSize.height(), 1);
-//         transformParameter->applyTransform(matrix, m_contextSize);
-//         matrix.scale3d(m_contextSize.width(), m_contextSize.height(), 1);
-//     }
-//     float glMatrix[16];
-//     matrix.toColumnMajorFloatArray(glMatrix);
-//     m_context->uniformMatrix4fv(uniformLocation, 1, false, &glMatrix[0]);
-// }
+static void matrixToColumnMajorFloatArray(const WebKit::WebTransformationMatrix& matrix, WebKit::WGC3Dfloat floatArray[16])
+{
+    // These are conversions from double to float.
+    floatArray[0] = matrix.m11();
+    floatArray[1] = matrix.m12();
+    floatArray[2] = matrix.m13();
+    floatArray[3] = matrix.m14();
+    floatArray[4] = matrix.m21();
+    floatArray[5] = matrix.m22();
+    floatArray[6] = matrix.m23();
+    floatArray[7] = matrix.m24();
+    floatArray[8] = matrix.m31();
+    floatArray[9] = matrix.m32();
+    floatArray[10] = matrix.m33();
+    floatArray[11] = matrix.m34();
+    floatArray[12] = matrix.m41();
+    floatArray[13] = matrix.m42();
+    floatArray[14] = matrix.m43();
+    floatArray[15] = matrix.m44();
+}
 
-void CustomFilterRenderer::bindProgramParameters(const WebKit::WebVector<WebKit::WebCustomFilterParameter>& parameters, CustomFilterCompiledProgram* compiledProgram)
+void CustomFilterRenderer::bindProgramTransformParameter(WebKit::WGC3Dint uniformLocation, const WebKit::WebCustomFilterParameter& transformParameter, WebKit::WGC3Dsizei viewportWidth, WebKit::WGC3Dsizei viewportHeight)
+{
+    WebKit::WebTransformationMatrix matrix;
+    matrix.makeIdentity();
+    if (viewportWidth && viewportHeight) {
+        // The viewport is a box with the size of 1 unit, so we are scaling up here to make sure that translations happen using real pixel
+        // units. At the end we scale back down in order to map it back to the original box. Note that transforms come in reverse order, because it is
+        // supposed to multiply to the left of the coordinates of the vertices.
+        // Note that the origin (0, 0) of the viewport is in the middle of the context, so there's no need to change the origin of the transform
+        // in order to rotate around the middle of mesh.
+        matrix.scale3d(1.0 / viewportWidth, 1.0 / viewportHeight, 1.0);
+        matrix.multiply(transformParameter.matrix);
+        matrix.scale3d(viewportWidth, viewportHeight, 1.0);
+    }
+    WebKit::WGC3Dfloat glMatrix[16];
+    matrixToColumnMajorFloatArray(matrix, glMatrix);
+    m_context->uniformMatrix4fv(uniformLocation, 1, false, &glMatrix[0]);
+}
+
+void CustomFilterRenderer::bindProgramParameters(const WebKit::WebVector<WebKit::WebCustomFilterParameter>& parameters, CustomFilterCompiledProgram* compiledProgram, WebKit::WGC3Dsizei viewportWidth, WebKit::WGC3Dsizei viewportHeight)
 {
     // FIXME: Find a way to reset uniforms that are not specified in CSS. This is needed to avoid using values
     // set by other previous rendered filters.
@@ -126,7 +148,7 @@ void CustomFilterRenderer::bindProgramParameters(const WebKit::WebVector<WebKit:
     size_t parametersSize = parameters.size();
     for (size_t i = 0; i < parametersSize; ++i) {
         WebKit::WebCustomFilterParameter parameter = parameters[i];
-        int uniformLocation = compiledProgram->uniformLocationByName(parameter.name);
+        WebKit::WGC3Dint uniformLocation = compiledProgram->uniformLocationByName(parameter.name);
         if (uniformLocation == -1)
             continue;
         switch (parameter.type) {
@@ -137,7 +159,7 @@ void CustomFilterRenderer::bindProgramParameters(const WebKit::WebVector<WebKit:
             bindProgramNumberParameters(uniformLocation, parameter);
             break;
         case WebKit::WebCustomFilterParameter::ParameterTypeTransform:
-            // bindProgramTransformParameter(uniformLocation, static_cast<CustomFilterTransformParameter*>(parameter));
+            bindProgramTransformParameter(uniformLocation, parameter, viewportWidth, viewportHeight);
             break;
         }
     }
@@ -234,7 +256,7 @@ void CustomFilterRenderer::render(const WebKit::WebFilterOperation& op, WebKit::
     // Bind author defined parameters.
     WebKit::WebVector<WebKit::WebCustomFilterParameter> parameters;
     op.customFilterParameters(parameters);
-    bindProgramParameters(parameters, compiledProgram.get());
+    bindProgramParameters(parameters, compiledProgram.get(), width, height);
 
     // Draw!
     GLC(m_context, m_context->drawElements(GL_TRIANGLES, mesh.indicesCount(), GL_UNSIGNED_SHORT, 0));
