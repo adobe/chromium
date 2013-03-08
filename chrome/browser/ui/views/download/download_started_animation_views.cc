@@ -10,6 +10,7 @@
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_view.h"
 #include "grit/theme_resources.h"
 #include "ui/base/animation/linear_animation.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -51,12 +52,12 @@ class DownloadStartedAnimationWin : public ui::LinearAnimation,
   void Close();
 
   // Animation
-  virtual void AnimateToState(double state);
+  virtual void AnimateToState(double state) OVERRIDE;
 
   // content::NotificationObserver
   virtual void Observe(int type,
                        const content::NotificationSource& source,
-                       const content::NotificationDetails& details);
+                       const content::NotificationDetails& details) OVERRIDE;
 
   // We use a HWND for the popup so that it may float above any HWNDs in our UI.
   views::Widget* popup_;
@@ -90,7 +91,7 @@ DownloadStartedAnimationWin::DownloadStartedAnimationWin(
 
   // If we're too small to show the download image, then don't bother -
   // the shelf will be enough.
-  web_contents_->GetContainerBounds(&web_contents_bounds_);
+  web_contents_->GetView()->GetContainerBounds(&web_contents_bounds_);
   if (web_contents_bounds_.height() < kDownloadImage->height())
     return;
 
@@ -110,7 +111,7 @@ DownloadStartedAnimationWin::DownloadStartedAnimationWin(
   views::Widget::InitParams params(views::Widget::InitParams::TYPE_POPUP);
   params.transparent = true;
   params.accept_events = false;
-  params.parent = web_contents_->GetNativeView();
+  params.parent = web_contents_->GetView()->GetNativeView();
   popup_->Init(params);
   popup_->SetOpacity(0x00);
   popup_->SetContentsView(this);

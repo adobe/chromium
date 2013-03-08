@@ -15,6 +15,7 @@
 #include "content/browser/renderer_host/tap_suppression_controller.h"
 #include "content/browser/renderer_host/test_render_view_host.h"
 #include "content/browser/renderer_host/touch_event_queue.h"
+#include "content/browser/renderer_host/touchpad_tap_suppression_controller.h"
 #include "content/common/view_messages.h"
 #include "content/port/browser/render_widget_host_view_port.h"
 #include "content/public/browser/notification_details.h"
@@ -127,7 +128,7 @@ class MockRenderWidgetHost : public RenderWidgetHostImpl {
   enum TapSuppressionState {
     TSC_NOTHING = TapSuppressionController::NOTHING,
     TSC_GFC_IN_PROGRESS = TapSuppressionController::GFC_IN_PROGRESS,
-    TSC_MD_STASHED = TapSuppressionController::MD_STASHED,
+    TSC_TAP_DOWN_STASHED = TapSuppressionController::TAP_DOWN_STASHED,
     TSC_LAST_CANCEL_STOPPED_FLING =
       TapSuppressionController::LAST_CANCEL_STOPPED_FLING,
   };
@@ -140,12 +141,17 @@ class MockRenderWidgetHost : public RenderWidgetHostImpl {
     hung_renderer_delay_ms_ = delay_ms;
   }
 
-  WebGestureEvent GestureEventLastQueueEvent() {
-    return gesture_event_filter_->coalesced_gesture_events_.back();
-  }
-
   unsigned GestureEventLastQueueEventSize() {
     return gesture_event_filter_->coalesced_gesture_events_.size();
+  }
+
+  WebGestureEvent GestureEventSecondFromLastQueueEvent() {
+    return gesture_event_filter_->coalesced_gesture_events_.at(
+      GestureEventLastQueueEventSize() - 2);
+  }
+
+  WebGestureEvent GestureEventLastQueueEvent() {
+    return gesture_event_filter_->coalesced_gesture_events_.back();
   }
 
   unsigned GestureEventDebouncingQueueSize() {
@@ -168,13 +174,18 @@ class MockRenderWidgetHost : public RenderWidgetHostImpl {
     return gesture_event_filter_->fling_in_progress_;
   }
 
+  bool WillIgnoreNextACK() {
+    return gesture_event_filter_->ignore_next_ack_;
+  }
+
   TapSuppressionState TapSuppressionControllerState() {
-    return static_cast<TapSuppressionState>(
-        gesture_event_filter_->tap_suppression_controller_->state_);
+    TouchpadTapSuppressionController* tsc =
+        gesture_event_filter_->tap_suppression_controller_.get();
+    return static_cast<TapSuppressionState>(tsc->controller_->state_);
   }
 
   void SetupForOverscrollControllerTest() {
-    InitializeOverscrollController();
+    SetOverscrollControllerEnabled(true);
     overscroll_delegate_.reset(new TestOverscrollDelegate);
     overscroll_controller_->set_delegate(overscroll_delegate_.get());
   }
@@ -272,7 +283,7 @@ class RenderWidgetHostProcess : public MockRenderProcessHost {
         update_msg_should_reply_(false),
         update_msg_reply_flags_(0) {
   }
-  ~RenderWidgetHostProcess() {
+  virtual ~RenderWidgetHostProcess() {
     delete current_update_buf_;
   }
 
@@ -286,12 +297,12 @@ class RenderWidgetHostProcess : public MockRenderProcessHost {
   // Fills the given update parameters with resonable default values.
   void InitUpdateRectParams(ViewHostMsg_UpdateRect_Params* params);
 
-  virtual bool HasConnection() const { return true; }
+  virtual bool HasConnection() const OVERRIDE { return true; }
 
  protected:
   virtual bool WaitForBackingStoreMsg(int render_widget_id,
                                       const base::TimeDelta& max_delay,
-                                      IPC::Message* msg);
+                                      IPC::Message* msg) OVERRIDE;
 
   TransportDIB* current_update_buf_;
 
@@ -451,9 +462,9 @@ class MockPaintingObserver : public NotificationObserver {
     size_ = size;
   }
 
-  void Observe(int type,
-               const NotificationSource& source,
-               const NotificationDetails& details) {
+  virtual void Observe(int type,
+                       const NotificationSource& source,
+                       const NotificationDetails& details) OVERRIDE {
     if (type == NOTIFICATION_RENDER_WIDGET_HOST_DID_RECEIVE_PAINT_AT_SIZE_ACK) {
       std::pair<int, gfx::Size>* size_ack_details =
           Details<std::pair<int, gfx::Size> >(details).ptr();
@@ -481,17 +492,17 @@ class RenderWidgetHostTest : public testing::Test {
  public:
   RenderWidgetHostTest() : process_(NULL) {
   }
-  ~RenderWidgetHostTest() {
+  virtual ~RenderWidgetHostTest() {
   }
 
  protected:
   // testing::Test
-  void SetUp() {
+  virtual void SetUp() {
     browser_context_.reset(new TestBrowserContext());
     delegate_.reset(new MockRenderWidgetHostDelegate());
     process_ = new RenderWidgetHostProcess(browser_context_.get());
 #if defined(USE_AURA)
-    screen_.reset(new aura::TestScreen);
+    screen_.reset(aura::TestScreen::Create());
     gfx::Screen::SetScreenInstance(gfx::SCREEN_TYPE_NATIVE, screen_.get());
 #endif
     host_.reset(
@@ -500,7 +511,7 @@ class RenderWidgetHostTest : public testing::Test {
     host_->SetView(view_.get());
     host_->Init();
   }
-  void TearDown() {
+  virtual void TearDown() {
     view_.reset();
     host_.reset();
     delegate_.reset();
@@ -516,9 +527,8 @@ class RenderWidgetHostTest : public testing::Test {
     MessageLoop::current()->RunUntilIdle();
   }
 
-  void SendInputEventACK(WebInputEvent::Type type, bool processed) {
-    InputEventAckState ack_result = processed ?
-        INPUT_EVENT_ACK_STATE_CONSUMED : INPUT_EVENT_ACK_STATE_NOT_CONSUMED;
+  void SendInputEventACK(WebInputEvent::Type type,
+                         InputEventAckState ack_result) {
     scoped_ptr<IPC::Message> response(
         new ViewHostMsg_HandleInputEvent_ACK(0, type, ack_result));
     host_->OnMessageReceived(*response);
@@ -537,12 +547,13 @@ class RenderWidgetHostTest : public testing::Test {
     host_->ForwardMouseEvent(mouse_event);
   }
 
-  void SimulateWheelEvent(float dX, float dY, int modifiers) {
+  void SimulateWheelEvent(float dX, float dY, int modifiers, bool precise) {
     WebMouseWheelEvent wheel_event;
     wheel_event.type = WebInputEvent::MouseWheel;
     wheel_event.deltaX = dX;
     wheel_event.deltaY = dY;
     wheel_event.modifiers = modifiers;
+    wheel_event.hasPreciseScrollingDeltas = precise;
     host_->ForwardWheelEvent(wheel_event);
   }
 
@@ -584,6 +595,19 @@ class RenderWidgetHostTest : public testing::Test {
     gesture_event.data.scrollUpdate.deltaY = dY;
     gesture_event.modifiers = modifiers;
     SimulateGestureEventCore(WebInputEvent::GestureScrollUpdate,
+                             WebGestureEvent::Touchscreen, &gesture_event);
+  }
+
+  void SimulateGesturePinchUpdateEvent(float scale,
+                                       float anchorX,
+                                       float anchorY,
+                                       int modifiers) {
+    WebGestureEvent gesture_event;
+    gesture_event.data.pinchUpdate.scale = scale;
+    gesture_event.x = anchorX;
+    gesture_event.y = anchorY;
+    gesture_event.modifiers = modifiers;
+    SimulateGestureEventCore(WebInputEvent::GesturePinchUpdate,
                              WebGestureEvent::Touchscreen, &gesture_event);
   }
 
@@ -1004,7 +1028,8 @@ TEST_F(RenderWidgetHostTest, MAYBE_HandleKeyEventsWeSent) {
   process_->sink().ClearMessages();
 
   // Send the simulated response from the renderer back.
-  SendInputEventACK(WebInputEvent::RawKeyDown, false);
+  SendInputEventACK(WebInputEvent::RawKeyDown,
+                    INPUT_EVENT_ACK_STATE_NOT_CONSUMED);
 
   EXPECT_TRUE(delegate_->unhandled_keyboard_event_called());
   EXPECT_EQ(WebInputEvent::RawKeyDown,
@@ -1013,7 +1038,8 @@ TEST_F(RenderWidgetHostTest, MAYBE_HandleKeyEventsWeSent) {
 
 TEST_F(RenderWidgetHostTest, IgnoreKeyEventsWeDidntSend) {
   // Send a simulated, unrequested key response. We should ignore this.
-  SendInputEventACK(WebInputEvent::RawKeyDown, false);
+  SendInputEventACK(WebInputEvent::RawKeyDown,
+                    INPUT_EVENT_ACK_STATE_NOT_CONSUMED);
 
   EXPECT_FALSE(delegate_->unhandled_keyboard_event_called());
 }
@@ -1028,7 +1054,8 @@ TEST_F(RenderWidgetHostTest, IgnoreKeyEventsHandledByRenderer) {
   process_->sink().ClearMessages();
 
   // Send the simulated response from the renderer back.
-  SendInputEventACK(WebInputEvent::RawKeyDown, true);
+  SendInputEventACK(WebInputEvent::RawKeyDown,
+                    INPUT_EVENT_ACK_STATE_CONSUMED);
   EXPECT_FALSE(delegate_->unhandled_keyboard_event_called());
 }
 
@@ -1067,7 +1094,8 @@ TEST_F(RenderWidgetHostTest, PreHandleRawKeyDownEvent) {
   process_->sink().ClearMessages();
 
   // Send the simulated response from the renderer back.
-  SendInputEventACK(WebInputEvent::KeyUp, false);
+  SendInputEventACK(WebInputEvent::KeyUp,
+                    INPUT_EVENT_ACK_STATE_NOT_CONSUMED);
 
   EXPECT_TRUE(delegate_->unhandled_keyboard_event_called());
   EXPECT_EQ(WebInputEvent::KeyUp, delegate_->unhandled_keyboard_event_type());
@@ -1077,10 +1105,10 @@ TEST_F(RenderWidgetHostTest, CoalescesWheelEvents) {
   process_->sink().ClearMessages();
 
   // Simulate wheel events.
-  SimulateWheelEvent(0, -5, 0);  // sent directly
-  SimulateWheelEvent(0, -10, 0);  // enqueued
-  SimulateWheelEvent(8, -6, 0);  // coalesced into previous event
-  SimulateWheelEvent(9, -7, 1);  // enqueued, different modifiers
+  SimulateWheelEvent(0, -5, 0, false);  // sent directly
+  SimulateWheelEvent(0, -10, 0, false);  // enqueued
+  SimulateWheelEvent(8, -6, 0, false);  // coalesced into previous event
+  SimulateWheelEvent(9, -7, 1, false);  // enqueued, different modifiers
 
   // Check that only the first event was sent.
   EXPECT_EQ(1U, process_->sink().message_count());
@@ -1089,7 +1117,8 @@ TEST_F(RenderWidgetHostTest, CoalescesWheelEvents) {
   process_->sink().ClearMessages();
 
   // Check that the ACK sends the second message.
-  SendInputEventACK(WebInputEvent::MouseWheel, true);
+  SendInputEventACK(WebInputEvent::MouseWheel,
+                    INPUT_EVENT_ACK_STATE_CONSUMED);
   // The coalesced events can queue up a delayed ack
   // so that additional input events can be processed before
   // we turn off coalescing.
@@ -1100,7 +1129,8 @@ TEST_F(RenderWidgetHostTest, CoalescesWheelEvents) {
   process_->sink().ClearMessages();
 
   // One more time.
-  SendInputEventACK(WebInputEvent::MouseWheel, true);
+  SendInputEventACK(WebInputEvent::MouseWheel,
+                    INPUT_EVENT_ACK_STATE_CONSUMED);
   MessageLoop::current()->RunUntilIdle();
   EXPECT_EQ(1U, process_->sink().message_count());
   EXPECT_TRUE(process_->sink().GetUniqueMessageMatching(
@@ -1108,7 +1138,8 @@ TEST_F(RenderWidgetHostTest, CoalescesWheelEvents) {
   process_->sink().ClearMessages();
 
   // After the final ack, the queue should be empty.
-  SendInputEventACK(WebInputEvent::MouseWheel, true);
+  SendInputEventACK(WebInputEvent::MouseWheel,
+                    INPUT_EVENT_ACK_STATE_CONSUMED);
   MessageLoop::current()->RunUntilIdle();
   EXPECT_EQ(0U, process_->sink().message_count());
 
@@ -1123,11 +1154,12 @@ TEST_F(RenderWidgetHostTest, CoalescesWheelEventsQueuedPhaseEndIsNotDropped) {
   SimulateGestureEvent(WebInputEvent::GestureScrollBegin,
                        WebGestureEvent::Touchpad);
   EXPECT_EQ(1U, process_->sink().message_count());
-  SendInputEventACK(WebInputEvent::GestureScrollBegin, true);
+  SendInputEventACK(WebInputEvent::GestureScrollBegin,
+                    INPUT_EVENT_ACK_STATE_CONSUMED);
   MessageLoop::current()->RunUntilIdle();
 
   // Send a wheel event, should get sent directly.
-  SimulateWheelEvent(0, -5, 0);
+  SimulateWheelEvent(0, -5, 0, false);
   EXPECT_EQ(2U, process_->sink().message_count());
 
   // Send a wheel phase end event before an ACK is received for the previous
@@ -1153,11 +1185,11 @@ TEST_F(RenderWidgetHostTest, CoalescesWheelEventsQueuedPhaseEndIsNotDropped) {
   EXPECT_EQ(WebInputEvent::GestureScrollEnd, input_event->type);
 }
 
-TEST_F(RenderWidgetHostTest, CoalescesGesturesEvents) {
+TEST_F(RenderWidgetHostTest, CoalescesScrollGestureEvents) {
   // Turn off debounce handling for test isolation.
   host_->set_debounce_interval_time_ms(0);
   process_->sink().ClearMessages();
-  // Only GestureScrollUpdate events can be coalesced.
+  // Test coalescing of only GestureScrollUpdate events.
   // Simulate gesture events.
 
   // Sent.
@@ -1201,7 +1233,8 @@ TEST_F(RenderWidgetHostTest, CoalescesGesturesEvents) {
   process_->sink().ClearMessages();
 
   // Check that the ACK sends the second message.
-  SendInputEventACK(WebInputEvent::GestureScrollBegin, true);
+  SendInputEventACK(WebInputEvent::GestureScrollBegin,
+                    INPUT_EVENT_ACK_STATE_CONSUMED);
   MessageLoop::current()->RunUntilIdle();
   EXPECT_EQ(1U, process_->sink().message_count());
   EXPECT_TRUE(process_->sink().GetUniqueMessageMatching(
@@ -1209,7 +1242,8 @@ TEST_F(RenderWidgetHostTest, CoalescesGesturesEvents) {
   process_->sink().ClearMessages();
 
   // Ack for queued coalesced event.
-  SendInputEventACK(WebInputEvent::GestureScrollUpdate, true);
+  SendInputEventACK(WebInputEvent::GestureScrollUpdate,
+                    INPUT_EVENT_ACK_STATE_CONSUMED);
   MessageLoop::current()->RunUntilIdle();
   EXPECT_EQ(1U, process_->sink().message_count());
   EXPECT_TRUE(process_->sink().GetUniqueMessageMatching(
@@ -1217,7 +1251,8 @@ TEST_F(RenderWidgetHostTest, CoalescesGesturesEvents) {
   process_->sink().ClearMessages();
 
   // Ack for queued uncoalesced event.
-  SendInputEventACK(WebInputEvent::GestureScrollUpdate, true);
+  SendInputEventACK(WebInputEvent::GestureScrollUpdate,
+                    INPUT_EVENT_ACK_STATE_CONSUMED);
   MessageLoop::current()->RunUntilIdle();
   EXPECT_EQ(1U, process_->sink().message_count());
   EXPECT_TRUE(process_->sink().GetUniqueMessageMatching(
@@ -1225,9 +1260,241 @@ TEST_F(RenderWidgetHostTest, CoalescesGesturesEvents) {
   process_->sink().ClearMessages();
 
   // After the final ack, the queue should be empty.
-  SendInputEventACK(WebInputEvent::GestureScrollEnd, true);
+  SendInputEventACK(WebInputEvent::GestureScrollEnd,
+                    INPUT_EVENT_ACK_STATE_CONSUMED);
   MessageLoop::current()->RunUntilIdle();
   EXPECT_EQ(0U, process_->sink().message_count());
+}
+
+TEST_F(RenderWidgetHostTest, CoalescesScrollAndPinchEvents) {
+  // Turn off debounce handling for test isolation.
+  host_->set_debounce_interval_time_ms(0);
+  process_->sink().ClearMessages();
+  // Test coalescing of only GestureScrollUpdate events.
+  // Simulate gesture events.
+
+  // Sent.
+  SimulateGestureEvent(WebInputEvent::GestureScrollBegin,
+                       WebGestureEvent::Touchscreen);
+
+  // Sent.
+  SimulateGestureEvent(WebInputEvent::GesturePinchBegin,
+                       WebGestureEvent::Touchscreen);
+
+  // Enqueued.
+  SimulateGestureScrollUpdateEvent(8, -4, 1);
+
+  // Make sure that the queue contains what we think it should.
+  WebGestureEvent merged_event = host_->GestureEventLastQueueEvent();
+  EXPECT_EQ(3U, host_->GestureEventLastQueueEventSize());
+  EXPECT_EQ(WebInputEvent::GestureScrollUpdate, merged_event.type);
+
+  // Coalesced without changing event order. Note anchor at (60, 60). Anchoring
+  // from a poinht that is not the origin should still give us the wight scroll.
+  SimulateGesturePinchUpdateEvent(1.5, 60, 60, 1);
+  EXPECT_EQ(4U, host_->GestureEventLastQueueEventSize());
+  merged_event = host_->GestureEventLastQueueEvent();
+  EXPECT_EQ(WebInputEvent::GesturePinchUpdate, merged_event.type);
+  EXPECT_EQ(1.5, merged_event.data.pinchUpdate.scale);
+  EXPECT_EQ(1, merged_event.modifiers);
+  merged_event = host_->GestureEventSecondFromLastQueueEvent();
+  EXPECT_EQ(WebInputEvent::GestureScrollUpdate, merged_event.type);
+  EXPECT_EQ(8, merged_event.data.scrollUpdate.deltaX);
+  EXPECT_EQ(-4, merged_event.data.scrollUpdate.deltaY);
+  EXPECT_EQ(1, merged_event.modifiers);
+
+  // Enqueued.
+  SimulateGestureScrollUpdateEvent(6, -3, 1);
+
+  // Check whether coalesced correctly.
+  EXPECT_EQ(4U, host_->GestureEventLastQueueEventSize());
+  merged_event = host_->GestureEventLastQueueEvent();
+  EXPECT_EQ(WebInputEvent::GesturePinchUpdate, merged_event.type);
+  EXPECT_EQ(1.5, merged_event.data.pinchUpdate.scale);
+  EXPECT_EQ(1, merged_event.modifiers);
+  merged_event = host_->GestureEventSecondFromLastQueueEvent();
+  EXPECT_EQ(WebInputEvent::GestureScrollUpdate, merged_event.type);
+  EXPECT_EQ(12, merged_event.data.scrollUpdate.deltaX);
+  EXPECT_EQ(-6, merged_event.data.scrollUpdate.deltaY);
+  EXPECT_EQ(1, merged_event.modifiers);
+
+  // Enqueued.
+  SimulateGesturePinchUpdateEvent(2, 60, 60, 1);
+
+  // Check whether coalesced correctly.
+  EXPECT_EQ(4U, host_->GestureEventLastQueueEventSize());
+  merged_event = host_->GestureEventLastQueueEvent();
+  EXPECT_EQ(WebInputEvent::GesturePinchUpdate, merged_event.type);
+  EXPECT_EQ(3, merged_event.data.pinchUpdate.scale);
+  EXPECT_EQ(1, merged_event.modifiers);
+  merged_event = host_->GestureEventSecondFromLastQueueEvent();
+  EXPECT_EQ(WebInputEvent::GestureScrollUpdate, merged_event.type);
+  EXPECT_EQ(12, merged_event.data.scrollUpdate.deltaX);
+  EXPECT_EQ(-6, merged_event.data.scrollUpdate.deltaY);
+  EXPECT_EQ(1, merged_event.modifiers);
+
+  // Enqueued.
+  SimulateGesturePinchUpdateEvent(2, 60, 60, 1);
+
+  // Check whether coalesced correctly.
+  EXPECT_EQ(4U, host_->GestureEventLastQueueEventSize());
+  merged_event = host_->GestureEventLastQueueEvent();
+  EXPECT_EQ(WebInputEvent::GesturePinchUpdate, merged_event.type);
+  EXPECT_EQ(6, merged_event.data.pinchUpdate.scale);
+  EXPECT_EQ(1, merged_event.modifiers);
+  merged_event = host_->GestureEventSecondFromLastQueueEvent();
+  EXPECT_EQ(WebInputEvent::GestureScrollUpdate, merged_event.type);
+  EXPECT_EQ(12, merged_event.data.scrollUpdate.deltaX);
+  EXPECT_EQ(-6, merged_event.data.scrollUpdate.deltaY);
+  EXPECT_EQ(1, merged_event.modifiers);
+
+  // Check that only the first event was sent.
+  EXPECT_EQ(1U, process_->sink().message_count());
+  EXPECT_TRUE(process_->sink().GetUniqueMessageMatching(
+              ViewMsg_HandleInputEvent::ID));
+  process_->sink().ClearMessages();
+
+  // Check that the ACK sends the second message.
+  SendInputEventACK(WebInputEvent::GestureScrollBegin,
+                    INPUT_EVENT_ACK_STATE_CONSUMED);
+  MessageLoop::current()->RunUntilIdle();
+  EXPECT_EQ(1U, process_->sink().message_count());
+  EXPECT_TRUE(process_->sink().GetUniqueMessageMatching(
+              ViewMsg_HandleInputEvent::ID));
+  process_->sink().ClearMessages();
+
+  // Enqueued.
+  SimulateGestureScrollUpdateEvent(6, -6, 1);
+
+  // Check whether coalesced correctly.
+  EXPECT_EQ(3U, host_->GestureEventLastQueueEventSize());
+  merged_event = host_->GestureEventLastQueueEvent();
+  EXPECT_EQ(WebInputEvent::GesturePinchUpdate, merged_event.type);
+  EXPECT_EQ(6, merged_event.data.pinchUpdate.scale);
+  EXPECT_EQ(1, merged_event.modifiers);
+  merged_event = host_->GestureEventSecondFromLastQueueEvent();
+  EXPECT_EQ(WebInputEvent::GestureScrollUpdate, merged_event.type);
+  EXPECT_EQ(13, merged_event.data.scrollUpdate.deltaX);
+  EXPECT_EQ(-7, merged_event.data.scrollUpdate.deltaY);
+  EXPECT_EQ(1, merged_event.modifiers);
+
+  // At this point ACKs shouldn't be getting ignored.
+  EXPECT_FALSE(host_->WillIgnoreNextACK());
+
+  // Check that the ACK sends both scroll and pinch updates.
+  SendInputEventACK(WebInputEvent::GesturePinchBegin,
+                    INPUT_EVENT_ACK_STATE_CONSUMED);
+  MessageLoop::current()->RunUntilIdle();
+  EXPECT_EQ(2U, process_->sink().message_count());
+  EXPECT_TRUE(process_->sink().GetFirstMessageMatching(
+              ViewMsg_HandleInputEvent::ID));
+  EXPECT_FALSE(process_->sink().GetUniqueMessageMatching(
+              ViewMsg_HandleInputEvent::ID));
+  process_->sink().ClearMessages();
+
+  // The next ACK should be getting ignored.
+  EXPECT_TRUE(host_->WillIgnoreNextACK());
+
+  // Enqueued.
+  SimulateGestureScrollUpdateEvent(1, -1, 1);
+
+  // Check whether coalesced correctly.
+  EXPECT_EQ(3U, host_->GestureEventLastQueueEventSize());
+  merged_event = host_->GestureEventLastQueueEvent();
+  EXPECT_EQ(WebInputEvent::GestureScrollUpdate, merged_event.type);
+  EXPECT_EQ(1, merged_event.data.scrollUpdate.deltaX);
+  EXPECT_EQ(-1, merged_event.data.scrollUpdate.deltaY);
+  EXPECT_EQ(1, merged_event.modifiers);
+  merged_event = host_->GestureEventSecondFromLastQueueEvent();
+  EXPECT_EQ(WebInputEvent::GesturePinchUpdate, merged_event.type);
+  EXPECT_EQ(6, merged_event.data.pinchUpdate.scale);
+  EXPECT_EQ(1, merged_event.modifiers);
+
+  // Enqueued.
+  SimulateGestureScrollUpdateEvent(2, -2, 1);
+
+  // Coalescing scrolls should still work.
+  EXPECT_EQ(3U, host_->GestureEventLastQueueEventSize());
+  merged_event = host_->GestureEventLastQueueEvent();
+  EXPECT_EQ(WebInputEvent::GestureScrollUpdate, merged_event.type);
+  EXPECT_EQ(3, merged_event.data.scrollUpdate.deltaX);
+  EXPECT_EQ(-3, merged_event.data.scrollUpdate.deltaY);
+  EXPECT_EQ(1, merged_event.modifiers);
+  merged_event = host_->GestureEventSecondFromLastQueueEvent();
+  EXPECT_EQ(WebInputEvent::GesturePinchUpdate, merged_event.type);
+  EXPECT_EQ(6, merged_event.data.pinchUpdate.scale);
+  EXPECT_EQ(1, merged_event.modifiers);
+
+  // Enqueued.
+  SimulateGesturePinchUpdateEvent(0.5, 60, 60, 1);
+
+  // Check whether coalesced correctly.
+  EXPECT_EQ(4U, host_->GestureEventLastQueueEventSize());
+  merged_event = host_->GestureEventLastQueueEvent();
+  EXPECT_EQ(WebInputEvent::GesturePinchUpdate, merged_event.type);
+  EXPECT_EQ(0.5, merged_event.data.pinchUpdate.scale);
+  EXPECT_EQ(1, merged_event.modifiers);
+  merged_event = host_->GestureEventSecondFromLastQueueEvent();
+  EXPECT_EQ(WebInputEvent::GestureScrollUpdate, merged_event.type);
+  EXPECT_EQ(3, merged_event.data.scrollUpdate.deltaX);
+  EXPECT_EQ(-3, merged_event.data.scrollUpdate.deltaY);
+  EXPECT_EQ(1, merged_event.modifiers);
+
+  // Check that the ACK gets ignored.
+  SendInputEventACK(WebInputEvent::GestureScrollUpdate,
+                    INPUT_EVENT_ACK_STATE_CONSUMED);
+  MessageLoop::current()->RunUntilIdle();
+  EXPECT_EQ(0U, process_->sink().message_count());
+  // The flag should have been flipped back to false.
+  EXPECT_FALSE(host_->WillIgnoreNextACK());
+
+  // Enqueued.
+  SimulateGestureScrollUpdateEvent(2, -2, 2);
+
+  // Shouldn't coalesce with different modifiers.
+  EXPECT_EQ(4U, host_->GestureEventLastQueueEventSize());
+  merged_event = host_->GestureEventLastQueueEvent();
+  EXPECT_EQ(WebInputEvent::GestureScrollUpdate, merged_event.type);
+  EXPECT_EQ(2, merged_event.data.scrollUpdate.deltaX);
+  EXPECT_EQ(-2, merged_event.data.scrollUpdate.deltaY);
+  EXPECT_EQ(2, merged_event.modifiers);
+  merged_event = host_->GestureEventSecondFromLastQueueEvent();
+  EXPECT_EQ(WebInputEvent::GesturePinchUpdate, merged_event.type);
+  EXPECT_EQ(0.5, merged_event.data.pinchUpdate.scale);
+  EXPECT_EQ(1, merged_event.modifiers);
+
+  // Check that the ACK sends the next scroll pinch pair.
+  SendInputEventACK(WebInputEvent::GesturePinchUpdate,
+                    INPUT_EVENT_ACK_STATE_CONSUMED);
+  MessageLoop::current()->RunUntilIdle();
+  EXPECT_EQ(2U, process_->sink().message_count());
+  EXPECT_TRUE(process_->sink().GetFirstMessageMatching(
+              ViewMsg_HandleInputEvent::ID));
+  EXPECT_FALSE(process_->sink().GetUniqueMessageMatching(
+              ViewMsg_HandleInputEvent::ID));
+  process_->sink().ClearMessages();
+
+  // Check that the ACK sends the second message.
+  SendInputEventACK(WebInputEvent::GestureScrollUpdate,
+                    INPUT_EVENT_ACK_STATE_CONSUMED);
+  MessageLoop::current()->RunUntilIdle();
+  EXPECT_EQ(0U, process_->sink().message_count());
+
+  // Check that the ACK sends the second message.
+  SendInputEventACK(WebInputEvent::GesturePinchUpdate,
+                    INPUT_EVENT_ACK_STATE_CONSUMED);
+  MessageLoop::current()->RunUntilIdle();
+  EXPECT_EQ(1U, process_->sink().message_count());
+  EXPECT_TRUE(process_->sink().GetUniqueMessageMatching(
+              ViewMsg_HandleInputEvent::ID));
+  process_->sink().ClearMessages();
+
+  // Check that the queue is empty after ACK and no messages get sent.
+  SendInputEventACK(WebInputEvent::GestureScrollUpdate,
+                    INPUT_EVENT_ACK_STATE_CONSUMED);
+  MessageLoop::current()->RunUntilIdle();
+  EXPECT_EQ(0U, process_->sink().message_count());
+  EXPECT_EQ(0U, host_->GestureEventLastQueueEventSize());
 }
 
 #if GTEST_HAS_PARAM_TEST
@@ -1246,12 +1513,14 @@ TEST_P(RenderWidgetHostWithSourceTest, GestureFlingCancelsFiltered) {
   process_->sink().ClearMessages();
   SimulateGestureFlingStartEvent(0, -10, source_device);
   EXPECT_TRUE(host_->FlingInProgress());
-  SendInputEventACK(WebInputEvent::GestureFlingStart, true);
+  SendInputEventACK(WebInputEvent::GestureFlingStart,
+                    INPUT_EVENT_ACK_STATE_CONSUMED);
   MessageLoop::current()->RunUntilIdle();
   SimulateGestureEvent(WebInputEvent::GestureFlingCancel, source_device);
   EXPECT_FALSE(host_->FlingInProgress());
   EXPECT_EQ(2U, process_->sink().message_count());
-  SendInputEventACK(WebInputEvent::GestureFlingCancel, true);
+  SendInputEventACK(WebInputEvent::GestureFlingCancel,
+                    INPUT_EVENT_ACK_STATE_CONSUMED);
   MessageLoop::current()->RunUntilIdle();
   EXPECT_EQ(0U, host_->GestureEventLastQueueEventSize());
 
@@ -1265,9 +1534,11 @@ TEST_P(RenderWidgetHostWithSourceTest, GestureFlingCancelsFiltered) {
   EXPECT_EQ(2U, host_->GestureEventLastQueueEventSize());
 
   // Advance state realistically.
-  SendInputEventACK(WebInputEvent::GestureFlingStart, true);
+  SendInputEventACK(WebInputEvent::GestureFlingStart,
+                    INPUT_EVENT_ACK_STATE_CONSUMED);
   MessageLoop::current()->RunUntilIdle();
-  SendInputEventACK(WebInputEvent::GestureFlingCancel, true);
+  SendInputEventACK(WebInputEvent::GestureFlingCancel,
+                    INPUT_EVENT_ACK_STATE_CONSUMED);
   MessageLoop::current()->RunUntilIdle();
   EXPECT_EQ(0U, host_->GestureEventLastQueueEventSize());
 
@@ -1593,8 +1864,8 @@ TEST_F(RenderWidgetHostTest, DebounceDropsDeferredEvents) {
 }
 
 #if defined(USE_AURA)
-// Test TapSuppressionController for when GestureFlingCancel Ack comes before
-// MouseDown and everything happens without any delays.
+// Test TouchpadTapSuppressionController for when GestureFlingCancel Ack comes
+// before MouseDown and everything happens without any delays.
 TEST_F(RenderWidgetHostTest, GFCAckBeforeMouseFast) {
   process_->sink().ClearMessages();
 
@@ -1609,7 +1880,8 @@ TEST_F(RenderWidgetHostTest, GFCAckBeforeMouseFast) {
   EXPECT_TRUE(host_->FlingInProgress());
 
   // Send GestureFlingStart Ack.
-  SendInputEventACK(WebInputEvent::GestureFlingStart, true);
+  SendInputEventACK(WebInputEvent::GestureFlingStart,
+                    INPUT_EVENT_ACK_STATE_CONSUMED);
   MessageLoop::current()->RunUntilIdle();
   EXPECT_EQ(1U, process_->sink().message_count());
   EXPECT_EQ(0U, host_->GestureEventLastQueueEventSize());
@@ -1629,7 +1901,8 @@ TEST_F(RenderWidgetHostTest, GFCAckBeforeMouseFast) {
   EXPECT_FALSE(host_->FlingInProgress());
 
   // Send GestureFlingCancel Ack.
-  SendInputEventACK(WebInputEvent::GestureFlingCancel, true);
+  SendInputEventACK(WebInputEvent::GestureFlingCancel,
+                    INPUT_EVENT_ACK_STATE_CONSUMED);
   MessageLoop::current()->RunUntilIdle();
   EXPECT_EQ(2U, process_->sink().message_count());
   EXPECT_EQ(0U, host_->GestureEventLastQueueEventSize());
@@ -1641,7 +1914,7 @@ TEST_F(RenderWidgetHostTest, GFCAckBeforeMouseFast) {
   SimulateMouseEvent(WebInputEvent::MouseDown);
   EXPECT_EQ(2U, process_->sink().message_count());
   EXPECT_EQ(0U, host_->GestureEventLastQueueEventSize());
-  EXPECT_EQ(MockRenderWidgetHost::TSC_MD_STASHED,
+  EXPECT_EQ(MockRenderWidgetHost::TSC_TAP_DOWN_STASHED,
             host_->TapSuppressionControllerState());
   EXPECT_FALSE(host_->FlingInProgress());
 
@@ -1654,8 +1927,8 @@ TEST_F(RenderWidgetHostTest, GFCAckBeforeMouseFast) {
   EXPECT_FALSE(host_->FlingInProgress());
 }
 
-// Test TapSuppressionController for when GestureFlingCancel Ack comes before
-// MouseDown, but there is a small delay between MouseDown and MouseUp.
+// Test TouchpadTapSuppressionController for when GestureFlingCancel Ack comes
+// before MouseDown, but there is a small delay between MouseDown and MouseUp.
 TEST_F(RenderWidgetHostTest, GFCAckBeforeMouseInsufficientlyLateMouseUp) {
   process_->sink().ClearMessages();
 
@@ -1670,7 +1943,8 @@ TEST_F(RenderWidgetHostTest, GFCAckBeforeMouseInsufficientlyLateMouseUp) {
   EXPECT_TRUE(host_->FlingInProgress());
 
   // Send GestureFlingStart Ack.
-  SendInputEventACK(WebInputEvent::GestureFlingStart, true);
+  SendInputEventACK(WebInputEvent::GestureFlingStart,
+                    INPUT_EVENT_ACK_STATE_CONSUMED);
   MessageLoop::current()->RunUntilIdle();
   EXPECT_EQ(1U, process_->sink().message_count());
   EXPECT_EQ(0U, host_->GestureEventLastQueueEventSize());
@@ -1690,7 +1964,8 @@ TEST_F(RenderWidgetHostTest, GFCAckBeforeMouseInsufficientlyLateMouseUp) {
   EXPECT_FALSE(host_->FlingInProgress());
 
   // Send GestureFlingCancel Ack.
-  SendInputEventACK(WebInputEvent::GestureFlingCancel, true);
+  SendInputEventACK(WebInputEvent::GestureFlingCancel,
+                    INPUT_EVENT_ACK_STATE_CONSUMED);
   MessageLoop::current()->RunUntilIdle();
   EXPECT_EQ(2U, process_->sink().message_count());
   EXPECT_EQ(0U, host_->GestureEventLastQueueEventSize());
@@ -1702,7 +1977,7 @@ TEST_F(RenderWidgetHostTest, GFCAckBeforeMouseInsufficientlyLateMouseUp) {
   SimulateMouseEvent(WebInputEvent::MouseDown);
   EXPECT_EQ(2U, process_->sink().message_count());
   EXPECT_EQ(0U, host_->GestureEventLastQueueEventSize());
-  EXPECT_EQ(MockRenderWidgetHost::TSC_MD_STASHED,
+  EXPECT_EQ(MockRenderWidgetHost::TSC_TAP_DOWN_STASHED,
             host_->TapSuppressionControllerState());
   EXPECT_FALSE(host_->FlingInProgress());
 
@@ -1717,7 +1992,7 @@ TEST_F(RenderWidgetHostTest, GFCAckBeforeMouseInsufficientlyLateMouseUp) {
   MessageLoop::current()->Run();
   EXPECT_EQ(2U, process_->sink().message_count());
   EXPECT_EQ(0U, host_->GestureEventLastQueueEventSize());
-  EXPECT_EQ(MockRenderWidgetHost::TSC_MD_STASHED,
+  EXPECT_EQ(MockRenderWidgetHost::TSC_TAP_DOWN_STASHED,
             host_->TapSuppressionControllerState());
   EXPECT_FALSE(host_->FlingInProgress());
 
@@ -1730,8 +2005,8 @@ TEST_F(RenderWidgetHostTest, GFCAckBeforeMouseInsufficientlyLateMouseUp) {
   EXPECT_FALSE(host_->FlingInProgress());
 }
 
-// Test TapSuppressionController for when GestureFlingCancel Ack comes before
-// MouseDown, but there is a long delay between MouseDown and MouseUp.
+// Test TouchpadTapSuppressionController for when GestureFlingCancel Ack comes
+// before MouseDown, but there is a long delay between MouseDown and MouseUp.
 TEST_F(RenderWidgetHostTest, GFCAckBeforeMouseSufficientlyLateMouseUp) {
   process_->sink().ClearMessages();
 
@@ -1746,7 +2021,8 @@ TEST_F(RenderWidgetHostTest, GFCAckBeforeMouseSufficientlyLateMouseUp) {
   EXPECT_TRUE(host_->FlingInProgress());
 
   // Send GestureFlingStart Ack.
-  SendInputEventACK(WebInputEvent::GestureFlingStart, true);
+  SendInputEventACK(WebInputEvent::GestureFlingStart,
+                    INPUT_EVENT_ACK_STATE_CONSUMED);
   MessageLoop::current()->RunUntilIdle();
   EXPECT_EQ(1U, process_->sink().message_count());
   EXPECT_EQ(0U, host_->GestureEventLastQueueEventSize());
@@ -1766,7 +2042,8 @@ TEST_F(RenderWidgetHostTest, GFCAckBeforeMouseSufficientlyLateMouseUp) {
   EXPECT_FALSE(host_->FlingInProgress());
 
   // Send processed GestureFlingCancel Ack.
-  SendInputEventACK(WebInputEvent::GestureFlingCancel, true);
+  SendInputEventACK(WebInputEvent::GestureFlingCancel,
+                    INPUT_EVENT_ACK_STATE_CONSUMED);
   MessageLoop::current()->RunUntilIdle();
   EXPECT_EQ(2U, process_->sink().message_count());
   EXPECT_EQ(0U, host_->GestureEventLastQueueEventSize());
@@ -1778,7 +2055,7 @@ TEST_F(RenderWidgetHostTest, GFCAckBeforeMouseSufficientlyLateMouseUp) {
   SimulateMouseEvent(WebInputEvent::MouseDown);
   EXPECT_EQ(2U, process_->sink().message_count());
   EXPECT_EQ(0U, host_->GestureEventLastQueueEventSize());
-  EXPECT_EQ(MockRenderWidgetHost::TSC_MD_STASHED,
+  EXPECT_EQ(MockRenderWidgetHost::TSC_TAP_DOWN_STASHED,
             host_->TapSuppressionControllerState());
   EXPECT_FALSE(host_->FlingInProgress());
 
@@ -1807,8 +2084,8 @@ TEST_F(RenderWidgetHostTest, GFCAckBeforeMouseSufficientlyLateMouseUp) {
   EXPECT_FALSE(host_->FlingInProgress());
 }
 
-// Test TapSuppressionController for when GestureFlingCancel Ack comes before
-// MouseDown, but there is a small delay between the Ack and MouseDown.
+// Test TouchpadTapSuppressionController for when GestureFlingCancel Ack comes
+// before MouseDown, but there is a small delay between the Ack and MouseDown.
 TEST_F(RenderWidgetHostTest, GFCAckBeforeMouseInsufficientlyLateMouseDown) {
   process_->sink().ClearMessages();
 
@@ -1823,7 +2100,8 @@ TEST_F(RenderWidgetHostTest, GFCAckBeforeMouseInsufficientlyLateMouseDown) {
   EXPECT_TRUE(host_->FlingInProgress());
 
   // Send GestureFlingStart Ack.
-  SendInputEventACK(WebInputEvent::GestureFlingStart, true);
+  SendInputEventACK(WebInputEvent::GestureFlingStart,
+                    INPUT_EVENT_ACK_STATE_CONSUMED);
   MessageLoop::current()->RunUntilIdle();
   EXPECT_EQ(1U, process_->sink().message_count());
   EXPECT_EQ(0U, host_->GestureEventLastQueueEventSize());
@@ -1843,7 +2121,8 @@ TEST_F(RenderWidgetHostTest, GFCAckBeforeMouseInsufficientlyLateMouseDown) {
   EXPECT_FALSE(host_->FlingInProgress());
 
   // Send GestureFlingCancel Ack.
-  SendInputEventACK(WebInputEvent::GestureFlingCancel, true);
+  SendInputEventACK(WebInputEvent::GestureFlingCancel,
+                    INPUT_EVENT_ACK_STATE_CONSUMED);
   MessageLoop::current()->RunUntilIdle();
   EXPECT_EQ(2U, process_->sink().message_count());
   EXPECT_EQ(0U, host_->GestureEventLastQueueEventSize());
@@ -1871,7 +2150,7 @@ TEST_F(RenderWidgetHostTest, GFCAckBeforeMouseInsufficientlyLateMouseDown) {
   SimulateMouseEvent(WebInputEvent::MouseDown);
   EXPECT_EQ(2U, process_->sink().message_count());
   EXPECT_EQ(0U, host_->GestureEventLastQueueEventSize());
-  EXPECT_EQ(MockRenderWidgetHost::TSC_MD_STASHED,
+  EXPECT_EQ(MockRenderWidgetHost::TSC_TAP_DOWN_STASHED,
             host_->TapSuppressionControllerState());
   EXPECT_FALSE(host_->FlingInProgress());
 
@@ -1884,8 +2163,8 @@ TEST_F(RenderWidgetHostTest, GFCAckBeforeMouseInsufficientlyLateMouseDown) {
   EXPECT_FALSE(host_->FlingInProgress());
 }
 
-// Test TapSuppressionController for when GestureFlingCancel Ack comes before
-// MouseDown, but there is a long delay between the Ack and MouseDown.
+// Test TouchpadTapSuppressionController for when GestureFlingCancel Ack comes
+// before MouseDown, but there is a long delay between the Ack and MouseDown.
 TEST_F(RenderWidgetHostTest, GFCAckBeforeMouseSufficientlyLateMouseDown) {
   process_->sink().ClearMessages();
 
@@ -1900,7 +2179,8 @@ TEST_F(RenderWidgetHostTest, GFCAckBeforeMouseSufficientlyLateMouseDown) {
   EXPECT_TRUE(host_->FlingInProgress());
 
   // Send GestureFlingStart Ack.
-  SendInputEventACK(WebInputEvent::GestureFlingStart, true);
+  SendInputEventACK(WebInputEvent::GestureFlingStart,
+                    INPUT_EVENT_ACK_STATE_CONSUMED);
   MessageLoop::current()->RunUntilIdle();
   EXPECT_EQ(1U, process_->sink().message_count());
   EXPECT_EQ(0U, host_->GestureEventLastQueueEventSize());
@@ -1920,7 +2200,8 @@ TEST_F(RenderWidgetHostTest, GFCAckBeforeMouseSufficientlyLateMouseDown) {
   EXPECT_FALSE(host_->FlingInProgress());
 
   // Send GestureFlingCancel Ack.
-  SendInputEventACK(WebInputEvent::GestureFlingCancel, true);
+  SendInputEventACK(WebInputEvent::GestureFlingCancel,
+                    INPUT_EVENT_ACK_STATE_CONSUMED);
   MessageLoop::current()->RunUntilIdle();
   EXPECT_EQ(2U, process_->sink().message_count());
   EXPECT_EQ(0U, host_->GestureEventLastQueueEventSize());
@@ -1960,8 +2241,8 @@ TEST_F(RenderWidgetHostTest, GFCAckBeforeMouseSufficientlyLateMouseDown) {
   EXPECT_FALSE(host_->FlingInProgress());
 }
 
-// Test TapSuppressionController for when unprocessed GestureFlingCancel Ack
-// comes after MouseDown and everything happens without any delay.
+// Test TouchpadTapSuppressionController for when unprocessed GestureFlingCancel
+// Ack comes after MouseDown and everything happens without any delay.
 TEST_F(RenderWidgetHostTest, GFCAckUnprocessedAfterMouseFast) {
   process_->sink().ClearMessages();
 
@@ -1976,7 +2257,8 @@ TEST_F(RenderWidgetHostTest, GFCAckUnprocessedAfterMouseFast) {
   EXPECT_TRUE(host_->FlingInProgress());
 
   // Send GestureFlingStart Ack.
-  SendInputEventACK(WebInputEvent::GestureFlingStart, true);
+  SendInputEventACK(WebInputEvent::GestureFlingStart,
+                    INPUT_EVENT_ACK_STATE_CONSUMED);
   MessageLoop::current()->RunUntilIdle();
   EXPECT_EQ(1U, process_->sink().message_count());
   EXPECT_EQ(0U, host_->GestureEventLastQueueEventSize());
@@ -2001,13 +2283,14 @@ TEST_F(RenderWidgetHostTest, GFCAckUnprocessedAfterMouseFast) {
   EXPECT_EQ(1U, host_->GestureEventLastQueueEventSize());
   EXPECT_EQ(WebInputEvent::GestureFlingCancel,
             host_->GestureEventLastQueueEvent().type);
-  EXPECT_EQ(MockRenderWidgetHost::TSC_MD_STASHED,
+  EXPECT_EQ(MockRenderWidgetHost::TSC_TAP_DOWN_STASHED,
             host_->TapSuppressionControllerState());
   EXPECT_FALSE(host_->FlingInProgress());
 
   // Send unprocessed GestureFlingCancel Ack. This should release the
   // previously suppressed MouseDown.
-  SendInputEventACK(WebInputEvent::GestureFlingCancel, false);
+  SendInputEventACK(WebInputEvent::GestureFlingCancel,
+                    INPUT_EVENT_ACK_STATE_NOT_CONSUMED);
   MessageLoop::current()->RunUntilIdle();
   EXPECT_EQ(3U, process_->sink().message_count());
   EXPECT_EQ(0U, host_->GestureEventLastQueueEventSize());
@@ -2024,8 +2307,8 @@ TEST_F(RenderWidgetHostTest, GFCAckUnprocessedAfterMouseFast) {
   EXPECT_FALSE(host_->FlingInProgress());
 }
 
-// Test TapSuppressionController for when processed GestureFlingCancel Ack
-// comes after MouseDown and everything happens without any delay.
+// Test TouchpadTapSuppressionController for when processed GestureFlingCancel
+// Ack comes after MouseDown and everything happens without any delay.
 TEST_F(RenderWidgetHostTest, GFCAckProcessedAfterMouseFast) {
   process_->sink().ClearMessages();
 
@@ -2040,7 +2323,8 @@ TEST_F(RenderWidgetHostTest, GFCAckProcessedAfterMouseFast) {
   EXPECT_TRUE(host_->FlingInProgress());
 
   // Send GestureFlingStart Ack.
-  SendInputEventACK(WebInputEvent::GestureFlingStart, true);
+  SendInputEventACK(WebInputEvent::GestureFlingStart,
+                    INPUT_EVENT_ACK_STATE_CONSUMED);
   MessageLoop::current()->RunUntilIdle();
   EXPECT_EQ(1U, process_->sink().message_count());
   EXPECT_EQ(0U, host_->GestureEventLastQueueEventSize());
@@ -2065,16 +2349,17 @@ TEST_F(RenderWidgetHostTest, GFCAckProcessedAfterMouseFast) {
   EXPECT_EQ(1U, host_->GestureEventLastQueueEventSize());
   EXPECT_EQ(WebInputEvent::GestureFlingCancel,
             host_->GestureEventLastQueueEvent().type);
-  EXPECT_EQ(MockRenderWidgetHost::TSC_MD_STASHED,
+  EXPECT_EQ(MockRenderWidgetHost::TSC_TAP_DOWN_STASHED,
             host_->TapSuppressionControllerState());
   EXPECT_FALSE(host_->FlingInProgress());
 
   // Send GestureFlingCancel Ack.
-  SendInputEventACK(WebInputEvent::GestureFlingCancel, true);
+  SendInputEventACK(WebInputEvent::GestureFlingCancel,
+                    INPUT_EVENT_ACK_STATE_CONSUMED);
   MessageLoop::current()->RunUntilIdle();
   EXPECT_EQ(2U, process_->sink().message_count());
   EXPECT_EQ(0U, host_->GestureEventLastQueueEventSize());
-  EXPECT_EQ(MockRenderWidgetHost::TSC_MD_STASHED,
+  EXPECT_EQ(MockRenderWidgetHost::TSC_TAP_DOWN_STASHED,
             host_->TapSuppressionControllerState());
   EXPECT_FALSE(host_->FlingInProgress());
 
@@ -2087,8 +2372,8 @@ TEST_F(RenderWidgetHostTest, GFCAckProcessedAfterMouseFast) {
   EXPECT_FALSE(host_->FlingInProgress());
 }
 
-// Test TapSuppressionController for when GestureFlingCancel Ack comes after
-// MouseDown and there is a small delay between the Ack and MouseUp.
+// Test TouchpadTapSuppressionController for when GestureFlingCancel Ack comes
+// after MouseDown and there is a small delay between the Ack and MouseUp.
 TEST_F(RenderWidgetHostTest, GFCAckAfterMouseInsufficientlyLateMouseUp) {
   process_->sink().ClearMessages();
 
@@ -2103,7 +2388,8 @@ TEST_F(RenderWidgetHostTest, GFCAckAfterMouseInsufficientlyLateMouseUp) {
   EXPECT_TRUE(host_->FlingInProgress());
 
   // Send GestureFlingStart Ack.
-  SendInputEventACK(WebInputEvent::GestureFlingStart, true);
+  SendInputEventACK(WebInputEvent::GestureFlingStart,
+                    INPUT_EVENT_ACK_STATE_CONSUMED);
   MessageLoop::current()->RunUntilIdle();
   EXPECT_EQ(1U, process_->sink().message_count());
   EXPECT_EQ(0U, host_->GestureEventLastQueueEventSize());
@@ -2128,16 +2414,17 @@ TEST_F(RenderWidgetHostTest, GFCAckAfterMouseInsufficientlyLateMouseUp) {
   EXPECT_EQ(1U, host_->GestureEventLastQueueEventSize());
   EXPECT_EQ(WebInputEvent::GestureFlingCancel,
             host_->GestureEventLastQueueEvent().type);
-  EXPECT_EQ(MockRenderWidgetHost::TSC_MD_STASHED,
+  EXPECT_EQ(MockRenderWidgetHost::TSC_TAP_DOWN_STASHED,
             host_->TapSuppressionControllerState());
   EXPECT_FALSE(host_->FlingInProgress());
 
   // Send GestureFlingCancel Ack.
-  SendInputEventACK(WebInputEvent::GestureFlingCancel, true);
+  SendInputEventACK(WebInputEvent::GestureFlingCancel,
+                    INPUT_EVENT_ACK_STATE_CONSUMED);
   MessageLoop::current()->RunUntilIdle();
   EXPECT_EQ(2U, process_->sink().message_count());
   EXPECT_EQ(0U, host_->GestureEventLastQueueEventSize());
-  EXPECT_EQ(MockRenderWidgetHost::TSC_MD_STASHED,
+  EXPECT_EQ(MockRenderWidgetHost::TSC_TAP_DOWN_STASHED,
             host_->TapSuppressionControllerState());
   EXPECT_FALSE(host_->FlingInProgress());
 
@@ -2152,7 +2439,7 @@ TEST_F(RenderWidgetHostTest, GFCAckAfterMouseInsufficientlyLateMouseUp) {
   MessageLoop::current()->Run();
   EXPECT_EQ(2U, process_->sink().message_count());
   EXPECT_EQ(0U, host_->GestureEventLastQueueEventSize());
-  EXPECT_EQ(MockRenderWidgetHost::TSC_MD_STASHED,
+  EXPECT_EQ(MockRenderWidgetHost::TSC_TAP_DOWN_STASHED,
             host_->TapSuppressionControllerState());
   EXPECT_FALSE(host_->FlingInProgress());
 
@@ -2165,8 +2452,8 @@ TEST_F(RenderWidgetHostTest, GFCAckAfterMouseInsufficientlyLateMouseUp) {
   EXPECT_FALSE(host_->FlingInProgress());
 }
 
-// Test TapSuppressionController for when GestureFlingCancel Ack comes after
-// MouseDown and there is a long delay between the Ack and MouseUp.
+// Test TouchpadTapSuppressionController for when GestureFlingCancel Ack comes
+// after MouseDown and there is a long delay between the Ack and MouseUp.
 TEST_F(RenderWidgetHostTest, GFCAckAfterMouseSufficientlyLateMouseUp) {
   process_->sink().ClearMessages();
 
@@ -2181,7 +2468,8 @@ TEST_F(RenderWidgetHostTest, GFCAckAfterMouseSufficientlyLateMouseUp) {
   EXPECT_TRUE(host_->FlingInProgress());
 
   // Send GestureFlingStart Ack.
-  SendInputEventACK(WebInputEvent::GestureFlingStart, true);
+  SendInputEventACK(WebInputEvent::GestureFlingStart,
+                    INPUT_EVENT_ACK_STATE_CONSUMED);
   MessageLoop::current()->RunUntilIdle();
   EXPECT_EQ(1U, process_->sink().message_count());
   EXPECT_EQ(0U, host_->GestureEventLastQueueEventSize());
@@ -2206,16 +2494,17 @@ TEST_F(RenderWidgetHostTest, GFCAckAfterMouseSufficientlyLateMouseUp) {
   EXPECT_EQ(1U, host_->GestureEventLastQueueEventSize());
   EXPECT_EQ(WebInputEvent::GestureFlingCancel,
             host_->GestureEventLastQueueEvent().type);
-  EXPECT_EQ(MockRenderWidgetHost::TSC_MD_STASHED,
+  EXPECT_EQ(MockRenderWidgetHost::TSC_TAP_DOWN_STASHED,
             host_->TapSuppressionControllerState());
   EXPECT_FALSE(host_->FlingInProgress());
 
   // Send GestureFlingCancel Ack.
-  SendInputEventACK(WebInputEvent::GestureFlingCancel, true);
+  SendInputEventACK(WebInputEvent::GestureFlingCancel,
+                    INPUT_EVENT_ACK_STATE_CONSUMED);
   MessageLoop::current()->RunUntilIdle();
   EXPECT_EQ(2U, process_->sink().message_count());
   EXPECT_EQ(0U, host_->GestureEventLastQueueEventSize());
-  EXPECT_EQ(MockRenderWidgetHost::TSC_MD_STASHED,
+  EXPECT_EQ(MockRenderWidgetHost::TSC_TAP_DOWN_STASHED,
             host_->TapSuppressionControllerState());
   EXPECT_FALSE(host_->FlingInProgress());
 
@@ -2262,7 +2551,8 @@ TEST_F(RenderWidgetHostTest, TouchEventQueue) {
   EXPECT_EQ(2U, host_->TouchEventQueueSize());
 
   // Receive an ACK for the first touch-event.
-  SendInputEventACK(WebInputEvent::TouchStart, true);
+  SendInputEventACK(WebInputEvent::TouchStart,
+                    INPUT_EVENT_ACK_STATE_CONSUMED);
   EXPECT_EQ(1U, host_->TouchEventQueueSize());
   EXPECT_EQ(WebKit::WebInputEvent::TouchStart, view_->acked_event().type);
   EXPECT_EQ(1, view_->acked_event_count());
@@ -2270,7 +2560,8 @@ TEST_F(RenderWidgetHostTest, TouchEventQueue) {
   process_->sink().ClearMessages();
   view_->ClearAckedEvent();
 
-  SendInputEventACK(WebInputEvent::TouchMove, true);
+  SendInputEventACK(WebInputEvent::TouchMove,
+                    INPUT_EVENT_ACK_STATE_CONSUMED);
   EXPECT_EQ(0U, host_->TouchEventQueueSize());
   EXPECT_EQ(WebKit::WebInputEvent::TouchMove, view_->acked_event().type);
   EXPECT_EQ(1, view_->acked_event_count());
@@ -2311,7 +2602,8 @@ TEST_F(RenderWidgetHostTest, TouchEventQueueFlush) {
 
   // Receive an ACK for the first touch-event. One of the queued touch-event
   // should be forwarded.
-  SendInputEventACK(WebInputEvent::TouchStart, true);
+  SendInputEventACK(WebInputEvent::TouchStart,
+                    INPUT_EVENT_ACK_STATE_CONSUMED);
   EXPECT_EQ(31U, host_->TouchEventQueueSize());
   EXPECT_EQ(WebKit::WebInputEvent::TouchStart, view_->acked_event().type);
   EXPECT_EQ(1, view_->acked_event_count());
@@ -2355,7 +2647,8 @@ TEST_F(RenderWidgetHostTest, TouchEventQueueCoalesce) {
   EXPECT_EQ(3U, host_->TouchEventQueueSize());
 
   // ACK the press.
-  SendInputEventACK(WebInputEvent::TouchStart, true);
+  SendInputEventACK(WebInputEvent::TouchStart,
+                    INPUT_EVENT_ACK_STATE_CONSUMED);
   EXPECT_EQ(1U, process_->sink().message_count());
   EXPECT_EQ(2U, host_->TouchEventQueueSize());
   EXPECT_EQ(WebKit::WebInputEvent::TouchStart, view_->acked_event().type);
@@ -2364,7 +2657,8 @@ TEST_F(RenderWidgetHostTest, TouchEventQueueCoalesce) {
   view_->ClearAckedEvent();
 
   // ACK the moves.
-  SendInputEventACK(WebInputEvent::TouchMove, true);
+  SendInputEventACK(WebInputEvent::TouchMove,
+                    INPUT_EVENT_ACK_STATE_CONSUMED);
   EXPECT_EQ(1U, process_->sink().message_count());
   EXPECT_EQ(1U, host_->TouchEventQueueSize());
   EXPECT_EQ(WebKit::WebInputEvent::TouchMove, view_->acked_event().type);
@@ -2373,7 +2667,8 @@ TEST_F(RenderWidgetHostTest, TouchEventQueueCoalesce) {
   view_->ClearAckedEvent();
 
   // ACK the release.
-  SendInputEventACK(WebInputEvent::TouchEnd, true);
+  SendInputEventACK(WebInputEvent::TouchEnd,
+                    INPUT_EVENT_ACK_STATE_CONSUMED);
   EXPECT_EQ(0U, process_->sink().message_count());
   EXPECT_EQ(0U, host_->TouchEventQueueSize());
   EXPECT_EQ(WebKit::WebInputEvent::TouchEnd, view_->acked_event().type);
@@ -2405,7 +2700,8 @@ TEST_F(RenderWidgetHostTest, SentTouchEventDoesNotCoalesce) {
   EXPECT_EQ(0U, process_->sink().message_count());
   EXPECT_EQ(2U, host_->TouchEventQueueSize());
 
-  SendInputEventACK(WebInputEvent::TouchStart, false);
+  SendInputEventACK(WebInputEvent::TouchStart,
+                    INPUT_EVENT_ACK_STATE_NOT_CONSUMED);
   EXPECT_EQ(1U, process_->sink().message_count());
   EXPECT_EQ(1U, host_->TouchEventQueueSize());
   process_->sink().ClearMessages();
@@ -2494,7 +2790,8 @@ TEST_F(RenderWidgetHostTest, TouchEventAckAfterQueueFlushed) {
 
   // Receive an ACK for the press. This should cause the queued touch-move to
   // be sent to the renderer.
-  SendInputEventACK(WebInputEvent::TouchStart, true);
+  SendInputEventACK(WebInputEvent::TouchStart,
+                    INPUT_EVENT_ACK_STATE_CONSUMED);
   EXPECT_EQ(1U, process_->sink().message_count());
   EXPECT_EQ(1U, host_->TouchEventQueueSize());
   process_->sink().ClearMessages();
@@ -2505,7 +2802,241 @@ TEST_F(RenderWidgetHostTest, TouchEventAckAfterQueueFlushed) {
   EXPECT_EQ(0U, host_->TouchEventQueueSize());
 
   // Now receive an ACK for the move.
-  SendInputEventACK(WebInputEvent::TouchMove, true);
+  SendInputEventACK(WebInputEvent::TouchMove,
+                    INPUT_EVENT_ACK_STATE_CONSUMED);
+  EXPECT_EQ(0U, process_->sink().message_count());
+  EXPECT_EQ(0U, host_->TouchEventQueueSize());
+}
+
+// Tests that touch-move events are not sent to the renderer if the preceding
+// touch-press event did not have a consumer (and consequently, did not hit the
+// main thread in the renderer). Also tests that all queued/coalesced touch
+// events are flushed immediately when the ACK for the touch-press comes back
+// with NO_CONSUMER status.
+TEST_F(RenderWidgetHostTest, TouchEventQueueNoConsumer) {
+  process_->sink().ClearMessages();
+
+  // The first touch-press should reach the renderer.
+  PressTouchPoint(1, 1);
+  SendTouchEvent();
+  EXPECT_EQ(1U, process_->sink().message_count());
+  process_->sink().ClearMessages();
+
+  // The second touch should not be sent since one is already in queue.
+  MoveTouchPoint(0, 5, 5);
+  SendTouchEvent();
+  EXPECT_EQ(0U, process_->sink().message_count());
+  EXPECT_EQ(2U, host_->TouchEventQueueSize());
+
+  // Receive an ACK for the first touch-event. This should release the queued
+  // touch-event, but it should not be sent to the renderer.
+  SendInputEventACK(WebInputEvent::TouchStart,
+                    INPUT_EVENT_ACK_STATE_NO_CONSUMER_EXISTS);
+  EXPECT_EQ(0U, host_->TouchEventQueueSize());
+  EXPECT_EQ(WebKit::WebInputEvent::TouchMove, view_->acked_event().type);
+  EXPECT_EQ(2, view_->acked_event_count());
+  EXPECT_EQ(0U, process_->sink().message_count());
+  process_->sink().ClearMessages();
+  view_->ClearAckedEvent();
+
+  // Send a release event. This should not reach the renderer.
+  ReleaseTouchPoint(0);
+  SendTouchEvent();
+  EXPECT_EQ(0U, process_->sink().message_count());
+  EXPECT_EQ(WebKit::WebInputEvent::TouchEnd, view_->acked_event().type);
+  EXPECT_EQ(1, view_->acked_event_count());
+  view_->ClearAckedEvent();
+
+  // Send a press-event, followed by move and release events, and another press
+  // event, before the ACK for the first press event comes back. All of the
+  // events should be queued first. After the NO_CONSUMER ack for the first
+  // touch-press, all events upto the second touch-press should be flushed.
+  PressTouchPoint(10, 10);
+  SendTouchEvent();
+  EXPECT_EQ(1U, process_->sink().message_count());
+  process_->sink().ClearMessages();
+
+  MoveTouchPoint(0, 5, 5);
+  SendTouchEvent();
+  MoveTouchPoint(0, 6, 5);
+  SendTouchEvent();
+  ReleaseTouchPoint(0);
+  SendTouchEvent();
+
+  PressTouchPoint(6, 5);
+  SendTouchEvent();
+  EXPECT_EQ(0U, process_->sink().message_count());
+  // The queue should hold the first sent touch-press event, the coalesced
+  // touch-move event, the touch-end event and the second touch-press event.
+  EXPECT_EQ(4U, host_->TouchEventQueueSize());
+
+  SendInputEventACK(WebInputEvent::TouchStart,
+                    INPUT_EVENT_ACK_STATE_NO_CONSUMER_EXISTS);
+  EXPECT_EQ(1U, process_->sink().message_count());
+  EXPECT_EQ(WebInputEvent::TouchEnd, view_->acked_event().type);
+  EXPECT_EQ(4, view_->acked_event_count());
+  EXPECT_EQ(1U, host_->TouchEventQueueSize());
+  process_->sink().ClearMessages();
+  view_->ClearAckedEvent();
+
+  // ACK the second press event as NO_CONSUMER too.
+  SendInputEventACK(WebInputEvent::TouchStart,
+                    INPUT_EVENT_ACK_STATE_NO_CONSUMER_EXISTS);
+  EXPECT_EQ(0U, process_->sink().message_count());
+  EXPECT_EQ(WebInputEvent::TouchStart, view_->acked_event().type);
+  EXPECT_EQ(1, view_->acked_event_count());
+  EXPECT_EQ(0U, host_->TouchEventQueueSize());
+
+  // Send a second press event. Even though the first touch had NO_CONSUMER,
+  // this press event should reach the renderer.
+  PressTouchPoint(1, 1);
+  SendTouchEvent();
+  EXPECT_EQ(1U, process_->sink().message_count());
+  EXPECT_EQ(1U, host_->TouchEventQueueSize());
+}
+
+TEST_F(RenderWidgetHostTest, TouchEventQueueConsumerIgnoreMultiFinger) {
+  process_->sink().ClearMessages();
+
+  // Press two touch points and move them around a bit. The renderer consumes
+  // the events for the first touch point, but returns NO_CONSUMER_EXISTS for
+  // the second touch point.
+
+  PressTouchPoint(1, 1);
+  SendTouchEvent();
+  EXPECT_EQ(1U, process_->sink().message_count());
+  process_->sink().ClearMessages();
+
+  MoveTouchPoint(0, 5, 5);
+  SendTouchEvent();
+
+  PressTouchPoint(10, 10);
+  SendTouchEvent();
+
+  MoveTouchPoint(0, 2, 2);
+  SendTouchEvent();
+
+  MoveTouchPoint(1, 4, 10);
+  SendTouchEvent();
+
+  MoveTouchPoint(0, 10, 10);
+  MoveTouchPoint(1, 20, 20);
+  SendTouchEvent();
+
+  // Since the first touch-press is still pending ACK, no other event should
+  // have been sent to the renderer.
+  EXPECT_EQ(0U, process_->sink().message_count());
+  // The queue includes the two presses, the first touch-move of the first
+  // point, and a coalesced touch-move of both points.
+  EXPECT_EQ(4U, host_->TouchEventQueueSize());
+
+  // ACK the first press as CONSUMED. This should cause the first touch-move of
+  // the first touch-point to be dispatched.
+  SendInputEventACK(WebInputEvent::TouchStart,
+                    INPUT_EVENT_ACK_STATE_CONSUMED);
+  EXPECT_EQ(1U, process_->sink().message_count());
+  process_->sink().ClearMessages();
+  EXPECT_EQ(3U, host_->TouchEventQueueSize());
+
+  // ACK the first move as CONSUMED.
+  SendInputEventACK(WebInputEvent::TouchMove,
+                    INPUT_EVENT_ACK_STATE_CONSUMED);
+  EXPECT_EQ(1U, process_->sink().message_count());
+  process_->sink().ClearMessages();
+  EXPECT_EQ(2U, host_->TouchEventQueueSize());
+
+  // ACK the second press as NO_CONSUMER_EXISTS. This will dequeue the coalesced
+  // touch-move event (which contains both touch points). Although the second
+  // touch-point does not need to be sent to the renderer, the first touch-point
+  // did move, and so the coalesced touch-event will be sent to the renderer.
+  SendInputEventACK(WebInputEvent::TouchStart,
+                    INPUT_EVENT_ACK_STATE_NO_CONSUMER_EXISTS);
+  EXPECT_EQ(1U, process_->sink().message_count());
+  process_->sink().ClearMessages();
+  EXPECT_EQ(1U, host_->TouchEventQueueSize());
+
+  // ACK the coalesced move as NOT_CONSUMED.
+  SendInputEventACK(WebInputEvent::TouchMove,
+                    INPUT_EVENT_ACK_STATE_NOT_CONSUMED);
+  EXPECT_EQ(0U, process_->sink().message_count());
+  EXPECT_EQ(0U, host_->TouchEventQueueSize());
+
+  // Move just the second touch point. Because the first touch point did not
+  // move, this event should not reach the renderer.
+  MoveTouchPoint(1, 30, 30);
+  SendTouchEvent();
+  EXPECT_EQ(0U, process_->sink().message_count());
+  EXPECT_EQ(0U, host_->TouchEventQueueSize());
+
+  // Move just the first touch point. This should reach the renderer.
+  MoveTouchPoint(0, 10, 10);
+  SendTouchEvent();
+  EXPECT_EQ(1U, process_->sink().message_count());
+  EXPECT_EQ(1U, host_->TouchEventQueueSize());
+  process_->sink().ClearMessages();
+
+  // Move both fingers. This event should reach the renderer (after the ACK of
+  // the previous move event is received), because the first touch point did
+  // move.
+  MoveTouchPoint(0, 15, 15);
+  MoveTouchPoint(1, 25, 25);
+  SendTouchEvent();
+  EXPECT_EQ(0U, process_->sink().message_count());
+
+  SendInputEventACK(WebInputEvent::TouchMove,
+                    INPUT_EVENT_ACK_STATE_CONSUMED);
+  EXPECT_EQ(1U, process_->sink().message_count());
+  EXPECT_EQ(1U, host_->TouchEventQueueSize());
+  process_->sink().ClearMessages();
+
+  SendInputEventACK(WebInputEvent::TouchMove,
+                    INPUT_EVENT_ACK_STATE_CONSUMED);
+  EXPECT_EQ(0U, process_->sink().message_count());
+  EXPECT_EQ(0U, host_->TouchEventQueueSize());
+
+  // Release the first finger. Then move the second finger around some, then
+  // press another finger. Once the release event is ACKed, the move events of
+  // the second finger should be immediately released to the view, and the
+  // touch-press event should be dispatched to the renderer.
+  ReleaseTouchPoint(0);
+  SendTouchEvent();
+  EXPECT_EQ(1U, process_->sink().message_count());
+  EXPECT_EQ(1U, host_->TouchEventQueueSize());
+  process_->sink().ClearMessages();
+
+  MoveTouchPoint(1, 40, 40);
+  SendTouchEvent();
+
+  MoveTouchPoint(1, 50, 50);
+  SendTouchEvent();
+
+  PressTouchPoint(1, 1);
+  SendTouchEvent();
+
+  MoveTouchPoint(1, 30, 30);
+  SendTouchEvent();
+  EXPECT_EQ(0U, process_->sink().message_count());
+  EXPECT_EQ(4U, host_->TouchEventQueueSize());
+  view_->ClearAckedEvent();
+
+  SendInputEventACK(WebKit::WebInputEvent::TouchEnd,
+                    INPUT_EVENT_ACK_STATE_NOT_CONSUMED);
+  EXPECT_EQ(1U, process_->sink().message_count());
+  EXPECT_EQ(2U, host_->TouchEventQueueSize());
+  EXPECT_EQ(WebKit::WebInputEvent::TouchMove, view_->acked_event().type);
+  view_->ClearAckedEvent();
+  process_->sink().ClearMessages();
+
+  // ACK the press with NO_CONSUMED_EXISTS. This should release the queued
+  // touch-move events to the view.
+  SendInputEventACK(WebKit::WebInputEvent::TouchStart,
+                    INPUT_EVENT_ACK_STATE_NO_CONSUMER_EXISTS);
+  EXPECT_EQ(0U, process_->sink().message_count());
+  EXPECT_EQ(0U, host_->TouchEventQueueSize());
+  EXPECT_EQ(WebKit::WebInputEvent::TouchMove, view_->acked_event().type);
+
+  ReleaseTouchPoint(2);
+  ReleaseTouchPoint(1);
   EXPECT_EQ(0U, process_->sink().message_count());
   EXPECT_EQ(0U, host_->TouchEventQueueSize());
 }
@@ -2575,7 +3106,8 @@ TEST_F(RenderWidgetHostTest, AckedTouchEventState) {
                                  WebInputEvent::TouchMove };
 
   for (size_t i = 0; i < arraysize(acks); ++i) {
-    SendInputEventACK(acks[i], false);
+    SendInputEventACK(acks[i],
+                      INPUT_EVENT_ACK_STATE_NOT_CONSUMED);
     EXPECT_EQ(acks[i], view_->acked_event().type);
     ScopedVector<ui::TouchEvent> acked;
 
@@ -2655,7 +3187,8 @@ TEST_F(RenderWidgetHostTest, MultipleInputEvents) {
   // Send two events but only one ack.
   SimulateKeyboardEvent(WebInputEvent::RawKeyDown);
   SimulateKeyboardEvent(WebInputEvent::RawKeyDown);
-  SendInputEventACK(WebInputEvent::RawKeyDown, true);
+  SendInputEventACK(WebInputEvent::RawKeyDown,
+                    INPUT_EVENT_ACK_STATE_CONSUMED);
 
   // Wait long enough for first timeout and see if it fired.
   MessageLoop::current()->PostDelayedTask(
@@ -2685,18 +3218,19 @@ TEST_F(RenderWidgetHostTest, WheelScrollEventOverscrolls) {
   process_->sink().ClearMessages();
 
   // Simulate wheel events.
-  SimulateWheelEvent(0, -5, 0);  // sent directly
-  SimulateWheelEvent(0, -10, 0);  // enqueued
-  SimulateWheelEvent(-10, -3, 0);  // coalesced into previous event
-  SimulateWheelEvent(-15, -1, 0);  // coalesced into previous event
-  SimulateWheelEvent(-10, -3, 0);  // coalesced into previous event
-  SimulateWheelEvent(-20, 16, 1);  // enqueued, different modifiers
+  SimulateWheelEvent(0, -5, 0, true);  // sent directly
+  SimulateWheelEvent(0, -1, 0, true);  // enqueued
+  SimulateWheelEvent(-10, -3, 0, true);  // coalesced into previous event
+  SimulateWheelEvent(-15, -1, 0, true);  // coalesced into previous event
+  SimulateWheelEvent(-30, -3, 0, true);  // coalesced into previous event
+  SimulateWheelEvent(-20, 6, 1, true);  // enqueued, different modifiers
   EXPECT_EQ(OVERSCROLL_NONE, host_->overscroll_mode());
   EXPECT_EQ(1U, process_->sink().message_count());
   process_->sink().ClearMessages();
 
   // Receive ACK the first wheel event as processed.
-  SendInputEventACK(WebInputEvent::MouseWheel, true);
+  SendInputEventACK(WebInputEvent::MouseWheel,
+                    INPUT_EVENT_ACK_STATE_CONSUMED);
   EXPECT_EQ(OVERSCROLL_NONE, host_->overscroll_mode());
   EXPECT_EQ(OVERSCROLL_NONE, host_->overscroll_delegate()->current_mode());
   EXPECT_EQ(1U, process_->sink().message_count());
@@ -2708,10 +3242,11 @@ TEST_F(RenderWidgetHostTest, WheelScrollEventOverscrolls) {
   // started, that event will also be included in the overscroll computation
   // instead of being sent to the renderer. So the result will be an overscroll
   // back navigation, and no event will be sent to the renderer.
-  SendInputEventACK(WebInputEvent::MouseWheel, false);
+  SendInputEventACK(WebInputEvent::MouseWheel,
+                    INPUT_EVENT_ACK_STATE_NOT_CONSUMED);
   EXPECT_EQ(OVERSCROLL_WEST, host_->overscroll_mode());
   EXPECT_EQ(OVERSCROLL_WEST, host_->overscroll_delegate()->current_mode());
-  EXPECT_EQ(-55.f, host_->overscroll_delta_x());
+  EXPECT_EQ(-75.f, host_->overscroll_delta_x());
   EXPECT_EQ(-25.f, host_->overscroll_delegate()->delta_x());
   EXPECT_EQ(0.f, host_->overscroll_delegate()->delta_y());
   EXPECT_EQ(0U, process_->sink().message_count());
@@ -2729,54 +3264,59 @@ TEST_F(RenderWidgetHostTest, WheelScrollOverscrollToggle) {
 
   // Send a wheel event. ACK the event as not processed. This should not
   // initiate an overscroll gesture since it doesn't cross the threshold yet.
-  SimulateWheelEvent(10, -5, 0);
+  SimulateWheelEvent(10, -5, 0, true);
   EXPECT_EQ(1U, process_->sink().message_count());
-  SendInputEventACK(WebInputEvent::MouseWheel, false);
+  SendInputEventACK(WebInputEvent::MouseWheel,
+                    INPUT_EVENT_ACK_STATE_NOT_CONSUMED);
   EXPECT_EQ(OVERSCROLL_NONE, host_->overscroll_mode());
   EXPECT_EQ(OVERSCROLL_NONE, host_->overscroll_delegate()->current_mode());
   process_->sink().ClearMessages();
 
   // Scroll some more so as to not overscroll.
-  SimulateWheelEvent(10, -4, 0);
+  SimulateWheelEvent(10, -4, 0, true);
   EXPECT_EQ(1U, process_->sink().message_count());
-  SendInputEventACK(WebInputEvent::MouseWheel, false);
+  SendInputEventACK(WebInputEvent::MouseWheel,
+                    INPUT_EVENT_ACK_STATE_NOT_CONSUMED);
   EXPECT_EQ(OVERSCROLL_NONE, host_->overscroll_mode());
   EXPECT_EQ(OVERSCROLL_NONE, host_->overscroll_delegate()->current_mode());
   process_->sink().ClearMessages();
 
   // Scroll some more to initiate an overscroll.
-  SimulateWheelEvent(20, -4, 0);
+  SimulateWheelEvent(40, -4, 0, true);
   EXPECT_EQ(1U, process_->sink().message_count());
-  SendInputEventACK(WebInputEvent::MouseWheel, false);
+  SendInputEventACK(WebInputEvent::MouseWheel,
+                    INPUT_EVENT_ACK_STATE_NOT_CONSUMED);
   EXPECT_EQ(OVERSCROLL_EAST, host_->overscroll_mode());
   EXPECT_EQ(OVERSCROLL_EAST, host_->overscroll_delegate()->current_mode());
-  EXPECT_EQ(40.f, host_->overscroll_delta_x());
+  EXPECT_EQ(60.f, host_->overscroll_delta_x());
   EXPECT_EQ(10.f, host_->overscroll_delegate()->delta_x());
   EXPECT_EQ(0.f, host_->overscroll_delegate()->delta_y());
   process_->sink().ClearMessages();
 
   // Scroll in the reverse direction enough to abort the overscroll.
-  SimulateWheelEvent(-20, -4, 0);
+  SimulateWheelEvent(-20, -4, 0, true);
   EXPECT_EQ(0U, process_->sink().message_count());
   EXPECT_EQ(OVERSCROLL_NONE, host_->overscroll_mode());
   EXPECT_EQ(OVERSCROLL_NONE, host_->overscroll_delegate()->current_mode());
 
   // Continue to scroll in the reverse direction.
-  SimulateWheelEvent(-20, 4, 0);
+  SimulateWheelEvent(-20, 4, 0, true);
   EXPECT_EQ(1U, process_->sink().message_count());
-  SendInputEventACK(WebInputEvent::MouseWheel, false);
+  SendInputEventACK(WebInputEvent::MouseWheel,
+                    INPUT_EVENT_ACK_STATE_NOT_CONSUMED);
   EXPECT_EQ(OVERSCROLL_NONE, host_->overscroll_mode());
   EXPECT_EQ(OVERSCROLL_NONE, host_->overscroll_delegate()->current_mode());
   process_->sink().ClearMessages();
 
   // Continue to scroll in the reverse direction enough to initiate overscroll
   // in that direction.
-  SimulateWheelEvent(-35, -2, 0);
+  SimulateWheelEvent(-55, -2, 0, true);
   EXPECT_EQ(1U, process_->sink().message_count());
-  SendInputEventACK(WebInputEvent::MouseWheel, false);
+  SendInputEventACK(WebInputEvent::MouseWheel,
+                    INPUT_EVENT_ACK_STATE_NOT_CONSUMED);
   EXPECT_EQ(OVERSCROLL_WEST, host_->overscroll_mode());
   EXPECT_EQ(OVERSCROLL_WEST, host_->overscroll_delegate()->current_mode());
-  EXPECT_EQ(-55.f, host_->overscroll_delta_x());
+  EXPECT_EQ(-75.f, host_->overscroll_delta_x());
   EXPECT_EQ(-25.f, host_->overscroll_delegate()->delta_x());
   EXPECT_EQ(0.f, host_->overscroll_delegate()->delta_y());
 }
@@ -2787,28 +3327,31 @@ TEST_F(RenderWidgetHostTest, ScrollEventsOverscrollWithFling) {
 
   // Send a wheel event. ACK the event as not processed. This should not
   // initiate an overscroll gesture since it doesn't cross the threshold yet.
-  SimulateWheelEvent(10, -5, 0);
+  SimulateWheelEvent(10, -5, 0, true);
   EXPECT_EQ(1U, process_->sink().message_count());
-  SendInputEventACK(WebInputEvent::MouseWheel, false);
+  SendInputEventACK(WebInputEvent::MouseWheel,
+                    INPUT_EVENT_ACK_STATE_NOT_CONSUMED);
   EXPECT_EQ(OVERSCROLL_NONE, host_->overscroll_mode());
   EXPECT_EQ(OVERSCROLL_NONE, host_->overscroll_delegate()->current_mode());
   process_->sink().ClearMessages();
 
   // Scroll some more so as to not overscroll.
-  SimulateWheelEvent(10, -4, 0);
+  SimulateWheelEvent(20, -4, 0, true);
   EXPECT_EQ(1U, process_->sink().message_count());
-  SendInputEventACK(WebInputEvent::MouseWheel, false);
+  SendInputEventACK(WebInputEvent::MouseWheel,
+                    INPUT_EVENT_ACK_STATE_NOT_CONSUMED);
   EXPECT_EQ(OVERSCROLL_NONE, host_->overscroll_mode());
   EXPECT_EQ(OVERSCROLL_NONE, host_->overscroll_delegate()->current_mode());
   process_->sink().ClearMessages();
 
   // Scroll some more to initiate an overscroll.
-  SimulateWheelEvent(20, -4, 0);
+  SimulateWheelEvent(30, -4, 0, true);
   EXPECT_EQ(1U, process_->sink().message_count());
-  SendInputEventACK(WebInputEvent::MouseWheel, false);
+  SendInputEventACK(WebInputEvent::MouseWheel,
+                    INPUT_EVENT_ACK_STATE_NOT_CONSUMED);
   EXPECT_EQ(OVERSCROLL_EAST, host_->overscroll_mode());
   EXPECT_EQ(OVERSCROLL_EAST, host_->overscroll_delegate()->current_mode());
-  EXPECT_EQ(40.f, host_->overscroll_delta_x());
+  EXPECT_EQ(60.f, host_->overscroll_delta_x());
   EXPECT_EQ(10.f, host_->overscroll_delegate()->delta_x());
   EXPECT_EQ(0.f, host_->overscroll_delegate()->delta_y());
   process_->sink().ClearMessages();
@@ -2831,28 +3374,31 @@ TEST_F(RenderWidgetHostTest, ScrollEventsOverscrollWithZeroFling) {
 
   // Send a wheel event. ACK the event as not processed. This should not
   // initiate an overscroll gesture since it doesn't cross the threshold yet.
-  SimulateWheelEvent(10, -5, 0);
+  SimulateWheelEvent(10, -5, 0, true);
   EXPECT_EQ(1U, process_->sink().message_count());
-  SendInputEventACK(WebInputEvent::MouseWheel, false);
+  SendInputEventACK(WebInputEvent::MouseWheel,
+                    INPUT_EVENT_ACK_STATE_NOT_CONSUMED);
   EXPECT_EQ(OVERSCROLL_NONE, host_->overscroll_mode());
   EXPECT_EQ(OVERSCROLL_NONE, host_->overscroll_delegate()->current_mode());
   process_->sink().ClearMessages();
 
   // Scroll some more so as to not overscroll.
-  SimulateWheelEvent(10, -4, 0);
+  SimulateWheelEvent(20, -4, 0, true);
   EXPECT_EQ(1U, process_->sink().message_count());
-  SendInputEventACK(WebInputEvent::MouseWheel, false);
+  SendInputEventACK(WebInputEvent::MouseWheel,
+                    INPUT_EVENT_ACK_STATE_NOT_CONSUMED);
   EXPECT_EQ(OVERSCROLL_NONE, host_->overscroll_mode());
   EXPECT_EQ(OVERSCROLL_NONE, host_->overscroll_delegate()->current_mode());
   process_->sink().ClearMessages();
 
   // Scroll some more to initiate an overscroll.
-  SimulateWheelEvent(20, -4, 0);
+  SimulateWheelEvent(30, -4, 0, true);
   EXPECT_EQ(1U, process_->sink().message_count());
-  SendInputEventACK(WebInputEvent::MouseWheel, false);
+  SendInputEventACK(WebInputEvent::MouseWheel,
+                    INPUT_EVENT_ACK_STATE_NOT_CONSUMED);
   EXPECT_EQ(OVERSCROLL_EAST, host_->overscroll_mode());
   EXPECT_EQ(OVERSCROLL_EAST, host_->overscroll_delegate()->current_mode());
-  EXPECT_EQ(40.f, host_->overscroll_delta_x());
+  EXPECT_EQ(60.f, host_->overscroll_delta_x());
   EXPECT_EQ(10.f, host_->overscroll_delegate()->delta_x());
   EXPECT_EQ(0.f, host_->overscroll_delegate()->delta_y());
   process_->sink().ClearMessages();
@@ -2883,8 +3429,10 @@ TEST_F(RenderWidgetHostTest, ReverseFlingCancelsOverscroll) {
     SimulateGestureEvent(WebInputEvent::GestureScrollBegin,
                          WebGestureEvent::Touchscreen);
     SimulateGestureScrollUpdateEvent(300, -5, 0);
-    SendInputEventACK(WebInputEvent::GestureScrollBegin, true);
-    SendInputEventACK(WebInputEvent::GestureScrollUpdate, false);
+    SendInputEventACK(WebInputEvent::GestureScrollBegin,
+                      INPUT_EVENT_ACK_STATE_CONSUMED);
+    SendInputEventACK(WebInputEvent::GestureScrollUpdate,
+                      INPUT_EVENT_ACK_STATE_NOT_CONSUMED);
     EXPECT_EQ(OVERSCROLL_EAST, host_->overscroll_mode());
     EXPECT_EQ(OVERSCROLL_EAST, host_->overscroll_delegate()->current_mode());
 
@@ -2892,7 +3440,8 @@ TEST_F(RenderWidgetHostTest, ReverseFlingCancelsOverscroll) {
                          WebGestureEvent::Touchscreen);
     EXPECT_EQ(OVERSCROLL_EAST, host_->overscroll_delegate()->completed_mode());
     EXPECT_EQ(OVERSCROLL_NONE, host_->overscroll_delegate()->current_mode());
-    SendInputEventACK(WebInputEvent::GestureScrollEnd, false);
+    SendInputEventACK(WebInputEvent::GestureScrollEnd,
+                      INPUT_EVENT_ACK_STATE_NOT_CONSUMED);
   }
 
   {
@@ -2904,8 +3453,10 @@ TEST_F(RenderWidgetHostTest, ReverseFlingCancelsOverscroll) {
     SimulateGestureEvent(WebInputEvent::GestureScrollBegin,
                          WebGestureEvent::Touchscreen);
     SimulateGestureScrollUpdateEvent(-300, -5, 0);
-    SendInputEventACK(WebInputEvent::GestureScrollBegin, true);
-    SendInputEventACK(WebInputEvent::GestureScrollUpdate, false);
+    SendInputEventACK(WebInputEvent::GestureScrollBegin,
+                      INPUT_EVENT_ACK_STATE_CONSUMED);
+    SendInputEventACK(WebInputEvent::GestureScrollUpdate,
+                      INPUT_EVENT_ACK_STATE_NOT_CONSUMED);
     EXPECT_EQ(OVERSCROLL_WEST, host_->overscroll_mode());
     EXPECT_EQ(OVERSCROLL_WEST, host_->overscroll_delegate()->current_mode());
     SimulateGestureFlingStartEvent(100, 0, WebGestureEvent::Touchscreen);
@@ -2928,18 +3479,21 @@ TEST_F(RenderWidgetHostTest, GestureScrollOverscrolls) {
   SimulateGestureScrollUpdateEvent(8, -5, 0);
 
   // ACK both events as being processed.
-  SendInputEventACK(WebInputEvent::GestureScrollBegin, true);
-  SendInputEventACK(WebInputEvent::GestureScrollUpdate, true);
+  SendInputEventACK(WebInputEvent::GestureScrollBegin,
+                    INPUT_EVENT_ACK_STATE_CONSUMED);
+  SendInputEventACK(WebInputEvent::GestureScrollUpdate,
+                    INPUT_EVENT_ACK_STATE_CONSUMED);
   EXPECT_EQ(OVERSCROLL_NONE, host_->overscroll_mode());
   EXPECT_EQ(OVERSCROLL_NONE, host_->overscroll_delegate()->current_mode());
 
   // Send another gesture event and ACK as not being processed. This should
   // initiate the navigation gesture.
-  SimulateGestureScrollUpdateEvent(35, -5, 0);
-  SendInputEventACK(WebInputEvent::GestureScrollUpdate, false);
+  SimulateGestureScrollUpdateEvent(55, -5, 0);
+  SendInputEventACK(WebInputEvent::GestureScrollUpdate,
+                    INPUT_EVENT_ACK_STATE_NOT_CONSUMED);
   EXPECT_EQ(OVERSCROLL_EAST, host_->overscroll_mode());
   EXPECT_EQ(OVERSCROLL_EAST, host_->overscroll_delegate()->current_mode());
-  EXPECT_EQ(35.f, host_->overscroll_delta_x());
+  EXPECT_EQ(55.f, host_->overscroll_delta_x());
   EXPECT_EQ(-5.f, host_->overscroll_delta_y());
   EXPECT_EQ(5.f, host_->overscroll_delegate()->delta_x());
   EXPECT_EQ(0.f, host_->overscroll_delegate()->delta_y());
@@ -2952,7 +3506,7 @@ TEST_F(RenderWidgetHostTest, GestureScrollOverscrolls) {
   SimulateGestureScrollUpdateEvent(10, -5, 0);
   EXPECT_EQ(OVERSCROLL_EAST, host_->overscroll_mode());
   EXPECT_EQ(OVERSCROLL_EAST, host_->overscroll_delegate()->current_mode());
-  EXPECT_EQ(45.f, host_->overscroll_delta_x());
+  EXPECT_EQ(65.f, host_->overscroll_delta_x());
   EXPECT_EQ(-10.f, host_->overscroll_delta_y());
   EXPECT_EQ(15.f, host_->overscroll_delegate()->delta_x());
   EXPECT_EQ(0.f, host_->overscroll_delegate()->delta_y());
@@ -2982,7 +3536,8 @@ TEST_F(RenderWidgetHostTest, GestureScrollDebounceOverscrolls) {
                        WebGestureEvent::Touchscreen);
   EXPECT_EQ(1U, process_->sink().message_count());
   process_->sink().ClearMessages();
-  SendInputEventACK(WebInputEvent::GestureScrollBegin, true);
+  SendInputEventACK(WebInputEvent::GestureScrollBegin,
+                    INPUT_EVENT_ACK_STATE_CONSUMED);
 
   // Send update events.
   SimulateGestureScrollUpdateEvent(25, -5, 0);
@@ -3007,7 +3562,7 @@ TEST_F(RenderWidgetHostTest, GestureScrollDebounceOverscrolls) {
   EXPECT_EQ(2U, host_->GestureEventDebouncingQueueSize());
 
   // Send another update event. This should get into the queue.
-  SimulateGestureScrollUpdateEvent(10, 5, 0);
+  SimulateGestureScrollUpdateEvent(30, 5, 0);
   EXPECT_EQ(0U, process_->sink().message_count());
   EXPECT_EQ(2U, host_->GestureEventLastQueueEventSize());
   EXPECT_EQ(0U, host_->GestureEventDebouncingQueueSize());
@@ -3017,7 +3572,8 @@ TEST_F(RenderWidgetHostTest, GestureScrollDebounceOverscrolls) {
   // This will contribute to the overscroll gesture, but not enough for the
   // overscroll controller to start consuming gesture events. This also cause
   // the queued gesture event to be forwarded to the renderer.
-  SendInputEventACK(WebInputEvent::GestureScrollUpdate, false);
+  SendInputEventACK(WebInputEvent::GestureScrollUpdate,
+                    INPUT_EVENT_ACK_STATE_NOT_CONSUMED);
   EXPECT_EQ(OVERSCROLL_NONE, host_->overscroll_mode());
   EXPECT_EQ(OVERSCROLL_NONE, host_->overscroll_delegate()->current_mode());
   EXPECT_EQ(1U, host_->GestureEventLastQueueEventSize());
@@ -3036,10 +3592,11 @@ TEST_F(RenderWidgetHostTest, GestureScrollDebounceOverscrolls) {
   // This will now initiate an overscroll. This will also cause the queued
   // gesture event to be released. But instead of going to the renderer, it will
   // be consumed by the overscroll controller.
-  SendInputEventACK(WebInputEvent::GestureScrollUpdate, false);
+  SendInputEventACK(WebInputEvent::GestureScrollUpdate,
+                    INPUT_EVENT_ACK_STATE_NOT_CONSUMED);
   EXPECT_EQ(OVERSCROLL_EAST, host_->overscroll_mode());
   EXPECT_EQ(OVERSCROLL_EAST, host_->overscroll_delegate()->current_mode());
-  EXPECT_EQ(45.f, host_->overscroll_delta_x());
+  EXPECT_EQ(65.f, host_->overscroll_delta_x());
   EXPECT_EQ(15.f, host_->overscroll_delegate()->delta_x());
   EXPECT_EQ(0.f, host_->overscroll_delegate()->delta_y());
   EXPECT_EQ(0U, process_->sink().message_count());
@@ -3059,10 +3616,11 @@ TEST_F(RenderWidgetHostTest, GestureScrollDebounceTimerOverscroll) {
                        WebGestureEvent::Touchscreen);
   EXPECT_EQ(1U, process_->sink().message_count());
   process_->sink().ClearMessages();
-  SendInputEventACK(WebInputEvent::GestureScrollBegin, true);
+  SendInputEventACK(WebInputEvent::GestureScrollBegin,
+                    INPUT_EVENT_ACK_STATE_CONSUMED);
 
   // Send update events.
-  SimulateGestureScrollUpdateEvent(35, -5, 0);
+  SimulateGestureScrollUpdateEvent(55, -5, 0);
   EXPECT_EQ(1U, host_->GestureEventLastQueueEventSize());
   EXPECT_EQ(0U, host_->GestureEventDebouncingQueueSize());
   EXPECT_TRUE(host_->ScrollingInProgress());
@@ -3077,10 +3635,11 @@ TEST_F(RenderWidgetHostTest, GestureScrollDebounceTimerOverscroll) {
   EXPECT_EQ(1U, host_->GestureEventDebouncingQueueSize());
 
   // Receive ACK for the scroll-update event.
-  SendInputEventACK(WebInputEvent::GestureScrollUpdate, false);
+  SendInputEventACK(WebInputEvent::GestureScrollUpdate,
+                    INPUT_EVENT_ACK_STATE_NOT_CONSUMED);
   EXPECT_EQ(OVERSCROLL_EAST, host_->overscroll_mode());
   EXPECT_EQ(OVERSCROLL_EAST, host_->overscroll_delegate()->current_mode());
-  EXPECT_EQ(35.f, host_->overscroll_delta_x());
+  EXPECT_EQ(55.f, host_->overscroll_delta_x());
   EXPECT_EQ(5.f, host_->overscroll_delegate()->delta_x());
   EXPECT_EQ(0.f, host_->overscroll_delegate()->delta_y());
   EXPECT_EQ(0U, host_->GestureEventLastQueueEventSize());
@@ -3119,13 +3678,15 @@ TEST_F(RenderWidgetHostTest, OverscrollWithTouchEvents) {
   SendTouchEvent();
   EXPECT_EQ(1U, process_->sink().message_count());
   process_->sink().ClearMessages();
-  SendInputEventACK(WebInputEvent::TouchStart, false);
+  SendInputEventACK(WebInputEvent::TouchStart,
+                    INPUT_EVENT_ACK_STATE_NOT_CONSUMED);
 
   MoveTouchPoint(0, 20, 5);
   SendTouchEvent();
   EXPECT_EQ(1U, process_->sink().message_count());
   process_->sink().ClearMessages();
-  SendInputEventACK(WebInputEvent::TouchMove, false);
+  SendInputEventACK(WebInputEvent::TouchMove,
+                    INPUT_EVENT_ACK_STATE_NOT_CONSUMED);
 
   EXPECT_EQ(OVERSCROLL_NONE, host_->overscroll_mode());
   EXPECT_EQ(OVERSCROLL_NONE, host_->overscroll_delegate()->current_mode());
@@ -3133,25 +3694,29 @@ TEST_F(RenderWidgetHostTest, OverscrollWithTouchEvents) {
   SimulateGestureEvent(WebInputEvent::GestureScrollBegin,
                        WebGestureEvent::Touchscreen);
   SimulateGestureScrollUpdateEvent(20, 4, 0);
-  SendInputEventACK(WebInputEvent::GestureScrollBegin, false);
-  SendInputEventACK(WebInputEvent::GestureScrollUpdate, false);
+  SendInputEventACK(WebInputEvent::GestureScrollBegin,
+                    INPUT_EVENT_ACK_STATE_NOT_CONSUMED);
+  SendInputEventACK(WebInputEvent::GestureScrollUpdate,
+                    INPUT_EVENT_ACK_STATE_NOT_CONSUMED);
   EXPECT_EQ(OVERSCROLL_NONE, host_->overscroll_mode());
   EXPECT_EQ(OVERSCROLL_NONE, host_->overscroll_delegate()->current_mode());
   process_->sink().ClearMessages();
 
   // Another touch move event should reach the renderer since overscroll hasn't
   // started yet.
-  MoveTouchPoint(0, 45, 10);
+  MoveTouchPoint(0, 65, 10);
   SendTouchEvent();
   EXPECT_EQ(1U, process_->sink().message_count());
   process_->sink().ClearMessages();
 
-  SendInputEventACK(WebInputEvent::TouchMove, false);
-  SimulateGestureScrollUpdateEvent(25, 5, 0);
-  SendInputEventACK(WebInputEvent::GestureScrollUpdate, false);
+  SendInputEventACK(WebInputEvent::TouchMove,
+                    INPUT_EVENT_ACK_STATE_NOT_CONSUMED);
+  SimulateGestureScrollUpdateEvent(45, 5, 0);
+  SendInputEventACK(WebInputEvent::GestureScrollUpdate,
+                    INPUT_EVENT_ACK_STATE_NOT_CONSUMED);
   EXPECT_EQ(OVERSCROLL_EAST, host_->overscroll_mode());
   EXPECT_EQ(OVERSCROLL_EAST, host_->overscroll_delegate()->current_mode());
-  EXPECT_EQ(45.f, host_->overscroll_delta_x());
+  EXPECT_EQ(65.f, host_->overscroll_delta_x());
   EXPECT_EQ(15.f, host_->overscroll_delegate()->delta_x());
   EXPECT_EQ(0.f, host_->overscroll_delegate()->delta_y());
   EXPECT_EQ(0U, host_->TouchEventQueueSize());
@@ -3160,13 +3725,13 @@ TEST_F(RenderWidgetHostTest, OverscrollWithTouchEvents) {
   // Try to send another touch event. Now that overscroll has started, the
   // controller should consume the touch event, and the touch-event queue should
   // remain empty.
-  MoveTouchPoint(0, 35, 5);
+  MoveTouchPoint(0, 55, 5);
   SendTouchEvent();
   EXPECT_EQ(0U, process_->sink().message_count());
   EXPECT_EQ(0U, host_->TouchEventQueueSize());
   EXPECT_EQ(OVERSCROLL_EAST, host_->overscroll_mode());
   EXPECT_EQ(OVERSCROLL_EAST, host_->overscroll_delegate()->current_mode());
-  EXPECT_EQ(45.f, host_->overscroll_delta_x());
+  EXPECT_EQ(65.f, host_->overscroll_delta_x());
   EXPECT_EQ(15.f, host_->overscroll_delegate()->delta_x());
   EXPECT_EQ(0.f, host_->overscroll_delegate()->delta_y());
 
@@ -3175,18 +3740,18 @@ TEST_F(RenderWidgetHostTest, OverscrollWithTouchEvents) {
   EXPECT_EQ(0U, host_->TouchEventQueueSize());
   EXPECT_EQ(OVERSCROLL_EAST, host_->overscroll_mode());
   EXPECT_EQ(OVERSCROLL_EAST, host_->overscroll_delegate()->current_mode());
-  EXPECT_EQ(35.f, host_->overscroll_delta_x());
+  EXPECT_EQ(55.f, host_->overscroll_delta_x());
   EXPECT_EQ(5.f, host_->overscroll_delegate()->delta_x());
   EXPECT_EQ(0.f, host_->overscroll_delegate()->delta_y());
 
-  MoveTouchPoint(0, 235, 5);
+  MoveTouchPoint(0, 255, 5);
   SendTouchEvent();
   SimulateGestureScrollUpdateEvent(200, 0, 0);
   EXPECT_EQ(0U, process_->sink().message_count());
   EXPECT_EQ(0U, host_->TouchEventQueueSize());
   EXPECT_EQ(OVERSCROLL_EAST, host_->overscroll_mode());
   EXPECT_EQ(OVERSCROLL_EAST, host_->overscroll_delegate()->current_mode());
-  EXPECT_EQ(235.f, host_->overscroll_delta_x());
+  EXPECT_EQ(255.f, host_->overscroll_delta_x());
   EXPECT_EQ(205.f, host_->overscroll_delegate()->delta_x());
   EXPECT_EQ(0.f, host_->overscroll_delegate()->delta_y());
 
@@ -3222,14 +3787,15 @@ TEST_F(RenderWidgetHostTest, TouchGestureEndDispatchedAfterOverscrollComplete) {
   EXPECT_EQ(1U, process_->sink().message_count());
   EXPECT_EQ(1U, host_->GestureEventLastQueueEventSize());
   process_->sink().ClearMessages();
-  SendInputEventACK(WebInputEvent::GestureScrollBegin, true);
+  SendInputEventACK(WebInputEvent::GestureScrollBegin,
+                    INPUT_EVENT_ACK_STATE_CONSUMED);
   EXPECT_EQ(0U, host_->GestureEventLastQueueEventSize());
   EXPECT_EQ(0U, process_->sink().message_count());
   EXPECT_EQ(OVERSCROLL_NONE, host_->overscroll_mode());
   EXPECT_EQ(OVERSCROLL_NONE, host_->overscroll_delegate()->current_mode());
 
   // Send update events.
-  SimulateGestureScrollUpdateEvent(35, -5, 0);
+  SimulateGestureScrollUpdateEvent(55, -5, 0);
   EXPECT_EQ(1U, host_->GestureEventLastQueueEventSize());
   EXPECT_EQ(0U, host_->GestureEventDebouncingQueueSize());
   EXPECT_TRUE(host_->ScrollingInProgress());
@@ -3238,12 +3804,13 @@ TEST_F(RenderWidgetHostTest, TouchGestureEndDispatchedAfterOverscrollComplete) {
   EXPECT_EQ(OVERSCROLL_NONE, host_->overscroll_mode());
   EXPECT_EQ(OVERSCROLL_NONE, host_->overscroll_delegate()->current_mode());
 
-  SendInputEventACK(WebInputEvent::GestureScrollUpdate, false);
+  SendInputEventACK(WebInputEvent::GestureScrollUpdate,
+                    INPUT_EVENT_ACK_STATE_NOT_CONSUMED);
   EXPECT_EQ(0U, host_->GestureEventLastQueueEventSize());
   EXPECT_EQ(0U, process_->sink().message_count());
   EXPECT_EQ(OVERSCROLL_EAST, host_->overscroll_mode());
   EXPECT_EQ(OVERSCROLL_EAST, host_->overscroll_delegate()->current_mode());
-  EXPECT_EQ(35.f, host_->overscroll_delta_x());
+  EXPECT_EQ(55.f, host_->overscroll_delta_x());
   EXPECT_EQ(5.f, host_->overscroll_delegate()->delta_x());
   EXPECT_EQ(0.f, host_->overscroll_delegate()->delta_y());
 
@@ -3264,7 +3831,8 @@ TEST_F(RenderWidgetHostTest, TouchGestureEndDispatchedAfterOverscrollComplete) {
   EXPECT_EQ(1U, host_->GestureEventLastQueueEventSize());
   EXPECT_EQ(0U, host_->GestureEventDebouncingQueueSize());
 
-  SendInputEventACK(WebKit::WebInputEvent::GestureScrollEnd, false);
+  SendInputEventACK(WebKit::WebInputEvent::GestureScrollEnd,
+                    INPUT_EVENT_ACK_STATE_NOT_CONSUMED);
   EXPECT_EQ(0U, process_->sink().message_count());
   EXPECT_EQ(0U, host_->GestureEventLastQueueEventSize());
   EXPECT_EQ(0U, host_->GestureEventDebouncingQueueSize());
@@ -3275,7 +3843,8 @@ TEST_F(RenderWidgetHostTest, TouchGestureEndDispatchedAfterOverscrollComplete) {
   EXPECT_EQ(1U, process_->sink().message_count());
   EXPECT_EQ(1U, host_->GestureEventLastQueueEventSize());
   process_->sink().ClearMessages();
-  SendInputEventACK(WebInputEvent::GestureScrollBegin, true);
+  SendInputEventACK(WebInputEvent::GestureScrollBegin,
+                    INPUT_EVENT_ACK_STATE_CONSUMED);
   EXPECT_EQ(0U, host_->GestureEventLastQueueEventSize());
   EXPECT_EQ(0U, process_->sink().message_count());
   EXPECT_EQ(OVERSCROLL_NONE, host_->overscroll_mode());
@@ -3291,13 +3860,14 @@ TEST_F(RenderWidgetHostTest, TouchGestureEndDispatchedAfterOverscrollComplete) {
   EXPECT_EQ(OVERSCROLL_NONE, host_->overscroll_mode());
   EXPECT_EQ(OVERSCROLL_NONE, host_->overscroll_delegate()->current_mode());
 
-  SendInputEventACK(WebInputEvent::GestureScrollUpdate, false);
+  SendInputEventACK(WebInputEvent::GestureScrollUpdate,
+                    INPUT_EVENT_ACK_STATE_NOT_CONSUMED);
   EXPECT_EQ(0U, host_->GestureEventLastQueueEventSize());
   EXPECT_EQ(0U, process_->sink().message_count());
   EXPECT_EQ(OVERSCROLL_EAST, host_->overscroll_mode());
   EXPECT_EQ(OVERSCROLL_EAST, host_->overscroll_delegate()->current_mode());
   EXPECT_EQ(235.f, host_->overscroll_delta_x());
-  EXPECT_EQ(205.f, host_->overscroll_delegate()->delta_x());
+  EXPECT_EQ(185.f, host_->overscroll_delegate()->delta_x());
   EXPECT_EQ(0.f, host_->overscroll_delegate()->delta_y());
 
   // Send end event.
@@ -3318,10 +3888,51 @@ TEST_F(RenderWidgetHostTest, TouchGestureEndDispatchedAfterOverscrollComplete) {
   EXPECT_EQ(1U, host_->GestureEventLastQueueEventSize());
   EXPECT_EQ(0U, host_->GestureEventDebouncingQueueSize());
 
-  SendInputEventACK(WebKit::WebInputEvent::GestureScrollEnd, false);
+  SendInputEventACK(WebKit::WebInputEvent::GestureScrollEnd,
+                    INPUT_EVENT_ACK_STATE_NOT_CONSUMED);
   EXPECT_EQ(0U, process_->sink().message_count());
   EXPECT_EQ(0U, host_->GestureEventLastQueueEventSize());
   EXPECT_EQ(0U, host_->GestureEventDebouncingQueueSize());
+}
+
+TEST_F(RenderWidgetHostTest, OverscrollDirectionChange) {
+  host_->SetupForOverscrollControllerTest();
+  host_->set_debounce_interval_time_ms(100);
+  process_->sink().ClearMessages();
+
+  // Start scrolling. Receive ACK as it being processed.
+  SimulateGestureEvent(WebInputEvent::GestureScrollBegin,
+                       WebGestureEvent::Touchscreen);
+  EXPECT_EQ(1U, process_->sink().message_count());
+  process_->sink().ClearMessages();
+  SendInputEventACK(WebInputEvent::GestureScrollBegin,
+                    INPUT_EVENT_ACK_STATE_CONSUMED);
+
+  // Send update events and receive ack as not consumed.
+  SimulateGestureScrollUpdateEvent(125, -5, 0);
+  EXPECT_EQ(1U, host_->GestureEventLastQueueEventSize());
+  EXPECT_EQ(0U, host_->GestureEventDebouncingQueueSize());
+  EXPECT_TRUE(host_->ScrollingInProgress());
+  EXPECT_EQ(1U, process_->sink().message_count());
+  process_->sink().ClearMessages();
+
+  SendInputEventACK(WebInputEvent::GestureScrollUpdate,
+                    INPUT_EVENT_ACK_STATE_NOT_CONSUMED);
+  EXPECT_EQ(OVERSCROLL_EAST, host_->overscroll_mode());
+  EXPECT_EQ(OVERSCROLL_EAST, host_->overscroll_delegate()->current_mode());
+  EXPECT_EQ(0U, process_->sink().message_count());
+
+  // Send another update event, but in the reverse direction. The overscroll
+  // controller will consume the event, and reset the overscroll mode.
+  SimulateGestureScrollUpdateEvent(-260, 0, 0);
+  EXPECT_EQ(0U, process_->sink().message_count());
+  EXPECT_EQ(OVERSCROLL_NONE, host_->overscroll_mode());
+
+  // Since the overscroll mode has been reset, the next scroll update events
+  // should reach the renderer.
+  SimulateGestureScrollUpdateEvent(-20, 0, 0);
+  EXPECT_EQ(1U, process_->sink().message_count());
+  EXPECT_EQ(OVERSCROLL_NONE, host_->overscroll_mode());
 }
 
 }  // namespace content

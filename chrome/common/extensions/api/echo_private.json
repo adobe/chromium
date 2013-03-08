@@ -5,6 +5,9 @@
 [
   {
     "namespace": "echoPrivate",
+    "compiler_options": {
+      "implemented_in": "chrome/browser/chromeos/extensions/echo_private_api.h"
+    },
     "nodoc": true,
     "platforms": ["chromeos"],
     "types": [],
@@ -27,6 +30,42 @@
                 "name": "result",
                 "type": "string",
                 "description" : "The coupon code."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "getOobeTimestamp",
+        "description": "Get the OOBE timestamp.",
+        "type": "function",
+        "parameters": [
+          {
+            "name": "callback",
+            "type": "function",
+            "parameters": [
+              {
+                "name": "result",
+                "type": "string",
+                "description" : "The OOBE timestamp."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "checkAllowRedeemOffers",
+        "description": "Check if device policy allows users to redeem offers.",
+        "type": "function",
+        "parameters": [
+          {
+            "name": "callback",
+            "type": "function",
+            "parameters": [
+              {
+                "name": "result",
+                "type": "boolean",
+                "description" : "true if allowed to redeem offers."
               }
             ]
           }

@@ -48,13 +48,13 @@ class MockExtensionService : public TestExtensionService {
   virtual ~MockExtensionService();
 
   // Adds an extension with id |id| to be returned by GetExtensionById.
-  void AddExtensionWithId(const std::string& id, Extension::Type type);
+  void AddExtensionWithId(const std::string& id, Manifest::Type type);
 
   // Adds an extension with id |id| to be returned by GetExtensionById, with
   // a set of permissions.
   void AddExtensionWithIdAndPermissions(
       const std::string& id,
-      Extension::Type type,
+      Manifest::Type type,
       const std::set<std::string>& permissions);
 
   virtual const Extension* GetExtensionById(
@@ -84,7 +84,7 @@ class MockExtensionSystem : public TestExtensionSystem {
 // the tests.
 class MockProfile : public TestingProfile {
  public:
-  explicit MockProfile(const FilePath& file_path);
+  explicit MockProfile(const base::FilePath& file_path);
   virtual ~MockProfile();
 };
 
@@ -100,7 +100,7 @@ class ScopedSettingsStorageFactory : public SettingsStorageFactory {
   void Reset(const scoped_refptr<SettingsStorageFactory>& delegate);
 
   // SettingsStorageFactory implementation.
-  virtual ValueStore* Create(const FilePath& base_path,
+  virtual ValueStore* Create(const base::FilePath& base_path,
                              const std::string& extension_id) OVERRIDE;
 
  private:

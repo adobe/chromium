@@ -6,7 +6,7 @@
 #include <string>
 
 #include "base/basictypes.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/platform_file.h"
 #include "content/browser/child_process_security_policy_impl.h"
 #include "content/public/common/url_constants.h"
@@ -31,7 +31,7 @@ class ChildProcessSecurityPolicyTestBrowserClient
  public:
   ChildProcessSecurityPolicyTestBrowserClient() {}
 
-  virtual bool IsHandledURL(const GURL& url) {
+  virtual bool IsHandledURL(const GURL& url) OVERRIDE {
     return schemes_.find(url.scheme()) != schemes_.end();
   }
 
@@ -300,16 +300,21 @@ TEST_F(ChildProcessSecurityPolicyTest, CanReadFiles) {
 
   p->Add(kRendererID);
 
-  EXPECT_FALSE(p->CanReadFile(kRendererID, FilePath(TEST_PATH("/etc/passwd"))));
-  p->GrantReadFile(kRendererID, FilePath(TEST_PATH("/etc/passwd")));
-  EXPECT_TRUE(p->CanReadFile(kRendererID, FilePath(TEST_PATH("/etc/passwd"))));
-  EXPECT_FALSE(p->CanReadFile(kRendererID, FilePath(TEST_PATH("/etc/shadow"))));
+  EXPECT_FALSE(p->CanReadFile(kRendererID,
+                              base::FilePath(TEST_PATH("/etc/passwd"))));
+  p->GrantReadFile(kRendererID, base::FilePath(TEST_PATH("/etc/passwd")));
+  EXPECT_TRUE(p->CanReadFile(kRendererID,
+                             base::FilePath(TEST_PATH("/etc/passwd"))));
+  EXPECT_FALSE(p->CanReadFile(kRendererID,
+                              base::FilePath(TEST_PATH("/etc/shadow"))));
 
   p->Remove(kRendererID);
   p->Add(kRendererID);
 
-  EXPECT_FALSE(p->CanReadFile(kRendererID, FilePath(TEST_PATH("/etc/passwd"))));
-  EXPECT_FALSE(p->CanReadFile(kRendererID, FilePath(TEST_PATH("/etc/shadow"))));
+  EXPECT_FALSE(p->CanReadFile(kRendererID,
+                              base::FilePath(TEST_PATH("/etc/passwd"))));
+  EXPECT_FALSE(p->CanReadFile(kRendererID,
+                              base::FilePath(TEST_PATH("/etc/shadow"))));
 
   p->Remove(kRendererID);
 }
@@ -320,40 +325,51 @@ TEST_F(ChildProcessSecurityPolicyTest, CanReadDirectories) {
 
   p->Add(kRendererID);
 
-  EXPECT_FALSE(p->CanReadDirectory(kRendererID, FilePath(TEST_PATH("/etc/"))));
-  p->GrantReadDirectory(kRendererID, FilePath(TEST_PATH("/etc/")));
-  EXPECT_TRUE(p->CanReadDirectory(kRendererID, FilePath(TEST_PATH("/etc/"))));
-  EXPECT_TRUE(p->CanReadFile(kRendererID, FilePath(TEST_PATH("/etc/passwd"))));
+  EXPECT_FALSE(p->CanReadDirectory(kRendererID,
+                                   base::FilePath(TEST_PATH("/etc/"))));
+  p->GrantReadDirectory(kRendererID,
+                        base::FilePath(TEST_PATH("/etc/")));
+  EXPECT_TRUE(p->CanReadDirectory(kRendererID,
+                                  base::FilePath(TEST_PATH("/etc/"))));
+  EXPECT_TRUE(p->CanReadFile(kRendererID,
+                             base::FilePath(TEST_PATH("/etc/passwd"))));
 
   p->Remove(kRendererID);
   p->Add(kRendererID);
 
-  EXPECT_FALSE(p->CanReadDirectory(kRendererID, FilePath(TEST_PATH("/etc/"))));
-  EXPECT_FALSE(p->CanReadFile(kRendererID, FilePath(TEST_PATH("/etc/passwd"))));
+  EXPECT_FALSE(p->CanReadDirectory(kRendererID,
+                                   base::FilePath(TEST_PATH("/etc/"))));
+  EXPECT_FALSE(p->CanReadFile(kRendererID,
+                              base::FilePath(TEST_PATH("/etc/passwd"))));
 
   // Just granting read permission as a file doesn't imply reading as a
   // directory.
-  p->GrantReadFile(kRendererID, FilePath(TEST_PATH("/etc/")));
-  EXPECT_TRUE(p->CanReadFile(kRendererID, FilePath(TEST_PATH("/etc/passwd"))));
-  EXPECT_FALSE(p->CanReadDirectory(kRendererID, FilePath(TEST_PATH("/etc/"))));
+  p->GrantReadFile(kRendererID, base::FilePath(TEST_PATH("/etc/")));
+  EXPECT_TRUE(p->CanReadFile(kRendererID,
+                             base::FilePath(TEST_PATH("/etc/passwd"))));
+  EXPECT_FALSE(p->CanReadDirectory(kRendererID,
+                                   base::FilePath(TEST_PATH("/etc/"))));
 
   p->Remove(kRendererID);
 }
 
 TEST_F(ChildProcessSecurityPolicyTest, FilePermissions) {
-  FilePath granted_file = FilePath(TEST_PATH("/home/joe"));
-  FilePath sibling_file = FilePath(TEST_PATH("/home/bob"));
-  FilePath child_file = FilePath(TEST_PATH("/home/joe/file"));
-  FilePath parent_file = FilePath(TEST_PATH("/home"));
-  FilePath parent_slash_file = FilePath(TEST_PATH("/home/"));
-  FilePath child_traversal1 = FilePath(TEST_PATH("/home/joe/././file"));
-  FilePath child_traversal2 = FilePath(
+  base::FilePath granted_file = base::FilePath(TEST_PATH("/home/joe"));
+  base::FilePath sibling_file = base::FilePath(TEST_PATH("/home/bob"));
+  base::FilePath child_file = base::FilePath(TEST_PATH("/home/joe/file"));
+  base::FilePath parent_file = base::FilePath(TEST_PATH("/home"));
+  base::FilePath parent_slash_file = base::FilePath(TEST_PATH("/home/"));
+  base::FilePath child_traversal1 =
+      base::FilePath(TEST_PATH("/home/joe/././file"));
+  base::FilePath child_traversal2 = base::FilePath(
       TEST_PATH("/home/joe/file/../otherfile"));
-  FilePath evil_traversal1 = FilePath(TEST_PATH("/home/joe/../../etc/passwd"));
-  FilePath evil_traversal2 = FilePath(
+  base::FilePath evil_traversal1 =
+      base::FilePath(TEST_PATH("/home/joe/../../etc/passwd"));
+  base::FilePath evil_traversal2 = base::FilePath(
       TEST_PATH("/home/joe/./.././../etc/passwd"));
-  FilePath self_traversal = FilePath(TEST_PATH("/home/joe/../joe/file"));
-  FilePath relative_file = FilePath(FILE_PATH_LITERAL("home/joe"));
+  base::FilePath self_traversal =
+      base::FilePath(TEST_PATH("/home/joe/../joe/file"));
+  base::FilePath relative_file = base::FilePath(FILE_PATH_LITERAL("home/joe"));
 
   ChildProcessSecurityPolicyImpl* p =
       ChildProcessSecurityPolicyImpl::GetInstance();
@@ -510,7 +526,7 @@ TEST_F(ChildProcessSecurityPolicyTest, RemoveRace) {
       ChildProcessSecurityPolicyImpl::GetInstance();
 
   GURL url("file:///etc/passwd");
-  FilePath file(TEST_PATH("/etc/passwd"));
+  base::FilePath file(TEST_PATH("/etc/passwd"));
 
   p->Add(kRendererID);
 

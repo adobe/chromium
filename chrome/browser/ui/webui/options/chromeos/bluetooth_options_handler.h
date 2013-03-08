@@ -135,6 +135,9 @@ class BluetoothOptionsHandler
                              device::BluetoothDevice* device) OVERRIDE;
 
  private:
+  // Displays in the UI a connecting to the device |device| message.
+  void DeviceConnecting(device::BluetoothDevice* device);
+
   // Called by device::BluetoothAdapter in response to a failure to
   // change the power status of the adapter.
   void EnableChangeError();
@@ -190,6 +193,9 @@ class BluetoothOptionsHandler
 
   // Default bluetooth adapter, used for all operations.
   scoped_refptr<device::BluetoothAdapter> adapter_;
+
+  // True while performing device discovery.
+  bool discovering_;
 
   // Weak pointer factory for generating 'this' pointers that might live longer
   // than this object does.

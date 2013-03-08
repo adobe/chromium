@@ -8,9 +8,10 @@
 #include "base/compiler_specific.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebGamepads.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebGraphicsContext3D.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBFactory.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebUnitTestSupport.h"
 #include "webkit/glue/webfileutilities_impl.h"
 #include "webkit/glue/webkitplatformsupport_impl.h"
+#include "webkit/mocks/mock_webhyphenator.h"
 #include "webkit/support/simple_database_system.h"
 #include "webkit/support/weburl_loader_mock_factory.h"
 #include "webkit/tools/test_shell/mock_webclipboard_impl.h"
@@ -22,14 +23,18 @@
 
 class TestShellWebBlobRegistryImpl;
 
-namespace WebKit {
-  class WebAudioDevice;
+namespace cc {
+class ContextProvider;
 }
 
-typedef struct _HyphenDict HyphenDict;
+namespace WebKit {
+class WebAudioDevice;
+class WebLayerTreeView;
+}
 
 // An implementation of WebKitPlatformSupport for tests.
 class TestWebKitPlatformSupport :
+    public WebKit::WebUnitTestSupport,
     public webkit_glue::WebKitPlatformSupportImpl {
  public:
   TestWebKitPlatformSupport(bool unit_test_mode,
@@ -43,9 +48,10 @@ class TestWebKitPlatformSupport :
   virtual WebKit::WebCookieJar* cookieJar();
   virtual WebKit::WebBlobRegistry* blobRegistry();
   virtual WebKit::WebFileSystem* fileSystem();
+  virtual WebKit::WebHyphenator* hyphenator();
 
   virtual bool sandboxEnabled();
-  virtual WebKit::WebKitPlatformSupport::FileHandle databaseOpenFile(
+  virtual WebKit::Platform::FileHandle databaseOpenFile(
       const WebKit::WebString& vfs_file_name, int desired_flags);
   virtual int databaseDeleteFile(const WebKit::WebString& vfs_file_name,
                                  bool sync_dir);
@@ -75,8 +81,6 @@ class TestWebKitPlatformSupport :
   virtual WebKit::WebStorageNamespace* createLocalStorageNamespace(
       const WebKit::WebString& path, unsigned quota);
 
-  virtual WebKit::WebIDBFactory* idbFactory();
-
 #if defined(OS_WIN) || defined(OS_MACOSX)
   void SetThemeEngine(WebKit::WebThemeEngine* engine);
   virtual WebKit::WebThemeEngine *themeEngine();
@@ -84,13 +88,16 @@ class TestWebKitPlatformSupport :
 
   virtual WebKit::WebGraphicsContext3D* createOffscreenGraphicsContext3D(
       const WebKit::WebGraphicsContext3D::Attributes&);
+  virtual WebKit::WebGraphicsContext3D* sharedOffscreenGraphicsContext3D();
+  virtual GrContext* sharedOffscreenGrContext();
   virtual bool canAccelerate2dCanvas();
+  virtual bool isThreadedCompositingEnabled();
 
   WebURLLoaderMockFactory* url_loader_factory() {
     return &url_loader_factory_;
   }
 
-  const FilePath& file_system_root() const {
+  const base::FilePath& file_system_root() const {
     return file_system_root_.path();
   }
 
@@ -98,6 +105,10 @@ class TestWebKitPlatformSupport :
   // talks with the browser process.
   virtual double audioHardwareSampleRate();
   virtual size_t audioHardwareBufferSize();
+  virtual WebKit::WebAudioDevice* createAudioDevice(size_t bufferSize,
+      unsigned numberOfInputChannels, unsigned numberOfChannels,
+      double sampleRate, WebKit::WebAudioDevice::RenderCallback*,
+      const WebKit::WebString& input_device_id);
   virtual WebKit::WebAudioDevice* createAudioDevice(size_t bufferSize,
       unsigned numberOfInputChannels, unsigned numberOfChannels,
       double sampleRate, WebKit::WebAudioDevice::RenderCallback*);
@@ -125,17 +136,32 @@ class TestWebKitPlatformSupport :
       WebKit::WebMediaStreamCenterClient* client);
   virtual WebKit::WebRTCPeerConnectionHandler* createRTCPeerConnectionHandler(
       WebKit::WebRTCPeerConnectionHandlerClient* client);
-  virtual bool canHyphenate(const WebKit::WebString& locale);
-  virtual size_t computeLastHyphenLocation(
-      const char16* characters,
-      size_t length,
-      size_t before_index,
-      const WebKit::WebString& locale);
 
   virtual WebKit::WebGestureCurve* createFlingAnimationCurve(
       int device_source,
       const WebKit::WebFloatPoint& velocity,
       const WebKit::WebSize& cumulative_scroll);
+
+  virtual WebKit::WebUnitTestSupport* unitTestSupport();
+
+  // WebUnitTestSupport implementation
+  virtual void registerMockedURL(const WebKit::WebURL& url,
+                                 const WebKit::WebURLResponse& response,
+                                 const WebKit::WebString& filePath);
+  virtual void registerMockedErrorURL(const WebKit::WebURL& url,
+                                      const WebKit::WebURLResponse& response,
+                                      const WebKit::WebURLError& error);
+  virtual void unregisterMockedURL(const WebKit::WebURL& url);
+  virtual void unregisterAllMockedURLs();
+  virtual void serveAsynchronousMockedRequests();
+  virtual WebKit::WebString webKitRootDir();
+  virtual WebKit::WebLayerTreeView* createLayerTreeViewForTesting();
+  virtual WebKit::WebLayerTreeView* createLayerTreeViewForTesting(
+      TestViewType type);
+
+  void set_threaded_compositing_enabled(bool enabled) {
+    threaded_compositing_enabled_ = enabled;
+  }
 
  private:
   TestShellWebMimeRegistryImpl mime_registry_;
@@ -149,11 +175,14 @@ class TestWebKitPlatformSupport :
   scoped_refptr<TestShellWebBlobRegistryImpl> blob_registry_;
   SimpleFileSystem file_system_;
   base::ScopedTempDir file_system_root_;
+  webkit_glue::MockWebHyphenator hyphenator_;
   WebURLLoaderMockFactory url_loader_factory_;
   bool unit_test_mode_;
   WebKit::WebGamepads gamepad_data_;
   WebKit::Platform* shadow_platform_delegate_;
-  HyphenDict* hyphen_dictionary_;
+  bool threaded_compositing_enabled_;
+
+  scoped_refptr<cc::ContextProvider> main_thread_contexts_;
 
 #if defined(OS_WIN) || defined(OS_MACOSX)
   WebKit::WebThemeEngine* active_theme_engine_;

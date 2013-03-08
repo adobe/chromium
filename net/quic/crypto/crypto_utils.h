@@ -10,24 +10,26 @@
 #include <string>
 
 #include "net/base/net_export.h"
+#include "net/quic/crypto/crypto_protocol.h"
 
 namespace net {
 
 class QuicClock;
 class QuicRandom;
-struct CryptoHandshakeMessage;
-struct QuicClientCryptoConfig;
 
 class NET_EXPORT_PRIVATE CryptoUtils {
  public:
+  // FindMutualTag sets |out_result| to the first tag in |preference| that is
+  // also in |supported| and returns true. If there is no intersection between
+  // |preference| and |supported| it returns false.
+  static bool FindMutualTag(const CryptoTagVector& preference,
+                            const CryptoTagVector& supported,
+                            CryptoTag* out_result);
+
   // Generates the connection nonce.
   static void GenerateNonce(const QuicClock* clock,
                             QuicRandom* random_generator,
                             std::string* nonce);
-
-  static void FillClientHelloMessage(const QuicClientCryptoConfig& config,
-                                     const std::string& nonce,
-                                     CryptoHandshakeMessage* message);
 };
 
 }  // namespace net

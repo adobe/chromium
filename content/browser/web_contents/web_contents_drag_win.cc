@@ -9,8 +9,8 @@
 #include <string>
 
 #include "base/bind.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/message_loop.h"
 #include "base/pickle.h"
 #include "base/threading/platform_thread.h"
@@ -24,6 +24,7 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_view.h"
 #include "content/public/browser/web_drag_dest_delegate.h"
 #include "net/base/net_util.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -225,7 +226,7 @@ void WebContentsDragWin::PrepareDragForDownload(
     const std::string& page_encoding) {
   // Parse the download metadata.
   string16 mime_type;
-  FilePath file_name;
+  base::FilePath file_name;
   GURL download_url;
   if (!ParseDownloadMetadata(drop_data.download_metadata,
                              &mime_type,
@@ -236,18 +237,19 @@ void WebContentsDragWin::PrepareDragForDownload(
   // Generate the file name based on both mime type and proposed file name.
   std::string default_name =
       GetContentClient()->browser()->GetDefaultDownloadName();
-  FilePath generated_download_file_name =
+  base::FilePath generated_download_file_name =
       net::GenerateFileName(download_url,
                             std::string(),
                             std::string(),
                             UTF16ToUTF8(file_name.value()),
                             UTF16ToUTF8(mime_type),
                             default_name);
-  FilePath temp_dir_path;
+  base::FilePath temp_dir_path;
   if (!file_util::CreateNewTempDirectory(
           FILE_PATH_LITERAL("chrome_drag"), &temp_dir_path))
     return;
-  FilePath download_path = temp_dir_path.Append(generated_download_file_name);
+  base::FilePath download_path =
+      temp_dir_path.Append(generated_download_file_name);
 
   // We cannot know when the target application will be done using the temporary
   // file, so schedule it to be deleted after rebooting.
@@ -264,7 +266,7 @@ void WebContentsDragWin::PrepareDragForDownload(
           Referrer(page_url, drop_data.referrer_policy),
           page_encoding,
           web_contents_);
-  ui::OSExchangeData::DownloadFileInfo file_download(FilePath(),
+  ui::OSExchangeData::DownloadFileInfo file_download(base::FilePath(),
                                                      download_file.get());
   data->SetDownloadFileInfo(file_download);
 
@@ -275,17 +277,17 @@ void WebContentsDragWin::PrepareDragForDownload(
 void WebContentsDragWin::PrepareDragForFileContents(
     const WebDropData& drop_data, ui::OSExchangeData* data) {
   static const int kMaxFilenameLength = 255;  // FAT and NTFS
-  FilePath file_name(drop_data.file_description_filename);
+  base::FilePath file_name(drop_data.file_description_filename);
 
   // Images without ALT text will only have a file extension so we need to
   // synthesize one from the provided extension and URL.
   if (file_name.BaseName().RemoveExtension().empty()) {
     const string16 extension = file_name.Extension();
     // Retrieve the name from the URL.
-    file_name = FilePath(
+    file_name = base::FilePath(
         net::GetSuggestedFilename(drop_data.url, "", "", "", "", ""));
     if (file_name.value().size() + extension.size() > kMaxFilenameLength) {
-      file_name = FilePath(file_name.value().substr(
+      file_name = base::FilePath(file_name.value().substr(
           0, kMaxFilenameLength - extension.size()));
     }
     file_name = file_name.ReplaceExtension(extension);
@@ -347,7 +349,7 @@ bool WebContentsDragWin::DoDragging(const WebDropData& drop_data,
   // Use a local variable to keep track of the contents view window handle.
   // It might not be safe to access the instance after DoDragDrop returns
   // because the window could be disposed in the nested message loop.
-  HWND native_window = web_contents_->GetNativeView();
+  HWND native_window = web_contents_->GetView()->GetNativeView();
 
   // We need to enable recursive tasks on the message loop so we can get
   // updates while in the system DoDragDrop loop.

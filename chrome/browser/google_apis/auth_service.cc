@@ -11,7 +11,7 @@
 #include "base/message_loop_proxy.h"
 #include "base/metrics/histogram.h"
 #include "chrome/browser/google_apis/auth_service_observer.h"
-#include "chrome/browser/google_apis/base_operations.h"
+#include "chrome/browser/google_apis/operation_registry.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/token_service.h"
 #include "chrome/browser/signin/token_service_factory.h"
@@ -217,14 +217,32 @@ void AuthService::ClearAccessToken() {
   access_token_.clear();
 }
 
+void AuthService::ClearRefreshToken() {
+  refresh_token_.clear();
+
+  FOR_EACH_OBSERVER(AuthServiceObserver,
+                    observers_,
+                    OnOAuth2RefreshTokenChanged());
+}
+
 void AuthService::OnAuthCompleted(const AuthStatusCallback& callback,
                                   GDataErrorCode error,
                                   const std::string& access_token) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(!callback.is_null());
 
-  if (error == HTTP_SUCCESS)
+  if (error == HTTP_SUCCESS) {
     access_token_ = access_token;
+  } else if (error == HTTP_UNAUTHORIZED) {
+    // Refreshing access token using the refresh token is failed with 401 error
+    // (HTTP_UNAUTHORIZED). This means the current refresh token is invalid for
+    // Drive, hence we clear the refresh token here to make HasRefreshToken()
+    // false, thus the invalidness is clearly observable.
+    // This is not for triggering refetch of the refresh token. UI should
+    // show some message to encourage user to log-off and log-in again in order
+    // to fetch new valid refresh token.
+    ClearRefreshToken();
+  }
 
   // TODO(zelidrag): Add retry, back-off logic when things go wrong here.
   callback.Run(error, access_token);

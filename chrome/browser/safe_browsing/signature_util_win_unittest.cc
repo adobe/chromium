@@ -8,9 +8,9 @@
 #include <vector>
 
 #include "base/base_paths.h"
-#include "base/file_path.h"
-#include "base/path_service.h"
+#include "base/files/file_path.h"
 #include "base/memory/ref_counted.h"
+#include "base/path_service.h"
 #include "chrome/common/safe_browsing/csd.pb.h"
 #include "net/base/x509_cert_types.h"
 #include "net/base/x509_certificate.h"
@@ -21,7 +21,7 @@ namespace safe_browsing {
 class SignatureUtilWinTest : public testing::Test {
  protected:
   virtual void SetUp() {
-    FilePath source_path;
+    base::FilePath source_path;
     ASSERT_TRUE(PathService::Get(base::DIR_SOURCE_ROOT, &source_path));
     testdata_path_ = source_path
         .AppendASCII("chrome")
@@ -43,7 +43,7 @@ class SignatureUtilWinTest : public testing::Test {
     }
   }
 
-  FilePath testdata_path_;
+  base::FilePath testdata_path_;
 };
 
 TEST_F(SignatureUtilWinTest, UntrustedSignedBinary) {

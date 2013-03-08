@@ -5,6 +5,7 @@
 #ifndef CC_LAYER_TREE_HOST_CLIENT_H_
 #define CC_LAYER_TREE_HOST_CLIENT_H_
 
+#include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 
 namespace gfx {
@@ -12,7 +13,7 @@ class Vector2d;
 }
 
 namespace cc {
-class FontAtlas;
+class ContextProvider;
 class InputHandler;
 class OutputSurface;
 
@@ -35,8 +36,16 @@ public:
     // Used only in the single-threaded path.
     virtual void scheduleComposite() = 0;
 
-    // Creates a font atlas to use for debug visualizations.
-    virtual scoped_ptr<FontAtlas> createFontAtlas() = 0;
+    // These must always return a valid ContextProvider. But the provider does not need to be capable of creating contexts.
+    virtual scoped_refptr<cc::ContextProvider> OffscreenContextProviderForMainThread() = 0;
+    virtual scoped_refptr<cc::ContextProvider> OffscreenContextProviderForCompositorThread() = 0;
+
+    // If the compositor doesn't support custom filters, it is safe to just return 0 here.
+    virtual scoped_refptr<cc::ContextProvider> CustomFilterContextProviderForMainThread();
+    virtual scoped_refptr<cc::ContextProvider> CustomFilterContextProviderForCompositorThread();
+
+    // This hook is for testing.
+    virtual void willRetryRecreateOutputSurface() {}
 
 protected:
     virtual ~LayerTreeHostClient() { }

@@ -14,12 +14,12 @@ using extensions::PageCaptureSaveAsMHTMLFunction;
 
 class ExtensionPageCaptureApiTest : public ExtensionApiTest {
  public:
-  virtual void SetUpCommandLine(CommandLine* command_line) {
+  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
     ExtensionApiTest::SetUpCommandLine(command_line);
     command_line->AppendSwitchASCII(switches::kJavaScriptFlags, "--expose-gc");
   }
 
-  virtual void SetUpInProcessBrowserTestFixture() {
+  virtual void SetUpInProcessBrowserTestFixture() OVERRIDE {
     ExtensionApiTest::SetUpInProcessBrowserTestFixture();
 
     host_resolver()->AddRule("www.a.com", "127.0.0.1");
@@ -46,11 +46,12 @@ class PageCaptureSaveAsMHTMLDelegate
     PageCaptureSaveAsMHTMLFunction::SetTestDelegate(NULL);
   }
 
-  virtual void OnTemporaryFileCreated(const FilePath& temp_file) OVERRIDE {
+  virtual void OnTemporaryFileCreated(
+      const base::FilePath& temp_file) OVERRIDE {
     temp_file_ = temp_file;
   }
 
-  FilePath temp_file_;
+  base::FilePath temp_file_;
 };
 
 IN_PROC_BROWSER_TEST_F(ExtensionPageCaptureApiTest, MAYBE_SaveAsMHTML) {

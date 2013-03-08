@@ -5,7 +5,7 @@
 #import "chrome/browser/ui/cocoa/applescript/tab_applescript.h"
 
 #include "base/bind.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
 #import "base/memory/scoped_nsobject.h"
 #include "base/sys_string_conversions.h"
@@ -272,11 +272,11 @@ void ResumeAppleEventAndSendReply(NSAppleEventManagerSuspensionID suspension_id,
     return;
   }
 
-  FilePath mainFile(base::SysNSStringToUTF8([fileURL path]));
+  base::FilePath mainFile(base::SysNSStringToUTF8([fileURL path]));
   // We create a directory path at the folder within which the file exists.
   // Eg.    if main_file = '/Users/Foo/Documents/Google.html'
   // then directory_path = '/Users/Foo/Documents/Google_files/'.
-  FilePath directoryPath = mainFile.RemoveExtension();
+  base::FilePath directoryPath = mainFile.RemoveExtension();
   directoryPath = directoryPath.InsertBeforeExtension(std::string("_files/"));
 
   NSString* saveType = [dictionary objectForKey:@"FileType"];

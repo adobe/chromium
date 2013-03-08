@@ -15,11 +15,13 @@
 #import "chrome/browser/ui/cocoa/extensions/extension_action_context_menu.h"
 #include "chrome/browser/ui/cocoa/infobars/infobar.h"
 #import "chrome/browser/ui/cocoa/menu_button.h"
+#include "chrome/common/extensions/api/icons/icons_handler.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_icon_set.h"
 #include "chrome/common/extensions/extension_resource.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_view.h"
 #include "grit/theme_resources.h"
 #include "skia/ext/skia_utils_mac.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -72,8 +74,10 @@ class InfobarBridge : public ExtensionInfoBarDelegate::DelegateObserver {
     const extensions::Extension* extension = delegate_->extension_host()->
         extension();
     ExtensionResource icon_resource =
-        extension->GetIconResource(extension_misc::EXTENSION_ICON_BITTY,
-                                   ExtensionIconSet::MATCH_EXACTLY);
+        extensions::IconsInfo::GetIconResource(
+            extension,
+            extension_misc::EXTENSION_ICON_BITTY,
+            ExtensionIconSet::MATCH_EXACTLY);
     extensions::ImageLoader* loader =
         extensions::ImageLoader::Get(delegate_->extension_host()->profile());
     loader->LoadImageAsync(extension, icon_resource,
@@ -83,7 +87,7 @@ class InfobarBridge : public ExtensionInfoBarDelegate::DelegateObserver {
                                       weak_ptr_factory_.GetWeakPtr()));
   }
 
-  // ImageLoadingTracker::Observer implementation.
+  // ImageLoader callback.
   // TODO(andybons): The infobar view implementations share a lot of the same
   // code. Come up with a strategy to share amongst them.
   void OnImageLoaded(const gfx::Image& image) {
@@ -118,7 +122,7 @@ class InfobarBridge : public ExtensionInfoBarDelegate::DelegateObserver {
   }
 
   // Overridden from ExtensionInfoBarDelegate::DelegateObserver:
-  virtual void OnDelegateDeleted() {
+  virtual void OnDelegateDeleted() OVERRIDE {
     delegate_ = NULL;
   }
 
@@ -272,7 +276,8 @@ class InfobarBridge : public ExtensionInfoBarDelegate::DelegateObserver {
 
 InfoBar* ExtensionInfoBarDelegate::CreateInfoBar(InfoBarService* owner) {
   NSWindow* window =
-      [(NSView*)owner->GetWebContents()->GetContentNativeView() window];
+      [(NSView*)owner->GetWebContents()->GetView()->GetContentNativeView()
+          window];
   ExtensionInfoBarController* controller =
       [[ExtensionInfoBarController alloc] initWithDelegate:this
                                                      owner:owner

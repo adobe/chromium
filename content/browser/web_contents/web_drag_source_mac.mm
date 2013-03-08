@@ -7,7 +7,7 @@
 #include <sys/param.h>
 
 #include "base/bind.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/mac/mac_util.h"
 #include "base/pickle.h"
 #include "base/string_util.h"
@@ -31,7 +31,6 @@
 #include "ui/base/clipboard/custom_data_helper.h"
 #include "ui/base/dragdrop/cocoa_dnd_util.h"
 #include "ui/gfx/image/image.h"
-#include "ui/gfx/mac/nsimage_cache.h"
 #include "webkit/glue/webdropdata.h"
 
 using base::SysNSStringToUTF8;
@@ -52,19 +51,20 @@ NSString* const kNSURLTitlePboardType = @"public.url-name";
 // Converts a string16 into a FilePath. Use this method instead of
 // -[NSString fileSystemRepresentation] to prevent exceptions from being thrown.
 // See http://crbug.com/78782 for more info.
-FilePath FilePathFromFilename(const string16& filename) {
+base::FilePath FilePathFromFilename(const string16& filename) {
   NSString* str = SysUTF16ToNSString(filename);
   char buf[MAXPATHLEN];
   if (![str getFileSystemRepresentation:buf maxLength:sizeof(buf)])
-    return FilePath();
-  return FilePath(buf);
+    return base::FilePath();
+  return base::FilePath(buf);
 }
 
 // Returns a filename appropriate for the drop data
 // TODO(viettrungluu): Refactor to make it common across platforms,
 // and move it somewhere sensible.
-FilePath GetFileNameFromDragData(const WebDropData& drop_data) {
-  FilePath file_name(FilePathFromFilename(drop_data.file_description_filename));
+base::FilePath GetFileNameFromDragData(const WebDropData& drop_data) {
+  base::FilePath file_name(
+      FilePathFromFilename(drop_data.file_description_filename));
 
   // Images without ALT text will only have a file extension so we need to
   // synthesize one from the provided extension and URL.
@@ -319,9 +319,9 @@ void PromiseWriterHelper(const WebDropData& drop_data,
     return nil;
   }
 
-  FilePath fileName = downloadFileName_.empty() ?
+  base::FilePath fileName = downloadFileName_.empty() ?
       GetFileNameFromDragData(*dropData_) : downloadFileName_;
-  FilePath filePath(SysNSStringToUTF8(path));
+  base::FilePath filePath(SysNSStringToUTF8(path));
   filePath = filePath.Append(fileName);
 
   // CreateFileStreamForDrop() will call file_util::PathExists(),
@@ -389,7 +389,7 @@ void PromiseWriterHelper(const WebDropData& drop_data,
       net::GetMimeTypeFromExtension(fileExtension, &mimeType);
     } else {
       string16 mimeType16;
-      FilePath fileName;
+      base::FilePath fileName;
       if (content::ParseDownloadMetadata(
               dropData_->download_metadata,
               &mimeType16,

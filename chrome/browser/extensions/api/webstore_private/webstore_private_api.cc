@@ -4,31 +4,38 @@
 
 #include "chrome/browser/extensions/api/webstore_private/webstore_private_api.h"
 
+#include "apps/app_launcher.h"
+#include "apps/switches.h"
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
 #include "base/lazy_instance.h"
 #include "base/memory/scoped_vector.h"
+#include "base/prefs/pref_service.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
+#include "chrome/browser/about_flags.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/crx_installer.h"
 #include "chrome/browser/extensions/extension_function_dispatcher.h"
 #include "chrome/browser/extensions/extension_prefs.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
+#include "chrome/browser/extensions/install_tracker.h"
+#include "chrome/browser/extensions/install_tracker_factory.h"
 #include "chrome/browser/extensions/webstore_installer.h"
 #include "chrome/browser/gpu/gpu_feature_checker.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/signin/token_service.h"
 #include "chrome/browser/signin/token_service_factory.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
+#include "chrome/browser/ui/app_list/app_list_service.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "chrome/common/chrome_switches.h"
+#include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_l10n_util.h"
+#include "chrome/common/extensions/extension_manifest_constants.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/gpu_data_manager.h"
 #include "content/public/browser/notification_details.h"
@@ -38,6 +45,11 @@
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
+
+#if defined(OS_WIN)
+#include "chrome/browser/extensions/app_host_installer_win.h"
+#include "chrome/installer/util/browser_distribution.h"
+#endif
 
 using content::GpuDataManager;
 
@@ -84,6 +96,7 @@ static base::LazyInstance<PendingApprovals> g_pending_approvals =
     LAZY_INSTANCE_INITIALIZER;
 
 const char kAppInstallBubbleKey[] = "appInstallBubble";
+const char kEnableLauncherKey[] = "enableLauncher";
 const char kIconDataKey[] = "iconData";
 const char kIconUrlKey[] = "iconUrl";
 const char kIdKey[] = "id";
@@ -190,7 +203,7 @@ void InstallBundleFunction::OnBundleInstallCompleted() {
 }
 
 BeginInstallWithManifestFunction::BeginInstallWithManifestFunction()
-    : use_app_installed_bubble_(false) {}
+    : use_app_installed_bubble_(false), enable_launcher_(false) {}
 
 BeginInstallWithManifestFunction::~BeginInstallWithManifestFunction() {}
 
@@ -236,6 +249,10 @@ bool BeginInstallWithManifestFunction::RunImpl() {
   if (details->HasKey(kAppInstallBubbleKey))
     EXTENSION_FUNCTION_VALIDATE(details->GetBoolean(
         kAppInstallBubbleKey, &use_app_installed_bubble_));
+
+  if (details->HasKey(kEnableLauncherKey))
+    EXTENSION_FUNCTION_VALIDATE(details->GetBoolean(
+        kEnableLauncherKey, &enable_launcher_));
 
   net::URLRequestContextGetter* context_getter = NULL;
   if (!icon_url.is_empty())
@@ -359,7 +376,9 @@ void BeginInstallWithManifestFunction::InstallUIProceed() {
       WebstoreInstaller::Approval::CreateWithNoInstallPrompt(
           profile(), id_, parsed_manifest_.Pass()));
   approval->use_app_installed_bubble = use_app_installed_bubble_;
+  approval->enable_launcher = enable_launcher_;
   approval->record_oauth2_grant = install_prompt_->record_oauth2_grant();
+  approval->installing_icon = gfx::ImageSkia::CreateFrom1xBitmap(icon_);
   g_pending_approvals.Get().PushApproval(approval.Pass());
 
   SetResultCode(ERROR_NONE);
@@ -399,6 +418,11 @@ void BeginInstallWithManifestFunction::InstallUIAbort(bool user_initiated) {
   Release();
 }
 
+CompleteInstallFunction::CompleteInstallFunction()
+    : is_app_(false) {}
+
+CompleteInstallFunction::~CompleteInstallFunction() {}
+
 bool CompleteInstallFunction::RunImpl() {
   std::string id;
   EXTENSION_FUNCTION_VALIDATE(args_->GetString(0, &id));
@@ -407,25 +431,73 @@ bool CompleteInstallFunction::RunImpl() {
     return false;
   }
 
-  scoped_ptr<WebstoreInstaller::Approval> approval(
-      g_pending_approvals.Get().PopApproval(profile(), id));
-  if (!approval.get()) {
+  approval_ = g_pending_approvals.Get().PopApproval(profile(), id).Pass();
+  if (!approval_) {
     error_ = ErrorUtils::FormatErrorMessage(
         kNoPreviousBeginInstallWithManifestError, id);
     return false;
   }
+  is_app_ = approval_->parsed_manifest->Get(
+      extension_manifest_keys::kPlatformAppBackground, NULL);
 
+  // Balanced in OnExtensionInstallSuccess() or OnExtensionInstallFailure().
   AddRef();
+
+#if defined(OS_WIN)
+  if (approval_->enable_launcher) {
+    if (BrowserDistribution::GetDistribution()->AppHostIsSupported()) {
+      LOG(INFO) << "Enabling App Launcher via installation";
+      extensions::AppHostInstaller::SetInstallWithLauncher(true);
+      extensions::AppHostInstaller::EnsureAppHostInstalled(
+          base::Bind(&CompleteInstallFunction::AfterMaybeInstallAppLauncher,
+                     this));
+      return true;
+    } else {
+      LOG(INFO) << "Enabling App Launcher via flags";
+      about_flags::SetExperimentEnabled(g_browser_process->local_state(),
+                                        apps::switches::kShowAppListShortcut,
+                                        true);
+    }
+  }
+#endif
+  AfterMaybeInstallAppLauncher(true);
+
+  return true;
+}
+
+void CompleteInstallFunction::AfterMaybeInstallAppLauncher(bool ok) {
+  if (!ok)
+    LOG(ERROR) << "Error installing app launcher";
+  apps::GetIsAppLauncherEnabled(base::Bind(
+      &CompleteInstallFunction::OnGetAppLauncherEnabled, this,
+      approval_->extension_id));
+}
+
+void CompleteInstallFunction::OnGetAppLauncherEnabled(
+    std::string id,
+    bool app_launcher_enabled) {
+  if (app_launcher_enabled) {
+    std::string name;
+    if (!approval_->parsed_manifest->GetString(extension_manifest_keys::kName,
+                                               &name)) {
+      NOTREACHED();
+    }
+    // Show the app list so it receives install progress notifications.
+    AppListService::Get()->ShowAppList(profile());
+    // Tell the app list about the install that we just started.
+    extensions::InstallTracker* tracker =
+        extensions::InstallTrackerFactory::GetForProfile(profile());
+    tracker->OnBeginExtensionInstall(
+        id, name, approval_->installing_icon, is_app_);
+  }
 
   // The extension will install through the normal extension install flow, but
   // the whitelist entry will bypass the normal permissions install dialog.
   scoped_refptr<WebstoreInstaller> installer = new WebstoreInstaller(
       profile(), this,
       &(dispatcher()->delegate()->GetAssociatedWebContents()->GetController()),
-      id, approval.Pass(), WebstoreInstaller::FLAG_NONE);
+      id, approval_.Pass(), WebstoreInstaller::FLAG_NONE);
   installer->Start();
-
-  return true;
 }
 
 void CompleteInstallFunction::OnExtensionInstallSuccess(
@@ -433,6 +505,7 @@ void CompleteInstallFunction::OnExtensionInstallSuccess(
   if (test_webstore_installer_delegate)
     test_webstore_installer_delegate->OnExtensionInstallSuccess(id);
 
+  LOG(INFO) << "Install success, sending response";
   SendResponse(true);
 
   // Matches the AddRef in RunImpl().
@@ -443,18 +516,29 @@ void CompleteInstallFunction::OnExtensionInstallFailure(
     const std::string& id,
     const std::string& error,
     WebstoreInstaller::FailureReason reason) {
+  extensions::InstallTracker* tracker =
+      extensions::InstallTrackerFactory::GetForProfile(profile());
+  tracker->OnInstallFailure(id);
   if (test_webstore_installer_delegate) {
     test_webstore_installer_delegate->OnExtensionInstallFailure(
         id, error, reason);
   }
 
   error_ = error;
+  LOG(INFO) << "Install failed, sending response";
   SendResponse(false);
 
   // Matches the AddRef in RunImpl().
   Release();
 }
 
+void CompleteInstallFunction::OnExtensionDownloadProgress(
+    const std::string& id,
+    content::DownloadItem* item) {
+  extensions::InstallTracker* tracker =
+      extensions::InstallTrackerFactory::GetForProfile(profile());
+  tracker->OnDownloadProgress(id, item->PercentComplete());
+}
 
 bool GetBrowserLoginFunction::RunImpl() {
   SetResult(CreateLoginResult(profile_->GetOriginalProfile()));
@@ -505,6 +589,17 @@ bool GetWebGLStatusFunction::RunImpl() {
 
 void GetWebGLStatusFunction::OnFeatureCheck(bool feature_allowed) {
   CreateResult(feature_allowed);
+  SendResponse(true);
+}
+
+bool GetIsLauncherEnabledFunction::RunImpl() {
+  apps::GetIsAppLauncherEnabled(base::Bind(
+      &GetIsLauncherEnabledFunction::OnIsLauncherCheckCompleted, this));
+  return true;
+}
+
+void GetIsLauncherEnabledFunction::OnIsLauncherCheckCompleted(bool is_enabled) {
+  SetResult(Value::CreateBooleanValue(is_enabled));
   SendResponse(true);
 }
 

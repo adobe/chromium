@@ -9,9 +9,9 @@
 #include "base/command_line.h"
 #include "base/file_util.h"
 #include "base/rand_util.h"
-#include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/download/download_crx_util.h"
@@ -66,7 +66,7 @@ const char kInvalidDownloadError[] = "Download was not a CRX";
 const char kInlineInstallSource[] = "inline";
 const char kDefaultInstallSource[] = "";
 
-FilePath* g_download_directory_for_tests = NULL;
+base::FilePath* g_download_directory_for_tests = NULL;
 
 GURL GetWebstoreInstallURL(
     const std::string& extension_id, const std::string& install_source) {
@@ -94,12 +94,12 @@ GURL GetWebstoreInstallURL(
 
 // Must be executed on the FILE thread.
 void GetDownloadFilePath(
-    const FilePath& download_directory, const std::string& id,
-    const base::Callback<void(const FilePath&)>& callback) {
-  FilePath directory(g_download_directory_for_tests ?
+    const base::FilePath& download_directory, const std::string& id,
+    const base::Callback<void(const base::FilePath&)>& callback) {
+  base::FilePath directory(g_download_directory_for_tests ?
                      *g_download_directory_for_tests : download_directory);
 
-#if defined (OS_CHROMEOS)
+#if defined(OS_CHROMEOS)
   // Do not use drive for extension downloads.
   if (drive::util::IsUnderDriveMountPoint(directory))
     directory = download_util::GetDefaultDownloadDirectory();
@@ -110,7 +110,7 @@ void GetDownloadFilePath(
   if (!file_util::DirectoryExists(directory)) {
     if (!file_util::CreateDirectory(directory)) {
       BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-                              base::Bind(callback, FilePath()));
+                              base::Bind(callback, base::FilePath()));
       return;
     }
   }
@@ -122,7 +122,8 @@ void GetDownloadFilePath(
   std::string random_number =
       base::Uint64ToString(base::RandGenerator(kuint16max));
 
-  FilePath file = directory.AppendASCII(id + "_" + random_number + ".crx");
+  base::FilePath file =
+      directory.AppendASCII(id + "_" + random_number + ".crx");
 
   int uniquifier = file_util::GetUniquePathNumber(file, FILE_PATH_LITERAL(""));
   if (uniquifier > 0)
@@ -215,7 +216,7 @@ void WebstoreInstaller::Start() {
     return;
   }
 
-  FilePath download_path = DownloadPrefs::FromDownloadManager(
+  base::FilePath download_path = DownloadPrefs::FromDownloadManager(
       BrowserContext::GetDownloadManager(profile_))->DownloadPath();
   BrowserThread::PostTask(
       BrowserThread::FILE, FROM_HERE,
@@ -255,7 +256,7 @@ void WebstoreInstaller::Observe(int type,
         return;
 
       // TODO(rdevlin.cronin): Continue removing std::string errors and
-      // replacing with string16
+      // replacing with string16. See crbug.com/71980.
       const string16* error = content::Details<const string16>(details).ptr();
       const std::string utf8_error = UTF16ToUTF8(*error);
       if (download_url_ == crx_installer->original_download_url())
@@ -272,7 +273,8 @@ void WebstoreInstaller::InvalidateDelegate() {
   delegate_ = NULL;
 }
 
-void WebstoreInstaller::SetDownloadDirectoryForTests(FilePath* directory) {
+void WebstoreInstaller::SetDownloadDirectoryForTests(
+    base::FilePath* directory) {
   g_download_directory_for_tests = directory;
 }
 
@@ -342,7 +344,7 @@ void WebstoreInstaller::OnDownloadDestroyed(DownloadItem* download) {
 // reports should narrow down exactly which pointer it is.  Collapsing all the
 // early-returns into a single branch makes it hard to see exactly which pointer
 // it is.
-void WebstoreInstaller::StartDownload(const FilePath& file) {
+void WebstoreInstaller::StartDownload(const base::FilePath& file) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   DownloadManager* download_manager =

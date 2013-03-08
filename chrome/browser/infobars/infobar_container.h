@@ -9,6 +9,7 @@
 
 #include "base/compiler_specific.h"
 #include "base/time.h"
+#include "chrome/browser/instant/instant_overlay_model_observer.h"
 #include "chrome/browser/ui/search/search_model_observer.h"
 #include "chrome/common/search_types.h"
 #include "content/public/browser/notification_observer.h"
@@ -33,16 +34,24 @@ class SearchModel;
 // Platforms need to subclass this to implement a few platform-specific
 // functions, which are pure virtual here.
 //
-// This class also observes changes to the SearchModel mode. If the user changes
-// into suggestions mode, it hides all the infobars temporarily.  When the user
-// changes back out of suggestions mode, it reshows any infobars, and starts a
-// 50 ms window during which any attempts to re-hide any infobars are handled
-// without animation.  This prevents glitchy-looking behavior when the user
-// navigates following a mode change, which otherwise would re-show the infobars
-// only to instantly animate them closed.  The window is canceled if a tab
-// change occurs.
+// This class also observes changes to the SearchModel modes.  It hides infobars
+// temporarily if the user changes into |SEARCH_SUGGESTIONS| mode (refer to
+// chrome::search::Mode in chrome/common/search_types.h for all search modes)
+// when on a :
+// - |DEFAULT| page: when Instant overlay is ready;
+// - |NTP| or |SEARCH_RESULTS| page: immediately;
+//   TODO(kuan): this scenario requires more complex synchronization with
+//   renderer SearchBoxAPI and will be implemented as the next step;
+//   for now, hiding is immediate.
+// When the user changes back out of |SEARCH_SUGGESTIONS| mode, it reshows any
+// infobars, and starts a 50 ms window during which any attempts to re-hide any
+// infobars are handled without animation.  This prevents glitchy-looking
+// behavior when the user navigates following a mode change, which otherwise
+// would re-show the infobars only to instantly animate them closed.  The window
+// to re-hide infobars without animation is canceled if a tab change occurs.
 class InfoBarContainer : public content::NotificationObserver,
-                         public chrome::search::SearchModelObserver  {
+                         public chrome::search::SearchModelObserver,
+                         public InstantOverlayModelObserver {
  public:
   class Delegate {
    public:
@@ -101,6 +110,9 @@ class InfoBarContainer : public content::NotificationObserver,
 
   const Delegate* delegate() const { return delegate_; }
 
+  // InstantOverlayModelObserver:
+  virtual void OverlayStateChanged(const InstantOverlayModel& model) OVERRIDE;
+
  protected:
   // Subclasses must call this during destruction, so that we can remove
   // infobars (which will call the pure virtual functions below) while the
@@ -156,6 +168,9 @@ class InfoBarContainer : public content::NotificationObserver,
   Delegate* delegate_;
   InfoBarService* infobar_service_;
   InfoBars infobars_;
+
+  // Tracks whether infobars in the container are shown or hidden.
+  bool infobars_shown_;
 
   // Tracks the most recent time infobars were re-shown after being hidden due
   // to Instant Extended's ModeChanged.

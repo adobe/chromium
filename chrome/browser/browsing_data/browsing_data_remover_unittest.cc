@@ -9,10 +9,11 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/message_loop.h"
 #include "base/platform_file.h"
+#include "base/prefs/testing_pref_service.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/autofill/autofill_common_test.h"
 #include "chrome/browser/autofill/autofill_profile.h"
@@ -22,13 +23,12 @@
 #include "chrome/browser/autofill/personal_data_manager_observer.h"
 #include "chrome/browser/browsing_data/browsing_data_helper.h"
 #include "chrome/browser/extensions/mock_extension_special_storage_policy.h"
-#include "chrome/browser/history/history.h"
+#include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_browser_process.h"
-#include "chrome/test/base/testing_pref_service.h"
 #include "chrome/test/base/testing_profile.h"
 #include "content/public/browser/dom_storage_context.h"
 #include "content/public/browser/notification_service.h"
@@ -66,16 +66,16 @@ const GURL kOrigin3(kTestOrigin3);
 const GURL kOriginExt(kTestOriginExt);
 const GURL kOriginDevTools(kTestOriginDevTools);
 
-const FilePath::CharType kDomStorageOrigin1[] =
+const base::FilePath::CharType kDomStorageOrigin1[] =
     FILE_PATH_LITERAL("http_host1_1.localstorage");
 
-const FilePath::CharType kDomStorageOrigin2[] =
+const base::FilePath::CharType kDomStorageOrigin2[] =
     FILE_PATH_LITERAL("http_host2_1.localstorage");
 
-const FilePath::CharType kDomStorageOrigin3[] =
+const base::FilePath::CharType kDomStorageOrigin3[] =
     FILE_PATH_LITERAL("http_host3_1.localstorage");
 
-const FilePath::CharType kDomStorageExt[] = FILE_PATH_LITERAL(
+const base::FilePath::CharType kDomStorageExt[] = FILE_PATH_LITERAL(
     "chrome-extension_abcdefghijklmnopqrstuvwxyz_0.localstorage");
 
 const quota::StorageType kTemporary = quota::kStorageTypeTemporary;
@@ -149,7 +149,7 @@ class AwaitCompletionHelper : public BrowsingDataRemover::Observer {
 
  protected:
   // BrowsingDataRemover::Observer implementation.
-  virtual void OnBrowsingDataRemoverDone() {
+  virtual void OnBrowsingDataRemoverDone() OVERRIDE {
     Notify();
   }
 
@@ -297,6 +297,11 @@ class RemoveServerBoundCertTester : public net::SSLConfigService::Observer {
                                 now + base::TimeDelta::FromDays(1));
   }
 
+  void GetCertList(net::ServerBoundCertStore::ServerBoundCertList* certs) {
+    GetCertStore()->GetAllServerBoundCerts(
+        base::Bind(&RemoveServerBoundCertTester::GetAllCertsCallback, certs));
+  }
+
   net::ServerBoundCertStore* GetCertStore() {
     return server_bound_cert_service_->GetCertStore();
   }
@@ -311,6 +316,12 @@ class RemoveServerBoundCertTester : public net::SSLConfigService::Observer {
   }
 
  private:
+  static void GetAllCertsCallback(
+      net::ServerBoundCertStore::ServerBoundCertList* dest,
+      const net::ServerBoundCertStore::ServerBoundCertList& result) {
+    *dest = result;
+  }
+
   net::ServerBoundCertService* server_bound_cert_service_;
   scoped_refptr<net::SSLConfigService> ssl_config_service_;
   int ssl_config_changed_count_;
@@ -373,7 +384,7 @@ class RemoveAutofillTester : public PersonalDataManagerObserver {
       : personal_data_manager_(
             PersonalDataManagerFactory::GetForProfile(profile)) {
     autofill_test::DisableSystemServices(profile);
-    personal_data_manager_->SetObserver(this);
+    personal_data_manager_->AddObserver(this);
   }
 
   virtual ~RemoveAutofillTester() {
@@ -440,7 +451,8 @@ class RemoveLocalStorageTester {
   void AddDOMStorageTestData() {
     // Note: This test depends on details of how the dom_storage library
     // stores data in the host file system.
-    FilePath storage_path = profile_->GetPath().AppendASCII("Local Storage");
+    base::FilePath storage_path =
+        profile_->GetPath().AppendASCII("Local Storage");
     file_util::CreateDirectory(storage_path);
 
     // Write some files.
@@ -504,7 +516,7 @@ class BrowsingDataRemoverTest : public testing::Test,
   virtual ~BrowsingDataRemoverTest() {
   }
 
-  void TearDown() {
+  virtual void TearDown() {
     // TestingProfile contains a DOMStorageContext.  BrowserContext's destructor
     // posts a message to the WEBKIT thread to delete some of its member
     // variables. We need to ensure that the profile is destroyed, and that
@@ -711,7 +723,8 @@ TEST_F(BrowsingDataRemoverTest, RemoveServerBoundCertLastHour) {
   EXPECT_EQ(1, tester.ssl_config_changed_count());
   ASSERT_EQ(1, tester.ServerBoundCertCount());
   net::ServerBoundCertStore::ServerBoundCertList certs;
-  tester.GetCertStore()->GetAllServerBoundCerts(&certs);
+  tester.GetCertList(&certs);
+  ASSERT_EQ(1U, certs.size());
   EXPECT_EQ(kTestOrigin2, certs.front().server_identifier());
 }
 
@@ -819,6 +832,86 @@ TEST_F(BrowsingDataRemoverTest, RemoveHistoryForLastHour) {
   EXPECT_FALSE(tester.HistoryContainsURL(kOrigin1));
   EXPECT_TRUE(tester.HistoryContainsURL(kOrigin2));
 }
+
+// This should crash (DCHECK) in Debug, but death tests don't work properly
+// here.
+#if defined(NDEBUG) && !defined(DCHECK_ALWAYS_ON)
+TEST_F(BrowsingDataRemoverTest, RemoveHistoryProhibited) {
+  RemoveHistoryTester tester(GetProfile());
+  PrefService* prefs = GetProfile()->GetPrefs();
+  prefs->SetBoolean(prefs::kAllowDeletingBrowserHistory, false);
+
+  base::Time two_hours_ago = base::Time::Now() - base::TimeDelta::FromHours(2);
+
+  tester.AddHistory(kOrigin1, base::Time::Now());
+  tester.AddHistory(kOrigin2, two_hours_ago);
+  ASSERT_TRUE(tester.HistoryContainsURL(kOrigin1));
+  ASSERT_TRUE(tester.HistoryContainsURL(kOrigin2));
+
+  BlockUntilBrowsingDataRemoved(BrowsingDataRemover::LAST_HOUR,
+      BrowsingDataRemover::REMOVE_HISTORY, false);
+  EXPECT_EQ(BrowsingDataRemover::REMOVE_HISTORY, GetRemovalMask());
+  EXPECT_EQ(BrowsingDataHelper::UNPROTECTED_WEB, GetOriginSetMask());
+
+  // Nothing should have been deleted.
+  EXPECT_TRUE(tester.HistoryContainsURL(kOrigin1));
+  EXPECT_TRUE(tester.HistoryContainsURL(kOrigin2));
+}
+#endif
+
+TEST_F(BrowsingDataRemoverTest, RemoveMultipleTypes) {
+  // Add some history.
+  RemoveHistoryTester history_tester(GetProfile());
+  history_tester.AddHistory(kOrigin1, base::Time::Now());
+  ASSERT_TRUE(history_tester.HistoryContainsURL(kOrigin1));
+
+  // Add some cookies.
+  RemoveProfileCookieTester cookie_tester(GetProfile());
+  cookie_tester.AddCookie();
+  ASSERT_TRUE(cookie_tester.ContainsCookie());
+
+  int removal_mask = BrowsingDataRemover::REMOVE_HISTORY |
+                     BrowsingDataRemover::REMOVE_COOKIES;
+
+  BlockUntilBrowsingDataRemoved(BrowsingDataRemover::EVERYTHING,
+      removal_mask, false);
+
+  EXPECT_EQ(removal_mask, GetRemovalMask());
+  EXPECT_EQ(BrowsingDataHelper::UNPROTECTED_WEB, GetOriginSetMask());
+  EXPECT_FALSE(history_tester.HistoryContainsURL(kOrigin1));
+  EXPECT_FALSE(cookie_tester.ContainsCookie());
+}
+
+// This should crash (DCHECK) in Debug, but death tests don't work properly
+// here.
+#if defined(NDEBUG) && !defined(DCHECK_ALWAYS_ON)
+TEST_F(BrowsingDataRemoverTest, RemoveMultipleTypesHistoryProhibited) {
+  PrefService* prefs = GetProfile()->GetPrefs();
+  prefs->SetBoolean(prefs::kAllowDeletingBrowserHistory, false);
+
+  // Add some history.
+  RemoveHistoryTester history_tester(GetProfile());
+  history_tester.AddHistory(kOrigin1, base::Time::Now());
+  ASSERT_TRUE(history_tester.HistoryContainsURL(kOrigin1));
+
+  // Add some cookies.
+  RemoveProfileCookieTester cookie_tester(GetProfile());
+  cookie_tester.AddCookie();
+  ASSERT_TRUE(cookie_tester.ContainsCookie());
+
+  int removal_mask = BrowsingDataRemover::REMOVE_HISTORY |
+                     BrowsingDataRemover::REMOVE_COOKIES;
+
+  BlockUntilBrowsingDataRemoved(BrowsingDataRemover::LAST_HOUR,
+                                removal_mask, false);
+  EXPECT_EQ(removal_mask, GetRemovalMask());
+  EXPECT_EQ(BrowsingDataHelper::UNPROTECTED_WEB, GetOriginSetMask());
+
+  // Cookie should be gone; history should remain.
+  EXPECT_FALSE(cookie_tester.ContainsCookie());
+  EXPECT_TRUE(history_tester.HistoryContainsURL(kOrigin1));
+}
+#endif
 
 TEST_F(BrowsingDataRemoverTest, QuotaClientMaskGeneration) {
   EXPECT_EQ(quota::QuotaClient::kFileSystem,
@@ -1184,6 +1277,8 @@ TEST_F(BrowsingDataRemoverTest, OriginBasedHistoryRemoval) {
 
   EXPECT_EQ(BrowsingDataRemover::REMOVE_HISTORY, GetRemovalMask());
   EXPECT_EQ(BrowsingDataHelper::UNPROTECTED_WEB, GetOriginSetMask());
+
+  // Nothing should have been deleted.
   EXPECT_TRUE(tester.HistoryContainsURL(kOrigin1));
   EXPECT_FALSE(tester.HistoryContainsURL(kOrigin2));
 }

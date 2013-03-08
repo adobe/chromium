@@ -18,7 +18,6 @@
 #include "chrome/browser/chromeos/login/login_display.h"
 #include "chrome/browser/chromeos/login/login_performer.h"
 #include "chrome/browser/chromeos/login/login_utils.h"
-#include "chrome/browser/chromeos/login/password_changed_view.h"
 #include "chrome/browser/chromeos/login/user.h"
 #include "chrome/browser/chromeos/settings/device_settings_service.h"
 #include "content/public/browser/notification_observer.h"
@@ -41,8 +40,7 @@ class LoginDisplayHost;
 class ExistingUserController : public LoginDisplay::Delegate,
                                public content::NotificationObserver,
                                public LoginPerformer::Delegate,
-                               public LoginUtils::Delegate,
-                               public PasswordChangedView::Delegate {
+                               public LoginUtils::Delegate {
  public:
   // All UI initialization is deferred till Init() call.
   explicit ExistingUserController(LoginDisplayHost* host);
@@ -63,6 +61,12 @@ class ExistingUserController : public LoginDisplay::Delegate,
   // Tells the controller to resume a pending login.
   void ResumeLogin();
 
+  // Invoked when a kiosk app launch is started.
+  void OnKioskAppLaunchStarted();
+
+  // Invoked when a kiosk app launch is failed.
+  void OnKioskAppLaunchFailed();
+
   // LoginDisplay::Delegate: implementation
   virtual void CancelPasswordChangedFlow() OVERRIDE;
   virtual void CreateAccount() OVERRIDE;
@@ -82,6 +86,7 @@ class ExistingUserController : public LoginDisplay::Delegate,
   virtual void OnStartDeviceReset() OVERRIDE;
   virtual void ResyncUserData() OVERRIDE;
   virtual void SetDisplayEmail(const std::string& email) OVERRIDE;
+  virtual void ShowWrongHWIDScreen() OVERRIDE;
   virtual void Signout() OVERRIDE;
 
   // content::NotificationObserver implementation.
@@ -126,10 +131,6 @@ class ExistingUserController : public LoginDisplay::Delegate,
 
   // LoginUtils::Delegate implementation:
   virtual void OnProfilePrepared(Profile* profile) OVERRIDE;
-
-  // PasswordChangedView::Delegate:
-  virtual void RecoverEncryptedData(const std::string& old_password) OVERRIDE;
-  virtual void ResyncEncryptedData() OVERRIDE;
 
   // Starts WizardController with the specified screen.
   void ActivateWizard(const std::string& screen_name);
@@ -233,9 +234,6 @@ class ExistingUserController : public LoginDisplay::Delegate,
 
   // Factory of callbacks.
   base::WeakPtrFactory<ExistingUserController> weak_factory_;
-
-  // Whether everything is ready to launch the browser.
-  bool ready_for_browser_launch_;
 
   // The displayed email for the next login attempt set by |SetDisplayEmail|.
   std::string display_email_;

@@ -35,7 +35,9 @@ using settings_namespace::MANAGED;
 using settings_namespace::Namespace;
 using settings_namespace::SYNC;
 using settings_namespace::ToString;
+using testing::AnyNumber;
 using testing::Return;
+using testing::_;
 
 namespace {
 
@@ -88,8 +90,10 @@ class ExtensionSettingsApiTest : public ExtensionApiTest {
     ExtensionApiTest::SetUpInProcessBrowserTestFixture();
 
 #if defined(ENABLE_CONFIGURATION_POLICY)
-    EXPECT_CALL(policy_provider_, IsInitializationComplete())
+    EXPECT_CALL(policy_provider_, IsInitializationComplete(_))
         .WillRepeatedly(Return(true));
+    EXPECT_CALL(policy_provider_,
+                RegisterPolicyDomain(_, _)).Times(AnyNumber());
     policy::BrowserPolicyConnector::SetPolicyProviderForTesting(
         &policy_provider_);
 #endif
@@ -143,8 +147,8 @@ class ExtensionSettingsApiTest : public ExtensionApiTest {
 #if defined(ENABLE_CONFIGURATION_POLICY)
   void SetPolicies(const base::DictionaryValue& policies) {
     scoped_ptr<policy::PolicyBundle> bundle(new policy::PolicyBundle());
-    policy::PolicyMap& policy_map = bundle->Get(
-        policy::POLICY_DOMAIN_EXTENSIONS, kManagedStorageExtensionId);
+    policy::PolicyMap& policy_map = bundle->Get(policy::PolicyNamespace(
+        policy::POLICY_DOMAIN_EXTENSIONS, kManagedStorageExtensionId));
     policy_map.LoadFrom(
         &policies, policy::POLICY_LEVEL_MANDATORY, policy::POLICY_SCOPE_USER);
     policy_provider_.UpdatePolicy(bundle.Pass());

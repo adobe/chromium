@@ -54,12 +54,18 @@ HOME_DIR = os.environ["HOME"]
 X_LOCK_FILE_TEMPLATE = "/tmp/.X%d-lock"
 FIRST_X_DISPLAY_NUMBER = 20
 
-# Minimum amount of time to wait between relaunching processes.
-BACKOFF_TIME = 60
+# Amount of time to wait between relaunching processes.
+SHORT_BACKOFF_TIME = 5
+LONG_BACKOFF_TIME = 60
 
-# Maximum allowed consecutive times that a child process runs for less than
-# BACKOFF_TIME. This script exits if this limit is exceeded.
-MAX_LAUNCH_FAILURES = 10
+# How long a process must run in order not to be counted against the restart
+# thresholds.
+MINIMUM_PROCESS_LIFETIME = 60
+
+# Thresholds for switching from fast- to slow-restart and for giving up
+# trying to restart entirely.
+SHORT_BACKOFF_THRESHOLD = 5
+MAX_LAUNCH_FAILURES = SHORT_BACKOFF_THRESHOLD + 10
 
 # Globals needed by the atexit cleanup() handler.
 g_desktops = []
@@ -103,9 +109,9 @@ class Config:
       os.umask(old_umask)
 
   def save_and_log_errors(self):
-    """Calls save(self), trapping and logging any errors."""
+    """Calls self.save(), trapping and logging any errors."""
     try:
-      save(self)
+      self.save()
     except (IOError, TypeError) as e:
       logging.error("Failed to save config: " + str(e))
 
@@ -540,20 +546,18 @@ def choose_x_session():
     "/etc/X11/Xsession" ]
   for session_wrapper in SESSION_WRAPPERS:
     if os.path.exists(session_wrapper):
-      break
-  else:
-    # No session wrapper found.
-    return None
-
-  # On Ubuntu 12.04, the default session relies on 3D-accelerated hardware.
-  # Trying to run this with a virtual X display produces weird results on some
-  # systems (for example, upside-down and corrupt displays).  So if the
-  # ubuntu-2d session is available, choose it explicitly.
-  if os.path.exists("/usr/bin/unity-2d-panel"):
-    return [session_wrapper, "/usr/bin/gnome-session --session=ubuntu-2d"]
-
-  # Use the session wrapper by itself, and let the system choose a session.
-  return session_wrapper
+      if os.path.exists("/usr/bin/unity-2d-panel"):
+        # On Ubuntu 12.04, the default session relies on 3D-accelerated
+        # hardware. Trying to run this with a virtual X display produces
+        # weird results on some systems (for example, upside-down and
+        # corrupt displays).  So if the ubuntu-2d session is available,
+        # choose it explicitly.
+        return [session_wrapper, "/usr/bin/gnome-session --session=ubuntu-2d"]
+      else:
+        # Use the session wrapper by itself, and let the system choose a
+        # session.
+        return session_wrapper
+  return None
 
 
 def locate_executable(exe_name):
@@ -607,10 +611,10 @@ def daemonize(log_filename):
       pass
     else:
       # Child process
-      os._exit(0)
+      os._exit(0)  # pylint: disable=W0212
   else:
     # Parent process
-    os._exit(0)
+    os._exit(0)  # pylint: disable=W0212
 
   logging.info("Daemon process running, logging to '%s'" % log_filename)
 
@@ -693,22 +697,24 @@ class RelaunchInhibitor:
     self.label = label
     self.running = False
     self.earliest_relaunch_time = 0
+    self.earliest_successful_termination = 0
     self.failures = 0
 
   def is_inhibited(self):
     return (not self.running) and (time.time() < self.earliest_relaunch_time)
 
-  def record_started(self, timeout):
+  def record_started(self, minimum_lifetime, relaunch_delay):
     """Record that the process was launched, and set the inhibit time to
     |timeout| seconds in the future."""
-    self.earliest_relaunch_time = time.time() + timeout
+    self.earliest_relaunch_time = time.time() + relaunch_delay
+    self.earliest_successful_termination = time.time() + minimum_lifetime
     self.running = True
 
   def record_stopped(self):
     """Record that the process was stopped, and adjust the failure count
     depending on whether the process ran long enough."""
     self.running = False
-    if time.time() < self.earliest_relaunch_time:
+    if time.time() < self.earliest_successful_termination:
       self.failures += 1
     else:
       self.failures = 0
@@ -852,16 +858,17 @@ Web Store: https://chrome.google.com/remotedesktop"""
     return 0
 
   if options.add_user:
-    sudo_command = "gksudo --message" if os.getenv("DISPLAY") else "sudo -p"
-    command = ("sudo -k && %(sudo)s "
-               "\"Please enter your password to enable "
-               "Chrome Remote Desktop: \" "
-               "-- sh -c "
+    if os.getenv("DISPLAY"):
+      sudo_command = "gksudo --description \"Chrome Remote Desktop\""
+    else:
+      sudo_command = "sudo"
+    command = ("sudo -k && exec %(sudo)s -- sh -c "
                "\"groupadd -f %(group)s && gpasswd --add %(user)s %(group)s\"" %
                { 'group': CHROME_REMOTING_GROUP_NAME,
                  'user': getpass.getuser(),
                  'sudo': sudo_command })
-    return os.system(command) >> 8
+    os.execv("/bin/sh", ["/bin/sh", "-c", command])
+    return 1
 
   if options.host_version:
     # TODO(sergeyu): Also check RPM package version once we add RPM package.
@@ -877,7 +884,7 @@ Web Store: https://chrome.google.com/remotedesktop"""
     default_sizes = DEFAULT_SIZES
     if os.environ.has_key(DEFAULT_SIZES_ENV_VAR):
       default_sizes = os.environ[DEFAULT_SIZES_ENV_VAR]
-    options.size = default_sizes.split(",");
+    options.size = default_sizes.split(",")
 
   sizes = []
   for size in options.size:
@@ -965,12 +972,15 @@ Web Store: https://chrome.google.com/remotedesktop"""
   allow_relaunch_self = False
 
   while True:
-    # Exit if a process failed too many times.
+    # Set the backoff interval and exit if a process failed too many times.
+    backoff_time = SHORT_BACKOFF_TIME
     for inhibitor in all_inhibitors:
       if inhibitor.failures >= MAX_LAUNCH_FAILURES:
         logging.error("Too many launch failures of '%s', exiting."
                       % inhibitor.label)
         return 1
+      elif inhibitor.failures >= SHORT_BACKOFF_THRESHOLD:
+        backoff_time = LONG_BACKOFF_TIME
 
     relaunch_times = []
 
@@ -1001,7 +1011,8 @@ Web Store: https://chrome.google.com/remotedesktop"""
         else:
           logging.info("Launching X server and X session.")
           desktop.launch_session(args)
-          x_server_inhibitor.record_started(BACKOFF_TIME)
+          x_server_inhibitor.record_started(MINIMUM_PROCESS_LIFETIME,
+                                            backoff_time)
           allow_relaunch_self = True
 
     if desktop.host_proc is None:
@@ -1011,7 +1022,8 @@ Web Store: https://chrome.google.com/remotedesktop"""
       else:
         logging.info("Launching host process")
         desktop.launch_host(host_config)
-        host_inhibitor.record_started(BACKOFF_TIME)
+        host_inhibitor.record_started(MINIMUM_PROCESS_LIFETIME,
+                                      backoff_time)
 
     deadline = min(relaunch_times) if relaunch_times else 0
     pid, status = waitpid_handle_exceptions(-1, deadline)

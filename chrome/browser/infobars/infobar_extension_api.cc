@@ -4,8 +4,8 @@
 
 #include "chrome/browser/infobars/infobar_extension_api.h"
 
-#include "base/string_number_conversions.h"
 #include "base/string_util.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/api/infobars/confirm_infobar_delegate.h"
 #include "chrome/browser/api/infobars/infobar_service.h"
@@ -31,7 +31,7 @@ const char kHeight[] = "height";
 
 }  // namespace
 
-bool ShowInfoBarFunction::RunImpl() {
+bool InfobarsShowFunction::RunImpl() {
   DictionaryValue* args;
   EXTENSION_FUNCTION_VALIDATE(args_->GetDictionary(0, &args));
 

@@ -4,18 +4,19 @@
 
 #include "chrome/browser/ui/window_sizer/window_sizer.h"
 
-#include "base/compiler_specific.h"
 #include "base/command_line.h"
+#include "base/compiler_specific.h"
+#include "base/prefs/pref_service.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/ash/ash_init.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/browser_window_state.h"
-#include "chrome/common/pref_names.h"
+#include "chrome/browser/ui/host_desktop.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/pref_names.h"
 #include "ui/gfx/screen.h"
 
 // Minimum height of the visible part of a window.
@@ -53,9 +54,10 @@ class DefaultStateProvider : public WindowSizer::StateProvider {
   }
 
   // Overridden from WindowSizer::StateProvider:
-  virtual bool GetPersistentState(gfx::Rect* bounds,
-                                  gfx::Rect* work_area,
-                                  ui::WindowShowState* show_state) const {
+  virtual bool GetPersistentState(
+      gfx::Rect* bounds,
+      gfx::Rect* work_area,
+      ui::WindowShowState* show_state) const OVERRIDE {
     DCHECK(bounds);
     DCHECK(show_state);
 
@@ -97,7 +99,7 @@ class DefaultStateProvider : public WindowSizer::StateProvider {
 
   virtual bool GetLastActiveWindowState(
       gfx::Rect* bounds,
-      ui::WindowShowState* show_state) const {
+      ui::WindowShowState* show_state) const OVERRIDE {
     DCHECK(show_state);
     // Applications are always restored with the same position.
     if (!app_name_.empty())
@@ -111,9 +113,15 @@ class DefaultStateProvider : public WindowSizer::StateProvider {
     if (browser_ && browser_->window() && !browser_->window()->IsPanel()) {
       window = browser_->window();
     } else {
-      BrowserList::const_reverse_iterator it = BrowserList::begin_last_active();
-      BrowserList::const_reverse_iterator end = BrowserList::end_last_active();
-      for (; (it != end); ++it) {
+      // This code is only ran on the native desktop (on the ash desktop,
+      // GetBoundsOverrideAsh should take over below before this is reached).
+      // TODO(gab): This code should go in a native desktop specific window
+      // sizer as part of fixing crbug.com/175812.
+      const BrowserList* native_browser_list =
+          BrowserList::GetInstance(chrome::HOST_DESKTOP_TYPE_NATIVE);
+      for (BrowserList::const_reverse_iterator it =
+               native_browser_list->begin_last_active();
+           it != native_browser_list->end_last_active(); ++it) {
         Browser* last_active = *it;
         if (last_active && last_active->is_type_tabbed()) {
           window = last_active->window();

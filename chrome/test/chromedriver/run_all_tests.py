@@ -5,6 +5,7 @@
 
 """Runs all ChromeDriver end to end tests."""
 
+import optparse
 import os
 import shutil
 import sys
@@ -34,34 +35,84 @@ def _AddToolsToSystemPathForWindows():
   os.environ['PATH'] = os.pathsep.join(paths) + os.pathsep + os.environ['PATH']
 
 
-def _FindChromeBinary(path):
-  if util.IsLinux():
-    exes = ['chrome']
-  elif util.IsMac():
-    exes = [
-      'Google Chrome.app/Contents/MacOS/Google Chrome',
-      'Chromium.app/Contents/MacOS/Chromium'
-    ]
-  elif util.IsWindows():
-    exes = ['chrome.exe']
-  else:
-    exes = []
-  for exe in exes:
-    binary = os.path.join(path, exe)
-    if os.path.exists(binary):
-      return binary
-  return None
+def RunPythonTests(chromedriver, chrome=None, android_package=None):
+  print '@@@BUILD_STEP chromedriver2_python_tests@@@'
+  cmd = [
+    sys.executable,
+    os.path.join(_THIS_DIR, 'run_py_tests.py'),
+    '--chromedriver=' + chromedriver,
+  ]
+  if chrome:
+    cmd.append('--chrome=' + chrome)
+
+  if android_package:
+    cmd.append('--android-package=' + android_package)
+
+  if util.IsMac():
+    # In Mac, chromedriver2.so is a 32-bit build, so run with the 32-bit python.
+    os.environ['VERSIONER_PYTHON_PREFER_32_BIT'] = 'yes'
+  code = util.RunCommand(cmd)
+  if code:
+    print '\n@@@STEP_FAILURE@@@'
+  return code
 
 
-def Main():
+def RunJavaTests(chromedriver, chrome):
+  print '@@@BUILD_STEP chromedriver2_java_tests@@@'
+  cmd = [
+    sys.executable,
+    os.path.join(_THIS_DIR, 'run_java_tests.py'),
+    '--chromedriver=' + chromedriver,
+    '--chrome=' + chrome,
+  ]
+  code = util.RunCommand(cmd)
+  if code:
+    print '@@@STEP_FAILURE@@@'
+  return code
+
+
+def RunCppTests(cpp_tests):
+  print '@@@BUILD_STEP chromedriver2_tests@@@'
+  code = util.RunCommand([cpp_tests])
+  if code:
+    print '@@@STEP_FAILURE@@@'
+  return code
+
+
+def main():
+  parser = optparse.OptionParser()
+  parser.add_option(
+      '', '--android-package',
+      help='Application package name, if running tests on Android.')
+  options, _ = parser.parse_args()
+
   chromedriver_map = {
     'win': 'chromedriver2.dll',
     'mac': 'chromedriver2.so',
     'linux': 'libchromedriver2.so',
   }
-  chromedriver = chromedriver_map[util.GetPlatformName()]
-  build_dir = chrome_paths.GetBuildDir([chromedriver])
-  chrome_binary = _FindChromeBinary(build_dir)
+  chromedriver_name = chromedriver_map[util.GetPlatformName()]
+
+  chrome_map = {
+    'win': 'chrome.exe',
+    'mac': 'Chromium.app/Contents/MacOS/Chromium',
+    'linux': 'chrome',
+  }
+  chrome_name = chrome_map[util.GetPlatformName()]
+
+  if util.IsWindows():
+    cpp_tests_name = 'chromedriver2_tests.exe'
+  else:
+    cpp_tests_name = 'chromedriver2_tests'
+
+  required_build_outputs = [chromedriver_name,  cpp_tests_name]
+  build_dir = chrome_paths.GetBuildDir(required_build_outputs)
+  print 'Using build outputs from', build_dir
+
+  chromedriver = os.path.join(build_dir, chromedriver_name)
+  chrome = os.path.join(build_dir, chrome_name)
+  cpp_tests = os.path.join(build_dir, cpp_tests_name)
+
   if util.IsLinux():
     # Set LD_LIBRARY_PATH to enable successful loading of shared object files,
     # when chromedriver2.so is not a static build.
@@ -70,39 +121,16 @@ def Main():
     # For Windows bots: add ant, java(jre) and the like to system path.
     _AddToolsToSystemPathForWindows()
 
-  # Run python test for chromedriver.
-  print '@@@BUILD_STEP chromedriver2_python_tests@@@'
-  cmd = [
-    sys.executable,
-    os.path.join(_THIS_DIR, 'run_py_tests.py'),
-    '--chromedriver=' + os.path.join(build_dir, chromedriver),
-  ]
-  # Set the built chrome binary.
-  if chrome_binary is not None:
-    cmd.append('--chrome=' + chrome_binary)
-  if util.IsMac():
-    # In Mac, chromedriver2.so is a 32-bit build, so run with the 32-bit python.
-    os.environ['VERSIONER_PYTHON_PREFER_32_BIT'] = 'yes'
-  code1 = util.RunCommand(cmd)
-  if code1 != 0:
-    print '@@@STEP_FAILURE@@@'
-
-  # Run java tests for chromedriver.
-  print '@@@BUILD_STEP chromedriver2_java_tests@@@'
-  cmd = [
-    sys.executable,
-    os.path.join(_THIS_DIR, 'run_java_tests.py'),
-    '--chromedriver=' + os.path.join(build_dir, chromedriver),
-  ]
-  # Set the built chrome binary.
-  if chrome_binary is not None:
-    cmd.append('--chrome=' + chrome_binary)
-  code2 = util.RunCommand(cmd)
-  if code2 != 0:
-    print '@@@STEP_FAILURE@@@'
-
-  return code1 or code2
+  if options.android_package:
+    os.environ['PATH'] += os.pathsep + _THIS_DIR
+    return RunPythonTests(chromedriver,
+                          android_package=options.android_package)
+  else:
+    code1 = RunPythonTests(chromedriver, chrome=chrome)
+    code2 = RunJavaTests(chromedriver, chrome)
+    code3 = RunCppTests(cpp_tests)
+    return code1 or code2 or code3
 
 
 if __name__ == '__main__':
-  sys.exit(Main())
+  sys.exit(main())

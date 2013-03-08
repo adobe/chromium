@@ -4,10 +4,10 @@
 
 #include "webkit/fileapi/file_system_util.h"
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "googleurl/src/gurl.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "webkit/fileapi/file_system_types.h"
+#include "webkit/fileapi/file_system_url.h"
 
 namespace fileapi {
 namespace {
@@ -30,8 +30,8 @@ TEST_F(FileSystemUtilTest, GetPersistentFileSystemRootURI) {
 
 TEST_F(FileSystemUtilTest, VirtualPathBaseName) {
   struct test_data {
-    const FilePath::StringType path;
-    const FilePath::StringType base_name;
+    const base::FilePath::StringType path;
+    const base::FilePath::StringType base_name;
   } test_cases[] = {
     { FILE_PATH_LITERAL("foo/bar"), FILE_PATH_LITERAL("bar") },
     { FILE_PATH_LITERAL("foo/b:bar"), FILE_PATH_LITERAL("b:bar") },
@@ -48,17 +48,82 @@ TEST_F(FileSystemUtilTest, VirtualPathBaseName) {
     { FILE_PATH_LITERAL("bar"), FILE_PATH_LITERAL("bar") }
   };
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(test_cases); ++i) {
-    FilePath input = FilePath(test_cases[i].path);
-    FilePath base_name = VirtualPath::BaseName(input);
+    base::FilePath input = base::FilePath(test_cases[i].path);
+    base::FilePath base_name = VirtualPath::BaseName(input);
     EXPECT_EQ(test_cases[i].base_name, base_name.value());
   }
 }
 
+TEST_F(FileSystemUtilTest, VirtualPathDirName) {
+  struct test_data {
+    const base::FilePath::StringType path;
+    const base::FilePath::StringType dir_name;
+  } test_cases[] = {
+    { FILE_PATH_LITERAL("foo/bar"), FILE_PATH_LITERAL("foo") },
+    { FILE_PATH_LITERAL("foo/b:bar"), FILE_PATH_LITERAL("foo") },
+    { FILE_PATH_LITERAL(""), FILE_PATH_LITERAL(".") },
+    { FILE_PATH_LITERAL("/"), FILE_PATH_LITERAL("/") },
+    { FILE_PATH_LITERAL("foo//////bar"), FILE_PATH_LITERAL("foo") },
+    { FILE_PATH_LITERAL("foo/bar/"), FILE_PATH_LITERAL("foo") },
+    { FILE_PATH_LITERAL("foo/bar/////"), FILE_PATH_LITERAL("foo") },
+    { FILE_PATH_LITERAL("/bar/////"), FILE_PATH_LITERAL("/") },
+    { FILE_PATH_LITERAL("bar/////"), FILE_PATH_LITERAL(".") },
+    { FILE_PATH_LITERAL("bar/"), FILE_PATH_LITERAL(".") },
+    { FILE_PATH_LITERAL("/bar"), FILE_PATH_LITERAL("/") },
+    { FILE_PATH_LITERAL("////bar"), FILE_PATH_LITERAL("/") },
+    { FILE_PATH_LITERAL("bar"), FILE_PATH_LITERAL(".") },
+    { FILE_PATH_LITERAL("c:bar"), FILE_PATH_LITERAL(".") },
+#ifdef FILE_PATH_USES_WIN_SEPARATORS
+    { FILE_PATH_LITERAL("foo\\bar"), FILE_PATH_LITERAL("foo") },
+    { FILE_PATH_LITERAL("foo\\b:bar"), FILE_PATH_LITERAL("foo") },
+    { FILE_PATH_LITERAL("\\"), FILE_PATH_LITERAL("\\") },
+    { FILE_PATH_LITERAL("foo\\\\\\\\\\\\bar"), FILE_PATH_LITERAL("foo") },
+    { FILE_PATH_LITERAL("foo\\bar\\"), FILE_PATH_LITERAL("foo") },
+    { FILE_PATH_LITERAL("foo\\bar\\\\\\\\\\"), FILE_PATH_LITERAL("foo") },
+    { FILE_PATH_LITERAL("\\bar\\\\\\\\\\"), FILE_PATH_LITERAL("\\") },
+    { FILE_PATH_LITERAL("bar\\\\\\\\\\"), FILE_PATH_LITERAL(".") },
+    { FILE_PATH_LITERAL("bar\\"), FILE_PATH_LITERAL(".") },
+    { FILE_PATH_LITERAL("\\bar"), FILE_PATH_LITERAL("\\") },
+    { FILE_PATH_LITERAL("\\\\\\\\bar"), FILE_PATH_LITERAL("\\") },
+#endif
+  };
+  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(test_cases); ++i) {
+    base::FilePath input = base::FilePath(test_cases[i].path);
+    base::FilePath dir_name = VirtualPath::DirName(input);
+    EXPECT_EQ(test_cases[i].dir_name, dir_name.value());
+  }
+}
+
+TEST_F(FileSystemUtilTest, GetNormalizedFilePath) {
+  struct test_data {
+    const base::FilePath::StringType path;
+    const base::FilePath::StringType normalized_path;
+  } test_cases[] = {
+    { FILE_PATH_LITERAL(""), FILE_PATH_LITERAL("/") },
+    { FILE_PATH_LITERAL("/"), FILE_PATH_LITERAL("/") },
+    { FILE_PATH_LITERAL("foo/bar"), FILE_PATH_LITERAL("/foo/bar") },
+    { FILE_PATH_LITERAL("/foo/bar"), FILE_PATH_LITERAL("/foo/bar") }
+  };
+  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(test_cases); ++i) {
+    base::FilePath input = base::FilePath(test_cases[i].path);
+    base::FilePath::StringType normalized_path_string =
+        VirtualPath::GetNormalizedFilePath(input);
+    EXPECT_EQ(test_cases[i].normalized_path, normalized_path_string);
+  }
+}
+
+TEST_F(FileSystemUtilTest, IsAbsolutePath) {
+  EXPECT_TRUE(VirtualPath::IsAbsolute(FILE_PATH_LITERAL("/")));
+  EXPECT_TRUE(VirtualPath::IsAbsolute(FILE_PATH_LITERAL("/foo/bar")));
+  EXPECT_FALSE(VirtualPath::IsAbsolute(FILE_PATH_LITERAL("")));
+  EXPECT_FALSE(VirtualPath::IsAbsolute(FILE_PATH_LITERAL("foo/bar")));
+}
+
 TEST_F(FileSystemUtilTest, VirtualPathGetComponents) {
   struct test_data {
-    const FilePath::StringType path;
+    const base::FilePath::StringType path;
     size_t count;
-    const FilePath::StringType components[3];
+    const base::FilePath::StringType components[3];
   } test_cases[] = {
     { FILE_PATH_LITERAL("foo/bar"),
       2,
@@ -81,10 +146,18 @@ TEST_F(FileSystemUtilTest, VirtualPathGetComponents) {
     { FILE_PATH_LITERAL("/foo/bar"),
       2,
       { FILE_PATH_LITERAL("foo"), FILE_PATH_LITERAL("bar") } },
+    { FILE_PATH_LITERAL("c:/bar"),
+      2,
+      { FILE_PATH_LITERAL("c:"), FILE_PATH_LITERAL("bar") } },
+#ifdef FILE_PATH_USES_WIN_SEPARATORS
+    { FILE_PATH_LITERAL("c:\\bar"),
+      2,
+      { FILE_PATH_LITERAL("c:"), FILE_PATH_LITERAL("bar") } },
+#endif
   };
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(test_cases); ++i) {
-    FilePath input = FilePath(test_cases[i].path);
-    std::vector<FilePath::StringType> components;
+    base::FilePath input = base::FilePath(test_cases[i].path);
+    std::vector<base::FilePath::StringType> components;
     VirtualPath::GetComponents(input, &components);
     EXPECT_EQ(test_cases[i].count, components.size());
     for (size_t j = 0; j < components.size(); ++j)
@@ -121,6 +194,30 @@ TEST_F(FileSystemUtilTest, RejectBadIsolatedFileSystemName) {
   EXPECT_FALSE(CrackIsolatedFileSystemName("foo:External", &fsid));
   EXPECT_FALSE(CrackIsolatedFileSystemName(":Isolated_bar", &fsid));
   EXPECT_FALSE(CrackIsolatedFileSystemName("foo:Isolated_", &fsid));
+}
+
+TEST_F(FileSystemUtilTest, AreSameFileSystem) {
+  FileSystemURL url_foo_temp_a = FileSystemURL::CreateForTest(
+      GURL("http://foo"), kFileSystemTypeTemporary,
+      base::FilePath::FromUTF8Unsafe("a"));
+  FileSystemURL url_foo_temp_b = FileSystemURL::CreateForTest(
+      GURL("http://foo"), kFileSystemTypeTemporary,
+      base::FilePath::FromUTF8Unsafe("b"));
+  FileSystemURL url_foo_perm_a = FileSystemURL::CreateForTest(
+      GURL("http://foo"), kFileSystemTypePersistent,
+      base::FilePath::FromUTF8Unsafe("a"));
+  FileSystemURL url_bar_temp_a = FileSystemURL::CreateForTest(
+      GURL("http://bar"), kFileSystemTypeTemporary,
+      base::FilePath::FromUTF8Unsafe("a"));
+  FileSystemURL url_bar_perm_a = FileSystemURL::CreateForTest(
+      GURL("http://bar"), kFileSystemTypePersistent,
+      base::FilePath::FromUTF8Unsafe("a"));
+
+  EXPECT_TRUE(AreSameFileSystem(url_foo_temp_a, url_foo_temp_a));
+  EXPECT_TRUE(AreSameFileSystem(url_foo_temp_a, url_foo_temp_b));
+  EXPECT_FALSE(AreSameFileSystem(url_foo_temp_a, url_foo_perm_a));
+  EXPECT_FALSE(AreSameFileSystem(url_foo_temp_a, url_bar_temp_a));
+  EXPECT_FALSE(AreSameFileSystem(url_foo_temp_a, url_bar_perm_a));
 }
 
 }  // namespace (anonymous)

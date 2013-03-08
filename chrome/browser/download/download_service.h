@@ -15,6 +15,8 @@
 
 class ChromeDownloadManagerDelegate;
 class DownloadHistory;
+class DownloadUIController;
+class ExtensionDownloadsEventRouter;
 class Profile;
 
 namespace content {
@@ -34,6 +36,12 @@ class DownloadService : public ProfileKeyedService {
   // incognito or if the DownloadManager hasn't been created yet or if there is
   // no HistoryService for profile.
   DownloadHistory* GetDownloadHistory();
+
+#if !defined(OS_ANDROID)
+  ExtensionDownloadsEventRouter* GetExtensionEventRouter() {
+    return extension_event_router_.get();
+  }
+#endif
 
   // Has a download manager been created?
   bool HasCreatedDownloadManager();
@@ -64,6 +72,25 @@ class DownloadService : public ProfileKeyedService {
   scoped_refptr<ChromeDownloadManagerDelegate> manager_delegate_;
 
   scoped_ptr<DownloadHistory> download_history_;
+
+  // The UI controller is responsible for observing the download manager and
+  // notifying the UI of any new downloads. Its lifetime matches that of the
+  // associated download manager.
+  scoped_ptr<DownloadUIController> download_ui_;
+
+  // On Android, GET downloads are not handled by the DownloadManager.
+  // Once we have extensions on android, we probably need the EventRouter
+  // in ContentViewDownloadDelegate which knows about both GET and POST
+  // downloads.
+#if !defined(OS_ANDROID)
+  // The ExtensionDownloadsEventRouter dispatches download creation, change, and
+  // erase events to extensions. Like ChromeDownloadManagerDelegate, it's a
+  // chrome-level concept and its lifetime should match DownloadManager. There
+  // should be a separate EDER for on-record and off-record managers.
+  // There does not appear to be a separate ExtensionSystem for on-record and
+  // off-record profiles, so ExtensionSystem cannot own the EDER.
+  scoped_ptr<ExtensionDownloadsEventRouter> extension_event_router_;
+#endif
 
   DISALLOW_COPY_AND_ASSIGN(DownloadService);
 };

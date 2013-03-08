@@ -6,7 +6,6 @@
 
 #include <string>
 
-#include "chrome/browser/ui/web_contents_modal_dialog.h"
 #include "chrome/browser/ui/webui/chrome_web_contents_handler.h"
 #include "content/public/browser/web_contents.h"
 #include "ipc/ipc_message.h"
@@ -25,7 +24,6 @@ ConstrainedWebDialogDelegateBase::ConstrainedWebDialogDelegateBase(
     : WebDialogWebContentsDelegate(browser_context,
                                    new ChromeWebContentsHandler),
       web_dialog_delegate_(delegate),
-      window_(NULL),
       closed_via_webui_(false),
       release_contents_on_close_(false) {
   CHECK(delegate);
@@ -63,17 +61,7 @@ WebDialogDelegate*
 
 void ConstrainedWebDialogDelegateBase::OnDialogCloseFromWebUI() {
   closed_via_webui_ = true;
-  window_->CloseWebContentsModalDialog();
-}
-
-void ConstrainedWebDialogDelegateBase::set_window(
-    WebContentsModalDialog* window) {
-  window_ = window;
-}
-
-void ConstrainedWebDialogDelegateBase::set_override_tab_delegate(
-    WebDialogWebContentsDelegate* override_tab_delegate) {
-  override_tab_delegate_.reset(override_tab_delegate);
+  CloseContents(web_contents_.get());
 }
 
 bool ConstrainedWebDialogDelegateBase::closed_via_webui() const {
@@ -84,8 +72,10 @@ void ConstrainedWebDialogDelegateBase::ReleaseWebContentsOnDialogClose() {
   release_contents_on_close_ = true;
 }
 
-WebContentsModalDialog* ConstrainedWebDialogDelegateBase::GetWindow() {
-  return window_;
+NativeWebContentsModalDialog
+    ConstrainedWebDialogDelegateBase::GetNativeDialog() {
+  NOTREACHED();
+  return NULL;
 }
 
 WebContents* ConstrainedWebDialogDelegateBase::GetWebContents() {

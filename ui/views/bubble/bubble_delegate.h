@@ -46,7 +46,7 @@ class VIEWS_EXPORT BubbleDelegateView : public WidgetDelegateView,
   virtual NonClientFrameView* CreateNonClientFrameView(Widget* widget) OVERRIDE;
 
   // WidgetObserver overrides:
-  virtual void OnWidgetClosing(Widget* widget) OVERRIDE;
+  virtual void OnWidgetDestroying(Widget* widget) OVERRIDE;
   virtual void OnWidgetVisibilityChanged(Widget* widget, bool visible) OVERRIDE;
   virtual void OnWidgetActivationChanged(Widget* widget, bool active) OVERRIDE;
   virtual void OnWidgetBoundsChanged(Widget* widget,
@@ -97,6 +97,11 @@ class VIEWS_EXPORT BubbleDelegateView : public WidgetDelegateView,
   bool accept_events() const { return accept_events_; }
   void set_accept_events(bool accept_events) { accept_events_ = accept_events; }
 
+  bool border_accepts_events() const { return border_accepts_events_; }
+  void set_border_accepts_events(bool accept) {
+    border_accepts_events_ = accept;
+  }
+
   bool adjust_if_offscreen() const { return adjust_if_offscreen_; }
   void set_adjust_if_offscreen(bool adjust) { adjust_if_offscreen_ = adjust; }
 
@@ -114,7 +119,8 @@ class VIEWS_EXPORT BubbleDelegateView : public WidgetDelegateView,
   // bubble to the setting before StartFade() was called.
   void ResetFade();
 
-  // Sets the bubble alignment relative to the anchor.
+  // Sets the bubble alignment relative to the anchor. This may only be called
+  // after calling CreateBubble.
   void SetAlignment(BubbleBorder::BubbleAlignment alignment);
 
  protected:
@@ -204,12 +210,16 @@ class VIEWS_EXPORT BubbleDelegateView : public WidgetDelegateView,
   // The widget hosting the border for this bubble (non-Aura Windows only).
   Widget* border_widget_;
 
-  // Create a popup window for focusless bubbles on Linux/ChromeOS.
-  // These bubbles are not interactive and should not gain focus.
+  // If true (defaults to false), the bubble does not take user focus upon
+  // display.
   bool use_focusless_;
 
   // Specifies whether the popup accepts events or lets them pass through.
   bool accept_events_;
+
+  // Specifies whether the bubble border accepts events or lets them pass
+  // through.
+  bool border_accepts_events_;
 
   // If true (defaults to true), the arrow may be mirrored and moved to fit the
   // bubble on screen better. It would be a no-op if the bubble has no arrow.

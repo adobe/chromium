@@ -8,11 +8,32 @@
 
 #include "chrome/browser/policy/policy_path_parser.h"
 
+#include "base/command_line.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/utf_string_conversions.h"
+#include "base/win/registry.h"
+#include "chrome/common/chrome_switches.h"
+#include "policy/policy_constants.h"
 
-namespace policy {
+namespace {
 
-namespace path_parser {
+// Checks if the registry key exists in the given hive and expands any
+// variables in the string.
+bool LoadUserDataDirPolicyFromRegistry(HKEY hive,
+                                       const std::wstring& key_name,
+                                       base::FilePath* user_data_dir) {
+  std::wstring value;
+
+  base::win::RegKey policy_key(hive,
+                               policy::kRegistryMandatorySubKey,
+                               KEY_READ);
+  if (policy_key.ReadValue(key_name.c_str(), &value) == ERROR_SUCCESS) {
+    *user_data_dir =
+        base::FilePath(policy::path_parser::ExpandPathVariables(value));
+    return true;
+  }
+  return false;
+}
 
 const WCHAR* kMachineNamePolicyVarName = L"${machine_name}";
 const WCHAR* kUserNamePolicyVarName = L"${user_name}";
@@ -41,11 +62,17 @@ const WinFolderNamesToCSIDLMapping win_folder_mapping[] = {
     { kWinDocumentsFolderVarName,      CSIDL_PERSONAL}
 };
 
+}  // namespace
+
+namespace policy {
+
+namespace path_parser {
+
 // Replaces all variable occurances in the policy string with the respective
 // system settings values.
-FilePath::StringType ExpandPathVariables(
-    const FilePath::StringType& untranslated_string) {
-  FilePath::StringType result(untranslated_string);
+base::FilePath::StringType ExpandPathVariables(
+    const base::FilePath::StringType& untranslated_string) {
+  base::FilePath::StringType result(untranslated_string);
   if (result.length() == 0)
     return result;
   // Sanitize quotes in case of any around the whole string.
@@ -104,6 +131,39 @@ FilePath::StringType ExpandPathVariables(
   }
 
   return result;
+}
+
+void CheckUserDataDirPolicy(base::FilePath* user_data_dir) {
+  DCHECK(user_data_dir);
+  // We are running as Chrome Frame if we were invoked with user-data-dir,
+  // chrome-frame, and automation-channel switches.
+  CommandLine* command_line = CommandLine::ForCurrentProcess();
+  const bool is_chrome_frame =
+      !user_data_dir->empty() &&
+      command_line->HasSwitch(switches::kChromeFrame) &&
+      command_line->HasSwitch(switches::kAutomationClientChannelID);
+
+  // In the case of Chrome Frame, the last path component of the user-data-dir
+  // provided on the command line must be preserved since it is specific to
+  // CF's host.
+  base::FilePath cf_host_dir;
+  if (is_chrome_frame)
+    cf_host_dir = user_data_dir->BaseName();
+
+  // Policy from the HKLM hive has precedence over HKCU so if we have one here
+  // we don't have to try to load HKCU.
+  const char* key_name_ascii = (is_chrome_frame ? policy::key::kGCFUserDataDir :
+                                policy::key::kUserDataDir);
+  std::wstring key_name(ASCIIToWide(key_name_ascii));
+  if (LoadUserDataDirPolicyFromRegistry(HKEY_LOCAL_MACHINE, key_name,
+                                        user_data_dir) ||
+      LoadUserDataDirPolicyFromRegistry(HKEY_CURRENT_USER, key_name,
+                                        user_data_dir)) {
+    // A Group Policy value was loaded.  Append the Chrome Frame host directory
+    // if relevant.
+    if (is_chrome_frame)
+      *user_data_dir = user_data_dir->Append(cf_host_dir);
+  }
 }
 
 }  // namespace path_parser

@@ -8,8 +8,7 @@
 #include <set>
 
 #include "base/basictypes.h"
-#include "chrome/browser/ui/browser_list_impl.h"
-#include "chrome/browser/ui/host_desktop.h"
+#include "chrome/browser/ui/browser_iterator.h"
 
 namespace content {
 class WebContents;
@@ -21,7 +20,7 @@ class WebContents;
 // browser windows or tabs while iterating may cause incorrect behavior.
 //
 // Example:
-//   for (TabContentsIterator iterator; !iterator.done(); ++iterator) {
+//   for (TabContentsIterator iterator; !iterator.done(); iterator.Next()) {
 //     WebContents* cur = *iterator;
 //     -or-
 //     iterator->OperationOnWebContents();
@@ -35,10 +34,14 @@ class TabContentsIterator {
   bool done() const { return cur_ == NULL; }
 
   // Returns the Browser instance associated with the current
-  // WebContents. Valid as long as !done()
-  Browser* browser() const;
+  // WebContents. Valid as long as !done().
+  Browser* browser() const {
+    if (!browser_iterator_.done())
+      return *browser_iterator_;
+    return NULL;
+  }
 
-  // Returns the current WebContents, valid as long as !Done()
+  // Returns the current WebContents, valid as long as !done().
   content::WebContents* operator->() const {
     return cur_;
   }
@@ -46,29 +49,12 @@ class TabContentsIterator {
     return cur_;
   }
 
-  // Incrementing operators, valid as long as !Done()
-  content::WebContents* operator++() {  // ++preincrement
-    Advance();
-    return cur_;
-  }
-  content::WebContents* operator++(int) {  // postincrement++
-    content::WebContents* tmp = cur_;
-    Advance();
-    return tmp;
-  }
+  // Loads the next host into |cur_|. This is designed so that for the initial
+  // call from the constructor, when browser_iterator_ points to the first
+  // Browser and web_view_index_ is -1, it will fill the first host.
+  void Next();
 
  private:
-  // Loads the next host into |cur_|. This is designed so that for the initial
-  // call when browser_iterator_ points to the first browser and
-  // web_view_index_ is -1, it will fill the first host.
-  void Advance();
-
-  // Helper function to iterate the BrowserList passed in.
-  // Returns true if the iterator was successfully advanced.
-  bool AdvanceBrowserIterator(
-      chrome::BrowserListImpl::const_iterator* list_iterator,
-      chrome::BrowserListImpl* browser_list);
-
   // Tab index into the current Browser of the current web view.
   int web_view_index_;
 
@@ -77,17 +63,8 @@ class TabContentsIterator {
   // cache this since the caller may access the current host many times.
   content::WebContents* cur_;
 
-  // The Desktop Browser list.
-  chrome::BrowserListImpl* desktop_browser_list_;
-
-  // The Ash Browser list.
-  chrome::BrowserListImpl* ash_browser_list_;
-
-  // Iterator over all the Browser objects in desktop mode.
-  chrome::BrowserListImpl::const_iterator desktop_browser_iterator_;
-
-  // Iterator over all the Browser objects in Ash mode.
-  chrome::BrowserListImpl::const_iterator ash_browser_iterator_;
+  // An iterator over all the browsers.
+  chrome::BrowserIterator browser_iterator_;
 
   DISALLOW_COPY_AND_ASSIGN(TabContentsIterator);
 };

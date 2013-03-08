@@ -18,8 +18,8 @@
 #include "chrome/browser/policy/proto/chrome_device_policy.pb.h"
 #include "chrome/browser/policy/proto/device_management_backend.pb.h"
 #include "chrome/common/chrome_paths.h"
+#include "chrome/test/base/scoped_testing_local_state.h"
 #include "chrome/test/base/testing_browser_process.h"
-#include "chrome/test/base/testing_pref_service.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -245,7 +245,7 @@ TEST_F(DeviceSettingsProviderTest, PolicyLoadNotification) {
 
 TEST_F(DeviceSettingsProviderTest, StatsReportingMigration) {
   // Create the legacy consent file.
-  FilePath consent_file;
+  base::FilePath consent_file;
   ASSERT_TRUE(PathService::Get(chrome::DIR_USER_DATA, &consent_file));
   consent_file = consent_file.AppendASCII("Consent To Send Stats");
   ASSERT_EQ(1, file_util::WriteFile(consent_file, "0", 1));

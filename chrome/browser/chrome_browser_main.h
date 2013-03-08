@@ -27,6 +27,7 @@ class Profile;
 class StartupBrowserCreator;
 class StartupTimeBomb;
 class ShutdownWatcherHelper;
+class ThreeDAPIObserver;
 class TranslateManager;
 
 namespace chrome_browser {
@@ -175,6 +176,7 @@ class ChromeBrowserMainParts : public content::BrowserMainParts {
   Profile* profile_;
   bool run_message_loop_;
   ProcessSingleton::NotifyResult notify_result_;
+  scoped_ptr<ThreeDAPIObserver> three_d_observer_;
 
   // Initialized in SetupMetricsAndFieldTrials.
   scoped_refptr<FieldTrialSynchronizer> field_trial_synchronizer_;
@@ -183,7 +185,7 @@ class ChromeBrowserMainParts : public content::BrowserMainParts {
   // PreMainMessageLoopRunThreadsCreated.
   bool do_first_run_tasks_;
   PrefService* local_state_;
-  FilePath user_data_dir_;
+  base::FilePath user_data_dir_;
 
   // Members needed across shutdown methods.
   bool restart_last_session_;

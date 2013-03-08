@@ -7,10 +7,11 @@
 
 #include <string>
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/chromeos/login/mock_user_image_manager.h"
 #include "chrome/browser/chromeos/login/user.h"
+#include "chrome/browser/chromeos/login/user_flow.h"
 #include "chrome/browser/chromeos/login/user_image.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -32,8 +33,6 @@ class MockUserManager : public UserManager {
   MOCK_METHOD2(RegularUserLoggedIn, void(const std::string&, bool));
   MOCK_METHOD1(RegularUserLoggedInAsEphemeral, void(const std::string&));
   MOCK_METHOD0(SessionStarted, void(void));
-  MOCK_METHOD1(CreateLocallyManagedUserRecord,
-               const User*(const string16& display_name));
   MOCK_METHOD2(RemoveUser, void(const std::string&, RemoveUserDelegate*));
   MOCK_METHOD1(RemoveUserFromList, void(const std::string&));
   MOCK_CONST_METHOD1(IsKnownUser, bool(const std::string&));
@@ -66,6 +65,22 @@ class MockUserManager : public UserManager {
   MOCK_METHOD1(RemoveObserver, void(UserManager::Observer*));
   MOCK_METHOD0(NotifyLocalStateChanged, void(void));
   MOCK_METHOD0(CreateLocallyManagedUserRecord, void(void));
+  MOCK_CONST_METHOD0(GetMergeSessionState, MergeSessionState(void));
+  MOCK_METHOD1(SetMergeSessionState, void(MergeSessionState));
+
+  MOCK_METHOD2(SetUserFlow, void(const std::string&, UserFlow*));
+  MOCK_METHOD1(ResetUserFlow, void(const std::string&));
+
+  MOCK_METHOD2(CreateLocallyManagedUserRecord, const User*(
+      const std::string& e_mail,
+      const string16& display_name));
+  MOCK_METHOD0(GenerateUniqueLocallyManagedUserId, std::string(void));
+
+  MOCK_METHOD1(StartLocallyManagedUserCreationTransaction,
+      void(const string16&));
+  MOCK_METHOD1(SetLocallyManagedUserCreationTransactionUserId,
+      void(const std::string&));
+  MOCK_METHOD0(CommitLocallyManagedUserCreationTransaction, void(void));
 
   // You can't mock this function easily because nobody can create User objects
   // but the UserManagerImpl and us.
@@ -77,11 +92,15 @@ class MockUserManager : public UserManager {
 
   virtual UserImageManager* GetUserImageManager() OVERRIDE;
 
+  virtual UserFlow* GetCurrentUserFlow() const OVERRIDE;
+  virtual UserFlow* GetUserFlow(const std::string&) const OVERRIDE;
+
   // Sets a new User instance.
   void SetLoggedInUser(const std::string& email);
 
   User* user_;
   scoped_ptr<MockUserImageManager> user_image_manager_;
+  scoped_ptr<UserFlow> user_flow_;
 };
 
 // Class that provides easy life-cycle management for mocking the UserManager

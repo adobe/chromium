@@ -5,7 +5,7 @@
 #include "testing/gtest/include/gtest/gtest.h"
 
 #include "base/command_line.h"
-#include "base/file_util.h"
+#include "base/files/memory_mapped_file.h"
 #include "base/logging.h"
 #include "base/string_number_conversions.h"
 #include "content/common/gpu/media/h264_parser.h"
@@ -13,14 +13,14 @@
 using content::H264Parser;
 using content::H264NALU;
 
-const FilePath::CharType* test_stream_filename =
+const base::FilePath::CharType* test_stream_filename =
     FILE_PATH_LITERAL("content/common/gpu/testdata/test-25fps.h264");
 // Number of NALUs in the stream to be parsed.
 int num_nalus = 759;
 
 TEST(H264ParserTest, StreamFileParsing) {
-  FilePath fp(test_stream_filename);
-  file_util::MemoryMappedFile stream;
+  base::FilePath fp(test_stream_filename);
+  base::MemoryMappedFile stream;
   CHECK(stream.Initialize(fp)) << "Couldn't open stream file: "
                                << test_stream_filename;
   DVLOG(1) << "Parsing file: " << test_stream_filename;

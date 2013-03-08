@@ -4,13 +4,13 @@
 
 #include "cc/layer_tree_host.h"
 
+#include "base/bind.h"
 #include "base/command_line.h"
 #include "base/debug/trace_event.h"
 #include "base/message_loop.h"
 #include "base/stl_util.h"
 #include "base/string_number_conversions.h"
 #include "cc/animation_registrar.h"
-#include "cc/font_atlas.h"
 #include "cc/heads_up_display_layer.h"
 #include "cc/heads_up_display_layer_impl.h"
 #include "cc/layer.h"
@@ -37,8 +37,6 @@ static int numLayerTreeInstances;
 
 namespace cc {
 
-bool LayerTreeHost::s_needsFilterContext = false;
-
 RendererCapabilities::RendererCapabilities()
     : bestTextureFormat(0)
     , usingPartialSwap(false)
@@ -46,10 +44,11 @@ RendererCapabilities::RendererCapabilities()
     , usingSetVisibility(false)
     , usingSwapCompleteCallback(false)
     , usingGpuMemoryManager(false)
-    , usingDiscardBackbuffer(false)
     , usingEglImage(false)
     , allowPartialTextureUpdates(false)
+    , usingOffscreenContext3d(false)
     , maxTextureSize(0)
+    , avoidPow2Textures(false)
 {
 }
 
@@ -73,6 +72,7 @@ scoped_ptr<LayerTreeHost> LayerTreeHost::create(LayerTreeHostClient* client, con
 LayerTreeHost::LayerTreeHost(LayerTreeHostClient* client, const LayerTreeSettings& settings)
     : m_animating(false)
     , m_needsFullTreeSync(true)
+    , m_needsFilterContext(false)
     , m_client(client)
     , m_commitNumber(0)
     , m_renderingStats()
@@ -157,7 +157,7 @@ void LayerTreeHost::initializeRenderer()
 
     // Update m_settings based on partial update capability.
     size_t maxPartialTextureUpdates = 0;
-    if (m_proxy->rendererCapabilities().allowPartialTextureUpdates)
+    if (m_proxy->rendererCapabilities().allowPartialTextureUpdates && !m_settings.implSidePainting)
         maxPartialTextureUpdates = std::min(m_settings.maxPartialTextureUpdates, m_proxy->maxPartialTextureUpdates());
     m_settings.maxPartialTextureUpdates = maxPartialTextureUpdates;
 
@@ -182,6 +182,8 @@ LayerTreeHost::RecreateResult LayerTreeHost::recreateOutputSurface()
         m_outputSurfaceLost = false;
         return RecreateSucceeded;
     }
+
+    m_client->willRetryRecreateOutputSurface();
 
     // Tolerate a certain number of recreation failures to work around races
     // in the output-surface-lost machinery.
@@ -259,33 +261,30 @@ void LayerTreeHost::finishCommitOnImplThread(LayerTreeHostImpl* hostImpl)
     bool newImplTreeHasNoEvictedResources = !m_contentsTextureManager->linkedEvictedBackingsExist();
 
     m_contentsTextureManager->updateBackingsInDrawingImplTree();
-    m_contentsTextureManager->reduceMemory(hostImpl->resourceProvider());
 
     // In impl-side painting, synchronize to the pending tree so that it has
     // time to raster before being displayed.  If no pending tree is needed,
-    // synchronization can happen directly to the active tree.
+    // synchronization can happen directly to the active tree and
+    // unlinked contents resources can be reclaimed immediately.
     LayerTreeImpl* syncTree;
-    bool needsFullTreeSync = false;
     if (m_settings.implSidePainting) {
         // Commits should not occur while there is already a pending tree.
         DCHECK(!hostImpl->pendingTree());
         hostImpl->createPendingTree();
         syncTree = hostImpl->pendingTree();
-        // TODO(enne): we could recycle old active trees and keep track for
-        // multiple main thread frames whether a sync is needed
-        needsFullTreeSync = true;
     } else {
+        m_contentsTextureManager->reduceMemory(hostImpl->resourceProvider());
         syncTree = hostImpl->activeTree();
-        needsFullTreeSync = m_needsFullTreeSync;
     }
 
-    if (needsFullTreeSync)
+    if (m_needsFullTreeSync)
         syncTree->SetRootLayer(TreeSynchronizer::synchronizeTrees(rootLayer(), syncTree->DetachLayerTree(), syncTree));
     {
         TRACE_EVENT0("cc", "LayerTreeHost::pushProperties");
         TreeSynchronizer::pushProperties(rootLayer(), syncTree->RootLayer());
     }
 
+    syncTree->set_needs_full_tree_sync(m_needsFullTreeSync);
     m_needsFullTreeSync = false;
 
     if (m_rootLayer && m_hudLayer)
@@ -299,22 +298,42 @@ void LayerTreeHost::finishCommitOnImplThread(LayerTreeHostImpl* hostImpl)
 
     syncTree->FindRootScrollLayer();
 
+    float page_scale_delta, sent_page_scale_delta;
+    if (m_settings.implSidePainting) {
+        // Update the delta from the active tree, which may have
+        // adjusted its delta prior to the pending tree being created.
+        // This code is equivalent to that in LayerTreeImpl::SetPageScaleDelta.
+        DCHECK_EQ(1, syncTree->sent_page_scale_delta());
+        page_scale_delta = hostImpl->activeTree()->page_scale_delta();
+        sent_page_scale_delta = hostImpl->activeTree()->sent_page_scale_delta();
+    } else {
+        page_scale_delta = syncTree->page_scale_delta();
+        sent_page_scale_delta = syncTree->sent_page_scale_delta();
+        syncTree->set_sent_page_scale_delta(1);
+    }
+
+    syncTree->SetPageScaleFactorAndLimits(m_pageScaleFactor, m_minPageScaleFactor, m_maxPageScaleFactor);
+    syncTree->SetPageScaleDelta(page_scale_delta / sent_page_scale_delta);
+
+    hostImpl->setViewportSize(layoutViewportSize(), deviceViewportSize());
+    hostImpl->setDeviceScaleFactor(deviceScaleFactor());
+    hostImpl->setDebugState(m_debugState);
+
+    DCHECK(!syncTree->ViewportSizeInvalid());
+
+    if (newImplTreeHasNoEvictedResources) {
+        if (syncTree->ContentsTexturesPurged())
+            syncTree->ResetContentsTexturesPurged();
+    }
+
     if (!m_settings.implSidePainting) {
         // If we're not in impl-side painting, the tree is immediately
         // considered active.
         syncTree->DidBecomeActive();
     }
 
-    hostImpl->setViewportSize(layoutViewportSize(), deviceViewportSize());
-    hostImpl->setDeviceScaleFactor(deviceScaleFactor());
-    hostImpl->setPageScaleFactorAndLimits(m_pageScaleFactor, m_minPageScaleFactor, m_maxPageScaleFactor);
-    hostImpl->setDebugState(m_debugState);
-    hostImpl->savePaintTime(m_renderingStats.totalPaintTime);
-
-    if (newImplTreeHasNoEvictedResources) {
-        if (syncTree->ContentsTexturesPurged())
-            syncTree->ResetContentsTexturesPurged();
-    }
+    if (m_debugState.continuousPainting)
+        hostImpl->savePaintTime(m_renderingStats.totalPaintTime, commitNumber());
 
     m_commitNumber++;
 }
@@ -322,13 +341,13 @@ void LayerTreeHost::finishCommitOnImplThread(LayerTreeHostImpl* hostImpl)
 void LayerTreeHost::willCommit()
 {
     m_client->willCommit();
+}
 
+void LayerTreeHost::updateHudLayer()
+{
     if (m_debugState.showHudInfo()) {
         if (!m_hudLayer)
             m_hudLayer = HeadsUpDisplayLayer::create();
-
-        if (m_debugState.hudNeedsFont() && !m_hudLayer->hasFontAtlas())
-            m_hudLayer->setFontAtlas(m_client->createFontAtlas());
 
         if (m_rootLayer && !m_hudLayer->parent())
             m_rootLayer->addChild(m_hudLayer);
@@ -355,7 +374,11 @@ scoped_ptr<InputHandler> LayerTreeHost::createInputHandler()
 
 scoped_ptr<LayerTreeHostImpl> LayerTreeHost::createLayerTreeHostImpl(LayerTreeHostImplClient* client)
 {
-    return LayerTreeHostImpl::create(m_settings, client, m_proxy.get());
+    DCHECK(m_proxy->isImplThread());
+    scoped_ptr<LayerTreeHostImpl> hostImpl(LayerTreeHostImpl::create(m_settings, client, m_proxy.get()));
+    if (m_settings.calculateTopControlsPosition && hostImpl->topControlsManager())
+        m_topControlsManagerWeakPtr = hostImpl->topControlsManager()->AsWeakPtr();
+    return hostImpl.Pass();
 }
 
 void LayerTreeHost::didLoseOutputSurface()
@@ -393,6 +416,7 @@ void LayerTreeHost::didDeferCommit()
 
 void LayerTreeHost::renderingStats(RenderingStats* stats) const
 {
+    CHECK(m_debugState.recordRenderingStats());
     *stats = m_renderingStats;
     m_proxy->renderingStats(stats);
 }
@@ -577,11 +601,11 @@ void LayerTreeHost::updateLayers(Layer* rootLayer, ResourceUpdateQueue& queue)
     LayerList updateList;
 
     {
-        if (m_settings.pageScalePinchZoomEnabled) {
-            Layer* rootScroll = findFirstScrollableLayer(rootLayer);
-            if (rootScroll)
-                rootScroll->setImplTransform(m_implTransform);
-        }
+        Layer* rootScroll = findFirstScrollableLayer(rootLayer);
+        if (rootScroll)
+            rootScroll->setImplTransform(m_implTransform);
+
+        updateHudLayer();
 
         TRACE_EVENT0("cc", "LayerTreeHost::updateLayers::calcDrawEtc");
         LayerTreeHostCommon::calculateDrawProperties(rootLayer, deviceViewportSize(), m_deviceScaleFactor, m_pageScaleFactor, rendererCapabilities().maxTextureSize, m_settings.canUseLCDText, updateList);
@@ -683,16 +707,18 @@ bool LayerTreeHost::paintMasksForRenderSurface(Layer* renderSurfaceLayer, Resour
     // in code, we already know that at least something will be drawn into this render surface, so the
     // mask and replica should be painted.
 
+    RenderingStats* stats = m_debugState.recordRenderingStats() ? &m_renderingStats : NULL;
+
     bool needMoreUpdates = false;
     Layer* maskLayer = renderSurfaceLayer->maskLayer();
     if (maskLayer) {
-        maskLayer->update(queue, 0, m_renderingStats);
+        maskLayer->update(queue, 0, stats);
         needMoreUpdates |= maskLayer->needMoreUpdates();
     }
 
     Layer* replicaMaskLayer = renderSurfaceLayer->replicaLayer() ? renderSurfaceLayer->replicaLayer()->maskLayer() : 0;
     if (replicaMaskLayer) {
-        replicaMaskLayer->update(queue, 0, m_renderingStats);
+        replicaMaskLayer->update(queue, 0, stats);
         needMoreUpdates |= replicaMaskLayer->needMoreUpdates();
     }
     return needMoreUpdates;
@@ -710,6 +736,8 @@ bool LayerTreeHost::paintLayerContents(const LayerList& renderSurfaceLayerList, 
 
     prioritizeTextures(renderSurfaceLayerList, occlusionTracker.overdrawMetrics());
 
+    RenderingStats* stats = m_debugState.recordRenderingStats() ? &m_renderingStats : NULL;
+
     LayerIteratorType end = LayerIteratorType::end(&renderSurfaceLayerList);
     for (LayerIteratorType it = LayerIteratorType::begin(&renderSurfaceLayerList); it != end; ++it) {
         occlusionTracker.enterLayer(it);
@@ -719,7 +747,7 @@ bool LayerTreeHost::paintLayerContents(const LayerList& renderSurfaceLayerList, 
             needMoreUpdates |= paintMasksForRenderSurface(*it, queue);
         } else if (it.representsItself()) {
             DCHECK(!it->bounds().IsEmpty());
-            it->update(queue, &occlusionTracker, m_renderingStats);
+            it->update(queue, &occlusionTracker, stats);
             needMoreUpdates |= it->needMoreUpdates();
         }
 
@@ -750,33 +778,6 @@ void LayerTreeHost::applyScrollAndScale(const ScrollAndScaleSet& info)
     }
     if (!rootScrollDelta.IsZero() || info.pageScaleDelta != 1)
         m_client->applyScrollAndScale(rootScrollDelta, info.pageScaleDelta);
-}
-
-gfx::PointF LayerTreeHost::adjustEventPointForPinchZoom(const gfx::PointF& zoomedViewportPoint)
-    const
-{
-    if (m_implTransform.IsIdentity())
-        return zoomedViewportPoint;
-
-    DCHECK(m_implTransform.IsInvertible());
-
-    // Scale to screen space before applying implTransform inverse.
-    gfx::PointF zoomedScreenspacePoint = gfx::ScalePoint(zoomedViewportPoint, deviceScaleFactor());
-
-    gfx::Transform inverseImplTransform(gfx::Transform::kSkipInitialization);
-    if (!m_implTransform.GetInverse(&inverseImplTransform)) {
-        // TODO(shawnsingh): Either we need to handle uninvertible transforms
-        // here, or DCHECK that the transform is invertible.
-    }
-
-    bool wasClipped = false;
-    gfx::PointF unzoomedScreenspacePoint = MathUtil::projectPoint(inverseImplTransform, zoomedScreenspacePoint, wasClipped);
-    DCHECK(!wasClipped);
-
-    // Convert back to logical pixels for hit testing.
-    gfx::PointF unzoomedViewportPoint = gfx::ScalePoint(unzoomedScreenspacePoint, 1 / deviceScaleFactor());
-
-    return unzoomedViewportPoint;
 }
 
 void LayerTreeHost::setImplTransform(const gfx::Transform& transform)
@@ -839,11 +840,28 @@ void LayerTreeHost::setDeviceScaleFactor(float deviceScaleFactor)
     setNeedsCommit();
 }
 
+void LayerTreeHost::enableHidingTopControls(bool enable)
+{
+    if (!m_settings.calculateTopControlsPosition)
+        return;
+
+    m_proxy->implThread()->postTask(
+        base::Bind(&TopControlsManager::enable_hiding_top_controls,
+                   m_topControlsManagerWeakPtr, enable));
+}
+
 bool LayerTreeHost::blocksPendingCommit() const
 {
     if (!m_rootLayer)
         return false;
     return m_rootLayer->blocksPendingCommitRecursive();
+}
+
+scoped_ptr<base::Value> LayerTreeHost::asValue() const
+{
+    scoped_ptr<base::DictionaryValue> state(new base::DictionaryValue());
+    state->Set("proxy", m_proxy->asValue().release());
+    return state.PassAs<base::Value>();
 }
 
 void LayerTreeHost::animateLayers(base::TimeTicks time)
@@ -856,8 +874,10 @@ void LayerTreeHost::animateLayers(base::TimeTicks time)
     double monotonicTime = (time - base::TimeTicks()).InSecondsF();
 
     AnimationRegistrar::AnimationControllerMap copy = m_animationRegistrar->active_animation_controllers();
-    for (AnimationRegistrar::AnimationControllerMap::iterator iter = copy.begin(); iter != copy.end(); ++iter)
-        (*iter).second->animate(monotonicTime, 0);
+    for (AnimationRegistrar::AnimationControllerMap::iterator iter = copy.begin(); iter != copy.end(); ++iter) {
+        (*iter).second->animate(monotonicTime);
+        (*iter).second->updateState(0);
+    }
 }
 
 void LayerTreeHost::setAnimationEventsRecursive(const AnimationEventsVector& events, Layer* layer, base::Time wallClockTime)

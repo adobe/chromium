@@ -6,8 +6,8 @@
 #include <string>
 #include <vector>
 
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/time.h"
@@ -16,11 +16,13 @@
 #include "chrome/browser/performance_monitor/metric.h"
 #include "chrome/browser/performance_monitor/performance_monitor_util.h"
 #include "chrome/common/extensions/extension.h"
+#include "chrome/common/extensions/manifest.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/leveldatabase/src/include/leveldb/db.h"
 #include "third_party/leveldatabase/src/include/leveldb/iterator.h"
 
 using extensions::Extension;
+using extensions::Manifest;
 
 namespace performance_monitor {
 
@@ -88,7 +90,7 @@ class TestingClock : public Database::Clock {
       : counter_(other.counter_) {
   }
   virtual ~TestingClock() {}
-  base::Time GetTime() {
+  virtual base::Time GetTime() OVERRIDE {
     return base::Time::FromInternalValue(++counter_);
   }
  private:
@@ -105,7 +107,7 @@ class PerformanceMonitorDatabaseEventTest : public ::testing::Test {
     db_->set_clock(scoped_ptr<Database::Clock>(clock_));
   }
 
-  void SetUp() {
+  virtual void SetUp() {
     ASSERT_TRUE(db_.get());
     PopulateDB();
   }
@@ -130,19 +132,19 @@ class PerformanceMonitorDatabaseEventTest : public ::testing::Test {
   void InitEvents() {
     install_event_1_ = util::CreateExtensionEvent(
         EVENT_EXTENSION_INSTALL, clock_->GetTime(), "a", "extension 1",
-        "http://foo.com", static_cast<int>(Extension::LOAD), "0.1",
+        "http://foo.com", static_cast<int>(Manifest::UNPACKED), "0.1",
         "Test Test");
     install_event_2_ = util::CreateExtensionEvent(
         EVENT_EXTENSION_INSTALL, clock_->GetTime(), "b", "extension 2",
-        "http://bar.com", static_cast<int>(Extension::LOAD), "0.1",
+        "http://bar.com", static_cast<int>(Manifest::UNPACKED), "0.1",
         "Test Test");
     uninstall_event_1_ = util::CreateExtensionEvent(
         EVENT_EXTENSION_UNINSTALL, clock_->GetTime(), "a", "extension 1",
-        "http://foo.com", static_cast<int>(Extension::LOAD), "0.1",
+        "http://foo.com", static_cast<int>(Manifest::UNPACKED), "0.1",
         "Test Test");
     uninstall_event_2_ = util::CreateExtensionEvent(
         EVENT_EXTENSION_UNINSTALL, clock_->GetTime(), "b", "extension 2",
-        "http://bar.com", static_cast<int>(Extension::LOAD), "0.1",
+        "http://bar.com", static_cast<int>(Manifest::UNPACKED), "0.1",
         "Test Test");
   }
 };
@@ -158,7 +160,7 @@ class PerformanceMonitorDatabaseMetricTest : public ::testing::Test {
     activity_ = std::string("A");
   }
 
-  void SetUp() {
+  virtual void SetUp() {
     ASSERT_TRUE(db_.get());
     PopulateDB();
   }
@@ -356,12 +358,12 @@ TEST_F(PerformanceMonitorDatabaseEventTest, GetEventsTimeRange) {
   scoped_ptr<Event> new_install_event =
       util::CreateExtensionEvent(EVENT_EXTENSION_INSTALL, clock_->GetTime(),
                                  "c", "test extension", "http://foo.com",
-                                 static_cast<int>(Extension::LOAD), "0.1",
+                                 static_cast<int>(Manifest::UNPACKED), "0.1",
                                  "Test Test");
   scoped_ptr<Event> new_uninstall_event =
       util::CreateExtensionEvent(EVENT_EXTENSION_UNINSTALL, clock_->GetTime(),
                                  "c", "test extension", "http://foo.com",
-                                 static_cast<int>(Extension::LOAD), "0.1",
+                                 static_cast<int>(Manifest::UNPACKED), "0.1",
                                  "Test Test");
   base::Time end_time = clock_->GetTime();
   db_->AddEvent(*new_install_event.get());

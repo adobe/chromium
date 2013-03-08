@@ -3,7 +3,7 @@
 // found in the LICENSE file.
 
 #include "base/bind.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/memory/ref_counted.h"
 #include "base/scoped_native_library.h"
 #include "remoting/base/auto_thread.h"
@@ -41,7 +41,7 @@ void CheckComAptTypeTask(APTTYPE* apt_type_out, HRESULT* hresult) {
   }
 
   // Dynamic link to the API so the same test binary can run on older systems.
-  base::ScopedNativeLibrary com_library(FilePath(L"ole32.dll"));
+  base::ScopedNativeLibrary com_library(base::FilePath(L"ole32.dll"));
   ASSERT_TRUE(com_library.is_valid());
   CoGetApartmentTypeFunc co_get_apartment_type =
       static_cast<CoGetApartmentTypeFunc>(

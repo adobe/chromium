@@ -4,6 +4,8 @@
 
 #include "chrome/browser/chromeos/drive/resource_entry_conversion.h"
 
+#include <string>
+
 #include "base/logging.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
@@ -23,11 +25,11 @@ DriveEntryProto ConvertResourceEntryToDriveEntryProto(
   // may be different (e.g. due to rename). To be consistent with the web
   // interface and other client to use the 'title' attribute, instead of
   // 'filename', as the file name in the local snapshot.
-  entry_proto.set_title(UTF16ToUTF8(entry.title()));
+  entry_proto.set_title(entry.title());
   entry_proto.set_base_name(util::EscapeUtf8FileName(entry_proto.title()));
 
   entry_proto.set_resource_id(entry.resource_id());
-  entry_proto.set_content_url(entry.content_url().spec());
+  entry_proto.set_download_url(entry.download_url().spec());
 
   const google_apis::Link* edit_link =
       entry.GetLinkByType(google_apis::Link::LINK_EDIT);

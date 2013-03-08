@@ -6,6 +6,9 @@
 
 #include "base/callback.h"
 #include "base/lazy_instance.h"
+#include "content/common/gpu/image_transport_surface.h"
+#include "content/renderer/devtools/devtools_client.h"
+#include "content/renderer/render_thread_impl.h"
 #include "content/renderer/render_view_impl.h"
 #include "content/renderer/renderer_webapplicationcachehost_impl.h"
 #include "content/renderer/renderer_webkitplatformsupport_impl.h"
@@ -49,6 +52,43 @@ void SetMockGamepads(const WebGamepads& pads) {
 
 void DisableAppCacheLogging() {
   RendererWebApplicationCacheHostImpl::DisableLoggingForTesting();
+}
+
+void EnableDevToolsFrontendTesting() {
+  DevToolsClient::EnableDevToolsFrontendTesting();
+}
+
+int GetLocalSessionHistoryLength(RenderView* render_view) {
+  return static_cast<RenderViewImpl*>(render_view)
+      ->GetLocalSessionHistoryLengthForTesting();
+}
+
+void SetAllowOSMesaImageTransportForTesting() {
+#if defined(OS_MACOSX)
+  ImageTransportSurface::SetAllowOSMesaForTesting(true);
+#endif
+}
+
+void DoNotSendFocusEvents() {
+  RenderThreadImpl::current()->set_should_send_focus_ipcs(false);
+}
+
+void SyncNavigationState(RenderView* render_view) {
+  static_cast<RenderViewImpl*>(render_view)->SyncNavigationState();
+}
+
+void SetFocusAndActivate(RenderView* render_view, bool enable) {
+  static_cast<RenderViewImpl*>(render_view)
+      ->SetFocusAndActivateForTesting(enable);
+}
+
+void EnableShortCircuitSizeUpdates() {
+  RenderThreadImpl::current()->set_short_circuit_size_updates(true);
+}
+
+void ForceResizeRenderView(RenderView* render_view,
+                           const WebKit::WebSize& new_size) {
+  static_cast<RenderViewImpl*>(render_view)->didAutoResize(new_size);
 }
 
 }  // namespace content

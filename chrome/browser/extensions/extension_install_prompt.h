@@ -39,6 +39,7 @@ namespace extensions {
 class BundleInstaller;
 class Extension;
 class ExtensionWebstorePrivateApiTest;
+class MockGetAuthTokenFunction;
 class PermissionSet;
 }  // namespace extensions
 
@@ -55,6 +56,7 @@ class ExtensionInstallPrompt
     RE_ENABLE_PROMPT,
     PERMISSIONS_PROMPT,
     EXTERNAL_INSTALL_PROMPT,
+    POST_INSTALL_PERMISSIONS_PROMPT,
     NUM_PROMPT_TYPES
   };
 
@@ -80,6 +82,8 @@ class ExtensionInstallPrompt
     // Getters for UI element labels.
     string16 GetDialogTitle() const;
     string16 GetHeading() const;
+    int GetDialogButtons() const;
+    bool HasAcceptButtonLabel() const;
     string16 GetAcceptButtonLabel() const;
     bool HasAbortButtonLabel() const;
     string16 GetAbortButtonLabel() const;
@@ -279,6 +283,13 @@ class ExtensionInstallPrompt
                                   const extensions::Extension* extension,
                                   const IssueAdviceInfo& issue_advice);
 
+  // This is called by the app handler launcher to review what permissions the
+  // extension or app currently has.
+  //
+  // This *WILL* call Abort() on |delegate|.
+  virtual void ReviewPermissions(Delegate* delegate,
+                                 const extensions::Extension* extension);
+
   // Installation was successful. This is declared virtual for testing.
   virtual void OnInstallSuccess(const extensions::Extension* extension,
                                 SkBitmap* icon);
@@ -288,8 +299,8 @@ class ExtensionInstallPrompt
 
  protected:
   friend class extensions::ExtensionWebstorePrivateApiTest;
+  friend class extensions::MockGetAuthTokenFunction;
   friend class WebstoreStandaloneInstallUnpackFailureTest;
-  friend class MockGetAuthTokenFunction;
 
   // Whether or not we should record the oauth2 grant upon successful install.
   bool record_oauth2_grant_;

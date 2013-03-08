@@ -49,6 +49,7 @@
 #include "ui/views/controls/link.h"
 #include "ui/views/controls/link_listener.h"
 #include "ui/views/layout/box_layout.h"
+#include "ui/views/layout/fill_layout.h"
 #include "ui/views/painter.h"
 #include "ui/views/view.h"
 #include "ui/views/widget/widget.h"
@@ -120,6 +121,15 @@ class RoundedImageView : public views::View {
   DISALLOW_COPY_AND_ASSIGN(RoundedImageView);
 };
 
+class ClickableAvatar : public views::CustomButton {
+ public:
+  explicit ClickableAvatar(views::ButtonListener* listener);
+  virtual ~ClickableAvatar();
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(ClickableAvatar);
+};
+
 // The user details shown in public account mode. This is essentially a label
 // but with custom painting code as the text is styled with multiple colors and
 // contains a link.
@@ -171,6 +181,7 @@ class UserView : public views::View,
 
   views::View* user_card_;
   views::View* logout_button_;
+  ClickableAvatar* profile_picture_;
 
   DISALLOW_COPY_AND_ASSIGN(UserView);
 };
@@ -213,6 +224,19 @@ void RoundedImageView::OnPaint(gfx::Canvas* canvas) {
   canvas->DrawImageInPath(resized_, image_bounds.x(), image_bounds.y(),
                           path, paint);
 }
+
+ClickableAvatar::ClickableAvatar(views::ButtonListener* listener)
+    : views::CustomButton(listener) {
+  SetLayoutManager(new views::FillLayout());
+  RoundedImageView* user_picture =
+      new RoundedImageView(kProfileRoundedCornerRadius);
+  user_picture->SetImage(
+      ash::Shell::GetInstance()->system_tray_delegate()->GetUserImage(),
+      gfx::Size(kUserIconSize, kUserIconSize));
+  AddChildView(user_picture);
+}
+
+ClickableAvatar::~ClickableAvatar() {}
 
 PublicAccountUserDetails::PublicAccountUserDetails(SystemTrayItem* owner,
                                                    int used_width)
@@ -272,10 +296,7 @@ void PublicAccountUserDetails::Layout() {
     position.set_y(position.y() + size.height());
 
     // Set the default text color for the line.
-    gfx::StyleRange default_style(line->default_style());
-    default_style.foreground = kPublicAccountUserCardTextColor;
-    line->set_default_style(default_style);
-    line->ApplyDefaultStyle();
+    line->SetColor(kPublicAccountUserCardTextColor);
 
     // If a range of the line contains the user's display name, apply a custom
     // text color to it.
@@ -284,11 +305,9 @@ void PublicAccountUserDetails::Layout() {
     if (!display_name.is_empty()) {
       display_name.set_end(
           it->find(kDisplayNameMark, display_name.start() + 1));
-      gfx::StyleRange display_name_style(line->default_style());
-      display_name_style.foreground = kPublicAccountUserCardNameColor;
       ui::Range line_range(0, it->size());
-      display_name_style.range = display_name.Intersect(line_range);
-      line->ApplyStyleRange(display_name_style);
+      line->ApplyColor(kPublicAccountUserCardNameColor,
+                       display_name.Intersect(line_range));
       // Update the range for the next line.
       if (display_name.end() >= line_range.end())
         display_name.set_start(0);
@@ -395,7 +414,8 @@ void PublicAccountUserDetails::CalculatePreferredSize(SystemTrayItem* owner,
 
 UserView::UserView(SystemTrayItem* owner, ash::user::LoginStatus login)
     : user_card_(NULL),
-      logout_button_(NULL) {
+      logout_button_(NULL),
+      profile_picture_(NULL) {
   CHECK_NE(ash::user::LOGGED_IN_NONE, login);
   set_background(views::Background::CreateSolidBackground(
       login == ash::user::LOGGED_IN_PUBLIC ? kPublicAccountBackgroundColor :
@@ -444,8 +464,12 @@ void UserView::Layout() {
 }
 
 void UserView::ButtonPressed(views::Button* sender, const ui::Event& event) {
-  DCHECK_EQ(logout_button_, sender);
-  ash::Shell::GetInstance()->system_tray_delegate()->SignOut();
+  if (sender == logout_button_)
+    ash::Shell::GetInstance()->system_tray_delegate()->SignOut();
+  else if (sender == profile_picture_)
+    ash::Shell::GetInstance()->system_tray_delegate()->ChangeProfilePicture();
+  else
+    NOTREACHED();
 }
 
 void UserView::AddLogoutButton(ash::user::LoginStatus login) {
@@ -463,13 +487,13 @@ void UserView::AddLogoutButton(ash::user::LoginStatus login) {
   if (login == ash::user::LOGGED_IN_PUBLIC) {
     TrayPopupLabelButtonBorder* border =
         static_cast<TrayPopupLabelButtonBorder*>(logout_button_->border());
-    border->SetPainter(views::CustomButton::STATE_NORMAL,
+    border->SetPainter(false, views::Button::STATE_NORMAL,
                        views::Painter::CreateImageGridPainter(
                            kPublicAccountLogoutButtonBorderImagesNormal));
-    border->SetPainter(views::CustomButton::STATE_HOVERED,
+    border->SetPainter(false, views::Button::STATE_HOVERED,
                        views::Painter::CreateImageGridPainter(
                            kPublicAccountLogoutButtonBorderImagesHovered));
-    border->SetPainter(views::CustomButton::STATE_PRESSED,
+    border->SetPainter(false, views::Button::STATE_PRESSED,
                        views::Painter::CreateImageGridPainter(
                            kPublicAccountLogoutButtonBorderImagesHovered));
   }
@@ -500,12 +524,8 @@ void UserView::AddUserCard(SystemTrayItem* owner,
     user_card_->AddChildView(details);
     return;
   }
-
-  RoundedImageView* avatar = new RoundedImageView(kProfileRoundedCornerRadius);
-  avatar->SetImage(
-      ash::Shell::GetInstance()->system_tray_delegate()->GetUserImage(),
-      gfx::Size(kUserIconSize, kUserIconSize));
-  user_card_->AddChildView(avatar);
+  profile_picture_ = new ClickableAvatar(this);
+  user_card_->AddChildView(profile_picture_);
 
   if (login == ash::user::LOGGED_IN_PUBLIC) {
     user_card_->AddChildView(new PublicAccountUserDetails(

@@ -8,9 +8,12 @@
 #include <map>
 #include <vector>
 
+#include "base/callback_forward.h"
 #include "base/string16.h"
 #include "chrome/browser/autofill/field_types.h"
 #include "third_party/skia/include/core/SkColor.h"
+
+class AutofillField;
 
 namespace autofill {
 
@@ -22,8 +25,8 @@ struct DetailInput {
   // kBillingInputs.
   int row_id;
   AutofillFieldType type;
-  // TODO(estade): remove this, do l10n.
-  const char* placeholder_text;
+  // Placeholder text resource ID.
+  int placeholder_text_rid;
   // The section suffix that the field must have to match up to this input.
   const char* section_suffix;
   // A number between 0 and 1.0 that describes how much of the horizontal space
@@ -34,19 +37,20 @@ struct DetailInput {
   string16 autofilled_value;
 };
 
+// Determines whether |input| and |field| match.
+typedef base::Callback<bool(const DetailInput& input,
+                            const AutofillField& field)> InputFieldComparator;
+
 // Sections of the dialog --- all fields that may be shown to the user fit under
 // one of these sections.
 enum DialogSection {
   SECTION_EMAIL,
+  // The Autofill-backed dialog uses separate CC and billing sections.
   SECTION_CC,
   SECTION_BILLING,
+  // The wallet-backed dialog uses a combined CC and billing section.
+  SECTION_CC_BILLING,
   SECTION_SHIPPING,
-};
-
-// Termination actions for the dialog.
-enum DialogAction {
-  ACTION_ABORT,
-  ACTION_SUBMIT,
 };
 
 // A notification to show in the autofill dialog. Ranges from information to
@@ -56,25 +60,41 @@ class DialogNotification {
  public:
   enum Type {
     NONE,
+    AUTOCHECKOUT_ERROR,
+    EXPLANATORY_MESSAGE,
     REQUIRED_ACTION,
     SECURITY_WARNING,
-    SUBMISSION_OPTION,
     VALIDATION_ERROR,
     WALLET_ERROR,
+    WALLET_PROMO,
   };
 
   DialogNotification();
   DialogNotification(Type type, const string16& display_text);
 
-  // Returns the appropriate background color for the view's notification area
-  // based on |type_|.
+  // Returns the appropriate background or text color for the view's
+  // notification area based on |type_|.
   SkColor GetBackgroundColor() const;
+  SkColor GetTextColor() const;
+
+  // Whether this notification has an arrow pointing up at the account chooser.
+  bool HasArrow() const;
+
+  // Whether this notifications has the "Save details to wallet" checkbox.
+  bool HasCheckbox() const;
 
   const string16& display_text() const { return display_text_; }
 
  private:
   Type type_;
   string16 display_text_;
+};
+
+enum DialogSignedInState {
+  REQUIRES_RESPONSE,
+  REQUIRES_SIGN_IN,
+  REQUIRES_PASSIVE_SIGN_IN,
+  SIGNED_IN,
 };
 
 typedef std::vector<DetailInput> DetailInputs;

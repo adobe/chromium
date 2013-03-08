@@ -5,7 +5,7 @@
 #include "content/browser/hyphenator/hyphenator_message_filter.h"
 
 #include "base/base_paths.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/path_service.h"
 #include "base/string16.h"
 #include "base/utf_string_conversions.h"
@@ -121,7 +121,7 @@ TEST_F(HyphenatorMessageFilterTest, OpenDictionary) {
 
   // Open a sample dictionary file and attach it to the
   // HyphenatorMessageFilter class so it can return a valid file.
-  FilePath path;
+  base::FilePath path;
   PathService::Get(base::DIR_SOURCE_ROOT, &path);
   path = path.Append(FILE_PATH_LITERAL("third_party"));
   path = path.Append(FILE_PATH_LITERAL("hyphen"));

@@ -7,7 +7,7 @@
 #include "base/command_line.h"
 #include "base/file_util.h"
 #include "base/path_service.h"
-#include "base/string_number_conversions.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/test/test_timeouts.h"
 #include "base/test/trace_event_analyzer.h"
 #include "base/utf_string_conversions.h"
@@ -71,9 +71,9 @@ class FrameRateTest
     return suffix;
   }
 
-  virtual FilePath GetDataPath(const std::string& name) {
+  virtual base::FilePath GetDataPath(const std::string& name) {
     // Make sure the test data is checked out.
-    FilePath test_path;
+    base::FilePath test_path;
     PathService::Get(chrome::DIR_TEST_DATA, &test_path);
     test_path = test_path.Append(FILE_PATH_LITERAL("perf"));
     test_path = test_path.Append(FILE_PATH_LITERAL("frame_rate"));
@@ -136,6 +136,12 @@ class FrameRateTest
   }
 
   void RunTest(const std::string& name) {
+#if defined(USE_AURA)
+    if (!HasFlag(kUseGpu)) {
+      printf("Test skipped, Aura always runs with GPU\n");
+      return;
+    }
+#endif
 #if defined(OS_WIN)
     if (HasFlag(kUseGpu) && HasFlag(kIsGpuCanvasTest) &&
         base::win::OSInfo::GetInstance()->version() == base::win::VERSION_XP) {
@@ -155,7 +161,7 @@ class FrameRateTest
     ASSERT_TRUE(HasFlag(kUseGpu) || !HasFlag(kForceGpuComposited));
     ASSERT_TRUE(!HasFlag(kUseGpu) || IsGpuAvailable());
 
-    FilePath test_path = GetDataPath(name);
+    base::FilePath test_path = GetDataPath(name);
     ASSERT_TRUE(file_util::DirectoryExists(test_path))
         << "Missing test directory: " << test_path.value();
 

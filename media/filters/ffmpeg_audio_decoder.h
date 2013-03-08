@@ -45,17 +45,10 @@ class MEDIA_EXPORT FFmpegAudioDecoder : public AudioDecoder {
   virtual ~FFmpegAudioDecoder();
 
  private:
-  // Methods running on decoder thread.
-  void DoInitialize(const scoped_refptr<DemuxerStream>& stream,
-                    const PipelineStatusCB& status_cb,
-                    const StatisticsCB& statistics_cb);
-  void DoReset(const base::Closure& closure);
-  void DoRead(const ReadCB& read_cb);
-  void DoDecodeBuffer(DemuxerStream::Status status,
-                      const scoped_refptr<DecoderBuffer>& input);
-
   // Reads from the demuxer stream with corresponding callback method.
   void ReadFromDemuxerStream();
+  void BufferReady(DemuxerStream::Status status,
+                   const scoped_refptr<DecoderBuffer>& input);
 
   bool ConfigureDecoder();
   void ReleaseFFmpegResources();
@@ -72,7 +65,11 @@ class MEDIA_EXPORT FFmpegAudioDecoder : public AudioDecoder {
   // Decoded audio format.
   int bits_per_channel_;
   ChannelLayout channel_layout_;
+  int channels_;
   int samples_per_second_;
+
+  // AVSampleFormat initially requested; not Chrome's SampleFormat.
+  int av_sample_format_;
 
   // Used for computing output timestamps.
   scoped_ptr<AudioTimestampHelper> output_timestamp_helper_;

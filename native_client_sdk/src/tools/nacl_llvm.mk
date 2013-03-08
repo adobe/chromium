@@ -26,13 +26,15 @@ PNACL_LIB?=$(TC_PATH)/$(OSNAME)_x86_$(TOOLCHAIN)/newlib/bin/pnacl-ar r
 # $3 = Include Directories
 #
 define C_COMPILER_RULE
-$(OUTDIR)/$(basename $(1))_pnacl.o : $(1) $(TOP_MAKE) | $(OUTDIR)
-	$(PNACL_CC) -o $$@ -c $$< $(POSIX_FLAGS) $(2) $(NACL_CFLAGS)
+-include $(OUTDIR)/$(basename $(1))_pnacl.d
+$(OUTDIR)/$(basename $(1))_pnacl.o : $(1) $(TOP_MAKE) | $(dir $(OUTDIR)/$(basename $(1)))dir.stamp
+	$(call LOG,CC,$$@,$(PNACL_CC) -o $$@ -c $$< $(POSIX_FLAGS) $(2) $(NACL_CFLAGS))
 endef
 
 define CXX_COMPILER_RULE
-$(OUTDIR)/$(basename $(1))_pnacl.o : $(1) $(TOP_MAKE) | $(OUTDIR)
-	$(PNACL_CXX) -o $$@ -c $$< $(POSIX_FLAGS) $(2) $(NACL_CFLAGS)
+-include $(OUTDIR)/$(basename $(1))_pnacl.d
+$(OUTDIR)/$(basename $(1))_pnacl.o : $(1) $(TOP_MAKE) | $(dir $(OUTDIR)/$(basename $(1)))dir.stamp
+	$(call LOG,CXX,$$@,$(PNACL_CXX) -o $$@ -c $$< $(POSIX_FLAGS) $(2) $(NACL_CFLAGS))
 endef
 
 
@@ -42,9 +44,9 @@ endef
 # $4 = VC Flags (unused)
 define COMPILE_RULE
 ifeq ('.c','$(suffix $(1))')
-$(call C_COMPILER_RULE,$(1),$(2) -I$(NACL_SDK_ROOT)/include $(foreach inc,$(3),-I$(inc)))
+$(call C_COMPILER_RULE,$(1),$(2) $(foreach inc,$(INC_PATHS),-I$(inc)) $(3))
 else
-$(call CXX_COMPILER_RULE,$(1),$(2) -I$(NACL_SDK_ROOT)/include $(foreach inc,$(3),-I$(inc)))
+$(call CXX_COMPILER_RULE,$(1),$(2) $(foreach inc,$(INC_PATHS),-I$(inc)) $(3))
 endif
 endef
 
@@ -69,10 +71,13 @@ endef
 # $3 = POSIX Link Flags
 # $4 = VC Link Flags (unused)
 define LIB_RULE
+$(STAMPDIR)/$(1).stamp : $(NACL_SDK_ROOT)/lib/$(TOOLCHAIN)/$(CONFIG)/lib$(1).a
+	@echo "TOUCHED $$@" > $(STAMPDIR)/$(1).stamp
+
 all: $(NACL_SDK_ROOT)/lib/$(TOOLCHAIN)/$(CONFIG)/lib$(1).a
 $(NACL_SDK_ROOT)/lib/$(TOOLCHAIN)/$(CONFIG)/lib$(1).a : $(foreach src,$(2),$(OUTDIR)/$(basename $(src))_pnacl.o)
 	$(MKDIR) -p $$(dir $$@)
-	$(PNACL_LIB) $$@ $$^ $(3)
+	$(call LOG,LIB,$$@,$(PNACL_LIB) $$@ $$^ $(3))
 endef
 
 
@@ -88,10 +93,9 @@ endef
 #
 define LINKER_RULE
 all: $(1)
-$(1) : $(2) $(4)
-	$(PNACL_LINK) -o $(1) $(2) $(foreach path,$(5),-L$(path)/pnacl/$(CONFIG)) $(foreach lib,$(3),-l$(lib)) $(6)
+$(1) : $(2) $(foreach dep,$(4),$(STAMPDIR)/$(dep).stamp)
+	$(call LOG,LINK,$$@,$(PNACL_LINK) -o $(1) $(2) $(foreach path,$(5),-L$(path)/pnacl/$(CONFIG)) $(foreach lib,$(3),-l$(lib)) $(6))
 endef
-
 
 
 #
@@ -126,7 +130,7 @@ NMF:=python $(NACL_SDK_ROOT)/tools/create_nmf.py
 define NMF_RULE
 all:$(OUTDIR)/$(1).nmf
 $(OUTDIR)/$(1).nmf : $(OUTDIR)/$(1).pexe
-	$(NMF) -o $$@ $$^ -s $(OUTDIR) $(2)
+	$(call LOG,CREATE_NMF,$$@,$(NMF) -o $$@ $$^ -s $(OUTDIR) $(2))
 endef
 
 

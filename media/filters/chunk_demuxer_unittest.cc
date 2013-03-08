@@ -61,8 +61,8 @@ static const int kAudioTrackNum = 2;
 static const int kAudioBlockDuration = 23;
 static const int kVideoBlockDuration = 33;
 
-static const char* kSourceId = "SourceId";
-static const char* kDefaultFirstClusterRange = "{ [0,46) }";
+static const char kSourceId[] = "SourceId";
+static const char kDefaultFirstClusterRange[] = "{ [0,46) }";
 static const int kDefaultFirstClusterEndTimestamp = 66;
 static const int kDefaultSecondClusterEndTimestamp = 132;
 
@@ -2041,9 +2041,37 @@ TEST_F(ChunkDemuxerTest, TestCodecPrefixMatching) {
 
   std::vector<std::string> codecs;
   codecs.push_back("avc1.4D4041");
-  codecs.push_back("mp4a.40.2");
 
   EXPECT_EQ(demuxer_->AddId("source_id", "video/mp4", codecs), expected);
+}
+
+// Test codec ID's that are not compliant with RFC6381, but have been
+// seen in the wild.
+TEST_F(ChunkDemuxerTest, TestCodecIDsThatAreNotRFC6381Compliant) {
+  ChunkDemuxer::Status expected = ChunkDemuxer::kNotSupported;
+
+#if defined(GOOGLE_CHROME_BUILD) || defined(USE_PROPRIETARY_CODECS)
+  expected = ChunkDemuxer::kOk;
+#endif
+  const char* codec_ids[] = {
+    // GPAC places leading zeros on the audio object type.
+    "mp4a.40.02",
+    "mp4a.40.05"
+  };
+
+  for (size_t i = 0; i < arraysize(codec_ids); ++i) {
+    std::vector<std::string> codecs;
+    codecs.push_back(codec_ids[i]);
+
+    ChunkDemuxer::Status result =
+        demuxer_->AddId("source_id", "audio/mp4", codecs);
+
+    EXPECT_EQ(result, expected)
+        << "Fail to add codec_id '" << codec_ids[i] << "'";
+
+    if (result == ChunkDemuxer::kOk)
+      demuxer_->RemoveId("source_id");
+  }
 }
 
 TEST_F(ChunkDemuxerTest, TestEndOfStreamFailures) {

@@ -17,29 +17,28 @@ class DictionaryValue;
 class Value;
 }
 
+class DevToolsClient;
 class Status;
 
 // Tracks the state of the DOM and execution context creation.
 class DomTracker : public DevToolsEventListener {
  public:
-  DomTracker();
+  explicit DomTracker(DevToolsClient* client);
   virtual ~DomTracker();
 
   Status GetFrameIdForNode(int node_id, std::string* frame_id);
-  Status GetContextIdForFrame(const std::string& frame_id, int* context_id);
 
   // Overridden from DevToolsEventListener:
+  virtual Status OnConnected() OVERRIDE;
   virtual void OnEvent(const std::string& method,
                        const base::DictionaryValue& params) OVERRIDE;
 
  private:
+  DevToolsClient* client_;
   bool ProcessNodeList(const base::Value* nodes);
   bool ProcessNode(const base::Value* node);
 
-  typedef std::map<int, std::string> NodeToFrameMap;
-  typedef std::map<std::string, int> FrameToContextMap;
-  NodeToFrameMap node_to_frame_map_;
-  FrameToContextMap frame_to_context_map_;
+  std::map<int, std::string> node_to_frame_map_;
 
   DISALLOW_COPY_AND_ASSIGN(DomTracker);
 };

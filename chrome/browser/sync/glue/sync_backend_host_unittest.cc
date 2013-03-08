@@ -11,11 +11,15 @@
 #include "base/message_loop.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/test/test_timeouts.h"
+#include "chrome/browser/prefs/pref_service_syncable.h"
 #include "chrome/browser/sync/glue/device_info.h"
 #include "chrome/browser/sync/glue/synced_device_tracker.h"
 #include "chrome/browser/sync/invalidations/invalidator_storage.h"
 #include "chrome/browser/sync/sync_prefs.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/test/base/testing_profile.h"
+#include "components/user_prefs/pref_registry_syncable.h"
+#include "content/public/browser/notification_service.h"
 #include "content/public/test/test_browser_thread.h"
 #include "google/cacheinvalidation/include/types.h"
 #include "googleurl/src/gurl.h"
@@ -58,9 +62,8 @@ class MockSyncFrontend : public SyncFrontend {
 
   MOCK_METHOD1(OnInvalidatorStateChange,
                void(syncer::InvalidatorState));
-  MOCK_METHOD2(OnIncomingInvalidation,
-               void(const syncer::ObjectIdInvalidationMap&,
-                    syncer::IncomingInvalidationSource));
+  MOCK_METHOD1(OnIncomingInvalidation,
+               void(const syncer::ObjectIdInvalidationMap&));
   MOCK_METHOD3(
       OnBackendInitialized,
       void(const syncer::WeakHandle<syncer::JsBackend>&,
@@ -143,7 +146,8 @@ class SyncBackendHostTest : public testing::Test {
     profile_.reset(new TestingProfile());
     profile_->CreateRequestContext();
     sync_prefs_.reset(new SyncPrefs(profile_->GetPrefs()));
-    invalidator_storage_.reset(new InvalidatorStorage(profile_->GetPrefs()));
+    invalidator_storage_.reset(new InvalidatorStorage(
+        profile_->GetPrefs()));
     backend_.reset(new SyncBackendHost(
         profile_->GetDebugName(),
         profile_.get(),
@@ -209,11 +213,17 @@ class SyncBackendHostTest : public testing::Test {
   // Synchronously configures the backend's datatypes.
   void ConfigureDataTypes(syncer::ModelTypeSet types_to_add,
                           syncer::ModelTypeSet types_to_remove) {
+    BackendDataTypeConfigurer::DataTypeConfigStateMap config_state_map;
+    BackendDataTypeConfigurer::SetDataTypesState(
+        BackendDataTypeConfigurer::ENABLED, types_to_add,  &config_state_map);
+    BackendDataTypeConfigurer::SetDataTypesState(
+        BackendDataTypeConfigurer::DISABLED,
+        types_to_remove, &config_state_map);
+
     types_to_add.PutAll(syncer::ControlTypes());
     backend_->ConfigureDataTypes(
         syncer::CONFIGURE_REASON_RECONFIGURATION,
-        types_to_add,
-        types_to_remove,
+        config_state_map,
         base::Bind(&SyncBackendHostTest::DownloadReady,
                    base::Unretained(this)),
         base::Bind(&SyncBackendHostTest::OnDownloadRetry,
@@ -221,6 +231,19 @@ class SyncBackendHostTest : public testing::Test {
     ui_loop_.PostDelayedTask(FROM_HERE,
         ui_loop_.QuitClosure(), TestTimeouts::action_timeout());
     ui_loop_.Run();
+  }
+
+  void IssueRefreshRequest(syncer::ModelTypeSet types) {
+    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
+    syncer::ModelTypeInvalidationMap invalidation_map(
+        ModelTypeSetToInvalidationMap(types, std::string()));
+
+    content::NotificationService::current()->Notify(
+        chrome::NOTIFICATION_SYNC_REFRESH_LOCAL,
+        content::Source<Profile>(profile_.get()),
+        content::Details<syncer::ModelTypeInvalidationMap>(
+            &invalidation_map));
   }
 
  protected:
@@ -581,11 +604,11 @@ TEST_F(SyncBackendHostTest, Invalidate) {
 
   EXPECT_CALL(
       mock_frontend_,
-      OnIncomingInvalidation(invalidation_map, syncer::REMOTE_INVALIDATION))
+      OnIncomingInvalidation(invalidation_map))
       .WillOnce(InvokeWithoutArgs(QuitMessageLoop));
 
   backend_->UpdateRegisteredInvalidationIds(ids);
-  fake_manager_->Invalidate(invalidation_map, syncer::REMOTE_INVALIDATION);
+  fake_manager_->Invalidate(invalidation_map);
   ui_loop_.PostDelayedTask(
       FROM_HERE, ui_loop_.QuitClosure(), TestTimeouts::action_timeout());
   ui_loop_.Run();
@@ -626,7 +649,7 @@ TEST_F(SyncBackendHostTest, InvalidationsAfterStopSyncingForShutdown) {
   fake_manager_->UpdateInvalidatorState(syncer::INVALIDATIONS_ENABLED);
   const syncer::ObjectIdInvalidationMap& invalidation_map =
       syncer::ObjectIdSetToInvalidationMap(ids, "payload");
-  fake_manager_->Invalidate(invalidation_map, syncer::REMOTE_INVALIDATION);
+  fake_manager_->Invalidate(invalidation_map);
 
   // Make sure the above calls take effect before we continue.
   fake_manager_->WaitForSyncThread();
@@ -682,6 +705,47 @@ TEST_F(SyncBackendHostTest, DownloadControlTypes) {
 TEST_F(SyncBackendHostTest, SilentlyFailToDownloadControlTypes) {
   fake_manager_factory_.set_configure_fail_types(syncer::ModelTypeSet::All());
   InitializeBackend(false);
+}
+
+// Test that local refresh requests are delivered to sync.
+TEST_F(SyncBackendHostTest, ForwardLocalRefreshRequest) {
+  InitializeBackend(true);
+
+  syncer::ModelTypeSet set1 = syncer::ModelTypeSet::All();
+  IssueRefreshRequest(set1);
+  fake_manager_->WaitForSyncThread();
+  EXPECT_TRUE(set1.Equals(fake_manager_->GetLastRefreshRequestTypes()));
+
+  syncer::ModelTypeSet set2 = syncer::ModelTypeSet(syncer::SESSIONS);
+  IssueRefreshRequest(set2);
+  fake_manager_->WaitForSyncThread();
+  EXPECT_TRUE(set2.Equals(fake_manager_->GetLastRefreshRequestTypes()));
+}
+
+// Test that local invalidations issued before sync is initialized are ignored.
+TEST_F(SyncBackendHostTest, AttemptForwardLocalRefreshRequestEarly) {
+  syncer::ModelTypeSet set1 = syncer::ModelTypeSet::All();
+  IssueRefreshRequest(set1);
+
+  InitializeBackend(true);
+
+  fake_manager_->WaitForSyncThread();
+  EXPECT_FALSE(set1.Equals(fake_manager_->GetLastRefreshRequestTypes()));
+}
+
+// Test that local invalidations issued while sync is shutting down are ignored.
+TEST_F(SyncBackendHostTest, AttemptForwardLocalRefreshRequestLate) {
+  InitializeBackend(true);
+
+  backend_->StopSyncingForShutdown();
+
+  syncer::ModelTypeSet types = syncer::ModelTypeSet::All();
+  IssueRefreshRequest(types);
+  fake_manager_->WaitForSyncThread();
+  EXPECT_FALSE(types.Equals(fake_manager_->GetLastRefreshRequestTypes()));
+
+  backend_->Shutdown(false);
+  backend_.reset();
 }
 
 }  // namespace

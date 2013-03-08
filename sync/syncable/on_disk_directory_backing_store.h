@@ -5,7 +5,7 @@
 #ifndef SYNC_SYNCABLE_ON_DISK_DIRECTORY_BACKING_STORE_H_
 #define SYNC_SYNCABLE_ON_DISK_DIRECTORY_BACKING_STORE_H_
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "sync/base/sync_export.h"
 #include "sync/syncable/directory_backing_store.h"
 
@@ -18,7 +18,7 @@ class SYNC_EXPORT_PRIVATE OnDiskDirectoryBackingStore
     : public DirectoryBackingStore {
  public:
   OnDiskDirectoryBackingStore(const std::string& dir_name,
-                              const FilePath& backing_filepath);
+                              const base::FilePath& backing_filepath);
   virtual ~OnDiskDirectoryBackingStore();
   virtual DirOpenResult Load(
       MetahandlesIndex* entry_bucket,
@@ -40,7 +40,7 @@ class SYNC_EXPORT_PRIVATE OnDiskDirectoryBackingStore
   FRIEND_TEST_ALL_PREFIXES(DirectoryBackingStoreTest, MinorCorruption);
 
   bool allow_failure_for_test_;
-  FilePath backing_filepath_;
+  base::FilePath backing_filepath_;
 
   DISALLOW_COPY_AND_ASSIGN(OnDiskDirectoryBackingStore);
 };

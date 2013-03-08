@@ -115,7 +115,7 @@ void ShillClientUnittestBase::SetUp() {
 
   // Set an expectation so mock_proxy's CallMethodAndBlock() will use
   // OnCallMethodAndBlock() to return responses.
-  EXPECT_CALL(*mock_proxy_, CallMethodAndBlock(_, _))
+  EXPECT_CALL(*mock_proxy_, MockCallMethodAndBlock(_, _))
       .WillRepeatedly(Invoke(
           this, &ShillClientUnittestBase::OnCallMethodAndBlock));
 
@@ -254,6 +254,20 @@ void ShillClientUnittestBase::ExpectObjectPathResultWithoutStatus(
 }
 
 // static
+void ShillClientUnittestBase::ExpectBoolResultWithoutStatus(
+    bool expected_result,
+    bool result) {
+  EXPECT_EQ(expected_result, result);
+}
+
+// static
+void ShillClientUnittestBase::ExpectStringResultWithoutStatus(
+    const std::string& expected_result,
+    const std::string& result) {
+  EXPECT_EQ(expected_result, result);
+}
+
+// static
 void ShillClientUnittestBase::ExpectDictionaryValueResultWithoutStatus(
     const base::DictionaryValue* expected_result,
     const base::DictionaryValue& result) {
@@ -315,7 +329,7 @@ dbus::Response* ShillClientUnittestBase::OnCallMethodAndBlock(
   dbus::MessageReader reader(method_call);
   argument_checker_.Run(&reader);
   return dbus::Response::FromRawMessage(
-      dbus_message_copy(response_->raw_message()));
+      dbus_message_copy(response_->raw_message())).release();
 }
 
 }  // namespace chromeos

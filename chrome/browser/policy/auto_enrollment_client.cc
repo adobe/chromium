@@ -11,12 +11,13 @@
 #include "base/logging.h"
 #include "base/message_loop_proxy.h"
 #include "base/metrics/histogram.h"
-#include "base/string_number_conversions.h"
+#include "base/prefs/pref_registry_simple.h"
+#include "base/prefs/pref_service.h"
+#include "base/strings/string_number_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/policy/browser_policy_connector.h"
 #include "chrome/browser/policy/device_cloud_policy_manager_chromeos.h"
 #include "chrome/browser/policy/device_management_service.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "crypto/sha2.h"
@@ -92,9 +93,9 @@ AutoEnrollmentClient::AutoEnrollmentClient(const base::Closure& callback,
 AutoEnrollmentClient::~AutoEnrollmentClient() {}
 
 // static
-void AutoEnrollmentClient::RegisterPrefs(PrefServiceSimple* local_state) {
-  local_state->RegisterBooleanPref(prefs::kShouldAutoEnroll, false);
-  local_state->RegisterIntegerPref(prefs::kAutoEnrollmentPowerLimit, -1);
+void AutoEnrollmentClient::RegisterPrefs(PrefRegistrySimple* registry) {
+  registry->RegisterBooleanPref(prefs::kShouldAutoEnroll, false);
+  registry->RegisterIntegerPref(prefs::kAutoEnrollmentPowerLimit, -1);
 }
 
 // static

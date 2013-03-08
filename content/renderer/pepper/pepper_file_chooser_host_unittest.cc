@@ -2,11 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/utf_string_conversions.h"
 #include "content/common/view_messages.h"
-#include "content/public/test/render_view_test.h"
 #include "content/public/common/file_chooser_params.h"
+#include "content/public/test/render_view_test.h"
 #include "content/renderer/pepper/mock_renderer_ppapi_host.h"
 #include "content/renderer/pepper/pepper_file_chooser_host.h"
 #include "content/renderer/render_view_impl.h"
@@ -61,7 +61,7 @@ class PepperFileChooserHostTest : public RenderViewTest {
 };
 
 // For testing to convert our hardcoded file paths to 8-bit.
-std::string FilePathToUTF8(const FilePath::StringType& path) {
+std::string FilePathToUTF8(const base::FilePath::StringType& path) {
 #if defined(OS_WIN)
   return UTF16ToUTF8(path);
 #else
@@ -107,7 +107,7 @@ TEST_F(PepperFileChooserHostTest, Show) {
   // path separator so we include both a Unix and a Windows one.
   ui::SelectedFileInfo selected_info;
   selected_info.display_name = FILE_PATH_LITERAL("Hello, world");
-  selected_info.local_path = FilePath(FILE_PATH_LITERAL("myp\\ath/foo"));
+  selected_info.local_path = base::FilePath(FILE_PATH_LITERAL("myp\\ath/foo"));
   std::vector<ui::SelectedFileInfo> selected_info_vector;
   selected_info_vector.push_back(selected_info);
   RenderViewImpl* view_impl = static_cast<RenderViewImpl*>(view_);

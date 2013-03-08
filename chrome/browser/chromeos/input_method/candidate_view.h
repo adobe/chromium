@@ -6,7 +6,6 @@
 #define CHROME_BROWSER_CHROMEOS_INPUT_METHOD_CANDIDATE_VIEW_H_
 
 #include "base/gtest_prod_util.h"
-#include "chrome/browser/chromeos/input_method/ibus_ui_controller.h"
 #include "chromeos/dbus/ibus/ibus_lookup_table.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/view.h"
@@ -21,7 +20,7 @@ class CandidateView : public views::View {
  public:
   CandidateView(CandidateWindowView* parent_candidate_window,
                 int index_in_page,
-                ibus::IBusLookupTable::Orientation orientation);
+                IBusLookupTable::Orientation orientation);
   virtual ~CandidateView() {}
   // Initializes the candidate view with the given column widths.
   // A width of 0 means that the column is resizable.
@@ -62,6 +61,10 @@ class CandidateView : public views::View {
   FRIEND_TEST_ALL_PREFIXES(CandidateWindowViewTest, ShortcutSettingTest);
   // Overridden from View:
   virtual bool OnMousePressed(const ui::MouseEvent& event) OVERRIDE;
+  virtual void OnGestureEvent(ui::GestureEvent* event) OVERRIDE;
+
+  // Selects the candidate located at the point.
+  void SelectCandidateAt(const gfx::Point& location);
 
   // Notifies labels of their new background colors.  Called whenever the view's
   // background color changes.
@@ -71,7 +74,7 @@ class CandidateView : public views::View {
   int index_in_page_;
 
   // The orientation of the candidate view.
-  ibus::IBusLookupTable::Orientation orientation_;
+  IBusLookupTable::Orientation orientation_;
 
   // The parent candidate window that contains this view.
   CandidateWindowView* parent_candidate_window_;

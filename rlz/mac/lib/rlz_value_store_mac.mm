@@ -4,14 +4,14 @@
 
 #include "rlz/mac/lib/rlz_value_store_mac.h"
 
-#include "base/mac/foundation_util.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
+#include "base/mac/foundation_util.h"
 #include "base/sys_string_conversions.h"
 #include "rlz/lib/assert.h"
 #include "rlz/lib/lib_values.h"
-#include "rlz/lib/rlz_lib.h"
 #include "rlz/lib/recursive_cross_process_lock_posix.h"
+#include "rlz/lib/rlz_lib.h"
 
 #import <Foundation/Foundation.h>
 #include <pthread.h>
@@ -275,7 +275,7 @@ NSString* RlzLockFilename() {
 
 ScopedRlzValueStoreLock::ScopedRlzValueStoreLock() {
   bool got_distributed_lock = g_recursive_lock.TryGetCrossProcessLock(
-      FilePath([RlzLockFilename() fileSystemRepresentation]));
+      base::FilePath([RlzLockFilename() fileSystemRepresentation]));
   // At this point, we hold the in-process lock, no matter the value of
   // |got_distributed_lock|.
 
@@ -349,7 +349,7 @@ RlzValueStore* ScopedRlzValueStoreLock::GetStore() {
 
 namespace testing {
 
-void SetRlzStoreDirectory(const FilePath& directory) {
+void SetRlzStoreDirectory(const base::FilePath& directory) {
   base::mac::ScopedNSAutoreleasePool pool;
 
   [g_test_folder release];

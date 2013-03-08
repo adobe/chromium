@@ -9,14 +9,15 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/logging.h"
+#include "base/prefs/pref_service.h"
 #include "chrome/browser/custom_handlers/register_protocol_handler_infobar_delegate.h"
 #include "chrome/browser/net/chrome_url_request_context.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile_io_data.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/custom_handlers/protocol_handler.h"
 #include "chrome/common/pref_names.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/child_process_security_policy.h"
 #include "grit/generated_resources.h"
 #include "net/base/network_delegate.h"
@@ -174,22 +175,6 @@ void ProtocolHandlerRegistry::JobInterceptorFactory::Chain(
   job_factory_ = job_factory.Pass();
 }
 
-bool ProtocolHandlerRegistry::JobInterceptorFactory::SetProtocolHandler(
-    const std::string& scheme, ProtocolHandler* protocol_handler) {
-  return job_factory_->SetProtocolHandler(scheme, protocol_handler);
-}
-
-void ProtocolHandlerRegistry::JobInterceptorFactory::AddInterceptor(
-    Interceptor* interceptor) {
-  return job_factory_->AddInterceptor(interceptor);
-}
-
-net::URLRequestJob*
-ProtocolHandlerRegistry::JobInterceptorFactory::MaybeCreateJobWithInterceptor(
-    net::URLRequest* request, net::NetworkDelegate* network_delegate) const {
-  return job_factory_->MaybeCreateJobWithInterceptor(request, network_delegate);
-}
-
 net::URLRequestJob*
 ProtocolHandlerRegistry::JobInterceptorFactory::
 MaybeCreateJobWithProtocolHandler(
@@ -203,21 +188,6 @@ MaybeCreateJobWithProtocolHandler(
     return job;
   return job_factory_->MaybeCreateJobWithProtocolHandler(
       scheme, request, network_delegate);
-}
-
-net::URLRequestJob*
-ProtocolHandlerRegistry::JobInterceptorFactory::MaybeInterceptRedirect(
-    const GURL& location,
-    net::URLRequest* request,
-    net::NetworkDelegate* network_delegate) const {
-  return job_factory_->MaybeInterceptRedirect(
-      location, request, network_delegate);
-}
-
-net::URLRequestJob*
-ProtocolHandlerRegistry::JobInterceptorFactory::MaybeInterceptResponse(
-    net::URLRequest* request, net::NetworkDelegate* network_delegate) const {
-  return job_factory_->MaybeInterceptResponse(request, network_delegate);
 }
 
 bool ProtocolHandlerRegistry::JobInterceptorFactory::IsHandledProtocol(
@@ -732,13 +702,13 @@ void ProtocolHandlerRegistry::Shutdown() {
 
 // static
 void ProtocolHandlerRegistry::RegisterUserPrefs(
-    PrefServiceSyncable* pref_service) {
-  pref_service->RegisterListPref(prefs::kRegisteredProtocolHandlers,
-                                 PrefServiceSyncable::UNSYNCABLE_PREF);
-  pref_service->RegisterListPref(prefs::kIgnoredProtocolHandlers,
-                                 PrefServiceSyncable::UNSYNCABLE_PREF);
-  pref_service->RegisterBooleanPref(prefs::kCustomHandlersEnabled, true,
-                                    PrefServiceSyncable::UNSYNCABLE_PREF);
+    PrefRegistrySyncable* registry) {
+  registry->RegisterListPref(prefs::kRegisteredProtocolHandlers,
+                             PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterListPref(prefs::kIgnoredProtocolHandlers,
+                             PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterBooleanPref(prefs::kCustomHandlersEnabled, true,
+                                PrefRegistrySyncable::UNSYNCABLE_PREF);
 }
 
 ProtocolHandlerRegistry::~ProtocolHandlerRegistry() {

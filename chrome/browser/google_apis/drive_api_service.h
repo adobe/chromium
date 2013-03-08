@@ -9,14 +9,16 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "base/observer_list.h"
-#include "chrome/browser/google_apis/auth_service.h"
 #include "chrome/browser/google_apis/auth_service_observer.h"
 #include "chrome/browser/google_apis/drive_api_url_generator.h"
 #include "chrome/browser/google_apis/drive_service_interface.h"
 
-class FilePath;
 class GURL;
 class Profile;
+
+namespace base {
+class FilePath;
+}
 
 namespace net {
 class URLRequestContextGetter;
@@ -51,10 +53,12 @@ class DriveAPIService : public DriveServiceInterface,
   virtual void RemoveObserver(DriveServiceObserver* observer) OVERRIDE;
   virtual bool CanStartOperation() const OVERRIDE;
   virtual void CancelAll() OVERRIDE;
-  virtual bool CancelForFilePath(const FilePath& file_path) OVERRIDE;
+  virtual bool CancelForFilePath(const base::FilePath& file_path) OVERRIDE;
   virtual OperationProgressStatusList GetProgressStatusList() const OVERRIDE;
   virtual bool HasAccessToken() const OVERRIDE;
   virtual bool HasRefreshToken() const OVERRIDE;
+  virtual void ClearAccessToken() OVERRIDE;
+  virtual void ClearRefreshToken() OVERRIDE;
   virtual std::string GetRootResourceId() const OVERRIDE;
   virtual void GetResourceList(
       const GURL& feed_url,
@@ -69,20 +73,17 @@ class DriveAPIService : public DriveServiceInterface,
 
   virtual void GetAccountMetadata(
       const GetAccountMetadataCallback& callback) OVERRIDE;
+  virtual void GetAboutResource(
+      const GetAboutResourceCallback& callback) OVERRIDE;
   virtual void GetAppList(const GetAppListCallback& callback) OVERRIDE;
   virtual void DeleteResource(
-      const GURL& edit_url,
+      const std::string& resource_id,
+      const std::string& etag,
       const EntryActionCallback& callback) OVERRIDE;
-  virtual void DownloadHostedDocument(
-      const FilePath& virtual_path,
-      const FilePath& local_cache_path,
-      const GURL& content_url,
-      DocumentExportFormat format,
-      const DownloadActionCallback& callback) OVERRIDE;
   virtual void DownloadFile(
-      const FilePath& virtual_path,
-      const FilePath& local_cache_path,
-      const GURL& content_url,
+      const base::FilePath& virtual_path,
+      const base::FilePath& local_cache_path,
+      const GURL& download_url,
       const DownloadActionCallback& download_action_callback,
       const GetContentCallback& get_content_callback) OVERRIDE;
   virtual void CopyHostedDocument(
@@ -90,27 +91,51 @@ class DriveAPIService : public DriveServiceInterface,
       const std::string& new_name,
       const GetResourceEntryCallback& callback) OVERRIDE;
   virtual void RenameResource(
-      const GURL& edit_url,
+      const std::string& resource_id,
       const std::string& new_name,
       const EntryActionCallback& callback) OVERRIDE;
   virtual void AddResourceToDirectory(
-      const GURL& parent_content_url,
-      const GURL& edit_url,
+      const std::string& parent_resource_id,
+      const std::string& resource_id,
       const EntryActionCallback& callback) OVERRIDE;
   virtual void RemoveResourceFromDirectory(
-      const GURL& parent_content_url,
+      const std::string& parent_resource_id,
       const std::string& resource_id,
       const EntryActionCallback& callback) OVERRIDE;
   virtual void AddNewDirectory(
-      const GURL& parent_content_url,
+      const std::string& parent_resource_id,
       const std::string& directory_name,
       const GetResourceEntryCallback& callback) OVERRIDE;
-  virtual void InitiateUpload(
-      const InitiateUploadParams& params,
+  virtual void InitiateUploadNewFile(
+      const base::FilePath& drive_file_path,
+      const std::string& content_type,
+      int64 content_length,
+      const std::string& parent_resource_id,
+      const std::string& title,
+      const InitiateUploadCallback& callback) OVERRIDE;
+  virtual void InitiateUploadExistingFile(
+      const base::FilePath& drive_file_path,
+      const std::string& content_type,
+      int64 content_length,
+      const std::string& resource_id,
+      const std::string& etag,
       const InitiateUploadCallback& callback) OVERRIDE;
   virtual void ResumeUpload(
-      const ResumeUploadParams& params,
-      const ResumeUploadCallback& callback) OVERRIDE;
+      UploadMode upload_mode,
+      const base::FilePath& drive_file_path,
+      const GURL& upload_url,
+      int64 start_position,
+      int64 end_position,
+      int64 content_length,
+      const std::string& content_type,
+      const scoped_refptr<net::IOBuffer>& buf,
+      const UploadRangeCallback& callback) OVERRIDE;
+  virtual void GetUploadStatus(
+      UploadMode upload_mode,
+      const base::FilePath& drive_file_path,
+      const GURL& upload_url,
+      int64 content_length,
+      const UploadRangeCallback& callback) OVERRIDE;
   virtual void AuthorizeApp(
       const GURL& edit_url,
       const std::string& app_id,
@@ -138,13 +163,12 @@ class DriveAPIService : public DriveServiceInterface,
                    const std::string& search_query,
                    const GetResourceListCallback& callback);
 
-  // AuthService::Observer override.
+  // AuthServiceObserver override.
   virtual void OnOAuth2RefreshTokenChanged() OVERRIDE;
 
   // DriveServiceObserver Overrides
   virtual void OnProgressUpdate(
       const OperationProgressStatusList& list) OVERRIDE;
-  virtual void OnAuthenticationFailed(GDataErrorCode error) OVERRIDE;
 
   net::URLRequestContextGetter* url_request_context_getter_;
   Profile* profile_;

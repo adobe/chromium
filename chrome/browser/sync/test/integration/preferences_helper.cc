@@ -4,13 +4,13 @@
 
 #include "chrome/browser/sync/test/integration/preferences_helper.h"
 
+#include "base/prefs/pref_service.h"
 #include "base/values.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/profile_sync_service_harness.h"
-#include "chrome/browser/sync/test/integration/sync_test.h"
 #include "chrome/browser/sync/test/integration/sync_datatype_helper.h"
+#include "chrome/browser/sync/test/integration/sync_test.h"
 
 using sync_datatype_helper::test;
 
@@ -67,7 +67,7 @@ void AppendStringPref(int index,
 
 void ChangeFilePathPref(int index,
                         const char* pref_name,
-                        const FilePath& new_value) {
+                        const base::FilePath& new_value) {
   GetPrefs(index)->SetFilePath(pref_name, new_value);
   if (test()->use_verifier())
     GetVerifierPrefs()->SetFilePath(pref_name, new_value);
@@ -183,7 +183,7 @@ bool StringPrefMatches(const char* pref_name) {
 }
 
 bool FilePathPrefMatches(const char* pref_name) {
-  FilePath reference_value;
+  base::FilePath reference_value;
   if (test()->use_verifier()) {
     reference_value = GetVerifierPrefs()->GetFilePath(pref_name);
   } else {
@@ -191,8 +191,8 @@ bool FilePathPrefMatches(const char* pref_name) {
   }
   for (int i = 0; i < test()->num_clients(); ++i) {
     if (reference_value != GetPrefs(i)->GetFilePath(pref_name)) {
-      LOG(ERROR) << "FilePath preference " << pref_name << " mismatched in"
-                 << " profile " << i << ".";
+      LOG(ERROR) << "base::FilePath preference " << pref_name
+                 << " mismatched in" << " profile " << i << ".";
       return false;
     }
   }

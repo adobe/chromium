@@ -30,7 +30,7 @@ using base::win::ScopedCOMInitializer;
 namespace media {
 
 static const size_t kMaxDeltaSamples = 1000;
-static const char* kDeltaTimeMsFileName = "unified_delta_times_ms.txt";
+static const char kDeltaTimeMsFileName[] = "unified_delta_times_ms.txt";
 
 // Verify that the delay estimate in the OnMoreIOData() callback is larger
 // than an expected minumum value.
@@ -69,7 +69,7 @@ class UnifiedSourceCallback : public AudioOutputStream::AudioSourceCallback {
   }
 
   virtual ~UnifiedSourceCallback() {
-    FilePath file_name;
+    base::FilePath file_name;
     EXPECT_TRUE(PathService::Get(base::DIR_EXE, &file_name));
     file_name = file_name.AppendASCII(kDeltaTimeMsFileName);
 

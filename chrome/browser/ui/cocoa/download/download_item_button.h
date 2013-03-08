@@ -4,7 +4,7 @@
 
 #import <Cocoa/Cocoa.h>
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #import "chrome/browser/ui/cocoa/draggable_button.h"
 
 @class DownloadItemController;
@@ -13,11 +13,11 @@
 // instead of firing an action when clicked in a certain area.
 @interface DownloadItemButton : DraggableButton<NSMenuDelegate> {
  @private
-  FilePath downloadPath_;
+  base::FilePath downloadPath_;
   DownloadItemController* controller_;  // weak
 }
 
-@property(assign, nonatomic) FilePath download;
+@property(assign, nonatomic) base::FilePath download;
 @property(assign, nonatomic) DownloadItemController* controller;
 
 // Overridden from DraggableButton.

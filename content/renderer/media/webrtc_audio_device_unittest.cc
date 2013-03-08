@@ -4,13 +4,13 @@
 
 #include "base/environment.h"
 #include "base/test/test_timeouts.h"
-#include "content/renderer/media/audio_hardware.h"
 #include "content/renderer/media/webrtc_audio_capturer.h"
 #include "content/renderer/media/webrtc_audio_device_impl.h"
 #include "content/renderer/media/webrtc_audio_renderer.h"
+#include "content/renderer/render_thread_impl.h"
 #include "content/test/webrtc_audio_device_test.h"
-#include "media/audio/audio_manager.h"
-#include "media/audio/audio_util.h"
+#include "media/audio/audio_manager_base.h"
+#include "media/base/audio_hardware_config.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "third_party/webrtc/voice_engine/include/voe_audio_processing.h"
 #include "third_party/webrtc/voice_engine/include/voe_base.h"
@@ -30,55 +30,20 @@ namespace {
 
 const int kRenderViewId = 1;
 
-class AudioUtil : public AudioUtilInterface {
- public:
-  AudioUtil() {}
-
-  virtual int GetAudioHardwareSampleRate() OVERRIDE {
-    return media::GetAudioHardwareSampleRate();
-  }
-  virtual int GetAudioInputHardwareSampleRate(
-      const std::string& device_id) OVERRIDE {
-    return media::GetAudioInputHardwareSampleRate(device_id);
-  }
-  virtual media::ChannelLayout GetAudioInputHardwareChannelLayout(
-      const std::string& device_id) OVERRIDE {
-    return media::GetAudioInputHardwareChannelLayout(device_id);
-  }
- private:
-  DISALLOW_COPY_AND_ASSIGN(AudioUtil);
-};
-
-class AudioUtilNoHardware : public AudioUtilInterface {
- public:
-  AudioUtilNoHardware(int output_rate, int input_rate,
-                      media::ChannelLayout input_channel_layout)
-      : output_rate_(output_rate),
-        input_rate_(input_rate),
-        input_channel_layout_(input_channel_layout) {
-  }
-
-  virtual int GetAudioHardwareSampleRate() OVERRIDE {
-    return output_rate_;
-  }
-  virtual int GetAudioInputHardwareSampleRate(
-      const std::string& device_id) OVERRIDE {
-    return input_rate_;
-  }
-  virtual media::ChannelLayout GetAudioInputHardwareChannelLayout(
-      const std::string& device_id) OVERRIDE {
-    return input_channel_layout_;
-  }
-
- private:
-  int output_rate_;
-  int input_rate_;
-  media::ChannelLayout input_channel_layout_;
-  DISALLOW_COPY_AND_ASSIGN(AudioUtilNoHardware);
-};
+scoped_ptr<media::AudioHardwareConfig> CreateRealHardwareConfig(
+    media::AudioManager* manager) {
+  const media::AudioParameters output_parameters =
+      manager->GetDefaultOutputStreamParameters();
+  const media::AudioParameters input_parameters =
+      manager->GetInputStreamParameters(
+          media::AudioManagerBase::kDefaultDeviceId);
+  return make_scoped_ptr(new media::AudioHardwareConfig(
+      output_parameters.frames_per_buffer(), output_parameters.sample_rate(),
+      input_parameters.sample_rate(), input_parameters.channel_layout()));
+}
 
 // Return true if at least one element in the array matches |value|.
-bool FindElementInArray(int* array, int size, int value) {
+bool FindElementInArray(const int* array, int size, int value) {
   return (std::find(&array[0], &array[0] + size, value) != &array[size]);
 }
 
@@ -93,10 +58,13 @@ bool HardwareSampleRatesAreValid() {
   // The actual WebRTC client can limit these ranges further depending on
   // platform but this is the maximum range we support today.
   int valid_input_rates[] = {16000, 32000, 44100, 48000, 96000};
-  int valid_output_rates[] = {44100, 48000, 96000};
+  int valid_output_rates[] = {16000, 32000, 44100, 48000, 96000};
+
+  media::AudioHardwareConfig* hardware_config =
+      RenderThreadImpl::current()->GetAudioHardwareConfig();
 
   // Verify the input sample rate.
-  int input_sample_rate = GetAudioInputSampleRate();
+  int input_sample_rate = hardware_config->GetInputSampleRate();
 
   if (!FindElementInArray(valid_input_rates, arraysize(valid_input_rates),
                           input_sample_rate)) {
@@ -105,7 +73,7 @@ bool HardwareSampleRatesAreValid() {
   }
 
   // Given that the input rate was OK, verify the output rate as well.
-  int output_sample_rate = GetAudioOutputSampleRate();
+  int output_sample_rate = hardware_config->GetOutputSampleRate();
   if (!FindElementInArray(valid_output_rates, arraysize(valid_output_rates),
                           output_sample_rate)) {
     LOG(WARNING) << "Non-supported output sample rate detected.";
@@ -124,10 +92,14 @@ bool InitializeCapturer(WebRtcAudioDeviceImpl* webrtc_audio_device) {
   if (!capturer)
     return false;
 
+  media::AudioHardwareConfig* hardware_config =
+      RenderThreadImpl::current()->GetAudioHardwareConfig();
+
   // Use native capture sample rate and channel configuration to get some
   // action in this test.
-  int sample_rate = GetAudioInputSampleRate();
-  media::ChannelLayout channel_layout = GetAudioInputChannelLayout();
+  int sample_rate = hardware_config->GetInputSampleRate();
+  media::ChannelLayout channel_layout =
+      hardware_config->GetInputChannelLayout();
   if (!capturer->Initialize(channel_layout, sample_rate))
     return false;
 
@@ -155,7 +127,7 @@ class WebRTCMediaProcessImpl : public webrtc::VoEMediaProcess {
                        WebRtc_Word16 audio_10ms[],
                        const int length,
                        const int sampling_freq,
-                       const bool is_stereo) {
+                       const bool is_stereo) OVERRIDE {
     base::AutoLock auto_lock(lock_);
     channel_id_ = channel;
     type_ = type;
@@ -246,8 +218,9 @@ TEST_F(WebRTCAudioDeviceTest, TestValidOutputRates) {
 // Basic test that instantiates and initializes an instance of
 // WebRtcAudioDeviceImpl.
 TEST_F(WebRTCAudioDeviceTest, Construct) {
-  AudioUtilNoHardware audio_util(48000, 48000, media::CHANNEL_LAYOUT_MONO);
-  SetAudioUtilCallback(&audio_util);
+  media::AudioHardwareConfig audio_config(
+      480, 48000, 48000, media::CHANNEL_LAYOUT_MONO);
+  SetAudioHardwareConfig(&audio_config);
 
   scoped_refptr<WebRtcAudioDeviceImpl> webrtc_audio_device(
       new WebRtcAudioDeviceImpl());
@@ -279,8 +252,9 @@ TEST_F(WebRTCAudioDeviceTest, DISABLED_StartPlayout) {
     return;
   }
 
-  AudioUtil audio_util;
-  SetAudioUtilCallback(&audio_util);
+  scoped_ptr<media::AudioHardwareConfig> config =
+      CreateRealHardwareConfig(audio_manager_.get());
+  SetAudioHardwareConfig(config.get());
 
   if (!HardwareSampleRatesAreValid())
     return;
@@ -351,14 +325,23 @@ TEST_F(WebRTCAudioDeviceTest, DISABLED_StartPlayout) {
 // to send encoded packets to the network. Our main interest here is to ensure
 // that the audio capturing starts as it should.
 // Disabled when running headless since the bots don't have the required config.
-TEST_F(WebRTCAudioDeviceTest, StartRecording) {
+
+// TODO(leozwang): Because ExternalMediaProcessing is disabled in webrtc,
+// disable this unit test on Android for now.
+#if defined(OS_ANDROID)
+#define MAYBE_StartRecording DISABLED_StartRecording
+#else
+#define MAYBE_StartRecording StartRecording
+#endif
+TEST_F(WebRTCAudioDeviceTest, MAYBE_StartRecording) {
   if (!has_input_devices_ || !has_output_devices_) {
     LOG(WARNING) << "Missing audio devices.";
     return;
   }
 
-  AudioUtil audio_util;
-  SetAudioUtilCallback(&audio_util);
+  scoped_ptr<media::AudioHardwareConfig> config =
+      CreateRealHardwareConfig(audio_manager_.get());
+  SetAudioHardwareConfig(config.get());
 
   if (!HardwareSampleRatesAreValid())
     return;
@@ -430,8 +413,9 @@ TEST_F(WebRTCAudioDeviceTest, DISABLED_PlayLocalFile) {
   std::string file_path(
       GetTestDataPath(FILE_PATH_LITERAL("speechmusic_mono_16kHz.pcm")));
 
-  AudioUtil audio_util;
-  SetAudioUtilCallback(&audio_util);
+  scoped_ptr<media::AudioHardwareConfig> config =
+      CreateRealHardwareConfig(audio_manager_.get());
+  SetAudioHardwareConfig(config.get());
 
   if (!HardwareSampleRatesAreValid())
     return;
@@ -477,7 +461,7 @@ TEST_F(WebRTCAudioDeviceTest, DISABLED_PlayLocalFile) {
   // Play 2 seconds worth of audio and then quit.
   message_loop_.PostDelayedTask(FROM_HERE,
                                 MessageLoop::QuitClosure(),
-                                base::TimeDelta::FromSeconds(2));
+                                base::TimeDelta::FromSeconds(6));
   message_loop_.Run();
 
   renderer->Stop();
@@ -495,14 +479,21 @@ TEST_F(WebRTCAudioDeviceTest, DISABLED_PlayLocalFile) {
 // Disabled when running headless since the bots don't have the required config.
 // TODO(henrika): improve quality by using a wideband codec, enabling noise-
 // suppressions etc.
-TEST_F(WebRTCAudioDeviceTest, FullDuplexAudioWithAGC) {
+// FullDuplexAudioWithAGC is flaky on Android, disable it for now.
+#if defined(OS_ANDROID)
+#define MAYBE_FullDuplexAudioWithAGC DISABLED_FullDuplexAudioWithAGC
+#else
+#define MAYBE_FullDuplexAudioWithAGC FullDuplexAudioWithAGC
+#endif
+TEST_F(WebRTCAudioDeviceTest, MAYBE_FullDuplexAudioWithAGC) {
   if (!has_output_devices_ || !has_input_devices_) {
     LOG(WARNING) << "Missing audio devices.";
     return;
   }
 
-  AudioUtil audio_util;
-  SetAudioUtilCallback(&audio_util);
+  scoped_ptr<media::AudioHardwareConfig> config =
+      CreateRealHardwareConfig(audio_manager_.get());
+  SetAudioHardwareConfig(config.get());
 
   if (!HardwareSampleRatesAreValid())
     return;
@@ -534,11 +525,19 @@ TEST_F(WebRTCAudioDeviceTest, FullDuplexAudioWithAGC) {
 
   ScopedWebRTCPtr<webrtc::VoEAudioProcessing> audio_processing(engine.get());
   ASSERT_TRUE(audio_processing.valid());
+#if defined(OS_ANDROID)
+  // On Android, by default AGC is off.
+  bool enabled = true;
+  webrtc::AgcModes agc_mode = webrtc::kAgcDefault;
+  EXPECT_EQ(0, audio_processing->GetAgcStatus(enabled, agc_mode));
+  EXPECT_FALSE(enabled);
+#else
   bool enabled = false;
-  webrtc::AgcModes agc_mode =  webrtc::kAgcDefault;
+  webrtc::AgcModes agc_mode = webrtc::kAgcDefault;
   EXPECT_EQ(0, audio_processing->GetAgcStatus(enabled, agc_mode));
   EXPECT_TRUE(enabled);
   EXPECT_EQ(agc_mode, webrtc::kAgcAdaptiveAnalog);
+#endif
 
   int ch = base->CreateChannel();
   EXPECT_NE(-1, ch);

@@ -7,14 +7,16 @@
 #include <shlobj.h>
 
 #include "base/base_paths.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/path_service.h"
 #include "base/win/scoped_co_mem.h"
 #include "base/win/windows_version.h"
 
 // http://blogs.msdn.com/oldnewthing/archive/2004/10/25/247180.aspx
 extern "C" IMAGE_DOS_HEADER __ImageBase;
+
+using base::FilePath;
 
 namespace {
 

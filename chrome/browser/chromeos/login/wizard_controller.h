@@ -18,7 +18,7 @@
 #include "googleurl/src/gurl.h"
 #include "ui/gfx/rect.h"
 
-class PrefServiceSimple;
+class PrefRegistrySimple;
 
 namespace base {
 class DictionaryValue;
@@ -28,15 +28,16 @@ namespace chromeos {
 
 class EnterpriseEnrollmentScreen;
 class EulaScreen;
-class HTMLPageScreen;
 class LoginDisplayHost;
 class NetworkScreen;
 class OobeDisplay;
-class RegistrationScreen;
 class ResetScreen;
+class TermsOfServiceScreen;
 class UpdateScreen;
 class UserImageScreen;
 class WizardScreen;
+class WrongHWIDScreen;
+class LocallyManagedUserCreationScreen;
 
 // Class that manages control flow between wizard screens. Wizard controller
 // interacts with screen controllers to move the user between screens.
@@ -60,9 +61,10 @@ class WizardController : public ScreenObserver {
     return default_controller_;
   }
 
-  // Whether the user image selection step should be skipped.
-  static bool skip_user_image_selection() {
-    return skip_user_image_selection_;
+  // Whether to skip any screens that may normally be shown after login
+  // (registration, Terms of Service, user image selection).
+  static bool skip_post_login_screens() {
+    return skip_post_login_screens_;
   }
 
   // Returns true if EULA has been accepted.
@@ -80,9 +82,6 @@ class WizardController : public ScreenObserver {
   // Returns device registration completion status, i.e. second part of OOBE.
   static bool IsDeviceRegistered();
 
-  // Returns true if valid registration URL is defined.
-  static bool IsRegisterScreenDefined();
-
   // Marks device registered. i.e. second part of OOBE is completed.
   static void MarkDeviceRegistered();
 
@@ -99,10 +98,11 @@ class WizardController : public ScreenObserver {
   static void SetInitialLocale(const std::string& locale);
 
   // Registers OOBE preferences.
-  static void RegisterPrefs(PrefServiceSimple* local_state);
+  static void RegisterPrefs(PrefRegistrySimple* registry);
 
-  // Marks user image screen to be always skipped after login.
-  static void SkipImageSelectionForTesting();
+  // Skips any screens that may normally be shown after login (registration,
+  // Terms of Service, user image selection).
+  static void SkipPostLoginScreensForTesting();
 
   // Shows the first screen defined by |first_screen_name| or by default
   // if the parameter is empty. Takes ownership of |screen_parameters|.
@@ -114,9 +114,6 @@ class WizardController : public ScreenObserver {
 
   // Advances to login screen. Should be used in for testing only.
   void SkipToLoginForTesting();
-
-  // If being at register screen proceeds to the next one.
-  void SkipRegistration();
 
   // Adds and removes an observer.
   void AddObserver(Observer* observer);
@@ -133,10 +130,11 @@ class WizardController : public ScreenObserver {
   UpdateScreen* GetUpdateScreen();
   UserImageScreen* GetUserImageScreen();
   EulaScreen* GetEulaScreen();
-  RegistrationScreen* GetRegistrationScreen();
-  HTMLPageScreen* GetHTMLPageScreen();
   EnterpriseEnrollmentScreen* GetEnterpriseEnrollmentScreen();
   ResetScreen* GetResetScreen();
+  TermsOfServiceScreen* GetTermsOfServiceScreen();
+  WrongHWIDScreen* GetWrongHWIDScreen();
+  LocallyManagedUserCreationScreen* GetLocallyManagedUserCreationScreen();
 
   // Returns a pointer to the current screen or NULL if there's no such
   // screen.
@@ -149,13 +147,16 @@ class WizardController : public ScreenObserver {
   static const char kLoginScreenName[];
   static const char kUpdateScreenName[];
   static const char kUserImageScreenName[];
+  // Not a real screen, just a placeholder for OOBE final stage.
   static const char kRegistrationScreenName[];
   static const char kOutOfBoxScreenName[];
   static const char kTestNoScreenName[];
   static const char kEulaScreenName[];
-  static const char kHTMLPageScreenName[];
   static const char kEnterpriseEnrollmentScreenName[];
   static const char kResetScreenName[];
+  static const char kTermsOfServiceScreenName[];
+  static const char kWrongHWIDScreenName[];
+  static const char kLocallyManagedUserCreationScreenName[];
 
  private:
   // Show specific screen.
@@ -163,10 +164,11 @@ class WizardController : public ScreenObserver {
   void ShowUpdateScreen();
   void ShowUserImageScreen();
   void ShowEulaScreen();
-  void ShowRegistrationScreen();
-  void ShowHTMLPageScreen();
   void ShowEnterpriseEnrollmentScreen();
   void ShowResetScreen();
+  void ShowTermsOfServiceScreen();
+  void ShowWrongHWIDScreen();
+  void ShowLocallyManagedUserCreationScreen();
 
   // Shows images login screen.
   void ShowLoginScreen();
@@ -189,7 +191,10 @@ class WizardController : public ScreenObserver {
   void OnEnterpriseEnrollmentDone();
   void OnEnterpriseAutoEnrollmentDone();
   void OnResetCanceled();
+  void OnWrongHWIDWarningSkipped();
   void OnOOBECompleted();
+  void OnTermsOfServiceDeclined();
+  void OnTermsOfServiceAccepted();
 
   // Loads brand code on I/O enabled thread and stores to Local State.
   void LoadBrandCodeFromFile();
@@ -228,7 +233,9 @@ class WizardController : public ScreenObserver {
   // Logs in the specified user via default login screen.
   void Login(const std::string& username, const std::string& password);
 
-  static bool skip_user_image_selection_;
+  // Whether to skip any screens that may normally be shown after login
+  // (registration, Terms of Service, user image selection).
+  static bool skip_post_login_screens_;
 
   static bool zero_delay_enabled_;
 
@@ -237,11 +244,13 @@ class WizardController : public ScreenObserver {
   scoped_ptr<UpdateScreen> update_screen_;
   scoped_ptr<UserImageScreen> user_image_screen_;
   scoped_ptr<EulaScreen> eula_screen_;
-  scoped_ptr<RegistrationScreen> registration_screen_;
   scoped_ptr<ResetScreen> reset_screen_;
-  scoped_ptr<HTMLPageScreen> html_page_screen_;
   scoped_ptr<EnterpriseEnrollmentScreen>
       enterprise_enrollment_screen_;
+  scoped_ptr<TermsOfServiceScreen> terms_of_service_screen_;
+  scoped_ptr<WrongHWIDScreen> wrong_hwid_screen_;
+  scoped_ptr<LocallyManagedUserCreationScreen>
+      locally_managed_user_creation_screen_;
 
   // Screen that's currently active.
   WizardScreen* current_screen_;

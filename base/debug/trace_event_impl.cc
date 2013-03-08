@@ -14,12 +14,16 @@
 #include "base/memory/singleton.h"
 #include "base/process_util.h"
 #include "base/stl_util.h"
-#include "base/stringprintf.h"
-#include "base/string_tokenizer.h"
+#include "base/string_split.h"
 #include "base/string_util.h"
+#include "base/stringprintf.h"
+#include "base/strings/string_tokenizer.h"
+#include "base/synchronization/cancellation_flag.h"
+#include "base/synchronization/waitable_event.h"
 #include "base/sys_info.h"
 #include "base/third_party/dynamic_annotations/dynamic_annotations.h"
 #include "base/threading/platform_thread.h"
+#include "base/threading/thread_id_name_manager.h"
 #include "base/threading/thread_local.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
@@ -35,6 +39,11 @@ class DeleteTraceLogForTesting {
               StaticMemorySingletonTraits<base::debug::TraceLog> >::OnExit(0);
   }
 };
+
+// The thread buckets for the sampling profiler.
+BASE_EXPORT TRACE_EVENT_API_ATOMIC_WORD g_trace_state0;
+BASE_EXPORT TRACE_EVENT_API_ATOMIC_WORD g_trace_state1;
+BASE_EXPORT TRACE_EVENT_API_ATOMIC_WORD g_trace_state2;
 
 namespace base {
 namespace debug {
@@ -65,9 +74,13 @@ const int g_category_categories_exhausted = 1;
 const int g_category_metadata = 2;
 int g_category_index = 3; // skip initial 3 categories
 
-// The most-recently captured name of the current thread
+// The name of the current thread. This is used to decide if the current
+// thread name has changed. We combine all the seen thread names into the
+// output name for the thread.
 LazyInstance<ThreadLocalPointer<const char> >::Leaky
     g_current_thread_name = LAZY_INSTANCE_INITIALIZER;
+
+const char kRecordUntilFull[] = "record-until-full";
 
 }  // namespace
 
@@ -160,7 +173,7 @@ TraceEvent::TraceEvent(int thread_id,
   }
 
   if (alloc_size) {
-    parameter_copy_storage_ = new base::RefCountedString;
+    parameter_copy_storage_ = new RefCountedString;
     parameter_copy_storage_->data().resize(alloc_size);
     char* ptr = string_as_array(&parameter_copy_storage_->data());
     const char* end = ptr + alloc_size;
@@ -277,7 +290,7 @@ void TraceEvent::AppendAsJSON(std::string* out) const {
 
 TraceResultBuffer::OutputCallback
     TraceResultBuffer::SimpleOutput::GetCallback() {
-  return base::Bind(&SimpleOutput::Append, base::Unretained(this));
+  return Bind(&SimpleOutput::Append, Unretained(this));
 }
 
 void TraceResultBuffer::SimpleOutput::Append(
@@ -314,6 +327,147 @@ void TraceResultBuffer::Finish() {
 
 ////////////////////////////////////////////////////////////////////////////////
 //
+// TraceSamplingThread
+//
+////////////////////////////////////////////////////////////////////////////////
+class TraceBucketData;
+typedef base::Callback<void(TraceBucketData*)> TraceSampleCallback;
+
+class TraceBucketData {
+ public:
+  TraceBucketData(base::subtle::AtomicWord* bucket,
+                  const char* name,
+                  TraceSampleCallback callback);
+  ~TraceBucketData();
+
+  TRACE_EVENT_API_ATOMIC_WORD* bucket;
+  const char* bucket_name;
+  TraceSampleCallback callback;
+};
+
+// This object must be created on the IO thread.
+class TraceSamplingThread : public PlatformThread::Delegate {
+ public:
+  TraceSamplingThread();
+  virtual ~TraceSamplingThread();
+
+  // Implementation of PlatformThread::Delegate:
+  virtual void ThreadMain() OVERRIDE;
+
+  static void DefaultSampleCallback(TraceBucketData* bucekt_data);
+
+  void Stop();
+  void InstallWaitableEventForSamplingTesting(WaitableEvent* waitable_event);
+
+ private:
+  friend class TraceLog;
+
+  void GetSamples();
+  // Not thread-safe. Once the ThreadMain has been called, this can no longer
+  // be called.
+  void RegisterSampleBucket(TRACE_EVENT_API_ATOMIC_WORD* bucket,
+                            const char* const name,
+                            TraceSampleCallback callback);
+  // Splits a combined "category\0name" into the two component parts.
+  static void ExtractCategoryAndName(const char* combined,
+                                     const char** category,
+                                     const char** name);
+  std::vector<TraceBucketData> sample_buckets_;
+  bool thread_running_;
+  scoped_ptr<CancellationFlag> cancellation_flag_;
+  scoped_ptr<WaitableEvent> waitable_event_for_testing_;
+};
+
+
+TraceSamplingThread::TraceSamplingThread()
+    : thread_running_(false) {
+  cancellation_flag_.reset(new CancellationFlag);
+}
+
+TraceSamplingThread::~TraceSamplingThread() {
+}
+
+void TraceSamplingThread::ThreadMain() {
+  PlatformThread::SetName("Sampling Thread");
+  thread_running_ = true;
+  const int kSamplingFrequencyMicroseconds = 1000;
+  while (!cancellation_flag_->IsSet()) {
+    PlatformThread::Sleep(
+        TimeDelta::FromMicroseconds(kSamplingFrequencyMicroseconds));
+    GetSamples();
+    if (waitable_event_for_testing_.get())
+      waitable_event_for_testing_->Signal();
+  }
+}
+
+// static
+void TraceSamplingThread::DefaultSampleCallback(TraceBucketData* bucket_data) {
+  TRACE_EVENT_API_ATOMIC_WORD category_and_name =
+      TRACE_EVENT_API_ATOMIC_LOAD(*bucket_data->bucket);
+  if (!category_and_name)
+    return;
+  const char* const combined =
+      reinterpret_cast<const char* const>(category_and_name);
+  const char* category;
+  const char* name;
+  ExtractCategoryAndName(combined, &category, &name);
+  TRACE_EVENT_API_ADD_TRACE_EVENT(TRACE_EVENT_PHASE_SAMPLE,
+                                  TraceLog::GetCategoryEnabled(category),
+                                  name,
+                                  0,
+                                  0,
+                                  NULL,
+                                  NULL,
+                                  NULL,
+                                  0);
+}
+
+void TraceSamplingThread::GetSamples() {
+  for (size_t i = 0; i < sample_buckets_.size(); ++i) {
+    TraceBucketData* bucket_data = &sample_buckets_[i];
+    bucket_data->callback.Run(bucket_data);
+  }
+}
+
+void TraceSamplingThread::RegisterSampleBucket(
+    TRACE_EVENT_API_ATOMIC_WORD* bucket,
+    const char* const name,
+    TraceSampleCallback callback) {
+  DCHECK(!thread_running_);
+  sample_buckets_.push_back(TraceBucketData(bucket, name, callback));
+}
+
+// static
+void TraceSamplingThread::ExtractCategoryAndName(const char* combined,
+                                                 const char** category,
+                                                 const char** name) {
+  *category = combined;
+  *name = &combined[strlen(combined) + 1];
+}
+
+void TraceSamplingThread::Stop() {
+  cancellation_flag_->Set();
+}
+
+void TraceSamplingThread::InstallWaitableEventForSamplingTesting(
+    WaitableEvent* waitable_event) {
+  waitable_event_for_testing_.reset(waitable_event);
+}
+
+
+TraceBucketData::TraceBucketData(base::subtle::AtomicWord* bucket,
+                                 const char* name,
+                                 TraceSampleCallback callback)
+    : bucket(bucket),
+      bucket_name(name),
+      callback(callback) {
+}
+
+TraceBucketData::~TraceBucketData() {
+}
+
+////////////////////////////////////////////////////////////////////////////////
+//
 // TraceLog
 //
 ////////////////////////////////////////////////////////////////////////////////
@@ -345,10 +499,38 @@ TraceLog* TraceLog::GetInstance() {
   return Singleton<TraceLog, StaticMemorySingletonTraits<TraceLog> >::get();
 }
 
+// static
+// Note, if you add more options here you also need to update:
+// content/browser/devtools/devtools_tracing_handler:TraceOptionsFromString
+TraceLog::Options TraceLog::TraceOptionsFromString(const std::string& options) {
+  std::vector<std::string> split;
+  base::SplitString(options, ',', &split);
+  int ret = 0;
+  for (std::vector<std::string>::iterator iter = split.begin();
+       iter != split.end();
+       ++iter) {
+    if (*iter == kRecordUntilFull) {
+      ret |= RECORD_UNTIL_FULL;
+    } else {
+      NOTREACHED();  // Unknown option provided.
+    }
+  }
+  // Check to see if any RECORD_* options are set, and if none, then provide
+  // a default.
+  // TODO(dsinclair): Remove this comment when we have more then one RECORD_*
+  // flag and the code's structure is then sensible.
+  if (!(ret & RECORD_UNTIL_FULL))
+    ret |= RECORD_UNTIL_FULL;  // Default when no options are specified.
+
+  return static_cast<Options>(ret);
+}
+
 TraceLog::TraceLog()
     : enable_count_(0),
       dispatching_to_observer_list_(false),
-      watch_category_(NULL) {
+      watch_category_(NULL),
+      trace_options_(RECORD_UNTIL_FULL),
+      sampling_thread_handle_(0) {
   // Trace is enabled or disabled on one thread while other threads are
   // accessing the enabled flag. We don't care whether edge-case events are
   // traced or not, so we allow races on the enabled flag to keep the trace
@@ -363,7 +545,7 @@ TraceLog::TraceLog()
 #if defined(OS_NACL)  // NaCl shouldn't expose the process id.
   SetProcessID(0);
 #else
-  SetProcessID(static_cast<int>(base::GetCurrentProcId()));
+  SetProcessID(static_cast<int>(GetCurrentProcId()));
 #endif
 }
 
@@ -440,7 +622,7 @@ const unsigned char* TraceLog::GetCategoryEnabledInternal(const char* name) {
       // Don't hold on to the name pointer, so that we can create categories
       // with strings not known at compile time (this is required by
       // SetWatchEvent).
-      const char* new_name = base::strdup(name);
+      const char* new_name = strdup(name);
       ANNOTATE_LEAKING_OBJECT_PTR(new_name);
       g_categories[new_index] = new_name;
       DCHECK(!g_category_enabled[new_index]);
@@ -475,10 +657,16 @@ void TraceLog::GetKnownCategories(std::vector<std::string>* categories) {
 }
 
 void TraceLog::SetEnabled(const std::vector<std::string>& included_categories,
-                          const std::vector<std::string>& excluded_categories) {
+                          const std::vector<std::string>& excluded_categories,
+                          Options options) {
   AutoLock lock(lock_);
 
   if (enable_count_++ > 0) {
+    if (options != trace_options_) {
+      DLOG(ERROR) << "Attemting to re-enable tracing with a different "
+                  << "set of options.";
+    }
+
     // Tracing is already enabled, so just merge in enabled categories.
     // We only expand the set of enabled categories upon nested SetEnable().
     if (!included_categories_.empty() && !included_categories.empty()) {
@@ -494,6 +682,7 @@ void TraceLog::SetEnabled(const std::vector<std::string>& included_categories,
     }
     return;
   }
+  trace_options_ = options;
 
   if (dispatching_to_observer_list_) {
     DLOG(ERROR) <<
@@ -515,9 +704,29 @@ void TraceLog::SetEnabled(const std::vector<std::string>& included_categories,
     EnableMatchingCategories(included_categories_, CATEGORY_ENABLED, 0);
   else
     EnableMatchingCategories(excluded_categories_, 0, CATEGORY_ENABLED);
+
+  if (options & ENABLE_SAMPLING) {
+    sampling_thread_.reset(new TraceSamplingThread);
+    sampling_thread_->RegisterSampleBucket(
+        &g_trace_state0,
+        "bucket0",
+        Bind(&TraceSamplingThread::DefaultSampleCallback));
+    sampling_thread_->RegisterSampleBucket(
+        &g_trace_state1,
+        "bucket1",
+        Bind(&TraceSamplingThread::DefaultSampleCallback));
+    sampling_thread_->RegisterSampleBucket(
+        &g_trace_state2,
+        "bucket2",
+        Bind(&TraceSamplingThread::DefaultSampleCallback));
+    if (!PlatformThread::Create(
+          0, sampling_thread_.get(), &sampling_thread_handle_)) {
+      DCHECK(false) << "failed to create thread";
+    }
+  }
 }
 
-void TraceLog::SetEnabled(const std::string& categories) {
+void TraceLog::SetEnabled(const std::string& categories, Options options) {
   std::vector<std::string> included, excluded;
   // Tokenize list of categories, delimited by ','.
   StringTokenizer tokens(categories, ",");
@@ -535,7 +744,7 @@ void TraceLog::SetEnabled(const std::string& categories) {
     else
       excluded.push_back(category);
   }
-  SetEnabled(included, excluded);
+  SetEnabled(included, excluded, options);
 }
 
 void TraceLog::GetEnabledTraceCategories(
@@ -560,8 +769,19 @@ void TraceLog::SetDisabled() {
     return;
   }
 
+  if (sampling_thread_.get()) {
+    // Stop the sampling thread.
+    sampling_thread_->Stop();
+    lock_.Release();
+    PlatformThread::Join(sampling_thread_handle_);
+    lock_.Acquire();
+    sampling_thread_handle_ = 0;
+    sampling_thread_.reset();
+  }
+
   dispatching_to_observer_list_ = true;
-  FOR_EACH_OBSERVER(EnabledStateChangedObserver, enabled_state_observer_list_,
+  FOR_EACH_OBSERVER(EnabledStateChangedObserver,
+                    enabled_state_observer_list_,
                     OnTraceLogWillDisable());
   dispatching_to_observer_list_ = false;
 
@@ -574,9 +794,9 @@ void TraceLog::SetDisabled() {
   AddThreadNameMetadataEvents();
 }
 
-void TraceLog::SetEnabled(bool enabled) {
+void TraceLog::SetEnabled(bool enabled, Options options) {
   if (enabled)
-    SetEnabled(std::vector<std::string>(), std::vector<std::string>());
+    SetEnabled(std::vector<std::string>(), std::vector<std::string>(), options);
   else
     SetDisabled();
 }
@@ -600,6 +820,11 @@ void TraceLog::SetNotificationCallback(
   notification_callback_ = cb;
 }
 
+void TraceLog::SetEventCallback(EventCallback cb) {
+  AutoLock lock(lock_);
+  event_callback_ = cb;
+};
+
 void TraceLog::Flush(const TraceLog::OutputCallback& cb) {
   std::vector<TraceEvent> previous_logged_events;
   {
@@ -621,14 +846,33 @@ void TraceLog::Flush(const TraceLog::OutputCallback& cb) {
 }
 
 void TraceLog::AddTraceEvent(char phase,
-                            const unsigned char* category_enabled,
-                            const char* name,
-                            unsigned long long id,
-                            int num_args,
-                            const char** arg_names,
-                            const unsigned char* arg_types,
-                            const unsigned long long* arg_values,
-                            unsigned char flags) {
+                             const unsigned char* category_enabled,
+                             const char* name,
+                             unsigned long long id,
+                             int num_args,
+                             const char** arg_names,
+                             const unsigned char* arg_types,
+                             const unsigned long long* arg_values,
+                             unsigned char flags) {
+  int thread_id = static_cast<int>(base::PlatformThread::CurrentId());
+  base::TimeTicks now = base::TimeTicks::NowFromSystemTraceTime();
+  AddTraceEventWithThreadIdAndTimestamp(phase, category_enabled, name, id,
+                                        thread_id, now, num_args, arg_names,
+                                        arg_types, arg_values, flags);
+}
+
+void TraceLog::AddTraceEventWithThreadIdAndTimestamp(
+    char phase,
+    const unsigned char* category_enabled,
+    const char* name,
+    unsigned long long id,
+    int thread_id,
+    const TimeTicks& timestamp,
+    int num_args,
+    const char** arg_names,
+    const unsigned char* arg_types,
+    const unsigned long long* arg_values,
+    unsigned char flags) {
   DCHECK(name);
 
 #if defined(OS_ANDROID)
@@ -636,8 +880,11 @@ void TraceLog::AddTraceEvent(char phase,
                num_args, arg_names, arg_types, arg_values);
 #endif
 
-  TimeTicks now = TimeTicks::NowFromSystemTraceTime() - time_offset_;
+  TimeTicks now = timestamp - time_offset_;
+  EventCallback event_callback_copy;
+
   NotificationHelper notifier(this);
+
   {
     AutoLock lock(lock_);
     if (*category_enabled != CATEGORY_ENABLED)
@@ -645,9 +892,8 @@ void TraceLog::AddTraceEvent(char phase,
     if (logged_events_.size() >= kTraceEventBufferSize)
       return;
 
-    int thread_id = static_cast<int>(PlatformThread::CurrentId());
-
-    const char* new_name = PlatformThread::GetName();
+    const char* new_name = ThreadIdNameManager::GetInstance()->
+        GetName(thread_id);
     // Check if the thread name has been set or changed since the previous
     // call (if any), but don't bother if the new name is empty. Note this will
     // not detect a thread name change within the same char* buffer address: we
@@ -655,7 +901,8 @@ void TraceLog::AddTraceEvent(char phase,
     if (new_name != g_current_thread_name.Get().Get() &&
         new_name && *new_name) {
       g_current_thread_name.Get().Set(new_name);
-      base::hash_map<int, std::string>::iterator existing_name =
+
+      hash_map<int, std::string>::iterator existing_name =
           thread_names_.find(thread_id);
       if (existing_name == thread_names_.end()) {
         // This is a new thread id, and a new name.
@@ -663,7 +910,7 @@ void TraceLog::AddTraceEvent(char phase,
       } else {
         // This is a thread id that we've seen before, but potentially with a
         // new name.
-        std::vector<base::StringPiece> existing_names;
+        std::vector<StringPiece> existing_names;
         Tokenize(existing_name->second, ",", &existing_names);
         bool found = std::find(existing_names.begin(),
                                existing_names.end(),
@@ -689,9 +936,16 @@ void TraceLog::AddTraceEvent(char phase,
 
     if (watch_category_ == category_enabled && watch_event_name_ == name)
       notifier.AddNotificationWhileLocked(EVENT_WATCH_NOTIFICATION);
+
+    event_callback_copy = event_callback_;
   }  // release lock
 
   notifier.SendNotificationIfAny();
+  if (event_callback_copy != NULL) {
+    event_callback_copy(phase, category_enabled, name, id,
+        num_args, arg_names, arg_types, arg_values,
+        flags);
+  }
 }
 
 void TraceLog::AddTraceEventEtw(char phase,
@@ -754,7 +1008,7 @@ void TraceLog::CancelWatchEvent() {
 
 void TraceLog::AddThreadNameMetadataEvents() {
   lock_.AssertAcquired();
-  for(base::hash_map<int, std::string>::iterator it = thread_names_.begin();
+  for(hash_map<int, std::string>::iterator it = thread_names_.begin();
       it != thread_names_.end();
       it++) {
     if (!it->second.empty()) {
@@ -772,6 +1026,11 @@ void TraceLog::AddThreadNameMetadataEvents() {
                      TRACE_EVENT_FLAG_NONE));
     }
   }
+}
+
+void TraceLog::InstallWaitableEventForSamplingTesting(
+    WaitableEvent* waitable_event) {
+  sampling_thread_->InstallWaitableEventForSamplingTesting(waitable_event);
 }
 
 void TraceLog::DeleteForTesting() {
@@ -798,3 +1057,51 @@ void TraceLog::SetTimeOffset(TimeDelta offset) {
 
 }  // namespace debug
 }  // namespace base
+
+namespace trace_event_internal {
+
+ScopedTrace::ScopedTrace(
+    TRACE_EVENT_API_ATOMIC_WORD* event_uid, const char* name) {
+  category_enabled_ =
+    reinterpret_cast<const unsigned char*>(TRACE_EVENT_API_ATOMIC_LOAD(
+        *event_uid));
+  if (!category_enabled_) {
+    category_enabled_ = TRACE_EVENT_API_GET_CATEGORY_ENABLED("gpu");
+    TRACE_EVENT_API_ATOMIC_STORE(
+        *event_uid,
+        reinterpret_cast<TRACE_EVENT_API_ATOMIC_WORD>(category_enabled_));
+  }
+  if (*category_enabled_) {
+    name_ = name;
+    TRACE_EVENT_API_ADD_TRACE_EVENT(
+        TRACE_EVENT_PHASE_BEGIN,    // phase
+        category_enabled_,          // category enabled
+        name,                       // name
+        0,                          // id
+        0,                          // num_args
+        NULL,                       // arg_names
+        NULL,                       // arg_types
+        NULL,                       // arg_values
+        TRACE_EVENT_FLAG_NONE);     // flags
+  } else {
+    category_enabled_ = NULL;
+  }
+}
+
+ScopedTrace::~ScopedTrace() {
+  if (category_enabled_ && *category_enabled_) {
+    TRACE_EVENT_API_ADD_TRACE_EVENT(
+        TRACE_EVENT_PHASE_END,   // phase
+        category_enabled_,       // category enabled
+        name_,                   // name
+        0,                       // id
+        0,                       // num_args
+        NULL,                    // arg_names
+        NULL,                    // arg_types
+        NULL,                    // arg_values
+        TRACE_EVENT_FLAG_NONE);  // flags
+  }
+}
+
+}  // namespace trace_event_internal
+

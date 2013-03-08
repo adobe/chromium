@@ -8,11 +8,12 @@
 #include "base/compiler_specific.h"
 #include "base/i18n/number_formatting.h"
 #include "base/i18n/rtl.h"
+#include "base/prefs/pref_registry_simple.h"
 #include "base/process_util.h"
 #include "base/rand_util.h"
 #include "base/stl_util.h"
-#include "base/string_number_conversions.h"
 #include "base/stringprintf.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/threading/thread.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/background/background_contents_service.h"
@@ -21,7 +22,6 @@
 #include "chrome/browser/extensions/extension_host.h"
 #include "chrome/browser/extensions/extension_process_manager.h"
 #include "chrome/browser/extensions/extension_system.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/task_manager/task_manager_resource_providers.h"
 #include "chrome/browser/task_manager/task_manager_worker_resource_provider.h"
@@ -139,8 +139,6 @@ class TaskManagerModelGpuDataManagerObserver
     TaskManager::GetInstance()->model()->NotifyVideoMemoryUsageStats(
         video_memory_usage_stats);
   }
-
-  virtual void OnGpuInfoUpdate() OVERRIDE {}
 
   virtual void OnVideoMemoryUsageStatsUpdate(
       const content::GPUVideoMemoryUsageStats& video_memory_usage_stats)
@@ -697,100 +695,116 @@ int TaskManagerModel::GetResourceIndexForGroup(int group_index,
 
 int TaskManagerModel::CompareValues(int row1, int row2, int col_id) const {
   CHECK(row1 < ResourceCount() && row2 < ResourceCount());
-  // TODO(sky): convert to switch.
-  if (col_id == IDS_TASK_MANAGER_TASK_COLUMN) {
-    // Let's do the default, string compare on the resource title.
-    static icu::Collator* collator = NULL;
-    if (!collator) {
-      UErrorCode create_status = U_ZERO_ERROR;
-      collator = icu::Collator::createInstance(create_status);
-      if (!U_SUCCESS(create_status)) {
-        collator = NULL;
-        NOTREACHED();
-      }
-    }
-    const string16& title1 = GetResourceTitle(row1);
-    const string16& title2 = GetResourceTitle(row2);
-    UErrorCode compare_status = U_ZERO_ERROR;
-    UCollationResult compare_result = collator->compare(
-        static_cast<const UChar*>(title1.c_str()),
-        static_cast<int>(title1.length()),
-        static_cast<const UChar*>(title2.c_str()),
-        static_cast<int>(title2.length()),
-        compare_status);
-    DCHECK(U_SUCCESS(compare_status));
-    return compare_result;
-  } else if (col_id == IDS_TASK_MANAGER_PROFILE_NAME_COLUMN) {
-    const string16& profile1 = GetResourceProfileName(row1);
-    const string16& profile2 = GetResourceProfileName(row2);
-    return profile1.compare(0, profile1.length(), profile2, 0,
-                            profile2.length());
-  } else if (col_id == IDS_TASK_MANAGER_NET_COLUMN) {
-    return ValueCompare(GetNetworkUsage(GetResource(row1)),
-                        GetNetworkUsage(GetResource(row2)));
-  } else if (col_id == IDS_TASK_MANAGER_CPU_COLUMN) {
-    return ValueCompare(GetCPUUsage(GetResource(row1)),
-                        GetCPUUsage(GetResource(row2)));
-  } else if (col_id == IDS_TASK_MANAGER_PRIVATE_MEM_COLUMN) {
-    return ValueCompareMember(
-        this, &TaskManagerModel::GetPrivateMemory, row1, row2);
-  } else if (col_id == IDS_TASK_MANAGER_SHARED_MEM_COLUMN) {
-    return ValueCompareMember(
-        this, &TaskManagerModel::GetSharedMemory, row1, row2);
-  } else if (col_id == IDS_TASK_MANAGER_PHYSICAL_MEM_COLUMN) {
-    return ValueCompareMember(
-        this, &TaskManagerModel::GetPhysicalMemory, row1, row2);
-  } else if (col_id == IDS_TASK_MANAGER_PROCESS_ID_COLUMN) {
-    base::ProcessId proc1_id = GetProcessId(row1);
-    base::ProcessId proc2_id = GetProcessId(row2);
-    return ValueCompare(proc1_id, proc2_id);
-  } else if (col_id == IDS_TASK_MANAGER_WEBCORE_IMAGE_CACHE_COLUMN ||
-             col_id == IDS_TASK_MANAGER_WEBCORE_SCRIPTS_CACHE_COLUMN ||
-             col_id == IDS_TASK_MANAGER_WEBCORE_CSS_CACHE_COLUMN) {
-    bool row1_stats_valid = CacheWebCoreStats(row1);
-    bool row2_stats_valid = CacheWebCoreStats(row2);
-    if (row1_stats_valid && row2_stats_valid) {
-      const WebKit::WebCache::ResourceTypeStats& stats1(
-          GetPerResourceValues(row1).webcore_stats);
-      const WebKit::WebCache::ResourceTypeStats& stats2(
-          GetPerResourceValues(row2).webcore_stats);
-      switch (col_id) {
-        case IDS_TASK_MANAGER_WEBCORE_IMAGE_CACHE_COLUMN:
-          return ValueCompare(stats1.images.size, stats2.images.size);
-        case IDS_TASK_MANAGER_WEBCORE_SCRIPTS_CACHE_COLUMN:
-          return ValueCompare(stats1.scripts.size, stats2.scripts.size);
-        case IDS_TASK_MANAGER_WEBCORE_CSS_CACHE_COLUMN:
-          return ValueCompare(stats1.cssStyleSheets.size,
-                              stats2.cssStyleSheets.size);
-        default:
+  switch (col_id) {
+    case IDS_TASK_MANAGER_TASK_COLUMN: {
+      static icu::Collator* collator = NULL;
+      if (!collator) {
+        UErrorCode create_status = U_ZERO_ERROR;
+        collator = icu::Collator::createInstance(create_status);
+        if (!U_SUCCESS(create_status)) {
+          collator = NULL;
           NOTREACHED();
-          return 0;
+        }
       }
+      const string16& title1 = GetResourceTitle(row1);
+      const string16& title2 = GetResourceTitle(row2);
+      UErrorCode compare_status = U_ZERO_ERROR;
+      UCollationResult compare_result = collator->compare(
+          static_cast<const UChar*>(title1.c_str()),
+          static_cast<int>(title1.length()),
+          static_cast<const UChar*>(title2.c_str()),
+          static_cast<int>(title2.length()),
+          compare_status);
+      DCHECK(U_SUCCESS(compare_status));
+      return compare_result;
     }
-    return OrderUnavailableValue(row1_stats_valid, row2_stats_valid);
-  } else if (col_id == IDS_TASK_MANAGER_FPS_COLUMN) {
-    return ValueCompareMember(
-        this, &TaskManagerModel::GetFPS, row1, row2);
-  } else if (col_id == IDS_TASK_MANAGER_VIDEO_MEMORY_COLUMN) {
-    size_t value1;
-    size_t value2;
-    bool has_duplicates;
-    bool value1_valid = GetVideoMemory(row1, &value1, &has_duplicates);
-    bool value2_valid = GetVideoMemory(row2, &value2, &has_duplicates);
-    return value1_valid && value2_valid ? ValueCompare(value1, value2) :
-        OrderUnavailableValue(value1_valid, value2_valid);
-  } else if (col_id == IDS_TASK_MANAGER_GOATS_TELEPORTED_COLUMN) {
-    return ValueCompare(GetGoatsTeleported(row1), GetGoatsTeleported(row2));
-  } else if (col_id == IDS_TASK_MANAGER_JAVASCRIPT_MEMORY_ALLOCATED_COLUMN) {
-    return ValueCompareMember(
-        this, &TaskManagerModel::GetV8Memory, row1, row2);
-  } else if (col_id == IDS_TASK_MANAGER_SQLITE_MEMORY_USED_COLUMN) {
-    return ValueCompareMember(
-        this, &TaskManagerModel::GetSqliteMemoryUsedBytes, row1, row2);
-  } else {
-    NOTREACHED();
-    return 0;
+
+    case IDS_TASK_MANAGER_PROFILE_NAME_COLUMN: {
+      const string16& profile1 = GetResourceProfileName(row1);
+      const string16& profile2 = GetResourceProfileName(row2);
+      return profile1.compare(0, profile1.length(), profile2, 0,
+                              profile2.length());
+    }
+
+    case IDS_TASK_MANAGER_NET_COLUMN:
+      return ValueCompare(GetNetworkUsage(GetResource(row1)),
+                          GetNetworkUsage(GetResource(row2)));
+
+    case IDS_TASK_MANAGER_CPU_COLUMN:
+      return ValueCompare(GetCPUUsage(GetResource(row1)),
+                          GetCPUUsage(GetResource(row2)));
+
+    case IDS_TASK_MANAGER_PRIVATE_MEM_COLUMN:
+      return ValueCompareMember(
+          this, &TaskManagerModel::GetPrivateMemory, row1, row2);
+
+    case IDS_TASK_MANAGER_SHARED_MEM_COLUMN:
+      return ValueCompareMember(
+          this, &TaskManagerModel::GetSharedMemory, row1, row2);
+
+    case IDS_TASK_MANAGER_PHYSICAL_MEM_COLUMN:
+      return ValueCompareMember(
+          this, &TaskManagerModel::GetPhysicalMemory, row1, row2);
+
+    case IDS_TASK_MANAGER_PROCESS_ID_COLUMN:
+      return ValueCompare(GetProcessId(row1), GetProcessId(row2));
+
+    case IDS_TASK_MANAGER_WEBCORE_IMAGE_CACHE_COLUMN:
+    case IDS_TASK_MANAGER_WEBCORE_SCRIPTS_CACHE_COLUMN:
+    case IDS_TASK_MANAGER_WEBCORE_CSS_CACHE_COLUMN: {
+      bool row1_stats_valid = CacheWebCoreStats(row1);
+      bool row2_stats_valid = CacheWebCoreStats(row2);
+      if (row1_stats_valid && row2_stats_valid) {
+        const WebKit::WebCache::ResourceTypeStats& stats1(
+            GetPerResourceValues(row1).webcore_stats);
+        const WebKit::WebCache::ResourceTypeStats& stats2(
+            GetPerResourceValues(row2).webcore_stats);
+        switch (col_id) {
+          case IDS_TASK_MANAGER_WEBCORE_IMAGE_CACHE_COLUMN:
+            return ValueCompare(stats1.images.size, stats2.images.size);
+          case IDS_TASK_MANAGER_WEBCORE_SCRIPTS_CACHE_COLUMN:
+            return ValueCompare(stats1.scripts.size, stats2.scripts.size);
+          case IDS_TASK_MANAGER_WEBCORE_CSS_CACHE_COLUMN:
+            return ValueCompare(stats1.cssStyleSheets.size,
+                                stats2.cssStyleSheets.size);
+          default:
+            NOTREACHED();
+            return 0;
+        }
+      }
+      return OrderUnavailableValue(row1_stats_valid, row2_stats_valid);
+    }
+
+    case IDS_TASK_MANAGER_FPS_COLUMN:
+      return ValueCompareMember(
+          this, &TaskManagerModel::GetFPS, row1, row2);
+
+    case IDS_TASK_MANAGER_VIDEO_MEMORY_COLUMN: {
+      size_t value1;
+      size_t value2;
+      bool has_duplicates;
+      bool value1_valid = GetVideoMemory(row1, &value1, &has_duplicates);
+      bool value2_valid = GetVideoMemory(row2, &value2, &has_duplicates);
+      return value1_valid && value2_valid ? ValueCompare(value1, value2) :
+          OrderUnavailableValue(value1_valid, value2_valid);
+    }
+
+    case IDS_TASK_MANAGER_GOATS_TELEPORTED_COLUMN:
+      return ValueCompare(GetGoatsTeleported(row1), GetGoatsTeleported(row2));
+
+    case IDS_TASK_MANAGER_JAVASCRIPT_MEMORY_ALLOCATED_COLUMN:
+      return ValueCompareMember(
+          this, &TaskManagerModel::GetV8Memory, row1, row2);
+
+    case IDS_TASK_MANAGER_SQLITE_MEMORY_USED_COLUMN:
+      return ValueCompareMember(
+          this, &TaskManagerModel::GetSqliteMemoryUsedBytes, row1, row2);
+
+    default:
+      NOTREACHED();
+      break;
   }
+  return 0;
 }
 
 int TaskManagerModel::GetUniqueChildProcessId(int index) const {
@@ -1372,8 +1386,8 @@ content::WebContents* TaskManager::Resource::GetWebContents() const {
 bool TaskManager::Resource::IsBackground() const { return false; }
 
 // static
-void TaskManager::RegisterPrefs(PrefServiceSimple* prefs) {
-  prefs->RegisterDictionaryPref(prefs::kTaskManagerWindowPlacement);
+void TaskManager::RegisterPrefs(PrefRegistrySimple* registry) {
+  registry->RegisterDictionaryPref(prefs::kTaskManagerWindowPlacement);
 }
 
 bool TaskManager::IsBrowserProcess(int index) const {

@@ -3,7 +3,7 @@
 // found in the LICENSE file.
 
 #include "base/command_line.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
@@ -39,7 +39,7 @@ class ExtensionManagementApiBrowserTest : public ExtensionBrowserTest {
     if (!background_host)
       return false;
     background_host->host_contents()->GetController().LoadURL(
-        GURL(chrome::kChromeUICrashURL), content::Referrer(),
+        GURL(content::kChromeUICrashURL), content::Referrer(),
         content::PAGE_TRANSITION_LINK, std::string());
     extension_crash_observer.Wait();
     return true;
@@ -171,18 +171,18 @@ class ExtensionManagementApiEscalationTest :
 
   virtual void SetUpOnMainThread() OVERRIDE {
     EXPECT_TRUE(scoped_temp_dir_.CreateUniqueTempDir());
-    FilePath pem_path = test_data_dir_.
+    base::FilePath pem_path = test_data_dir_.
         AppendASCII("permissions_increase").AppendASCII("permissions.pem");
-    FilePath path_v1 = PackExtensionWithOptions(
+    base::FilePath path_v1 = PackExtensionWithOptions(
         test_data_dir_.AppendASCII("permissions_increase").AppendASCII("v1"),
         scoped_temp_dir_.path().AppendASCII("permissions1.crx"),
         pem_path,
-        FilePath());
-    FilePath path_v2 = PackExtensionWithOptions(
+        base::FilePath());
+    base::FilePath path_v2 = PackExtensionWithOptions(
         test_data_dir_.AppendASCII("permissions_increase").AppendASCII("v2"),
         scoped_temp_dir_.path().AppendASCII("permissions2.crx"),
         pem_path,
-        FilePath());
+        base::FilePath());
 
     ExtensionService* service = ExtensionSystem::Get(browser()->profile())->
         extension_service();

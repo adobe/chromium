@@ -4,10 +4,21 @@
 
 #include "chrome/renderer/searchbox/searchbox.h"
 
+#include "base/utf_string_conversions.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/renderer/searchbox/searchbox_extension.h"
 #include "content/public/renderer/render_view.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
+
+namespace {
+
+// Prefix for a thumbnail URL.
+const char kThumbnailUrlPrefix[] = "chrome-search://thumb/";
+
+// Prefix for a thumbnail URL.
+const char kFaviconUrlPrefix[] = "chrome-search://favicon/";
+
+}
 
 SearchBox::SearchBox(content::RenderView* render_view)
     : content::RenderViewObserver(render_view),
@@ -17,12 +28,11 @@ SearchBox::SearchBox(content::RenderView* render_view)
       selection_end_(0),
       results_base_(0),
       start_margin_(0),
-      end_margin_(0),
       last_results_base_(0),
       is_key_capture_enabled_(false),
-      theme_area_height_(0),
       display_instant_results_(false),
-      omnibox_font_size_(0) {
+      omnibox_font_size_(0),
+      last_restricted_id_(0) {
 }
 
 SearchBox::~SearchBox() {
@@ -41,10 +51,10 @@ void SearchBox::SetSuggestions(
       render_view()->GetRoutingID(), render_view()->GetPageId(), suggestions));
 }
 
-void SearchBox::ShowInstantPreview(InstantShownReason reason,
+void SearchBox::ShowInstantOverlay(InstantShownReason reason,
                                    int height,
                                    InstantSizeUnits units) {
-  render_view()->Send(new ChromeViewHostMsg_ShowInstantPreview(
+  render_view()->Send(new ChromeViewHostMsg_ShowInstantOverlay(
       render_view()->GetRoutingID(), render_view()->GetPageId(), reason,
       height, units));
 }
@@ -60,18 +70,32 @@ void SearchBox::StopCapturingKeyStrokes() {
 }
 
 void SearchBox::NavigateToURL(const GURL& url,
-                              content::PageTransition transition) {
+                              content::PageTransition transition,
+                              WindowOpenDisposition disposition) {
   render_view()->Send(new ChromeViewHostMsg_SearchBoxNavigate(
       render_view()->GetRoutingID(), render_view()->GetPageId(),
-      url, transition));
+      url, transition, disposition));
+}
+
+void SearchBox::DeleteMostVisitedItem(int restrict_id) {
+  string16 url = RestrictedIdToURL(restrict_id);
+  render_view()->Send(new ChromeViewHostMsg_InstantDeleteMostVisitedItem(
+      render_view()->GetRoutingID(), GURL(url)));
+}
+
+void SearchBox::UndoMostVisitedDeletion(int restrict_id) {
+  string16 url = RestrictedIdToURL(restrict_id);
+  render_view()->Send(new ChromeViewHostMsg_InstantUndoMostVisitedDeletion(
+      render_view()->GetRoutingID(), GURL(url)));
+}
+
+void SearchBox::UndoAllMostVisitedDeletions() {
+  render_view()->Send(new ChromeViewHostMsg_InstantUndoAllMostVisitedDeletions(
+      render_view()->GetRoutingID()));
 }
 
 int SearchBox::GetStartMargin() const {
   return static_cast<int>(start_margin_ / GetZoom());
-}
-
-int SearchBox::GetEndMargin() const {
-  return static_cast<int>(end_margin_ / GetZoom());
 }
 
 gfx::Rect SearchBox::GetPopupBounds() const {
@@ -104,10 +128,6 @@ const ThemeBackgroundInfo& SearchBox::GetThemeBackgroundInfo() {
   return theme_info_;
 }
 
-int SearchBox::GetThemeAreaHeight() {
-  return theme_area_height_;
-}
-
 bool SearchBox::OnMessageReceived(const IPC::Message& message) {
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(SearchBox, message)
@@ -122,18 +142,18 @@ bool SearchBox::OnMessageReceived(const IPC::Message& message) {
                         OnAutocompleteResults)
     IPC_MESSAGE_HANDLER(ChromeViewMsg_SearchBoxUpOrDownKeyPressed,
                         OnUpOrDownKeyPressed)
-    IPC_MESSAGE_HANDLER(ChromeViewMsg_SearchBoxModeChanged,
-                        OnModeChanged)
+    IPC_MESSAGE_HANDLER(ChromeViewMsg_SearchBoxCancelSelection,
+                        OnCancelSelection)
     IPC_MESSAGE_HANDLER(ChromeViewMsg_SearchBoxSetDisplayInstantResults,
                         OnSetDisplayInstantResults)
     IPC_MESSAGE_HANDLER(ChromeViewMsg_SearchBoxKeyCaptureChanged,
                         OnKeyCaptureChange)
     IPC_MESSAGE_HANDLER(ChromeViewMsg_SearchBoxThemeChanged,
                         OnThemeChanged)
-    IPC_MESSAGE_HANDLER(ChromeViewMsg_SearchBoxThemeAreaHeightChanged,
-                        OnThemeAreaHeightChanged)
     IPC_MESSAGE_HANDLER(ChromeViewMsg_SearchBoxFontInformation,
                         OnFontInformationReceived)
+    IPC_MESSAGE_HANDLER(ChromeViewMsg_InstantMostVisitedItemsChanged,
+                        OnMostVisitedChanged)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
   return handled;
@@ -191,9 +211,12 @@ void SearchBox::OnPopupResize(const gfx::Rect& bounds) {
   }
 }
 
-void SearchBox::OnMarginChange(int start, int end) {
-  start_margin_ = start;
-  end_margin_ = end;
+void SearchBox::OnMarginChange(int margin, int width) {
+  start_margin_ = margin;
+
+  // Override only the width parameter of the popup bounds.
+  popup_bounds_.set_width(width);
+
   if (render_view()->GetWebView() && render_view()->GetWebView()->mainFrame()) {
     extensions_v8::SearchBoxExtension::DispatchMarginChange(
         render_view()->GetWebView()->mainFrame());
@@ -229,21 +252,24 @@ void SearchBox::OnUpOrDownKeyPressed(int count) {
   }
 }
 
+void SearchBox::OnCancelSelection(const string16& query) {
+  // TODO(sreeram): crbug.com/176101 The state reset below are somewhat wrong.
+  query_ = query;
+  verbatim_ = true;
+  selection_start_ = selection_end_ = query_.size();
+  if (render_view()->GetWebView() && render_view()->GetWebView()->mainFrame()) {
+    DVLOG(1) << render_view() << " OnKeyPress ESC";
+    extensions_v8::SearchBoxExtension::DispatchEscKeyPress(
+        render_view()->GetWebView()->mainFrame());
+  }
+}
+
 void SearchBox::OnKeyCaptureChange(bool is_key_capture_enabled) {
   if (is_key_capture_enabled != is_key_capture_enabled_ &&
       render_view()->GetWebView() && render_view()->GetWebView()->mainFrame()) {
     is_key_capture_enabled_ = is_key_capture_enabled;
     DVLOG(1) << render_view() << " OnKeyCaptureChange";
     extensions_v8::SearchBoxExtension::DispatchKeyCaptureChange(
-        render_view()->GetWebView()->mainFrame());
-  }
-}
-
-void SearchBox::OnModeChanged(const chrome::search::Mode& mode) {
-  mode_ = mode;
-  if (render_view()->GetWebView() && render_view()->GetWebView()->mainFrame()) {
-    DVLOG(1) << render_view() << " OnModeChanged";
-    extensions_v8::SearchBoxExtension::DispatchContextChange(
         render_view()->GetWebView()->mainFrame());
   }
 }
@@ -256,14 +282,6 @@ void SearchBox::OnThemeChanged(const ThemeBackgroundInfo& theme_info) {
   theme_info_ = theme_info;
   if (render_view()->GetWebView() && render_view()->GetWebView()->mainFrame()) {
     extensions_v8::SearchBoxExtension::DispatchThemeChange(
-        render_view()->GetWebView()->mainFrame());
-  }
-}
-
-void SearchBox::OnThemeAreaHeightChanged(int height) {
-  theme_area_height_ = height;
-  if (render_view()->GetWebView() && render_view()->GetWebView()->mainFrame()) {
-    extensions_v8::SearchBoxExtension::DispatchThemeAreaHeightChange(
         render_view()->GetWebView()->mainFrame());
   }
 }
@@ -292,15 +310,55 @@ void SearchBox::Reset() {
   results_base_ = 0;
   popup_bounds_ = gfx::Rect();
   start_margin_ = 0;
-  end_margin_ = 0;
   autocomplete_results_.clear();
   is_key_capture_enabled_ = false;
-  mode_ = chrome::search::Mode();
   theme_info_ = ThemeBackgroundInfo();
-  theme_area_height_ = 0;
   // Don't reset display_instant_results_ to prevent clearing it on committed
   // results pages in extended mode. Otherwise resetting it is a no-op because
   // a new loader is created when it changes; see crbug.com/164662.
   // Also don't reset omnibox_font_ or omnibox_font_size_ since it never
   // changes.
+}
+
+void SearchBox::OnMostVisitedChanged(
+    const std::vector<MostVisitedItem>& items) {
+  most_visited_items_ = items;
+
+  if (render_view()->GetWebView() && render_view()->GetWebView()->mainFrame()) {
+    extensions_v8::SearchBoxExtension::DispatchMostVisitedChanged(
+        render_view()->GetWebView()->mainFrame());
+  }
+}
+
+const std::vector<MostVisitedItem>& SearchBox::GetMostVisitedItems() {
+  return most_visited_items_;
+}
+
+int SearchBox::UrlToRestrictedId(string16 url) {
+  if (url_to_restricted_id_map_[url])
+    return url_to_restricted_id_map_[url];
+
+  last_restricted_id_++;
+  url_to_restricted_id_map_[url] = last_restricted_id_;
+  restricted_id_to_url_map_[last_restricted_id_] = url;
+
+  return last_restricted_id_;
+}
+
+string16 SearchBox::RestrictedIdToURL(int id) {
+  return restricted_id_to_url_map_[id];
+}
+
+string16 SearchBox::GenerateThumbnailUrl(int id) {
+  std::ostringstream ostr;
+  ostr << kThumbnailUrlPrefix << id;
+  GURL url = GURL(ostr.str());
+  return UTF8ToUTF16(url.spec());
+}
+
+string16 SearchBox::GenerateFaviconUrl(int id) {
+  std::ostringstream ostr;
+  ostr << kFaviconUrlPrefix << id;
+  GURL url = GURL(ostr.str());
+  return UTF8ToUTF16(url.spec());
 }

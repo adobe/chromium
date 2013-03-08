@@ -5,6 +5,7 @@
 #include "chrome/browser/prefs/pref_service_mock_builder.h"
 
 #include "base/prefs/testing_pref_store.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 
 PrefServiceMockBuilder::PrefServiceMockBuilder() {
   ResetDefaultState();
@@ -12,13 +13,15 @@ PrefServiceMockBuilder::PrefServiceMockBuilder() {
 
 PrefServiceMockBuilder::~PrefServiceMockBuilder() {}
 
-PrefServiceSimple* PrefServiceMockBuilder::CreateSimple() {
-  PrefServiceSimple* service = PrefServiceBuilder::CreateSimple();
+PrefService* PrefServiceMockBuilder::Create(PrefRegistry* pref_registry) {
+  PrefService* service = PrefServiceBuilder::Create(pref_registry);
   return service;
 }
 
-PrefServiceSyncable* PrefServiceMockBuilder::CreateSyncable() {
-  PrefServiceSyncable* service = PrefServiceSyncableBuilder::CreateSyncable();
+PrefServiceSyncable* PrefServiceMockBuilder::CreateSyncable(
+    PrefRegistrySyncable* pref_registry) {
+  PrefServiceSyncable* service =
+      PrefServiceSyncableBuilder::CreateSyncable(pref_registry);
   return service;
 }
 

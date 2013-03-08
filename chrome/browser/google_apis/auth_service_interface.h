@@ -7,15 +7,15 @@
 
 #include <string>
 
-#include "chrome/browser/google_apis/base_operations.h"
+#include "base/callback_forward.h"
 #include "chrome/browser/google_apis/gdata_errorcode.h"
 
 class Profile;
 
 namespace google_apis {
 
-class OperationRegistry;
 class AuthServiceObserver;
+class OperationRegistry;
 
 // Called when fetching of access token is complete.
 typedef base::Callback<void(GDataErrorCode error,
@@ -55,6 +55,9 @@ class AuthServiceInterface {
 
   // Clears OAuth2 access token.
   virtual void ClearAccessToken() = 0;
+
+  // Clears OAuth2 refresh token.
+  virtual void ClearRefreshToken() = 0;
 };
 
 }  // namespace google_apis

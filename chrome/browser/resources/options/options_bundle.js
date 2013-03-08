@@ -29,15 +29,19 @@
   <include src="chromeos/accounts_user_list.js"></include>
   <include src="chromeos/accounts_user_name_edit.js"></include>
   <include src="chromeos/display_options.js"></include>
+  <include src="chromeos/display_overscan.js"></include>
   <include src="chromeos/keyboard_overlay.js"></include>
+  <include src="chromeos/kiosk_apps.js"></include>
   <include src="chromeos/pointer_overlay.js"></include>
   var AccountsOptions = options.AccountsOptions;
   var ChangePictureOptions = options.ChangePictureOptions;
   var DetailsInternetPage = options.internet.DetailsInternetPage;
   var DisplayOptions = options.DisplayOptions;
+  var DisplayOverscan = options.DisplayOverscan;
   var BluetoothOptions = options.BluetoothOptions;
   var BluetoothPairing = options.BluetoothPairing;
   var KeyboardOverlay = options.KeyboardOverlay;
+  var KioskAppsOverlay = options.KioskAppsOverlay;
   var PointerOverlay = options.PointerOverlay;
   var UIAccountTweaks = uiAccountTweaks.UIAccountTweaks;
 </if>
@@ -72,6 +76,7 @@
 <include src="cookies_view.js"></include>
 <include src="factory_reset_overlay.js"></include>
 <include src="managed_user_settings.js"></include>
+<include src="managed_user_set_passphrase.js"></include>
 <include src="font_settings.js"></include>
 <include src="handler_options.js"></include>
 <include src="handler_options_list.js"></include>

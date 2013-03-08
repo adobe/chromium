@@ -31,13 +31,16 @@ class CONTENT_EXPORT BrowserPluginCompositingHelper :
  public:
   BrowserPluginCompositingHelper(WebKit::WebPluginContainer* container,
                                  BrowserPluginManager* manager,
+                                 int instance_id,
                                  int host_routing_id);
   void EnableCompositing(bool);
   void OnContainerDestroy();
   void OnBuffersSwapped(const gfx::Size& size,
                         const std::string& mailbox_name,
                         int gpu_route_id,
-                        int gpu_host_id);
+                        int gpu_host_id,
+                        float device_scale_factor);
+  void UpdateVisibility(bool);
  protected:
   // Friend RefCounted so that the dtor can be non-public.
   friend class base::RefCounted<BrowserPluginCompositingHelper>;
@@ -49,10 +52,13 @@ class CONTENT_EXPORT BrowserPluginCompositingHelper :
                        int gpu_route_id,
                        int gpu_host_id,
                        unsigned sync_point);
-
+  int instance_id_;
   int host_routing_id_;
+  int last_gpu_route_id_;
+  int last_gpu_host_id_;
   bool last_mailbox_valid_;
   bool ack_pending_;
+  bool ack_pending_for_crashed_guest_;
 
   gfx::Size buffer_size_;
 

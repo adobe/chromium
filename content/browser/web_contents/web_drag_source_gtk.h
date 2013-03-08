@@ -8,7 +8,7 @@
 #include <gtk/gtk.h>
 
 #include "base/basictypes.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/message_loop.h"
 #include "base/string16.h"
 #include "content/common/content_export.h"
@@ -93,7 +93,7 @@ class CONTENT_EXPORT WebDragSourceGtk : public MessageLoopForUI::Observer {
   string16 wide_download_mime_type_;
 
   // The file name to be saved to for a drag-out download.
-  FilePath download_file_name_;
+  base::FilePath download_file_name_;
 
   // The URL to download from for a drag-out download.
   GURL download_url_;

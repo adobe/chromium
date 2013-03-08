@@ -5,13 +5,13 @@
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/compiler_specific.h"
-#include "base/string_number_conversions.h"
+#include "base/prefs/pref_service.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/bookmarks/bookmark_utils.h"
 #include "chrome/browser/ui/browser.h"
@@ -117,8 +117,10 @@ class BookmarkBarViewEventTestBase : public ViewEventTestBase {
     profile_->BlockUntilBookmarkModelLoaded();
     profile_->GetPrefs()->SetBoolean(prefs::kShowBookmarkBar, true);
 
+    Browser::CreateParams native_params(profile_.get(),
+                                        chrome::HOST_DESKTOP_TYPE_NATIVE);
     browser_.reset(
-        chrome::CreateBrowserWithTestWindowForProfile(profile_.get()));
+        chrome::CreateBrowserWithTestWindowForParams(&native_params));
 
     model_ = BookmarkModelFactory::GetForProfile(profile_.get());
     model_->ClearStore();
@@ -176,11 +178,11 @@ class BookmarkBarViewEventTestBase : public ViewEventTestBase {
   }
 
  protected:
-  virtual views::View* CreateContentsView() {
+  virtual views::View* CreateContentsView() OVERRIDE {
     return bb_view_.get();
   }
 
-  virtual gfx::Size GetPreferredSize() { return bb_view_pref_; }
+  virtual gfx::Size GetPreferredSize() OVERRIDE { return bb_view_pref_; }
 
   views::TextButton* GetBookmarkButton(int view_index) {
     return bb_view_->GetBookmarkButton(view_index);
@@ -234,7 +236,7 @@ class BookmarkBarViewEventTestBase : public ViewEventTestBase {
 // child, clicks it and makes sure a navigation occurs.
 class BookmarkBarViewTest1 : public BookmarkBarViewEventTestBase {
  protected:
-  virtual void DoTestOnMessageLoop() {
+  virtual void DoTestOnMessageLoop() OVERRIDE {
     // Move the mouse to the first folder on the bookmark bar and press the
     // mouse.
     views::TextButton* button = GetBookmarkButton(0);
@@ -280,14 +282,12 @@ class BookmarkBarViewTest1 : public BookmarkBarViewEventTestBase {
   }
 };
 
-// TODO(jcampan): http://crbug.com/26996 temporarily disabled because failing
-//                since we move to running the process
-VIEW_TEST(BookmarkBarViewTest1, DISABLED_Basic)
+VIEW_TEST(BookmarkBarViewTest1, Basic)
 
 // Brings up menu, clicks on empty space and make sure menu hides.
 class BookmarkBarViewTest2 : public BookmarkBarViewEventTestBase {
  protected:
-  virtual void DoTestOnMessageLoop() {
+  virtual void DoTestOnMessageLoop() OVERRIDE {
     // Move the mouse to the first folder on the bookmark bar and press the
     // mouse.
     views::TextButton* button = GetBookmarkButton(0);
@@ -308,13 +308,21 @@ class BookmarkBarViewTest2 : public BookmarkBarViewEventTestBase {
     // to press the mouse on.
     gfx::Point mouse_loc;
     views::View::ConvertPointToScreen(bb_view_.get(), &mouse_loc);
-    ui_controls::SendMouseMove(0, 0);
-    ui_controls::SendMouseEventsNotifyWhenDone(
-        ui_controls::LEFT, ui_controls::DOWN | ui_controls::UP,
+    ui_controls::SendMouseMoveNotifyWhenDone(0, 0,
         CreateEventTask(this, &BookmarkBarViewTest2::Step3));
   }
 
   void Step3() {
+    // As the click is on the desktop the hook never sees the up, so we only
+    // wait on the down. We still send the up though else the system thinks
+    // the mouse is still down.
+    ui_controls::SendMouseEventsNotifyWhenDone(
+        ui_controls::LEFT, ui_controls::DOWN,
+        CreateEventTask(this, &BookmarkBarViewTest2::Step4));
+    ui_controls::SendMouseEvents(ui_controls::LEFT, ui_controls::UP);
+  }
+
+  void Step4() {
     // The menu shouldn't be showing.
     views::MenuItemView* menu = bb_view_->GetMenu();
     ASSERT_TRUE(menu == NULL || !menu->GetSubmenu()->IsShowing());
@@ -323,21 +331,17 @@ class BookmarkBarViewTest2 : public BookmarkBarViewEventTestBase {
     views::TextButton* button = GetBookmarkButton(0);
     ASSERT_TRUE(button->state() == views::CustomButton::STATE_NORMAL);
 
-    window_->Activate();
-
     Done();
   }
 };
 
-// TODO(jcampan): http://crbug.com/26996 temporarily disabled because failing
-//                since we move to running the process
-VIEW_TEST(BookmarkBarViewTest2, DISABLED_HideOnDesktopClick)
+VIEW_TEST(BookmarkBarViewTest2, HideOnDesktopClick)
 
 // Brings up menu. Moves over child to make sure submenu appears, moves over
 // another child and make sure next menu appears.
 class BookmarkBarViewTest3 : public BookmarkBarViewEventTestBase {
  protected:
-  virtual void DoTestOnMessageLoop() {
+  virtual void DoTestOnMessageLoop() OVERRIDE {
     // Move the mouse to the first folder on the bookmark bar and press the
     // mouse.
     views::MenuButton* button = bb_view_->other_bookmarked_button();
@@ -419,7 +423,7 @@ class ContextMenuNotificationObserver : public content::NotificationObserver {
 
   virtual void Observe(int type,
                        const content::NotificationSource& source,
-                       const content::NotificationDetails& details) {
+                       const content::NotificationDetails& details) OVERRIDE {
     MessageLoop::current()->PostTask(FROM_HERE, task_);
   }
 
@@ -444,7 +448,7 @@ class BookmarkBarViewTest4 : public BookmarkBarViewEventTestBase {
   }
 
  protected:
-  virtual void DoTestOnMessageLoop() {
+  virtual void DoTestOnMessageLoop() OVERRIDE {
     // Move the mouse to the first folder on the bookmark bar and press the
     // mouse.
     views::TextButton* button = bb_view_->other_bookmarked_button();
@@ -497,7 +501,7 @@ VIEW_TEST(BookmarkBarViewTest4, ContextMenus)
 // Tests drag and drop within the same menu.
 class BookmarkBarViewTest5 : public BookmarkBarViewEventTestBase {
  protected:
-  virtual void DoTestOnMessageLoop() {
+  virtual void DoTestOnMessageLoop() OVERRIDE {
     url_dragging_ =
         model_->bookmark_bar_node()->GetChild(0)->GetChild(0)->url();
 
@@ -568,7 +572,7 @@ VIEW_TEST(BookmarkBarViewTest5, DND)
 // then selecting an item.
 class BookmarkBarViewTest6 : public BookmarkBarViewEventTestBase {
  protected:
-  virtual void DoTestOnMessageLoop() {
+  virtual void DoTestOnMessageLoop() OVERRIDE {
     // Press the mouse button on the overflow button. Don't release it though.
     views::TextButton* button = bb_view_->overflow_button();
     ui_test_utils::MoveMouseToCenterAndPress(button, ui_controls::LEFT,
@@ -605,7 +609,7 @@ VIEW_TEST(BookmarkBarViewTest6, OpenMenuOnClickAndHold)
 // Tests drag and drop to different menu.
 class BookmarkBarViewTest7 : public BookmarkBarViewEventTestBase {
  protected:
-  virtual void DoTestOnMessageLoop() {
+  virtual void DoTestOnMessageLoop() OVERRIDE {
     url_dragging_ =
         model_->bookmark_bar_node()->GetChild(0)->GetChild(0)->url();
 
@@ -676,13 +680,17 @@ class BookmarkBarViewTest7 : public BookmarkBarViewEventTestBase {
         drop_menu->GetSubmenu()->GetMenuItemAt(0);
     gfx::Point loc(1, 1);
     views::View::ConvertPointToScreen(target_menu, &loc);
-    ui_controls::SendMouseMove(loc.x(), loc.y());
-    ui_controls::SendMouseEventsNotifyWhenDone(
-        ui_controls::LEFT, ui_controls::UP,
+    ui_controls::SendMouseMoveNotifyWhenDone(loc.x(), loc.y(),
         CreateEventTask(this, &BookmarkBarViewTest7::Step5));
   }
 
   void Step5() {
+    ui_controls::SendMouseEventsNotifyWhenDone(
+        ui_controls::LEFT, ui_controls::UP,
+        CreateEventTask(this, &BookmarkBarViewTest7::Step6));
+  }
+
+  void Step6() {
     ASSERT_TRUE(model_->other_node()->GetChild(0)->url() == url_dragging_);
     Done();
   }
@@ -701,7 +709,7 @@ VIEW_TEST(BookmarkBarViewTest7, DNDToDifferentMenu)
 // original menu.
 class BookmarkBarViewTest8 : public BookmarkBarViewEventTestBase {
  protected:
-  virtual void DoTestOnMessageLoop() {
+  virtual void DoTestOnMessageLoop() OVERRIDE {
     url_dragging_ =
         model_->bookmark_bar_node()->GetChild(0)->GetChild(0)->url();
 
@@ -809,9 +817,9 @@ VIEW_TEST(BookmarkBarViewTest8, DNDBackToOriginatingMenu)
 // Moves the mouse over the scroll button and makes sure we get scrolling.
 class BookmarkBarViewTest9 : public BookmarkBarViewEventTestBase {
  protected:
-  virtual bool CreateBigMenu() { return true; }
+  virtual bool CreateBigMenu() OVERRIDE { return true; }
 
-  virtual void DoTestOnMessageLoop() {
+  virtual void DoTestOnMessageLoop() OVERRIDE {
     // Move the mouse to the first folder on the bookmark bar and press the
     // mouse.
     views::TextButton* button = GetBookmarkButton(0);
@@ -880,7 +888,7 @@ VIEW_TEST(BookmarkBarViewTest9, ScrollButtonScrolls)
 // Tests up/down/left/enter key messages.
 class BookmarkBarViewTest10 : public BookmarkBarViewEventTestBase {
  protected:
-  virtual void DoTestOnMessageLoop() {
+  virtual void DoTestOnMessageLoop() OVERRIDE {
     // Move the mouse to the first folder on the bookmark bar and press the
     // mouse.
     views::TextButton* button = GetBookmarkButton(0);
@@ -995,7 +1003,7 @@ class BookmarkBarViewTest11 : public BookmarkBarViewEventTestBase {
   }
 
  protected:
-  virtual void DoTestOnMessageLoop() {
+  virtual void DoTestOnMessageLoop() OVERRIDE {
     // Move the mouse to the first folder on the bookmark bar and press the
     // mouse.
     views::TextButton* button = bb_view_->other_bookmarked_button();
@@ -1063,7 +1071,7 @@ VIEW_TEST(BookmarkBarViewTest11, CloseMenuAfterClosingContextMenu)
 // Tests showing a modal dialog from a context menu.
 class BookmarkBarViewTest12 : public BookmarkBarViewEventTestBase {
  protected:
-  virtual void DoTestOnMessageLoop() {
+  virtual void DoTestOnMessageLoop() OVERRIDE {
     // Open up the other folder.
     views::TextButton* button = bb_view_->other_bookmarked_button();
     ui_test_utils::MoveMouseToCenterAndPress(button, ui_controls::LEFT,
@@ -1072,7 +1080,7 @@ class BookmarkBarViewTest12 : public BookmarkBarViewEventTestBase {
     chrome::num_bookmark_urls_before_prompting = 1;
   }
 
-  ~BookmarkBarViewTest12() {
+  virtual ~BookmarkBarViewTest12() {
     chrome::num_bookmark_urls_before_prompting = 15;
   }
 
@@ -1153,7 +1161,7 @@ class BookmarkBarViewTest13 : public BookmarkBarViewEventTestBase {
   }
 
  protected:
-  virtual void DoTestOnMessageLoop() {
+  virtual void DoTestOnMessageLoop() OVERRIDE {
     // Move the mouse to the first folder on the bookmark bar and press the
     // mouse.
     views::TextButton* button = bb_view_->other_bookmarked_button();
@@ -1238,7 +1246,7 @@ class BookmarkBarViewTest14 : public BookmarkBarViewEventTestBase {
   }
 
  protected:
-  virtual void DoTestOnMessageLoop() {
+  virtual void DoTestOnMessageLoop() OVERRIDE {
     // Move the mouse to the first folder on the bookmark bar and press the
     // right mouse button.
     views::TextButton* button = GetBookmarkButton(0);
@@ -1279,7 +1287,7 @@ class BookmarkBarViewTest15 : public BookmarkBarViewEventTestBase {
   }
 
  protected:
-  virtual void DoTestOnMessageLoop() {
+  virtual void DoTestOnMessageLoop() OVERRIDE {
     // Show the other bookmarks.
     views::TextButton* button = bb_view_->other_bookmarked_button();
     ui_test_utils::MoveMouseToCenterAndPress(button, ui_controls::LEFT,
@@ -1350,7 +1358,7 @@ VIEW_TEST(BookmarkBarViewTest15, MenuStaysVisibleAfterDelete)
 // Tests that we don't crash or get stuck if the parent of a menu is closed.
 class BookmarkBarViewTest16 : public BookmarkBarViewEventTestBase {
  protected:
-  virtual void DoTestOnMessageLoop() {
+  virtual void DoTestOnMessageLoop() OVERRIDE {
     // Move the mouse to the first folder on the bookmark bar and press the
     // mouse.
     views::TextButton* button = GetBookmarkButton(0);
@@ -1391,7 +1399,7 @@ class BookmarkBarViewTest17 : public BookmarkBarViewEventTestBase {
   }
 
  protected:
-  virtual void DoTestOnMessageLoop() {
+  virtual void DoTestOnMessageLoop() OVERRIDE {
     // Move the mouse to the other folder on the bookmark bar and press the
     // left mouse button.
     views::TextButton* button = bb_view_->other_bookmarked_button();
@@ -1468,7 +1476,7 @@ VIEW_TEST(BookmarkBarViewTest17, ContextMenus3)
 // menu appears.
 class BookmarkBarViewTest18 : public BookmarkBarViewEventTestBase {
  protected:
-  virtual void DoTestOnMessageLoop() {
+  virtual void DoTestOnMessageLoop() OVERRIDE {
     // Move the mouse to the other folder on the bookmark bar and press the
     // left mouse button.
     views::TextButton* button = bb_view_->other_bookmarked_button();
@@ -1516,7 +1524,7 @@ VIEW_TEST(BookmarkBarViewTest18, BookmarkBarViewTest18_SiblingMenu)
 // the menu.
 class BookmarkBarViewTest19 : public BookmarkBarViewEventTestBase {
  protected:
-  virtual void DoTestOnMessageLoop() {
+  virtual void DoTestOnMessageLoop() OVERRIDE {
     // Move the mouse to the other folder on the bookmark bar and press the
     // left mouse button.
     views::TextButton* button = bb_view_->other_bookmarked_button();
@@ -1585,3 +1593,107 @@ class BookmarkBarViewTest19 : public BookmarkBarViewEventTestBase {
 };
 
 VIEW_TEST(BookmarkBarViewTest19, BookmarkBarViewTest19_SiblingMenu)
+
+#if !defined(OS_WIN)
+
+// Verify that when clicking a mouse button outside a context menu,
+// the context menu is dismissed *and* the underlying view receives
+// the the mouse event (due to event reposting).
+class BookmarkBarViewTest20 : public BookmarkBarViewEventTestBase {
+ public:
+  BookmarkBarViewTest20() : test_view_(new TestViewForMenuExit) {}
+
+ protected:
+  virtual void DoTestOnMessageLoop() OVERRIDE {
+    // Add |test_view_| next to |bb_view_|.
+    views::View* parent = bb_view_->parent();
+    views::View* container_view = new ContainerViewForMenuExit;
+    container_view->AddChildView(bb_view_.get());
+    container_view->AddChildView(test_view_);
+    parent->AddChildView(container_view);
+    parent->Layout();
+
+    ASSERT_EQ(test_view_->press_count(), 0);
+
+    // Move the mouse to the Test View and press the left mouse button.
+    ui_test_utils::MoveMouseToCenterAndPress(
+        test_view_, ui_controls::LEFT, ui_controls::DOWN | ui_controls::UP,
+        CreateEventTask(this, &BookmarkBarViewTest20::Step1));
+  }
+
+ private:
+  void Step1() {
+    ASSERT_EQ(test_view_->press_count(), 1);
+    ASSERT_TRUE(bb_view_->GetMenu() == NULL);
+
+    // Move the mouse to the first folder on the bookmark bar and press the
+    // left mouse button.
+    views::TextButton* button = GetBookmarkButton(0);
+    ui_test_utils::MoveMouseToCenterAndPress(
+        button, ui_controls::LEFT, ui_controls::DOWN | ui_controls::UP,
+        CreateEventTask(this, &BookmarkBarViewTest20::Step2));
+  }
+
+  void Step2() {
+    ASSERT_EQ(test_view_->press_count(), 1);
+    views::MenuItemView* menu = bb_view_->GetMenu();
+    ASSERT_TRUE(menu != NULL);
+    ASSERT_TRUE(menu->GetSubmenu()->IsShowing());
+
+    // Move the mouse to the Test View and press the left mouse button.
+    // The context menu will consume the event and exit. Thereafter,
+    // the event is reposted and delivered to the Test View which
+    // increases its press-count.
+    ui_test_utils::MoveMouseToCenterAndPress(
+        test_view_, ui_controls::LEFT, ui_controls::DOWN | ui_controls::UP,
+        CreateEventTask(this, &BookmarkBarViewTest20::Step3));
+  }
+
+  void Step3() {
+    ASSERT_EQ(test_view_->press_count(), 2);
+    ASSERT_TRUE(bb_view_->GetMenu() == NULL);
+    Done();
+  }
+
+  class ContainerViewForMenuExit : public views::View {
+   public:
+    ContainerViewForMenuExit() {
+    }
+
+    virtual void Layout() OVERRIDE {
+      DCHECK_EQ(2, child_count());
+      views::View* bb_view = child_at(0);
+      views::View* test_view = child_at(1);
+      const int width = bb_view->width();
+      const int height = bb_view->height();
+      bb_view->SetBounds(0,0, width - 22, height);
+      test_view->SetBounds(width - 20, 0, 20, height);
+    }
+
+   private:
+
+    DISALLOW_COPY_AND_ASSIGN(ContainerViewForMenuExit);
+  };
+
+  class TestViewForMenuExit : public views::View {
+   public:
+    TestViewForMenuExit() : press_count_(0) {
+    }
+    virtual bool OnMousePressed(const ui::MouseEvent& event) OVERRIDE {
+      ++press_count_;
+      return true;
+    }
+    int press_count() const { return press_count_; }
+
+   private:
+    int press_count_;
+
+    DISALLOW_COPY_AND_ASSIGN(TestViewForMenuExit);
+  };
+
+  TestViewForMenuExit* test_view_;
+};
+
+VIEW_TEST(BookmarkBarViewTest20, ContextMenuExitTest)
+
+#endif // !defined(OS_WIN)

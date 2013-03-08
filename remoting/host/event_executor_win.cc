@@ -11,6 +11,7 @@
 #include "base/location.h"
 #include "base/memory/ref_counted.h"
 #include "base/single_thread_task_runner.h"
+#include "remoting/base/util.h"
 #include "remoting/host/clipboard.h"
 #include "remoting/proto/event.pb.h"
 // SkSize.h assumes that stdint.h-style types are already defined.
@@ -50,21 +51,20 @@ class EventExecutorWin : public EventExecutor {
 
  private:
   // The actual implementation resides in EventExecutorWin::Core class.
-  class Core : public base::RefCountedThreadSafe<Core>, public EventExecutor {
+  class Core : public base::RefCountedThreadSafe<Core> {
    public:
     Core(scoped_refptr<base::SingleThreadTaskRunner> main_task_runner,
          scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner);
 
-    // ClipboardStub interface.
-    virtual void InjectClipboardEvent(const ClipboardEvent& event) OVERRIDE;
+    // Mirrors the ClipboardStub interface.
+    void InjectClipboardEvent(const ClipboardEvent& event);
 
-    // InputStub interface.
-    virtual void InjectKeyEvent(const KeyEvent& event) OVERRIDE;
-    virtual void InjectMouseEvent(const MouseEvent& event) OVERRIDE;
+    // Mirrors the InputStub interface.
+    void InjectKeyEvent(const KeyEvent& event);
+    void InjectMouseEvent(const MouseEvent& event);
 
-    // EventExecutor interface.
-    virtual void Start(
-        scoped_ptr<protocol::ClipboardStub> client_clipboard) OVERRIDE;
+    // Mirrors the EventExecutor interface.
+    void Start(scoped_ptr<protocol::ClipboardStub> client_clipboard);
 
     void Stop();
 
@@ -129,6 +129,7 @@ void EventExecutorWin::Core::InjectClipboardEvent(const ClipboardEvent& event) {
     return;
   }
 
+  // |clipboard_| will ignore unknown MIME-types, and verify the data's format.
   clipboard_->InjectClipboardEvent(event);
 }
 
@@ -178,11 +179,20 @@ EventExecutorWin::Core::~Core() {
 
 void EventExecutorWin::Core::HandleKey(const KeyEvent& event) {
   // HostEventDispatcher should filter events missing the pressed field.
-  DCHECK(event.has_pressed());
-  DCHECK(event.has_usb_keycode());
+  if (!event.has_pressed() || !event.has_usb_keycode())
+    return;
 
   // Reset the system idle suspend timeout.
   SetThreadExecutionState(ES_SYSTEM_REQUIRED);
+
+  int scancode = UsbKeycodeToNativeKeycode(event.usb_keycode());
+
+  VLOG(3) << "Converting USB keycode: " << std::hex << event.usb_keycode()
+          << " to scancode: " << scancode << std::dec;
+
+  // Ignore events which can't be mapped.
+  if (scancode == InvalidNativeKeycode())
+    return;
 
   // Populate the a Windows INPUT structure for the event.
   INPUT input;
@@ -193,26 +203,16 @@ void EventExecutorWin::Core::HandleKey(const KeyEvent& event) {
   if (!event.pressed())
     input.ki.dwFlags |= KEYEVENTF_KEYUP;
 
-  int scancode = UsbKeycodeToNativeKeycode(event.usb_keycode());
-  VLOG(3) << "Converting USB keycode: " << std::hex << event.usb_keycode()
-          << " to scancode: " << scancode << std::dec;
-
-  // Ignore events which can't be mapped.
-  if (scancode == kInvalidKeycode)
-    return;
-
   // Windows scancodes are only 8-bit, so store the low-order byte into the
   // event and set the extended flag if any high-order bits are set. The only
   // high-order values we should see are 0xE0 or 0xE1. The extended bit usually
   // distinguishes keys with the same meaning, e.g. left & right shift.
   input.ki.wScan = scancode & 0xFF;
-  if ((scancode & 0xFF00) != 0x0000) {
+  if ((scancode & 0xFF00) != 0x0000)
     input.ki.dwFlags |= KEYEVENTF_EXTENDEDKEY;
-  }
 
-  if (SendInput(1, &input, sizeof(INPUT)) == 0) {
+  if (SendInput(1, &input, sizeof(INPUT)) == 0)
     LOG_GETLASTERROR(ERROR) << "Failed to inject a key event";
-  }
 }
 
 void EventExecutorWin::Core::HandleMouse(const MouseEvent& event) {
@@ -237,9 +237,8 @@ void EventExecutorWin::Core::HandleMouse(const MouseEvent& event) {
       input.mi.dy = static_cast<int>((y * 65535) / (screen_size.height() - 1));
       input.mi.dwFlags =
           MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK;
-      if (SendInput(1, &input, sizeof(INPUT)) == 0) {
+      if (SendInput(1, &input, sizeof(INPUT)) == 0)
         LOG_GETLASTERROR(ERROR) << "Failed to inject a mouse move event";
-      }
     }
   }
 
@@ -258,16 +257,14 @@ void EventExecutorWin::Core::HandleMouse(const MouseEvent& event) {
     if (wheel_delta_x != 0) {
       wheel.mi.mouseData = wheel_delta_x;
       wheel.mi.dwFlags = MOUSEEVENTF_HWHEEL;
-      if (SendInput(1, &wheel, sizeof(INPUT)) == 0) {
+      if (SendInput(1, &wheel, sizeof(INPUT)) == 0)
         LOG_GETLASTERROR(ERROR) << "Failed to inject a mouse wheel(x) event";
-      }
     }
     if (wheel_delta_y != 0) {
       wheel.mi.mouseData = wheel_delta_y;
       wheel.mi.dwFlags = MOUSEEVENTF_WHEEL;
-      if (SendInput(1, &wheel, sizeof(INPUT)) == 0) {
+      if (SendInput(1, &wheel, sizeof(INPUT)) == 0)
         LOG_GETLASTERROR(ERROR) << "Failed to inject a mouse wheel(y) event";
-      }
     }
   }
 
@@ -280,6 +277,17 @@ void EventExecutorWin::Core::HandleMouse(const MouseEvent& event) {
 
     MouseEvent::MouseButton button = event.button();
     bool down = event.button_down();
+
+    // If the host is configured to swap left & right buttons, inject swapped
+    // events to un-do that re-mapping.
+    if (GetSystemMetrics(SM_SWAPBUTTON)) {
+      if (button == MouseEvent::BUTTON_LEFT) {
+        button = MouseEvent::BUTTON_RIGHT;
+      } else if (button == MouseEvent::BUTTON_RIGHT) {
+        button = MouseEvent::BUTTON_LEFT;
+      }
+    }
+
     if (button == MouseEvent::BUTTON_LEFT) {
       button_event.mi.dwFlags =
           down ? MOUSEEVENTF_LEFTDOWN : MOUSEEVENTF_LEFTUP;
@@ -294,9 +302,8 @@ void EventExecutorWin::Core::HandleMouse(const MouseEvent& event) {
           down ? MOUSEEVENTF_LEFTDOWN : MOUSEEVENTF_LEFTUP;
     }
 
-    if (SendInput(1, &button_event, sizeof(INPUT)) == 0) {
+    if (SendInput(1, &button_event, sizeof(INPUT)) == 0)
       LOG_GETLASTERROR(ERROR) << "Failed to inject a mouse button event";
-    }
   }
 }
 

@@ -6,7 +6,8 @@
 
 #include "base/metrics/histogram.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_finder.h"
+#include "chrome/browser/ui/browser_iterator.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -24,7 +25,8 @@ UMABrowsingActivityObserver* g_instance = NULL;
 // static
 void UMABrowsingActivityObserver::Init() {
   DCHECK(!g_instance);
-  DCHECK(BrowserList::empty());  // Must be created before any Browsers are.
+  // Must be created before any Browsers are.
+  DCHECK_EQ(0U, chrome::GetTotalBrowserCount());
   g_instance = new UMABrowsingActivityObserver;
 }
 
@@ -72,10 +74,9 @@ void UMABrowsingActivityObserver::LogBrowserTabCount() const {
   int panel_window_count = 0;
   int popup_window_count = 0;
   int tabbed_window_count = 0;
-  for (BrowserList::const_iterator browser_iterator = BrowserList::begin();
-       browser_iterator != BrowserList::end(); ++browser_iterator) {
+  for (chrome::BrowserIterator it; !it.done(); it.Next()) {
     // Record how many tabs each window has open.
-    Browser* browser = (*browser_iterator);
+    Browser* browser = *it;
     UMA_HISTOGRAM_CUSTOM_COUNTS("Tabs.TabCountPerWindow",
                                 browser->tab_strip_model()->count(),
                                 1, 200, 50);

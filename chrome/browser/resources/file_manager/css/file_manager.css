@@ -90,12 +90,12 @@ body.loaded {
   -webkit-box-pack: end;
   -webkit-margin-start: 6px;
   display: -webkit-box;
-  height: 20px;
 }
 
 #butter-bar .actions a {
   color: rgb(17, 85, 204);
   cursor: pointer;
+  vertical-align: middle;
 }
 
 #butter-bar .actions a.x {
@@ -104,17 +104,13 @@ body.loaded {
     url('../images/files/ui/close_bar.png') 1x,
     url('../images/files/ui/2x/close_bar.png') 2x);
   display: inline-block;
-  height: 12px;
-  padding: 4px 2px;
-  width: 12px;
+  height: 35px;  /* #butter-bar .content's min-height. */
+  margin-right: -12px;
+  width: 35px;
 }
 
-#butter-bar .actions a:first-child {
-  margin-left: 2px;
-}
-
-#butter-bar .actions a:last-child {
-  margin-right: -2px;  /* Overlap the padding with butter-bar padding. */
+#butter-bar .actions a.x:first-child {
+  margin-left: -6px;
 }
 
 #butter-bar.error {
@@ -169,6 +165,8 @@ body.loaded {
   -webkit-box-flex: 0;
   background-color: #e6e6e6;
   display: -webkit-box;
+  max-width: 50%;
+  min-width: 45px;
   overflow: hidden;
   position: relative;
   width: 168px;
@@ -249,16 +247,17 @@ div.sidebar-splitter {
 
 li.root-item > .root-label {
   -webkit-box-flex: 1;
-  margin-right: 5px;
+  margin: 0 2px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.root-label {
-  -webkit-padding-start: 38px;
-  background-position: left center;
+.volume-icon {
+  background-position: center 2px;
   background-repeat: no-repeat;
+  height: 24px;
+  width: 24px;
 }
 
 div.root-eject {
@@ -299,8 +298,8 @@ div.root-eject:hover {
   margin: 7px 7px 7px 0;
 }
 
-[maximized] .dialog-header {
-  -webkit-padding-end: 70px;
+body[maximized][type='full-page'] .dialog-header {
+  -webkit-padding-end: 75px;
 }
 
 /* Container for the detail and thumbnail list views. */
@@ -361,8 +360,6 @@ div.root-eject:hover {
 }
 
 #search-breadcrumbs {
-  -webkit-margin-end: 5px;
-  -webkit-margin-start: 5px;
 }
 
 .breadcrumbs > [collapsed]::before {
@@ -624,7 +621,7 @@ button#detail-view:not([disabled]) {
 }
 
 /* Drive space warning banner. */
-.gdrive-space-warning {
+.volume-warning {
   -webkit-box-align: center;
   -webkit-box-orient: horizontal;
   -webkit-transition: height 70ms linear;
@@ -640,15 +637,15 @@ button#detail-view:not([disabled]) {
   position: relative;
 }
 
-.gdrive-space-warning[hidden] {
+.volume-warning[hidden] {
   border-top-width: 0;
   height: 0;
 }
 
-.gdrive-space-warning .gdrive-icon {
+.volume-warning .drive-icon {
   background-image: -webkit-image-set(
-    url('../images/files/ui/gdrive_logo.png') 1x,
-    url('../images/files/ui/2x/gdrive_logo.png') 2x);
+    url('../images/files/ui/drive_logo.png') 1x,
+    url('../images/files/ui/2x/drive_logo.png') 2x);
   background-position: center;
   background-repeat: no-repeat;
   background-size: 25px 22px;
@@ -656,7 +653,7 @@ button#detail-view:not([disabled]) {
   width: 50px;
 }
 
-.gdrive-space-warning .gdrive-text {
+.volume-warning .drive-text {
   margin-right: 11px;
 }
 
@@ -1037,7 +1034,7 @@ input.rename {
 
 /* Text label in a table header. */
 .table-header-label {
-  margin: 5px 10px 0 9px;
+  line-height: 27px;
 }
 
 .table-row-cell > * {
@@ -1064,13 +1061,11 @@ input.rename {
 }
 
 #select-all-checkbox {
-  -webkit-margin-end: 11px;
-  -webkit-margin-start: 1px;
+  -webkit-margin-end: 7px;
+  -webkit-margin-start: 2px;
   margin-bottom: 0;
   margin-top: 0;
-  /* 1px below text */
-  position: relative;
-  top: 1px;
+  vertical-align: middle;
 }
 
 #list-container li.table-row:hover .file-checkbox,
@@ -1140,6 +1135,8 @@ input.rename {
 
 #preview-lines {
   -webkit-box-flex: 1;
+  -webkit-margin-end: 10px;
+  -webkit-margin-start: 10px;
   vertical-align: middle;
 }
 
@@ -1147,8 +1144,6 @@ input.rename {
 .preview-summary {
   color: #666;
   overflow: hidden;
-  padding-left: 10px;
-  padding-right: 10px;
   text-overflow: ellipsis;
   vertical-align: middle;
   white-space: nowrap;
@@ -1224,8 +1219,8 @@ body:not([type='saveas-file']) #filename-input-box {
 /* Dimmed items */
 
 body[type='folder'] .file,
-[gdata][connection='offline'] .dim-offline,
-[gdata][connection='metered'] .dim-metered {
+[drive][connection='offline'] .dim-offline,
+[drive][connection='metered'] .dim-metered {
   opacity: 0.4;
 }
 
@@ -1307,7 +1302,11 @@ menu.file-context-menu {
   z-index: 4;
 }
 
-menu.chrome-menu > hr {
+menu.chrome-menu {
+  min-width: 200px;
+}
+
+menu.chrome-menu hr {
   color: transparent;
   font-size: 0;
 }
@@ -1344,7 +1343,7 @@ div.shade[fadein] {
   opacity: 1;
 }
 
-/* Message panel for unmounted GData */
+/* Message panel for unmounted Drive */
 #unmounted-panel,
 #format-panel {
   bottom: 0;
@@ -1358,17 +1357,17 @@ div.shade[fadein] {
   top: 0;
 }
 
-.dialog-container[gdata='mounting'] #unmounted-panel,
-.dialog-container[gdata='error'] #unmounted-panel,
-.dialog-container[unformatted] #format-panel {
+body[drive='mounting'] .dialog-container #unmounted-panel,
+body[drive='error'] .dialog-container #unmounted-panel,
+body[unformatted] .dialog-container #format-panel {
   display: block;
 }
 
-.dialog-container[gdata='unmounted'] .filelist-panel,
-.dialog-container[gdata='mounting'] .filelist-panel,
-.dialog-container[gdata='error'] .filelist-panel,
-.dialog-container[unformatted] .filelist-panel {
-  /* Hide file list when GData is not mounted.
+body[drive='unmounted'] .dialog-container .filelist-panel,
+body[drive='mounting'] .dialog-container .filelist-panel,
+body[drive='error'] .dialog-container .filelist-panel,
+body[unformatted] .dialog-container .filelist-panel {
+  /* Hide file list when Drive is not mounted.
      Use opacity to avoid manual resizing.*/
   opacity: 0;
 }
@@ -1395,10 +1394,10 @@ div.shade[fadein] {
   width: 40px;
 }
 
-[unformatted] #format-panel > .error,
-[gdata='mounting'] #unmounted-panel > .loading,
-[gdata='mounting'] #unmounted-panel > .progress,
-[gdata='error'] #unmounted-panel > .error,
+body[unformatted] #format-panel > .error,
+body[drive='mounting'] #unmounted-panel > .loading,
+body[drive='mounting'] #unmounted-panel > .progress,
+body[drive='error'] #unmounted-panel > .error,
 #format-panel > #format-button,
 #unmounted-panel.retry-enabled > .retry,
 #unmounted-panel.retry-enabled > .learn-more {
@@ -1436,7 +1435,11 @@ body:not([ctrl-pressing]) [required_attr='ctrl-pressing'] {
   display: none;
 }
 
-#gdata-settings::before {
+body:not([drive]) [required_drive] {
+  display: none;
+}
+
+#gear-button::before {
   background-image: url('../images/files/ui/settings.svg');
   background-position: 20px center;
   background-repeat: no-repeat;
@@ -1449,36 +1452,19 @@ body:not([ctrl-pressing]) [required_attr='ctrl-pressing'] {
   top: 0;
 }
 
-#gdata-settings:hover::before {
+#gear-button:hover::before {
   opacity: 1;
 }
 
-
-#gdata-settings {
+#gear-button {
   overflow: hidden;
   text-align: left;
   width: 54px;
 }
 
-#gdata-settings span.disclosureindicator {
+#gear-button span.disclosureindicator {
   float: none;
   margin-left: 42px;
-}
-
-/* To animate the #gdata-settings element to invisibility we set every property
-  that affects its horizontal size to 0. */
-.dialog-container:not([gdata]) #gdata-settings {
-  border-color: transparent;  /* Changing only the color to preserve layout. */
-  border-left-width: 0;
-  border-right-width: 0;
-  margin: 0;
-  min-width: 0;
-  padding: 0;
-  width: 0;
-}
-
-.dialog-container:not([gdata]) #gdata-settings > * {
-  display: none;
 }
 
 .buttonbar > * {
@@ -1562,7 +1548,7 @@ body:not([ctrl-pressing]) [required_attr='ctrl-pressing'] {
   top: 28px;  /* Leave room for the file list header. */
 }
 
-.dialog-container:not([gdrive-welcome='page']) #no-search-results[show] {
+.dialog-container:not([drive-welcome='page']) #no-search-results[show] {
   display: block;
 }
 
@@ -1570,19 +1556,20 @@ body:not([ctrl-pressing]) [required_attr='ctrl-pressing'] {
   min-width: 250px;
 }
 
-#gdata-space-info,
-#downloads-space-info {
+#volume-space-info {
   -webkit-box-pack: justify;
   display: -webkit-box;
 }
 
-#gdata-space-info-label,
-#downloads-space-info-label {
+#volume-space-info-label {
   display: block;
 }
 
-#gdata-space-info > div,
-#downloads-space-info > div {
+#volume-space-info-label {
+  display: block;
+}
+
+#volume-space-info > div {
   -webkit-box-flex: 1;
   border: 1px solid rgb(192, 192, 192);
   display: block;
@@ -1591,8 +1578,7 @@ body:not([ctrl-pressing]) [required_attr='ctrl-pressing'] {
   min-width: 30px;
 }
 
-#gdata-space-info-bar[pending],
-#downloads-space-info-bar[pending] {
+#volume-space-info-bar[pending] {
   -webkit-animation-duration: 800ms;
   -webkit-animation-iteration-count: infinite;
   -webkit-animation-name: bg;
@@ -1606,8 +1592,7 @@ body:not([ctrl-pressing]) [required_attr='ctrl-pressing'] {
   background-size: 16px 8px;
 }
 
-#gdata-space-info-bar,
-#downloads-space-info-bar {
+#volume-space-info-bar {
   background-color: rgb(192, 192, 192);
   border: 1px solid rgb(255, 255, 255);
   box-sizing: border-box;
@@ -1636,7 +1621,45 @@ button:focus {
   width: auto;
 }
 
-.gdrive-welcome-wrapper {
-  /* gdrive_welcome.css will override it once loaded. */
+.drive-welcome-wrapper {
+  /* drive_welcome.css will override it once loaded. */
   display: none;
+}
+
+list.autocomplete-suggestions {
+  -webkit-border-radius: 2px;
+  background-color: white;
+  border: 1px solid #aaa;
+  box-sizing: border-box;  /* To match the width with the search box's. */
+  min-height: 0;
+  position: fixed;
+  z-index: 3;
+}
+
+list.autocomplete-suggestions > li {
+  -webkit-border-radius: 0;
+  -webkit-box-align: center;
+  display: -webkit-box;
+  margin: 0;  /* To prevent vertical overflow. */
+  padding: 3px 0;
+}
+
+list.autocomplete-suggestions > li:hover {
+  background-color: white;
+  border: 1px solid white;
+}
+
+list.autocomplete-suggestions > li > div.detail-text {
+  -webkit-box-flex: 1;
+  overflow-x: hidden;
+  text-overflow: ellipsis;
+}
+
+list.autocomplete-suggestions[hasElementFocus] > [selected],
+list.autocomplete-suggestions[hasElementFocus] > [lead],
+list.autocomplete-suggestions:not([hasElementFocus]) > [selected],
+list.autocomplete-suggestions:not([hasElementFocus]) > [lead] {
+  background-color: rgb(238, 238, 238);
+  background-image: none;
+  border: 1px solid white;
 }

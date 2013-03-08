@@ -10,6 +10,7 @@
 #include "third_party/WebKit/Source/Platform/chromium/public/WebHTTPBody.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebPoint.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebVector.h"
+#include "ui/gfx/screen.h"
 #include "webkit/base/file_path_string_conversions.h"
 #include "webkit/glue/glue_serialize.h"
 #include "webkit/glue/web_io_operators.h"
@@ -108,6 +109,16 @@ class GlueSerializeTest : public testing::Test {
   void HistoryItemExpectBaseDataEqual(const WebHistoryItem& a,
                                       const WebHistoryItem& b,
                                       int version) {
+    float expectedPageScaleFactor = a.pageScaleFactor();
+    WebPoint expectedScrollOffset = a.scrollOffset();
+#if defined(OS_ANDROID)
+    if (version == 11) {
+      expectedScrollOffset.x /= a.pageScaleFactor();
+      expectedScrollOffset.y /= a.pageScaleFactor();
+      expectedPageScaleFactor /= gfx::Screen::GetNativeScreen()
+          ->GetPrimaryDisplay().device_scale_factor();
+    }
+#endif
     EXPECT_EQ(string16(a.urlString()), string16(b.urlString()));
     EXPECT_EQ(string16(a.originalURLString()), string16(b.originalURLString()));
     EXPECT_EQ(string16(a.target()), string16(b.target()));
@@ -115,12 +126,12 @@ class GlueSerializeTest : public testing::Test {
     EXPECT_EQ(string16(a.title()), string16(b.title()));
     EXPECT_EQ(string16(a.alternateTitle()), string16(b.alternateTitle()));
     EXPECT_EQ(a.lastVisitedTime(), b.lastVisitedTime());
-    EXPECT_EQ(a.scrollOffset(), b.scrollOffset());
+    EXPECT_EQ(expectedScrollOffset, b.scrollOffset());
     EXPECT_EQ(a.isTargetItem(), b.isTargetItem());
     EXPECT_EQ(a.visitCount(), b.visitCount());
     EXPECT_EQ(string16(a.referrer()), string16(b.referrer()));
     if (version >= 11)
-      EXPECT_EQ(a.pageScaleFactor(), b.pageScaleFactor());
+      EXPECT_EQ(expectedPageScaleFactor, b.pageScaleFactor());
     if (version >= 9)
       EXPECT_EQ(a.itemSequenceNumber(), b.itemSequenceNumber());
     if (version >= 6)
@@ -265,8 +276,8 @@ TEST_F(GlueSerializeTest, FilePathsFromHistoryState) {
   WebHistoryItem item = MakeHistoryItem(false, true);
 
   // Append file paths to item.
-  FilePath file_path1(FILE_PATH_LITERAL("file.txt"));
-  FilePath file_path2(FILE_PATH_LITERAL("another_file"));
+  base::FilePath file_path1(FILE_PATH_LITERAL("file.txt"));
+  base::FilePath file_path2(FILE_PATH_LITERAL("another_file"));
   WebHTTPBody http_body;
   http_body.initialize();
   http_body.appendFile(webkit_base::FilePathToWebString(file_path1));
@@ -274,7 +285,7 @@ TEST_F(GlueSerializeTest, FilePathsFromHistoryState) {
   item.setHTTPBody(http_body);
 
   std::string serialized_item = webkit_glue::HistoryItemToString(item);
-  const std::vector<FilePath>& file_paths =
+  const std::vector<base::FilePath>& file_paths =
       webkit_glue::FilePathsFromHistoryState(serialized_item);
   ASSERT_EQ(2U, file_paths.size());
   EXPECT_EQ(file_path1, file_paths[0]);

@@ -17,6 +17,7 @@
 
 #include "base/basictypes.h"
 #include "base/bind.h"
+#include "base/chromeos/chromeos_version.h"
 #include "base/i18n/char_iterator.h"
 #include "base/logging.h"
 #include "base/string_util.h"
@@ -28,7 +29,6 @@
 #include "chromeos/dbus/ibus/ibus_text.h"
 #include "ui/base/events/event_constants.h"
 #include "ui/base/events/event_utils.h"
-#include "ui/base/ime/ibus_client.h"
 #include "ui/base/ime/text_input_client.h"
 #include "ui/base/keycodes/keyboard_code_conversion.h"
 #include "ui/base/keycodes/keyboard_code_conversion_x.h"
@@ -73,6 +73,11 @@ chromeos::IBusInputContextClient* GetInputContextClient() {
   return chromeos::DBusThreadManager::Get()->GetIBusInputContextClient();
 }
 
+// Converts gfx::Rect to ibus::Rect.
+chromeos::ibus::Rect GfxRectToIBusRect(const gfx::Rect& rect) {
+  return chromeos::ibus::Rect(rect.x(), rect.y(), rect.width(), rect.height());
+}
+
 }  // namespace
 
 namespace ui {
@@ -80,8 +85,7 @@ namespace ui {
 // InputMethodIBus implementation -----------------------------------------
 InputMethodIBus::InputMethodIBus(
     internal::InputMethodDelegate* delegate)
-    : ibus_client_(new internal::IBusClient),
-      input_context_state_(INPUT_CONTEXT_STOP),
+    : input_context_state_(INPUT_CONTEXT_STOP),
       create_input_context_fail_count_(0),
       context_focused_(false),
       composing_text_(false),
@@ -90,6 +94,14 @@ InputMethodIBus::InputMethodIBus(
       current_keyevent_id_(0),
       weak_ptr_factory_(this) {
   SetDelegate(delegate);
+
+  // chromeos::IBusDaemonController is not available in case of some testing,
+  // e.g. content_browser test can't initialize IBusDaemonController.
+  DCHECK(!base::chromeos::IsRunningOnChromeOS() ||
+         chromeos::IBusDaemonController::GetInstance());
+
+  if (chromeos::IBusDaemonController::GetInstance())
+    chromeos::IBusDaemonController::GetInstance()->AddObserver(this);
 }
 
 InputMethodIBus::~InputMethodIBus() {
@@ -98,15 +110,8 @@ InputMethodIBus::~InputMethodIBus() {
     DestroyContext();
   if (GetInputContextClient())
     GetInputContextClient()->SetInputContextHandler(NULL);
-}
-
-void InputMethodIBus::set_ibus_client(
-    scoped_ptr<internal::IBusClient> new_client) {
-  ibus_client_.swap(new_client);
-}
-
-internal::IBusClient* InputMethodIBus::ibus_client() const {
-  return ibus_client_.get();
+  if (chromeos::IBusDaemonController::GetInstance())
+    chromeos::IBusDaemonController::GetInstance()->RemoveObserver(this);
 }
 
 void InputMethodIBus::OnFocus() {
@@ -167,8 +172,8 @@ void InputMethodIBus::DispatchKeyEvent(const base::NativeEvent& native_event) {
   // enabled, so that ibus can have a chance to enable the |context_|.
   if (!context_focused_ ||
       GetTextInputType() == TEXT_INPUT_TYPE_PASSWORD ||
-      ibus_client_->GetInputMethodType() ==
-      internal::IBusClient::INPUT_METHOD_XKB_LAYOUT) {
+      !GetInputContextClient() ||
+      GetInputContextClient()->IsXKBLayout()) {
     if (native_event->type == KeyPress)
       ProcessUnfilteredKeyPressEvent(native_event, ibus_keyval);
     else
@@ -227,8 +232,9 @@ void InputMethodIBus::OnCaretBoundsChanged(const TextInputClient* client) {
     composition_head = rect;
   }
 
-  // This function runs asynchronously.
-  ibus_client_->SetCursorLocation(rect, composition_head);
+  GetInputContextClient()->SetCursorLocation(
+      GfxRectToIBusRect(rect),
+      GfxRectToIBusRect(composition_head));
 
   ui::Range text_range;
   ui::Range selection_range;
@@ -641,7 +647,7 @@ void InputMethodIBus::AbandonAllPendingKeyEvents() {
   pending_key_events_.clear();
 }
 
-void InputMethodIBus::CommitText(const chromeos::ibus::IBusText& text) {
+void InputMethodIBus::CommitText(const chromeos::IBusText& text) {
   if (suppress_next_result_ || text.text().empty())
     return;
 
@@ -700,7 +706,7 @@ void InputMethodIBus::ShowPreeditText() {
   composing_text_ = true;
 }
 
-void InputMethodIBus::UpdatePreeditText(const chromeos::ibus::IBusText& text,
+void InputMethodIBus::UpdatePreeditText(const chromeos::IBusText& text,
                                         uint32 cursor_pos,
                                         bool visible) {
   if (suppress_next_result_ || IsTextInputTypeNone())
@@ -836,7 +842,7 @@ void InputMethodIBus::OnDisconnected() {
 }
 
 void InputMethodIBus::ExtractCompositionText(
-    const chromeos::ibus::IBusText& text,
+    const chromeos::IBusText& text,
     uint32 cursor_position,
     CompositionText* out_composition) const {
   out_composition->Clear();
@@ -864,9 +870,9 @@ void InputMethodIBus::ExtractCompositionText(
 
   out_composition->selection = Range(cursor_offset);
 
-  const std::vector<chromeos::ibus::IBusText::UnderlineAttribute>&
+  const std::vector<chromeos::IBusText::UnderlineAttribute>&
       underline_attributes = text.underline_attributes();
-  const std::vector<chromeos::ibus::IBusText::SelectionAttribute>&
+  const std::vector<chromeos::IBusText::SelectionAttribute>&
       selection_attributes = text.selection_attributes();
 
   if (!underline_attributes.empty()) {
@@ -879,10 +885,10 @@ void InputMethodIBus::ExtractCompositionText(
           char16_offsets[start], char16_offsets[end],
           SK_ColorBLACK, false /* thick */);
       if (underline_attributes[i].type ==
-          chromeos::ibus::IBusText::IBUS_TEXT_UNDERLINE_DOUBLE)
+          chromeos::IBusText::IBUS_TEXT_UNDERLINE_DOUBLE)
         underline.thick = true;
       else if (underline_attributes[i].type ==
-               chromeos::ibus::IBusText::IBUS_TEXT_UNDERLINE_ERROR)
+               chromeos::IBusText::IBUS_TEXT_UNDERLINE_ERROR)
         underline.color = SK_ColorRED;
       out_composition->underlines.push_back(underline);
     }

@@ -5,7 +5,7 @@
 #ifndef WEBKIT_SUPPORT_SIMPLE_DATABASE_SYSTEM_H_
 #define WEBKIT_SUPPORT_SIMPLE_DATABASE_SYSTEM_H_
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/hash_tables.h"
 #include "base/memory/ref_counted.h"
@@ -80,7 +80,7 @@ class SimpleDatabaseSystem : public webkit_database::DatabaseTracker::Observer,
   void VfsGetSpaceAvailable(const string16& origin_identifier,
                             int64* result, base::WaitableEvent* done_event);
 
-  FilePath GetFullFilePathForVfsFile(const string16& vfs_file_name);
+  base::FilePath GetFullFilePathForVfsFile(const string16& vfs_file_name);
 
   void ResetTracker();
   void ThreadCleanup(base::WaitableEvent* done_event);

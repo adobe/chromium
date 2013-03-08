@@ -44,11 +44,6 @@ class GL_EXPORT GLSurface : public base::RefCounted<GLSurface> {
   // rescheduled.
   virtual bool DeferDraws();
 
-  // Unschedule the GpuScheduler and return true to abort the processing of
-  // a GL SwapBuffers call to this surface and defer it until the GpuScheduler
-  // is rescheduled.
-  virtual bool DeferSwapBuffers();
-
   // Returns true if this surface is offscreen.
   virtual bool IsOffscreen() = 0;
 
@@ -86,7 +81,7 @@ class GL_EXPORT GLSurface : public base::RefCounted<GLSurface> {
   virtual bool OnMakeCurrent(GLContext* context);
 
   // Used for explicit buffer management.
-  virtual void SetBackbufferAllocation(bool allocated);
+  virtual bool SetBackbufferAllocation(bool allocated);
   virtual void SetFrontbufferAllocation(bool allocated);
 
   // Get a handle used to share the surface with another process. Returns null
@@ -143,7 +138,6 @@ class GL_EXPORT GLSurfaceAdapter : public GLSurface {
   virtual void Destroy() OVERRIDE;
   virtual bool Resize(const gfx::Size& size) OVERRIDE;
   virtual bool DeferDraws() OVERRIDE;
-  virtual bool DeferSwapBuffers() OVERRIDE;
   virtual bool IsOffscreen() OVERRIDE;
   virtual bool SwapBuffers() OVERRIDE;
   virtual bool PostSubBuffer(int x, int y, int width, int height) OVERRIDE;
@@ -152,7 +146,7 @@ class GL_EXPORT GLSurfaceAdapter : public GLSurface {
   virtual void* GetHandle() OVERRIDE;
   virtual unsigned int GetBackingFrameBufferObject() OVERRIDE;
   virtual bool OnMakeCurrent(GLContext* context) OVERRIDE;
-  virtual void SetBackbufferAllocation(bool allocated) OVERRIDE;
+  virtual bool SetBackbufferAllocation(bool allocated) OVERRIDE;
   virtual void SetFrontbufferAllocation(bool allocated) OVERRIDE;
   virtual void* GetShareHandle() OVERRIDE;
   virtual void* GetDisplay() OVERRIDE;

@@ -120,6 +120,10 @@ class BrowserWindow : public BaseWindow {
       const GURL& url,
       FullscreenExitBubbleType bubble_type) = 0;
 
+  // Windows and GTK remove the top controls in fullscreen, but Mac and Ash
+  // keep the controls in a slide-down panel.
+  virtual bool ShouldHideUIForFullscreen() const = 0;
+
   // Returns true if the fullscreen bubble is visible.
   virtual bool IsFullscreenBubbleVisible() const = 0;
 
@@ -218,6 +222,11 @@ class BrowserWindow : public BaseWindow {
   virtual void ShowChromeToMobileBubble() = 0;
 
 #if defined(ENABLE_ONE_CLICK_SIGNIN)
+  enum OneClickSigninBubbleType {
+    ONE_CLICK_SIGNIN_BUBBLE_TYPE_BUBBLE,
+    ONE_CLICK_SIGNIN_BUBBLE_TYPE_MODAL_DIALOG
+  };
+
   // Callback type used with the ShowOneClickSigninBubble() method.  If the
   // user chooses to accept the sign in, the callback is called to start the
   // sync process.
@@ -226,6 +235,7 @@ class BrowserWindow : public BaseWindow {
 
   // Shows the one-click sign in bubble.
   virtual void ShowOneClickSigninBubble(
+      OneClickSigninBubbleType type,
       const StartSyncCallback& start_sync_callback) = 0;
 #endif
 
@@ -295,13 +305,14 @@ class BrowserWindow : public BaseWindow {
   // Opens the tabpose view.
   virtual void OpenTabpose() = 0;
 
-  // Sets the presentation mode for the window.  If the window is not already in
-  // fullscreen, also enters fullscreen mode.
-  virtual void EnterPresentationMode(
-      const GURL& url,
-      FullscreenExitBubbleType bubble_type) = 0;
-  virtual void ExitPresentationMode() = 0;
-  virtual bool InPresentationMode() = 0;
+  // Enters Mac specific fullscreen mode with chrome displayed (e.g. omnibox)
+  // on OSX 10.7+, a.k.a. Lion Fullscreen mode.
+  // Invalid to call on OSX earlier than 10.7.
+  // Enters either from non fullscreen, or from fullscreen without chrome.
+  // Exit to normal fullscreen with EnterFullscreen().
+  virtual void EnterFullscreenWithChrome() = 0;
+  virtual bool IsFullscreenWithChrome() = 0;
+  virtual bool IsFullscreenWithoutChrome() = 0;
 #endif
 
   // Returns the desired bounds for Instant in screen coordinates. Note that if
@@ -355,7 +366,7 @@ class BrowserWindow : public BaseWindow {
       autofill::PasswordGenerator* password_generator) = 0;
 
  protected:
-  friend void browser::CloseAllBrowsers();
+  friend void chrome::CloseAllBrowsers();
   friend class BrowserView;
   virtual void DestroyBrowser() = 0;
 };

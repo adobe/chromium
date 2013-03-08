@@ -56,9 +56,11 @@ class MockAudioRendererHost : public AudioRendererHost {
   explicit MockAudioRendererHost(
       media::AudioManager* audio_manager,
       AudioMirroringManager* mirroring_manager,
-      MediaObserver* media_observer)
-      : AudioRendererHost(
-            kRenderProcessId, audio_manager, mirroring_manager, media_observer),
+      MediaInternals* media_internals)
+      : AudioRendererHost(kRenderProcessId,
+                          audio_manager,
+                          mirroring_manager,
+                          media_internals),
         shared_memory_length_(0) {
   }
 
@@ -169,7 +171,7 @@ class AudioRendererHostTest : public testing::Test {
     ui_thread_.reset(new BrowserThreadImpl(BrowserThread::UI,
                                            message_loop_.get()));
     audio_manager_.reset(media::AudioManager::Create());
-    observer_.reset(new MockMediaObserver());
+    observer_.reset(new MockMediaInternals());
     host_ = new MockAudioRendererHost(
         audio_manager_.get(), &mirroring_manager_, observer_.get());
 
@@ -210,8 +212,7 @@ class AudioRendererHostTest : public testing::Test {
                               media::AudioParameters::AUDIO_FAKE,
                               media::CHANNEL_LAYOUT_STEREO,
                               media::AudioParameters::kAudioCDSampleRate, 16,
-                              media::AudioParameters::kAudioCDSampleRate / 10),
-                          0);
+                              media::AudioParameters::kAudioCDSampleRate / 10));
     message_loop_->Run();
 
     // Simulate the renderer process associating a stream with a render view.
@@ -319,7 +320,7 @@ class AudioRendererHostTest : public testing::Test {
   }
 
  private:
-  scoped_ptr<MockMediaObserver> observer_;
+  scoped_ptr<MockMediaInternals> observer_;
   MockAudioMirroringManager mirroring_manager_;
   scoped_refptr<MockAudioRendererHost> host_;
   scoped_ptr<MessageLoop> message_loop_;

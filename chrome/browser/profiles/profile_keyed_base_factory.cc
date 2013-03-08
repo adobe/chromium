@@ -4,8 +4,10 @@
 
 #include "chrome/browser/profiles/profile_keyed_base_factory.h"
 
+#include "base/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_dependency_manager.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 
 ProfileKeyedBaseFactory::ProfileKeyedBaseFactory(
     const char* name, ProfileDependencyManager* manager)
@@ -76,7 +78,10 @@ void ProfileKeyedBaseFactory::RegisterUserPrefsOnProfile(Profile* profile) {
 
   std::set<Profile*>::iterator it = registered_preferences_.find(profile);
   if (it == registered_preferences_.end()) {
-    RegisterUserPrefs(profile->GetPrefs());
+    PrefService* prefs = profile->GetPrefs();
+    PrefRegistrySyncable* registry = static_cast<PrefRegistrySyncable*>(
+        prefs->DeprecatedGetPrefRegistry());
+    RegisterUserPrefs(registry);
     registered_preferences_.insert(profile);
   }
 }

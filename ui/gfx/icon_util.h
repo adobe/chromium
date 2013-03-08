@@ -16,10 +16,13 @@
 #include "ui/gfx/point.h"
 #include "ui/gfx/size.h"
 
+namespace base {
+class FilePath;
+}
+
 namespace gfx {
 class Size;
 }
-class FilePath;
 class SkBitmap;
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -55,6 +58,9 @@ class SkBitmap;
 ///////////////////////////////////////////////////////////////////////////////
 class UI_EXPORT IconUtil {
  public:
+  // The size of the large icon entries in .ico files on Windows Vista+.
+  static const int kLargeIconSize = 256;
+
   // Given an SkBitmap object, the function converts the bitmap to a Windows
   // icon and returns the corresponding HICON handle. If the function cannot
   // convert the bitmap, NULL is returned.
@@ -104,7 +110,7 @@ class UI_EXPORT IconUtil {
   // The function returns true on success and false otherwise.
   static bool CreateIconFileFromSkBitmap(const SkBitmap& bitmap,
                                          const SkBitmap& large_bitmap,
-                                         const FilePath& icon_path);
+                                         const base::FilePath& icon_path);
 
   // Creates a cursor of the specified size from the DIB passed in.
   // Returns the cursor on success or NULL on failure.

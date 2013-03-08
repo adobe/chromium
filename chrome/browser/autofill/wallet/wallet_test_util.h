@@ -7,6 +7,7 @@
 
 #include "base/memory/scoped_ptr.h"
 
+namespace autofill {
 namespace wallet {
 
 class Instrument;
@@ -14,7 +15,9 @@ class Address;
 
 scoped_ptr<Instrument> GetTestInstrument();
 scoped_ptr<Address> GetTestShippingAddress();
+scoped_ptr<Address> GetTestAddress();
 
 }  // namespace wallet
+}  // namespace autofill
 
 #endif  // CHROME_BROWSER_AUTOFILL_WALLET_WALLET_TEST_UTIL_H_

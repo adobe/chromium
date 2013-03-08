@@ -10,6 +10,7 @@
 #include "base/files/scoped_temp_dir.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
+#include "base/prefs/pref_registry_simple.h"
 #include "base/string_util.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/threading/sequenced_worker_pool.h"
@@ -21,10 +22,13 @@
 #include "chrome/browser/chromeos/login/authenticator.h"
 #include "chrome/browser/chromeos/login/login_status_consumer.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
+#include "chrome/browser/chromeos/net/connectivity_state_helper.h"
+#include "chrome/browser/chromeos/net/mock_connectivity_state_helper.h"
 #include "chrome/browser/chromeos/settings/device_settings_test_helper.h"
 #include "chrome/browser/io_thread.h"
 #include "chrome/browser/net/predictor.h"
 #include "chrome/browser/policy/browser_policy_connector.h"
+#include "chrome/browser/policy/device_management_service.h"
 #include "chrome/browser/policy/enterprise_install_attributes.h"
 #include "chrome/browser/policy/policy_service.h"
 #include "chrome/browser/policy/proto/device_management_backend.pb.h"
@@ -34,8 +38,8 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
+#include "chrome/test/base/scoped_testing_local_state.h"
 #include "chrome/test/base/testing_browser_process.h"
-#include "chrome/test/base/testing_pref_service.h"
 #include "chromeos/cryptohome/mock_async_method_caller.h"
 #include "chromeos/dbus/mock_cryptohome_client.h"
 #include "chromeos/dbus/mock_dbus_thread_manager.h"
@@ -50,6 +54,7 @@
 #include "net/url_request/test_url_fetcher_factory.h"
 #include "net/url_request/url_fetcher_delegate.h"
 #include "net/url_request/url_request.h"
+#include "net/url_request/url_request_context_getter.h"
 #include "net/url_request/url_request_status.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -84,10 +89,21 @@ const char kAttrEnterpriseMode[] = "enterprise.mode";
 const char kAttrEnterpriseDeviceId[] = "enterprise.device_id";
 
 const char kOAuthTokenCookie[] = "oauth_token=1234";
-const char kOAuthGetAccessTokenData[] =
-    "oauth_token=1234&oauth_token_secret=1234";
-const char kOAuthServiceTokenData[] =
-    "wrap_access_token=1234&wrap_access_token_expires_in=123456789";
+
+const char kGaiaAccountDisabledResponse[] = "Error=AccountDeleted";
+
+const char kOAuth2TokenPairData[] =
+    "{"
+    "  \"refresh_token\": \"1234\","
+    "  \"access_token\": \"5678\","
+    "  \"expires_in\": 3600"
+    "}";
+
+const char kOAuth2AccessTokenData[] =
+    "{"
+    "  \"access_token\": \"5678\","
+    "  \"expires_in\": 3600"
+    "}";
 
 const char kDMServer[] = "http://server/device_management";
 const char kDMRegisterRequest[] =
@@ -141,7 +157,7 @@ class LoginUtilsTest : public testing::Test,
         browser_process_(TestingBrowserProcess::GetGlobal()),
         local_state_(browser_process_),
         ui_thread_(BrowserThread::UI, &loop_),
-        db_thread_(BrowserThread::DB),
+        db_thread_(BrowserThread::DB, &loop_),
         file_thread_(BrowserThread::FILE, &loop_),
         mock_async_method_caller_(NULL),
         connector_(NULL),
@@ -183,16 +199,14 @@ class LoginUtilsTest : public testing::Test,
     CommandLine* command_line = CommandLine::ForCurrentProcess();
     command_line->AppendSwitchASCII(switches::kDeviceManagementUrl, kDMServer);
     command_line->AppendSwitchASCII(switches::kLoginProfile, "user");
-    // TODO(mnissler): Figure out how to beat this test into submission on
-    // OAuth2 path.
-    command_line->AppendSwitch(switches::kForceOAuth1);
-
-    local_state_.Get()->RegisterStringPref(prefs::kApplicationLocale, "");
 
     // DBusThreadManager should be initialized before io_thread_state_, as
     // DBusThreadManager is used from chromeos::ProxyConfigServiceImpl,
     // which is part of io_thread_state_.
     DBusThreadManager::InitializeForTesting(&mock_dbus_thread_manager_);
+
+    ConnectivityStateHelper::InitializeForTesting(
+        &mock_connectivity_state_helper_);
 
     input_method::InitializeForTesting(&mock_input_method_manager_);
     disks::DiskMountManager::InitializeForTesting(&mock_disk_mount_manager_);
@@ -268,10 +282,11 @@ class LoginUtilsTest : public testing::Test,
     browser_process_->SetProfileManager(
         new ProfileManagerWithoutInit(scoped_temp_dir_.path()));
     connector_ = browser_process_->browser_policy_connector();
-    connector_->Init();
+    connector_->Init(local_state_.Get(),
+                     browser_process_->system_request_context());
 
     io_thread_state_.reset(new IOThread(local_state_.Get(),
-                                        g_browser_process->policy_service(),
+                                        browser_process_->policy_service(),
                                         NULL, NULL));
     browser_process_->SetIOThread(io_thread_state_.get());
 
@@ -417,6 +432,8 @@ class LoginUtilsTest : public testing::Test,
   net::TestURLFetcher* PrepareOAuthFetcher(const std::string& expected_url) {
     net::TestURLFetcher* fetcher = test_url_fetcher_factory_.GetFetcherByID(0);
     EXPECT_TRUE(fetcher);
+    if (!fetcher)
+      return NULL;
     EXPECT_TRUE(fetcher->delegate());
     EXPECT_TRUE(StartsWithASCII(fetcher->GetOriginalURL().spec(),
                                 expected_url,
@@ -430,8 +447,11 @@ class LoginUtilsTest : public testing::Test,
   net::TestURLFetcher* PrepareDMServiceFetcher(
       const std::string& expected_url,
       const em::DeviceManagementResponse& response) {
-    net::TestURLFetcher* fetcher = test_url_fetcher_factory_.GetFetcherByID(0);
+    net::TestURLFetcher* fetcher = test_url_fetcher_factory_.GetFetcherByID(
+        policy::DeviceManagementService::kURLFetcherID);
     EXPECT_TRUE(fetcher);
+    if (!fetcher)
+      return NULL;
     EXPECT_TRUE(fetcher->delegate());
     EXPECT_TRUE(StartsWithASCII(fetcher->GetOriginalURL().spec(),
                                 expected_url,
@@ -482,6 +502,7 @@ class LoginUtilsTest : public testing::Test,
   input_method::MockInputMethodManager mock_input_method_manager_;
   disks::MockDiskMountManager mock_disk_mount_manager_;
   net::TestURLFetcherFactory test_url_fetcher_factory_;
+  MockConnectivityStateHelper mock_connectivity_state_helper_;
 
   cryptohome::MockAsyncMethodCaller* mock_async_method_caller_;
 
@@ -602,11 +623,14 @@ TEST_P(LoginUtilsBlockingLoginTest, EnterpriseLoginBlocksForEnterpriseUser) {
   // should resume.
   int steps = GetParam();
 
+  // The next expected fetcher ID. This is used to make it fail.
+  int next_expected_fetcher_id = 0;
+
   do {
     if (steps < 1) break;
 
-    // Fake OAuth token retrieval:
-    fetcher = PrepareOAuthFetcher(gaia_urls->get_oauth_token_url());
+    // Fake refresh token retrieval:
+    fetcher = PrepareOAuthFetcher(gaia_urls->client_login_to_oauth2_url());
     ASSERT_TRUE(fetcher);
     net::ResponseCookies cookies;
     cookies.push_back(kOAuthTokenCookie);
@@ -614,21 +638,22 @@ TEST_P(LoginUtilsBlockingLoginTest, EnterpriseLoginBlocksForEnterpriseUser) {
     fetcher->delegate()->OnURLFetchComplete(fetcher);
     if (steps < 2) break;
 
-    // Fake OAuth access token retrieval:
-    fetcher = PrepareOAuthFetcher(gaia_urls->oauth_get_access_token_url());
+    // Fake OAuth2 token pair retrieval:
+    fetcher = PrepareOAuthFetcher(gaia_urls->oauth2_token_url());
     ASSERT_TRUE(fetcher);
-    fetcher->SetResponseString(kOAuthGetAccessTokenData);
+    fetcher->SetResponseString(kOAuth2TokenPairData);
     fetcher->delegate()->OnURLFetchComplete(fetcher);
     if (steps < 3) break;
 
-    // Fake OAuth service token retrieval:
-    fetcher = PrepareOAuthFetcher(gaia_urls->oauth_wrap_bridge_url());
+    // Fake OAuth2 access token retrieval:
+    fetcher = PrepareOAuthFetcher(gaia_urls->oauth2_token_url());
     ASSERT_TRUE(fetcher);
-    fetcher->SetResponseString(kOAuthServiceTokenData);
+    fetcher->SetResponseString(kOAuth2AccessTokenData);
     fetcher->delegate()->OnURLFetchComplete(fetcher);
 
     // The cloud policy subsystem is now ready to fetch the dmtoken and the user
     // policy.
+    next_expected_fetcher_id = policy::DeviceManagementService::kURLFetcherID;
     RunUntilIdle();
     if (steps < 4) break;
 
@@ -652,12 +677,17 @@ TEST_P(LoginUtilsBlockingLoginTest, EnterpriseLoginBlocksForEnterpriseUser) {
     // Verify that the profile hasn't been created yet.
     EXPECT_FALSE(prepared_profile_);
 
-    // Make the current fetcher fail.
-    net::TestURLFetcher* fetcher = test_url_fetcher_factory_.GetFetcherByID(0);
+    // Make the current fetcher fail with a Gaia error.
+    net::TestURLFetcher* fetcher = test_url_fetcher_factory_.GetFetcherByID(
+        next_expected_fetcher_id);
     ASSERT_TRUE(fetcher);
     EXPECT_TRUE(fetcher->delegate());
     fetcher->set_url(fetcher->GetOriginalURL());
-    fetcher->set_response_code(500);
+    fetcher->set_response_code(403);
+    // This response body is important to make the gaia fetcher skip its delayed
+    // retry behavior, which makes testing harder. If this is sent to the policy
+    // fetchers then it will make them fail too.
+    fetcher->SetResponseString(kGaiaAccountDisabledResponse);
     fetcher->delegate()->OnURLFetchComplete(fetcher);
     RunUntilIdle();
   }

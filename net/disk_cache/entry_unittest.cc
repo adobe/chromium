@@ -656,6 +656,9 @@ void DiskCacheEntryTest::GetTimes() {
   if (type_ == net::APP_CACHE) {
     EXPECT_TRUE(entry->GetLastUsed() < t2);
     EXPECT_TRUE(entry->GetLastModified() < t2);
+  } else if (type_ == net::SHADER_CACHE) {
+    EXPECT_TRUE(entry->GetLastUsed() < t3);
+    EXPECT_TRUE(entry->GetLastModified() < t3);
   } else {
     EXPECT_TRUE(entry->GetLastUsed() >= t3);
     EXPECT_TRUE(entry->GetLastModified() < t3);
@@ -676,6 +679,12 @@ TEST_F(DiskCacheEntryTest, MemoryOnlyGetTimes) {
 
 TEST_F(DiskCacheEntryTest, AppCacheGetTimes) {
   SetCacheType(net::APP_CACHE);
+  InitCache();
+  GetTimes();
+}
+
+TEST_F(DiskCacheEntryTest, ShaderCacheGetTimes) {
+  SetCacheType(net::SHADER_CACHE);
   InitCache();
   GetTimes();
 }
@@ -1379,7 +1388,7 @@ TEST_F(DiskCacheEntryTest, MissingData) {
   FlushQueueForTest();
 
   disk_cache::Addr address(0x80000001);
-  FilePath name = cache_impl_->GetFileName(address);
+  base::FilePath name = cache_impl_->GetFileName(address);
   EXPECT_TRUE(file_util::Delete(name, false));
 
   // Attempt to read the data.

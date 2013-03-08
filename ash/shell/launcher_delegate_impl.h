@@ -27,13 +27,13 @@ class LauncherDelegateImpl : public ash::LauncherDelegate {
   // LauncherDelegate overrides:
   virtual void OnBrowserShortcutClicked(int event_flags) OVERRIDE;
   virtual void ItemClicked(const ash::LauncherItem& item,
-                           int event_flags) OVERRIDE;
+                           const ui::Event& event) OVERRIDE;
   virtual int GetBrowserShortcutResourceId() OVERRIDE;
   virtual string16 GetTitle(const ash::LauncherItem& item) OVERRIDE;
   virtual ui::MenuModel* CreateContextMenu(
       const ash::LauncherItem& item,
       aura::RootWindow* root) OVERRIDE;
-  virtual ui::MenuModel* CreateApplicationMenu(
+  virtual ash::LauncherMenuModel* CreateApplicationMenu(
       const ash::LauncherItem&) OVERRIDE;
   virtual ash::LauncherID GetIDByWindow(aura::Window* window) OVERRIDE;
   virtual bool IsDraggable(const ash::LauncherItem& item) OVERRIDE;

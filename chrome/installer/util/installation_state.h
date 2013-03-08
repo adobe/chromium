@@ -9,7 +9,7 @@
 
 #include "base/basictypes.h"
 #include "base/command_line.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/memory/scoped_ptr.h"
 #include "chrome/installer/util/app_commands.h"
 #include "chrome/installer/util/browser_distribution.h"
@@ -45,7 +45,7 @@ class ProductState {
   const ChannelInfo& channel() const { return channel_; }
 
   // Returns the path to the product's "setup.exe"; may be empty.
-  FilePath GetSetupPath() const;
+  base::FilePath GetSetupPath() const;
 
   // Returns the product's version.  This method may only be called on an
   // instance that has been initialized for an installed product.

@@ -2,30 +2,18 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "build/build_config.h"
-
 #include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
 
 #include <set>
 
-#include "base/bind.h"
-#include "base/bind_helpers.h"
-#include "base/command_line.h"
+#include "apps/app_launcher.h"
 #include "base/i18n/rtl.h"
 #include "base/lazy_instance.h"
-#include "base/memory/singleton.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/metrics/histogram.h"
-#include "base/string_number_conversions.h"
-#include "base/threading/thread.h"
+#include "base/prefs/pref_service.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/defaults.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/sessions/session_types.h"
-#include "chrome/browser/sync/profile_sync_service.h"
-#include "chrome/browser/themes/theme_service.h"
-#include "chrome/browser/themes/theme_service_factory.h"
-#include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/webui/metrics_handler.h"
 #include "chrome/browser/ui/webui/ntp/favicon_webui_handler.h"
 #include "chrome/browser/ui/webui/ntp/foreign_session_handler.h"
@@ -33,23 +21,19 @@
 #include "chrome/browser/ui/webui/ntp/ntp_resource_cache.h"
 #include "chrome/browser/ui/webui/ntp/ntp_resource_cache_factory.h"
 #include "chrome/browser/ui/webui/ntp/recently_closed_tabs_handler.h"
-#include "chrome/browser/ui/webui/theme_source.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "chrome/common/chrome_switches.h"
-#include "chrome/common/extensions/extension.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_view_host.h"
-#include "content/public/browser/user_metrics.h"
+#include "content/public/browser/url_data_source.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
 #include "grit/browser_resources.h"
 #include "grit/generated_resources.h"
-#include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/base/resource/resource_bundle.h"
 
 #if !defined(OS_ANDROID)
 #include "chrome/browser/ui/webui/ntp/app_launcher_handler.h"
@@ -64,10 +48,12 @@
 #include "chrome/browser/ui/webui/ntp/android/promo_handler.h"
 #endif
 
+#if defined(ENABLE_THEMES)
+#include "chrome/browser/ui/webui/theme_handler.h"
+#endif
+
 using content::BrowserThread;
 using content::RenderViewHost;
-using content::UserMetricsAction;
-using content::WebContents;
 using content::WebUIController;
 
 namespace {
@@ -114,10 +100,8 @@ NewTabUI::NewTabUI(content::WebUI* web_ui)
     if (NewTabUI::IsDiscoveryInNTPEnabled())
       web_ui->AddMessageHandler(new SuggestionsHandler());
     // Android doesn't have a sync promo/username on NTP.
-    if (GetProfile()->IsSyncAccessible())
-      web_ui->AddMessageHandler(new NewTabPageSyncHandler());
+    web_ui->AddMessageHandler(new NewTabPageSyncHandler());
 
-    // Or apps.
     if (ShouldShowApps()) {
       ExtensionService* service = GetProfile()->GetExtensionService();
       // We might not have an ExtensionService (on ChromeOS when not logged in
@@ -143,12 +127,16 @@ NewTabUI::NewTabUI(content::WebUI* web_ui)
     web_ui->AddMessageHandler(new NTPLoginHandler());
 #endif
 
-  // Initializing the CSS and HTML can require some CPU, so do it after
-  // we've hooked up the most visited handler.  This allows the DB query
-  // for the new tab thumbs to happen earlier.
-  InitializeCSSCaches();
-  NewTabHTMLSource* html_source =
-      new NewTabHTMLSource(GetProfile()->GetOriginalProfile());
+#if defined(ENABLE_THEMES)
+  // The theme handler can require some CPU, so do it after hooking up the most
+  // visited handler. This allows the DB query for the new tab thumbs to happen
+  // earlier.
+  web_ui->AddMessageHandler(new ThemeHandler());
+#endif
+
+  scoped_ptr<NewTabHTMLSource> html_source(new NewTabHTMLSource(
+      GetProfile()->GetOriginalProfile()));
+
   // These two resources should be loaded only if suggestions NTP is enabled.
   html_source->AddResource("suggestions_page.css", "text/css",
       NewTabUI::IsDiscoveryInNTPEnabled() ? IDR_SUGGESTIONS_PAGE_CSS : 0);
@@ -156,23 +144,13 @@ NewTabUI::NewTabUI(content::WebUI* web_ui)
     html_source->AddResource("suggestions_page.js", "application/javascript",
         IDR_SUGGESTIONS_PAGE_JS);
   }
-  // ChromeURLDataManager assumes the ownership of the html_source and in some
-  // tests immediately deletes it, so html_source should not be accessed after
-  // this call.
-  Profile* profile = GetProfile();
-  ChromeURLDataManager::AddDataSource(profile, html_source);
+  // content::URLDataSource assumes the ownership of the html_source.
+  content::URLDataSource::Add(GetProfile(), html_source.release());
 
   pref_change_registrar_.Init(GetProfile()->GetPrefs());
   pref_change_registrar_.Add(prefs::kShowBookmarkBar,
                              base::Bind(&NewTabUI::OnShowBookmarkBarChanged,
                                         base::Unretained(this)));
-
-#if defined(ENABLE_THEMES)
-  // Listen for theme installation.
-  registrar_.Add(this, chrome::NOTIFICATION_BROWSER_THEME_CHANGED,
-                 content::Source<ThemeService>(
-                     ThemeServiceFactory::GetForProfile(GetProfile())));
-#endif
 }
 
 NewTabUI::~NewTabUI() {
@@ -222,17 +200,6 @@ void NewTabUI::StartTimingPaint(RenderViewHost* render_view_host) {
                &NewTabUI::PaintTimeout);
 }
 
-bool NewTabUI::CanShowBookmarkBar() const {
-  if (web_ui()->GetWebContents()->GetURL().SchemeIs(chrome::kViewSourceScheme))
-    return false;
-
-  PrefService* prefs = GetProfile()->GetPrefs();
-  bool disabled_by_policy =
-      prefs->IsManagedPreference(prefs::kShowBookmarkBar) &&
-      !prefs->GetBoolean(prefs::kShowBookmarkBar);
-  return browser_defaults::bookmarks_enabled && !disabled_by_policy;
-}
-
 void NewTabUI::RenderViewCreated(RenderViewHost* render_view_host) {
   StartTimingPaint(render_view_host);
 }
@@ -245,16 +212,6 @@ void NewTabUI::Observe(int type,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) {
   switch (type) {
-#if defined(ENABLE_THEMES)
-    case chrome::NOTIFICATION_BROWSER_THEME_CHANGED: {
-      InitializeCSSCaches();
-      StringValue attribution(
-          ThemeServiceFactory::GetForProfile(GetProfile())->HasCustomImage(
-              IDR_THEME_NTP_ATTRIBUTION) ? "true" : "false");
-      web_ui()->CallJavascriptFunction("ntp.themeChanged", attribution);
-      break;
-    }
-#endif
     case content::NOTIFICATION_RENDER_WIDGET_HOST_DID_UPDATE_BACKING_STORE: {
       last_paint_ = base::TimeTicks::Now();
       break;
@@ -271,35 +228,28 @@ void NewTabUI::OnShowBookmarkBarChanged() {
   web_ui()->CallJavascriptFunction("ntp.setBookmarkBarAttached", attached);
 }
 
-void NewTabUI::InitializeCSSCaches() {
-#if defined(ENABLE_THEMES)
-  Profile* profile = GetProfile();
-  ThemeSource* theme = new ThemeSource(profile);
-  ChromeURLDataManager::AddDataSource(profile, theme);
-#endif
-}
-
 // static
-void NewTabUI::RegisterUserPrefs(PrefServiceSyncable* prefs) {
+void NewTabUI::RegisterUserPrefs(PrefRegistrySyncable* registry) {
 #if !defined(OS_ANDROID)
-  AppLauncherHandler::RegisterUserPrefs(prefs);
-  NewTabPageHandler::RegisterUserPrefs(prefs);
+  AppLauncherHandler::RegisterUserPrefs(registry);
+  NewTabPageHandler::RegisterUserPrefs(registry);
   if (NewTabUI::IsDiscoveryInNTPEnabled())
-    SuggestionsHandler::RegisterUserPrefs(prefs);
+    SuggestionsHandler::RegisterUserPrefs(registry);
 #endif
-  MostVisitedHandler::RegisterUserPrefs(prefs);
-  browser_sync::ForeignSessionHandler::RegisterUserPrefs(prefs);
+  MostVisitedHandler::RegisterUserPrefs(registry);
+  browser_sync::ForeignSessionHandler::RegisterUserPrefs(registry);
 }
 
 // static
 bool NewTabUI::ShouldShowApps() {
-#if defined(USE_ASH) || defined(OS_ANDROID)
+#if defined(OS_ANDROID)
   // Ash shows apps in app list thus should not show apps page in NTP4.
   // Android does not have apps.
   return false;
 #else
-  return !CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kShowAppListShortcut);
+  // This needs to be synchronous, so we use the value the last time it
+  // was checked.
+  return !apps::WasAppLauncherEnabled();
 #endif
 }
 
@@ -347,7 +297,7 @@ void NewTabUI::SetUrlTitleAndDirection(DictionaryValue* dictionary,
 }
 
 // static
-NewTabUI* NewTabUI::FromWebUIController(content::WebUIController* ui) {
+NewTabUI* NewTabUI::FromWebUIController(WebUIController* ui) {
   if (!g_live_new_tabs.Pointer()->count(ui))
     return NULL;
   return static_cast<NewTabUI*>(ui);

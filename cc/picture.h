@@ -12,8 +12,8 @@
 #include "cc/cc_export.h"
 #include "skia/ext/lazy_pixel_ref.h"
 #include "skia/ext/refptr.h"
-#include "third_party/skia/include/core/SkPicture.h"
 #include "third_party/skia/include/core/SkPixelRef.h"
+#include "third_party/skia/include/core/SkTileGridPicture.h"
 #include "ui/gfx/rect.h"
 
 namespace cc {
@@ -23,18 +23,23 @@ struct RenderingStats;
 
 class CC_EXPORT Picture
     : public base::RefCountedThreadSafe<Picture> {
-public:
+ public:
   static scoped_refptr<Picture> Create(gfx::Rect layer_rect);
 
   const gfx::Rect& LayerRect() const { return layer_rect_; }
   const gfx::Rect& OpaqueRect() const { return opaque_rect_; }
 
-  // Make a thread-safe clone for rasterizing with.
-  scoped_refptr<Picture> Clone() const;
+  // Get thread-safe clone for rasterizing with on a specific thread.
+  scoped_refptr<Picture> GetCloneForDrawingOnThread(
+      unsigned thread_index) const;
+
+  // Make thread-safe clones for rasterizing with.
+  void CloneForDrawing(int num_threads);
 
   // Record a paint operation. To be able to safely use this SkPicture for
   // playback on a different thread this can only be called once.
-  void Record(ContentLayerClient*, RenderingStats&);
+  void Record(ContentLayerClient*, RenderingStats*,
+      const SkTileGridPicture::TileGridInfo& tileGridInfo);
 
   // Has Record() been called yet?
   bool HasRecording() const { return picture_.get() != NULL; }
@@ -42,10 +47,16 @@ public:
   // Apply this contents scale and raster the content rect into the canvas.
   void Raster(SkCanvas* canvas, gfx::Rect content_rect, float contents_scale);
 
-  void GatherPixelRefs(const gfx::Rect& rect,
-                       std::list<skia::LazyPixelRef*>&);
+  // Estimate the cost of rasterizing. To predict the cost of a particular
+  // call to Raster(), pass this the bounds of the canvas that will
+  // be rastered into.
+  bool IsCheapInRect(const gfx::Rect& layer_rect) const;
 
-private:
+  void GatherPixelRefs(
+      const gfx::Rect& layer_rect,
+      std::list<skia::LazyPixelRef*>& pixel_ref_list);
+
+ private:
   Picture(gfx::Rect layer_rect);
   // This constructor assumes SkPicture is already ref'd and transfers
   // ownership to this picture.
@@ -57,6 +68,9 @@ private:
   gfx::Rect layer_rect_;
   gfx::Rect opaque_rect_;
   skia::RefPtr<SkPicture> picture_;
+
+  typedef std::vector<scoped_refptr<Picture> > PictureVector;
+  PictureVector clones_;
 
   friend class base::RefCountedThreadSafe<Picture>;
   DISALLOW_COPY_AND_ASSIGN(Picture);

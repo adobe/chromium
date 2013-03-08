@@ -214,8 +214,8 @@ SyncManagerImpl::~SyncManagerImpl() {
 SyncManagerImpl::NotificationInfo::NotificationInfo() : total_count(0) {}
 SyncManagerImpl::NotificationInfo::~NotificationInfo() {}
 
-DictionaryValue* SyncManagerImpl::NotificationInfo::ToValue() const {
-  DictionaryValue* value = new DictionaryValue();
+base::DictionaryValue* SyncManagerImpl::NotificationInfo::ToValue() const {
+  base::DictionaryValue* value = new base::DictionaryValue();
   value->SetInteger("totalCount", total_count);
   value->SetString("payload", payload);
   return value;
@@ -289,7 +289,6 @@ ModelTypeSet SyncManagerImpl::GetTypesWithEmptyProgressMarkerToken(
 
     if (marker.token().empty())
       result.Put(i.Get());
-
   }
   return result;
 }
@@ -297,6 +296,7 @@ ModelTypeSet SyncManagerImpl::GetTypesWithEmptyProgressMarkerToken(
 void SyncManagerImpl::ConfigureSyncer(
     ConfigureReason reason,
     ModelTypeSet types_to_config,
+    ModelTypeSet failed_types,
     const ModelSafeRoutingInfo& new_routing_info,
     const base::Closure& ready_task,
     const base::Closure& retry_task) {
@@ -309,7 +309,8 @@ void SyncManagerImpl::ConfigureSyncer(
   if (!session_context_->routing_info().empty())
     previous_types = GetRoutingInfoTypes(session_context_->routing_info());
   if (!PurgeDisabledTypes(previous_types,
-                          GetRoutingInfoTypes(new_routing_info))) {
+                          GetRoutingInfoTypes(new_routing_info),
+                          failed_types)) {
     // We failed to cleanup the types. Invoke the ready task without actually
     // configuring any types. The caller should detect this as a configuration
     // failure and act appropriately.
@@ -325,11 +326,10 @@ void SyncManagerImpl::ConfigureSyncer(
   scheduler_->Start(SyncScheduler::CONFIGURATION_MODE);
   if (!scheduler_->ScheduleConfiguration(params))
     retry_task.Run();
-
 }
 
 void SyncManagerImpl::Init(
-    const FilePath& database_location,
+    const base::FilePath& database_location,
     const WeakHandle<JsEventHandler>& event_handler,
     const std::string& sync_server_and_path,
     int port,
@@ -382,14 +382,14 @@ void SyncManagerImpl::Init(
   sync_encryption_handler_->AddObserver(&debug_info_event_listener_);
   sync_encryption_handler_->AddObserver(&js_sync_encryption_handler_observer_);
 
-  FilePath absolute_db_path(database_path_);
+  base::FilePath absolute_db_path(database_path_);
   file_util::AbsolutePath(&absolute_db_path);
   scoped_ptr<syncable::DirectoryBackingStore> backing_store =
       internal_components_factory->BuildDirectoryBackingStore(
           credentials.email, absolute_db_path).Pass();
 
   DCHECK(backing_store.get());
-  share_.name = credentials.email;
+  const std::string& username = credentials.email;
   share_.directory.reset(
       new syncable::Directory(
           backing_store.release(),
@@ -398,8 +398,8 @@ void SyncManagerImpl::Init(
           sync_encryption_handler_.get(),
           sync_encryption_handler_->GetCryptographerUnsafe()));
 
-  DVLOG(1) << "Username: " << username_for_share();
-  if (!OpenDirectory()) {
+  DVLOG(1) << "Username: " << username;
+  if (!OpenDirectory(username)) {
     FOR_EACH_OBSERVER(SyncManager::Observer, observers_,
                       OnInitializationComplete(
                           MakeWeakHandle(weak_ptr_factory_.GetWeakPtr()),
@@ -415,22 +415,18 @@ void SyncManagerImpl::Init(
   connection_manager_->set_client_id(directory()->cache_guid());
   connection_manager_->AddListener(this);
 
-  // Retrieve and set the sync notifier state.
-  std::string unique_id = directory()->cache_guid();
-  DVLOG(1) << "Read notification unique ID: " << unique_id;
-  allstatus_.SetUniqueId(unique_id);
-  invalidator_->SetUniqueId(unique_id);
+  std::string sync_id = directory()->cache_guid();
 
-  std::string state = directory()->GetNotificationState();
-  if (VLOG_IS_ON(1)) {
-    std::string encoded_state;
-    base::Base64Encode(state, &encoded_state);
-    DVLOG(1) << "Read notification state: " << encoded_state;
-  }
+  // TODO(rlarocque): The invalidator client ID should be independent from the
+  // sync client ID.  See crbug.com/124142.
+  const std::string invalidator_client_id = sync_id;
 
-  // TODO(tim): Remove once invalidation state has been migrated to new
-  // InvalidationStateTracker store. Bug 124140.
-  invalidator_->SetStateDeprecated(state);
+  allstatus_.SetSyncId(sync_id);
+  allstatus_.SetInvalidatorClientId(invalidator_client_id);
+
+  DVLOG(1) << "Setting sync client ID: " << sync_id;
+  DVLOG(1) << "Setting invalidator client ID: " << invalidator_client_id;
+  invalidator_->SetUniqueId(invalidator_client_id);
 
   // Build a SyncSessionContext and store the worker in it.
   DVLOG(1) << "Sync is bringing up SyncSessionContext.";
@@ -445,7 +441,8 @@ void SyncManagerImpl::Init(
       &throttled_data_type_tracker_,
       listeners,
       &debug_info_event_listener_,
-      &traffic_recorder_).Pass();
+      &traffic_recorder_,
+      invalidator_client_id).Pass();
   session_context_->set_account_name(credentials.email);
   scheduler_ = internal_components_factory->BuildScheduler(
       name_, session_context_.get()).Pass();
@@ -533,7 +530,7 @@ bool SyncManagerImpl::GetHasInvalidAuthTokenForTest() const {
   return connection_manager_->HasInvalidAuthToken();
 }
 
-bool SyncManagerImpl::OpenDirectory() {
+bool SyncManagerImpl::OpenDirectory(const std::string& username) {
   DCHECK(!initialized_) << "Should only happen once";
 
   // Set before Open().
@@ -542,10 +539,9 @@ bool SyncManagerImpl::OpenDirectory() {
       MakeWeakHandle(js_mutation_event_observer_.AsWeakPtr()));
 
   syncable::DirOpenResult open_result = syncable::NOT_INITIALIZED;
-  open_result = directory()->Open(username_for_share(), this,
-                                  transaction_observer);
+  open_result = directory()->Open(username, this, transaction_observer);
   if (open_result != syncable::OPENED) {
-    LOG(ERROR) << "Could not open share for:" << username_for_share();
+    LOG(ERROR) << "Could not open share for:" << username;
     return false;
   }
 
@@ -578,12 +574,14 @@ bool SyncManagerImpl::PurgePartiallySyncedTypes() {
                        partially_synced_types.Size());
   if (partially_synced_types.Empty())
     return true;
-  return directory()->PurgeEntriesWithTypeIn(partially_synced_types);
+  return directory()->PurgeEntriesWithTypeIn(partially_synced_types,
+                                             ModelTypeSet());
 }
 
 bool SyncManagerImpl::PurgeDisabledTypes(
     ModelTypeSet previously_enabled_types,
-    ModelTypeSet currently_enabled_types) {
+    ModelTypeSet currently_enabled_types,
+    ModelTypeSet failed_types) {
   ModelTypeSet disabled_types = Difference(previously_enabled_types,
                                            currently_enabled_types);
   if (disabled_types.Empty())
@@ -591,14 +589,12 @@ bool SyncManagerImpl::PurgeDisabledTypes(
 
   DVLOG(1) << "Purging disabled types "
            << ModelTypeSetToString(disabled_types);
-  return directory()->PurgeEntriesWithTypeIn(disabled_types);
+  return directory()->PurgeEntriesWithTypeIn(disabled_types, failed_types);
 }
 
-void SyncManagerImpl::UpdateCredentials(
-    const SyncCredentials& credentials) {
+void SyncManagerImpl::UpdateCredentials(const SyncCredentials& credentials) {
   DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(initialized_);
-  DCHECK_EQ(credentials.email, share_.name);
   DCHECK(!credentials.email.empty());
   DCHECK(!credentials.sync_token.empty());
 
@@ -638,6 +634,13 @@ void SyncManagerImpl::UnregisterInvalidationHandler(
   DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(initialized_);
   invalidator_->UnregisterHandler(handler);
+}
+
+void SyncManagerImpl::AcknowledgeInvalidation(
+    const invalidation::ObjectId& id, const syncer::AckHandle& ack_handle) {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK(initialized_);
+  invalidator_->Acknowledge(id, ack_handle);
 }
 
 void SyncManagerImpl::AddObserver(SyncManager::Observer* observer) {
@@ -1013,7 +1016,6 @@ void SyncManagerImpl::OnSyncEngineEvent(const SyncEngineEvent& event) {
             event.snapshot.model_neutral_state().sync_protocol_error));
     return;
   }
-
 }
 
 void SyncManagerImpl::SetJsEventHandler(
@@ -1057,9 +1059,9 @@ void SyncManagerImpl::BindJsMessageHandler(
       base::Bind(unbound_message_handler, base::Unretained(this));
 }
 
-DictionaryValue* SyncManagerImpl::NotificationInfoToValue(
+base::DictionaryValue* SyncManagerImpl::NotificationInfoToValue(
     const NotificationInfoMap& notification_info) {
-  DictionaryValue* value = new DictionaryValue();
+  base::DictionaryValue* value = new base::DictionaryValue();
 
   for (NotificationInfoMap::const_iterator it = notification_info.begin();
       it != notification_info.end(); ++it) {
@@ -1072,7 +1074,7 @@ DictionaryValue* SyncManagerImpl::NotificationInfoToValue(
 
 std::string SyncManagerImpl::NotificationInfoToString(
     const NotificationInfoMap& notification_info) {
-  scoped_ptr<DictionaryValue> value(
+  scoped_ptr<base::DictionaryValue> value(
       NotificationInfoToValue(notification_info));
   std::string str;
   base::JSONWriter::Write(value.get(), &str);
@@ -1084,8 +1086,8 @@ JsArgList SyncManagerImpl::GetNotificationState(
   const std::string& notification_state =
       InvalidatorStateToString(invalidator_state_);
   DVLOG(1) << "GetNotificationState: " << notification_state;
-  ListValue return_args;
-  return_args.Append(Value::CreateStringValue(notification_state));
+  base::ListValue return_args;
+  return_args.Append(new base::StringValue(notification_state));
   return JsArgList(&return_args);
 }
 
@@ -1093,7 +1095,7 @@ JsArgList SyncManagerImpl::GetNotificationInfo(
     const JsArgList& args) {
   DVLOG(1) << "GetNotificationInfo: "
            << NotificationInfoToString(notification_info_map_);
-  ListValue return_args;
+  base::ListValue return_args;
   return_args.Append(NotificationInfoToValue(notification_info_map_));
   return JsArgList(&return_args);
 }
@@ -1103,15 +1105,15 @@ JsArgList SyncManagerImpl::GetRootNodeDetails(
   ReadTransaction trans(FROM_HERE, GetUserShare());
   ReadNode root(&trans);
   root.InitByRootLookup();
-  ListValue return_args;
+  base::ListValue return_args;
   return_args.Append(root.GetDetailsAsValue());
   return JsArgList(&return_args);
 }
 
 JsArgList SyncManagerImpl::GetClientServerTraffic(
     const JsArgList& args) {
-  ListValue return_args;
-  ListValue* value = traffic_recorder_.ToValue();
+  base::ListValue return_args;
+  base::ListValue* value = traffic_recorder_.ToValue();
   if (value != NULL)
     return_args.Append(value);
   return JsArgList(&return_args);
@@ -1119,7 +1121,7 @@ JsArgList SyncManagerImpl::GetClientServerTraffic(
 
 namespace {
 
-int64 GetId(const ListValue& ids, int i) {
+int64 GetId(const base::ListValue& ids, int i) {
   std::string id_str;
   if (!ids.GetString(i, &id_str)) {
     return kInvalidId;
@@ -1131,14 +1133,15 @@ int64 GetId(const ListValue& ids, int i) {
   return id;
 }
 
-JsArgList GetNodeInfoById(const JsArgList& args,
-                          UserShare* user_share,
-                          DictionaryValue* (BaseNode::*info_getter)() const) {
+JsArgList GetNodeInfoById(
+    const JsArgList& args,
+    UserShare* user_share,
+    base::DictionaryValue* (BaseNode::*info_getter)() const) {
   CHECK(info_getter);
-  ListValue return_args;
-  ListValue* node_summaries = new ListValue();
+  base::ListValue return_args;
+  base::ListValue* node_summaries = new base::ListValue();
   return_args.Append(node_summaries);
-  const ListValue* id_list = NULL;
+  const base::ListValue* id_list = NULL;
   ReadTransaction trans(FROM_HERE, user_share);
   if (args.Get().GetList(0, &id_list)) {
     CHECK(id_list);
@@ -1168,8 +1171,8 @@ JsArgList SyncManagerImpl::GetNodeDetailsById(const JsArgList& args) {
 }
 
 JsArgList SyncManagerImpl::GetAllNodes(const JsArgList& args) {
-  ListValue return_args;
-  ListValue* result = new ListValue();
+  base::ListValue return_args;
+  base::ListValue* result = new base::ListValue();
   return_args.Append(result);
 
   ReadTransaction trans(FROM_HERE, GetUserShare());
@@ -1186,8 +1189,8 @@ JsArgList SyncManagerImpl::GetAllNodes(const JsArgList& args) {
 }
 
 JsArgList SyncManagerImpl::GetChildNodeIds(const JsArgList& args) {
-  ListValue return_args;
-  ListValue* child_ids = new ListValue();
+  base::ListValue return_args;
+  base::ListValue* child_ids = new base::ListValue();
   return_args.Append(child_ids);
   int64 id = GetId(args.Get(), 0);
   if (id != kInvalidId) {
@@ -1197,8 +1200,7 @@ JsArgList SyncManagerImpl::GetChildNodeIds(const JsArgList& args) {
                                                   id, &child_handles);
     for (syncable::Directory::ChildHandles::const_iterator it =
              child_handles.begin(); it != child_handles.end(); ++it) {
-      child_ids->Append(Value::CreateStringValue(
-          base::Int64ToString(*it)));
+      child_ids->Append(new base::StringValue(base::Int64ToString(*it)));
     }
   }
   return JsArgList(&return_args);
@@ -1226,13 +1228,11 @@ void SyncManagerImpl::OnInvalidatorStateChange(InvalidatorState state) {
   if (invalidator_state_ == syncer::INVALIDATION_CREDENTIALS_REJECTED) {
     // If the invalidator's credentials were rejected, that means that
     // our sync credentials are also bad, so invalidate those.
-    connection_manager_->InvalidateAndClearAuthToken();
-    FOR_EACH_OBSERVER(SyncManager::Observer, observers_,
-                      OnConnectionStatusChange(CONNECTION_AUTH_ERROR));
+    connection_manager_->OnInvalidationCredentialsRejected();
   }
 
   if (js_event_handler_.IsInitialized()) {
-    DictionaryValue details;
+    base::DictionaryValue details;
     details.SetString("state", state_str);
     js_event_handler_.Call(FROM_HERE,
                            &JsEventHandler::HandleJsEvent,
@@ -1242,18 +1242,23 @@ void SyncManagerImpl::OnInvalidatorStateChange(InvalidatorState state) {
 }
 
 void SyncManagerImpl::OnIncomingInvalidation(
-    const ObjectIdInvalidationMap& invalidation_map,
-    IncomingInvalidationSource source) {
+    const ObjectIdInvalidationMap& invalidation_map) {
   DCHECK(thread_checker_.CalledOnValidThread());
+
+  // TODO(dcheng): Acknowledge immediately for now. Fix this once the
+  // invalidator doesn't repeatedly ping for unacknowledged invaliations, since
+  // it conflicts with the sync scheduler's internal backoff algorithm.
+  // See http://crbug.com/124149 for more information.
+  for (ObjectIdInvalidationMap::const_iterator it = invalidation_map.begin();
+       it != invalidation_map.end(); ++it) {
+    invalidator_->Acknowledge(it->first, it->second.ack_handle);
+  }
+
   const ModelTypeInvalidationMap& type_invalidation_map =
       ObjectIdInvalidationMapToModelTypeInvalidationMap(invalidation_map);
-  if (source == LOCAL_INVALIDATION) {
-    allstatus_.IncrementNudgeCounter(NUDGE_SOURCE_LOCAL_REFRESH);
-    scheduler_->ScheduleNudgeWithStatesAsync(
-        TimeDelta::FromMilliseconds(kSyncRefreshDelayMsec),
-        NUDGE_SOURCE_LOCAL_REFRESH,
-        type_invalidation_map, FROM_HERE);
-  } else if (!type_invalidation_map.empty()) {
+  if (type_invalidation_map.empty()) {
+    LOG(WARNING) << "Sync received invalidation without any type information.";
+  } else {
     allstatus_.IncrementNudgeCounter(NUDGE_SOURCE_NOTIFICATION);
     scheduler_->ScheduleNudgeWithStatesAsync(
         TimeDelta::FromMilliseconds(kSyncSchedulerDelayMsec),
@@ -1262,23 +1267,53 @@ void SyncManagerImpl::OnIncomingInvalidation(
     allstatus_.IncrementNotificationsReceived();
     UpdateNotificationInfo(type_invalidation_map);
     debug_info_event_listener_.OnIncomingNotification(type_invalidation_map);
-  } else {
-    LOG(WARNING) << "Sync received invalidation without any type information.";
   }
 
   if (js_event_handler_.IsInitialized()) {
-    DictionaryValue details;
-    ListValue* changed_types = new ListValue();
+    base::DictionaryValue details;
+    base::ListValue* changed_types = new base::ListValue();
     details.Set("changedTypes", changed_types);
     for (ModelTypeInvalidationMap::const_iterator it =
              type_invalidation_map.begin(); it != type_invalidation_map.end();
          ++it) {
       const std::string& model_type_str =
           ModelTypeToString(it->first);
-      changed_types->Append(Value::CreateStringValue(model_type_str));
+      changed_types->Append(new base::StringValue(model_type_str));
     }
-    details.SetString("source", (source == LOCAL_INVALIDATION) ?
-        "LOCAL_INVALIDATION" : "REMOTE_INVALIDATION");
+    details.SetString("source", "REMOTE_INVALIDATION");
+    js_event_handler_.Call(FROM_HERE,
+                           &JsEventHandler::HandleJsEvent,
+                           "onIncomingNotification",
+                           JsEventDetails(&details));
+  }
+}
+
+void SyncManagerImpl::RefreshTypes(ModelTypeSet types) {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  const ModelTypeInvalidationMap& type_invalidation_map =
+      ModelTypeSetToInvalidationMap(types, "");
+  if (type_invalidation_map.empty()) {
+    LOG(WARNING) << "Sync received refresh request with no types specified.";
+  } else {
+    allstatus_.IncrementNudgeCounter(NUDGE_SOURCE_LOCAL_REFRESH);
+    scheduler_->ScheduleNudgeWithStatesAsync(
+        TimeDelta::FromMilliseconds(kSyncRefreshDelayMsec),
+        NUDGE_SOURCE_LOCAL_REFRESH,
+        type_invalidation_map, FROM_HERE);
+  }
+
+  if (js_event_handler_.IsInitialized()) {
+    base::DictionaryValue details;
+    base::ListValue* changed_types = new base::ListValue();
+    details.Set("changedTypes", changed_types);
+    for (ModelTypeInvalidationMap::const_iterator it =
+             type_invalidation_map.begin(); it != type_invalidation_map.end();
+         ++it) {
+      const std::string& model_type_str =
+          ModelTypeToString(it->first);
+      changed_types->Append(new base::StringValue(model_type_str));
+    }
+    details.SetString("source", "LOCAL_INVALIDATION");
     js_event_handler_.Call(FROM_HERE,
                            &JsEventHandler::HandleJsEvent,
                            "onIncomingNotification",
@@ -1292,10 +1327,6 @@ SyncStatus SyncManagerImpl::GetDetailedStatus() const {
 
 void SyncManagerImpl::SaveChanges() {
   directory()->SaveChanges();
-}
-
-const std::string& SyncManagerImpl::username_for_share() const {
-  return share_.name;
 }
 
 UserShare* SyncManagerImpl::GetUserShare() {
@@ -1337,6 +1368,16 @@ bool SyncManagerImpl::ReceivedExperiment(Experiments* experiments) {
       autofill_culling_node.GetExperimentsSpecifics().
           autofill_culling().enabled()) {
     experiments->autofill_culling = true;
+    found_experiment = true;
+  }
+
+  ReadNode full_history_sync_node(&trans);
+  if (full_history_sync_node.InitByClientTagLookup(
+          syncer::EXPERIMENTS,
+          syncer::kFullHistorySyncTag) == BaseNode::INIT_OK &&
+      full_history_sync_node.GetExperimentsSpecifics().
+          history_delete_directives().enabled()) {
+    experiments->full_history_sync = true;
     found_experiment = true;
   }
 

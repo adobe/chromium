@@ -8,15 +8,13 @@
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
 #include "base/memory/weak_ptr.h"
+#include "base/prefs/pref_service.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/chromeos/input_method/input_method_configuration.h"
 #include "chrome/browser/chromeos/input_method/input_method_manager.h"
 #include "chrome/browser/chromeos/input_method/xkeyboard.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/webui/chrome_url_data_manager.h"
-#include "chrome/browser/ui/webui/chrome_web_ui_data_source.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
@@ -24,6 +22,7 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/browser/web_ui.h"
+#include "content/public/browser/web_ui_data_source.h"
 #include "content/public/browser/web_ui_message_handler.h"
 #include "grit/browser_resources.h"
 #include "grit/chromium_strings.h"
@@ -174,9 +173,9 @@ struct I18nContentToMessage {
   { "keyboardOverlayNewWindow", IDS_KEYBOARD_OVERLAY_NEW_WINDOW },
   { "keyboardOverlayNextWindow", IDS_KEYBOARD_OVERLAY_NEXT_WINDOW },
   { "keyboardOverlayNextWord", IDS_KEYBOARD_OVERLAY_NEXT_WORD },
+  { "keyboardOverlayOpen", IDS_KEYBOARD_OVERLAY_OPEN },
   { "keyboardOverlayOpenAddressInNewTab",
     IDS_KEYBOARD_OVERLAY_OPEN_ADDRESS_IN_NEW_TAB },
-  { "keyboardOverlayOpenDialog", IDS_KEYBOARD_OVERLAY_OPEN_DIALOG },
   { "keyboardOverlayPageDown", IDS_KEYBOARD_OVERLAY_PAGE_DOWN },
   { "keyboardOverlayPageUp", IDS_KEYBOARD_OVERLAY_PAGE_UP },
   { "keyboardOverlayPaste", IDS_KEYBOARD_OVERLAY_PASTE },
@@ -203,6 +202,8 @@ struct I18nContentToMessage {
     IDS_KEYBOARD_OVERLAY_SELECT_PREVIOUS_INPUT_METHOD },
   { "keyboardOverlaySelectWordAtATime",
     IDS_KEYBOARD_OVERLAY_SELECT_WORD_AT_A_TIME },
+  { "keyboardOverlayShowMessageCenter",
+    IDS_KEYBOARD_OVERLAY_SHOW_MESSAGE_CENTER },
   { "keyboardOverlayShowStatusMenu", IDS_KEYBOARD_OVERLAY_SHOW_STATUS_MENU },
   { "keyboardOverlayShowWrenchMenu", IDS_KEYBOARD_OVERLAY_SHOW_WRENCH_MENU },
   { "keyboardOverlaySignOut", IDS_KEYBOARD_OVERLAY_SIGN_OUT },
@@ -237,7 +238,7 @@ std::string ModifierKeyToLabel(ModifierKey modifier) {
 
 content::WebUIDataSource* CreateKeyboardOverlayUIHTMLSource() {
   content::WebUIDataSource* source =
-      ChromeWebUIDataSource::Create(chrome::kChromeUIKeyboardOverlayHost);
+      content::WebUIDataSource::Create(chrome::kChromeUIKeyboardOverlayHost);
 
   for (size_t i = 0; i < arraysize(kI18nContentToMessage); ++i) {
     source->AddLocalizedString(kI18nContentToMessage[i].i18n_content,
@@ -366,6 +367,5 @@ KeyboardOverlayUI::KeyboardOverlayUI(content::WebUI* web_ui)
   web_ui->AddMessageHandler(handler);
 
   // Set up the chrome://keyboardoverlay/ source.
-  ChromeURLDataManager::AddWebUIDataSource(
-      profile, CreateKeyboardOverlayUIHTMLSource());
+  content::WebUIDataSource::Add(profile, CreateKeyboardOverlayUIHTMLSource());
 }

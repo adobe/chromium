@@ -3,7 +3,7 @@
 // found in the LICENSE file.
 
 #include "base/bind.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "chrome/browser/download/download_danger_prompt.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
@@ -75,7 +75,7 @@ class DownloadDangerPromptTest : public InProcessBrowserTest {
  private:
   void SetUpDownloadItemExpectations() {
     EXPECT_CALL(download_, GetFileNameToReportUser()).WillRepeatedly(Return(
-        FilePath(FILE_PATH_LITERAL("evil.exe"))));
+        base::FilePath(FILE_PATH_LITERAL("evil.exe"))));
     EXPECT_CALL(download_, AddObserver(_))
       .WillOnce(SaveArg<0>(&download_observer_));
     EXPECT_CALL(download_, RemoveObserver(Eq(ByRef(download_observer_))));

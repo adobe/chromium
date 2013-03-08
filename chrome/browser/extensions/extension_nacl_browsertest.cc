@@ -3,17 +3,17 @@
 // found in the LICENSE file.
 
 #include "base/command_line.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/path_service.h"
+#include "base/prefs/pref_service.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/extensions/crx_installer.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_tabstrip.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
@@ -26,6 +26,7 @@
 using content::PluginService;
 using content::WebContents;
 using extensions::Extension;
+using extensions::Manifest;
 
 namespace {
 
@@ -46,7 +47,7 @@ class NaClExtensionTest : public ExtensionBrowserTest {
   };
 
   const Extension* InstallExtension(InstallType install_type) {
-    FilePath file_path = test_data_dir_.AppendASCII("native_client");
+    base::FilePath file_path = test_data_dir_.AppendASCII("native_client");
     ExtensionService* service = extensions::ExtensionSystem::Get(
         browser()->profile())->extension_service();
     const Extension* extension = NULL;
@@ -84,7 +85,7 @@ class NaClExtensionTest : public ExtensionBrowserTest {
   }
 
   bool IsNaClPluginLoaded() {
-    FilePath path;
+    base::FilePath path;
     if (PathService::Get(chrome::FILE_NACL_PLUGIN, &path)) {
       webkit::WebPluginInfo info;
       return PluginService::GetInstance()->GetPluginInfoByPath(path, &info);
@@ -101,7 +102,8 @@ class NaClExtensionTest : public ExtensionBrowserTest {
 
     bool embedded_plugin_created = false;
     bool content_handler_plugin_created = false;
-    WebContents* web_contents = chrome::GetActiveWebContents(browser());
+    WebContents* web_contents =
+        browser()->tab_strip_model()->GetActiveWebContents();
     ASSERT_TRUE(content::ExecuteScriptAndExtractBool(
         web_contents,
         "window.domAutomationController.send(EmbeddedPluginCreated());",
@@ -140,7 +142,7 @@ IN_PROC_BROWSER_TEST_F(NaClExtensionTest, ComponentExtension) {
 
   const Extension* extension = InstallExtension(INSTALL_TYPE_COMPONENT);
   ASSERT_TRUE(extension);
-  ASSERT_EQ(extension->location(), Extension::COMPONENT);
+  ASSERT_EQ(extension->location(), Manifest::COMPONENT);
   CheckPluginsCreated(extension, true);
 }
 
@@ -150,7 +152,7 @@ IN_PROC_BROWSER_TEST_F(NaClExtensionTest, UnpackedExtension) {
 
   const Extension* extension = InstallExtension(INSTALL_TYPE_UNPACKED);
   ASSERT_TRUE(extension);
-  ASSERT_EQ(extension->location(), Extension::LOAD);
+  ASSERT_EQ(extension->location(), Manifest::UNPACKED);
   CheckPluginsCreated(extension, true);
 }
 

@@ -8,11 +8,22 @@ import cpp_util
 import schema_util
 
 class HGenerator(object):
+  def __init__(self, type_generator, cpp_namespace):
+    self._type_generator = type_generator
+    self._cpp_namespace = cpp_namespace
+
+  def Generate(self, namespace):
+    return _Generator(namespace,
+                      self._type_generator,
+                      self._cpp_namespace).Generate()
+
+class _Generator(object):
   """A .h generator for a namespace.
   """
-  def __init__(self, namespace, cpp_type_generator):
-    self._type_helper = cpp_type_generator
+  def __init__(self, namespace, cpp_type_generator, cpp_namespace):
     self._namespace = namespace
+    self._type_helper = cpp_type_generator
+    self._cpp_namespace = cpp_namespace
     self._target_namespace = (
         self._type_helper.GetCppNamespaceName(self._namespace))
 
@@ -40,10 +51,11 @@ class HGenerator(object):
       .Append('#include "base/memory/linked_ptr.h"')
       .Append('#include "base/memory/scoped_ptr.h"')
       .Append('#include "base/values.h"')
+      .Cblock(self._type_helper.GenerateIncludes())
       .Append()
     )
 
-    c.Concat(self._type_helper.GetRootNamespaceStart())
+    c.Concat(cpp_util.OpenNamespace(self._cpp_namespace))
     # TODO(calamity): These forward declarations should be #includes to allow
     # $ref types from other files to be used as required params. This requires
     # some detangling of windows and tabs which will currently lead to circular
@@ -95,7 +107,7 @@ class HGenerator(object):
       for event in self._namespace.events.values():
         c.Cblock(self._GenerateEvent(event))
     (c.Concat(self._type_helper.GetNamespaceEnd())
-      .Cblock(self._type_helper.GetRootNamespaceEnd())
+      .Concat(cpp_util.CloseNamespace(self._cpp_namespace))
       .Append('#endif  // %s' % ifndef_name)
       .Append()
     )
@@ -162,7 +174,7 @@ class HGenerator(object):
                         a typedef. This may not always be desired. If false,
                         primitive types are ignored.
     """
-    classname = cpp_util.Classname(schema_util.StripSchemaNamespace(type_.name))
+    classname = cpp_util.Classname(schema_util.StripNamespace(type_.name))
     c = Code()
 
     if type_.functions:
@@ -241,6 +253,7 @@ class HGenerator(object):
                                                  is_in_container=True)))
           )
       (c.Eblock()
+        .Append()
         .Sblock(' private:')
           .Append('DISALLOW_COPY_AND_ASSIGN(%(classname)s);')
         .Eblock('};')
@@ -319,6 +332,7 @@ class HGenerator(object):
       .Cblock(self._GenerateTypes(p.type_ for p in function.params))
       .Cblock(self._GenerateFields(function.params))
       .Eblock()
+      .Append()
       .Sblock(' private:')
         .Append('Params();')
         .Append()

@@ -67,9 +67,18 @@ void PrerenderLinkManager::OnAddPrerender(int launcher_child_id,
                                           const content::Referrer& referrer,
                                           const gfx::Size& size,
                                           int render_view_route_id) {
-  DCHECK_EQ(static_cast<LinkPrerender*>(NULL),
-            FindByLauncherChildIdAndPrerenderId(launcher_child_id,
-                                                prerender_id));
+  // TODO(gavinp): Determine why WebKit appears to be sending duplicate adds,
+  // and prevent it.
+  if (FindByLauncherChildIdAndPrerenderId(launcher_child_id, prerender_id))
+    return;
+
+  content::RenderProcessHost* rph =
+      content::RenderProcessHost::FromID(launcher_child_id);
+  // Guests inside <webview> do not support cross-process navigation and so we
+  // do not allow guests to prerender content.
+  if (rph && rph->IsGuest())
+    return;
+
   LinkPrerender
       prerender(launcher_child_id, prerender_id, url, referrer, size,
                 render_view_route_id, manager_->GetCurrentTimeTicks());

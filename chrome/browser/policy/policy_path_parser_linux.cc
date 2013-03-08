@@ -19,9 +19,9 @@ const char* kUserNamePolicyVarName = "${user_name}";
 
 // Replaces all variable occurrences in the policy string with the respective
 // system settings values.
-FilePath::StringType ExpandPathVariables(
-    const FilePath::StringType& untranslated_string) {
-  FilePath::StringType result(untranslated_string);
+base::FilePath::StringType ExpandPathVariables(
+    const base::FilePath::StringType& untranslated_string) {
+  base::FilePath::StringType result(untranslated_string);
   if (result.length() == 0)
     return result;
   // Sanitize quotes in case of any around the whole string.
@@ -51,6 +51,12 @@ FilePath::StringType ExpandPathVariables(
     }
   }
   return result;
+}
+
+void CheckUserDataDirPolicy(base::FilePath* user_data_dir) {
+  // This function is not implemented in Linux because we don't support the
+  // policy on this platform.
+  NOTREACHED();
 }
 
 }  // namespace path_parser

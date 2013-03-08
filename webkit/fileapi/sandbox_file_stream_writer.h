@@ -5,7 +5,7 @@
 #ifndef WEBKIT_FILEAPI_SANDBOX_FILE_STREAM_WRITER_H_
 #define WEBKIT_FILEAPI_SANDBOX_FILE_STREAM_WRITER_H_
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/platform_file.h"
 #include "googleurl/src/gurl.h"
@@ -52,7 +52,7 @@ class WEBKIT_STORAGE_EXPORT_PRIVATE SandboxFileStreamWriter
   void DidGetFileInfo(const net::CompletionCallback& callback,
                       base::PlatformFileError file_error,
                       const base::PlatformFileInfo& file_info,
-                      const FilePath& platform_path);
+                      const base::FilePath& platform_path);
   void DidGetUsageAndQuota(const net::CompletionCallback& callback,
                            quota::QuotaStatusCode status,
                            int64 usage, int64 quota);
@@ -74,7 +74,7 @@ class WEBKIT_STORAGE_EXPORT_PRIVATE SandboxFileStreamWriter
 
   UpdateObserverList observers_;
 
-  FilePath file_path_;
+  base::FilePath file_path_;
   int64 file_size_;
   int64 total_bytes_written_;
   int64 allowed_bytes_to_write_;

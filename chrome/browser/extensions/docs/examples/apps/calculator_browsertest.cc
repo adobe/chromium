@@ -2,9 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/path_service.h"
-#include "chrome/browser/ui/browser_tabstrip.h"
+#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
@@ -16,7 +17,7 @@ class CalculatorBrowserTest : public InProcessBrowserTest {
 };
 
 IN_PROC_BROWSER_TEST_F(CalculatorBrowserTest, Model) {
-  FilePath test_file;
+  base::FilePath test_file;
   PathService::Get(chrome::DIR_TEST_DATA, &test_file);
   test_file = test_file.DirName().DirName()
       .AppendASCII("common").AppendASCII("extensions").AppendASCII("docs")
@@ -27,7 +28,7 @@ IN_PROC_BROWSER_TEST_F(CalculatorBrowserTest, Model) {
 
   bool success;
   bool executed = content::ExecuteScriptAndExtractBool(
-      chrome::GetActiveWebContents(browser()),
+      browser()->tab_strip_model()->GetActiveWebContents(),
       "window.domAutomationController.send(window.runTests().success)",
       &success);
 

@@ -10,8 +10,10 @@
           'target_name': 'components_unittests',
           'type': '<(gtest_target_type)',
           'sources': [
+            'auto_login_parser/auto_login_parser_unittest.cc',
             'navigation_interception/intercept_navigation_resource_throttle_unittest.cc',
             'test/run_all_unittests.cc',
+            'visitedlink/test/visitedlink_unittest.cc',
           ],
           'include_dirs': [
             '..',
@@ -21,12 +23,52 @@
             '../testing/gmock.gyp:gmock',
             '../testing/gtest.gyp:gtest',
 
+            # Dependencies of auto_login_parser
+            'components.gyp:auto_login_parser',
+
             # Dependencies of intercept_navigation_resource_throttle_unittest.cc
             '../content/content.gyp:test_support_content',
             '../skia/skia.gyp:skia',
             'navigation_interception',
+
+            # Dependencies of visitedlink
+            'components.gyp:visitedlink_browser',
+            'components.gyp:visitedlink_renderer',
+            '../content/content_resources.gyp:content_resources',
           ],
+          'conditions': [
+            ['OS == "android" and gtest_target_type == "shared_library"', {
+              'dependencies': [
+                '../testing/android/native_test.gyp:native_test_native_code',
+              ]
+            }],
+            ['OS=="win" and win_use_allocator_shim==1', {
+              'dependencies': [
+                '../base/allocator/allocator.gyp:allocator',
+              ],
+            }],
+          ],
+          # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
+          'msvs_disabled_warnings': [4267, ],
         }
+      ],
+      'conditions': [
+        ['OS == "android" and gtest_target_type == "shared_library"', {
+          'targets': [
+            {
+              'target_name': 'components_unittests_apk',
+              'type': 'none',
+              'dependencies': [
+                'components_unittests',
+              ],
+              'variables': {
+                'test_suite_name': 'components_unittests',
+                'input_shlib_path': '<(SHARED_LIB_DIR)/<(SHARED_LIB_PREFIX)components_unittests<(SHARED_LIB_SUFFIX)',
+              },
+              'includes': [ '../build/apk_test.gypi' ],
+            },
+          ],
+        }],
       ],
     }],
   ],

@@ -82,16 +82,15 @@ class ONCCertificateImporterTest : public testing::Test {
                               std::string* guid) {
     scoped_ptr<base::DictionaryValue> onc =
         test_utils::ReadTestDictionary(filename);
-    base::ListValue* certificates;
+    base::ListValue* certificates = NULL;
     onc->GetListWithoutPathExpansion(toplevel_config::kCertificates,
                                      &certificates);
 
-    base::DictionaryValue* certificate;
+    base::DictionaryValue* certificate = NULL;
     certificates->GetDictionary(0, &certificate);
     certificate->GetStringWithoutPathExpansion(certificate::kGUID, guid);
 
-    CertificateImporter importer(ONC_SOURCE_USER_IMPORT,
-                                 false /* don't allow web trust */);
+    CertificateImporter importer(true /* allow web trust */);
     EXPECT_EQ(CertificateImporter::IMPORT_OK,
               importer.ParseAndStoreCertificates(*certificates));
 

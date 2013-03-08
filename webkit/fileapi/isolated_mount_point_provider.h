@@ -11,19 +11,17 @@
 
 namespace fileapi {
 
-class DraggedFileUtil;
+class AsyncFileUtilAdapter;
 class IsolatedContext;
-class IsolatedFileUtil;
 class MediaPathFilter;
-class NativeMediaFileUtil;
 
 #if defined(SUPPORT_MTP_DEVICE_FILESYSTEM)
-class DeviceMediaFileUtil;
+class DeviceMediaAsyncFileUtil;
 #endif
 
 class IsolatedMountPointProvider : public FileSystemMountPointProvider {
  public:
-  explicit IsolatedMountPointProvider(const FilePath& profile_path);
+  explicit IsolatedMountPointProvider(const base::FilePath& profile_path);
   virtual ~IsolatedMountPointProvider();
 
   // FileSystemMountPointProvider implementation.
@@ -32,12 +30,11 @@ class IsolatedMountPointProvider : public FileSystemMountPointProvider {
       FileSystemType type,
       bool create,
       const ValidateFileSystemCallback& callback) OVERRIDE;
-  virtual FilePath GetFileSystemRootPathOnFileThread(
+  virtual base::FilePath GetFileSystemRootPathOnFileThread(
       const FileSystemURL& url,
       bool create) OVERRIDE;
-  virtual bool IsAccessAllowed(const FileSystemURL& url) OVERRIDE;
-  virtual bool IsRestrictedFileName(const FilePath& filename) const OVERRIDE;
   virtual FileSystemFileUtil* GetFileUtil(FileSystemType type) OVERRIDE;
+  virtual AsyncFileUtil* GetAsyncFileUtil(FileSystemType type) OVERRIDE;
   virtual FilePermissionPolicy GetPermissionPolicy(
       const FileSystemURL& url,
       int permissions) const OVERRIDE;
@@ -63,16 +60,20 @@ class IsolatedMountPointProvider : public FileSystemMountPointProvider {
 
  private:
   // Store the profile path. We need this to create temporary snapshot files.
-  const FilePath profile_path_;
+  const base::FilePath profile_path_;
 
   scoped_ptr<MediaPathFilter> media_path_filter_;
 
-  scoped_ptr<IsolatedFileUtil> isolated_file_util_;
-  scoped_ptr<DraggedFileUtil> dragged_file_util_;
-  scoped_ptr<NativeMediaFileUtil> native_media_file_util_;
+  scoped_ptr<AsyncFileUtilAdapter> isolated_file_util_;
+  scoped_ptr<AsyncFileUtilAdapter> dragged_file_util_;
+  scoped_ptr<AsyncFileUtilAdapter> native_media_file_util_;
 
 #if defined(SUPPORT_MTP_DEVICE_FILESYSTEM)
-  scoped_ptr<DeviceMediaFileUtil> device_media_file_util_;
+  scoped_ptr<DeviceMediaAsyncFileUtil> device_media_async_file_util_;
+
+  //  TODO(kmadhusu): Remove |device_media_file_util_adapter_| after
+  //  fixing crbug.com/154835.
+  scoped_ptr<AsyncFileUtilAdapter> device_media_file_util_adapter_;
 #endif
 };
 

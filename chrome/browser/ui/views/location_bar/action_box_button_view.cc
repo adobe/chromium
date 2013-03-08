@@ -33,7 +33,7 @@ ActionBoxButtonView::ActionBoxButtonView(Browser* browser,
   SetHoverIcon(*ui::ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
       IDR_ACTION_BOX_BUTTON_HOVER));
   SetPushedIcon(*ui::ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
-      IDR_ACTION_BOX_BUTTON_PUSHED));
+      IDR_ACTION_BOX_BUTTON_PRESSED));
   set_accessibility_focusable(true);
   set_border(NULL);
   SizeToPreferredSize();
@@ -63,6 +63,6 @@ void ActionBoxButtonView::GetHitTestMask(gfx::Path* mask) const {
 }
 
 void ActionBoxButtonView::ShowMenu(scoped_ptr<ActionBoxMenuModel> menu_model) {
-  menu_ = ActionBoxMenu::Create(browser_, menu_model.Pass());
+  menu_ = ActionBoxMenu::Create(browser_->profile(), menu_model.Pass());
   menu_->RunMenu(this, menu_offset_);
 }

@@ -6,11 +6,13 @@
 
 #include "ash/launcher/background_animator.h"
 #include "ash/root_window_controller.h"
+#include "ash/screen_ash.h"
 #include "ash/shell.h"
 #include "ash/shell_window_ids.h"
 #include "ash/system/status_area_widget.h"
 #include "ash/system/status_area_widget_delegate.h"
 #include "ash/system/tray/tray_constants.h"
+#include "ash/system/tray/tray_event_filter.h"
 #include "ash/wm/property_util.h"
 #include "ash/wm/shelf_layout_manager.h"
 #include "ash/wm/window_animations.h"
@@ -180,6 +182,7 @@ TrayBackgroundView::TrayBackgroundView(
 
   tray_container_ = new TrayContainer(shelf_alignment_);
   SetContents(tray_container_);
+  tray_event_filter_.reset(new TrayEventFilter);
 }
 
 TrayBackgroundView::~TrayBackgroundView() {
@@ -326,7 +329,7 @@ gfx::Rect TrayBackgroundView::GetBubbleAnchorRect(
         bool rtl = base::i18n::IsRTL();
         rect.Inset(
             rtl ? kPaddingFromRightEdgeOfScreenBottomAlignment : 0,
-            4,
+            kTrayBubbleAnchorTopInsetBottomAnchor,
             rtl ? 0 : kPaddingFromRightEdgeOfScreenBottomAlignment,
             kPaddingFromBottomOfScreenBottomAlignment);
       } else if (anchor_alignment == TrayBubbleView::ANCHOR_ALIGNMENT_LEFT) {
@@ -350,12 +353,16 @@ gfx::Rect TrayBackgroundView::GetBubbleAnchorRect(
 
   // TODO(jennyz): May need to add left/right alignment in the following code.
   if (rect.IsEmpty()) {
-    rect = Shell::GetScreen()->GetPrimaryDisplay().bounds();
+    aura::RootWindow* target_root = anchor_widget ?
+        anchor_widget->GetNativeView()->GetRootWindow() :
+        Shell::GetPrimaryRootWindow();
+    rect = target_root->bounds();
     rect = gfx::Rect(
         base::i18n::IsRTL() ? kPaddingFromRightEdgeOfScreenBottomAlignment :
         rect.width() - kPaddingFromRightEdgeOfScreenBottomAlignment,
         rect.height() - kPaddingFromBottomOfScreenBottomAlignment,
         0, 0);
+    rect = ScreenAsh::ConvertRectToScreen(target_root, rect);
   }
   return rect;
 }
@@ -381,7 +388,9 @@ void TrayBackgroundView::UpdateBubbleViewArrow(
       bubble_view->GetWidget()->GetNativeView()->GetRootWindow();
   ash::internal::ShelfLayoutManager* shelf =
       ash::GetRootWindowController(root_window)->shelf();
-  bubble_view->SetPaintArrow(shelf->IsVisible());
+  bubble_view->SetArrowPaintType(
+      shelf->IsVisible() ? views::BubbleBorder::PAINT_NORMAL :
+                           views::BubbleBorder::PAINT_TRANSPARENT);
 }
 
 }  // namespace internal

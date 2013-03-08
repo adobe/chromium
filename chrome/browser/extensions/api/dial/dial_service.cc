@@ -10,8 +10,8 @@
 #include "base/callback.h"
 #include "base/logging.h"
 #include "base/rand_util.h"
-#include "base/string_number_conversions.h"
 #include "base/stringprintf.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/time.h"
 #include "chrome/browser/extensions/api/dial/dial_device_data.h"
 #include "chrome/common/chrome_version_info.h"
@@ -42,8 +42,8 @@ namespace extensions {
 
 namespace {
 
-// The total number of requests to make.
-const int kDialNumRequests = 1;
+// The total number of requests to make per discovery cycle.
+const int kDialMaxRequests = 4;
 
 // The interval to wait between successive requests.
 const int kDialRequestIntervalMillis = 1000;
@@ -99,11 +99,30 @@ std::string BuildRequest() {
   return request;
 }
 
+void GetNetworkListOnFileThread(
+    const scoped_refptr<base::MessageLoopProxy>& loop,
+    const base::Callback<void(const NetworkInterfaceList& networks)>& cb) {
+  NetworkInterfaceList list;
+  bool success = net::GetNetworkList(&list);
+  if (!success)
+    DVLOG(1) << "Could not retrieve network list!";
+
+  loop->PostTask(FROM_HERE, base::Bind(cb, list));
+}
+
 }  // namespace
 
 DialServiceImpl::DialServiceImpl(net::NetLog* net_log)
-  : is_writing_(false), is_reading_(false), discovery_active_(false),
-    num_requests_sent_(0) {
+  : is_writing_(false),
+    is_reading_(false),
+    discovery_active_(false),
+    num_requests_sent_(0),
+    max_requests_(kDialMaxRequests),
+    finish_delay_(TimeDelta::FromMilliseconds((kDialMaxRequests - 1) *
+                                              kDialRequestIntervalMillis) +
+                  TimeDelta::FromSeconds(kDialResponseTimeoutSecs)),
+    request_interval_(TimeDelta::FromMilliseconds(kDialRequestIntervalMillis))
+ {
   IPAddressNumber address;
   bool result = net::ParseIPLiteralToNumber(kDialRequestAddress, &address);
   DCHECK(result);
@@ -112,9 +131,6 @@ DialServiceImpl::DialServiceImpl(net::NetLog* net_log)
   net_log_ = net_log;
   net_log_source_.type = net::NetLog::SOURCE_UDP_SOCKET;
   net_log_source_.id = net_log_->NextID();
-  finish_delay_ = TimeDelta::FromMilliseconds((kDialNumRequests - 1) *
-                                              kDialRequestIntervalMillis) +
-    TimeDelta::FromSeconds(kDialResponseTimeoutSecs);
 }
 
 DialServiceImpl::~DialServiceImpl() {
@@ -144,24 +160,24 @@ bool DialServiceImpl::Discover() {
 
   DVLOG(1) << "Discovery started.";
 
-  // TODO(mfoltz): Send multiple requests.
-  StartRequest();
+  StartDiscovery();
   return true;
 }
 
-void DialServiceImpl::FinishDiscovery() {
+void DialServiceImpl::StartDiscovery() {
   DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(discovery_active_);
-  DVLOG(1) << "Discovery finished.";
-  CloseSocket();
-  finish_timer_.Stop();
-  discovery_active_ = false;
-  num_requests_sent_ = 0;
-  FOR_EACH_OBSERVER(Observer, observer_list_, OnDiscoveryFinished(this));
+  if (socket_.get())
+    return;
+
+  BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE, base::Bind(
+      &GetNetworkListOnFileThread,
+      base::MessageLoopProxy::current(), base::Bind(
+          &DialServiceImpl::SendNetworkList, AsWeakPtr())));
 }
 
-bool DialServiceImpl::BindAndWriteSocket(
-      const NetworkInterface& bind_interface) {
+bool DialServiceImpl::BindSocketAndSendRequest(
+      const IPAddressNumber& bind_ip_address) {
   DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(!socket_.get());
 
@@ -173,54 +189,54 @@ bool DialServiceImpl::BindAndWriteSocket(
   socket_->AllowBroadcast();
 
   // Schedule a timer to finish the discovery process (and close the socket).
-  finish_timer_.Start(FROM_HERE,
-                      finish_delay_,
-                      this,
-                      &DialServiceImpl::FinishDiscovery);
+  if (finish_delay_ > TimeDelta::FromSeconds(0)) {
+    finish_timer_.Start(FROM_HERE,
+                        finish_delay_,
+                        this,
+                        &DialServiceImpl::FinishDiscovery);
+  }
 
   // 0 means bind a random port
-  IPEndPoint address(bind_interface.address, 0);
+  IPEndPoint address(bind_ip_address, 0);
 
   if (!CheckResult("Bind", socket_->Bind(address)))
     return false;
 
-  if (!socket_.get()) {
-    DLOG(WARNING) << "Socket not connected.";
-    return false;
-  }
+  DCHECK(socket_.get());
 
   recv_buffer_ = new IOBufferWithSize(kDialRecvBufferSize);
-  ReadSocket();
+  if (!ReadSocket())
+    return false;
+  SendOneRequest();
+  return true;
+}
+
+void DialServiceImpl::SendOneRequest() {
+  if (num_requests_sent_ == max_requests_) {
+    request_timer_.Stop();
+    return;
+  }
+  num_requests_sent_++;
+  if (!socket_.get()) {
+    DLOG(WARNING) << "Socket not connected.";
+    return;
+  }
 
   if (is_writing_) {
     DVLOG(1) << "Already writing.";
-    return false;
+    return;
   }
+  DVLOG(1) << "Sending request " << num_requests_sent_ << "/"
+           << max_requests_;
   is_writing_ = true;
   int result = socket_->SendTo(
-      send_buffer_.get(),
-      send_buffer_->size(), send_address_,
-      base::Bind(&DialServiceImpl::OnSocketWrite, this));
+      send_buffer_.get(), send_buffer_->size(), send_address_,
+      base::Bind(&DialServiceImpl::OnSocketWrite, AsWeakPtr()));
   bool result_ok = CheckResult("SendTo", result);
   if (result_ok && result > 0) {
     // Synchronous write.
     OnSocketWrite(result);
   }
-  return result_ok;
-}
-
-void DialServiceImpl::StartRequest() {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  DCHECK(discovery_active_);
-  if (socket_.get())
-    return;
-
-  // TODO(mfoltz): Add a net::NetworkChangeNotifier() to listen for connection
-  // type/IP address changes, and notify via observer.  Also sanity check the
-  // connection type, i.e. !IsOffline && !IsCellular
-  // http://crbug.com/165290
-  BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE, base::Bind(
-      &DialServiceImpl::DoGetNetworkList, this));
 }
 
 void DialServiceImpl::OnSocketWrite(int result) {
@@ -239,7 +255,13 @@ void DialServiceImpl::OnSocketWrite(int result) {
     return;
   }
   FOR_EACH_OBSERVER(Observer, observer_list_, OnDiscoveryRequest(this));
-  num_requests_sent_++;
+  // If we need to send additional requests, schedule a timer to do so.
+  if (num_requests_sent_ < max_requests_ && num_requests_sent_ == 1) {
+    request_timer_.Start(FROM_HERE,
+                         request_interval_,
+                         this,
+                         &DialServiceImpl::SendOneRequest);
+  }
 }
 
 bool DialServiceImpl::ReadSocket() {
@@ -261,7 +283,7 @@ bool DialServiceImpl::ReadSocket() {
     result = socket_->RecvFrom(
         recv_buffer_.get(),
         kDialRecvBufferSize, &recv_address_,
-        base::Bind(&DialServiceImpl::OnSocketRead, this));
+        base::Bind(&DialServiceImpl::OnSocketRead, AsWeakPtr()));
     result_ok = CheckResult("RecvFrom", result);
     if (result != net::ERR_IO_PENDING)
       is_reading_ = false;
@@ -370,18 +392,13 @@ bool DialServiceImpl::ParseResponse(const std::string& response,
 
 void DialServiceImpl::SendNetworkList(const NetworkInterfaceList& networks) {
   DCHECK(thread_checker_.CalledOnValidThread());
-  if (!networks.size()) {
-    DVLOG(1) << "No network interfaces found!";
-    return;
-  }
-
   const NetworkInterface* interface = NULL;
   // Returns the first IPv4 address found.  If there is a need for discovery
   // across multiple networks, we could manage multiple sockets.
 
   // TODO(mfoltz): Support IPV6 multicast.  http://crbug.com/165286
   for (NetworkInterfaceList::const_iterator iter = networks.begin();
-       iter != networks.end(); iter++) {
+       iter != networks.end(); ++iter) {
     DVLOG(1) << "Found " << iter->name << ", "
              << net::IPAddressToString(iter->address);
     if (iter->address.size() == net::kIPv4AddressSize) {
@@ -392,28 +409,28 @@ void DialServiceImpl::SendNetworkList(const NetworkInterfaceList& networks) {
 
   if (interface == NULL) {
     DVLOG(1) << "Could not find a valid interface to bind.";
+    FinishDiscovery();
   } else {
-    BindAndWriteSocket(*interface);
+    BindSocketAndSendRequest(interface->address);
   }
 }
 
-void DialServiceImpl::DoGetNetworkList() {
-  NetworkInterfaceList list;
-  bool success = net::GetNetworkList(&list);
-  if (!success) {
-    DVLOG(1) << "Could not retrieve network list!";
-    return;
-  }
-  BrowserThread::PostTask(BrowserThread::IO, FROM_HERE, base::Bind(
-      &DialServiceImpl::SendNetworkList, this, list));
+void DialServiceImpl::FinishDiscovery() {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK(discovery_active_);
+  DVLOG(1) << "Discovery finished.";
+  CloseSocket();
+  finish_timer_.Stop();
+  request_timer_.Stop();
+  discovery_active_ = false;
+  num_requests_sent_ = 0;
+  FOR_EACH_OBSERVER(Observer, observer_list_, OnDiscoveryFinished(this));
 }
 
 void DialServiceImpl::CloseSocket() {
   DCHECK(thread_checker_.CalledOnValidThread());
   is_reading_ = false;
   is_writing_ = false;
-  if (!socket_.get())
-    return;
   socket_.reset();
 }
 
@@ -424,7 +441,9 @@ bool DialServiceImpl::CheckResult(const char* operation, int result) {
     CloseSocket();
     std::string error_str(net::ErrorToString(result));
     DVLOG(0) << "dial socket error: " << error_str;
-    FOR_EACH_OBSERVER(Observer, observer_list_, OnError(this, error_str));
+    // TODO(justinlin): More granular socket errors.
+    FOR_EACH_OBSERVER(
+        Observer, observer_list_, OnError(this, DIAL_SERVICE_SOCKET_ERROR));
     return false;
   }
   return true;

@@ -9,6 +9,7 @@
 #include <string>
 
 #include "base/basictypes.h"
+#include "chrome/browser/autofill/autofill_manager_delegate.h"
 #include "chrome/browser/autofill/field_types.h"
 
 namespace base {
@@ -17,6 +18,23 @@ class TimeDelta;
 
 class AutofillMetrics {
  public:
+  // The success or failure of Autocheckout.
+  enum AutocheckoutCompletionStatus {
+    AUTOCHECKOUT_FAILED,     // The user canceled out of the dialog after
+                             // an Autocheckout failure.
+    AUTOCHECKOUT_SUCCEEDED,  // The dialog was closed after Autocheckout
+                             // succeeded.
+  };
+
+  // The action a user took to dismiss a bubble.
+  enum BubbleMetric {
+    BUBBLE_CREATED = 0,  // The bubble was created.
+    BUBBLE_ACCEPTED,     // The user accepted, i.e. confirmed, the bubble.
+    BUBBLE_DISMISSED,    // The user dismissed the bubble.
+    BUBBLE_IGNORED,      // The user did not interact with the bubble.
+    NUM_BUBBLE_METRICS,
+  };
+
   enum DeveloperEngagementMetric {
     // Parsed a form that is potentially autofillable.
     FILLABLE_FORM_PARSED = 0,
@@ -24,7 +42,13 @@ class AutofillMetrics {
     // web developer-specified field type hint, a la
     // http://is.gd/whatwg_autocomplete
     FILLABLE_FORM_CONTAINS_TYPE_HINTS,
-    NUM_DEVELOPER_ENGAGEMENT_METRICS
+    NUM_DEVELOPER_ENGAGEMENT_METRICS,
+  };
+
+  // The action the user took to dismiss a dialog.
+  enum DialogDismissalAction {
+    DIALOG_ACCEPTED = 0,  // The user accepted, i.e. confirmed, the dialog.
+    DIALOG_CANCELED,      // The user canceled out of the dialog.
   };
 
   enum InfoBarMetric {
@@ -34,7 +58,7 @@ class AutofillMetrics {
     INFOBAR_DENIED,     // The user explicitly denied the infobar.
     INFOBAR_IGNORED,    // The user completely ignored the infobar (logged on
                         // tab close).
-    NUM_INFO_BAR_METRICS
+    NUM_INFO_BAR_METRICS,
   };
 
   // Metrics measuring how well we predict field types.  Exactly three such
@@ -45,7 +69,7 @@ class AutofillMetrics {
     TYPE_UNKNOWN = 0,  // Offered no prediction.
     TYPE_MATCH,        // Predicted correctly.
     TYPE_MISMATCH,     // Predicted incorrectly.
-    NUM_FIELD_TYPE_QUALITY_METRICS
+    NUM_FIELD_TYPE_QUALITY_METRICS,
   };
 
   enum QualityMetric {
@@ -68,7 +92,7 @@ class AutofillMetrics {
     NOT_AUTOFILLED_SERVER_TYPE_UNKNOWN,
     NOT_AUTOFILLED_SERVER_TYPE_MATCH,
     NOT_AUTOFILLED_SERVER_TYPE_MISMATCH,
-    NUM_QUALITY_METRICS
+    NUM_QUALITY_METRICS,
   };
 
   // Each of these is logged at most once per query to the server, which in turn
@@ -89,7 +113,7 @@ class AutofillMetrics {
     // Our heuristics did not detect any auto-fillable fields, but the server
     // response did detect at least one.
     QUERY_RESPONSE_WITH_NO_LOCAL_HEURISTICS,
-    NUM_SERVER_QUERY_METRICS
+    NUM_SERVER_QUERY_METRICS,
   };
 
   // Each of these metrics is logged only for potentially autofillable forms,
@@ -126,11 +150,14 @@ class AutofillMetrics {
     USER_DID_EDIT_AUTOFILLED_FIELD,
     // Same as above, but only logged once per page load.
     USER_DID_EDIT_AUTOFILLED_FIELD_ONCE,
-    NUM_USER_HAPPINESS_METRICS
+    NUM_USER_HAPPINESS_METRICS,
   };
 
   AutofillMetrics();
   virtual ~AutofillMetrics();
+
+  // Logs how the user interacted with the Autocheckout bubble.
+  virtual void LogAutocheckoutBubbleMetric(BubbleMetric metric) const;
 
   virtual void LogCreditCardInfoBarMetric(InfoBarMetric metric) const;
 
@@ -156,7 +183,19 @@ class AutofillMetrics {
 
   virtual void LogUserHappinessMetric(UserHappinessMetric metric) const;
 
-  virtual void LogAutocheckoutInfoBarMetric(InfoBarMetric metric) const;
+  // This should be called when the requestAutocomplete dialog, invoked by the
+  // |requester|, is closed.  |duration| should be the time elapsed between the
+  // dialog being shown and it being closed.  |dismissal_action| should indicate
+  // whether the user dismissed the dialog by submitting the form data or by
+  // cancelling.
+  virtual void LogRequestAutocompleteUiDuration(
+      const base::TimeDelta& duration,
+      autofill::DialogType dialog_type,
+      DialogDismissalAction dismissal_action) const;
+
+  virtual void LogAutocheckoutDuration(
+      const base::TimeDelta& duration,
+      AutocheckoutCompletionStatus status) const;
 
   // This should be called when a form that has been Autofilled is submitted.
   // |duration| should be the time elapsed between form load and submission.

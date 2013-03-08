@@ -10,6 +10,8 @@
 #include "net/http/http_response_headers.h"
 #include "net/http/http_response_info.h"
 #include "net/http/http_util.h"
+#include "net/quic/crypto/quic_decrypter.h"
+#include "net/quic/crypto/quic_encrypter.h"
 #include "net/quic/quic_http_stream.h"
 #include "net/quic/test_tools/mock_clock.h"
 #include "net/quic/test_tools/mock_random.h"
@@ -31,19 +33,23 @@ class QuicStreamFactoryTest : public ::testing::Test {
   }
 
   scoped_ptr<QuicEncryptedPacket> ConstructChlo() {
+    const std::string& host = host_port_proxy_pair_.first.host();
     scoped_ptr<QuicPacket> chlo(ConstructClientHelloPacket(0xDEADBEEF,
                                                            clock_,
-                                                           &random_generator_));
-    QuicFramer framer(QuicDecrypter::Create(kNULL),
+                                                           &random_generator_,
+                                                           host));
+    QuicFramer framer(kQuicVersion1,
+                      QuicDecrypter::Create(kNULL),
                       QuicEncrypter::Create(kNULL));
-    return scoped_ptr<QuicEncryptedPacket>(framer.EncryptPacket(*chlo));
+    return scoped_ptr<QuicEncryptedPacket>(framer.EncryptPacket(1, *chlo));
   }
 
   scoped_ptr<QuicEncryptedPacket> ConstructShlo() {
     scoped_ptr<QuicPacket> shlo(ConstructHandshakePacket(0xDEADBEEF, kSHLO));
-    QuicFramer framer(QuicDecrypter::Create(kNULL),
+    QuicFramer framer(kQuicVersion1,
+                      QuicDecrypter::Create(kNULL),
                       QuicEncrypter::Create(kNULL));
-    return scoped_ptr<QuicEncryptedPacket>(framer.EncryptPacket(*shlo));
+    return scoped_ptr<QuicEncryptedPacket>(framer.EncryptPacket(1, *shlo));
   }
 
   scoped_ptr<QuicEncryptedPacket> ConstructRstPacket(
@@ -51,12 +57,15 @@ class QuicStreamFactoryTest : public ::testing::Test {
       QuicStreamId stream_id) {
     QuicPacketHeader header;
     header.public_header.guid = 0xDEADBEEF;
-    header.public_header.flags = PACKET_PUBLIC_FLAGS_NONE;
+    header.public_header.reset_flag = false;
+    header.public_header.version_flag = false;
     header.packet_sequence_number = num;
-    header.private_flags = PACKET_PRIVATE_FLAGS_NONE;
+    header.entropy_flag = false;
+    header.fec_entropy_flag = false;
+    header.fec_flag = false;
     header.fec_group = 0;
 
-    QuicRstStreamFrame rst(stream_id, 0, QUIC_NO_ERROR);
+    QuicRstStreamFrame rst(stream_id, QUIC_NO_ERROR);
     return scoped_ptr<QuicEncryptedPacket>(
         ConstructPacket(header, QuicFrame(&rst)));
   }
@@ -66,26 +75,30 @@ class QuicStreamFactoryTest : public ::testing::Test {
       QuicPacketSequenceNumber least_unacked) {
     QuicPacketHeader header;
     header.public_header.guid = 0xDEADBEEF;
-    header.public_header.flags = PACKET_PUBLIC_FLAGS_NONE;
+    header.public_header.reset_flag = false;
+    header.public_header.version_flag = false;
     header.packet_sequence_number = 2;
-    header.private_flags = PACKET_PRIVATE_FLAGS_NONE;
+    header.entropy_flag = false;
+    header.fec_entropy_flag = false;
+    header.fec_flag = false;
     header.fec_group = 0;
 
     QuicAckFrame ack(largest_received, least_unacked);
-
     QuicCongestionFeedbackFrame feedback;
     feedback.type = kTCP;
     feedback.tcp.accumulated_number_of_lost_packets = 0;
     feedback.tcp.receive_window = 16000;
 
-    QuicFramer framer(QuicDecrypter::Create(kNULL),
+    QuicFramer framer(kQuicVersion1,
+                      QuicDecrypter::Create(kNULL),
                       QuicEncrypter::Create(kNULL));
     QuicFrames frames;
     frames.push_back(QuicFrame(&ack));
     frames.push_back(QuicFrame(&feedback));
     scoped_ptr<QuicPacket> packet(
-        framer.ConstructFrameDataPacket(header, frames));
-    return scoped_ptr<QuicEncryptedPacket>(framer.EncryptPacket(*packet));
+        framer.ConstructFrameDataPacket(header, frames).packet);
+    return scoped_ptr<QuicEncryptedPacket>(
+        framer.EncryptPacket(header.packet_sequence_number, *packet));
   }
 
   // Returns a newly created packet to send congestion feedback data.
@@ -93,9 +106,12 @@ class QuicStreamFactoryTest : public ::testing::Test {
       QuicPacketSequenceNumber sequence_number) {
     QuicPacketHeader header;
     header.public_header.guid = 0xDEADBEEF;
-    header.public_header.flags = PACKET_PUBLIC_FLAGS_NONE;
+    header.public_header.reset_flag = false;
+    header.public_header.version_flag = false;
     header.packet_sequence_number = sequence_number;
-    header.private_flags = PACKET_PRIVATE_FLAGS_NONE;
+    header.entropy_flag = false;
+    header.fec_entropy_flag = false;
+    header.fec_flag = false;
     header.fec_group = 0;
 
     QuicCongestionFeedbackFrame frame;
@@ -110,13 +126,15 @@ class QuicStreamFactoryTest : public ::testing::Test {
   scoped_ptr<QuicEncryptedPacket> ConstructPacket(
       const QuicPacketHeader& header,
       const QuicFrame& frame) {
-    QuicFramer framer(QuicDecrypter::Create(kNULL),
+    QuicFramer framer(kQuicVersion1,
+                      QuicDecrypter::Create(kNULL),
                       QuicEncrypter::Create(kNULL));
     QuicFrames frames;
     frames.push_back(frame);
     scoped_ptr<QuicPacket> packet(
-        framer.ConstructFrameDataPacket(header, frames));
-    return scoped_ptr<QuicEncryptedPacket>(framer.EncryptPacket(*packet));
+        framer.ConstructFrameDataPacket(header, frames).packet);
+    return scoped_ptr<QuicEncryptedPacket>(
+        framer.EncryptPacket(header.packet_sequence_number, *packet));
   }
 
   MockHostResolver host_resolver_;

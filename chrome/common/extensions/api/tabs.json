@@ -347,7 +347,7 @@
               "url": {
                 "type": "string",
                 "optional": true,
-                "description": "Match tabs against a URL pattern."
+                "description": "Match tabs against a <a href='match_patterns.html'>URL pattern</a>. Note that fragment identifiers are not matched."
               },
               "windowId": {
                 "type": "integer",
@@ -538,7 +538,7 @@
         "type": "function",
         "description": "Reload a tab.",
         "parameters": [
-          {"type": "integer", "name": "tabId", "optional": true, "description": "The ID of the tab to reload; defaults to the selected tab of the current window."},
+          {"type": "integer", "name": "tabId", "minimum": 0, "optional": true, "description": "The ID of the tab to reload; defaults to the selected tab of the current window."},
           {
             "type": "object",
             "name": "reloadProperties",
@@ -598,7 +598,7 @@
       {
         "name": "captureVisibleTab",
         "type": "function",
-        "description": "Captures the visible area of the currently active tab in the specified window. You must have <a href='manifest.html#permissions'>host permission</a> for the URL displayed by the tab.",
+        "description": "Captures the visible area of the currently active tab in the specified window. You must have <a href='declare_permissions.html'>host permission</a> for the URL displayed by the tab.",
         "parameters": [
           {
             "type": "integer",
@@ -640,7 +640,7 @@
         "type": "function",
         "description": "Injects JavaScript code into a page. For details, see the <a href='content_scripts.html#pi'>programmatic injection</a> section of the content scripts doc.",
         "parameters": [
-          {"type": "integer", "name": "tabId", "optional": true, "description": "The ID of the tab in which to run the script; defaults to the active tab of the current window."},
+          {"type": "integer", "name": "tabId", "minimum": 0, "optional": true, "description": "The ID of the tab in which to run the script; defaults to the active tab of the current window."},
           {
             "$ref": "tabs.InjectDetails",
             "name": "details",
@@ -668,7 +668,7 @@
         "type": "function",
         "description": "Injects CSS into a page. For details, see the <a href='content_scripts.html#pi'>programmatic injection</a> section of the content scripts doc.",
         "parameters": [
-          {"type": "integer", "name": "tabId", "optional": true, "description": "The ID of the tab in which to insert the CSS; defaults to the active tab of the current window."},
+          {"type": "integer", "name": "tabId", "minimum": 0, "optional": true, "description": "The ID of the tab in which to insert the CSS; defaults to the active tab of the current window."},
           {
             "$ref": "tabs.InjectDetails",
             "name": "details",
@@ -913,7 +913,7 @@
             "type": "object",
             "name": "removeInfo",
             "properties": {
-              "windowId": {"type": "integer", "minimum": 0, "description": "the window whose tab is closed." },
+              "windowId": {"type": "integer", "minimum": 0, "description": "The window whose tab is closed." },
               "isWindowClosing": {"type": "boolean", "description": "True when the tab is being closed because its window is being closed." }
             }
           }

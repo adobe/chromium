@@ -1,5 +1,5 @@
 {
-  'TOOLS': ['win', 'linux'],
+  'TOOLS': ['newlib', 'glibc', 'pnacl', 'linux', 'win'],
   'SEARCH' : [
     '.',
     '../../../../ppapi/lib/gl/gles2'
@@ -13,9 +13,6 @@
         'gles2.c'
       ],
     }
-  ],
-  'DATA': [
-    'Makefile',
   ],
   'DEST': 'src',
   'NAME': 'ppapi_gles2',

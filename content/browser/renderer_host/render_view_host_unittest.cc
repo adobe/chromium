@@ -6,13 +6,13 @@
 #include "content/browser/child_process_security_policy_impl.h"
 #include "content/browser/renderer_host/test_render_view_host.h"
 #include "content/browser/web_contents/navigation_controller_impl.h"
-#include "content/browser/web_contents/test_web_contents.h"
 #include "content/common/view_messages.h"
 #include "content/port/browser/render_view_host_delegate_view.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/common/bindings_policy.h"
 #include "content/public/common/page_transition_types.h"
 #include "content/public/test/mock_render_process_host.h"
+#include "content/test/test_web_contents.h"
 #include "net/base/net_util.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDragOperation.h"
 #include "webkit/glue/webdropdata.h"
@@ -159,9 +159,9 @@ TEST_F(RenderViewHostTest, DragEnteredFileURLsStillBlocked) {
   gfx::Point screen_point;
   // We use "//foo/bar" path (rather than "/foo/bar") since dragged paths are
   // expected to be absolute on any platforms.
-  FilePath highlighted_file_path(FILE_PATH_LITERAL("//tmp/foo.html"));
-  FilePath dragged_file_path(FILE_PATH_LITERAL("//tmp/image.jpg"));
-  FilePath sensitive_file_path(FILE_PATH_LITERAL("//etc/passwd"));
+  base::FilePath highlighted_file_path(FILE_PATH_LITERAL("//tmp/foo.html"));
+  base::FilePath dragged_file_path(FILE_PATH_LITERAL("//tmp/image.jpg"));
+  base::FilePath sensitive_file_path(FILE_PATH_LITERAL("//etc/passwd"));
   GURL highlighted_file_url = net::FilePathToFileURL(highlighted_file_path);
   GURL dragged_file_url = net::FilePathToFileURL(dragged_file_path);
   GURL sensitive_file_url = net::FilePathToFileURL(sensitive_file_path);

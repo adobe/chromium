@@ -11,11 +11,11 @@
 #
 # Toolchain
 #
-# This makefile is designed to work with the NEWLIB toolchain which is
-# currently supported by x86 and ARM.  To switch to glibc, you would need
-# to drop support for ARM.
+# By default the VALID_TOOLCHAINS list contains newlib and glibc.  If your
+# project only builds in one or the other then this should be overridden
+# accordingly.
 #
-VALID_TOOLCHAINS?=newlib
+VALID_TOOLCHAINS?=newlib glibc
 TOOLCHAIN?=$(word 1,$(VALID_TOOLCHAINS))
 
 
@@ -63,21 +63,73 @@ export CYGWIN
 
 
 #
+# If NACL_SDK_ROOT is not already set, then set it relative to this makefile.
+#
+THIS_MAKEFILE:=$(CURDIR)/$(lastword $(MAKEFILE_LIST))
+ifndef NACL_SDK_ROOT
+  NACL_SDK_ROOT:=$(realpath $(dir $(THIS_MAKEFILE))/..)
+endif
+
+
+#
+# Check that NACL_SDK_ROOT is set to a valid location.
+# We use the existence of tools/oshelpers.py to verify the validity of the SDK
+# root.
+#
+ifeq (,$(wildcard $(NACL_SDK_ROOT)/tools/oshelpers.py))
+  $(error NACL_SDK_ROOT is set to an invalid location: $(NACL_SDK_ROOT))
+endif
+
+
+#
+# If this makefile is part of a valid nacl SDK, but NACL_SDK_ROOT is set
+# to a different location this is almost certainly a local configuration
+# error.
+#
+LOCAL_ROOT:=$(realpath $(dir $(THIS_MAKEFILE))/..)
+ifneq (,$(wildcard $(LOCAL_ROOT)/tools/oshelpers.py))
+  ifneq ($(realpath $(NACL_SDK_ROOT)), $(realpath $(LOCAL_ROOT)))
+    $(error common.mk included from an SDK that does not match the current NACL_SDK_ROOT)
+  endif
+endif
+
+
+#
 # Alias for standard POSIX file system commands
 #
-CP:=python $(NACL_SDK_ROOT)/tools/oshelpers.py cp
-MKDIR:=python $(NACL_SDK_ROOT)/tools/oshelpers.py mkdir
-MV:=python $(NACL_SDK_ROOT)/tools/oshelpers.py mv
-RM:=python $(NACL_SDK_ROOT)/tools/oshelpers.py rm
+OSHELPERS=python $(NACL_SDK_ROOT)/tools/oshelpers.py
+WHICH:=$(OSHELPERS) which
+ifdef V
+RM:=$(OSHELPERS) rm
+CP:=$(OSHELPERS) cp
+MKDIR:=$(OSHELPERS) mkdir
+MV:=$(OSHELPERS) mv
+else
+RM:=@$(OSHELPERS) rm
+CP:=@$(OSHELPERS) cp
+MKDIR:=@$(OSHELPERS) mkdir
+MV:=@$(OSHELPERS) mv
+endif
+
 
 
 #
 # Compute path to requested NaCl Toolchain
 #
-OSNAME:=$(shell python $(NACL_SDK_ROOT)/tools/getos.py)
+GETOS=python $(NACL_SDK_ROOT)/tools/getos.py
+OSNAME:=$(shell $(GETOS))
 TC_PATH:=$(abspath $(NACL_SDK_ROOT)/toolchain)
 
 
+#
+# Check for required minimum SDK version.
+#
+ifdef NACL_SDK_VERSION_MIN
+  VERSION_CHECK:=$(shell $(GETOS) --check-version=$(NACL_SDK_VERSION_MIN) 2>&1)
+  ifneq ($(VERSION_CHECK),)
+    $(error $(VERSION_CHECK))
+  endif
+endif
 
 
 #
@@ -107,16 +159,29 @@ endef
 # The target for all versions
 #
 USABLE_TOOLCHAINS=$(filter $(OSNAME) newlib glibc pnacl,$(VALID_TOOLCHAINS))
+
+ifeq (1,$(NO_HOST_BUILDS))
+USABLE_TOOLCHAINS:=$(filter-out $(OSNAME),$(USABLE_TOOLCHAINS))
+endif
+
 $(foreach tool,$(USABLE_TOOLCHAINS),$(eval $(call TOOLCHAIN_RULE,$(tool),$(dep))))
+
+.PHONY: all_versions
 all_versions: $(TOOLCHAIN_LIST)
+
+
+OUTBASE?=.
+OUTDIR:=$(OUTBASE)/$(TOOLCHAIN)/$(CONFIG)
+STAMPDIR?=$(OUTDIR)
+
 
 #
 # Target to remove temporary files
 #
 .PHONY: clean
 clean:
-	$(RM) $(TARGET).nmf
-	$(RM) -fr $(TOOLCHAIN)
+	$(RM) -f $(TARGET).nmf
+	$(RM) -fr $(OUTDIR)
 
 
 #
@@ -127,32 +192,40 @@ clean:
 # proivde a cross platform solution. The use of '|' checks for existance instead
 # of timestamp, since the directory can update when files change.
 #
-$(TOOLCHAIN):
-	$(MKDIR) $(TOOLCHAIN)
-
-$(TOOLCHAIN)/$(CONFIG): | $(TOOLCHAIN)
-	$(MKDIR) $(TOOLCHAIN)/$(CONFIG)
-
-OUTDIR:=$(TOOLCHAIN)/$(CONFIG)
--include $(OUTDIR)/*.d
+%dir.stamp :
+	$(MKDIR) -p $(dir $@)
+	@echo Directory Stamp > $@
 
 
 #
 # Dependency Macro
 #
-# $1 = Name of dependency
+# $1 = Name of stamp
+# $2 = Directory for the sub-make
+# $3 = Extra Settings
 #
 define DEPEND_RULE
-.PHONY: $(1)
-$(1):
 ifeq (,$(IGNORE_DEPS))
-	@echo "Checking library: $(1)"
-	+$(MAKE) -C $(NACL_SDK_ROOT)/src/$(1)
-DEPS_LIST+=$(1)
+.PHONY : rebuild_$(1)
+
+rebuild_$(1) :| $(STAMPDIR)/dir.stamp
+ifeq (,$(2))
+	+$(MAKE) -C $(NACL_SDK_ROOT)/src/$(1) STAMPDIR=$(abspath $(STAMPDIR)) $(abspath $(STAMPDIR)/$(1).stamp) $(3)
 else
-	@echo "Ignore DEPS: $(1)"
+	+$(MAKE) -C $(2) STAMPDIR=$(abspath $(STAMPDIR)) $(abspath $(STAMPDIR)/$(1).stamp) $(3)
+endif
+
+all: rebuild_$(1)
+$(STAMPDIR)/$(1).stamp : rebuild_$(1)
+
+else
+
+.PHONY : $(STAMPDIR)/$(1).stamp
+$(STAMPDIR)/$(1).stamp :
+	@echo Ignore $(1)
 endif
 endef
+
 
 
 ifeq ('win','$(TOOLCHAIN)')
@@ -173,6 +246,7 @@ endif
 
 NACL_CFLAGS?=-Wno-long-long -Werror
 NACL_CXXFLAGS?=-Wno-long-long -Werror
+NACL_LDFLAGS?=-Wl,-as-needed
 
 #
 # Default Paths
@@ -184,6 +258,33 @@ INC_PATHS?=$(NACL_SDK_ROOT)/include/$(OSNAME) $(NACL_SDK_ROOT)/include $(EXTRA_I
 endif
 
 LIB_PATHS?=$(NACL_SDK_ROOT)/lib $(EXTRA_LIB_PATHS)
+
+#
+# Define a LOG macro that allow a command to be run in quiet mode where
+# the command echoed is not the same as the actual command executed.
+# The primary use case for this is to avoid echoing the full compiler
+# and linker command in the default case.  Defining V=1 will restore
+# the verbose behavior
+#
+# $1 = The name of the tool being run
+# $2 = The target file being built
+# $3 = The full command to run
+#
+ifdef V
+define LOG
+$(3)
+endef
+else
+ifeq ($(OSNAME),win)
+define LOG
+@echo   $(1) $(2) && $(3)
+endef
+else
+define LOG
+@echo "  $(1) $(2)" && $(3)
+endef
+endif
+endif
 
 
 #
@@ -207,11 +308,25 @@ ifneq (,$(findstring $(TOOLCHAIN),pnacl))
 include $(NACL_SDK_ROOT)/tools/nacl_llvm.mk
 endif
 
+#
+# File to redirect to to in order to hide output.
+#
+ifeq ($(OSNAME),win)
+DEV_NULL=nul
+else
+DEV_NULL=/dev/null
+endif
+
+#
+# Assign a sensible default to CHROME_PATH.
+#
+ifndef CHROME_PATH
+CHROME_PATH:=$(shell python $(NACL_SDK_ROOT)/tools/getos.py --chrome 2> $(DEV_NULL))
+endif
 
 #
 # Verify we can find the Chrome executable if we need to launch it.
 #
-.PHONY: CHECK_FOR_CHROME RUN LAUNCH
 CHECK_FOR_CHROME:
 ifeq (,$(wildcard $(CHROME_PATH)))
 	$(warning No valid Chrome found at CHROME_PATH=$(CHROME_PATH))
@@ -241,25 +356,28 @@ PPAPI_DEBUG=$(abspath $(OSNAME)/Debug/$(TARGET)$(HOST_EXT));application/x-ppapi-
 PPAPI_RELEASE=$(abspath $(OSNAME)/Release/$(TARGET)$(HOST_EXT));application/x-ppapi-release
 
 
-PAGE?=index_$(TOOLCHAIN)_$(CONFIG).html
+PAGE?=index.html
+PAGE_TC_CONFIG="$(PAGE)?tc=$(TOOLCHAIN)&config=$(CONFIG)"
 
 RUN: LAUNCH
 LAUNCH: CHECK_FOR_CHROME all
 ifeq (,$(wildcard $(PAGE)))
-	$(warning No valid HTML page found at $(PAGE))
-	$(error Make sure TOOLCHAIN and CONFIG are properly set)
+	$(error No valid HTML page found at $(PAGE))
 endif
-	$(RUN_PY) -C $(CURDIR) -P $(PAGE) $(addprefix -E ,$(CHROME_ENV)) -- \
-	    $(CHROME_PATH) $(CHROME_ARGS) \
+	$(RUN_PY) -C $(CURDIR) -P $(PAGE_TC_CONFIG) \
+	    $(addprefix -E ,$(CHROME_ENV)) -- $(CHROME_PATH) $(CHROME_ARGS) \
 	    --register-pepper-plugins="$(PPAPI_DEBUG),$(PPAPI_RELEASE)"
 
 
-SYSARCH=$(shell python $(NACL_SDK_ROOT)/tools/getos.py --chrome)
+SYSARCH=$(shell python $(NACL_SDK_ROOT)/tools/getos.py --nacl-arch)
 GDB_ARGS+=-D $(TC_PATH)/$(OSNAME)_x86_$(TOOLCHAIN)/bin/$(SYSARCH)-nacl-gdb
-GDB_ARGS+=-D $(CURDIR)/$(OUTDIR)/$(TARGET)_$(SYSARCH).nexe
+GDB_ARGS+=-D $(abspath $(OUTDIR))/$(TARGET)_$(SYSARCH).nexe
 
 DEBUG: CHECK_FOR_CHROME all
 	$(RUN_PY) $(GDB_ARGS) \
-	    -C $(CURDIR) -P $(PAGE) $(addprefix -E ,$(CHROME_ENV)) -- \
-	    $(CHROME_PATH) $(CHROME_ARGS) --enable-nacl-debug \
+	    -C $(CURDIR) -P $(PAGE_TC_CONFIG) \
+	    $(addprefix -E ,$(CHROME_ENV)) -- $(CHROME_PATH) $(CHROME_ARGS) \
+	    --enable-nacl-debug \
 	    --register-pepper-plugins="$(PPAPI_DEBUG),$(PPAPI_RELEASE)"
+
+.PHONY: CHECK_FOR_CHROME RUN LAUNCH

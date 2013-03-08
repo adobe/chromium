@@ -5,7 +5,7 @@
 #ifndef WEBKIT_BASE_FILE_PATH_STRING_CONVERSIONS_H_
 #define WEBKIT_BASE_FILE_PATH_STRING_CONVERSIONS_H_
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "webkit/base/webkit_base_export.h"
 
 namespace WebKit {
@@ -14,13 +14,13 @@ class WebString;
 
 namespace webkit_base {
 
-WEBKIT_BASE_EXPORT FilePath::StringType WebStringToFilePathString(
+WEBKIT_BASE_EXPORT base::FilePath::StringType WebStringToFilePathString(
     const WebKit::WebString& str);
 WEBKIT_BASE_EXPORT WebKit::WebString FilePathStringToWebString(
-    const FilePath::StringType& str);
-WEBKIT_BASE_EXPORT FilePath WebStringToFilePath(const WebKit::WebString& str);
+    const base::FilePath::StringType& str);
+WEBKIT_BASE_EXPORT base::FilePath WebStringToFilePath(const WebKit::WebString& str);
 WEBKIT_BASE_EXPORT WebKit::WebString FilePathToWebString(
-    const FilePath& file_path);
+    const base::FilePath& file_path);
 
 }  // namespace webkit_base
 

@@ -7,7 +7,7 @@
 #include "chrome/browser/extensions/api/web_navigation/web_navigation_api_helpers.h"
 
 #include "base/json/json_writer.h"
-#include "base/string_number_conversions.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/time.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/api/web_navigation/web_navigation_api_constants.h"
@@ -15,10 +15,10 @@
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/common/extensions/event_filtering_info.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
+#include "extensions/common/event_filtering_info.h"
 #include "net/base/net_errors.h"
 
 namespace extensions {

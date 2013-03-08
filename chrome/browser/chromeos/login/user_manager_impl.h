@@ -24,7 +24,6 @@
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 
-class FilePath;
 class PrefService;
 class ProfileSyncService;
 
@@ -57,8 +56,6 @@ class UserManagerImpl
   virtual void RegularUserLoggedInAsEphemeral(
       const std::string& email) OVERRIDE;
   virtual void SessionStarted() OVERRIDE;
-  virtual const User* CreateLocallyManagedUserRecord(
-      const string16& display_name) OVERRIDE;
   virtual void RemoveUser(const std::string& email,
                           RemoveUserDelegate* delegate) OVERRIDE;
   virtual void RemoveUserFromList(const std::string& email) OVERRIDE;
@@ -91,12 +88,28 @@ class UserManagerImpl
   virtual bool IsLoggedInAsLocallyManagedUser() const OVERRIDE;
   virtual bool IsLoggedInAsStub() const OVERRIDE;
   virtual bool IsSessionStarted() const OVERRIDE;
+  virtual MergeSessionState GetMergeSessionState() const OVERRIDE;
+  virtual void SetMergeSessionState(MergeSessionState status) OVERRIDE;
   virtual bool HasBrowserRestarted() const OVERRIDE;
   virtual bool IsUserNonCryptohomeDataEphemeral(
       const std::string& email) const OVERRIDE;
   virtual void AddObserver(UserManager::Observer* obs) OVERRIDE;
   virtual void RemoveObserver(UserManager::Observer* obs) OVERRIDE;
   virtual void NotifyLocalStateChanged() OVERRIDE;
+  virtual const User* CreateLocallyManagedUserRecord(
+      const std::string& e_mail,
+      const string16& display_name) OVERRIDE;
+  virtual std::string GenerateUniqueLocallyManagedUserId() OVERRIDE;
+  virtual void StartLocallyManagedUserCreationTransaction(
+      const string16& display_name) OVERRIDE;
+  virtual void SetLocallyManagedUserCreationTransactionUserId(
+      const std::string& email) OVERRIDE;
+  virtual void CommitLocallyManagedUserCreationTransaction() OVERRIDE;
+
+  virtual UserFlow* GetCurrentUserFlow() const OVERRIDE;
+  virtual UserFlow* GetUserFlow(const std::string& email) const OVERRIDE;
+  virtual void SetUserFlow(const std::string& email, UserFlow* flow) OVERRIDE;
+  virtual void ResetUserFlow(const std::string& email) OVERRIDE;
 
   // content::NotificationObserver implementation.
   virtual void Observe(int type,
@@ -169,6 +182,15 @@ class UserManagerImpl
   // associated with that username.
   void UpdatePublicAccountDisplayName(const std::string& username);
 
+  // Notifies the UI about a change to the user list.
+  void NotifyUserListChanged();
+
+  // Notifies observers that merge session state had changed.
+  void NotifyMergeSessionStateChanged();
+
+  // Lazily creates default user flow.
+  UserFlow* GetDefaultUserFlow() const;
+
   // Interface to the signed settings store.
   CrosSettings* cros_settings_;
 
@@ -212,8 +234,8 @@ class UserManagerImpl
   // policy yet.
   bool ephemeral_users_enabled_;
 
-  // True if user pod row is showed at login screen.
-  bool show_users_;
+  // Merge session state (cookie restore process state).
+  MergeSessionState merge_session_state_;
 
   // Cached name of device owner. Defaults to empty string if the value has not
   // been read from trusted device policy yet.
@@ -233,6 +255,14 @@ class UserManagerImpl
 
   // Session length limiter.
   scoped_ptr<SessionLengthLimiter> session_length_limiter_;
+
+  typedef std::map<std::string, UserFlow*> FlowMap;
+
+  // Lazy-initialized default flow.
+  mutable scoped_ptr<UserFlow> default_flow_;
+
+  // Specific flows by user e-mail.
+  FlowMap specific_flows_;
 
   DISALLOW_COPY_AND_ASSIGN(UserManagerImpl);
 };

@@ -64,8 +64,15 @@ static const char* kErrorPermissionDenied =
     "Permission to access device was denied";
 static const char* kErrorInvalidTransferLength = "Transfer length must be a "
     "positive number less than 104,857,600.";
+static const char* kErrorInvalidNumberOfPackets = "Number of packets must be a "
+    "positive number less than 4,194,304.";
+static const char* kErrorInvalidPacketLength = "Packet length must be a "
+    "positive number less than 65,536.";
 
 static const size_t kMaxTransferLength = 100 * 1024 * 1024;
+static const int kMaxPackets = 4 * 1024 * 1024;
+static const int kMaxPacketLength = 64 * 1024;
+
 static UsbDevice* device_for_test_ = NULL;
 
 static bool ConvertDirection(const Direction& input,
@@ -150,7 +157,7 @@ template<class T>
 static scoped_refptr<net::IOBuffer> CreateBufferForTransfer(
     const T& input, UsbDevice::TransferDirection direction, size_t size) {
 
-  if (size > kMaxTransferLength)
+  if (size >= kMaxTransferLength)
     return NULL;
 
   // Allocate a |size|-bytes buffer, or a one-byte buffer if |size| is 0. This
@@ -302,7 +309,7 @@ bool UsbFindDevicesFunction::Prepare() {
 }
 
 void UsbFindDevicesFunction::AsyncWorkStart() {
-  scoped_ptr<base::ListValue> result(new base::ListValue());
+  result_.reset(new base::ListValue());
 
   if (device_for_test_) {
     UsbDeviceResource* const resource = new UsbDeviceResource(
@@ -310,8 +317,8 @@ void UsbFindDevicesFunction::AsyncWorkStart() {
         device_for_test_);
 
     Device device;
-    result->Append(PopulateDevice(manager_->Add(resource), 0, 0));
-    SetResult(result.release());
+    result_->Append(PopulateDevice(manager_->Add(resource), 0, 0));
+    SetResult(result_.release());
     AsyncWorkCompleted();
     return;
   }
@@ -334,20 +341,23 @@ void UsbFindDevicesFunction::AsyncWorkStart() {
     return;
   }
 
-  vector<scoped_refptr<UsbDevice> > devices;
-  service->FindDevices(vendor_id, product_id, &devices);
-  for (size_t i = 0; i < devices.size(); ++i) {
-    UsbDevice* const device = devices[i];
+  service->FindDevices(vendor_id, product_id, &devices_, base::Bind(
+      &UsbFindDevicesFunction::OnCompleted, this));
+}
+
+void UsbFindDevicesFunction::OnCompleted() {
+  for (size_t i = 0; i < devices_.size(); ++i) {
+    UsbDevice* const device = devices_[i];
     UsbDeviceResource* const resource = new UsbDeviceResource(
         extension_->id(), device);
 
     Device js_device;
-    result->Append(PopulateDevice(manager_->Add(resource),
-                                  vendor_id,
-                                  product_id));
+    result_->Append(PopulateDevice(manager_->Add(resource),
+                                   parameters_->options.vendor_id,
+                                   parameters_->options.product_id));
   }
 
-  SetResult(result.release());
+  SetResult(result_.release());
   AsyncWorkCompleted();
 }
 
@@ -628,9 +638,24 @@ void UsbIsochronousTransferFunction::AsyncWorkStart() {
     AsyncWorkCompleted();
     return;
   }
-
   if (!GetTransferSize(generic_transfer, &size)) {
     CompleteWithError(kErrorInvalidTransferLength);
+    return;
+  }
+  if (transfer.packets < 0 || transfer.packets >= kMaxPackets) {
+    CompleteWithError(kErrorInvalidNumberOfPackets);
+    return;
+  }
+  unsigned int packets = transfer.packets;
+  if (transfer.packet_length < 0 ||
+      transfer.packet_length >= kMaxPacketLength) {
+    CompleteWithError(kErrorInvalidPacketLength);
+    return;
+  }
+  unsigned int packet_length = transfer.packet_length;
+  const uint64 total_length = packets * packet_length;
+  if (packets > size || total_length > size) {
+    CompleteWithError(kErrorTransferLength);
     return;
   }
 
@@ -642,7 +667,7 @@ void UsbIsochronousTransferFunction::AsyncWorkStart() {
   }
 
   device->device()->IsochronousTransfer(direction, generic_transfer.endpoint,
-      buffer, size, transfer.packets, transfer.packet_length, 0, base::Bind(
+      buffer, size, packets, packet_length, 0, base::Bind(
           &UsbIsochronousTransferFunction::OnCompleted, this));
 }
 

@@ -5,10 +5,11 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/path_service.h"
+#include "base/prefs/pref_service.h"
 #include "base/prefs/public/pref_member.h"
 #include "base/test/test_file_util.h"
 #include "chrome/app/chrome_command_ids.h"
@@ -19,12 +20,11 @@
 #include "chrome/browser/download/download_service_factory.h"
 #include "chrome/browser/history/download_row.h"
 #include "chrome/browser/net/url_request_mock_util.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
-#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
@@ -52,6 +52,8 @@ using content::DownloadItem;
 using content::DownloadManager;
 using content::URLRequestMockHTTPJob;
 using content::WebContents;
+
+namespace {
 
 // Waits for an item record in the downloads database to match |filter|. See
 // DownloadStoredProperly() below for an example filter.
@@ -84,7 +86,7 @@ class DownloadPersistedObserver : public DownloadHistory::Observer {
   }
 
   virtual void OnDownloadStored(DownloadItem* item,
-                                const history::DownloadRow& info) {
+                                const history::DownloadRow& info) OVERRIDE {
     persisted_ = filter_.Run(item, info);
     if (persisted_ && waiting_)
       MessageLoopForUI::current()->Quit();
@@ -121,10 +123,10 @@ class DownloadRemovedObserver : public DownloadPersistedObserver {
   }
 
   virtual void OnDownloadStored(DownloadItem* item,
-                                const history::DownloadRow& info) {
+                                const history::DownloadRow& info) OVERRIDE {
   }
 
-  virtual void OnDownloadsRemoved(const DownloadHistory::IdSet& ids) {
+  virtual void OnDownloadsRemoved(const DownloadHistory::IdSet& ids) OVERRIDE {
     removed_ = ids.find(download_id_) != ids.end();
     if (removed_ && waiting_)
       MessageLoopForUI::current()->Quit();
@@ -140,7 +142,7 @@ class DownloadRemovedObserver : public DownloadPersistedObserver {
 
 bool DownloadStoredProperly(
     const GURL& expected_url,
-    const FilePath& expected_path,
+    const base::FilePath& expected_path,
     int64 num_files,
     DownloadItem::DownloadState expected_state,
     DownloadItem* item,
@@ -148,13 +150,18 @@ bool DownloadStoredProperly(
   // This function may be called multiple times for a given test. Returning
   // false doesn't necessarily mean that the test has failed or will fail, it
   // might just mean that the test hasn't passed yet.
-  if (info.path != expected_path) {
-    VLOG(20) << __FUNCTION__ << " " << info.path.value()
+  if (info.target_path != expected_path) {
+    VLOG(20) << __FUNCTION__ << " " << info.target_path.value()
              << " != " << expected_path.value();
     return false;
   }
-  if (info.url != expected_url) {
-    VLOG(20) << __FUNCTION__ << " " << info.url.spec()
+  if (info.url_chain.size() != 1u) {
+    VLOG(20) << __FUNCTION__ << " " << info.url_chain.size()
+             << " != 1";
+    return false;
+  }
+  if (info.url_chain[0] != expected_url) {
+    VLOG(20) << __FUNCTION__ << " " << info.url_chain[0].spec()
              << " != " << expected_url.spec();
     return false;
   }
@@ -171,7 +178,7 @@ bool DownloadStoredProperly(
   return true;
 }
 
-const FilePath::CharType kTestDir[] = FILE_PATH_LITERAL("save_page");
+const base::FilePath::CharType kTestDir[] = FILE_PATH_LITERAL("save_page");
 
 static const char kAppendedExtension[] =
 #if defined(OS_WIN)
@@ -188,7 +195,7 @@ class DownloadItemCreatedObserver : public DownloadManager::Observer {
     manager->AddObserver(this);
   }
 
-  ~DownloadItemCreatedObserver() {
+  virtual ~DownloadItemCreatedObserver() {
     if (manager_)
       manager_->RemoveObserver(this);
   }
@@ -240,19 +247,50 @@ class DownloadItemCreatedObserver : public DownloadManager::Observer {
   DISALLOW_COPY_AND_ASSIGN(DownloadItemCreatedObserver);
 };
 
+class SavePackageFinishedObserver : public content::DownloadManager::Observer {
+ public:
+  SavePackageFinishedObserver(content::DownloadManager* manager,
+                              const base::Closure& callback)
+      : download_manager_(manager),
+        callback_(callback) {
+    download_manager_->AddObserver(this);
+  }
+
+  virtual ~SavePackageFinishedObserver() {
+    if (download_manager_)
+      download_manager_->RemoveObserver(this);
+  }
+
+  // DownloadManager::Observer:
+  virtual void OnSavePackageSuccessfullyFinished(
+      content::DownloadManager* manager, content::DownloadItem* item) OVERRIDE {
+    callback_.Run();
+  }
+  virtual void ManagerGoingDown(content::DownloadManager* manager) OVERRIDE {
+    download_manager_->RemoveObserver(this);
+    download_manager_ = NULL;
+  }
+
+ private:
+  content::DownloadManager* download_manager_;
+  base::Closure callback_;
+
+  DISALLOW_COPY_AND_ASSIGN(SavePackageFinishedObserver);
+};
+
 class SavePageBrowserTest : public InProcessBrowserTest {
  public:
   SavePageBrowserTest() {}
   virtual ~SavePageBrowserTest();
 
  protected:
-  void SetUp() OVERRIDE {
+  virtual void SetUp() OVERRIDE {
     ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &test_dir_));
     ASSERT_TRUE(save_dir_.CreateUniqueTempDir());
     InProcessBrowserTest::SetUp();
   }
 
-  void SetUpOnMainThread() OVERRIDE {
+  virtual void SetUpOnMainThread() OVERRIDE {
     browser()->profile()->GetPrefs()->SetFilePath(
         prefs::kDownloadDefaultDirectory, save_dir_.path());
     BrowserThread::PostTask(
@@ -262,35 +300,31 @@ class SavePageBrowserTest : public InProcessBrowserTest {
 
   GURL NavigateToMockURL(const std::string& prefix) {
     GURL url = URLRequestMockHTTPJob::GetMockUrl(
-        FilePath(kTestDir).AppendASCII(prefix + ".htm"));
+        base::FilePath(kTestDir).AppendASCII(prefix + ".htm"));
     ui_test_utils::NavigateToURL(browser(), url);
     return url;
   }
 
   // Returns full paths of destination file and directory.
   void GetDestinationPaths(const std::string& prefix,
-                FilePath* full_file_name,
-                FilePath* dir) {
+                base::FilePath* full_file_name,
+                base::FilePath* dir) {
     *full_file_name = save_dir_.path().AppendASCII(prefix + ".htm");
     *dir = save_dir_.path().AppendASCII(prefix + "_files");
   }
 
   WebContents* GetCurrentTab(Browser* browser) const {
-    WebContents* current_tab = chrome::GetActiveWebContents(browser);
+    WebContents* current_tab =
+        browser->tab_strip_model()->GetActiveWebContents();
     EXPECT_TRUE(current_tab);
     return current_tab;
   }
 
   // Returns true if and when there was a single download created, and its url
   // is |expected_url|.
-  bool WaitForSavePackageToFinish(
+  bool VerifySavePackageExpectations(
       Browser* browser,
       const GURL& expected_url) const {
-    content::WindowedNotificationObserver observer(
-        content::NOTIFICATION_SAVE_PACKAGE_SUCCESSFULLY_FINISHED,
-        content::NotificationService::AllSources());
-    observer.Wait();
-
     // Generally, there should only be one download item created
     // in all of these tests.  If it's already here, grab it; if not,
     // wait for it to show up.
@@ -307,9 +341,7 @@ class SavePageBrowserTest : public InProcessBrowserTest {
       return false;
     DownloadItem* download_item(items[0]);
 
-    return ((expected_url == download_item->GetOriginalUrl()) &&
-            (expected_url == content::Details<DownloadItem>(
-                observer.details()).ptr()->GetOriginalUrl()));
+    return (expected_url == download_item->GetOriginalUrl());
   }
 
   // Note on synchronization:
@@ -332,7 +364,7 @@ class SavePageBrowserTest : public InProcessBrowserTest {
   }
 
   // Path to directory containing test data.
-  FilePath test_dir_;
+  base::FilePath test_dir_;
 
   // Temporary directory we will save pages to.
   base::ScopedTempDir save_dir_;
@@ -345,7 +377,8 @@ SavePageBrowserTest::~SavePageBrowserTest() {
 }
 
 // Disabled on Windows due to flakiness. http://crbug.com/162323
-#if defined(OS_WIN)
+// TODO(linux_aura) http://crbug.com/163931
+#if defined(OS_WIN) || (defined(OS_LINUX) && !defined(OS_CHROMEOS) && defined(USE_AURA))
 #define MAYBE_SaveHTMLOnly DISABLED_SaveHTMLOnly
 #else
 #define MAYBE_SaveHTMLOnly SaveHTMLOnly
@@ -353,25 +386,31 @@ SavePageBrowserTest::~SavePageBrowserTest() {
 IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, MAYBE_SaveHTMLOnly) {
   GURL url = NavigateToMockURL("a");
 
-  FilePath full_file_name, dir;
+  base::FilePath full_file_name, dir;
   GetDestinationPaths("a", &full_file_name, &dir);
   DownloadPersistedObserver persisted(browser()->profile(), base::Bind(
       &DownloadStoredProperly, url, full_file_name, 1,
       DownloadItem::COMPLETE));
+  scoped_refptr<content::MessageLoopRunner> loop_runner(
+      new content::MessageLoopRunner);
+  SavePackageFinishedObserver observer(
+      content::BrowserContext::GetDownloadManager(browser()->profile()),
+      loop_runner->QuitClosure());
   ASSERT_TRUE(GetCurrentTab(browser())->SavePage(full_file_name, dir,
                                         content::SAVE_PAGE_TYPE_AS_ONLY_HTML));
-  ASSERT_TRUE(WaitForSavePackageToFinish(browser(), url));
+  loop_runner->Run();
+  ASSERT_TRUE(VerifySavePackageExpectations(browser(), url));
   persisted.WaitForPersisted();
   EXPECT_TRUE(browser()->window()->IsDownloadShelfVisible());
   EXPECT_TRUE(file_util::PathExists(full_file_name));
   EXPECT_FALSE(file_util::PathExists(dir));
-  EXPECT_TRUE(file_util::ContentsEqual(
-      test_dir_.Append(FilePath(kTestDir)).Append(FILE_PATH_LITERAL("a.htm")),
-      full_file_name));
+  EXPECT_TRUE(file_util::ContentsEqual(test_dir_.Append(base::FilePath(
+      kTestDir)).Append(FILE_PATH_LITERAL("a.htm")), full_file_name));
 }
 
 // Disabled on Windows due to flakiness. http://crbug.com/162323
-#if defined(OS_WIN)
+// TODO(linux_aura) http://crbug.com/163931
+#if defined(OS_WIN) || (defined(OS_LINUX) && !defined(OS_CHROMEOS) && defined(USE_AURA))
 #define MAYBE_SaveHTMLOnlyCancel DISABLED_SaveHTMLOnlyCancel
 #else
 #define MAYBE_SaveHTMLOnlyCancel SaveHTMLOnlyCancel
@@ -383,7 +422,7 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, MAYBE_SaveHTMLOnlyCancel) {
   manager->GetAllDownloads(&downloads);
   ASSERT_EQ(0u, downloads.size());
 
-  FilePath full_file_name, dir;
+  base::FilePath full_file_name, dir;
   GetDestinationPaths("a", &full_file_name, &dir);
   DownloadItemCreatedObserver creation_observer(manager);
   DownloadPersistedObserver persisted(browser()->profile(), base::Bind(
@@ -418,7 +457,7 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, SaveHTMLOnlyTabDestroy) {
   manager->GetAllDownloads(&downloads);
   ASSERT_EQ(0u, downloads.size());
 
-  FilePath full_file_name, dir;
+  base::FilePath full_file_name, dir;
   GetDestinationPaths("a", &full_file_name, &dir);
   DownloadItemCreatedObserver creation_observer(manager);
   ASSERT_TRUE(GetCurrentTab(browser())->SavePage(full_file_name, dir,
@@ -436,27 +475,34 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, SaveHTMLOnlyTabDestroy) {
 }
 
 // Disabled on Windows due to flakiness. http://crbug.com/162323
-#if defined(OS_WIN)
+// TODO(linux_aura) http://crbug.com/163931
+#if defined(OS_WIN) || (defined(OS_LINUX) && !defined(OS_CHROMEOS) && defined(USE_AURA))
 #define MAYBE_SaveViewSourceHTMLOnly DISABLED_SaveViewSourceHTMLOnly
 #else
 #define MAYBE_SaveViewSourceHTMLOnly SaveViewSourceHTMLOnly
 #endif
 IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, MAYBE_SaveViewSourceHTMLOnly) {
-  FilePath file_name(FILE_PATH_LITERAL("a.htm"));
+  base::FilePath file_name(FILE_PATH_LITERAL("a.htm"));
   GURL view_source_url = URLRequestMockHTTPJob::GetMockViewSourceUrl(
-      FilePath(kTestDir).Append(file_name));
+      base::FilePath(kTestDir).Append(file_name));
   GURL actual_page_url = URLRequestMockHTTPJob::GetMockUrl(
-      FilePath(kTestDir).Append(file_name));
+      base::FilePath(kTestDir).Append(file_name));
   ui_test_utils::NavigateToURL(browser(), view_source_url);
 
-  FilePath full_file_name, dir;
+  base::FilePath full_file_name, dir;
   GetDestinationPaths("a", &full_file_name, &dir);
   DownloadPersistedObserver persisted(browser()->profile(), base::Bind(
       &DownloadStoredProperly, actual_page_url, full_file_name, 1,
       DownloadItem::COMPLETE));
+  scoped_refptr<content::MessageLoopRunner> loop_runner(
+      new content::MessageLoopRunner);
+  SavePackageFinishedObserver observer(
+      content::BrowserContext::GetDownloadManager(browser()->profile()),
+      loop_runner->QuitClosure());
   ASSERT_TRUE(GetCurrentTab(browser())->SavePage(full_file_name, dir,
                                         content::SAVE_PAGE_TYPE_AS_ONLY_HTML));
-  ASSERT_TRUE(WaitForSavePackageToFinish(browser(), actual_page_url));
+  loop_runner->Run();
+  ASSERT_TRUE(VerifySavePackageExpectations(browser(), actual_page_url));
   persisted.WaitForPersisted();
 
   EXPECT_TRUE(browser()->window()->IsDownloadShelfVisible());
@@ -464,12 +510,13 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, MAYBE_SaveViewSourceHTMLOnly) {
   EXPECT_TRUE(file_util::PathExists(full_file_name));
   EXPECT_FALSE(file_util::PathExists(dir));
   EXPECT_TRUE(file_util::ContentsEqual(
-      test_dir_.Append(FilePath(kTestDir)).Append(file_name),
+      test_dir_.Append(base::FilePath(kTestDir)).Append(file_name),
       full_file_name));
 }
 
 // Disabled on Windows due to flakiness. http://crbug.com/162323
-#if defined(OS_WIN)
+// TODO(linux_aura) http://crbug.com/163931
+#if defined(OS_WIN) || (defined(OS_LINUX) && !defined(OS_CHROMEOS) && defined(USE_AURA))
 #define MAYBE_SaveCompleteHTML DISABLED_SaveCompleteHTML
 #else
 #define MAYBE_SaveCompleteHTML SaveCompleteHTML
@@ -477,14 +524,20 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, MAYBE_SaveViewSourceHTMLOnly) {
 IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, MAYBE_SaveCompleteHTML) {
   GURL url = NavigateToMockURL("b");
 
-  FilePath full_file_name, dir;
+  base::FilePath full_file_name, dir;
   GetDestinationPaths("b", &full_file_name, &dir);
   DownloadPersistedObserver persisted(browser()->profile(), base::Bind(
       &DownloadStoredProperly, url, full_file_name, 3,
       DownloadItem::COMPLETE));
+  scoped_refptr<content::MessageLoopRunner> loop_runner(
+      new content::MessageLoopRunner);
+  SavePackageFinishedObserver observer(
+      content::BrowserContext::GetDownloadManager(browser()->profile()),
+      loop_runner->QuitClosure());
   ASSERT_TRUE(GetCurrentTab(browser())->SavePage(
       full_file_name, dir, content::SAVE_PAGE_TYPE_AS_COMPLETE_HTML));
-  ASSERT_TRUE(WaitForSavePackageToFinish(browser(), url));
+  loop_runner->Run();
+  ASSERT_TRUE(VerifySavePackageExpectations(browser(), url));
   persisted.WaitForPersisted();
 
   EXPECT_TRUE(browser()->window()->IsDownloadShelfVisible());
@@ -492,13 +545,13 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, MAYBE_SaveCompleteHTML) {
   EXPECT_TRUE(file_util::PathExists(full_file_name));
   EXPECT_TRUE(file_util::PathExists(dir));
   EXPECT_TRUE(file_util::TextContentsEqual(
-      test_dir_.Append(FilePath(kTestDir)).AppendASCII("b.saved1.htm"),
+      test_dir_.Append(base::FilePath(kTestDir)).AppendASCII("b.saved1.htm"),
       full_file_name));
   EXPECT_TRUE(file_util::ContentsEqual(
-      test_dir_.Append(FilePath(kTestDir)).AppendASCII("1.png"),
+      test_dir_.Append(base::FilePath(kTestDir)).AppendASCII("1.png"),
       dir.AppendASCII("1.png")));
   EXPECT_TRUE(file_util::ContentsEqual(
-      test_dir_.Append(FilePath(kTestDir)).AppendASCII("1.css"),
+      test_dir_.Append(base::FilePath(kTestDir)).AppendASCII("1.css"),
       dir.AppendASCII("1.css")));
 }
 
@@ -523,17 +576,23 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest,
 
   // Navigate, unblocking with new tab.
   GURL url = URLRequestMockHTTPJob::GetMockUrl(
-      FilePath(kTestDir).AppendASCII("b.htm"));
+      base::FilePath(kTestDir).AppendASCII("b.htm"));
   NavigateToURLWithDisposition(incognito, url, NEW_FOREGROUND_TAB,
                                ui_test_utils::BROWSER_TEST_WAIT_FOR_TAB);
 
   // Save the page before completion.
-  FilePath full_file_name, dir;
+  base::FilePath full_file_name, dir;
   GetDestinationPaths("b", &full_file_name, &dir);
+  scoped_refptr<content::MessageLoopRunner> loop_runner(
+      new content::MessageLoopRunner);
+  SavePackageFinishedObserver observer(
+      content::BrowserContext::GetDownloadManager(incognito->profile()),
+      loop_runner->QuitClosure());
   ASSERT_TRUE(GetCurrentTab(incognito)->SavePage(
       full_file_name, dir, content::SAVE_PAGE_TYPE_AS_COMPLETE_HTML));
 
-  ASSERT_TRUE(WaitForSavePackageToFinish(incognito, url));
+  loop_runner->Run();
+  ASSERT_TRUE(VerifySavePackageExpectations(incognito, url));
 
   // Confirm download shelf is visible.
   EXPECT_TRUE(incognito->window()->IsDownloadShelfVisible());
@@ -551,7 +610,8 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, NoSave) {
 }
 
 // Disabled on Windows due to flakiness. http://crbug.com/162323
-#if defined(OS_WIN)
+// TODO(linux_aura) http://crbug.com/163931
+#if defined(OS_WIN) || (defined(OS_LINUX) && !defined(OS_CHROMEOS) && defined(USE_AURA))
 #define MAYBE_FileNameFromPageTitle DISABLED_FileNameFromPageTitle
 #else
 #define MAYBE_FileNameFromPageTitle FileNameFromPageTitle
@@ -559,17 +619,23 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, NoSave) {
 IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, MAYBE_FileNameFromPageTitle) {
   GURL url = NavigateToMockURL("b");
 
-  FilePath full_file_name = save_dir_.path().AppendASCII(
+  base::FilePath full_file_name = save_dir_.path().AppendASCII(
       std::string("Test page for saving page feature") + kAppendedExtension);
-  FilePath dir = save_dir_.path().AppendASCII(
+  base::FilePath dir = save_dir_.path().AppendASCII(
       "Test page for saving page feature_files");
   DownloadPersistedObserver persisted(browser()->profile(), base::Bind(
       &DownloadStoredProperly, url, full_file_name, 3,
       DownloadItem::COMPLETE));
+  scoped_refptr<content::MessageLoopRunner> loop_runner(
+      new content::MessageLoopRunner);
+  SavePackageFinishedObserver observer(
+      content::BrowserContext::GetDownloadManager(browser()->profile()),
+      loop_runner->QuitClosure());
   ASSERT_TRUE(GetCurrentTab(browser())->SavePage(
       full_file_name, dir, content::SAVE_PAGE_TYPE_AS_COMPLETE_HTML));
 
-  ASSERT_TRUE(WaitForSavePackageToFinish(browser(), url));
+  loop_runner->Run();
+  ASSERT_TRUE(VerifySavePackageExpectations(browser(), url));
   persisted.WaitForPersisted();
 
   EXPECT_TRUE(browser()->window()->IsDownloadShelfVisible());
@@ -577,18 +643,19 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, MAYBE_FileNameFromPageTitle) {
   EXPECT_TRUE(file_util::PathExists(full_file_name));
   EXPECT_TRUE(file_util::PathExists(dir));
   EXPECT_TRUE(file_util::TextContentsEqual(
-      test_dir_.Append(FilePath(kTestDir)).AppendASCII("b.saved2.htm"),
+      test_dir_.Append(base::FilePath(kTestDir)).AppendASCII("b.saved2.htm"),
       full_file_name));
   EXPECT_TRUE(file_util::ContentsEqual(
-      test_dir_.Append(FilePath(kTestDir)).AppendASCII("1.png"),
+      test_dir_.Append(base::FilePath(kTestDir)).AppendASCII("1.png"),
       dir.AppendASCII("1.png")));
   EXPECT_TRUE(file_util::ContentsEqual(
-      test_dir_.Append(FilePath(kTestDir)).AppendASCII("1.css"),
+      test_dir_.Append(base::FilePath(kTestDir)).AppendASCII("1.css"),
       dir.AppendASCII("1.css")));
 }
 
 // Disabled on Windows due to flakiness. http://crbug.com/162323
-#if defined(OS_WIN)
+// TODO(linux_aura) http://crbug.com/163931
+#if defined(OS_WIN) || (defined(OS_LINUX) && !defined(OS_CHROMEOS) && defined(USE_AURA))
 #define MAYBE_RemoveFromList DISABLED_RemoveFromList
 #else
 #define MAYBE_RemoveFromList RemoveFromList
@@ -596,15 +663,21 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, MAYBE_FileNameFromPageTitle) {
 IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, MAYBE_RemoveFromList) {
   GURL url = NavigateToMockURL("a");
 
-  FilePath full_file_name, dir;
+  base::FilePath full_file_name, dir;
   GetDestinationPaths("a", &full_file_name, &dir);
   DownloadPersistedObserver persisted(browser()->profile(), base::Bind(
       &DownloadStoredProperly, url, full_file_name, 1,
       DownloadItem::COMPLETE));
+  scoped_refptr<content::MessageLoopRunner> loop_runner(
+      new content::MessageLoopRunner);
+  SavePackageFinishedObserver observer(
+      content::BrowserContext::GetDownloadManager(browser()->profile()),
+      loop_runner->QuitClosure());
   ASSERT_TRUE(GetCurrentTab(browser())->SavePage(full_file_name, dir,
                                         content::SAVE_PAGE_TYPE_AS_ONLY_HTML));
 
-  ASSERT_TRUE(WaitForSavePackageToFinish(browser(), url));
+  loop_runner->Run();
+  ASSERT_TRUE(VerifySavePackageExpectations(browser(), url));
   persisted.WaitForPersisted();
 
   EXPECT_TRUE(browser()->window()->IsDownloadShelfVisible());
@@ -621,9 +694,8 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, MAYBE_RemoveFromList) {
 
   EXPECT_TRUE(file_util::PathExists(full_file_name));
   EXPECT_FALSE(file_util::PathExists(dir));
-  EXPECT_TRUE(file_util::ContentsEqual(
-      test_dir_.Append(FilePath(kTestDir)).Append(FILE_PATH_LITERAL("a.htm")),
-      full_file_name));
+  EXPECT_TRUE(file_util::ContentsEqual(test_dir_.Append(base::FilePath(
+      kTestDir)).Append(FILE_PATH_LITERAL("a.htm")), full_file_name));
 }
 
 // This tests that a webpage with the title "test.exe" is saved as
@@ -631,25 +703,27 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, MAYBE_RemoveFromList) {
 // We probably don't care to handle this on Linux or Mac.
 #if defined(OS_WIN)
 IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, CleanFilenameFromPageTitle) {
-  const FilePath file_name(FILE_PATH_LITERAL("c.htm"));
-  FilePath download_dir =
+  const base::FilePath file_name(FILE_PATH_LITERAL("c.htm"));
+  base::FilePath download_dir =
       DownloadPrefs::FromDownloadManager(GetDownloadManager())->
           DownloadPath();
-  FilePath full_file_name =
+  base::FilePath full_file_name =
       download_dir.AppendASCII(std::string("test.exe") + kAppendedExtension);
-  FilePath dir = download_dir.AppendASCII("test.exe_files");
+  base::FilePath dir = download_dir.AppendASCII("test.exe_files");
 
   EXPECT_FALSE(file_util::PathExists(full_file_name));
   GURL url = URLRequestMockHTTPJob::GetMockUrl(
-      FilePath(kTestDir).Append(file_name));
+      base::FilePath(kTestDir).Append(file_name));
   ui_test_utils::NavigateToURL(browser(), url);
 
   SavePackageFilePicker::SetShouldPromptUser(false);
-  content::WindowedNotificationObserver observer(
-        content::NOTIFICATION_SAVE_PACKAGE_SUCCESSFULLY_FINISHED,
-        content::NotificationService::AllSources());
+  scoped_refptr<content::MessageLoopRunner> loop_runner(
+      new content::MessageLoopRunner);
+  SavePackageFinishedObserver observer(
+      content::BrowserContext::GetDownloadManager(browser()->profile()),
+      loop_runner->QuitClosure());
   chrome::SavePage(browser());
-  observer.Wait();
+  loop_runner->Run();
 
   EXPECT_TRUE(file_util::PathExists(full_file_name));
 
@@ -676,9 +750,9 @@ SavePageAsMHTMLBrowserTest::~SavePageAsMHTMLBrowserTest() {
 IN_PROC_BROWSER_TEST_F(SavePageAsMHTMLBrowserTest, SavePageAsMHTML) {
   static const int64 kFileSizeMin = 2758;
   GURL url = NavigateToMockURL("b");
-  FilePath download_dir = DownloadPrefs::FromDownloadManager(
+  base::FilePath download_dir = DownloadPrefs::FromDownloadManager(
       GetDownloadManager())->DownloadPath();
-  FilePath full_file_name = download_dir.AppendASCII(std::string(
+  base::FilePath full_file_name = download_dir.AppendASCII(std::string(
       "Test page for saving page feature.mhtml"));
 #if defined(OS_CHROMEOS)
   SavePackageFilePickerChromeOS::SetShouldPromptUser(false);
@@ -688,8 +762,14 @@ IN_PROC_BROWSER_TEST_F(SavePageAsMHTMLBrowserTest, SavePageAsMHTML) {
   DownloadPersistedObserver persisted(browser()->profile(), base::Bind(
       &DownloadStoredProperly, url, full_file_name, -1,
       DownloadItem::COMPLETE));
+  scoped_refptr<content::MessageLoopRunner> loop_runner(
+      new content::MessageLoopRunner);
+  SavePackageFinishedObserver observer(
+      content::BrowserContext::GetDownloadManager(browser()->profile()),
+      loop_runner->QuitClosure());
   chrome::SavePage(browser());
-  ASSERT_TRUE(WaitForSavePackageToFinish(browser(), url));
+  loop_runner->Run();
+  ASSERT_TRUE(VerifySavePackageExpectations(browser(), url));
   persisted.WaitForPersisted();
 
   EXPECT_TRUE(file_util::PathExists(full_file_name));
@@ -697,3 +777,30 @@ IN_PROC_BROWSER_TEST_F(SavePageAsMHTMLBrowserTest, SavePageAsMHTML) {
   EXPECT_TRUE(file_util::GetFileSize(full_file_name, &actual_file_size));
   EXPECT_LE(kFileSizeMin, actual_file_size);
 }
+
+IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, SavePageBrowserTest_NonMHTML) {
+#if defined(OS_CHROMEOS)
+  SavePackageFilePickerChromeOS::SetShouldPromptUser(false);
+#else
+  SavePackageFilePicker::SetShouldPromptUser(false);
+#endif
+  GURL url("data:text/plain,foo");
+  ui_test_utils::NavigateToURL(browser(), url);
+  scoped_refptr<content::MessageLoopRunner> loop_runner(
+      new content::MessageLoopRunner);
+  SavePackageFinishedObserver observer(
+      content::BrowserContext::GetDownloadManager(browser()->profile()),
+      loop_runner->QuitClosure());
+  chrome::SavePage(browser());
+  loop_runner->Run();
+  base::FilePath download_dir = DownloadPrefs::FromDownloadManager(
+      GetDownloadManager())->DownloadPath();
+  base::FilePath filename = download_dir.AppendASCII("dataurl.txt");
+  EXPECT_TRUE(file_util::PathExists(filename));
+  std::string contents;
+  EXPECT_TRUE(file_util::ReadFileToString(filename, &contents));
+  EXPECT_EQ("foo", contents);
+}
+
+}  // namespace
+

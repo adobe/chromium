@@ -9,10 +9,13 @@
 #include "base/path_service.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
+#include "chrome/common/extensions/api/icons/icons_handler.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_icon_set.h"
 #include "chrome/common/extensions/extension_resource.h"
+#include "chrome/common/extensions/manifest.h"
+#include "chrome/common/extensions/manifest_handler.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/test/test_browser_thread.h"
 #include "grit/component_extension_resources.h"
@@ -25,6 +28,7 @@
 using content::BrowserThread;
 using extensions::Extension;
 using extensions::ImageLoader;
+using extensions::Manifest;
 
 class ImageLoaderTest : public testing::Test {
  public:
@@ -56,9 +60,9 @@ class ImageLoaderTest : public testing::Test {
   }
 
   scoped_refptr<Extension> CreateExtension(const char* name,
-                                           Extension::Location location) {
+                                           Manifest::Location location) {
     // Create and load an extension.
-    FilePath test_file;
+    base::FilePath test_file;
     if (!PathService::Get(chrome::DIR_TEST_DATA, &test_file)) {
       EXPECT_FALSE(true);
       return NULL;
@@ -79,7 +83,7 @@ class ImageLoaderTest : public testing::Test {
     if (!valid_value.get())
       return NULL;
 
-    if (location == Extension::COMPONENT) {
+    if (location == Manifest::COMPONENT) {
       if (!PathService::Get(chrome::DIR_RESOURCES, &test_file)) {
         EXPECT_FALSE(true);
         return NULL;
@@ -93,9 +97,16 @@ class ImageLoaderTest : public testing::Test {
   gfx::Image image_;
 
  private:
-  virtual void SetUp() {
+  virtual void SetUp() OVERRIDE {
+    testing::Test::SetUp();
+    (new extensions::IconsHandler)->Register();
+
     file_thread_.Start();
     io_thread_.Start();
+  }
+
+  virtual void TearDown() OVERRIDE {
+    extensions::ManifestHandler::ClearRegistryForTesting();
   }
 
   int image_loaded_count_;
@@ -109,12 +120,13 @@ class ImageLoaderTest : public testing::Test {
 // Tests loading an image works correctly.
 TEST_F(ImageLoaderTest, LoadImage) {
   scoped_refptr<Extension> extension(CreateExtension(
-      "image_loading_tracker", Extension::INVALID));
+      "image_loading_tracker", Manifest::INVALID_LOCATION));
   ASSERT_TRUE(extension.get() != NULL);
 
-  ExtensionResource image_resource =
-      extension->GetIconResource(extension_misc::EXTENSION_ICON_SMALLISH,
-                                 ExtensionIconSet::MATCH_EXACTLY);
+  ExtensionResource image_resource = extensions::IconsInfo::GetIconResource(
+      extension,
+      extension_misc::EXTENSION_ICON_SMALLISH,
+      ExtensionIconSet::MATCH_EXACTLY);
   gfx::Size max_size(extension_misc::EXTENSION_ICON_SMALLISH,
                      extension_misc::EXTENSION_ICON_SMALLISH);
   ImageLoader loader;
@@ -141,12 +153,13 @@ TEST_F(ImageLoaderTest, LoadImage) {
 // problems.
 TEST_F(ImageLoaderTest, DeleteExtensionWhileWaitingForCache) {
   scoped_refptr<Extension> extension(CreateExtension(
-      "image_loading_tracker", Extension::INVALID));
+      "image_loading_tracker", Manifest::INVALID_LOCATION));
   ASSERT_TRUE(extension.get() != NULL);
 
-  ExtensionResource image_resource =
-      extension->GetIconResource(extension_misc::EXTENSION_ICON_SMALLISH,
-                                 ExtensionIconSet::MATCH_EXACTLY);
+  ExtensionResource image_resource = extensions::IconsInfo::GetIconResource(
+      extension,
+      extension_misc::EXTENSION_ICON_SMALLISH,
+      ExtensionIconSet::MATCH_EXACTLY);
   gfx::Size max_size(extension_misc::EXTENSION_ICON_SMALLISH,
                      extension_misc::EXTENSION_ICON_SMALLISH);
   ImageLoader loader;
@@ -187,15 +200,15 @@ TEST_F(ImageLoaderTest, DeleteExtensionWhileWaitingForCache) {
 // Tests loading multiple dimensions of the same image.
 TEST_F(ImageLoaderTest, MultipleImages) {
   scoped_refptr<Extension> extension(CreateExtension(
-      "image_loading_tracker", Extension::INVALID));
+      "image_loading_tracker", Manifest::INVALID_LOCATION));
   ASSERT_TRUE(extension.get() != NULL);
 
   std::vector<ImageLoader::ImageRepresentation> info_list;
   int sizes[] = {extension_misc::EXTENSION_ICON_SMALLISH,
                  extension_misc::EXTENSION_ICON_BITTY};
   for (size_t i = 0; i < arraysize(sizes); ++i) {
-    ExtensionResource resource =
-        extension->GetIconResource(sizes[i], ExtensionIconSet::MATCH_EXACTLY);
+    ExtensionResource resource = extensions::IconsInfo::GetIconResource(
+        extension, sizes[i], ExtensionIconSet::MATCH_EXACTLY);
     info_list.push_back(ImageLoader::ImageRepresentation(
         resource,
         ImageLoader::ImageRepresentation::RESIZE_WHEN_LARGER,
@@ -234,12 +247,13 @@ TEST_F(ImageLoaderTest, MultipleImages) {
 // Tests IsComponentExtensionResource function.
 TEST_F(ImageLoaderTest, IsComponentExtensionResource) {
   scoped_refptr<Extension> extension(CreateExtension(
-      "file_manager", Extension::COMPONENT));
+      "file_manager", Manifest::COMPONENT));
   ASSERT_TRUE(extension.get() != NULL);
 
-  ExtensionResource resource =
-      extension->GetIconResource(extension_misc::EXTENSION_ICON_BITTY,
-                                 ExtensionIconSet::MATCH_EXACTLY);
+  ExtensionResource resource = extensions::IconsInfo::GetIconResource(
+      extension,
+      extension_misc::EXTENSION_ICON_BITTY,
+      ExtensionIconSet::MATCH_EXACTLY);
 
 #if defined(FILE_MANAGER_EXTENSION)
   int resource_id;

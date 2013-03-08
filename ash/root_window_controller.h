@@ -65,7 +65,7 @@ class ASH_EXPORT RootWindowController {
   static RootWindowController* ForLauncher(aura::Window* window);
 
   // Returns a RootWindowController of the window's root window.
-  static RootWindowController* ForWindow(aura::Window* window);
+  static RootWindowController* ForWindow(const aura::Window* window);
 
   // Returns the RootWindowController of the active root window.
   static internal::RootWindowController* ForActiveRootWindow();
@@ -203,6 +203,7 @@ class ASH_EXPORT RootWindowController {
   scoped_ptr<ToplevelWindowEventHandler> always_on_top_container_handler_;
   scoped_ptr<ToplevelWindowEventHandler> modal_container_handler_;
   scoped_ptr<ToplevelWindowEventHandler> lock_modal_container_handler_;
+  scoped_ptr<ToplevelWindowEventHandler> panel_container_handler_;
 
   DISALLOW_COPY_AND_ASSIGN(RootWindowController);
 };

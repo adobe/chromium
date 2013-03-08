@@ -6,9 +6,9 @@
 #define CHROME_BROWSER_UI_WEBUI_CONSTRAINED_WEB_DIALOG_UI_H_
 
 #include "base/compiler_specific.h"
+#include "chrome/browser/ui/native_web_contents_modal_dialog.h"
 #include "content/public/browser/web_ui_controller.h"
-
-class WebContentsModalDialog;
+#include "ui/gfx/native_widget_types.h"
 
 namespace content {
 class BrowserContext;
@@ -35,11 +35,11 @@ class ConstrainedWebDialogDelegate {
   // released WebContents.
   virtual void ReleaseWebContentsOnDialogClose() = 0;
 
-  // Returns the WebContentsModalDialog.
-  virtual WebContentsModalDialog* GetWindow() = 0;
-
   // Returns the WebContents owned by the constrained window.
   virtual content::WebContents* GetWebContents() = 0;
+
+  // Returns the native type used to display the dialog.
+  virtual NativeWebContentsModalDialog GetNativeDialog() = 0;
 
  protected:
   virtual ~ConstrainedWebDialogDelegate() {}
@@ -47,12 +47,10 @@ class ConstrainedWebDialogDelegate {
 
 // ConstrainedWebDialogUI is a facility to show HTML WebUI content
 // in a tab-modal constrained dialog.  It is implemented as an adapter
-// between an WebDialogUI object and a WebContentsModalDialog object.
+// between an WebDialogUI object and a web contents modal dialog.
 //
-// Since WebContentsModalDialog requires platform-specific delegate
+// Since the web contents modal dialog requires platform-specific delegate
 // implementations, this class is just a factory stub.
-// TODO(thestig): Refactor the platform-independent code out of the
-// platform-specific implementations.
 class ConstrainedWebDialogUI
     : public content::WebUIController {
  public:

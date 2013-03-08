@@ -6,7 +6,7 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "chrome/browser/prefs/pref_service.h"
+#include "base/prefs/pref_registry_simple.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/ui/browser_otr_state.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -32,9 +32,9 @@ bool UseTestingIntervals() {
 }
 
 // static
-void UpgradeDetector::RegisterPrefs(PrefServiceSimple* prefs) {
-  prefs->RegisterBooleanPref(prefs::kRestartLastSessionOnShutdown, false);
-  prefs->RegisterBooleanPref(prefs::kWasRestarted, false);
+void UpgradeDetector::RegisterPrefs(PrefRegistrySimple* registry) {
+  registry->RegisterBooleanPref(prefs::kRestartLastSessionOnShutdown, false);
+  registry->RegisterBooleanPref(prefs::kWasRestarted, false);
 }
 
 int UpgradeDetector::GetIconResourceID(UpgradeNotificationIconType type) {
@@ -61,7 +61,7 @@ int UpgradeDetector::GetIconResourceID(UpgradeNotificationIconType type) {
 }
 
 UpgradeDetector::UpgradeDetector()
-    : is_critical_upgrade_(false),
+    : upgrade_available_(UPGRADE_AVAILABLE_NONE),
       critical_update_acknowledged_(false),
       upgrade_notification_stage_(UPGRADE_ANNOYANCE_NONE),
       notify_upgrade_(false) {
@@ -83,13 +83,25 @@ void UpgradeDetector::NotifyUpgradeRecommended() {
       content::Source<UpgradeDetector>(this),
       content::NotificationService::NoDetails());
 
-  if (is_critical_upgrade_) {
-    int idle_timer = UseTestingIntervals() ?
-        kIdleRepeatingTimerWait :
-        kIdleRepeatingTimerWait * 60;  // To minutes.
-    idle_check_timer_.Start(FROM_HERE,
-        base::TimeDelta::FromSeconds(idle_timer),
-        this, &UpgradeDetector::CheckIdle);
+  switch (upgrade_available_) {
+    case UPGRADE_NEEDED_OUTDATED_INSTALL: {
+      content::NotificationService::current()->Notify(
+          chrome::NOTIFICATION_OUTDATED_INSTALL,
+          content::Source<UpgradeDetector>(this),
+          content::NotificationService::NoDetails());
+      break;
+    }
+    case UPGRADE_AVAILABLE_CRITICAL: {
+      int idle_timer = UseTestingIntervals() ?
+          kIdleRepeatingTimerWait :
+          kIdleRepeatingTimerWait * 60;  // To minutes.
+      idle_check_timer_.Start(FROM_HERE,
+          base::TimeDelta::FromSeconds(idle_timer),
+          this, &UpgradeDetector::CheckIdle);
+      break;
+    }
+    default:
+      break;
   }
 }
 
@@ -113,7 +125,7 @@ void UpgradeDetector::IdleCallback(IdleState state) {
     case IDLE_STATE_LOCKED:
       // Computer is locked, auto-restart.
       idle_check_timer_.Stop();
-      browser::AttemptRestart();
+      chrome::AttemptRestart();
       break;
     case IDLE_STATE_IDLE:
       // Computer has been idle for long enough, show warning.

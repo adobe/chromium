@@ -9,8 +9,8 @@
 #include <iterator>
 
 #include "base/logging.h"
-#include "base/prefs/public/pref_service_base.h"
-#include "base/string_number_conversions.h"
+#include "base/prefs/pref_service.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/api/sync/profile_sync_service_base.h"
 #include "chrome/browser/api/webdata/autofill_web_data_service.h"
@@ -18,14 +18,15 @@
 #include "chrome/browser/autofill/autofill_country.h"
 #include "chrome/browser/autofill/autofill_field.h"
 #include "chrome/browser/autofill/autofill_metrics.h"
-#include "chrome/browser/autofill/autofill_regexes.h"
 #include "chrome/browser/autofill/form_group.h"
 #include "chrome/browser/autofill/form_structure.h"
 #include "chrome/browser/autofill/personal_data_manager_observer.h"
 #include "chrome/browser/autofill/phone_number.h"
 #include "chrome/browser/autofill/phone_number_i18n.h"
+#include "chrome/browser/autofill/validation.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
+#include "components/user_prefs/user_prefs.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/notification_source.h"
 
@@ -76,20 +77,6 @@ T* address_of(T& v) {
   return &v;
 }
 
-bool IsValidEmail(const string16& value) {
-  // This regex is more permissive than the official rfc2822 spec on the
-  // subject, but it does reject obvious non-email addresses.
-  const string16 kEmailPattern = ASCIIToUTF16("^[^@]+@[^@]+\\.[a-z]{2,6}$");
-  return autofill::MatchesPattern(value, kEmailPattern);
-}
-
-// Valid for US zip codes only.
-bool IsValidZip(const string16& value) {
-  // Basic US zip code matching.
-  const string16 kZipPattern = ASCIIToUTF16("^\\d{5}(-\\d{4})?$");
-  return autofill::MatchesPattern(value, kZipPattern);
-}
-
 // Returns true if minimum requirements for import of a given |profile| have
 // been met.  An address submitted via a form must have at least these fields
 // filled.  No verification of validity of the contents is preformed.  This is
@@ -115,13 +102,41 @@ bool IsValidFieldTypeAndValue(const std::set<AutofillFieldType>& types_seen,
 
   // Abandon the import if an email address value shows up in a field that is
   // not an email address.
-  if (field_type != EMAIL_ADDRESS && IsValidEmail(value))
+  if (field_type != EMAIL_ADDRESS && autofill::IsValidEmailAddress(value))
     return false;
 
   return true;
 }
 
 }  // namespace
+
+PersonalDataManager::PersonalDataManager()
+    : browser_context_(NULL),
+      is_data_loaded_(false),
+      pending_profiles_query_(0),
+      pending_creditcards_query_(0),
+      metric_logger_(new AutofillMetrics),
+      has_logged_profile_count_(false) {}
+
+void PersonalDataManager::Init(BrowserContext* browser_context) {
+  browser_context_ = browser_context;
+  metric_logger_->LogIsAutofillEnabledAtStartup(IsAutofillEnabled());
+
+  scoped_ptr<AutofillWebDataService> autofill_data(
+      AutofillWebDataService::FromBrowserContext(browser_context_));
+
+  // WebDataService may not be available in tests.
+  if (!autofill_data.get())
+    return;
+
+  LoadProfiles();
+  LoadCreditCards();
+
+  notification_registrar_.Add(
+      this,
+      chrome::NOTIFICATION_AUTOFILL_MULTIPLE_CHANGED,
+      autofill_data->GetNotificationSource());
+}
 
 PersonalDataManager::~PersonalDataManager() {
   CancelPendingQuery(&pending_profiles_query_);
@@ -168,10 +183,7 @@ void PersonalDataManager::OnWebDataServiceRequestDone(
   }
 }
 
-void PersonalDataManager::SetObserver(PersonalDataManagerObserver* observer) {
-  // TODO(dhollowa): RemoveObserver is for compatibility with old code, it
-  // should be nuked.
-  observers_.RemoveObserver(observer);
+void PersonalDataManager::AddObserver(PersonalDataManagerObserver* observer) {
   observers_.AddObserver(observer);
 }
 
@@ -204,12 +216,6 @@ void PersonalDataManager::OnStateChanged() {
     autofill_data->EmptyMigrationTrash(true);
     sync_service->RemoveObserver(this);
   }
-}
-
-void PersonalDataManager::Shutdown() {
-  CancelPendingQuery(&pending_profiles_query_);
-  CancelPendingQuery(&pending_creditcards_query_);
-  notification_registrar_.RemoveAll();
 }
 
 void PersonalDataManager::Observe(int type,
@@ -512,7 +518,7 @@ bool PersonalDataManager::IsDataLoaded() const {
 }
 
 const std::vector<AutofillProfile*>& PersonalDataManager::GetProfiles() {
-  if (!PrefServiceBase::FromBrowserContext(browser_context_)->GetBoolean(
+  if (!components::UserPrefs::Get(browser_context_)->GetBoolean(
           prefs::kAutofillAuxiliaryProfilesEnabled)) {
     return web_profiles();
   }
@@ -658,36 +664,8 @@ void PersonalDataManager::GetCreditCardSuggestions(
   }
 }
 
-PersonalDataManager::PersonalDataManager()
-    : browser_context_(NULL),
-      is_data_loaded_(false),
-      pending_profiles_query_(0),
-      pending_creditcards_query_(0),
-      metric_logger_(new AutofillMetrics),
-      has_logged_profile_count_(false) {
-}
-
-void PersonalDataManager::Init(BrowserContext* browser_context) {
-  browser_context_ = browser_context;
-  metric_logger_->LogIsAutofillEnabledAtStartup(IsAutofillEnabled());
-
-  // WebDataService may not be available in tests.
-  scoped_ptr<AutofillWebDataService> autofill_data(
-      AutofillWebDataService::FromBrowserContext(browser_context_));
-  if (!autofill_data.get())
-    return;
-
-  LoadProfiles();
-  LoadCreditCards();
-
-  notification_registrar_.Add(
-      this,
-      chrome::NOTIFICATION_AUTOFILL_MULTIPLE_CHANGED,
-      autofill_data->GetNotificationSource());
-}
-
 bool PersonalDataManager::IsAutofillEnabled() const {
-  return PrefServiceBase::FromBrowserContext(browser_context_)->GetBoolean(
+  return components::UserPrefs::Get(browser_context_)->GetBoolean(
       prefs::kAutofillEnabled);
 }
 
@@ -698,7 +676,7 @@ bool PersonalDataManager::IsValidLearnableProfile(
     return false;
 
   string16 email = profile.GetRawInfo(EMAIL_ADDRESS);
-  if (!email.empty() && !IsValidEmail(email))
+  if (!email.empty() && !autofill::IsValidEmailAddress(email))
     return false;
 
   // Reject profiles with invalid US state information.
@@ -710,7 +688,8 @@ bool PersonalDataManager::IsValidLearnableProfile(
 
   // Reject profiles with invalid US zip information.
   string16 zip = profile.GetRawInfo(ADDRESS_HOME_ZIP);
-  if (profile.CountryCode() == "US" && !zip.empty() && !IsValidZip(zip))
+  if (profile.CountryCode() == "US" && !zip.empty() &&
+      !autofill::IsValidZip(zip))
     return false;
 
   return true;

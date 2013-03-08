@@ -13,9 +13,9 @@
 #include "base/guid.h"
 #include "base/logging.h"
 #include "base/string16.h"
-#include "base/string_number_conversions.h"
-#include "base/string_split.h"
 #include "base/string_util.h"
+#include "base/strings/string_number_conversions.h"
+#include "base/strings/string_split.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/autofill/autofill_country.h"
 #include "chrome/browser/autofill/autofill_field.h"
@@ -25,6 +25,7 @@
 #include "chrome/browser/autofill/validation.h"
 #include "chrome/common/form_field_data.h"
 #include "grit/generated_resources.h"
+#include "grit/webkit_resources.h"
 #include "third_party/icu/public/common/unicode/uloc.h"
 #include "third_party/icu/public/i18n/unicode/dtfmtsym.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -32,6 +33,11 @@
 namespace {
 
 const char16 kCreditCardObfuscationSymbol = '*';
+
+// This is the maximum obfuscated symbols displayed.
+// It is introduced to avoid rare cases where the credit card number is
+// too large and fills the screen.
+const size_t kMaxObfuscationSize = 20;
 
 std::string GetCreditCardType(const string16& number) {
   // Don't check for a specific type if this is not a credit card number.
@@ -71,7 +77,7 @@ std::string GetCreditCardType(const string16& number) {
 
       break;
     case 14:
-      if (first_three_digits >= 300 && first_three_digits <=305)
+      if (first_three_digits >= 300 && first_three_digits <= 305)
         return kDinersCard;
 
       if (first_digit == 36)
@@ -115,34 +121,6 @@ std::string GetCreditCardType(const string16& number) {
   }
 
   return kGenericCard;
-}
-
-string16 GetCreditCardTypeDisplayName(const std::string& card_type) {
-  if (card_type == kAmericanExpressCard)
-    return l10n_util::GetStringUTF16(IDS_AUTOFILL_CC_AMEX);
-
-  if (card_type == kDinersCard)
-    return l10n_util::GetStringUTF16(IDS_AUTOFILL_CC_DINERS);
-
-  if (card_type == kDiscoverCard)
-    return l10n_util::GetStringUTF16(IDS_AUTOFILL_CC_DISCOVER);
-
-  if (card_type == kJCBCard)
-    return l10n_util::GetStringUTF16(IDS_AUTOFILL_CC_JCB);
-
-  if (card_type == kMasterCard)
-    return l10n_util::GetStringUTF16(IDS_AUTOFILL_CC_MASTERCARD);
-
-  if (card_type == kSoloCard)
-    return l10n_util::GetStringUTF16(IDS_AUTOFILL_CC_SOLO);
-
-  if (card_type == kVisaCard)
-    return l10n_util::GetStringUTF16(IDS_AUTOFILL_CC_VISA);
-
-  // If you hit this DCHECK, the above list of cases needs to be updated to
-  // include a new card.
-  DCHECK_EQ(kGenericCard, card_type);
-  return string16();
 }
 
 bool ConvertYear(const string16& year, int* num) {
@@ -277,7 +255,7 @@ string16 CreditCard::GetRawInfo(AutofillFieldType type) const {
     }
 
     case CREDIT_CARD_TYPE:
-      return GetCreditCardTypeDisplayName(type_);
+      return TypeForDisplay();
 
     case CREDIT_CARD_NUMBER:
       return number_;
@@ -420,10 +398,11 @@ string16 CreditCard::ObfuscatedNumber() const {
     return number_;
 
   string16 number = StripSeparators(number_);
-  string16 result(number.size() - 4, kCreditCardObfuscationSymbol);
-  result.append(LastFourDigits());
 
-  return result;
+  // Avoid making very long obfuscated numbers.
+  size_t obfuscated_digits = std::min(kMaxObfuscationSize, number.size() - 4);
+  string16 result(obfuscated_digits, kCreditCardObfuscationSymbol);
+  return result.append(LastFourDigits());
 }
 
 string16 CreditCard::LastFourDigits() const {
@@ -434,6 +413,63 @@ string16 CreditCard::LastFourDigits() const {
     return string16();
 
   return number.substr(number.size() - kNumLastDigits, kNumLastDigits);
+}
+
+string16 CreditCard::TypeForDisplay() const {
+  if (type_ == kAmericanExpressCard)
+    return l10n_util::GetStringUTF16(IDS_AUTOFILL_CC_AMEX);
+  if (type_ == kDinersCard)
+    return l10n_util::GetStringUTF16(IDS_AUTOFILL_CC_DINERS);
+  if (type_ == kDiscoverCard)
+    return l10n_util::GetStringUTF16(IDS_AUTOFILL_CC_DISCOVER);
+  if (type_ == kJCBCard)
+    return l10n_util::GetStringUTF16(IDS_AUTOFILL_CC_JCB);
+  if (type_ == kMasterCard)
+    return l10n_util::GetStringUTF16(IDS_AUTOFILL_CC_MASTERCARD);
+  if (type_ == kSoloCard)
+    return l10n_util::GetStringUTF16(IDS_AUTOFILL_CC_SOLO);
+  if (type_ == kVisaCard)
+    return l10n_util::GetStringUTF16(IDS_AUTOFILL_CC_VISA);
+
+  // If you hit this DCHECK, the above list of cases needs to be updated to
+  // include a new card.
+  DCHECK_EQ(kGenericCard, type_);
+  return string16();
+}
+
+string16 CreditCard::TypeAndLastFourDigits() const {
+  string16 type = TypeForDisplay();
+  // TODO(estade): type may be empty, we probably want to return
+  // "Card - 1234" or something in that case.
+
+  string16 digits = LastFourDigits();
+  if (digits.empty())
+    return type;
+
+  // TODO(estade): i18n.
+  return type + ASCIIToUTF16(" - ") + digits;
+}
+
+int CreditCard::IconResourceId() const {
+  if (type_ == kAmericanExpressCard)
+    return IDR_AUTOFILL_CC_AMEX;
+  if (type_ == kDinersCard)
+    return IDR_AUTOFILL_CC_DINERS;
+  if (type_ == kDiscoverCard)
+    return IDR_AUTOFILL_CC_DISCOVER;
+  if (type_ == kJCBCard)
+    return IDR_AUTOFILL_CC_JCB;
+  if (type_ == kMasterCard)
+    return IDR_AUTOFILL_CC_MASTERCARD;
+  if (type_ == kSoloCard)
+    return IDR_AUTOFILL_CC_SOLO;
+  if (type_ == kVisaCard)
+    return IDR_AUTOFILL_CC_VISA;
+
+  // If you hit this DCHECK, the above list of cases needs to be updated to
+  // include a new card.
+  DCHECK_EQ(kGenericCard, type_);
+  return IDR_AUTOFILL_CC_GENERIC;
 }
 
 void CreditCard::operator=(const CreditCard& credit_card) {

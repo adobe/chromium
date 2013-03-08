@@ -46,6 +46,8 @@ class SyncSetupHandler : public options::OptionsPageUIHandler,
   virtual void CloseUI() OVERRIDE;
 
   // content::WebContentsObserver implementation.
+  virtual void DidStopLoading(
+      content::RenderViewHost* render_view_host) OVERRIDE;
   virtual void WebContentsDestroyed(
       content::WebContents* web_contents) OVERRIDE;
 
@@ -143,7 +145,7 @@ class SyncSetupHandler : public options::OptionsPageUIHandler,
 
   // When web-flow is enabled, displays the Gaia login form in a new tab.
   // This function is virtual so that tests can override.
-  virtual void DisplayGaiaLoginInNewTab();
+  virtual void DisplayGaiaLoginInNewTabOrWindow();
 
   // Displays the GAIA login form with a custom error message (used for errors
   // like "email address already in use by another profile"). No message

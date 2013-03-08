@@ -6,7 +6,7 @@
 
 #include "base/at_exit.h"
 #include "base/command_line.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/test/test_timeouts.h"
@@ -89,7 +89,7 @@ int main(int argc, const char* argv[]) {
     }
   }
 
-  FilePath doc_root = command_line->GetSwitchValuePath("doc-root");
+  base::FilePath doc_root = command_line->GetSwitchValuePath("doc-root");
   if (doc_root.empty()) {
     printf("Error: --doc-root must be specified\n");
     PrintUsage();

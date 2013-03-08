@@ -7,9 +7,9 @@
 #include <dlfcn.h>
 
 #include "base/bind.h"
-#include "base/file_path.h"
-#import "base/mac/foundation_util.h"
+#include "base/files/file_path.h"
 #include "base/location.h"
+#import "base/mac/foundation_util.h"
 #include "base/mac/scoped_nsautorelease_pool.h"
 #include "base/native_library.h"
 
@@ -57,7 +57,7 @@ bool InitializeVdaApis() {
   static bool should_initialize = true;
   if (should_initialize) {
     should_initialize = false;
-    FilePath path;
+    base::FilePath path;
     if (!base::mac::GetSearchPathDirectory(
             NSLibraryDirectory, NSSystemDomainMask, &path)) {
       return false;

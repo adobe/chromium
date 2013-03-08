@@ -22,8 +22,6 @@ ExtensionViewViews::ExtensionViewViews(extensions::ExtensionHost* host,
       initialized_(false),
       container_(NULL),
       is_clipped_(false) {
-  host_->set_view(this);
-
   // This view needs to be focusable so it can act as the focused view for the
   // focus manager. This is required to have SkipDefaultKeyEventProcessing
   // called so the tab key events are forwarded to the renderer.
@@ -104,15 +102,6 @@ void ExtensionViewViews::CleanUp() {
   initialized_ = false;
 }
 
-void ExtensionViewViews::SetBackground(const SkBitmap& background) {
-  if (render_view_host()->IsRenderViewLive() && render_view_host()->GetView()) {
-    render_view_host()->GetView()->SetBackground(background);
-  } else {
-    pending_background_ = background;
-  }
-  ShowIfCompletelyLoaded();
-}
-
 void ExtensionViewViews::ResizeDueToAutoResize(const gfx::Size& new_size) {
   // Don't actually do anything with this information until we have been shown.
   // Size changes will not be honored by lower layers while we are hidden.
@@ -161,11 +150,6 @@ void ExtensionViewViews::OnBoundsChanged(const gfx::Rect& previous_bounds) {
 }
 
 void ExtensionViewViews::RenderViewCreated() {
-  if (!pending_background_.empty() && render_view_host()->GetView()) {
-    render_view_host()->GetView()->SetBackground(pending_background_);
-    pending_background_.reset();
-  }
-
   chrome::ViewType host_type = host_->extension_host_type();
   if (host_type == chrome::VIEW_TYPE_EXTENSION_POPUP) {
     gfx::Size min_size(ExtensionPopup::kMinWidth,

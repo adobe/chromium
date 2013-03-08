@@ -11,8 +11,9 @@
 #include "base/bind_helpers.h"
 #include "base/file_util.h"
 #include "base/logging.h"
-#include "base/string_split.h"
+#include "base/prefs/pref_service.h"
 #include "base/string_util.h"
+#include "base/strings/string_split.h"
 #include "base/sys_string_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/download/chrome_download_manager_delegate.h"
@@ -20,10 +21,10 @@
 #include "chrome/browser/download/download_service.h"
 #include "chrome/browser/download/download_service_factory.h"
 #include "chrome/browser/download/download_util.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/pref_names.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/download_manager.h"
 #include "content/public/browser/save_page_type.h"
@@ -39,6 +40,20 @@ using content::DownloadManager;
 
 DownloadPrefs::DownloadPrefs(Profile* profile) : profile_(profile) {
   PrefService* prefs = profile->GetPrefs();
+
+  // If the download path is dangerous we forcefully reset it. But if we do
+  // so we set a flag to make sure we only do it once, to avoid fighting
+  // the user if he really wants it on an unsafe place such as the desktop.
+  if (!prefs->GetBoolean(prefs::kDownloadDirUpgraded)) {
+    base::FilePath current_download_dir = prefs->GetFilePath(
+        prefs::kDownloadDefaultDirectory);
+    if (download_util::DownloadPathIsDangerous(current_download_dir)) {
+      prefs->SetFilePath(prefs::kDownloadDefaultDirectory,
+                         download_util::GetDefaultDownloadDirectory());
+    }
+    prefs->SetBoolean(prefs::kDownloadDirUpgraded, true);
+  }
+
   prompt_for_download_.Init(prefs::kPromptForDownload, prefs);
   download_path_.Init(prefs::kDownloadDefaultDirectory, prefs);
   save_file_type_.Init(prefs::kSaveFileType, prefs);
@@ -52,9 +67,9 @@ DownloadPrefs::DownloadPrefs(Profile* profile) : profile_(profile) {
 
   for (size_t i = 0; i < extensions.size(); ++i) {
 #if defined(OS_POSIX)
-    FilePath path(extensions[i]);
+    base::FilePath path(extensions[i]);
 #elif defined(OS_WIN)
-    FilePath path(UTF8ToWide(extensions[i]));
+    base::FilePath path(UTF8ToWide(extensions[i]));
 #endif
     if (!extensions[i].empty() &&
         download_util::GetFileDangerLevel(path) == download_util::NotDangerous)
@@ -67,26 +82,26 @@ DownloadPrefs::~DownloadPrefs() {
 }
 
 // static
-void DownloadPrefs::RegisterUserPrefs(PrefServiceSyncable* prefs) {
-  prefs->RegisterBooleanPref(prefs::kPromptForDownload,
-                             false,
-                             PrefServiceSyncable::SYNCABLE_PREF);
-  prefs->RegisterStringPref(prefs::kDownloadExtensionsToOpen,
-                            "",
-                            PrefServiceSyncable::UNSYNCABLE_PREF);
-  prefs->RegisterBooleanPref(prefs::kDownloadDirUpgraded,
-                             false,
-                             PrefServiceSyncable::UNSYNCABLE_PREF);
-  prefs->RegisterIntegerPref(prefs::kSaveFileType,
-                             content::SAVE_PAGE_TYPE_AS_COMPLETE_HTML,
-                             PrefServiceSyncable::UNSYNCABLE_PREF);
+void DownloadPrefs::RegisterUserPrefs(PrefRegistrySyncable* registry) {
+  registry->RegisterBooleanPref(prefs::kPromptForDownload,
+                                false,
+                                PrefRegistrySyncable::SYNCABLE_PREF);
+  registry->RegisterStringPref(prefs::kDownloadExtensionsToOpen,
+                               "",
+                               PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterBooleanPref(prefs::kDownloadDirUpgraded,
+                                false,
+                                PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterIntegerPref(prefs::kSaveFileType,
+                                content::SAVE_PAGE_TYPE_AS_COMPLETE_HTML,
+                                PrefRegistrySyncable::UNSYNCABLE_PREF);
 
   // The default download path is userprofile\download.
-  const FilePath& default_download_path =
+  const base::FilePath& default_download_path =
       download_util::GetDefaultDownloadDirectory();
-  prefs->RegisterFilePathPref(prefs::kDownloadDefaultDirectory,
-                              default_download_path,
-                              PrefServiceSyncable::UNSYNCABLE_PREF);
+  registry->RegisterFilePathPref(prefs::kDownloadDefaultDirectory,
+                                 default_download_path,
+                                 PrefRegistrySyncable::UNSYNCABLE_PREF);
 
 #if defined(OS_CHROMEOS)
   // Ensure that the download directory specified in the preferences exists.
@@ -95,19 +110,6 @@ void DownloadPrefs::RegisterUserPrefs(PrefServiceSyncable* prefs) {
       base::Bind(base::IgnoreResult(&file_util::CreateDirectory),
                  default_download_path));
 #endif  // defined(OS_CHROMEOS)
-
-  // If the download path is dangerous we forcefully reset it. But if we do
-  // so we set a flag to make sure we only do it once, to avoid fighting
-  // the user if he really wants it on an unsafe place such as the desktop.
-  if (!prefs->GetBoolean(prefs::kDownloadDirUpgraded)) {
-    FilePath current_download_dir = prefs->GetFilePath(
-        prefs::kDownloadDefaultDirectory);
-    if (download_util::DownloadPathIsDangerous(current_download_dir)) {
-      prefs->SetFilePath(prefs::kDownloadDefaultDirectory,
-                         default_download_path);
-    }
-    prefs->SetBoolean(prefs::kDownloadDirUpgraded, true);
-  }
 }
 
 // static
@@ -125,7 +127,7 @@ DownloadPrefs* DownloadPrefs::FromBrowserContext(
   return FromDownloadManager(BrowserContext::GetDownloadManager(context));
 }
 
-FilePath DownloadPrefs::DownloadPath() const {
+base::FilePath DownloadPrefs::DownloadPath() const {
 #if defined(OS_CHROMEOS)
   // If the download path is under /drive, and DriveSystemService isn't
   // available (which it isn't for incognito mode, for instance), use the
@@ -153,15 +155,16 @@ bool DownloadPrefs::IsAutoOpenUsed() const {
 }
 
 bool DownloadPrefs::IsAutoOpenEnabledForExtension(
-    const FilePath::StringType& extension) const {
+    const base::FilePath::StringType& extension) const {
   return auto_open_.find(extension) != auto_open_.end();
 }
 
-bool DownloadPrefs::EnableAutoOpenBasedOnExtension(const FilePath& file_name) {
-  FilePath::StringType extension = file_name.Extension();
+bool DownloadPrefs::EnableAutoOpenBasedOnExtension(
+    const base::FilePath& file_name) {
+  base::FilePath::StringType extension = file_name.Extension();
   if (extension.empty())
     return false;
-  DCHECK(extension[0] == FilePath::kExtensionSeparator);
+  DCHECK(extension[0] == base::FilePath::kExtensionSeparator);
   extension.erase(0, 1);
 
   auto_open_.insert(extension);
@@ -169,11 +172,12 @@ bool DownloadPrefs::EnableAutoOpenBasedOnExtension(const FilePath& file_name) {
   return true;
 }
 
-void DownloadPrefs::DisableAutoOpenBasedOnExtension(const FilePath& file_name) {
-  FilePath::StringType extension = file_name.Extension();
+void DownloadPrefs::DisableAutoOpenBasedOnExtension(
+    const base::FilePath& file_name) {
+  base::FilePath::StringType extension = file_name.Extension();
   if (extension.empty())
     return;
-  DCHECK(extension[0] == FilePath::kExtensionSeparator);
+  DCHECK(extension[0] == base::FilePath::kExtensionSeparator);
   extension.erase(0, 1);
   auto_open_.erase(extension);
   SaveAutoOpenState();
@@ -203,7 +207,7 @@ void DownloadPrefs::SaveAutoOpenState() {
 }
 
 bool DownloadPrefs::AutoOpenCompareFunctor::operator()(
-    const FilePath::StringType& a,
-    const FilePath::StringType& b) const {
-  return FilePath::CompareLessIgnoreCase(a, b);
+    const base::FilePath::StringType& a,
+    const base::FilePath::StringType& b) const {
+  return base::FilePath::CompareLessIgnoreCase(a, b);
 }

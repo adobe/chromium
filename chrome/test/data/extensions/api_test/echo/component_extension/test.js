@@ -19,5 +19,13 @@ chrome.test.runTests([
         chrome.test.callbackPass(function(result) {
       chrome.test.assertTrue(result == '');
     }));
+    chrome.echoPrivate.getOobeTimestamp(
+        chrome.test.callbackPass(function(result) {
+      chrome.test.assertTrue(result == '');
+    }));
+    chrome.echoPrivate.checkAllowRedeemOffers(
+        chrome.test.callbackPass(function(result) {
+      chrome.test.assertTrue(result);
+    }));
   }
 ]);

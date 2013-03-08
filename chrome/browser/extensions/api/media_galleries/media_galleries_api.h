@@ -11,7 +11,7 @@
 #include <vector>
 
 #include "chrome/browser/extensions/extension_function.h"
-#include "chrome/browser/media_gallery/media_file_system_registry.h"
+#include "chrome/browser/media_galleries/media_file_system_registry.h"
 
 namespace extensions {
 
@@ -26,6 +26,10 @@ class MediaGalleriesGetMediaFileSystemsFunction
   virtual bool RunImpl() OVERRIDE;
 
  private:
+  // Always show the dialog.
+  void AlwaysShowDialog(
+      const std::vector<chrome::MediaFileSystemInfo>& filesystems);
+
   // If no galleries are found, show the dialog, otherwise return them.
   void ShowDialogIfNoGalleries(
       const std::vector<chrome::MediaFileSystemInfo>& filesystems);
@@ -40,6 +44,11 @@ class MediaGalleriesGetMediaFileSystemsFunction
 
   // Shows the configuration dialog to edit gallery preferences.
   void ShowDialog();
+
+  // A helper method that calls
+  // MediaFileSystemRegistry::GetMediaFileSystemsForExtension().
+  void GetMediaFileSystemsForExtension(
+      const chrome::MediaFileSystemsCallback& cb);
 };
 
 class MediaGalleriesAssembleMediaFileFunction : public SyncExtensionFunction {

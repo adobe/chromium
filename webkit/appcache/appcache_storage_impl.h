@@ -12,7 +12,7 @@
 #include <vector>
 
 #include "base/callback.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop_proxy.h"
 #include "webkit/appcache/appcache_database.h"
@@ -31,7 +31,7 @@ class AppCacheStorageImpl : public AppCacheStorage {
   explicit AppCacheStorageImpl(AppCacheService* service);
   virtual ~AppCacheStorageImpl();
 
-  void Initialize(const FilePath& cache_directory,
+  void Initialize(const base::FilePath& cache_directory,
                   base::MessageLoopProxy* db_thread,
                   base::MessageLoopProxy* cache_thread);
   void Disable();
@@ -134,7 +134,7 @@ class AppCacheStorageImpl : public AppCacheStorage {
   WEBKIT_STORAGE_EXPORT AppCacheDiskCache* disk_cache();
 
   // The directory in which we place files in the file system.
-  FilePath cache_directory_;
+  base::FilePath cache_directory_;
   bool is_incognito_;
 
   // This class operates primarily on the IO thread, but schedules

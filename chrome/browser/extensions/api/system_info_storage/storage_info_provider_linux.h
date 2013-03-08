@@ -5,9 +5,9 @@
 #ifndef CHROME_BROWSER_EXTENSIONS_API_SYSTEM_INFO_STORAGE_STORAGE_INFO_PROVIDER_LINUX_H_
 #define CHROME_BROWSER_EXTENSIONS_API_SYSTEM_INFO_STORAGE_STORAGE_INFO_PROVIDER_LINUX_H_
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "chrome/browser/extensions/api/system_info_storage/storage_info_provider.h"
-#include "chrome/browser/system_monitor/udev_util_linux.h"
+#include "chrome/browser/storage_monitor/udev_util_linux.h"
 
 namespace extensions {
 
@@ -19,7 +19,7 @@ class StorageInfoProviderLinux : public StorageInfoProvider {
   virtual ~StorageInfoProviderLinux();
 
   // For unit test.
-  explicit StorageInfoProviderLinux(const FilePath& mtab_path);
+  explicit StorageInfoProviderLinux(const base::FilePath& mtab_path);
 
   virtual bool QueryInfo(StorageInfo* info) OVERRIDE;
 
@@ -35,7 +35,7 @@ class StorageInfoProviderLinux : public StorageInfoProvider {
   chrome::ScopedUdevObject udev_context_;
 
   // The mtab file path on the system.
-  const FilePath mtab_file_path_;
+  const base::FilePath mtab_file_path_;
 };
 
 }  // namespace extensions

@@ -71,7 +71,6 @@
         'win/lib/rlz_lib_win.cc',
         'win/lib/rlz_value_store_registry.cc',
         'win/lib/rlz_value_store_registry.h',
-        'win/lib/vista_winnt.h',
       ],
       'conditions': [
         ['rlz_use_chrome_net==1', {
@@ -98,6 +97,8 @@
           },
         }],
       ],
+      # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
+      'msvs_disabled_warnings': [ 4267, ],
     },
     {
       'target_name': 'rlz_unittests',
@@ -130,6 +131,8 @@
           ],
         }],
       ],
+      # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
+      'msvs_disabled_warnings': [ 4267, ],
     },
     {
       'target_name': 'rlz_id',

@@ -49,7 +49,7 @@ class MenuRunnerImpl : public internal::MenuControllerDelegate {
   virtual void SiblingMenuCreated(MenuItemView* menu) OVERRIDE;
 
  private:
-  ~MenuRunnerImpl();
+  virtual ~MenuRunnerImpl();
 
   // Cleans up after the menu is no longer showing. |result| is the menu that
   // the user selected, or NULL if nothing was selected.
@@ -288,7 +288,10 @@ MenuRunner::RunResult MenuRunner::RunMenuAt(Widget* parent,
     display_change_listener_.reset(
         internal::DisplayChangeListener::Create(parent, this));
   }
-  if ((types & MenuRunner::CONTEXT_MENU) && parent && parent->GetCurrentEvent())
+  if ((types & MenuRunner::CONTEXT_MENU) &&
+      parent &&
+      parent->GetCurrentEvent() &&
+      !MenuItemView::IsBubble(anchor))
     anchor = parent->GetCurrentEvent()->IsGestureEvent() ?
         MenuItemView::BOTTOMCENTER : MenuItemView::TOPLEFT;
 

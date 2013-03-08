@@ -88,8 +88,6 @@
         '../third_party/skia/src/pdf/SkPDFUtils.h',
 
         '../third_party/skia/src/ports/FontHostConfiguration_android.cpp',
-        '../third_party/skia/src/ports/SkFontDescriptor.cpp',
-        '../third_party/skia/src/ports/SkFontDescriptor.h',
         #'../third_party/skia/src/ports/SkFontHost_FONTPATH.cpp',
         '../third_party/skia/src/ports/SkFontHost_FreeType.cpp',
         '../third_party/skia/src/ports/SkFontHost_FreeType_common.cpp',
@@ -150,6 +148,8 @@
 
         '../third_party/skia/include/utils/SkNullCanvas.h',
         '../third_party/skia/include/utils/SkPictureUtils.h',
+        'ext/analysis_canvas.cc',
+        'ext/analysis_canvas.h',
         'ext/bitmap_platform_device.h',
         'ext/bitmap_platform_device_android.cc',
         'ext/bitmap_platform_device_android.h',
@@ -168,6 +168,8 @@
         'ext/lazy_pixel_ref.cc',
         'ext/lazy_pixel_ref.h',
         'ext/SkThread_chrome.cc',
+        'ext/paint_simplifier.cc',
+        'ext/paint_simplifier.h',
         'ext/platform_canvas.cc',
         'ext/platform_canvas.h',
         'ext/platform_device.cc',
@@ -200,6 +202,7 @@
         '../third_party/skia/include/core',
         '../third_party/skia/include/effects',
         '../third_party/skia/include/images',
+        '../third_party/skia/include/lazy',
         '../third_party/skia/include/pdf',
         '../third_party/skia/include/pipe',
         '../third_party/skia/include/ports',
@@ -229,9 +232,12 @@
         # SkGraphics::Init().
         'SK_ALLOW_STATIC_GLOBAL_INITIALIZERS=0',
 
-        'SK_IGNORE_1XN_BITMAP_OPT',
-        'SK_IGNORE_CLIP_BUG_FIX',
-        'SK_IGNORE_CONVEX_QUAD_OPT',
+        'SK_DISABLE_BLUR_ROUNDING',
+        'SK_IGNORE_SUBPIXEL_AXIS_ALIGN_FIX',
+
+        # Disable this check because it is too strict for some Chromium-specific
+        # subclasses of SkPixelRef. See bug: crbug.com/171776.
+        'SK_DISABLE_PIXELREF_LOCKCOUNT_BALANCE_CHECK',
       ],
       'sources!': [
         '../third_party/skia/include/core/SkTypes.h',
@@ -469,6 +475,8 @@
         [ 'OS == "mac"', {
           'defines': [
             'SK_BUILD_FOR_MAC',
+            'SK_USE_MAC_CORE_TEXT',
+#           'SK_USE_COLOR_LUMINANCE',
           ],
           'include_dirs': [
             '../third_party/skia/include/utils/mac',
@@ -485,20 +493,6 @@
             # The mac's fonthost implements the table methods natively,
             # so no need for these generic versions.
             '../third_party/skia/src/ports/SkFontHost_tables.cpp',
-          ],
-          'conditions': [
-             [ 'use_skia == 0', {
-               'sources/': [
-                 ['exclude', '/pdf/'],
-                 ['exclude', 'ext/vector_platform_device_skia\\.(cc|h)'],
-               ],
-            },
-            { # use_skia
-              'defines': [
-                'SK_USE_MAC_CORE_TEXT',
-#                'SK_USE_COLOR_LUMINANCE',
-              ],
-            }],
           ],
         }],
         [ 'OS == "win"', {
@@ -534,6 +528,18 @@
               'SKIA_DLL',
             ],
           },
+        }],
+        # TODO(scottmg): http://crbug.com/177306
+        ['clang==1', {
+          'xcode_settings': {
+            'WARNING_CFLAGS!': [
+              # Don't warn about string->bool used in asserts.
+              '-Wstring-conversion',
+            ],
+          },
+          'cflags!': [
+            '-Wstring-conversion',
+          ],
         }],
       ],
       'dependencies': [
@@ -641,6 +647,7 @@
         '../third_party/skia/include/core',
         '../third_party/skia/include/effects',
         '../third_party/skia/include/images',
+        '../third_party/skia/include/lazy',
         '../third_party/skia/include/utils',
         '../third_party/skia/src/core',
       ],
@@ -827,6 +834,7 @@
             '../third_party/skia/include/core',
             '../third_party/skia/include/effects',
             '../third_party/skia/include/images',
+            '../third_party/skia/include/lazy',
             '../third_party/skia/include/utils',
             '../third_party/skia/src/core',
           ],

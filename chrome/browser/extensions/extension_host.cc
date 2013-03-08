@@ -21,10 +21,9 @@
 #include "chrome/browser/extensions/extension_tab_util.h"
 #include "chrome/browser/extensions/window_controller.h"
 #include "chrome/browser/file_select_helper.h"
-#include "chrome/browser/intents/web_intents_util.h"
-#include "chrome/browser/media/media_internals.h"
+#include "chrome/browser/media/media_capture_devices_dispatcher.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/app_modal_dialogs/javascript_dialog_creator.h"
+#include "chrome/browser/ui/app_modal_dialogs/javascript_dialog_manager.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_list.h"
@@ -33,6 +32,7 @@
 #include "chrome/browser/view_type_utils.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/extensions/background_info.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_messages.h"
@@ -48,7 +48,6 @@
 #include "content/public/browser/site_instance.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
-#include "content/public/browser/web_intents_dispatcher.h"
 #include "grit/browser_resources.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
@@ -160,7 +159,7 @@ ExtensionHost::ExtensionHost(const Extension* extension,
 
 ExtensionHost::~ExtensionHost() {
   if (extension_host_type_ == chrome::VIEW_TYPE_EXTENSION_BACKGROUND_PAGE &&
-      extension_ && extension_->has_lazy_background_page()) {
+      extension_ && BackgroundInfo::HasLazyBackgroundPage(extension_)) {
     UMA_HISTOGRAM_LONG_TIMES("Extensions.EventPageActiveTime",
                              since_created_.Elapsed());
   }
@@ -353,7 +352,7 @@ void ExtensionHost::DidStopLoading(content::RenderViewHost* render_view_host) {
   }
   if (notify) {
     if (extension_host_type_ == chrome::VIEW_TYPE_EXTENSION_BACKGROUND_PAGE) {
-      if (extension_ && extension_->has_lazy_background_page()) {
+      if (extension_ && BackgroundInfo::HasLazyBackgroundPage(extension_)) {
         UMA_HISTOGRAM_TIMES("Extensions.EventPageLoadTime",
                             since_created_.Elapsed());
       } else {
@@ -412,38 +411,6 @@ void ExtensionHost::CloseContents(WebContents* contents) {
       extension_host_type_ == chrome::VIEW_TYPE_PANEL) {
     Close();
   }
-}
-
-void ExtensionHost::OnStartDownload(
-    content::WebContents* source, content::DownloadItem* download) {
-  // If |source| is in the context of a Browser, show the DownloadShelf on that
-  // Browser.
-  if (!view() || !view()->browser())
-    return;
-  static_cast<content::WebContentsDelegate*>(view()->browser())->
-    OnStartDownload(source, download);
-}
-
-void ExtensionHost::WebIntentDispatch(
-    content::WebContents* web_contents,
-    content::WebIntentsDispatcher* intents_dispatcher) {
-#if !defined(OS_ANDROID)
-  scoped_ptr<content::WebIntentsDispatcher> dispatcher(intents_dispatcher);
-
-  Browser* browser = view() ? view()->browser()
-      : chrome::FindBrowserWithWebContents(web_contents);
-
-  // For background scripts/pages, there will be no view(). In this case, we
-  // want to treat the intent as a browser-initiated one and deliver it into the
-  // current browser. It probably came from a context menu click or similar.
-  if (!browser)
-    browser = web_intents::GetBrowserForBackgroundWebIntentDelivery(profile());
-
-  if (browser) {
-    static_cast<WebContentsDelegate*>(browser)->
-        WebIntentDispatch(NULL, dispatcher.release());
-  }
-#endif
 }
 
 void ExtensionHost::WillRunJavaScriptDialog() {
@@ -594,11 +561,11 @@ void ExtensionHost::RenderViewDeleted(RenderViewHost* render_view_host) {
     render_view_host_ = host_contents_->GetRenderViewHost();
 }
 
-content::JavaScriptDialogCreator* ExtensionHost::GetJavaScriptDialogCreator() {
-  if (!dialog_creator_.get()) {
-    dialog_creator_.reset(CreateJavaScriptDialogCreatorInstance(this));
+content::JavaScriptDialogManager* ExtensionHost::GetJavaScriptDialogManager() {
+  if (!dialog_manager_.get()) {
+    dialog_manager_.reset(CreateJavaScriptDialogManagerInstance(this));
   }
-  return dialog_creator_.get();
+  return dialog_manager_.get();
 }
 
 void ExtensionHost::RunFileChooser(WebContents* tab,
@@ -652,7 +619,7 @@ void ExtensionHost::RequestMediaAccessPermission(
     const content::MediaResponseCallback& callback) {
   // Get the preferred default devices for the request.
   content::MediaStreamDevices devices;
-  media::GetDefaultDevicesForProfile(
+  MediaCaptureDevicesDispatcher::GetInstance()->GetDefaultDevicesForProfile(
       profile_,
       content::IsAudioMediaType(request.audio_type),
       content::IsVideoMediaType(request.video_type),

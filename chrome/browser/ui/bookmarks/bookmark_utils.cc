@@ -6,8 +6,8 @@
 
 #include "base/basictypes.h"
 #include "base/logging.h"
-#include "base/prefs/public/pref_service_base.h"
-#include "base/string_number_conversions.h"
+#include "base/prefs/pref_service.h"
+#include "base/strings/string_number_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
@@ -18,6 +18,7 @@
 #include "chrome/browser/ui/simple_message_box.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/pref_names.h"
+#include "components/user_prefs/user_prefs.h"
 #include "content/public/browser/web_contents.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
@@ -220,6 +221,18 @@ bool HasBookmarkURLs(const std::vector<const BookmarkNode*>& selection) {
   return iterator.has_next();
 }
 
+bool HasBookmarkURLsAllowedInIncognitoMode(
+    const std::vector<const BookmarkNode*>& selection,
+    content::BrowserContext* browser_context) {
+  OpenURLIterator iterator(selection);
+  while (iterator.has_next()) {
+    const GURL* url = iterator.NextURL();
+    if (IsURLAllowedInIncognito(*url, browser_context))
+      return true;
+  }
+  return false;
+}
+
 void GetURLAndTitleToBookmark(content::WebContents* web_contents,
                               GURL* url,
                               string16* title) {
@@ -228,7 +241,7 @@ void GetURLAndTitleToBookmark(content::WebContents* web_contents,
 }
 
 void ToggleBookmarkBarWhenVisible(content::BrowserContext* browser_context) {
-  PrefServiceBase* prefs = PrefServiceBase::FromBrowserContext(browser_context);
+  PrefService* prefs = components::UserPrefs::Get(browser_context);
   const bool always_show = !prefs->GetBoolean(prefs::kShowBookmarkBar);
 
   // The user changed when the bookmark bar is shown, update the preferences.
@@ -236,7 +249,7 @@ void ToggleBookmarkBarWhenVisible(content::BrowserContext* browser_context) {
 }
 
 string16 FormatBookmarkURLForDisplay(const GURL& url,
-                                     const PrefServiceBase* prefs) {
+                                     const PrefService* prefs) {
   std::string languages;
   if (prefs)
     languages = prefs->GetString(prefs::kAcceptLanguages);

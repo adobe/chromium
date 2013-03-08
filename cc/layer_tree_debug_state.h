@@ -27,12 +27,21 @@ class CC_EXPORT LayerTreeDebugState {
   bool showOccludingRects;
   bool showNonOccludingRects;
 
+  int slowDownRasterScaleFactor;
+
+  void setRecordRenderingStats(bool);
+  bool recordRenderingStats() const;
+
+  bool traceAllRenderedFrames;
+
   bool showHudInfo() const;
   bool showHudRects() const;
-  bool hudNeedsFont() const;
 
   static bool equal(const LayerTreeDebugState& a, const LayerTreeDebugState& b);
   static LayerTreeDebugState unite(const LayerTreeDebugState& a, const LayerTreeDebugState& b);
+
+private:
+  bool m_recordRenderingStats;
 };
 
 }  // namespace cc

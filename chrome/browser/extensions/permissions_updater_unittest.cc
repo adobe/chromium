@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/json/json_file_value_serializer.h"
 #include "base/memory/ref_counted.h"
 #include "base/path_service.h"
@@ -88,7 +88,7 @@ class PermissionsUpdaterTest : public ExtensionServiceTestBase {
 };
 
 scoped_refptr<Extension> LoadManifest(std::string* error) {
-  FilePath path;
+  base::FilePath path;
   PathService::Get(chrome::DIR_TEST_DATA, &path);
   path = path.AppendASCII("extensions")
       .AppendASCII("api_test")
@@ -102,7 +102,7 @@ scoped_refptr<Extension> LoadManifest(std::string* error) {
     return NULL;
 
   scoped_refptr<Extension> extension = Extension::Create(
-      path.DirName(), Extension::INTERNAL,
+      path.DirName(), Manifest::INTERNAL,
       *static_cast<DictionaryValue*>(result.get()), Extension::NO_FLAGS, error);
   return extension;
 }

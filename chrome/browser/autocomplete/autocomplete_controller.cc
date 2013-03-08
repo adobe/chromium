@@ -11,10 +11,11 @@
 #include "base/format_macros.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
-#include "base/string_number_conversions.h"
 #include "base/stringprintf.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/time.h"
 #include "chrome/browser/autocomplete/autocomplete_controller_delegate.h"
+#include "chrome/browser/autocomplete/autocomplete_field_trial.h"
 #include "chrome/browser/autocomplete/bookmark_provider.h"
 #include "chrome/browser/autocomplete/builtin_provider.h"
 #include "chrome/browser/autocomplete/extension_app_provider.h"
@@ -94,6 +95,8 @@ AutocompleteController::AutocompleteController(
       in_start_(false),
       in_zero_suggest_(false),
       profile_(profile) {
+  // AND with the disabled providers, if any.
+  provider_types &= ~AutocompleteFieldTrial::GetDisabledProviderTypes();
   bool use_hqp = !!(provider_types & AutocompleteProvider::TYPE_HISTORY_QUICK);
   // TODO(mrossetti): Permanently modify the HistoryURLProvider to not search
   // titles once HQP is turned on permanently.
@@ -447,6 +450,30 @@ void AutocompleteController::UpdateAssistedQueryStats(
     match->destination_url = GURL(template_url->url_ref().ReplaceSearchTerms(
         *match->search_terms_args));
   }
+}
+
+GURL AutocompleteController::GetDestinationURL(
+    const AutocompleteMatch& match,
+    base::TimeDelta query_formulation_time) const {
+  GURL destination_url(match.destination_url);
+  TemplateURL* template_url = match.GetTemplateURL(profile_, false);
+
+  // Append the query formulation time (time from when the user first typed a
+  // character into the omnibox to when the user selected a query) and whether
+  // a field trial has triggered to the AQS parameter, if other AQS parameters
+  // were already populated.
+  if (template_url && match.search_terms_args.get() &&
+      !match.search_terms_args->assisted_query_stats.empty()) {
+    TemplateURLRef::SearchTermsArgs search_terms_args(*match.search_terms_args);
+    search_terms_args.assisted_query_stats += base::StringPrintf(
+        ".%" PRId64 "j%d",
+        query_formulation_time.InMilliseconds(),
+        search_provider_ &&
+        search_provider_->field_trial_triggered_in_session());
+    destination_url = GURL(template_url->url_ref().
+                           ReplaceSearchTerms(search_terms_args));
+  }
+  return destination_url;
 }
 
 void AutocompleteController::UpdateKeywordDescriptions(

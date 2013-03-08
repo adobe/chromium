@@ -7,10 +7,16 @@
  */
 function ImageEncoder() {}
 
-//TODO(JSDOC)
+/**
+ * @type {Array.<Object>}
+ */
 ImageEncoder.metadataEncoders = {};
 
-//TODO(JSDOC)
+/**
+ * @param {function(new:ImageEncoder.MetadataEncoder)} constructor
+ *     // TODO(JSDOC).
+ * @param {string} mimeType  // TODO(JSDOC).
+ */
 ImageEncoder.registerMetadataEncoder = function(constructor, mimeType) {
   ImageEncoder.metadataEncoders[mimeType] = constructor;
 };
@@ -20,7 +26,7 @@ ImageEncoder.registerMetadataEncoder = function(constructor, mimeType) {
  *
  * The encoder will own and modify a copy of the original metadata.
  *
- * @param {Object} metadata Original metadata
+ * @param {Object} metadata Original metadata.
  * @return {ImageEncoder.MetadataEncoder} Created metadata encoder.
  */
 ImageEncoder.createMetadataEncoder = function(metadata) {
@@ -34,9 +40,9 @@ ImageEncoder.createMetadataEncoder = function(metadata) {
  * Create a metadata encoder object holding a copy of metadata
  * modified according to the properties of the supplied image.
  *
- * @param {Object} metadata Original metadata
+ * @param {Object} metadata Original metadata.
  * @param {HTMLCanvasElement} canvas Canvas to use for metadata.
- * @param {number} quality Encoding quality (defaults to 1)
+ * @param {number} quality Encoding quality (defaults to 1).
  * @return {ImageEncoder.MetadataEncoder} Encoder with encoded metadata.
  */
 ImageEncoder.encodeMetadata = function(metadata, canvas, quality) {
@@ -118,9 +124,9 @@ ImageEncoder.decodeDataURL = function(dataURL) {
 /**
  * Return a thumbnail for an image.
  * @param {HTMLCanvasElement} canvas Original image.
- * @param {number} opt_shrinkage Thumbnail should be at least this much smaller
- *                               than the original image (in each dimension).
- * @return {HTMLCanvasElement} Thumbnail canvas
+ * @param {number=} opt_shrinkage Thumbnail should be at least this much smaller
+ *     than the original image (in each dimension).
+ * @return {HTMLCanvasElement} Thumbnail canvas.
  */
 ImageEncoder.createThumbnail = function(canvas, opt_shrinkage) {
   var MAX_THUMBNAIL_DIMENSION = 320;
@@ -141,6 +147,13 @@ ImageEncoder.createThumbnail = function(canvas, opt_shrinkage) {
   return thumbnailCanvas;
 };
 
+/**
+ * TODO(JSDOC)
+ * @param {string} string  // TODO(JSDOC).
+ * @param {number} from  // TODO(JSDOC).
+ * @param {number} to  // TODO(JSDOC).
+ * @return {ArrayBuffer}  // TODO(JSDOC).
+ */
 ImageEncoder.stringToArrayBuffer = function(string, from, to) {
   var size = to - from;
   var array = new Uint8Array(size);
@@ -157,9 +170,10 @@ ImageEncoder.stringToArrayBuffer = function(string, from, to) {
  * parsers recognized.
  *
  * @param {Object} original_metadata Starting metadata.
+ * @constructor
  */
 ImageEncoder.MetadataEncoder = function(original_metadata) {
-  this.metadata_ = ImageUtil.deepCopy(original_metadata) || {};
+  this.metadata_ = MetadataCache.cloneMetadata(original_metadata) || {};
   if (this.metadata_.mimeType != 'image/jpeg') {
     // Chrome can only encode JPEG and PNG. Force PNG mime type so that we
     // can save to file and generate a thumbnail.
@@ -167,6 +181,10 @@ ImageEncoder.MetadataEncoder = function(original_metadata) {
   }
 };
 
+/**
+ * TODO(JSDOC)
+ * @return {Object}   // TODO(JSDOC).
+ */
 ImageEncoder.MetadataEncoder.prototype.getMetadata = function() {
   return this.metadata_;
 };
@@ -192,7 +210,7 @@ ImageEncoder.MetadataEncoder.prototype.setThumbnailData =
 
 /**
  * Return a range where the metadata is (or should be) located.
- * @param {string} encodedImage //TODO(JSDOC)
+ * @param {string} encodedImage // TODO(JSDOC).
  * @return {Object} An object with from and to properties.
  */
 ImageEncoder.MetadataEncoder.prototype.
@@ -201,7 +219,7 @@ ImageEncoder.MetadataEncoder.prototype.
 /**
  * Return serialized metadata ready to write to an image file.
  * The return type is optimized for passing to Blob.append.
- * @return {ArrayBuffer} //TODO(JSDOC)
+ * @return {ArrayBuffer} // TODO(JSDOC).
  */
 ImageEncoder.MetadataEncoder.prototype.encode = function() {
   return new Uint8Array(0).buffer;

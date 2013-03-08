@@ -4,7 +4,7 @@
 
 #include <string>
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/memory/ref_counted.h"
 #include "base/message_loop.h"
 #include "base/prefs/pref_store_observer_mock.h"
@@ -46,7 +46,7 @@ class PolicyAndPref {
 class ConfigurationPolicyPrefStoreTest : public testing::Test {
  protected:
   ConfigurationPolicyPrefStoreTest() {
-    EXPECT_CALL(provider_, IsInitializationComplete())
+    EXPECT_CALL(provider_, IsInitializationComplete(_))
         .WillRepeatedly(Return(false));
     provider_.Init();
     PolicyServiceImpl::Providers providers;
@@ -284,7 +284,9 @@ INSTANTIATE_TEST_CASE_P(
         PolicyAndPref(key::kDisablePrintPreview,
                       prefs::kPrintPreviewDisabled),
         PolicyAndPref(key::kDeveloperToolsDisabled,
-                      prefs::kDevToolsDisabled)));
+                      prefs::kDevToolsDisabled),
+        PolicyAndPref(key::kHideWebStoreIcon,
+                      prefs::kHideWebStoreIcon)));
 
 #if defined(OS_CHROMEOS)
 INSTANTIATE_TEST_CASE_P(
@@ -299,6 +301,8 @@ INSTANTIATE_TEST_CASE_P(
                       prefs::kDisableDriveOverCellular),
         PolicyAndPref(key::kExternalStorageDisabled,
                       prefs::kExternalStorageDisabled),
+        PolicyAndPref(key::kShowAccessibilityOptionsInSystemTrayMenu,
+                      prefs::kShouldAlwaysShowAccessibilityMenu),
         PolicyAndPref(key::kAudioOutputAllowed,
                       prefs::kAudioOutputAllowed),
         PolicyAndPref(key::kAudioCaptureAllowed,
@@ -1025,7 +1029,7 @@ TEST_F(ConfigurationPolicyPrefStoreRefreshTest, Refresh) {
 
 TEST_F(ConfigurationPolicyPrefStoreRefreshTest, Initialization) {
   EXPECT_FALSE(store_->IsInitializationComplete());
-  EXPECT_CALL(provider_, IsInitializationComplete())
+  EXPECT_CALL(provider_, IsInitializationComplete(POLICY_DOMAIN_CHROME))
       .WillRepeatedly(Return(true));
   EXPECT_CALL(observer_, OnInitializationCompleted(true)).Times(1);
   PolicyMap policy;

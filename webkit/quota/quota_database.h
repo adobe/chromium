@@ -10,7 +10,7 @@
 
 #include "base/basictypes.h"
 #include "base/callback.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/time.h"
@@ -38,7 +38,7 @@ class WEBKIT_STORAGE_EXPORT_PRIVATE QuotaDatabase {
   static const char kTemporaryQuotaOverrideKey[];
 
   // If 'path' is empty, an in memory database will be used.
-  explicit QuotaDatabase(const FilePath& path);
+  explicit QuotaDatabase(const base::FilePath& path);
   ~QuotaDatabase();
 
   void CloseConnection();
@@ -163,7 +163,7 @@ class WEBKIT_STORAGE_EXPORT_PRIVATE QuotaDatabase {
   bool DumpQuotaTable(QuotaTableCallback* callback);
   bool DumpOriginInfoTable(OriginInfoTableCallback* callback);
 
-  FilePath db_file_path_;
+  base::FilePath db_file_path_;
 
   scoped_ptr<sql::Connection> db_;
   scoped_ptr<sql::MetaTable> meta_table_;

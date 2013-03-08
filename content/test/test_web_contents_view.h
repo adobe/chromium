@@ -7,11 +7,11 @@
 
 #include "base/compiler_specific.h"
 #include "content/port/browser/render_view_host_delegate_view.h"
-#include "content/public/browser/web_contents_view.h"
+#include "content/port/browser/web_contents_view_port.h"
 
 namespace content {
 
-class TestWebContentsView : public WebContentsView,
+class TestWebContentsView : public WebContentsViewPort,
                             public RenderViewHostDelegateView {
  public:
   TestWebContentsView();
@@ -37,31 +37,36 @@ class TestWebContentsView : public WebContentsView,
   virtual void TakeFocus(bool reverse) OVERRIDE;
 
   // WebContentsView:
+  virtual gfx::NativeView GetNativeView() const OVERRIDE;
+  virtual gfx::NativeView GetContentNativeView() const OVERRIDE;
+  virtual gfx::NativeWindow GetTopLevelNativeWindow() const OVERRIDE;
+  virtual void GetContainerBounds(gfx::Rect *out) const OVERRIDE;
+  virtual void OnTabCrashed(base::TerminationStatus status,
+                            int error_code) OVERRIDE;
+  virtual void SizeContents(const gfx::Size& size) OVERRIDE;
+  virtual void Focus() OVERRIDE;
+  virtual void SetInitialFocus() OVERRIDE;
+  virtual void StoreFocus() OVERRIDE;
+  virtual void RestoreFocus() OVERRIDE;
+  virtual WebDropData* GetDropData() const OVERRIDE;
+  virtual gfx::Rect GetViewBounds() const OVERRIDE;
+#if defined(OS_MACOSX)
+  virtual void SetAllowOverlappingViews(bool overlapping) OVERRIDE;
+#endif
+
+  // WebContentsViewPort:
   virtual void CreateView(const gfx::Size& initial_size,
                           gfx::NativeView context) OVERRIDE;
   virtual RenderWidgetHostView* CreateViewForWidget(
       RenderWidgetHost* render_widget_host) OVERRIDE;
   virtual RenderWidgetHostView* CreateViewForPopupWidget(
       RenderWidgetHost* render_widget_host) OVERRIDE;
-  virtual gfx::NativeView GetNativeView() const OVERRIDE;
-  virtual gfx::NativeView GetContentNativeView() const OVERRIDE;
-  virtual gfx::NativeWindow GetTopLevelNativeWindow() const OVERRIDE;
-  virtual void GetContainerBounds(gfx::Rect *out) const OVERRIDE;
   virtual void SetPageTitle(const string16& title) OVERRIDE;
-  virtual void OnTabCrashed(base::TerminationStatus status,
-                            int error_code) OVERRIDE;
-  virtual void SizeContents(const gfx::Size& size) OVERRIDE;
   virtual void RenderViewCreated(RenderViewHost* host) OVERRIDE;
-  virtual void Focus() OVERRIDE;
-  virtual void SetInitialFocus() OVERRIDE;
-  virtual void StoreFocus() OVERRIDE;
-  virtual void RestoreFocus() OVERRIDE;
-  virtual WebDropData* GetDropData() const OVERRIDE;
+  virtual void RenderViewSwappedIn(RenderViewHost* host) OVERRIDE;
+#if defined(OS_MACOSX)
   virtual bool IsEventTracking() const OVERRIDE;
   virtual void CloseTabAfterEventTracking() OVERRIDE;
-  virtual gfx::Rect GetViewBounds() const OVERRIDE;
-#if defined(OS_MACOSX)
-  virtual void SetAllowOverlappingViews(bool overlapping) OVERRIDE;
 #endif
 
  private:

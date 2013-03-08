@@ -6,13 +6,13 @@
 
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/prefs/pref_service.h"
 #include "base/stl_util.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/fullscreen.h"
 #include "chrome/browser/idle.h"
 #include "chrome/browser/notifications/balloon_collection.h"
 #include "chrome/browser/notifications/notification.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/notification_service.h"
@@ -20,6 +20,7 @@
 BalloonNotificationUIManager::BalloonNotificationUIManager(
     PrefService* local_state)
     : NotificationUIManagerImpl(),
+      NotificationPrefsManager(local_state),
       balloon_collection_(NULL) {
   position_pref_.Init(
       prefs::kDesktopNotificationPosition,
@@ -42,6 +43,12 @@ void BalloonNotificationUIManager::SetBalloonCollection(
       static_cast<BalloonCollection::PositionPreference>(
           position_pref_.GetValue()));
   balloon_collection_->set_space_change_listener(this);
+}
+
+bool BalloonNotificationUIManager::DoesIdExist(const std::string& id) {
+  if (NotificationUIManagerImpl::DoesIdExist(id))
+    return true;
+  return balloon_collection_->DoesIdExist(id);
 }
 
 bool BalloonNotificationUIManager::CancelById(const std::string& id) {
@@ -147,4 +154,3 @@ BalloonNotificationUIManager*
   return static_cast<BalloonNotificationUIManager*>(
       g_browser_process->notification_ui_manager());
 }
-

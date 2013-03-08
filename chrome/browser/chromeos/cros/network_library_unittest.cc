@@ -46,8 +46,8 @@ class StubEnrollmentDelegate : public EnrollmentDelegate {
       : did_enroll(false),
         correct_args(false) {}
 
-  void Enroll(const std::vector<std::string>& uri_list,
-              const base::Closure& closure) {
+  virtual void Enroll(const std::vector<std::string>& uri_list,
+                      const base::Closure& closure) OVERRIDE {
     std::vector<std::string> expected_uri_list;
     expected_uri_list.push_back("http://youtu.be/dQw4w9WgXcQ");
     expected_uri_list.push_back("chrome-extension://abc/keygen-cert.html");
@@ -324,8 +324,7 @@ TEST_F(NetworkLibraryStubTest, NetworkConnectWifiWithCertPattern) {
   onc_root->GetListWithoutPathExpansion(onc::toplevel_config::kCertificates,
                                         &certificates);
 
-  onc::CertificateImporter importer(onc::ONC_SOURCE_USER_IMPORT,
-                                    false /* don't allow webtrust */);
+  onc::CertificateImporter importer(true /* allow webtrust */);
   ASSERT_EQ(onc::CertificateImporter::IMPORT_OK,
             importer.ParseAndStoreCertificates(*certificates));
 
@@ -354,8 +353,7 @@ TEST_F(NetworkLibraryStubTest, NetworkConnectVPNWithCertPattern) {
   onc_root->GetListWithoutPathExpansion(onc::toplevel_config::kCertificates,
                                         &certificates);
 
-  onc::CertificateImporter importer(onc::ONC_SOURCE_USER_IMPORT,
-                                    false /* don't allow webtrust */);
+  onc::CertificateImporter importer(true /* allow webtrust */);
   ASSERT_EQ(onc::CertificateImporter::IMPORT_OK,
             importer.ParseAndStoreCertificates(*certificates));
 

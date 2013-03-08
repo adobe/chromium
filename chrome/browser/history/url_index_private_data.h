@@ -8,11 +8,11 @@
 #include <set>
 #include <string>
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/ref_counted.h"
-#include "chrome/browser/history/in_memory_url_index_types.h"
 #include "chrome/browser/history/in_memory_url_index_cache.pb.h"
+#include "chrome/browser/history/in_memory_url_index_types.h"
 #include "chrome/browser/history/scored_history_match.h"
 #include "content/public/browser/notification_details.h"
 
@@ -50,19 +50,24 @@ class URLIndexPrivateData
   // vector with all scored, matching history items. The |term_string| is
   // broken down into individual terms (words), each of which must occur in the
   // candidate history item's URL or page title for the item to qualify;
-  // however, the terms do not necessarily have to be adjacent. Once we have
-  // a set of candidates, they are filtered to insure that all |term_string|
-  // terms, as separated by whitespace, occur within the candidate's URL
-  // or page title. Scores are then calculated on no more than
-  // |kItemsToScoreLimit| candidates, as the scoring of such a large number of
-  // candidates may cause perceptible typing response delays in the omnibox.
-  // This is likely to occur for short omnibox terms such as 'h' and 'w' which
+  // however, the terms do not necessarily have to be adjacent. We
+  // also allow breaking |term_string| at |cursor_position| (if
+  // set). Once we have a set of candidates, they are filtered to ensure
+  // that all |term_string| terms, as separated by whitespace and the
+  // cursor (if set), occur within the candidate's URL or page title.
+  // Scores are then calculated on no more than |kItemsToScoreLimit|
+  // candidates, as the scoring of such a large number of candidates may
+  // cause perceptible typing response delays in the omnibox. This is
+  // likely to occur for short omnibox terms such as 'h' and 'w' which
   // will be found in nearly all history candidates. Results are sorted by
   // descending score. The full results set (i.e. beyond the
   // |kItemsToScoreLimit| limit) will be retained and used for subsequent calls
   // to this function. |bookmark_service| is used to boost a result's score if
-  // its URL is referenced by one or more of the user's bookmarks.
-  ScoredHistoryMatches HistoryItemsForTerms(const string16& term_string,
+  // its URL is referenced by one or more of the user's bookmarks.  |languages|
+  // is used to help parse/format the URLs in the history index.
+  ScoredHistoryMatches HistoryItemsForTerms(string16 term_string,
+                                            size_t cursor_position,
+                                            const std::string& languages,
                                             BookmarkService* bookmark_service);
 
   // Adds the history item in |row| to the index if it does not already already
@@ -86,7 +91,7 @@ class URLIndexPrivateData
   // of the cache file stored in |file_path|, and assigns it to |private_data|.
   // |languages| will be used to break URLs and page titles into words.
   static void RestoreFromFileTask(
-      const FilePath& file_path,
+      const base::FilePath& file_path,
       scoped_refptr<URLIndexPrivateData> private_data,
       const std::string& languages);
 
@@ -103,7 +108,7 @@ class URLIndexPrivateData
   // Writes |private_data| as a cache file to |file_path| and returns success.
   static bool WritePrivateDataToCacheFileTask(
       scoped_refptr<URLIndexPrivateData> private_data,
-      const FilePath& file_path);
+      const base::FilePath& file_path);
 
   // Creates a copy of ourself.
   scoped_refptr<URLIndexPrivateData> Duplicate() const;
@@ -123,6 +128,7 @@ class URLIndexPrivateData
   friend class ::HistoryQuickProviderTest;
   friend class InMemoryURLIndexTest;
   FRIEND_TEST_ALL_PREFIXES(InMemoryURLIndexTest, CacheSaveRestore);
+  FRIEND_TEST_ALL_PREFIXES(InMemoryURLIndexTest, CursorPositionRetrieval);
   FRIEND_TEST_ALL_PREFIXES(InMemoryURLIndexTest, HugeResultSet);
   FRIEND_TEST_ALL_PREFIXES(InMemoryURLIndexTest, Scoring);
   FRIEND_TEST_ALL_PREFIXES(InMemoryURLIndexTest, TitleSearch);
@@ -166,6 +172,7 @@ class URLIndexPrivateData
   class AddHistoryMatch : public std::unary_function<HistoryID, void> {
    public:
     AddHistoryMatch(const URLIndexPrivateData& private_data,
+                    const std::string& languages,
                     BookmarkService* bookmark_service,
                     const string16& lower_string,
                     const String16Vector& lower_terms,
@@ -178,6 +185,7 @@ class URLIndexPrivateData
 
    private:
     const URLIndexPrivateData& private_data_;
+    const std::string& languages_;
     BookmarkService* bookmark_service_;
     ScoredHistoryMatches scored_matches_;
     const string16& lower_string_;
@@ -255,7 +263,7 @@ class URLIndexPrivateData
 
   // Caches the index private data and writes the cache file to the profile
   // directory.  Called by WritePrivateDataToCacheFileTask.
-  bool SaveToFile(const FilePath& file_path);
+  bool SaveToFile(const base::FilePath& file_path);
 
   // Encode a data structure into the protobuf |cache|.
   void SavePrivateData(imui::InMemoryURLIndexCacheItem* cache) const;
@@ -271,7 +279,7 @@ class URLIndexPrivateData
   // restored data but upon failure will be empty.  |languages| will be used to
   // break URLs and page titles into words
   static scoped_refptr<URLIndexPrivateData> RestoreFromFile(
-      const FilePath& path,
+      const base::FilePath& path,
       const std::string& languages);
 
   // Decode a data structure from the protobuf |cache|. Return false if there
@@ -293,6 +301,11 @@ class URLIndexPrivateData
 
   // Cache of search terms.
   SearchTermCacheMap search_term_cache_;
+
+  // Whether to allow breaking the input at the cursor position.  Set based
+  // on whether the user is in the OmniboxHQPUseCursorPosition field trial
+  // experiment group.
+  bool use_cursor_position_;
 
   // Start of data members that are cached -------------------------------------
 

@@ -12,6 +12,7 @@
 #include "base/values.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/extensions/extension_manifest_constants.h"
+#include "chrome/common/extensions/manifest.h"
 #include "chrome/common/url_constants.h"
 #include "extensions/common/error_utils.h"
 
@@ -90,12 +91,10 @@ DevToolsPageHandler::DevToolsPageHandler() {
 DevToolsPageHandler::~DevToolsPageHandler() {
 }
 
-bool DevToolsPageHandler::Parse(const base::Value* value,
-                                Extension* extension,
-                                string16* error) {
+bool DevToolsPageHandler::Parse(Extension* extension, string16* error) {
   scoped_ptr<ManifestURL> manifest_url(new ManifestURL);
   std::string devtools_str;
-  if (!value->GetAsString(&devtools_str)) {
+  if (!extension->manifest()->GetString(keys::kDevToolsPage, &devtools_str)) {
     *error = ASCIIToUTF16(errors::kInvalidDevToolsPage);
     return false;
   }
@@ -104,18 +103,21 @@ bool DevToolsPageHandler::Parse(const base::Value* value,
   return true;
 }
 
+const std::vector<std::string> DevToolsPageHandler::Keys() const {
+  return SingleKey(keys::kDevToolsPage);
+}
+
 HomepageURLHandler::HomepageURLHandler() {
 }
 
 HomepageURLHandler::~HomepageURLHandler() {
 }
 
-bool HomepageURLHandler::Parse(const base::Value* value,
-                               Extension* extension,
-                               string16* error) {
+bool HomepageURLHandler::Parse(Extension* extension, string16* error) {
   scoped_ptr<ManifestURL> manifest_url(new ManifestURL);
   std::string homepage_url_str;
-  if (!value->GetAsString(&homepage_url_str)) {
+  if (!extension->manifest()->GetString(keys::kHomepageURL,
+                                        &homepage_url_str)) {
     *error = ErrorUtils::FormatErrorMessageUTF16(
         errors::kInvalidHomepageURL, "");
     return false;
@@ -132,19 +134,21 @@ bool HomepageURLHandler::Parse(const base::Value* value,
   return true;
 }
 
+const std::vector<std::string> HomepageURLHandler::Keys() const {
+  return SingleKey(keys::kHomepageURL);
+}
+
 UpdateURLHandler::UpdateURLHandler() {
 }
 
 UpdateURLHandler::~UpdateURLHandler() {
 }
 
-bool UpdateURLHandler::Parse(const base::Value* value,
-                             Extension* extension,
-                             string16* error) {
+bool UpdateURLHandler::Parse(Extension* extension, string16* error) {
   scoped_ptr<ManifestURL> manifest_url(new ManifestURL);
   std::string tmp_update_url;
 
-  if (!value->GetAsString(&tmp_update_url)) {
+  if (!extension->manifest()->GetString(keys::kUpdateURL, &tmp_update_url)) {
     *error = ErrorUtils::FormatErrorMessageUTF16(
         errors::kInvalidUpdateURL, "");
     return false;
@@ -162,18 +166,20 @@ bool UpdateURLHandler::Parse(const base::Value* value,
   return true;
 }
 
+const std::vector<std::string> UpdateURLHandler::Keys() const {
+  return SingleKey(keys::kUpdateURL);
+}
+
 OptionsPageHandler::OptionsPageHandler() {
 }
 
 OptionsPageHandler::~OptionsPageHandler() {
 }
 
-bool OptionsPageHandler::Parse(const base::Value* value,
-                               Extension* extension,
-                               string16* error) {
+bool OptionsPageHandler::Parse(Extension* extension, string16* error) {
   scoped_ptr<ManifestURL> manifest_url(new ManifestURL);
   std::string options_str;
-  if (!value->GetAsString(&options_str)) {
+  if (!extension->manifest()->GetString(keys::kOptionsPage, &options_str)) {
     *error = ASCIIToUTF16(errors::kInvalidOptionsPage);
     return false;
   }
@@ -204,25 +210,28 @@ bool OptionsPageHandler::Parse(const base::Value* value,
   return true;
 }
 
+const std::vector<std::string> OptionsPageHandler::Keys() const {
+  return SingleKey(keys::kOptionsPage);
+}
+
 URLOverridesHandler::URLOverridesHandler() {
 }
 
 URLOverridesHandler::~URLOverridesHandler() {
 }
 
-bool URLOverridesHandler::Parse(const base::Value* value,
-                           Extension* extension,
-                           string16* error) {
+bool URLOverridesHandler::Parse(Extension* extension, string16* error) {
   const DictionaryValue* overrides = NULL;
-  if (!value->GetAsDictionary(&overrides)) {
+  if (!extension->manifest()->GetDictionary(keys::kChromeURLOverrides,
+                                            &overrides)) {
     *error = ASCIIToUTF16(errors::kInvalidChromeURLOverrides);
     return false;
   }
   scoped_ptr<URLOverrides> url_overrides(new URLOverrides);
   // Validate that the overrides are all strings
-  for (DictionaryValue::key_iterator iter = overrides->begin_keys();
-       iter != overrides->end_keys(); ++iter) {
-    std::string page = *iter;
+  for (DictionaryValue::Iterator iter(*overrides); !iter.IsAtEnd();
+         iter.Advance()) {
+    std::string page = iter.key();
     std::string val;
     // Restrict override pages to a list of supported URLs.
     bool is_override = (page != chrome::kChromeUINewTabHost &&
@@ -234,11 +243,11 @@ bool URLOverridesHandler::Parse(const base::Value* value,
 #endif
 #if defined(FILE_MANAGER_EXTENSION)
     is_override = (is_override &&
-                   !(extension->location() == Extension::COMPONENT &&
+                   !(extension->location() == Manifest::COMPONENT &&
                      page == chrome::kChromeUIFileManagerHost));
 #endif
 
-    if (is_override || !overrides->GetStringWithoutPathExpansion(*iter, &val)) {
+    if (is_override || !iter.value().GetAsString(&val)) {
       *error = ASCIIToUTF16(errors::kInvalidChromeURLOverrides);
       return false;
     }
@@ -247,7 +256,7 @@ bool URLOverridesHandler::Parse(const base::Value* value,
 
     // For component extensions, add override URL to extent patterns.
     if (extension->is_legacy_packaged_app() &&
-        extension->location() == Extension::COMPONENT) {
+        extension->location() == Manifest::COMPONENT) {
       URLPattern pattern(URLPattern::SCHEME_CHROMEUI);
       std::string url = base::StringPrintf(kOverrideExtentUrlPatternFormat,
                                            page.c_str());
@@ -268,6 +277,10 @@ bool URLOverridesHandler::Parse(const base::Value* value,
   extension->SetManifestData(keys::kChromeURLOverrides,
                              url_overrides.release());
   return true;
+}
+
+const std::vector<std::string> URLOverridesHandler::Keys() const {
+  return SingleKey(keys::kChromeURLOverrides);
 }
 
 }  // namespace extensions

@@ -11,26 +11,35 @@ scoped_ptr<PaintTimeCounter> PaintTimeCounter::create() {
   return make_scoped_ptr(new PaintTimeCounter());
 }
 
-PaintTimeCounter::PaintTimeCounter() {
+PaintTimeCounter::PaintTimeCounter()
+  : can_save_paint_time_delta_(false),
+    can_save_rasterize_time_delta_(false) {
 }
 
-base::TimeDelta PaintTimeCounter::GetPaintTimeOfRecentFrame(
-    const size_t& n) const {
-  DCHECK(n < ring_buffer_.BufferSize());
-
-  if (ring_buffer_.IsFilledIndex(n))
-    return ring_buffer_.ReadBuffer(n);
-
-  return base::TimeDelta();
-}
-
-void PaintTimeCounter::SavePaintTime(const base::TimeDelta& total_paint_time) {
-  base::TimeDelta paint_time = total_paint_time - last_total_paint_time_;
-
-  if (paint_time.InMillisecondsF() > 0)
-    ring_buffer_.SaveToBuffer(paint_time);
+void PaintTimeCounter::SavePaintTime(const base::TimeDelta& total_paint_time,
+                                     int commit_number) {
+  if (can_save_paint_time_delta_) {
+    Entry entry;
+    entry.commit_number = commit_number;
+    entry.paint_time = total_paint_time - last_total_paint_time_;
+    ring_buffer_.SaveToBuffer(entry);
+  }
 
   last_total_paint_time_ = total_paint_time;
+  can_save_paint_time_delta_ = true;
+}
+
+void PaintTimeCounter::SaveRasterizeTime(
+    const base::TimeDelta& total_rasterize_time,
+    int commit_number) {
+  if (can_save_rasterize_time_delta_) {
+    Entry* entry = ring_buffer_.MutableReadBuffer(ring_buffer_.BufferSize() - 1);
+    DCHECK(commit_number == entry->commit_number);
+    entry->rasterize_time = total_rasterize_time - last_total_rasterize_time_;
+  }
+
+  last_total_rasterize_time_ = total_rasterize_time;
+  can_save_rasterize_time_delta_ = true;
 }
 
 void PaintTimeCounter::GetMinAndMaxPaintTime(base::TimeDelta* min,
@@ -38,19 +47,23 @@ void PaintTimeCounter::GetMinAndMaxPaintTime(base::TimeDelta* min,
   *min = base::TimeDelta::FromDays(1);
   *max = base::TimeDelta();
 
-  for (size_t i = 0; i < ring_buffer_.BufferSize(); i++) {
-    if (ring_buffer_.IsFilledIndex(i)) {
-      base::TimeDelta paint_time = ring_buffer_.ReadBuffer(i);
+  for (RingBufferType::Iterator it = ring_buffer_.Begin(); it; ++it) {
+    const base::TimeDelta paint_time = it->total_time();
 
-      if (paint_time < *min)
-        *min = paint_time;
-      if (paint_time > *max)
-        *max = paint_time;
-    }
+    if (paint_time < *min)
+      *min = paint_time;
+    if (paint_time > *max)
+      *max = paint_time;
   }
 
   if (*min > *max)
     *min = *max;
+}
+
+void PaintTimeCounter::ClearHistory() {
+  ring_buffer_.Clear();
+  can_save_paint_time_delta_ = false;
+  can_save_rasterize_time_delta_ = false;
 }
 
 }  // namespace cc

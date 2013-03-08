@@ -6,7 +6,7 @@
 
 #include "base/debug/trace_event.h"
 #include "base/logging.h"
-#include "base/string_split.h"
+#include "base/strings/string_split.h"
 #include "base/values.h"
 #include "chrome/common/extensions/api/extension_api.h"
 #include "chrome/common/extensions/extension.h"
@@ -24,10 +24,8 @@ namespace {
 
 const char kChromeHidden[] = "chromeHidden";
 
-#ifndef NDEBUG
 const char kValidateCallbacks[] = "validateCallbacks";
 const char kValidateAPI[] = "validateAPI";
-#endif
 
 }  // namespace
 
@@ -35,7 +33,8 @@ ChromeV8Context::ChromeV8Context(v8::Handle<v8::Context> v8_context,
                                  WebKit::WebFrame* web_frame,
                                  const Extension* extension,
                                  Feature::Context context_type)
-    : v8_context_(v8::Persistent<v8::Context>::New(v8_context)),
+    : v8_context_(v8::Persistent<v8::Context>::New(v8_context->GetIsolate(),
+                                                   v8_context)),
       web_frame_(web_frame),
       extension_(extension),
       context_type_(context_type) {
@@ -48,7 +47,7 @@ ChromeV8Context::ChromeV8Context(v8::Handle<v8::Context> v8_context,
 ChromeV8Context::~ChromeV8Context() {
   VLOG(1) << "Destroyed context for extension\n"
           << "  extension id: " << GetExtensionID();
-  v8_context_.Dispose();
+  v8_context_.Dispose(v8_context_->GetIsolate());
 }
 
 std::string ChromeV8Context::GetExtensionID() {
@@ -66,15 +65,15 @@ v8::Handle<v8::Value> ChromeV8Context::GetOrCreateChromeHidden(
     hidden = v8::Object::New();
     global->SetHiddenValue(v8::String::New(kChromeHidden), hidden);
 
-#ifndef NDEBUG
-    // Tell schema_generated_bindings.js to validate callbacks and events
-    // against their schema definitions.
-    v8::Local<v8::Object>::Cast(hidden)->Set(
-        v8::String::New(kValidateCallbacks), v8::True());
-    // Tell schema_generated_bindings.js to validate API for ambiguity.
-    v8::Local<v8::Object>::Cast(hidden)->Set(
-        v8::String::New(kValidateAPI), v8::True());
-#endif
+    if (DCHECK_IS_ON()) {
+      // Tell schema_generated_bindings.js to validate callbacks and events
+      // against their schema definitions.
+      v8::Local<v8::Object>::Cast(hidden)->Set(
+          v8::String::New(kValidateCallbacks), v8::True());
+      // Tell schema_generated_bindings.js to validate API for ambiguity.
+      v8::Local<v8::Object>::Cast(hidden)->Set(
+          v8::String::New(kValidateAPI), v8::True());
+    }
   }
 
   DCHECK(hidden->IsObject());

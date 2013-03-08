@@ -4,10 +4,12 @@
 
 #include "ash/wm/toplevel_window_event_handler.h"
 
+#include "ash/root_window_controller.h"
 #include "ash/shell.h"
 #include "ash/shell_window_ids.h"
 #include "ash/test/ash_test_base.h"
 #include "ash/wm/property_util.h"
+#include "ash/wm/session_state_controller_impl.h"
 #include "ash/wm/window_util.h"
 #include "ash/wm/workspace/snap_sizer.h"
 #include "ash/wm/workspace_controller.h"
@@ -76,6 +78,7 @@ class ToplevelWindowEventHandlerTest : public AshTestBase {
   aura::Window* CreateWindow(int hittest_code) {
     TestWindowDelegate* d1 = new TestWindowDelegate(hittest_code);
     aura::Window* w1 = new aura::Window(d1);
+    w1->SetType(aura::client::WINDOW_TYPE_NORMAL);
     w1->set_id(1);
     w1->Init(ui::LAYER_TEXTURED);
     aura::Window* parent =
@@ -381,7 +384,11 @@ TEST_F(ToplevelWindowEventHandlerTest, DontGotWiderThanScreen) {
 
 // Verifies that touch-gestures drag the window correctly.
 TEST_F(ToplevelWindowEventHandlerTest, GestureDrag) {
-  scoped_ptr<aura::Window> target(CreateWindow(HTCAPTION));
+  scoped_ptr<aura::Window> target(
+      CreateTestWindowInShellWithDelegate(
+          new TestWindowDelegate(HTCAPTION),
+          0,
+          gfx::Rect(0, 0, 100, 100)));
   aura::test::EventGenerator generator(Shell::GetPrimaryRootWindow(),
                                        target.get());
   gfx::Rect old_bounds = target->bounds();
@@ -463,6 +470,34 @@ TEST_F(ToplevelWindowEventHandlerTest, GestureDrag) {
             GetRestoreBoundsInScreen(target.get())->ToString());
 }
 
+// Tests that a gesture cannot minimize a window in login/lock screen.
+TEST_F(ToplevelWindowEventHandlerTest, GestureDragMinimizeLoginScreen) {
+  SessionStateControllerImpl* state_controller =
+      static_cast<SessionStateControllerImpl*>
+      (Shell::GetInstance()->session_state_controller());
+  state_controller->OnLoginStateChanged(user::LOGGED_IN_NONE);
+  state_controller->OnLockStateChanged(false);
+  SetUserLoggedIn(false);
+
+  scoped_ptr<aura::Window> target(CreateWindow(HTCAPTION));
+  aura::Window* lock = internal::RootWindowController::ForWindow(target.get())->
+      GetContainer(internal::kShellWindowId_LockSystemModalContainer);
+  lock->AddChild(target.get());
+  aura::test::EventGenerator generator(Shell::GetPrimaryRootWindow(),
+                                       target.get());
+  gfx::Rect old_bounds = target->bounds();
+  gfx::Point location(5, 5);
+  target->SetProperty(aura::client::kCanMaximizeKey, true);
+
+  gfx::Point end = location;
+  end.Offset(0, 100);
+  generator.GestureScrollSequence(location, end,
+      base::TimeDelta::FromMilliseconds(5),
+      10);
+  RunAllPendingInMessageLoop();
+  EXPECT_FALSE(wm::IsWindowMinimized(target.get()));
+}
+
 TEST_F(ToplevelWindowEventHandlerTest, GestureDragToRestore) {
   scoped_ptr<aura::Window> window(
       CreateTestWindowInShellWithDelegate(
@@ -487,6 +522,106 @@ TEST_F(ToplevelWindowEventHandlerTest, GestureDragToRestore) {
   EXPECT_TRUE(GetWindowAlwaysRestoresToRestoreBounds(window.get()));
   EXPECT_EQ(old_bounds.ToString(),
             GetRestoreBoundsInScreen(window.get())->ToString());
+}
+
+// Tests that an unresizable window cannot be dragged or snapped using gestures.
+TEST_F(ToplevelWindowEventHandlerTest, GestureDragForUnresizableWindow) {
+  scoped_ptr<aura::Window> target(CreateWindow(HTCAPTION));
+
+  aura::test::EventGenerator generator(Shell::GetPrimaryRootWindow(),
+                                       target.get());
+  gfx::Rect old_bounds = target->bounds();
+  gfx::Point location(5, 5);
+
+  target->SetProperty(aura::client::kCanResizeKey, false);
+
+  gfx::Point end = location;
+
+  // Try to snap right. The window is not resizable. So it should not snap.
+  {
+    // Get the expected snapped bounds before the gesture.
+    internal::SnapSizer sizer(target.get(), location,
+        internal::SnapSizer::RIGHT_EDGE,
+        internal::SnapSizer::OTHER_INPUT);
+    gfx::Rect snapped_bounds = sizer.GetSnapBounds(target->bounds());
+
+    end.Offset(100, 0);
+    generator.GestureScrollSequence(location, end,
+        base::TimeDelta::FromMilliseconds(5),
+        10);
+    RunAllPendingInMessageLoop();
+
+    // Verify that the window has moved after the gesture.
+    gfx::Rect expected_bounds(old_bounds);
+    expected_bounds.Offset(gfx::Vector2d(100, 0));
+    EXPECT_EQ(expected_bounds.ToString(), target->bounds().ToString());
+
+    // Verify that the window did not snap left.
+    EXPECT_NE(snapped_bounds.ToString(), target->bounds().ToString());
+  }
+
+  old_bounds = target->bounds();
+
+  // Try to snap left. It should not snap.
+  {
+    // Get the expected snapped bounds before the gesture.
+    internal::SnapSizer sizer(target.get(), location,
+        internal::SnapSizer::LEFT_EDGE,
+        internal::SnapSizer::OTHER_INPUT);
+    gfx::Rect snapped_bounds = sizer.GetSnapBounds(target->bounds());
+    end = location = target->GetBoundsInRootWindow().CenterPoint();
+    end.Offset(-100, 0);
+    generator.GestureScrollSequence(location, end,
+        base::TimeDelta::FromMilliseconds(5),
+        10);
+    RunAllPendingInMessageLoop();
+
+    // Verify that the window has moved after the gesture.
+    gfx::Rect expected_bounds(old_bounds);
+    expected_bounds.Offset(gfx::Vector2d(-100, 0));
+    EXPECT_EQ(expected_bounds.ToString(), target->bounds().ToString());
+
+    // Verify that the window did not snap left.
+    EXPECT_NE(snapped_bounds.ToString(), target->bounds().ToString());
+  }
+}
+
+// Tests that dragging multiple windows at the same time is not allowed.
+TEST_F(ToplevelWindowEventHandlerTest, GestureDragMultipleWindows) {
+  scoped_ptr<aura::Window> target(
+      CreateTestWindowInShellWithDelegate(
+          new TestWindowDelegate(HTCAPTION),
+          0,
+          gfx::Rect(0, 0, 100, 100)));
+  scoped_ptr<aura::Window> notmoved(
+      CreateTestWindowInShellWithDelegate(
+          new TestWindowDelegate(HTCAPTION),
+          1, gfx::Rect(100, 0, 100, 100)));
+
+  aura::test::EventGenerator generator(Shell::GetPrimaryRootWindow(),
+                                       target.get());
+  gfx::Rect old_bounds = target->bounds();
+  gfx::Point location(5, 5);
+  target->SetProperty(aura::client::kCanMaximizeKey, true);
+
+  // Send some touch events to start dragging |target|.
+  generator.MoveTouch(location);
+  generator.PressTouch();
+  location.Offset(40, 5);
+  generator.MoveTouch(location);
+
+  // Try to drag |notmoved| window. This should not move the window.
+  {
+    gfx::Rect bounds = notmoved->bounds();
+    aura::test::EventGenerator gen(Shell::GetPrimaryRootWindow(),
+                                   notmoved.get());
+    gfx::Point start = notmoved->bounds().origin() + gfx::Vector2d(10, 10);
+    gfx::Point end = start + gfx::Vector2d(100, 10);
+    gen.GestureScrollSequence(start, end,
+        base::TimeDelta::FromMilliseconds(10),
+        10);
+    EXPECT_EQ(bounds.ToString(), notmoved->bounds().ToString());
+  }
 }
 
 // Verifies pressing escape resets the bounds to the original bounds.

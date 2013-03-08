@@ -8,7 +8,7 @@
 
 #include "content/common/accessibility_messages.h"
 #include "content/common/appcache_messages.h"
-#include "content/common/browser_plugin_messages.h"
+#include "content/common/browser_plugin/browser_plugin_messages.h"
 #include "content/common/cc_messages.h"
 #include "content/common/clipboard_messages.h"
 #include "content/common/database_messages.h"
@@ -28,7 +28,6 @@
 #include "content/common/hyphenator_messages.h"
 #include "content/common/icon_messages.h"
 #include "content/common/indexed_db/indexed_db_messages.h"
-#include "content/common/intents_messages.h"
 #include "content/common/java_bridge_messages.h"
 #include "content/common/media/audio_messages.h"
 #include "content/common/media/media_player_messages.h"

@@ -5,18 +5,19 @@
 #include "chrome/browser/ui/views/bookmarks/bookmark_context_menu_controller_views.h"
 
 #include "base/compiler_specific.h"
+#include "base/prefs/pref_service.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/bookmarks/bookmark_editor.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/bookmarks/bookmark_utils.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/chrome_pages.h"
+#include "chrome/browser/ui/search/search.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/page_navigator.h"
 #include "content/public/browser/user_metrics.h"
@@ -115,8 +116,9 @@ void BookmarkContextMenuControllerViews::ExecuteCommand(int id) {
           bookmark_utils::GetParentForNewNodes(parent_, selection_, &index);
       GURL url;
       string16 title;
-      chrome::GetURLAndTitleToBookmark(chrome::GetActiveWebContents(browser_),
-                                       &url, &title);
+      chrome::GetURLAndTitleToBookmark(
+          browser_->tab_strip_model()->GetActiveWebContents(),
+          &url, &title);
       BookmarkEditor::Show(parent_widget_->GetNativeWindow(),
                            profile_,
                            BookmarkEditor::EditDetails::AddNodeInFolder(
@@ -143,6 +145,14 @@ void BookmarkContextMenuControllerViews::ExecuteCommand(int id) {
     case IDC_BOOKMARK_BAR_ALWAYS_SHOW:
       chrome::ToggleBookmarkBarWhenVisible(profile_);
       break;
+
+    case IDC_BOOKMARK_BAR_SHOW_APPS_SHORTCUT: {
+      PrefService* prefs = profile_->GetPrefs();
+      prefs->SetBoolean(
+          prefs::kShowAppsShortcutInBookmarkBar,
+          !prefs->GetBoolean(prefs::kShowAppsShortcutInBookmarkBar));
+      break;
+    }
 
     case IDC_BOOKMARK_MANAGER: {
       content::RecordAction(UserMetricsAction("ShowBookmarkManager"));
@@ -184,8 +194,14 @@ void BookmarkContextMenuControllerViews::ExecuteCommand(int id) {
 }
 
 bool BookmarkContextMenuControllerViews::IsItemChecked(int id) const {
-  DCHECK_EQ(IDC_BOOKMARK_BAR_ALWAYS_SHOW, id);
-  return profile_->GetPrefs()->GetBoolean(prefs::kShowBookmarkBar);
+  if (id == IDC_BOOKMARK_BAR_ALWAYS_SHOW)
+    return profile_->GetPrefs()->GetBoolean(prefs::kShowBookmarkBar);
+
+  // This should only be available when instant extended is enabled.
+  DCHECK(chrome::search::IsInstantExtendedAPIEnabled());
+  DCHECK_EQ(IDC_BOOKMARK_BAR_SHOW_APPS_SHORTCUT, id);
+  return profile_->GetPrefs()->GetBoolean(
+      prefs::kShowAppsShortcutInBookmarkBar);
 }
 
 bool BookmarkContextMenuControllerViews::IsCommandEnabled(int id) const {
@@ -201,7 +217,8 @@ bool BookmarkContextMenuControllerViews::IsCommandEnabled(int id) const {
              incognito_avail != IncognitoModePrefs::DISABLED;
 
     case IDC_BOOKMARK_BAR_OPEN_ALL_INCOGNITO:
-      return chrome::HasBookmarkURLs(selection_) &&
+      return chrome::HasBookmarkURLsAllowedInIncognitoMode(selection_, profile_)
+             &&
              !profile_->IsOffTheRecord() &&
              incognito_avail != IncognitoModePrefs::DISABLED;
 
@@ -226,6 +243,10 @@ bool BookmarkContextMenuControllerViews::IsCommandEnabled(int id) const {
     case IDC_BOOKMARK_BAR_ALWAYS_SHOW:
       return !profile_->GetPrefs()->IsManagedPreference(
           prefs::kShowBookmarkBar);
+
+    case IDC_BOOKMARK_BAR_SHOW_APPS_SHORTCUT:
+      return !profile_->GetPrefs()->IsManagedPreference(
+          prefs::kShowAppsShortcutInBookmarkBar);
 
     case IDC_COPY:
     case IDC_CUT:
@@ -285,6 +306,10 @@ void BookmarkContextMenuControllerViews::BuildMenu() {
 
   delegate_->AddSeparator();
   delegate_->AddItemWithStringId(IDC_BOOKMARK_MANAGER, IDS_BOOKMARK_MANAGER);
+  if (chrome::search::IsInstantExtendedAPIEnabled()) {
+    delegate_->AddCheckboxItem(IDC_BOOKMARK_BAR_SHOW_APPS_SHORTCUT,
+                               IDS_BOOKMARK_BAR_SHOW_APPS_SHORTCUT);
+  }
   delegate_->AddCheckboxItem(IDC_BOOKMARK_BAR_ALWAYS_SHOW,
                              IDS_SHOW_BOOKMARK_BAR);
 }

@@ -11,22 +11,24 @@
 #include "chrome/browser/autofill/validation.h"
 #include "chrome/browser/autofill/wallet/wallet_address.h"
 
+namespace autofill {
+namespace wallet {
+
 namespace {
 
-std::string FormOfPaymentToString(
-    wallet::Instrument::FormOfPayment form_of_payment) {
+std::string FormOfPaymentToString(Instrument::FormOfPayment form_of_payment) {
   switch (form_of_payment) {
-    case wallet::Instrument::UNKNOWN:
+    case Instrument::UNKNOWN:
       return "UNKNOWN";
-    case wallet::Instrument::VISA:
+    case Instrument::VISA:
       return "VISA";
-    case wallet::Instrument::MASTER_CARD:
+    case Instrument::MASTER_CARD:
       return "MASTER_CARD";
-    case wallet::Instrument::AMEX:
+    case Instrument::AMEX:
       return "AMEX";
-    case wallet::Instrument::DISCOVER:
+    case Instrument::DISCOVER:
       return "DISCOVER";
-    case wallet::Instrument::JCB:
+    case Instrument::JCB:
       return "JCB";
   }
   NOTREACHED();
@@ -35,10 +37,8 @@ std::string FormOfPaymentToString(
 
 }  // namespace
 
-namespace wallet {
-
-Instrument::Instrument(const std::string& primary_account_number,
-                       const std::string& card_verification_number,
+Instrument::Instrument(const string16& primary_account_number,
+                       const string16& card_verification_number,
                        int expiration_month,
                        int expiration_year,
                        FormOfPayment form_of_payment,
@@ -80,7 +80,7 @@ bool Instrument::IsValid() const {
   if (!IsStringASCII(primary_account_number_))
     return false;
   bool primary_account_number_valid =
-      autofill::IsValidCreditCardNumber(ASCIIToUTF16(primary_account_number_));
+      autofill::IsValidCreditCardNumber(primary_account_number_);
   bool card_verification_number_valid = card_verification_number_.size() == 3 ||
                                         card_verification_number_.size() == 4;
   bool exp_month_valid = expiration_month_ >= 1 && expiration_month_ <= 12;
@@ -93,3 +93,4 @@ bool Instrument::IsValid() const {
 }
 
 }  // namespace wallet
+}  // namespace autofill

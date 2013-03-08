@@ -7,7 +7,7 @@
 
 #include <vector>
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/string16.h"
 #include "googleurl/src/gurl.h"
 
@@ -161,7 +161,7 @@ struct BookmarkNodeData {
 
  private:
   // Path of the profile we originated from.
-  FilePath profile_path_;
+  base::FilePath profile_path_;
 };
 
 #endif  // CHROME_BROWSER_BOOKMARKS_BOOKMARK_NODE_DATA_H_

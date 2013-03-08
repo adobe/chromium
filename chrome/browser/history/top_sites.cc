@@ -13,16 +13,17 @@
 #include "base/md5.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/message_loop_proxy.h"
+#include "base/prefs/pref_service.h"
 #include "base/string_util.h"
 #include "base/task_runner.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/history/history_backend.h"
+#include "chrome/browser/history/history_db_task.h"
 #include "chrome/browser/history/history_notifications.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/history/page_usage_data.h"
 #include "chrome/browser/history/top_sites_cache.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/webui/ntp/most_visited_handler.h"
@@ -121,7 +122,7 @@ class LoadThumbnailsFromHistoryTask : public HistoryDBTask {
   }
 
   virtual bool RunOnDBThread(history::HistoryBackend* backend,
-                             history::HistoryDatabase* db) {
+                             history::HistoryDatabase* db) OVERRIDE {
     // Get the most visited urls.
     backend->QueryMostVisitedURLsImpl(result_count_,
                                       kDaysOfHistory,
@@ -139,7 +140,7 @@ class LoadThumbnailsFromHistoryTask : public HistoryDBTask {
     return true;
   }
 
-  virtual void DoneRunOnMainThread() {
+  virtual void DoneRunOnMainThread() OVERRIDE {
     top_sites_->FinishHistoryMigration(data_);
   }
 
@@ -193,7 +194,7 @@ TopSites::TopSites(Profile* profile)
   }
 }
 
-void TopSites::Init(const FilePath& db_name) {
+void TopSites::Init(const base::FilePath& db_name) {
   // Create the backend here, rather than in the constructor, so that
   // unit tests that do not need the backend can run without a problem.
   backend_ = new TopSitesBackend;

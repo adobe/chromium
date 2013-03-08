@@ -7,7 +7,7 @@
 #include <stddef.h>
 
 #include "base/command_line.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/memory/scoped_vector.h"
 #include "content/common/child_process.h"
 #include "content/common/child_process_messages.h"
@@ -96,7 +96,7 @@ void UtilityThreadImpl::OnBatchModeFinished() {
 
 #if defined(OS_POSIX)
 void UtilityThreadImpl::OnLoadPlugins(
-    const std::vector<FilePath>& plugin_paths) {
+    const std::vector<base::FilePath>& plugin_paths) {
   webkit::npapi::PluginList* plugin_list =
       webkit::npapi::PluginList::Singleton();
 

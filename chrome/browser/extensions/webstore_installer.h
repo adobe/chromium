@@ -20,9 +20,13 @@
 #include "content/public/browser/notification_registrar.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/net_errors.h"
+#include "ui/gfx/image/image_skia.h"
 
-class FilePath;
 class Profile;
+
+namespace base {
+class FilePath;
+}
 
 namespace content {
 class NavigationController;
@@ -102,8 +106,14 @@ class WebstoreInstaller :public content::NotificationObserver,
     // Whether we should record an oauth2 grant for the extensions.
     bool record_oauth2_grant;
 
+    // Whether we should enable the launcher before installing the app.
+    bool enable_launcher;
+
     // Used to show the install dialog.
     ExtensionInstallPrompt::ShowDialogCallback show_dialog_callback;
+
+    // The icon to use to display the extension while it is installing.
+    gfx::ImageSkia installing_icon;
 
    private:
     Approval();
@@ -142,7 +152,7 @@ class WebstoreInstaller :public content::NotificationObserver,
 
   // Instead of using the default download directory, use |directory| instead.
   // This does *not* transfer ownership of |directory|.
-  static void SetDownloadDirectoryForTests(FilePath* directory);
+  static void SetDownloadDirectoryForTests(base::FilePath* directory);
 
  private:
   friend struct content::BrowserThread::DeleteOnThread<
@@ -158,7 +168,7 @@ class WebstoreInstaller :public content::NotificationObserver,
   virtual void OnDownloadDestroyed(content::DownloadItem* download) OVERRIDE;
 
   // Starts downloading the extension to |file_path|.
-  void StartDownload(const FilePath& file_path);
+  void StartDownload(const base::FilePath& file_path);
 
   // Reports an install |error| to the delegate for the given extension if this
   // managed its installation. This also removes the associated PendingInstall.

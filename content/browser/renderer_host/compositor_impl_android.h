@@ -17,7 +17,6 @@
 struct ANativeWindow;
 
 namespace cc {
-class FontAtlas;
 class InputHandler;
 class Layer;
 class LayerTreeHost;
@@ -47,6 +46,7 @@ class CONTENT_EXPORT CompositorImpl
   virtual void SetRootLayer(scoped_refptr<cc::Layer> root) OVERRIDE;
   virtual void SetWindowSurface(ANativeWindow* window) OVERRIDE;
   virtual void SetVisible(bool visible) OVERRIDE;
+  virtual void setDeviceScaleFactor(float factor) OVERRIDE;
   virtual void SetWindowBounds(const gfx::Size& size) OVERRIDE;
   virtual void SetHasTransparentBackground(bool flag) OVERRIDE;
   virtual bool CompositeAndReadback(
@@ -77,7 +77,10 @@ class CONTENT_EXPORT CompositorImpl
   virtual void didCommitAndDrawFrame() OVERRIDE;
   virtual void didCompleteSwapBuffers() OVERRIDE;
   virtual void scheduleComposite() OVERRIDE;
-  virtual scoped_ptr<cc::FontAtlas> createFontAtlas() OVERRIDE;
+  virtual scoped_refptr<cc::ContextProvider>
+      OffscreenContextProviderForMainThread() OVERRIDE;
+  virtual scoped_refptr<cc::ContextProvider>
+      OffscreenContextProviderForCompositorThread() OVERRIDE;
 
   // WebGraphicsContext3DSwapBuffersClient implementation.
   virtual void OnViewContextSwapBuffersPosted() OVERRIDE;
@@ -100,6 +103,8 @@ class CONTENT_EXPORT CompositorImpl
 
   Compositor::Client* client_;
   base::WeakPtrFactory<CompositorImpl> weak_factory_;
+
+  scoped_refptr<cc::ContextProvider> null_offscreen_context_provider_;
 
   DISALLOW_COPY_AND_ASSIGN(CompositorImpl);
 };

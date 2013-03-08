@@ -6,8 +6,8 @@
 
 #include <string>
 
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "base/string_util.h"
@@ -50,7 +50,7 @@ class TestOnlineAttempt : public OnlineAttempt {
  public:
   TestOnlineAttempt(AuthAttemptState* state,
                     AuthAttemptStateResolver* resolver)
-      : OnlineAttempt(false, state, resolver) {
+      : OnlineAttempt(state, resolver) {
   }
 };
 
@@ -67,7 +67,7 @@ class ParallelAuthenticatorTest : public testing::Test {
     hash_ascii_.append(std::string(16, '0'));
   }
 
-  ~ParallelAuthenticatorTest() {
+  virtual ~ParallelAuthenticatorTest() {
     DCHECK(!mock_caller_);
   }
 
@@ -109,8 +109,8 @@ class ParallelAuthenticatorTest : public testing::Test {
     mock_caller_ = NULL;
   }
 
-  FilePath PopulateTempFile(const char* data, int data_len) {
-    FilePath out;
+  base::FilePath PopulateTempFile(const char* data, int data_len) {
+    base::FilePath out;
     FILE* tmp_file = file_util::CreateAndOpenTemporaryFile(&out);
     EXPECT_NE(tmp_file, static_cast<FILE*>(NULL));
     EXPECT_EQ(file_util::WriteFile(out, data, data_len), data_len);

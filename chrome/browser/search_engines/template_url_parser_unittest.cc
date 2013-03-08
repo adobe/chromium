@@ -18,7 +18,7 @@
 class ParamFilterImpl : public TemplateURLParser::ParameterFilter {
  public:
   ParamFilterImpl(std::string name_str, std::string value_str);
-  ~ParamFilterImpl();
+  virtual ~ParamFilterImpl();
 
   virtual bool KeepParameter(const std::string& key,
                              const std::string& value) OVERRIDE;
@@ -50,7 +50,7 @@ bool ParamFilterImpl::KeepParameter(const std::string& key,
 class TemplateURLParserTest : public testing::Test {
  protected:
   TemplateURLParserTest();
-  ~TemplateURLParserTest();
+  virtual ~TemplateURLParserTest();
 
   virtual void SetUp() OVERRIDE;
 
@@ -65,7 +65,7 @@ class TemplateURLParserTest : public testing::Test {
   scoped_ptr<TemplateURL> template_url_;
 
  private:
-  FilePath full_path_;
+  base::FilePath full_path_;
 };
 
 TemplateURLParserTest::TemplateURLParserTest() {
@@ -80,7 +80,7 @@ void TemplateURLParserTest::SetUp() {
   if (!file_util::PathExists(full_path_)) {
     LOG(ERROR) <<
         "This test can't be run without some non-redistributable data";
-    full_path_ = FilePath();
+    full_path_ = base::FilePath();
   }
 }
 
@@ -91,7 +91,7 @@ bool TemplateURLParserTest::is_disabled() const {
 void TemplateURLParserTest::ParseFile(
     const std::string& file_name,
     TemplateURLParser::ParameterFilter* filter) {
-  FilePath full_path;
+  base::FilePath full_path;
   ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &full_path));
   full_path = full_path.AppendASCII("osdd");
   full_path = full_path.AppendASCII(file_name);

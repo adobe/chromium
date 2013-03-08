@@ -13,7 +13,7 @@
 #include <string>
 #include <vector>
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/memory/linked_ptr.h"
 #include "base/sequenced_task_runner_helpers.h"
 #include "base/shared_memory.h"
@@ -65,7 +65,7 @@ struct WebPluginInfo;
 namespace content {
 class BrowserContext;
 class DOMStorageContextImpl;
-class MediaObserver;
+class MediaInternals;
 class PluginServiceImpl;
 class RenderWidgetHelper;
 class ResourceContext;
@@ -82,7 +82,7 @@ class RenderMessageFilter : public BrowserMessageFilter {
                       BrowserContext* browser_context,
                       net::URLRequestContextGetter* request_context,
                       RenderWidgetHelper* render_widget_helper,
-                      MediaObserver* media_observer,
+                      MediaInternals* media_internals,
                       DOMStorageContextImpl* dom_storage_context);
 
   // IPC::ChannelProxy::MessageFilter methods:
@@ -113,6 +113,7 @@ class RenderMessageFilter : public BrowserMessageFilter {
 
   virtual ~RenderMessageFilter();
 
+  void OnGetProcessMemorySizes(size_t* private_bytes, size_t* shared_bytes);
   void OnCreateWindow(const ViewHostMsg_CreateWindow_Params& params,
                       int* route_id,
                       int* surface_id,
@@ -166,7 +167,7 @@ class RenderMessageFilter : public BrowserMessageFilter {
                              const GURL& policy_url,
                              const std::string& mime_type,
                              IPC::Message* reply_msg);
-  void OnOpenChannelToPepperPlugin(const FilePath& path,
+  void OnOpenChannelToPepperPlugin(const base::FilePath& path,
                                    IPC::Message* reply_msg);
   void OnDidCreateOutOfProcessPepperInstance(
       int plugin_child_id,
@@ -178,7 +179,7 @@ class RenderMessageFilter : public BrowserMessageFilter {
                                              bool is_external);
   void OnOpenChannelToPpapiBroker(int routing_id,
                                   int request_id,
-                                  const FilePath& path);
+                                  const base::FilePath& path);
   void OnGenerateRoutingID(int* route_id);
   void OnDownloadUrl(const IPC::Message& message,
                      const GURL& url,
@@ -189,10 +190,9 @@ class RenderMessageFilter : public BrowserMessageFilter {
 
   void OnGetCPUUsage(int* cpu_usage);
 
-  void OnGetHardwareBufferSize(uint32* buffer_size);
-  void OnGetHardwareInputSampleRate(int* sample_rate);
-  void OnGetHardwareSampleRate(int* sample_rate);
-  void OnGetHardwareInputChannelLayout(media::ChannelLayout* layout);
+  void OnGetAudioHardwareConfig(int* output_buffer_size,
+                                int* output_sample_rate, int* input_sample_rate,
+                                media::ChannelLayout* input_channel_layout);
 
   // Used to look up the monitor color profile.
   void OnGetMonitorColorProfile(std::vector<char>* profile);
@@ -220,10 +220,10 @@ class RenderMessageFilter : public BrowserMessageFilter {
       const GURL& url,
       IPC::Message* reply_msg);
   void OnAsyncOpenFile(const IPC::Message& msg,
-                       const FilePath& path,
+                       const base::FilePath& path,
                        int flags,
                        int message_id);
-  void AsyncOpenFileOnFileThread(const FilePath& path,
+  void AsyncOpenFileOnFileThread(const base::FilePath& path,
                                  int flags,
                                  int message_id,
                                  int routing_id);
@@ -261,7 +261,7 @@ class RenderMessageFilter : public BrowserMessageFilter {
   // by the BrowserProcess, which has a wider scope than we do.
   ResourceDispatcherHostImpl* resource_dispatcher_host_;
   PluginServiceImpl* plugin_service_;
-  FilePath profile_data_directory_;
+  base::FilePath profile_data_directory_;
 
   // Contextual information to be used for requests created here.
   scoped_refptr<net::URLRequestContextGetter> request_context_;
@@ -291,7 +291,7 @@ class RenderMessageFilter : public BrowserMessageFilter {
   // Used for sampling CPU usage of the renderer process.
   scoped_ptr<base::ProcessMetrics> process_metrics_;
 
-  MediaObserver* media_observer_;
+  MediaInternals* media_internals_;
 
   DISALLOW_COPY_AND_ASSIGN(RenderMessageFilter);
 };

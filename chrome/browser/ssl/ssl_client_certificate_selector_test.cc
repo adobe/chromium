@@ -5,7 +5,7 @@
 #include "chrome/browser/ssl/ssl_client_certificate_selector_test.h"
 
 #include "base/bind.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
@@ -33,7 +33,7 @@ SSLClientCertificateSelectorTestBase::~SSLClientCertificateSelectorTestBase() {
 }
 
 void SSLClientCertificateSelectorTestBase::SetUpInProcessBrowserTestFixture() {
-  FilePath certs_dir = net::GetTestCertsDirectory();
+  base::FilePath certs_dir = net::GetTestCertsDirectory();
 
   mit_davidben_cert_ = net::ImportCertFromFile(certs_dir, "mit.davidben.der");
   ASSERT_TRUE(mit_davidben_cert_);

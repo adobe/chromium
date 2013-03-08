@@ -12,6 +12,7 @@
 #include "base/message_loop.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram.h"
+#include "base/pending_task.h"
 #include "base/run_loop.h"
 #include "base/string_number_conversions.h"
 #include "base/threading/thread_restrictions.h"
@@ -30,7 +31,9 @@
 #include "content/browser/renderer_host/media/audio_mirroring_manager.h"
 #include "content/browser/renderer_host/media/media_stream_manager.h"
 #include "content/browser/speech/speech_recognition_manager_impl.h"
-#include "content/browser/trace_controller_impl.h"
+#include "content/browser/tracing/trace_controller_impl.h"
+#include "content/browser/webui/content_web_ui_controller_factory.h"
+#include "content/browser/webui/url_data_manager.h"
 #include "content/public/browser/browser_main_parts.h"
 #include "content/public/browser/browser_shutdown.h"
 #include "content/public/browser/compositor_util.h"
@@ -169,6 +172,10 @@ static void GLibLogHandler(const gchar* log_domain,
              strstr(log_domain, "<unknown>")) {
     LOG(ERROR) << "DBus call timeout or out of memory: "
                << "http://crosbug.com/15496";
+  } else if (strstr(message, "Could not connect: Connection refused") &&
+             strstr(log_domain, "<unknown>")) {
+    LOG(ERROR) << "DConf settings backend could not connect to session bus: "
+               << "http://crbug.com/179797";
   } else if (strstr(message, "XDG_RUNTIME_DIR variable not set")) {
     LOG(ERROR) << message << " (http://bugs.chromium.org/97293)";
   } else if (strstr(message, "Attempting to store changes into") ||
@@ -223,6 +230,34 @@ class BrowserShutdownImpl {
 void ImmediateShutdownAndExitProcess() {
   BrowserShutdownImpl::ImmediateShutdownAndExitProcess();
 }
+
+// For measuring memory usage after each task. Behind a command line flag.
+class BrowserMainLoop::MemoryObserver : public MessageLoop::TaskObserver {
+ public:
+  MemoryObserver() {}
+  virtual ~MemoryObserver() {}
+
+  virtual void WillProcessTask(const base::PendingTask& pending_task) OVERRIDE {
+  }
+
+  virtual void DidProcessTask(const base::PendingTask& pending_task) OVERRIDE {
+#if !defined(OS_IOS)  // No ProcessMetrics on IOS.
+    scoped_ptr<base::ProcessMetrics> process_metrics(
+        base::ProcessMetrics::CreateProcessMetrics(
+#if defined(OS_MACOSX)
+            base::GetCurrentProcessHandle(), NULL));
+#else
+            base::GetCurrentProcessHandle()));
+#endif
+    size_t private_bytes;
+    process_metrics->GetMemoryBytes(&private_bytes, NULL);
+    HISTOGRAM_MEMORY_KB("Memory.BrowserUsed", private_bytes >> 10);
+#endif
+  }
+ private:
+  DISALLOW_COPY_AND_ASSIGN(MemoryObserver);
+};
+
 
 // static
 media::AudioManager* BrowserMainLoop::GetAudioManager() {
@@ -295,7 +330,7 @@ void BrowserMainLoop::EarlyInitialization() {
   // TODO(abarth): Should this move to InitializeNetworkOptions?  This doesn't
   // seem dependent on SSL initialization().
   if (parsed_command_line_.HasSwitch(switches::kEnableTcpFastOpen))
-    net::set_tcp_fastopen_enabled(true);
+    net::SetTCPFastOpenEnabled(true);
 
 #if !defined(OS_IOS)
   if (parsed_command_line_.HasSwitch(switches::kRendererProcessLimit)) {
@@ -335,11 +370,13 @@ void BrowserMainLoop::MainMessageLoopStart() {
   hi_res_timer_manager_.reset(new HighResolutionTimerManager);
   network_change_notifier_.reset(net::NetworkChangeNotifier::Create());
   audio_manager_.reset(media::AudioManager::Create());
-#if !defined(OS_IOS)
-  audio_mirroring_manager_.reset(new AudioMirroringManager());
-#endif
 
 #if !defined(OS_IOS)
+  WebUIControllerFactory::RegisterFactory(
+      ContentWebUIControllerFactory::GetInstance());
+
+  audio_mirroring_manager_.reset(new AudioMirroringManager());
+
   // Start tracing to a file if needed.
   if (base::debug::TraceLog::GetInstance()->IsEnabled()) {
     TraceControllerImpl::GetInstance()->InitStartupTracing(
@@ -365,11 +402,14 @@ void BrowserMainLoop::MainMessageLoopStart() {
     parts_->PostMainMessageLoopStart();
 
 #if defined(OS_ANDROID)
-  SurfaceTexturePeer::InitInstance(new SurfaceTexturePeerBrowserImpl(
-      parameters_.command_line.HasSwitch(
-          switches::kMediaPlayerInRenderProcess)));
+  SurfaceTexturePeer::InitInstance(new SurfaceTexturePeerBrowserImpl());
   DataFetcherImplAndroid::Init(base::android::AttachCurrentThread());
 #endif
+
+  if (parsed_command_line_.HasSwitch(switches::kMemoryMetrics)) {
+    memory_observer_.reset(new MemoryObserver());
+    MessageLoop::current()->AddTaskObserver(memory_observer_.get());
+  }
 }
 
 void BrowserMainLoop::CreateThreads() {
@@ -619,6 +659,8 @@ void BrowserMainLoop::ShutdownThreadsAndCleanUp() {
   // Must happen after the I/O thread is shutdown since this class lives on the
   // I/O thread and isn't threadsafe.
   GamepadService::GetInstance()->Terminate();
+
+  URLDataManager::DeleteDataSources();
 #endif  // !defined(OS_IOS)
 
   if (parts_.get())

@@ -2,20 +2,28 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CHROME_BROWSER_EXTENSIONS_APP_RESTORE_SERVICE_H_
-#define CHROME_BROWSER_EXTENSIONS_APP_RESTORE_SERVICE_H_
+#ifndef APPS_APP_RESTORE_SERVICE_H_
+#define APPS_APP_RESTORE_SERVICE_H_
 
 #include <string>
+#include <vector>
 
 #include "chrome/browser/profiles/profile_keyed_service.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 
-class Profile;
-
 namespace extensions {
 class Extension;
+
+namespace app_file_handler_util {
+struct SavedFileEntry;
 }
+
+}
+
+class Profile;
+
+using extensions::app_file_handler_util::SavedFileEntry;
 
 namespace apps {
 
@@ -37,12 +45,16 @@ class AppRestoreService : public ProfileKeyedService,
 
   void RecordAppStart(const std::string& extension_id);
   void RecordAppStop(const std::string& extension_id);
-  void RestoreApp(const extensions::Extension* extension);
+  void RestoreApp(
+      const extensions::Extension* extension,
+      const std::vector<SavedFileEntry>& file_entries);
 
   content::NotificationRegistrar registrar_;
   Profile* profile_;
+
+  DISALLOW_COPY_AND_ASSIGN(AppRestoreService);
 };
 
 }  // namespace apps
 
-#endif  // CHROME_BROWSER_EXTENSIONS_APP_RESTORE_SERVICE_H_
+#endif  // APPS_APP_RESTORE_SERVICE_H_

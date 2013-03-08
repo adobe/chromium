@@ -6,6 +6,7 @@
 
 #include <vector>
 
+#include "ash/ash_constants.h"
 #include "ash/ash_switches.h"
 #include "ash/desktop_background/desktop_background_widget_controller.h"
 #include "ash/display/display_controller.h"
@@ -21,7 +22,6 @@
 #include "ash/wm/base_layout_manager.h"
 #include "ash/wm/boot_splash_screen.h"
 #include "ash/wm/panel_layout_manager.h"
-#include "ash/wm/panel_window_event_filter.h"
 #include "ash/wm/property_util.h"
 #include "ash/wm/root_window_layout_manager.h"
 #include "ash/wm/screen_dimmer.h"
@@ -55,11 +55,6 @@
 
 namespace ash {
 namespace {
-
-#if defined(OS_CHROMEOS)
-// Background color used for the Chrome OS boot splash screen.
-const SkColor kChromeOsBootColor = SkColorSetARGB(0xff, 0xfe, 0xfe, 0xfe);
-#endif
 
 // Duration for the animation that hides the boot splash screen, in
 // milliseconds.  This should be short enough in relation to
@@ -115,10 +110,12 @@ void ReparentAllWindows(aura::RootWindow* src, aura::RootWindow* dst) {
   // Set of windows to move.
   const int kContainerIdsToMove[] = {
     internal::kShellWindowId_DefaultContainer,
+    internal::kShellWindowId_PanelContainer,
     internal::kShellWindowId_AlwaysOnTopContainer,
     internal::kShellWindowId_SystemModalContainer,
     internal::kShellWindowId_LockSystemModalContainer,
     internal::kShellWindowId_InputMethodContainer,
+    internal::kShellWindowId_UnparentedControlContainer,
   };
   // For workspace windows we need to manually reparent the windows. This way
   // workspace can move the windows to the appropriate workspace.
@@ -137,16 +134,20 @@ void ReparentAllWindows(aura::RootWindow* src, aura::RootWindow* dst) {
 
     aura::Window* src_container = Shell::GetContainer(src, id);
     aura::Window* dst_container = Shell::GetContainer(dst, id);
-    aura::Window::Windows children = src_container->children();
-    for (aura::Window::Windows::iterator iter = children.begin();
-         iter != children.end(); ++iter) {
-      aura::Window* window = *iter;
-      // Don't move modal screen.
-      if (internal::SystemModalContainerLayoutManager::IsModalBackground(
-              window))
-        continue;
-
-      ReparentWindow(window, dst_container);
+    while (!src_container->children().empty()) {
+      // Restart iteration from the source container windows each time as they
+      // may change as a result of moving other windows.
+      aura::Window::Windows::const_iterator iter =
+          src_container->children().begin();
+      while (iter != src_container->children().end() &&
+             internal::SystemModalContainerLayoutManager::IsModalBackground(
+                *iter)) {
+        ++iter;
+      }
+      // If the entire window list is modal background windows then stop.
+      if (iter == src_container->children().end())
+        break;
+      ReparentWindow(*iter, dst_container);
     }
   }
 }
@@ -188,7 +189,8 @@ RootWindowController* RootWindowController::ForLauncher(aura::Window* window) {
 }
 
 // static
-RootWindowController* RootWindowController::ForWindow(aura::Window* window) {
+RootWindowController* RootWindowController::ForWindow(
+    const aura::Window* window) {
   return GetRootWindowController(window->GetRootWindow());
 }
 
@@ -299,17 +301,15 @@ void RootWindowController::InitForPrimaryDisplay() {
 
   workspace_controller()->SetShelf(shelf_);
 
-  // TODO(oshima): Disable panels on non primary display for now.
-  // crbug.com/166195.
-  if (root_window_ == Shell::GetPrimaryRootWindow()) {
+  if (Shell::IsLauncherPerDisplayEnabled() ||
+      root_window_ == Shell::GetPrimaryRootWindow()) {
     // Create Panel layout manager
     aura::Window* panel_container = GetContainer(
         internal::kShellWindowId_PanelContainer);
     panel_layout_manager_ =
         new internal::PanelLayoutManager(panel_container);
-    panel_container->AddPreTargetHandler(
-        new internal::PanelWindowEventFilter(
-            panel_container, panel_layout_manager_));
+    panel_container_handler_.reset(
+        new ToplevelWindowEventHandler(panel_container));
     panel_container->SetLayoutManager(panel_layout_manager_);
   }
 
@@ -412,6 +412,12 @@ void RootWindowController::CloseChildWindows() {
     status_area_widget_ = NULL;
   }
 
+  // panel_layout_manager_ needs to be shut down before windows are destroyed.
+  if (panel_layout_manager_) {
+    panel_layout_manager_->Shutdown();
+    panel_layout_manager_ = NULL;
+  }
+
   // Closing the windows frees the workspace controller.
   if (shelf_)
     shelf_->set_workspace_controller(NULL);
@@ -484,6 +490,8 @@ void RootWindowController::ShowContextMenu(
   DCHECK(Shell::GetInstance()->delegate());
   scoped_ptr<ui::MenuModel> menu_model(
       Shell::GetInstance()->delegate()->CreateContextMenu(target));
+  if (!menu_model.get())
+    return;
 
   views::MenuModelAdapter menu_model_adapter(menu_model.get());
   views::MenuRunner menu_runner(menu_model_adapter.CreateMenu());

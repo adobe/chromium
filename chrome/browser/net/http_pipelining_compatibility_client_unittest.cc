@@ -25,7 +25,7 @@
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-using base::Histogram;
+using base::HistogramBase;
 using base::HistogramSamples;
 
 namespace chrome_browser_net {
@@ -81,10 +81,10 @@ using testing::StrEq;
 class HttpPipeliningCompatibilityClientTest : public testing::Test {
  public:
   HttpPipeliningCompatibilityClientTest()
-      : test_server_(
-          net::TestServer::TYPE_HTTP,
-          net::TestServer::kLocalhost,
-          FilePath(FILE_PATH_LITERAL("chrome/test/data/http_pipelining"))),
+      : test_server_(net::TestServer::TYPE_HTTP,
+                     net::TestServer::kLocalhost,
+                     base::FilePath(FILE_PATH_LITERAL(
+                         "chrome/test/data/http_pipelining"))),
         io_thread_(BrowserThread::IO, &message_loop_) {
   }
 
@@ -210,8 +210,8 @@ class HttpPipeliningCompatibilityClientTest : public testing::Test {
  private:
   scoped_ptr<HistogramSamples> GetHistogram(const char* name) {
     scoped_ptr<HistogramSamples> samples;
-    Histogram* cached_histogram = NULL;
-    Histogram* current_histogram =
+    HistogramBase* cached_histogram = NULL;
+    HistogramBase* current_histogram =
         base::StatisticsRecorder::FindHistogram(name);
     if (ContainsKey(histograms_, name)) {
       cached_histogram = histograms_[name];
@@ -238,12 +238,12 @@ class HttpPipeliningCompatibilityClientTest : public testing::Test {
     return samples.Pass();
   }
 
-  static std::map<std::string, Histogram*> histograms_;
+  static std::map<std::string, HistogramBase*> histograms_;
   std::map<std::string, HistogramSamples*> original_samples_;
 };
 
 // static
-std::map<std::string, Histogram*>
+std::map<std::string, HistogramBase*>
     HttpPipeliningCompatibilityClientTest::histograms_;
 
 TEST_F(HttpPipeliningCompatibilityClientTest, Success) {

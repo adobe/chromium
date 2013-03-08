@@ -7,7 +7,7 @@
 #include "build/build_config.h"
 
 #include "base/compiler_specific.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/thread_task_runner_handle.h"
 #include "base/threading/worker_pool.h"
 #include "net/base/cert_verifier.h"
@@ -58,11 +58,11 @@ class TestShellHttpUserAgentSettings : public net::HttpUserAgentSettings {
 
 TestShellRequestContext::TestShellRequestContext()
     : ALLOW_THIS_IN_INITIALIZER_LIST(storage_(this)) {
-  Init(FilePath(), net::HttpCache::NORMAL, false);
+  Init(base::FilePath(), net::HttpCache::NORMAL, false);
 }
 
 TestShellRequestContext::TestShellRequestContext(
-    const FilePath& cache_path,
+    const base::FilePath& cache_path,
     net::HttpCache::Mode cache_mode,
     bool no_proxy)
     : ALLOW_THIS_IN_INITIALIZER_LIST(storage_(this)) {
@@ -70,7 +70,7 @@ TestShellRequestContext::TestShellRequestContext(
 }
 
 void TestShellRequestContext::Init(
-    const FilePath& cache_path,
+    const base::FilePath& cache_path,
     net::HttpCache::Mode cache_mode,
     bool no_proxy) {
   storage_.set_cookie_store(new net::CookieMonster(NULL, NULL));
@@ -80,23 +80,10 @@ void TestShellRequestContext::Init(
 
   storage_.set_http_user_agent_settings(new TestShellHttpUserAgentSettings);
 
-#if defined(OS_POSIX) && !defined(OS_MACOSX)
-  // Use no proxy to avoid ProxyConfigServiceLinux.
-  // Enabling use of the ProxyConfigServiceLinux requires:
-  // -Calling from a thread with a TYPE_UI MessageLoop,
-  // -If at all possible, passing in a pointer to the IO thread's MessageLoop,
-  // -Keep in mind that proxy auto configuration is also
-  //  non-functional on linux in this context because of v8 threading
-  //  issues.
-  // TODO(port): rename "linux" to some nonspecific unix.
+  // Use no proxy; it's not needed for testing and just breaks things.
   scoped_ptr<net::ProxyConfigService> proxy_config_service(
       new net::ProxyConfigServiceFixed(net::ProxyConfig()));
-#else
-  // Use the system proxy settings.
-  scoped_ptr<net::ProxyConfigService> proxy_config_service(
-      net::ProxyService::CreateSystemProxyConfigService(
-          base::ThreadTaskRunnerHandle::Get(), NULL));
-#endif
+
   storage_.set_host_resolver(net::HostResolver::CreateDefaultResolver(NULL));
   storage_.set_cert_verifier(net::CertVerifier::CreateDefault());
   storage_.set_proxy_service(net::ProxyService::CreateUsingSystemProxyResolver(

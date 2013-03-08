@@ -13,7 +13,7 @@
 #include "base/path_service.h"
 #include "base/prefs/testing_pref_store.h"
 #include "base/run_loop.h"
-#include "base/string_number_conversions.h"
+#include "base/strings/string_number_conversions.h"
 #include "chrome/browser/autocomplete/autocomplete_classifier.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
@@ -28,8 +28,9 @@
 #include "chrome/browser/favicon/favicon_service_factory.h"
 #include "chrome/browser/geolocation/chrome_geolocation_permission_context.h"
 #include "chrome/browser/geolocation/chrome_geolocation_permission_context_factory.h"
-#include "chrome/browser/history/history.h"
 #include "chrome/browser/history/history_backend.h"
+#include "chrome/browser/history/history_db_task.h"
+#include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/history/shortcuts_backend.h"
 #include "chrome/browser/history/shortcuts_backend_factory.h"
@@ -38,6 +39,7 @@
 #include "chrome/browser/notifications/desktop_notification_service.h"
 #include "chrome/browser/notifications/desktop_notification_service_factory.h"
 #include "chrome/browser/prefs/browser_prefs.h"
+#include "chrome/browser/prefs/pref_service_syncable.h"
 #include "chrome/browser/prerender/prerender_manager.h"
 #include "chrome/browser/profiles/profile_dependency_manager.h"
 #include "chrome/browser/profiles/storage_partition_descriptor.h"
@@ -51,8 +53,9 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/bookmark_load_observer.h"
 #include "chrome/test/base/history_index_restore_observer.h"
-#include "chrome/test/base/testing_pref_service.h"
+#include "chrome/test/base/testing_pref_service_syncable.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/user_prefs/user_prefs.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_process_host.h"
@@ -87,21 +90,21 @@ namespace {
 // Task used to make sure history has finished processing a request. Intended
 // for use with BlockUntilHistoryProcessesPendingRequests.
 
-class QuittingHistoryDBTask : public HistoryDBTask {
+class QuittingHistoryDBTask : public history::HistoryDBTask {
  public:
   QuittingHistoryDBTask() {}
 
   virtual bool RunOnDBThread(history::HistoryBackend* backend,
-                             history::HistoryDatabase* db) {
+                             history::HistoryDatabase* db) OVERRIDE {
     return true;
   }
 
-  virtual void DoneRunOnMainThread() {
+  virtual void DoneRunOnMainThread() OVERRIDE {
     MessageLoop::current()->Quit();
   }
 
  private:
-  ~QuittingHistoryDBTask() {}
+  virtual ~QuittingHistoryDBTask() {}
 
   DISALLOW_COPY_AND_ASSIGN(QuittingHistoryDBTask);
 };
@@ -121,7 +124,7 @@ class TestExtensionURLRequestContext : public net::URLRequestContext {
 class TestExtensionURLRequestContextGetter
     : public net::URLRequestContextGetter {
  public:
-  virtual net::URLRequestContext* GetURLRequestContext() {
+  virtual net::URLRequestContext* GetURLRequestContext() OVERRIDE {
     if (!context_.get())
       context_.reset(new TestExtensionURLRequestContext());
     return context_.get();
@@ -161,6 +164,7 @@ TestingProfile::TestingProfile()
     : start_time_(Time::Now()),
       testing_prefs_(NULL),
       incognito_(false),
+      original_profile_(NULL),
       last_session_exited_cleanly_(true),
       profile_dependency_manager_(ProfileDependencyManager::GetInstance()),
       delegate_(NULL) {
@@ -171,10 +175,11 @@ TestingProfile::TestingProfile()
   FinishInit();
 }
 
-TestingProfile::TestingProfile(const FilePath& path)
+TestingProfile::TestingProfile(const base::FilePath& path)
     : start_time_(Time::Now()),
       testing_prefs_(NULL),
       incognito_(false),
+      original_profile_(NULL),
       last_session_exited_cleanly_(true),
       profile_path_(path),
       profile_dependency_manager_(ProfileDependencyManager::GetInstance()),
@@ -183,11 +188,12 @@ TestingProfile::TestingProfile(const FilePath& path)
   FinishInit();
 }
 
-TestingProfile::TestingProfile(const FilePath& path,
+TestingProfile::TestingProfile(const base::FilePath& path,
                                Delegate* delegate)
     : start_time_(Time::Now()),
       testing_prefs_(NULL),
       incognito_(false),
+      original_profile_(NULL),
       last_session_exited_cleanly_(true),
       profile_path_(path),
       profile_dependency_manager_(ProfileDependencyManager::GetInstance()),
@@ -203,7 +209,7 @@ TestingProfile::TestingProfile(const FilePath& path,
 }
 
 TestingProfile::TestingProfile(
-    const FilePath& path,
+    const base::FilePath& path,
     Delegate* delegate,
     scoped_refptr<ExtensionSpecialStoragePolicy> extension_policy,
     scoped_ptr<PrefServiceSyncable> prefs)
@@ -211,6 +217,7 @@ TestingProfile::TestingProfile(
       prefs_(prefs.release()),
       testing_prefs_(NULL),
       incognito_(false),
+      original_profile_(NULL),
       last_session_exited_cleanly_(true),
       extension_special_storage_policy_(extension_policy),
       profile_path_(path),
@@ -242,7 +249,7 @@ void TestingProfile::CreateTempProfileDir() {
     LOG(ERROR) << "Failed to create unique temporary directory.";
 
     // Fallback logic in case we fail to create unique temporary directory.
-    FilePath system_tmp_dir;
+    base::FilePath system_tmp_dir;
     bool success = PathService::Get(base::DIR_TEMP, &system_tmp_dir);
 
     // We're severly screwed if we can't get the system temporary
@@ -250,7 +257,8 @@ void TestingProfile::CreateTempProfileDir() {
     // or other bad places.
     CHECK(success);
 
-    FilePath fallback_dir(system_tmp_dir.AppendASCII("TestingProfilePath"));
+    base::FilePath fallback_dir(
+        system_tmp_dir.AppendASCII("TestingProfilePath"));
     file_util::Delete(fallback_dir, true);
     file_util::CreateDirectory(fallback_dir);
     if (!temp_dir_.Set(fallback_dir)) {
@@ -264,6 +272,9 @@ void TestingProfile::CreateTempProfileDir() {
 }
 
 void TestingProfile::Init() {
+  if (prefs_.get())
+    components::UserPrefs::Set(this, prefs_.get());
+
   if (!file_util::PathExists(profile_path_))
     file_util::CreateDirectory(profile_path_);
 
@@ -322,7 +333,7 @@ static ProfileKeyedService* BuildHistoryService(Profile* profile) {
 void TestingProfile::CreateHistoryService(bool delete_file, bool no_db) {
   DestroyHistoryService();
   if (delete_file) {
-    FilePath path = GetPath();
+    base::FilePath path = GetPath();
     path = path.Append(chrome::kHistoryFilename);
     file_util::Delete(path, false);
   }
@@ -363,7 +374,7 @@ void TestingProfile::DestroyHistoryService() {
 void TestingProfile::CreateTopSites() {
   DestroyTopSites();
   top_sites_ = new history::TopSites(this);
-  FilePath file_name = GetPath().Append(chrome::kTopSitesFilename);
+  base::FilePath file_name = GetPath().Append(chrome::kTopSitesFilename);
   top_sites_->Init(file_name);
 }
 
@@ -389,7 +400,7 @@ static ProfileKeyedService* BuildBookmarkModel(Profile* profile) {
 void TestingProfile::CreateBookmarkModel(bool delete_file) {
 
   if (delete_file) {
-    FilePath path = GetPath();
+    base::FilePath path = GetPath();
     path = path.Append(chrome::kBookmarksFileName);
     file_util::Delete(path, false);
   }
@@ -428,14 +439,7 @@ void TestingProfile::BlockUntilBookmarkModelLoaded() {
   BookmarkModel* bookmark_model =
       BookmarkModelFactory::GetForProfileIfExists(this);
   DCHECK(bookmark_model);
-  if (bookmark_model->IsLoaded())
-    return;
-  base::RunLoop run_loop;
-  BookmarkLoadObserver observer(content::GetQuitTaskForRunLoop(&run_loop));
-  bookmark_model->AddObserver(&observer);
-  run_loop.Run();
-  bookmark_model->RemoveObserver(&observer);
-  DCHECK(bookmark_model->IsLoaded());
+  ui_test_utils::WaitForBookmarkModelToLoad(bookmark_model);
 }
 
 void TestingProfile::BlockUntilHistoryIndexIsRefreshed() {
@@ -466,7 +470,7 @@ void TestingProfile::BlockUntilTopSitesLoaded() {
   top_sites_loaded_observer.Wait();
 }
 
-FilePath TestingProfile::GetPath() {
+base::FilePath TestingProfile::GetPath() {
   return profile_path_;
 }
 
@@ -497,6 +501,10 @@ void TestingProfile::SetOffTheRecordProfile(Profile* profile) {
   incognito_profile_.reset(profile);
 }
 
+void TestingProfile::SetOriginalProfile(Profile* profile) {
+  original_profile_ = profile;
+}
+
 Profile* TestingProfile::GetOffTheRecordProfile() {
   return incognito_profile_.get();
 }
@@ -506,6 +514,8 @@ bool TestingProfile::HasOffTheRecordProfile() {
 }
 
 Profile* TestingProfile::GetOriginalProfile() {
+  if (original_profile_)
+    return original_profile_;
   return this;
 }
 
@@ -549,19 +559,15 @@ policy::PolicyService* TestingProfile::GetPolicyService() {
   return policy_service_.get();
 }
 
-void TestingProfile::SetPrefService(PrefServiceSyncable* prefs) {
-  prefs_.reset(prefs);
-}
-
 void TestingProfile::CreateTestingPrefService() {
   DCHECK(!prefs_.get());
   testing_prefs_ = new TestingPrefServiceSyncable();
   prefs_.reset(testing_prefs_);
-  Profile::RegisterUserPrefs(prefs_.get());
-  chrome::RegisterUserPrefs(prefs_.get());
+  components::UserPrefs::Set(this, prefs_.get());
+  chrome::RegisterUserPrefs(testing_prefs_->registry());
 }
 
-PrefServiceSyncable* TestingProfile::GetPrefs() {
+PrefService* TestingProfile::GetPrefs() {
   if (!prefs_.get()) {
     CreateTestingPrefService();
   }
@@ -581,6 +587,20 @@ DownloadManagerDelegate* TestingProfile::GetDownloadManagerDelegate() {
 }
 
 net::URLRequestContextGetter* TestingProfile::GetRequestContext() {
+  return request_context_.get();
+}
+
+net::URLRequestContextGetter* TestingProfile::CreateRequestContext(
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        blob_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        file_system_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        developer_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        chrome_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        chrome_devtools_protocol_handler) {
   return request_context_.get();
 }
 
@@ -618,7 +638,7 @@ TestingProfile::GetMediaRequestContextForRenderProcess(
 
 net::URLRequestContextGetter*
 TestingProfile::GetMediaRequestContextForStoragePartition(
-    const FilePath& partition_path,
+    const base::FilePath& partition_path,
     bool in_memory) {
   return NULL;
 }
@@ -636,9 +656,19 @@ net::SSLConfigService* TestingProfile::GetSSLConfigService() {
 }
 
 net::URLRequestContextGetter*
-TestingProfile::GetRequestContextForStoragePartition(
-    const FilePath& partition_path,
-    bool in_memory) {
+TestingProfile::CreateRequestContextForStoragePartition(
+    const base::FilePath& partition_path,
+    bool in_memory,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        blob_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        file_system_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        developer_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        chrome_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        chrome_devtools_protocol_handler) {
   // We don't test storage partitions here yet, so returning the same dummy
   // context is sufficient for now.
   return GetRequestContext();
@@ -700,11 +730,11 @@ ProtocolHandlerRegistry* TestingProfile::GetProtocolHandlerRegistry() {
   return NULL;
 }
 
-FilePath TestingProfile::last_selected_directory() {
+base::FilePath TestingProfile::last_selected_directory() {
   return last_selected_directory_;
 }
 
-void TestingProfile::set_last_selected_directory(const FilePath& path) {
+void TestingProfile::set_last_selected_directory(const base::FilePath& path) {
   last_selected_directory_ = path;
 }
 
@@ -743,7 +773,7 @@ GURL TestingProfile::GetHomePage() {
   return GURL(chrome::kChromeUINewTabURL);
 }
 
-PrefServiceSyncable* TestingProfile::GetOffTheRecordPrefs() {
+PrefService* TestingProfile::GetOffTheRecordPrefs() {
   return NULL;
 }
 
@@ -759,11 +789,6 @@ Profile::ExitType TestingProfile::GetLastSessionExitType() {
   return last_session_exited_cleanly_ ? EXIT_NORMAL : EXIT_CRASHED;
 }
 
-base::Callback<ChromeURLDataManagerBackend*(void)>
-    TestingProfile::GetChromeURLDataManagerBackendGetter() const {
-  return base::Callback<ChromeURLDataManagerBackend*(void)>();
-}
-
 TestingProfile::Builder::Builder()
     : build_called_(false),
       delegate_(NULL) {
@@ -772,7 +797,7 @@ TestingProfile::Builder::Builder()
 TestingProfile::Builder::~Builder() {
 }
 
-void TestingProfile::Builder::SetPath(const FilePath& path) {
+void TestingProfile::Builder::SetPath(const base::FilePath& path) {
   path_ = path;
 }
 

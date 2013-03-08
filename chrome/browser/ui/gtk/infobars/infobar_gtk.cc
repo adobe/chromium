@@ -8,6 +8,7 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/api/infobars/infobar_service.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/themes/theme_properties.h"
 #include "chrome/browser/ui/gtk/browser_window_gtk.h"
 #include "chrome/browser/ui/gtk/custom_button.h"
 #include "chrome/browser/ui/gtk/gtk_chrome_link_button.h"
@@ -193,15 +194,14 @@ void InfoBarGtk::AddLabelWithInlineLink(const string16& display_text,
 void InfoBarGtk::ShowMenuWithModel(GtkWidget* sender,
                                    MenuGtk::Delegate* delegate,
                                    ui::MenuModel* model) {
-  menu_model_.reset(model);
-  menu_.reset(new MenuGtk(delegate, menu_model_.get()));
+  menu_.reset(new MenuGtk(delegate, model));
   menu_->PopupForWidget(sender, 1, gtk_get_current_event_time());
 }
 
 void InfoBarGtk::GetTopColor(InfoBarDelegate::Type type,
                              double* r, double* g, double* b) {
   SkColor color = theme_service_->UsingNativeTheme() ?
-                  theme_service_->GetColor(ThemeService::COLOR_TOOLBAR) :
+                  theme_service_->GetColor(ThemeProperties::COLOR_TOOLBAR) :
                   GetInfoBarTopColor(type);
   *r = SkColorGetR(color) / 255.0;
   *g = SkColorGetG(color) / 255.0;
@@ -211,7 +211,7 @@ void InfoBarGtk::GetTopColor(InfoBarDelegate::Type type,
 void InfoBarGtk::GetBottomColor(InfoBarDelegate::Type type,
                                 double* r, double* g, double* b) {
   SkColor color = theme_service_->UsingNativeTheme() ?
-                  theme_service_->GetColor(ThemeService::COLOR_TOOLBAR) :
+                  theme_service_->GetColor(ThemeProperties::COLOR_TOOLBAR) :
                   GetInfoBarBottomColor(type);
   *r = SkColorGetR(color) / 255.0;
   *g = SkColorGetG(color) / 255.0;
@@ -289,7 +289,6 @@ void InfoBarGtk::PlatformSpecificOnCloseSoon() {
   // We must close all menus and prevent any signals from being emitted while
   // we are animating the info bar closed.
   menu_.reset();
-  menu_model_.reset();
   signals_.reset();
 }
 

@@ -4,8 +4,8 @@
 
 #include "chrome/browser/component_updater/flash_component_installer.h"
 
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/json/json_file_value_serializer.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
@@ -22,7 +22,7 @@ using content::BrowserThread;
 
 namespace {
 // File name of the Pepper Flash plugin on different platforms.
-const FilePath::CharType kDataPath[] =
+const base::FilePath::CharType kDataPath[] =
 #if defined(OS_MACOSX)
     FILE_PATH_LITERAL("components/flapper/mac");
 #elif defined(OS_WIN)
@@ -38,8 +38,15 @@ const FilePath::CharType kDataPath[] =
 #endif
 }
 
+// TODO(jschuh): Get Pepper Flash supported on Win64 build. crbug.com/179716
+#if defined(OS_WIN) && defined(ARCH_CPU_X86_64)
+#define MAYBE_PepperFlashCheck DISABLED_PepperFlashCheck
+#else
+#define MAYBE_PepperFlashCheck PepperFlashCheck
+#endif
+
 // TODO(viettrungluu): Separate out into two separate tests; use a test fixture.
-TEST(ComponentInstallerTest, PepperFlashCheck) {
+TEST(ComponentInstallerTest, MAYBE_PepperFlashCheck) {
   MessageLoop message_loop;
   content::TestBrowserThread ui_thread(BrowserThread::UI, &message_loop);
 
@@ -48,7 +55,7 @@ TEST(ComponentInstallerTest, PepperFlashCheck) {
   ppapi::PpapiGlobals::SetPpapiGlobalsOnThreadForTest(&test_globals);
 
   // The test directory is chrome/test/data/components/flapper.
-  FilePath manifest;
+  base::FilePath manifest;
   PathService::Get(chrome::DIR_TEST_DATA, &manifest);
   manifest = manifest.Append(kDataPath);
   manifest = manifest.AppendASCII("manifest.json");

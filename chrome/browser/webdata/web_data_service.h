@@ -14,7 +14,7 @@
 #include <vector>
 
 #include "base/callback_forward.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/location.h"
 #include "base/memory/ref_counted.h"
 #include "base/sequenced_task_runner_helpers.h"
@@ -123,7 +123,7 @@ class WebDataService
 
   // Initializes the web data service. Returns false on failure
   // Takes the path of the profile directory as its argument.
-  bool Init(const FilePath& profile_path);
+  bool Init(const base::FilePath& profile_path);
 
   // Returns false if Shutdown() has been called.
   bool IsRunning() const;
@@ -183,6 +183,7 @@ class WebDataService
   // specified web app.
   Handle GetWebAppImages(const GURL& app_url, WebDataServiceConsumer* consumer);
 
+#if defined(ENABLE_WEB_INTENTS)
   //////////////////////////////////////////////////////////////////////////////
   //
   // Web Intents
@@ -227,6 +228,7 @@ class WebDataService
   // Get a list of all registered web intent service defaults.
   // |consumer| must not be null.
   Handle GetAllDefaultWebIntentServices(WebDataServiceConsumer* consumer);
+#endif
 
   //////////////////////////////////////////////////////////////////////////////
   //
@@ -325,10 +327,7 @@ class WebDataService
   virtual ~WebDataService();
 
   // This is invoked by the unit test; path is the path of the Web Data file.
-  bool InitWithPath(const FilePath& path);
-
-  // Invoked by request implementations when a request has been processed.
-  void RequestCompleted(Handle h);
+  bool InitWithPath(const base::FilePath& path);
 
   //////////////////////////////////////////////////////////////////////////////
   //
@@ -374,10 +373,10 @@ class WebDataService
       WebDataServiceConsumer* consumer);
 
   void DBTaskWrapper(const base::Closure& task,
-                     WebDataRequest* request);
+                     scoped_ptr<WebDataRequest> request);
 
   void DBResultTaskWrapper(const ResultTask& task,
-                           WebDataRequest* request);
+                           scoped_ptr<WebDataRequest> request);
 
   // Schedule a commit if one is not already pending.
   void ScheduleCommit();
@@ -405,6 +404,7 @@ class WebDataService
   void RemoveWebAppImpl(const GURL& app_url);
   scoped_ptr<WDTypedResult> GetWebAppImagesImpl(const GURL& app_url);
 
+#if defined(ENABLE_WEB_INTENTS)
   //////////////////////////////////////////////////////////////////////////////
   //
   // Web Intents.
@@ -425,6 +425,7 @@ class WebDataService
   scoped_ptr<WDTypedResult> GetDefaultWebIntentServicesForActionImpl(
       const string16& action);
   scoped_ptr<WDTypedResult> GetAllDefaultWebIntentServicesImpl();
+#endif
 
   //////////////////////////////////////////////////////////////////////////////
   //
@@ -482,14 +483,14 @@ class WebDataService
   bool is_running_;
 
   // The path with which to initialize the database.
-  FilePath path_;
+  base::FilePath path_;
 
   // Our database.  We own the |db_|, but don't use a |scoped_ptr| because the
   // |db_| lifetime must be managed on the database thread.
   WebDatabase* db_;
 
   // Keeps track of all pending requests made to the db.
-  WebDataRequestManager request_manager_;
+  scoped_refptr<WebDataRequestManager> request_manager_;
 
   // The application locale.  The locale is needed for some database migrations,
   // and must be read on the UI thread.  It's cached here so that we can pass it

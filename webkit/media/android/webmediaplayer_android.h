@@ -14,13 +14,17 @@
 #include "third_party/WebKit/Source/Platform/chromium/public/WebSize.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebURL.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebMediaPlayer.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebVideoFrame.h"
+
+namespace WebKit {
+class WebVideoFrame;
+}
 
 namespace webkit_media {
 
 class StreamTextureFactory;
 class StreamTextureProxy;
 class WebMediaPlayerManagerAndroid;
+class WebVideoFrameImpl;
 
 // An abstract class that serves as the common base class for implementing
 // WebKit::WebMediaPlayer on Android.
@@ -121,6 +125,9 @@ class WebMediaPlayerAndroid
   // Method inherited from DestructionObserver.
   virtual void WillDestroyCurrentMessageLoop() OVERRIDE;
 
+  // Detach the player from its manager.
+  void Detach();
+
  protected:
   // Construct a WebMediaPlayerAndroid object with reference to the
   // client, manager and stream texture factory.
@@ -183,7 +190,7 @@ class WebMediaPlayerAndroid
   WebKit::WebSize natural_size_;
 
   // The video frame object used for renderering by WebKit.
-  scoped_ptr<WebKit::WebVideoFrame> video_frame_;
+  scoped_ptr<WebVideoFrameImpl> web_video_frame_;
 
   // Message loop for main renderer thread.
   MessageLoop* main_loop_;

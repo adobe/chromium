@@ -5,6 +5,7 @@
 #include "ash/system/tray/tray_views.h"
 
 #include "ash/ash_constants.h"
+#include "ash/system/tray/fixed_sized_image_view.h"
 #include "ash/system/tray/tray_constants.h"
 #include "ash/system/tray/tray_item_view.h"
 #include "base/i18n/rtl.h"
@@ -33,10 +34,6 @@ namespace ash {
 namespace internal {
 
 namespace {
-const int kIconPaddingLeft = 5;
-const int kPopupDetailLabelExtraLeftMargin = 8;
-const int kCheckLabelPadding = 4;
-const int kSpecialPopupRowHeight = 55;
 const int kTrayPopupLabelButtonPaddingHorizontal = 16;
 const int kTrayPopupLabelButtonPaddingVertical = 8;
 
@@ -75,264 +72,6 @@ const int kTrayPopupLabelButtonBorderImagesHovered[] = {
     IDR_AURA_TRAY_POPUP_LABEL_BUTTON_BORDER,
 };
 
-views::View* CreatePopupHeaderButtonsContainer() {
-  views::View* view = new views::View;
-  view->SetLayoutManager(new
-      views::BoxLayout(views::BoxLayout::kHorizontal, 0, 0, -1));
-  view->set_border(views::Border::CreateEmptyBorder(0, 0, 0, 5));
-  return view;
-}
-
-const int kBorderHeight = 3;
-const SkColor kBorderGradientDark = SkColorSetRGB(0xae, 0xae, 0xae);
-const SkColor kBorderGradientLight = SkColorSetRGB(0xe8, 0xe8, 0xe8);
-
-class SpecialPopupRowBorder : public views::Border {
- public:
-  SpecialPopupRowBorder()
-      : painter_(views::Painter::CreateVerticalGradient(kBorderGradientDark,
-                                                        kBorderGradientLight)) {
-  }
-
-  virtual ~SpecialPopupRowBorder() {}
-
- private:
-  virtual void Paint(const views::View& view, gfx::Canvas* canvas) OVERRIDE {
-    views::Painter::PaintPainterAt(canvas, painter_.get(),
-        gfx::Rect(gfx::Size(view.width(), kBorderHeight)));
-  }
-
-  virtual gfx::Insets GetInsets() const OVERRIDE {
-    return gfx::Insets(kBorderHeight, 0, 0, 0);
-  }
-
-  scoped_ptr<views::Painter> painter_;
-
-  DISALLOW_COPY_AND_ASSIGN(SpecialPopupRowBorder);
-};
-
-}
-
-////////////////////////////////////////////////////////////////////////////////
-// FixedSizedImageView
-
-FixedSizedImageView::FixedSizedImageView(int width, int height)
-    : width_(width),
-      height_(height) {
-  SetHorizontalAlignment(views::ImageView::CENTER);
-  SetVerticalAlignment(views::ImageView::CENTER);
-}
-
-FixedSizedImageView::~FixedSizedImageView() {
-}
-
-gfx::Size FixedSizedImageView::GetPreferredSize() {
-  gfx::Size size = views::ImageView::GetPreferredSize();
-  return gfx::Size(width_ ? width_ : size.width(),
-                   height_ ? height_ : size.height());
-}
-
-////////////////////////////////////////////////////////////////////////////////
-// ActionableView
-
-ActionableView::ActionableView()
-    : has_capture_(false) {
-  set_focusable(true);
-}
-
-ActionableView::~ActionableView() {
-}
-
-void ActionableView::DrawBorder(gfx::Canvas* canvas, const gfx::Rect& bounds) {
-  gfx::Rect rect = bounds;
-  rect.Inset(1, 1, 3, 3);
-  canvas->DrawRect(rect, kFocusBorderColor);
-}
-
-bool ActionableView::OnKeyPressed(const ui::KeyEvent& event) {
-  if (event.key_code() == ui::VKEY_SPACE ||
-      event.key_code() == ui::VKEY_RETURN) {
-    return PerformAction(event);
-  }
-  return false;
-}
-
-bool ActionableView::OnMousePressed(const ui::MouseEvent& event) {
-  // Return true so that this view starts capturing the events.
-  has_capture_ = true;
-  return true;
-}
-
-void ActionableView::OnMouseReleased(const ui::MouseEvent& event) {
-  if (has_capture_ && GetLocalBounds().Contains(event.location()))
-    PerformAction(event);
-}
-
-void ActionableView::OnMouseCaptureLost() {
-  has_capture_ = false;
-}
-
-void ActionableView::SetAccessibleName(const string16& name) {
-  accessible_name_ = name;
-}
-
-void ActionableView::OnPaintFocusBorder(gfx::Canvas* canvas) {
-  if (HasFocus() && (focusable() || IsAccessibilityFocusable()))
-    DrawBorder(canvas, GetLocalBounds());
-}
-
-void ActionableView::OnGestureEvent(ui::GestureEvent* event) {
-  if (event->type() == ui::ET_GESTURE_TAP && PerformAction(*event))
-    event->SetHandled();
-}
-
-void ActionableView::GetAccessibleState(ui::AccessibleViewState* state) {
-  state->role = ui::AccessibilityTypes::ROLE_PUSHBUTTON;
-  state->name = accessible_name_;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-// HoverHighlightView
-
-HoverHighlightView::HoverHighlightView(ViewClickListener* listener)
-    : listener_(listener),
-      text_label_(NULL),
-      highlight_color_(kHoverBackgroundColor),
-      default_color_(0),
-      text_highlight_color_(0),
-      text_default_color_(0),
-      hover_(false),
-      expandable_(false) {
-  set_notify_enter_exit_on_child(true);
-}
-
-HoverHighlightView::~HoverHighlightView() {
-}
-
-void HoverHighlightView::AddIconAndLabel(const gfx::ImageSkia& image,
-                                         const string16& text,
-                                         gfx::Font::FontStyle style) {
-  SetLayoutManager(new views::BoxLayout(
-      views::BoxLayout::kHorizontal, 0, 3, kTrayPopupPaddingBetweenItems));
-  views::ImageView* image_view =
-      new FixedSizedImageView(kTrayPopupDetailsIconWidth, 0);
-  image_view->SetImage(image);
-  AddChildView(image_view);
-
-  text_label_ = new views::Label(text);
-  text_label_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
-  text_label_->SetFont(text_label_->font().DeriveFont(0, style));
-  if (text_default_color_)
-    text_label_->SetEnabledColor(text_default_color_);
-  AddChildView(text_label_);
-
-  SetAccessibleName(text);
-}
-
-views::Label* HoverHighlightView::AddLabel(const string16& text,
-                                           gfx::Font::FontStyle style) {
-  SetLayoutManager(new views::FillLayout());
-  text_label_ = new views::Label(text);
-  int margin = kTrayPopupPaddingHorizontal + kPopupDetailLabelExtraLeftMargin;
-  int left_margin = 0;
-  int right_margin = 0;
-  if (base::i18n::IsRTL())
-    right_margin = margin;
-  else
-    left_margin = margin;
-  text_label_->set_border(
-      views::Border::CreateEmptyBorder(5, left_margin, 5, right_margin));
-  text_label_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
-  text_label_->SetFont(text_label_->font().DeriveFont(0, style));
-  // Do not set alpha value in disable color. It will have issue with elide
-  // blending filter in disabled state for rendering label text color.
-  text_label_->SetDisabledColor(SkColorSetARGB(255, 127, 127, 127));
-  if (text_default_color_)
-    text_label_->SetEnabledColor(text_default_color_);
-  AddChildView(text_label_);
-
-  SetAccessibleName(text);
-  return text_label_;
-}
-
-views::Label* HoverHighlightView::AddCheckableLabel(const string16& text,
-                                                    gfx::Font::FontStyle style,
-                                                    bool checked) {
-  if (checked) {
-    ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
-    const gfx::ImageSkia* check =
-        rb.GetImageNamed(IDR_MENU_CHECK).ToImageSkia();
-    int margin = kTrayPopupPaddingHorizontal + kPopupDetailLabelExtraLeftMargin
-        - kCheckLabelPadding;
-    SetLayoutManager(new views::BoxLayout(
-        views::BoxLayout::kHorizontal, 0, 3, kCheckLabelPadding));
-    views::ImageView* image_view = new FixedSizedImageView(margin, 0);
-    image_view->SetImage(check);
-    image_view->SetHorizontalAlignment(views::ImageView::TRAILING);
-    AddChildView(image_view);
-
-    text_label_ = new views::Label(text);
-    text_label_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
-    text_label_->SetFont(text_label_->font().DeriveFont(0, style));
-    text_label_->SetDisabledColor(SkColorSetARGB(127, 0, 0, 0));
-    if (text_default_color_)
-      text_label_->SetEnabledColor(text_default_color_);
-    AddChildView(text_label_);
-
-    SetAccessibleName(text);
-    return text_label_;
-  } else {
-    return AddLabel(text, style);
-  }
-}
-
-void HoverHighlightView::SetExpandable(bool expandable) {
-  if (expandable != expandable_) {
-    expandable_ = expandable;
-    InvalidateLayout();
-  }
-}
-
-bool HoverHighlightView::PerformAction(const ui::Event& event) {
-  if (!listener_)
-    return false;
-  listener_->ClickedOn(this);
-  return true;
-}
-
-gfx::Size HoverHighlightView::GetPreferredSize() {
-  gfx::Size size = ActionableView::GetPreferredSize();
-  if (!expandable_ || size.height() < kTrayPopupItemHeight)
-    size.set_height(kTrayPopupItemHeight);
-  return size;
-}
-
-void HoverHighlightView::OnMouseEntered(const ui::MouseEvent& event) {
-  hover_ = true;
-  if (text_highlight_color_ && text_label_)
-    text_label_->SetEnabledColor(text_highlight_color_);
-  SchedulePaint();
-}
-
-void HoverHighlightView::OnMouseExited(const ui::MouseEvent& event) {
-  hover_ = false;
-  if (text_default_color_ && text_label_)
-    text_label_->SetEnabledColor(text_default_color_);
-  SchedulePaint();
-}
-
-void HoverHighlightView::OnEnabledChanged() {
-  for (int i = 0; i < child_count(); ++i)
-    child_at(i)->SetEnabled(enabled());
-}
-
-void HoverHighlightView::OnPaintBackground(gfx::Canvas* canvas) {
-  canvas->DrawColor(hover_ ? highlight_color_ : default_color_);
-}
-
-void HoverHighlightView::OnFocus() {
-  ScrollRectToVisible(gfx::Rect(gfx::Point(), size()));
-  ActionableView::OnFocus();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -398,17 +137,18 @@ void FixedSizedScrollView::OnPaintFocusBorder(gfx::Canvas* canvas) {
 ////////////////////////////////////////////////////////////////////////////////
 // TrayPopupLabelButtonBorder
 
-TrayPopupLabelButtonBorder::TrayPopupLabelButtonBorder() {
-  SetPainter(views::CustomButton::STATE_NORMAL,
+TrayPopupLabelButtonBorder::TrayPopupLabelButtonBorder()
+    : LabelButtonBorder(views::Button::STYLE_TEXTBUTTON) {
+  SetPainter(false, views::Button::STATE_NORMAL,
              views::Painter::CreateImageGridPainter(
                  kTrayPopupLabelButtonBorderImagesNormal));
-  SetPainter(views::CustomButton::STATE_DISABLED,
+  SetPainter(false, views::Button::STATE_DISABLED,
              views::Painter::CreateImageGridPainter(
                  kTrayPopupLabelButtonBorderImagesNormal));
-  SetPainter(views::CustomButton::STATE_HOVERED,
+  SetPainter(false, views::Button::STATE_HOVERED,
              views::Painter::CreateImageGridPainter(
                  kTrayPopupLabelButtonBorderImagesHovered));
-  SetPainter(views::CustomButton::STATE_PRESSED,
+  SetPainter(false, views::Button::STATE_PRESSED,
              views::Painter::CreateImageGridPainter(
                  kTrayPopupLabelButtonBorderImagesHovered));
 }
@@ -489,13 +229,13 @@ TrayPopupHeaderButton::TrayPopupHeaderButton(views::ButtonListener* listener,
                                              int accessible_name_id)
     : views::ToggleImageButton(listener) {
   ui::ResourceBundle& bundle = ui::ResourceBundle::GetSharedInstance();
-  SetImage(views::CustomButton::STATE_NORMAL,
+  SetImage(views::Button::STATE_NORMAL,
       bundle.GetImageNamed(enabled_resource_id).ToImageSkia());
-  SetToggledImage(views::CustomButton::STATE_NORMAL,
+  SetToggledImage(views::Button::STATE_NORMAL,
       bundle.GetImageNamed(disabled_resource_id).ToImageSkia());
-  SetImage(views::CustomButton::STATE_HOVERED,
+  SetImage(views::Button::STATE_HOVERED,
       bundle.GetImageNamed(enabled_resource_id_hover).ToImageSkia());
-  SetToggledImage(views::CustomButton::STATE_HOVERED,
+  SetToggledImage(views::Button::STATE_HOVERED,
       bundle.GetImageNamed(disabled_resource_id_hover).ToImageSkia());
   SetImageAlignment(views::ImageButton::ALIGN_CENTER,
                     views::ImageButton::ALIGN_MIDDLE);
@@ -611,95 +351,11 @@ void TrayBarButtonWithTitle::UpdateButton(bool control_on) {
   image_->Update(control_on);
 }
 
-////////////////////////////////////////////////////////////////////////////////
-// SpecialPopupRow
-
-SpecialPopupRow::SpecialPopupRow()
-    : content_(NULL),
-      button_container_(NULL) {
-  views::Background* background = views::Background::CreateBackgroundPainter(
-      true, views::Painter::CreateVerticalGradient(kHeaderBackgroundColorLight,
-                                                   kHeaderBackgroundColorDark));
-  background->SetNativeControlColor(kHeaderBackgroundColorDark);
-  set_background(background);
-  set_border(new SpecialPopupRowBorder);
-  SetLayoutManager(
-      new views::BoxLayout(views::BoxLayout::kHorizontal, 0, 0, 0));
-}
-
-SpecialPopupRow::~SpecialPopupRow() {
-}
-
-void SpecialPopupRow::SetTextLabel(int string_id, ViewClickListener* listener) {
-  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
-  HoverHighlightView* container = new HoverHighlightView(listener);
-  container->SetLayoutManager(new
-      views::BoxLayout(views::BoxLayout::kHorizontal, 0, 3, kIconPaddingLeft));
-
-  container->set_highlight_color(SkColorSetARGB(0, 0, 0, 0));
-  container->set_default_color(SkColorSetARGB(0, 0, 0, 0));
-  container->set_text_highlight_color(kHeaderTextColorHover);
-  container->set_text_default_color(kHeaderTextColorNormal);
-
-  container->AddIconAndLabel(
-      *rb.GetImageNamed(IDR_AURA_UBER_TRAY_LESS).ToImageSkia(),
-      rb.GetLocalizedString(string_id),
-      gfx::Font::BOLD);
-
-  container->set_border(views::Border::CreateEmptyBorder(0,
-      kTrayPopupPaddingHorizontal, 0, 0));
-
-  container->SetAccessibleName(
-      rb.GetLocalizedString(IDS_ASH_STATUS_TRAY_PREVIOUS_MENU));
-  SetContent(container);
-}
-
-void SpecialPopupRow::SetContent(views::View* view) {
-  CHECK(!content_);
-  content_ = view;
-  AddChildViewAt(content_, 0);
-}
-
-void SpecialPopupRow::AddButton(TrayPopupHeaderButton* button) {
-  if (!button_container_) {
-    button_container_ = CreatePopupHeaderButtonsContainer();
-    AddChildView(button_container_);
-  }
-
-  button_container_->AddChildView(button);
-}
-
-gfx::Size SpecialPopupRow::GetPreferredSize() {
-  gfx::Size size = views::View::GetPreferredSize();
-  size.set_height(kSpecialPopupRowHeight);
-  return size;
-}
-
-void SpecialPopupRow::Layout() {
-  views::View::Layout();
-  gfx::Rect content_bounds = GetContentsBounds();
-  if (content_bounds.IsEmpty())
-    return;
-  if (!button_container_) {
-    content_->SetBoundsRect(GetContentsBounds());
-    return;
-  }
-
-  gfx::Rect bounds(button_container_->GetPreferredSize());
-  bounds.set_height(content_bounds.height());
-  gfx::Rect container_bounds = content_bounds;
-  container_bounds.ClampToCenteredSize(bounds.size());
-  container_bounds.set_x(content_bounds.width() - container_bounds.width());
-  button_container_->SetBoundsRect(container_bounds);
-
-  bounds = content_->bounds();
-  bounds.set_width(button_container_->x());
-  content_->SetBoundsRect(bounds);
-}
-
 void SetupLabelForTray(views::Label* label) {
-  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
-  label->SetFont(rb.GetFont(ui::ResourceBundle::BoldFont));
+  // Making label_font static to avoid the time penalty of DeriveFont for
+  // all but the first call.
+  static const gfx::Font label_font(gfx::Font().DeriveFont(1, gfx::Font::BOLD));
+  label->SetFont(label_font);
   label->SetAutoColorReadabilityEnabled(false);
   label->SetEnabledColor(SK_ColorWHITE);
   label->SetBackgroundColor(SkColorSetARGB(0, 255, 255, 255));

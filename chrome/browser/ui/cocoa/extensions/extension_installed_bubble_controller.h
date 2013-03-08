@@ -14,6 +14,7 @@
 
 class Browser;
 class ExtensionLoadedNotificationObserver;
+@class HyperlinkTextView;
 @class HoverCloseButton;
 @class InfoBubbleView;
 
@@ -33,8 +34,13 @@ const int kOuterVerticalMargin = 15;
 // Inner vertical margin for text messages.
 const int kInnerVerticalMargin = 10;
 
+// An offset we apply to position the point of the bubble's arrow pointing at
+// the NewTabButton.
+const int kAppsBubbleArrowOffset = 4;
+
 // We use a different kind of notification for each of these extension types.
 typedef enum {
+  kApp,
   kBrowserAction,
   kGeneric,
   kOmniboxKeyword,
@@ -48,7 +54,8 @@ typedef enum {
 // an extension has been installed to inform the user that the install happened
 // properly, and to let the user know how to manage this extension in the
 // future.
-@interface ExtensionInstalledBubbleController : BaseBubbleController {
+@interface ExtensionInstalledBubbleController :
+    BaseBubbleController<NSTextViewDelegate> {
  @private
   const extensions::Extension* extension_;  // weak
   const extensions::BundleInstaller* bundle_;  // weak
@@ -70,12 +77,21 @@ typedef enum {
   // References below are weak, being obtained from the nib.
   IBOutlet HoverCloseButton* closeButton_;
   IBOutlet NSImageView* iconImage_;
-  IBOutlet NSTextField* extensionInstalledMsg_;
-  // Only shown for page actions and omnibox keywords.
-  IBOutlet NSTextField* extraInfoMsg_;
-  IBOutlet NSTextField* extensionInstalledInfoMsg_;
+  IBOutlet NSTextField* heading_;
+  // Only shown for browser actions, page actions and omnibox keywords.
+  IBOutlet NSTextField* howToUse_;
+  IBOutlet NSTextField* howToManage_;
+  // Only shown for app installs.
+  IBOutlet NSButton* appShortcutLink_;
   // Only shown for extensions with commands.
   IBOutlet NSButton* manageShortcutLink_;
+  // Only shown if the sign-in promo is active.
+  IBOutlet NSTextField* promoPlaceholder_;
+  // Text fields don't work as well with embedded links as text views, but
+  // text views cannot conveniently be created in IB. The xib file contains
+  // a text field |promoPlaceholder_| that's replaced by this text view |promo_|
+  // in -awakeFromNib.
+  scoped_nsobject<HyperlinkTextView> promo_;
   // Only shown for bundle installs.
   IBOutlet NSTextField* installedHeadingMsg_;
   IBOutlet NSTextField* installedItemsMsg_;
@@ -98,6 +114,11 @@ typedef enum {
 // Action for close button.
 - (IBAction)closeWindow:(id)sender;
 
+// From NSTextViewDelegate:
+- (BOOL)textView:(NSTextView*)aTextView
+   clickedOnLink:(id)link
+         atIndex:(NSUInteger)charIndex;
+
 // Displays the extension installed bubble. This callback is triggered by
 // the extensionObserver when the extension has completed loading.
 - (void)showWindow:(id)sender;
@@ -109,6 +130,9 @@ typedef enum {
 // Opens the shortcut configuration UI.
 - (IBAction)onManageShortcutClicked:(id)sender;
 
+// Shows the new app installed animation.
+- (IBAction)onAppShortcutClicked:(id)sender;
+
 @end
 
 @interface ExtensionInstalledBubbleController (ExposedForTesting)
@@ -117,9 +141,12 @@ typedef enum {
 - (NSWindow*)initializeWindow;
 - (int)calculateWindowHeight;
 - (void)setMessageFrames:(int)newWindowHeight;
-- (NSRect)getExtensionInstalledMsgFrame;
-- (NSRect)getExtraInfoMsgFrame;
-- (NSRect)getExtensionInstalledInfoMsgFrame;
+- (NSRect)headingFrame;
+- (NSRect)frameOfHowToUse;
+- (NSRect)frameOfHowToManage;
+- (NSRect)frameOfSigninPromo;
+- (BOOL)showSyncPromo;
+- (NSButton*)appInstalledShortcutLink;
 
 @end  // ExtensionInstalledBubbleController(ExposedForTesting)
 

@@ -14,7 +14,7 @@
 
 #include "base/basictypes.h"
 #include "base/command_line.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/hash_tables.h"
 #include "base/linux_util.h"
 #include "base/memory/scoped_ptr.h"
@@ -275,9 +275,10 @@ static void PreSandboxInit() {
   // pre-sandbox init, but more likely this is just a build configuration error.
   #error Which SSL library are you using?
 #endif
-
+#if defined(ENABLE_PLUGINS)
   // Ensure access to the Pepper plugins before the sandbox is turned on.
   PepperPluginRegistry::PreloadModules();
+#endif
 }
 
 #if !defined(CHROMIUM_SELINUX)

@@ -7,22 +7,24 @@
 #include "base/mac/mac_util.h"
 #import "base/memory/scoped_nsobject.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/prefs/pref_service.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
-#include "chrome/browser/prefs/pref_service.h"
+#include "chrome/browser/signin/fake_auth_status_provider.h"
 #include "chrome/browser/signin/signin_global_error.h"
 #include "chrome/browser/signin/signin_manager.h"
-#include "chrome/browser/signin/signin_manager_fake.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
+#include "chrome/browser/signin/signin_manager_fake.h"
 #include "chrome/browser/sync/profile_sync_service.h"
-#include "chrome/browser/sync/profile_sync_service_mock.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
+#include "chrome/browser/sync/profile_sync_service_mock.h"
 #include "chrome/browser/sync/sync_global_error.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/cocoa/cocoa_profile_test.h"
 #include "chrome/browser/ui/cocoa/find_bar/find_bar_bridge.h"
 #include "chrome/browser/ui/cocoa/tabs/tab_strip_view.h"
+#include "chrome/browser/ui/host_desktop.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_profile.h"
@@ -35,24 +37,6 @@
 #include "ui/base/l10n/l10n_util_mac.h"
 
 using ::testing::Return;
-
-namespace {
-class FakeAuthStatusProvider : public SigninGlobalError::AuthStatusProvider {
- public:
-  FakeAuthStatusProvider() : auth_error_(GoogleServiceAuthError::None()) {}
-
-  // AuthStatusProvider implementation.
-  GoogleServiceAuthError GetAuthStatus() const OVERRIDE { return auth_error_; }
-
-  void set_auth_error(const GoogleServiceAuthError& error) {
-    auth_error_ = error;
-  }
-
- private:
-  GoogleServiceAuthError auth_error_;
-};
-
-}  // namespace
 
 @interface BrowserWindowController (JustForTesting)
 // Already defined in BWC.
@@ -141,8 +125,7 @@ TEST_F(BrowserWindowControllerTest, TestFullScreenWindow) {
 
 TEST_F(BrowserWindowControllerTest, TestNormal) {
   // Force the bookmark bar to be shown.
-  profile()->GetPrefs()->
-      SetBoolean(prefs::kShowBookmarkBar, true);
+  profile()->GetPrefs()->SetBoolean(prefs::kShowBookmarkBar, true);
   [controller_ browserWindow]->BookmarkBarStateChanged(
       BookmarkBar::DONT_ANIMATE_STATE_CHANGE);
 
@@ -155,7 +138,8 @@ TEST_F(BrowserWindowControllerTest, TestNormal) {
   // And make sure a controller for a pop-up window is not normal.
   // popup_browser will be owned by its window.
   Browser* popup_browser(new Browser(
-      Browser::CreateParams(Browser::TYPE_POPUP, profile())));
+      Browser::CreateParams(Browser::TYPE_POPUP, profile(),
+                            chrome::HOST_DESKTOP_TYPE_NATIVE)));
   NSWindow *cocoaWindow = popup_browser->window()->GetNativeWindow();
   BrowserWindowController* controller =
       static_cast<BrowserWindowController*>([cocoaWindow windowController]);
@@ -169,7 +153,8 @@ TEST_F(BrowserWindowControllerTest, TestNormal) {
 
 TEST_F(BrowserWindowControllerTest, TestSetBounds) {
   // Create a normal browser with bounds smaller than the minimum.
-  Browser::CreateParams params(Browser::TYPE_TABBED, profile());
+  Browser::CreateParams params(Browser::TYPE_TABBED, profile(),
+                               chrome::HOST_DESKTOP_TYPE_NATIVE);
   params.initial_bounds = gfx::Rect(0, 0, 50, 50);
   Browser* browser = new Browser(params);
   NSWindow *cocoaWindow = browser->window()->GetNativeWindow();
@@ -194,7 +179,8 @@ TEST_F(BrowserWindowControllerTest, TestSetBounds) {
 
 TEST_F(BrowserWindowControllerTest, TestSetBoundsPopup) {
   // Create a popup with bounds smaller than the minimum.
-  Browser::CreateParams params(Browser::TYPE_POPUP, profile());
+  Browser::CreateParams params(Browser::TYPE_POPUP, profile(),
+                               chrome::HOST_DESKTOP_TYPE_NATIVE);
   params.initial_bounds = gfx::Rect(0, 0, 50, 50);
   Browser* browser = new Browser(params);
   NSWindow *cocoaWindow = browser->window()->GetNativeWindow();
@@ -240,7 +226,8 @@ TEST_F(BrowserWindowControllerTest, TestIncognitoWidthSpace) {
   scoped_ptr<TestingProfile> incognito_profile(new TestingProfile());
   incognito_profile->set_off_the_record(true);
   scoped_ptr<Browser> browser(
-      new Browser(Browser::CreateParams(incognito_profile.get()));
+      new Browser(Browser::CreateParams(incognito_profile.get(),
+                                        chrome::HOST_DESKTOP_TYPE_NATIVE));
   controller_.reset([[BrowserWindowController alloc]
                               initWithBrowser:browser.get()
                                 takeOwnership:NO]);
@@ -458,8 +445,7 @@ TEST_F(BrowserWindowControllerTest, TestResizeViews) {
 
 TEST_F(BrowserWindowControllerTest, TestResizeViewsWithBookmarkBar) {
   // Force a display of the bookmark bar.
-  profile()->GetPrefs()->
-      SetBoolean(prefs::kShowBookmarkBar, true);
+  profile()->GetPrefs()->SetBoolean(prefs::kShowBookmarkBar, true);
   [controller_ browserWindow]->BookmarkBarStateChanged(
       BookmarkBar::DONT_ANIMATE_STATE_CHANGE);
 
@@ -505,8 +491,7 @@ TEST_F(BrowserWindowControllerTest, TestResizeViewsWithBookmarkBar) {
   CheckViewPositions(controller_);
 
   // Remove the bookmark bar and recheck
-  profile()->GetPrefs()->
-      SetBoolean(prefs::kShowBookmarkBar, false);
+  profile()->GetPrefs()->SetBoolean(prefs::kShowBookmarkBar, false);
   [controller_ resizeView:bookmark newHeight:0];
   CheckViewPositions(controller_);
 
@@ -722,20 +707,18 @@ TEST_F(BrowserWindowControllerTest, TestSigninMenuItemAuthError) {
     ProfileSyncServiceFactory::GetForProfile(profile());
   sync->SetSyncSetupCompleted();
   // Force an auth error.
-  FakeAuthStatusProvider provider;
+  FakeAuthStatusProvider provider(signin->signin_global_error());
   GoogleServiceAuthError error(
       GoogleServiceAuthError::INVALID_GAIA_CREDENTIALS);
-  provider.set_auth_error(error);
-  signin->signin_global_error()->AddProvider(&provider);
+  provider.SetAuthError(error);
   [BrowserWindowController updateSigninItem:syncMenuItem
                                  shouldShow:YES
                              currentProfile:profile()];
   NSString* authError =
-    l10n_util::GetNSStringWithFixup(IDS_SYNC_MENU_SYNC_ERROR_LABEL);
+    l10n_util::GetNSStringWithFixup(IDS_SYNC_SIGN_IN_ERROR_WRENCH_MENU_ITEM);
   EXPECT_TRUE([[syncMenuItem title] isEqualTo:authError]);
   EXPECT_FALSE([syncMenuItem isHidden]);
 
-  signin->signin_global_error()->RemoveProvider(&provider);
 }
 
 // If there's a separator after the signin menu item, make sure it is hidden/
@@ -803,6 +786,21 @@ TEST_F(BrowserWindowControllerTest, TestSigninMenuItemWithNonSeparator) {
   EXPECT_TRUE([followingNonSeparator isHidden]);
 }
 
+// Verify that hit testing works correctly when the bookmark bar overlaps
+// web contents.
+TEST_F(BrowserWindowControllerTest, BookmarkBarHitTest) {
+  profile()->GetPrefs()->SetBoolean(prefs::kShowBookmarkBar, true);
+  [controller_ browserWindow]->BookmarkBarStateChanged(
+      BookmarkBar::DONT_ANIMATE_STATE_CHANGE);
+
+  NSView* bookmarkView = [controller_ bookmarkView];
+  NSView* contentView = [[controller_ window] contentView];
+  NSPoint point = [bookmarkView convertPoint:NSMakePoint(1, 1)
+                                      toView:[contentView superview]];
+
+  EXPECT_TRUE([[contentView hitTest:point] isDescendantOf:bookmarkView]);
+}
+
 @interface BrowserWindowControllerFakeFullscreen : BrowserWindowController {
  @private
   // We release the window ourselves, so we don't have to rely on the unittest
@@ -850,8 +848,7 @@ TEST_F(BrowserWindowFullScreenControllerTest, TestFullscreen) {
   [controller_ showWindow:nil];
   EXPECT_FALSE([controller_ isFullscreen]);
 
-  [controller_ enterFullscreenForURL:GURL()
-                       bubbleType:FEB_TYPE_BROWSER_FULLSCREEN_EXIT_INSTRUCTION];
+  [controller_ enterFullscreen];
   WaitForFullScreenTransition();
   EXPECT_TRUE([controller_ isFullscreen]);
 
@@ -872,8 +869,7 @@ TEST_F(BrowserWindowFullScreenControllerTest, TestActivate) {
   [controller_ activate];
   EXPECT_TRUE(IsFrontWindow([controller_ window]));
 
-  [controller_ enterFullscreenForURL:GURL()
-                       bubbleType:FEB_TYPE_BROWSER_FULLSCREEN_EXIT_INSTRUCTION];
+  [controller_ enterFullscreen];
   WaitForFullScreenTransition();
   [controller_ activate];
 

@@ -4,23 +4,23 @@
 
 #import "chrome/browser/ui/cocoa/extensions/extension_action_context_menu.h"
 
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/json/json_file_value_serializer.h"
 #include "base/path_service.h"
+#include "base/prefs/pref_service.h"
 #include "chrome/browser/extensions/browser_action_test_util.h"
 #include "chrome/browser/extensions/extension_action.h"
 #include "chrome/browser/extensions/extension_action_manager.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/cocoa/browser_window_cocoa.h"
 #include "chrome/browser/ui/cocoa/browser_window_controller.h"
 #import "chrome/browser/ui/cocoa/location_bar/location_bar_view_mac.h"
 #include "chrome/browser/ui/cocoa/toolbar/toolbar_controller.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/pref_names.h"
@@ -45,7 +45,8 @@ public:
     action_ = action_manager->GetPageAction(*extension_);
     EXPECT_TRUE(action_);
 
-    content::WebContents* contents = chrome::GetActiveWebContents(browser());
+    content::WebContents* contents =
+        browser()->tab_strip_model()->GetActiveWebContents();
     action_->SetAppearance(ExtensionTabUtil::GetTabId(contents),
                            ExtensionAction::ACTIVE);
 
@@ -100,7 +101,8 @@ IN_PROC_BROWSER_TEST_F(ExtensionActionContextMenuTest, BrowserAction) {
   EXPECT_TRUE(action_);
 
   Browser* empty_browser(
-       new Browser(Browser::CreateParams(browser()->profile())));
+       new Browser(Browser::CreateParams(browser()->profile(),
+                                         browser()->host_desktop_type())));
 
   scoped_nsobject<ExtensionActionContextMenu> menu;
   menu.reset([[ExtensionActionContextMenu alloc]
@@ -146,10 +148,6 @@ IN_PROC_BROWSER_TEST_F(ExtensionActionContextMenuTest, RunInspectPopup) {
                  to:[inspectItem target]
                from:inspectItem];
   devtools_attached_observer.Wait();
-
-  // Hide the popup to prevent racy crashes at test cleanup.
-  BrowserActionTestUtil test_util(browser());
-  test_util.HidePopup();
 
   service->SetBoolean(prefs::kExtensionsUIDeveloperMode, original);
 }

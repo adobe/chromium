@@ -7,12 +7,12 @@
 #include "base/float_util.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/string_number_conversions.h"
 #include "base/string_piece.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
+#include "base/strings/string_number_conversions.h"
+#include "base/strings/utf_string_conversion_utils.h"
 #include "base/third_party/icu/icu_utf.h"
-#include "base/utf_string_conversion_utils.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 
@@ -404,7 +404,9 @@ void JSONParser::EatWhitespaceAndComments() {
       case '\r':
       case '\n':
         index_last_line_ = index_;
-        ++line_number_;
+        // Don't increment line_number_ twice for "\r\n".
+        if (!(*pos_ == '\n' && pos_ > start_pos_ && *(pos_ - 1) == '\r'))
+          ++line_number_;
         // Fall through.
       case ' ':
       case '\t':

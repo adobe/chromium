@@ -8,7 +8,7 @@
 #include <vector>
 
 #include "base/basictypes.h"
-#include "chrome/browser/history/history.h"
+#include "chrome/browser/history/history_service.h"
 #include "chrome/browser/sessions/session_types.h"
 #include "chrome/browser/ui/host_desktop.h"
 #include "ui/base/window_open_disposition.h"
@@ -71,6 +71,9 @@ class SessionRestore {
 
   // Returns true if we're in the process of restoring |profile|.
   static bool IsRestoring(const Profile* profile);
+
+  // Returns true if synchronously restoring a session.
+  static bool IsRestoringSynchronously();
 
   // The max number of non-selected tabs SessionRestore loads when restoring
   // a session. A value of 0 indicates all tabs are loaded at once.

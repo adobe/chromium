@@ -12,12 +12,14 @@
 #include "chrome/browser/extensions/management_policy.h"
 #include "chrome/browser/managed_mode/managed_mode_url_filter.h"
 #include "chrome/browser/profiles/profile_keyed_service.h"
+#include "chrome/browser/ui/webui/managed_user_passphrase_dialog.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
+#include "content/public/browser/web_contents.h"
 
 class ManagedModeURLFilter;
 class ManagedModeSiteList;
-class PrefServiceSyncable;
+class PrefRegistrySyncable;
 class Profile;
 
 // This class handles all the information related to a given managed profile
@@ -29,12 +31,19 @@ class ManagedUserService : public ProfileKeyedService,
  public:
   typedef std::vector<string16> CategoryList;
 
+  enum ManualBehavior {
+    MANUAL_NONE = 0,
+    MANUAL_ALLOW,
+    MANUAL_BLOCK
+  };
+
   explicit ManagedUserService(Profile* profile);
   virtual ~ManagedUserService();
 
   bool ProfileIsManaged() const;
+  bool IsElevated() const;
 
-  static void RegisterUserPrefs(PrefServiceSyncable* prefs);
+  static void RegisterUserPrefs(PrefRegistrySyncable* registry);
 
   // Returns the URL filter for the IO thread, for filtering network requests
   // (in ManagedModeResourceThrottle).
@@ -52,38 +61,35 @@ class ManagedUserService : public ProfileKeyedService,
   // be fast.
   void GetCategoryNames(CategoryList* list);
 
-  // The functions that handle manual whitelists use |url_pattern| or lists
-  // of "url patterns". An "url pattern" is a pattern in the format used by the
-  // policy::URLBlacklist filter. A description of the format used can be found
-  // here: http://dev.chromium.org/administrators/url-blacklist-filter-format.
-  // They all receive the |is_whitelist| parameter which dictates whether they
-  // act on the whitelist (for |is_whitelist| == true) or on the blacklist (for
-  // |is_whitelist| == false).
+  // These methods allow querying and modifying the manual filtering behavior.
+  // The manual behavior is set by the user and overrides all other settings
+  // (whitelists or the default behavior).
 
-  // Checks if the |url_pattern| is in the manual whitelist.
-  bool IsInManualList(const bool is_whitelist, const std::string& url_pattern);
+  // Returns the manual behavior for the given host.
+  ManualBehavior GetManualBehaviorForHost(const std::string& hostname);
 
-  // Appends |list| to the manual white/black list (according to |is_whitelist|)
-  // both in URL filter and in preferences.
-  void AddToManualList(const bool is_whitelist, const base::ListValue& list);
+  // Sets the manual behavior for the given host.
+  void SetManualBehaviorForHosts(const std::vector<std::string>& hostnames,
+                                 ManualBehavior behavior);
 
-  // Removes |list| from the manual white/black list (according to
-  // |is_whitelist|) both in URL filter and in preferences.
-  void RemoveFromManualList(const bool is_whitelist,
-                            const base::ListValue& list);
+  // Returns the manual behavior for the given URL.
+  ManualBehavior GetManualBehaviorForURL(const GURL& url);
 
-  // Updates the whitelist and the blacklist from the prefs.
-  void UpdateManualLists();
+  // Sets the manual behavior for the given URL.
+  void SetManualBehaviorForURLs(const std::vector<GURL>& url,
+                                ManualBehavior behavior);
 
-  void SetElevatedForTesting(bool is_elevated);
+  // Handles the request to authorize as the custodian of the managed user.
+  void RequestAuthorization(content::WebContents* web_contents,
+                            const PassphraseCheckedCallback& callback);
+
+  void SetElevated(bool is_elevated);
 
   // Initializes this object. This method does nothing if the profile is not
-  // managed. This method should only be called for testing, to do
-  // initialization after the profile has been manually set to managed,
-  // otherwise it is called automatically,
+  // managed.
   void Init();
 
-  // ExtensionManagementPolicy::Provider implementation:
+  // extensions::ManagementPolicy::Provider implementation:
   virtual std::string GetDebugPolicyProviderName() const OVERRIDE;
   virtual bool UserMayLoad(const extensions::Extension* extension,
                            string16* error) const OVERRIDE;
@@ -112,10 +118,8 @@ class ManagedUserService : public ProfileKeyedService,
     void SetDefaultFilteringBehavior(
         ManagedModeURLFilter::FilteringBehavior behavior);
     void LoadWhitelists(ScopedVector<ManagedModeSiteList> site_lists);
-    void SetManualLists(scoped_ptr<base::ListValue> whitelist,
-                        scoped_ptr<base::ListValue> blacklist);
-    void AddURLPatternToManualList(const bool isWhitelist,
-                                   const std::string& url);
+    void SetManualHosts(scoped_ptr<std::map<std::string, bool> > host_map);
+    void SetManualURLs(scoped_ptr<std::map<GURL, bool> > url_map);
 
    private:
     // ManagedModeURLFilter is refcounted because the IO thread filter is used
@@ -143,16 +147,13 @@ class ManagedUserService : public ProfileKeyedService,
 
   void UpdateSiteLists();
 
-  // Adds the |url_pattern| to the manual lists in the URL filter. This is used
-  // by AddToManualListImpl().
-  void AddURLPatternToManualList(const bool is_whitelist,
-                                 const std::string& url_pattern);
+  // Updates the manual overrides for hosts in the URL filters when the
+  // corresponding preference is changed.
+  void UpdateManualHosts();
 
-  // Returns a copy of the manual whitelist which is stored in each profile.
-  scoped_ptr<base::ListValue> GetWhitelist();
-
-  // Returns a copy of the manual blacklist which is stored in each profile.
-  scoped_ptr<base::ListValue> GetBlacklist();
+  // Updates the manual overrides for URLs in the URL filters when the
+  // corresponding preference is changed.
+  void UpdateManualURLs();
 
   // Owns us via the ProfileKeyedService mechanism.
   Profile* profile_;

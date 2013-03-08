@@ -13,6 +13,16 @@ namespace autofill {
 // Uses the Luhn formula to validate the number.
 bool IsValidCreditCardNumber(const string16& text);
 
+// Returns true if |text| looks like a valid credit card security code.
+bool IsValidCreditCardSecurityCode(const string16& text);
+
+// Returns true if |text| looks like a valid e-mail address.
+bool IsValidEmailAddress(const string16& text);
+
+// Returns true if |text| looks like a valid zip code.
+// Valid for US zip codes only.
+bool IsValidZip(const string16& text);
+
 }  // namespace autofill
 
 #endif  // CHROME_BROWSER_AUTOFILL_VALIDATION_H_

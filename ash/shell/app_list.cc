@@ -20,6 +20,7 @@
 #include "ui/app_list/search_result.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/font.h"
+#include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/rect.h"
 #include "ui/views/examples/examples_window_with_content.h"
 
@@ -42,7 +43,7 @@ class WindowTypeLauncherItem : public app_list::AppListItemModel {
   };
 
   explicit WindowTypeLauncherItem(Type type) : type_(type) {
-    SetIcon(GetIcon(type));
+    SetIcon(GetIcon(type), false);
     SetTitle(GetTitle(type));
   }
 
@@ -193,8 +194,6 @@ class ExampleAppListViewDelegate : public app_list::AppListViewDelegate {
          ++i) {
       WindowTypeLauncherItem::Type type =
           static_cast<WindowTypeLauncherItem::Type>(i);
-
-      std::string title = WindowTypeLauncherItem::GetTitle(type);
       apps->Add(new WindowTypeLauncherItem(type));
     }
   }
@@ -225,6 +224,10 @@ class ExampleAppListViewDelegate : public app_list::AppListViewDelegate {
     model_ = model;
     PopulateApps(model_->apps());
     DecorateSearchBox(model_->search_box());
+  }
+
+  virtual app_list::SigninDelegate* GetSigninDelegate() OVERRIDE {
+    return NULL;
   }
 
   virtual void ActivateAppListItem(app_list::AppListItemModel* item,
@@ -284,6 +287,10 @@ class ExampleAppListViewDelegate : public app_list::AppListViewDelegate {
 
   virtual void ViewActivationChanged(bool active) OVERRIDE {
     // Nothing needs to be done.
+  }
+
+  virtual gfx::ImageSkia GetWindowIcon() OVERRIDE {
+    return gfx::ImageSkia();
   }
 
   app_list::AppListModel* model_;

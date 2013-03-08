@@ -4,8 +4,8 @@
 
 #include <set>
 
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/message_loop.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/history/text_database_manager.h"
@@ -51,11 +51,11 @@ class InMemDB : public URLDatabase, public VisitDatabase {
     CreateURLTable(false);
     InitVisitTable();
   }
-  ~InMemDB() {
+  virtual ~InMemDB() {
   }
 
  private:
-  virtual sql::Connection& GetDB() { return db_; }
+  virtual sql::Connection& GetDB() OVERRIDE { return db_; }
 
   sql::Connection db_;
 
@@ -157,17 +157,17 @@ class TextDatabaseManagerTest : public testing::Test {
   }
 
  protected:
-  void SetUp() {
+  virtual void SetUp() {
   }
 
-  void TearDown() {
+  virtual void TearDown() {
     file_util::Delete(dir_, true);
   }
 
   MessageLoop message_loop_;
 
   // Directory containing the databases.
-  FilePath dir_;
+  base::FilePath dir_;
 };
 
 // Tests basic querying.

@@ -7,8 +7,33 @@
 #include "base/logging.h"
 #include "base/memory/singleton.h"
 #include "base/observer_list.h"
+#include "ui/message_center/notification.h"
+#include "ui/message_center/notification_list.h"
 
 namespace message_center {
+
+namespace {
+static MessageCenter* g_message_center;
+}
+
+// static
+void MessageCenter::Initialize() {
+  DCHECK(g_message_center == NULL);
+  g_message_center = new MessageCenter();
+}
+
+// static
+MessageCenter* MessageCenter::Get() {
+  DCHECK(g_message_center);
+  return g_message_center;
+}
+
+// static
+void MessageCenter::Shutdown() {
+  DCHECK(g_message_center);
+  delete g_message_center;
+  g_message_center = NULL;
+}
 
 //------------------------------------------------------------------------------
 MessageCenter::MessageCenter()
@@ -52,7 +77,7 @@ bool MessageCenter::HasPopupNotifications() const {
 // Client code interface.
 
 void MessageCenter::AddNotification(
-    ui::notifications::NotificationType type,
+    NotificationType type,
     const std::string& id,
     const string16& title,
     const string16& message,
@@ -76,8 +101,7 @@ void MessageCenter::UpdateNotification(
 }
 
 void MessageCenter::RemoveNotification(const std::string& id) {
-  if (!notification_list_->RemoveNotification(id))
-    return;
+  notification_list_->RemoveNotification(id);
   NotifyMessageCenterChanged(false);
 }
 
@@ -104,22 +128,23 @@ void MessageCenter::SetNotificationButtonIcon(
 //------------------------------------------------------------------------------
 // Overridden from NotificationList::Delegate.
 
-void MessageCenter::SendRemoveNotification(const std::string& id) {
+void MessageCenter::SendRemoveNotification(const std::string& id,
+                                           bool by_user) {
   if (delegate_)
-    delegate_->NotificationRemoved(id);
+    delegate_->NotificationRemoved(id, by_user);
 }
 
-void MessageCenter::SendRemoveAllNotifications() {
+void MessageCenter::SendRemoveAllNotifications(bool by_user) {
   if (delegate_) {
-    NotificationList::Notifications notifications;
-    notification_list_->GetNotifications(&notifications);
+    const NotificationList::Notifications& notifications =
+        notification_list_->GetNotifications();
     for (NotificationList::Notifications::const_iterator loopiter =
              notifications.begin();
          loopiter != notifications.end(); ) {
       NotificationList::Notifications::const_iterator curiter = loopiter++;
-      std::string notification_id = curiter->id;
+      std::string notification_id = (*curiter)->id();
       // May call RemoveNotification and erase curiter.
-      delegate_->NotificationRemoved(notification_id);
+      delegate_->NotificationRemoved(notification_id, by_user);
     }
   }
 }
@@ -142,6 +167,11 @@ void MessageCenter::DisableNotificationByUrl(const std::string& id) {
 void MessageCenter::ShowNotificationSettings(const std::string& id) {
   if (delegate_)
     delegate_->ShowSettings(id);
+}
+
+void MessageCenter::ShowNotificationSettingsDialog(gfx::NativeView context) {
+  if (delegate_)
+    delegate_->ShowSettingsDialog(context);
 }
 
 void MessageCenter::OnNotificationClicked(const std::string& id) {

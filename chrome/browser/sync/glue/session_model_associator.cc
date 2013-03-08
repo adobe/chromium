@@ -15,8 +15,8 @@
 #include "base/threading/sequenced_worker_pool.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/favicon/favicon_service_factory.h"
-#include "chrome/browser/history/history.h"
-#include "chrome/browser/prefs/pref_service.h"
+#include "chrome/browser/history/history_service.h"
+#include "chrome/browser/prefs/pref_service_syncable.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sessions/session_id.h"
 #include "chrome/browser/sync/glue/device_info.h"
@@ -29,6 +29,7 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_service.h"
@@ -95,15 +96,17 @@ SessionModelAssociator::SessionModelAssociator(ProfileSyncService* sync_service,
       waiting_for_change_(false),
       ALLOW_THIS_IN_INITIALIZER_LIST(test_weak_factory_(this)),
       profile_(sync_service->profile()),
-      pref_service_(profile_->GetPrefs()),
+      pref_service_(PrefServiceSyncable::FromProfile(profile_)),
       error_handler_(error_handler) {
   DCHECK(CalledOnValidThread());
   DCHECK(sync_service_);
   DCHECK(profile_);
   if (pref_service_->FindPreference(kSyncSessionsGUID) == NULL) {
-    pref_service_->RegisterStringPref(kSyncSessionsGUID,
-                                      std::string(),
-                                      PrefServiceSyncable::UNSYNCABLE_PREF);
+    static_cast<PrefRegistrySyncable*>(
+        pref_service_->DeprecatedGetPrefRegistry())->RegisterStringPref(
+            kSyncSessionsGUID,
+            std::string(),
+            PrefRegistrySyncable::UNSYNCABLE_PREF);
   }
 }
 
@@ -610,6 +613,9 @@ syncer::SyncError SessionModelAssociator::AssociateModels(
 
   scoped_ptr<DeviceInfo> local_device_info(sync_service_->GetLocalDeviceInfo());
 
+#if defined(OS_ANDROID)
+  std::string transaction_tag;
+#endif
   // Read any available foreign sessions and load any session data we may have.
   // If we don't have any local session data in the db, create a header node.
   {
@@ -669,11 +675,16 @@ syncer::SyncError SessionModelAssociator::AssociateModels(
       local_session_syncid_ = write_node.GetId();
     }
 #if defined(OS_ANDROID)
-    std::string transaction_tag = GetMachineTagFromTransaction(&trans);
-    if (current_machine_tag_.compare(transaction_tag) != 0)
-      DeleteForeignSession(transaction_tag);
+    transaction_tag = GetMachineTagFromTransaction(&trans);
 #endif
   }
+#if defined(OS_ANDROID)
+  // We need to delete foreign sessions after giving up our
+  // syncer::WriteTransaction, since DeleteForeignSession(std::string&) uses
+  // its own syncer::WriteTransaction.
+  if (current_machine_tag_.compare(transaction_tag) != 0)
+    DeleteForeignSession(transaction_tag);
+#endif
 
   // Check if anything has changed on the client side.
   if (!UpdateSyncModelDataFromClient(&error)) {
@@ -773,7 +784,7 @@ bool SessionModelAssociator::UpdateAssociationsFromSyncModel(
     if (specifics.session_tag().empty()) {
       // This is a corrupted node. Just delete it.
       LOG(WARNING) << "Found node with no session tag, deleting.";
-      sync_node.Remove();
+      sync_node.Tombstone();
     } else if (specifics.session_tag() != GetCurrentMachineTag()) {
       AssociateForeignSpecifics(specifics, modification_time);
     } else {
@@ -796,7 +807,7 @@ bool SessionModelAssociator::UpdateAssociationsFromSyncModel(
         // TODO(zea): fix this once we add support for reassociating
         // pre-existing tabs with pre-existing tab nodes. We'll need to load
         // the tab_node_id and ensure the tab_pool_ keeps track of them.
-        sync_node.Remove();
+        sync_node.Tombstone();
       }
     }
     id = next_id;
@@ -1172,7 +1183,7 @@ void SessionModelAssociator::DeleteForeignSession(const std::string& tag) {
     const sync_pb::SessionSpecifics& specifics =
         sync_node.GetSessionSpecifics();
     if (specifics.session_tag() == tag)
-      sync_node.Remove();
+      sync_node.Tombstone();
   }
 }
 

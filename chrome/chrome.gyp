@@ -14,7 +14,7 @@
       'common',
       'browser',
       '../content/content.gyp:content_app',
-      '../sync/sync.gyp:sync_core',
+      '../sync/sync.gyp:sync',
     ],
     'allocator_target': '../base/allocator/allocator.gyp:allocator',
     'grit_out_dir': '<(SHARED_INTERMEDIATE_DIR)/chrome',
@@ -175,9 +175,9 @@
             ['OS=="linux" and chromeos==1 and branding=="Chrome"', {
               'copies': [
                 {
-                  'destination': '<(PRODUCT_DIR)/extensions',
+                  'destination': '<(PRODUCT_DIR)',
                   'files': [
-                    '>!@(ls browser/extensions/default_extensions/chromeos/cache/*)'
+                    'browser/extensions/default_extensions/chromeos/extensions/'
                   ]
                 }
               ],
@@ -236,6 +236,8 @@
                ],
             }],
           ],
+          # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
+          'msvs_disabled_warnings': [ 4267, ],
         },
         {
           'target_name': 'plugin',
@@ -285,6 +287,8 @@
               ],
             }],
           ],
+          # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
+          'msvs_disabled_warnings': [ 4267, ],
         },
         {
           'target_name': 'service',
@@ -339,6 +343,8 @@
             'service/cloud_print/print_system.h',
             'service/cloud_print/printer_job_handler.cc',
             'service/cloud_print/printer_job_handler.h',
+            'service/cloud_print/printer_job_queue_handler.cc',
+            'service/cloud_print/printer_job_queue_handler.h',
             'service/gaia/service_gaia_authenticator.cc',
             'service/gaia/service_gaia_authenticator.h',
             'service/net/service_url_request_context.cc',
@@ -385,7 +391,7 @@
           'dependencies': [
             'test_support_common',
             '../skia/skia.gyp:skia',
-            '../sync/sync.gyp:sync_core',
+            '../sync/sync.gyp:sync',
           ],
           'include_dirs': [
              '..',
@@ -872,7 +878,7 @@
             '../ui/ui.gyp:ui_unittests',
           ],
           'conditions': [
-            ['use_aura==1', {
+            ['use_aura==1 or target_arch=="x64"', {
               'dependencies!': [
                 '../chrome_frame/chrome_frame.gyp:chrome_frame_tests',
                 '../chrome_frame/chrome_frame.gyp:chrome_frame_net_tests',
@@ -1074,6 +1080,7 @@
           'target_name': 'chrome_java',
           'type': 'none',
           'dependencies': [
+            'toolbar_model_security_levels_java',
             '../base/base.gyp:base',
             '../components/components.gyp:navigation_interception_java',
             '../components/components.gyp:web_contents_delegate_android_java',
@@ -1083,7 +1090,6 @@
             '../ui/ui.gyp:ui_java',
           ],
           'variables': {
-            'package_name': 'chrome',
             'java_in_dir': '../chrome/android/java',
             'has_java_resources': 1,
             'R_package': 'org.chromium.chrome',

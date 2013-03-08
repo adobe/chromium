@@ -5,11 +5,12 @@
 #include "base/files/important_file_writer.h"
 
 #include "base/compiler_specific.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
+#include "base/run_loop.h"
 #include "base/threading/thread.h"
 #include "base/time.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -31,7 +32,7 @@ class DataSerializer : public ImportantFileWriter::DataSerializer {
   explicit DataSerializer(const std::string& data) : data_(data) {
   }
 
-  virtual bool SerializeData(std::string* output) {
+  virtual bool SerializeData(std::string* output) OVERRIDE {
     output->assign(data_);
     return true;
   }
@@ -63,7 +64,7 @@ TEST_F(ImportantFileWriterTest, Basic) {
                              MessageLoopProxy::current());
   EXPECT_FALSE(file_util::PathExists(writer.path()));
   writer.WriteNow("foo");
-  loop_.RunUntilIdle();
+  RunLoop().RunUntilIdle();
 
   ASSERT_TRUE(file_util::PathExists(writer.path()));
   EXPECT_EQ("foo", GetFileContent(writer.path()));
@@ -79,7 +80,7 @@ TEST_F(ImportantFileWriterTest, ScheduleWrite) {
   EXPECT_TRUE(writer.HasPendingWrite());
   MessageLoop::current()->PostDelayedTask(
       FROM_HERE,
-      MessageLoop::QuitClosure(),
+      MessageLoop::QuitWhenIdleClosure(),
       TimeDelta::FromMilliseconds(100));
   MessageLoop::current()->Run();
   EXPECT_FALSE(writer.HasPendingWrite());
@@ -97,7 +98,7 @@ TEST_F(ImportantFileWriterTest, DoScheduledWrite) {
   writer.DoScheduledWrite();
   MessageLoop::current()->PostDelayedTask(
       FROM_HERE,
-      MessageLoop::QuitClosure(),
+      MessageLoop::QuitWhenIdleClosure(),
       TimeDelta::FromMilliseconds(100));
   MessageLoop::current()->Run();
   EXPECT_FALSE(writer.HasPendingWrite());
@@ -115,7 +116,7 @@ TEST_F(ImportantFileWriterTest, BatchingWrites) {
   writer.ScheduleWrite(&baz);
   MessageLoop::current()->PostDelayedTask(
       FROM_HERE,
-      MessageLoop::QuitClosure(),
+      MessageLoop::QuitWhenIdleClosure(),
       TimeDelta::FromMilliseconds(100));
   MessageLoop::current()->Run();
   ASSERT_TRUE(file_util::PathExists(writer.path()));

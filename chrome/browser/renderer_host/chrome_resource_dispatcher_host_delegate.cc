@@ -60,6 +60,7 @@
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/extensions/file_browser_resource_throttle.h"
+#include "chrome/browser/chromeos/login/merge_session_throttle.h"
 // TODO(oshima): Enable this for other platforms.
 #include "chrome/browser/renderer_host/offline_resource_throttle.h"
 #endif
@@ -162,6 +163,11 @@ void ChromeResourceDispatcherHostDelegate::RequestBeginning(
     // block unsafe site after we remove offline page.
     throttles->push_back(new OfflineResourceThrottle(
         child_id, route_id, request, appcache_service));
+    // Add interstitial page while merge session process (cookie
+    // reconstruction from OAuth2 refresh token in ChromeOS login) is still in
+    // progress while we are attempting to load a google property.
+    throttles->push_back(new MergeSessionThrottle(
+        child_id, route_id, request));
   }
 #endif
 
@@ -312,10 +318,10 @@ void ChromeResourceDispatcherHostDelegate::AppendStandardResourceThrottles(
     int route_id,
     ResourceType::Type resource_type,
     ScopedVector<content::ResourceThrottle>* throttles) {
+  ProfileIOData* io_data = ProfileIOData::FromResourceContext(resource_context);
 #if defined(FULL_SAFE_BROWSING) || defined(MOBILE_SAFE_BROWSING)
   // Insert safe browsing at the front of the list, so it gets to decide on
   // policies first.
-  ProfileIOData* io_data = ProfileIOData::FromResourceContext(resource_context);
   if (io_data->safe_browsing_enabled()->GetValue()) {
     bool is_subresource_request = resource_type != ResourceType::MAIN_FRAME;
     content::ResourceThrottle* throttle =
@@ -399,11 +405,14 @@ void ChromeResourceDispatcherHostDelegate::OnResponseStarted(
   AutoLoginPrompter::ShowInfoBarIfPossible(request, info->GetChildID(),
                                            info->GetRouteID());
 
+  ProfileIOData* io_data = ProfileIOData::FromResourceContext(resource_context);
+
 #if defined(ENABLE_ONE_CLICK_SIGNIN)
   // See if the response contains the Google-Accounts-SignIn header.  If so,
   // then the user has just finished signing in, and the server is allowing the
   // browser to suggest connecting the user's profile to the account.
-  OneClickSigninHelper::ShowInfoBarIfPossible(request, info->GetChildID(),
+  OneClickSigninHelper::ShowInfoBarIfPossible(request, io_data,
+                                              info->GetChildID(),
                                               info->GetRouteID());
 #endif
 
@@ -418,7 +427,6 @@ void ChromeResourceDispatcherHostDelegate::OnResponseStarted(
     }
   }
 
-  ProfileIOData* io_data = ProfileIOData::FromResourceContext(resource_context);
   if (io_data->resource_prefetch_predictor_observer())
     io_data->resource_prefetch_predictor_observer()->OnResponseStarted(request);
 
@@ -432,19 +440,20 @@ void ChromeResourceDispatcherHostDelegate::OnRequestRedirected(
     content::ResourceResponse* response) {
   LoadTimingObserver::PopulateTimingInfo(request, response);
 
+  ProfileIOData* io_data = ProfileIOData::FromResourceContext(resource_context);
+
 #if defined(ENABLE_ONE_CLICK_SIGNIN)
   const ResourceRequestInfo* info = ResourceRequestInfo::ForRequest(request);
-
-  AppendChromeSyncGaiaHeader(request, resource_context);
 
   // See if the response contains the Google-Accounts-SignIn header.  If so,
   // then the user has just finished signing in, and the server is allowing the
   // browser to suggest connecting the user's profile to the account.
-  OneClickSigninHelper::ShowInfoBarIfPossible(request, info->GetChildID(),
+  OneClickSigninHelper::ShowInfoBarIfPossible(request, io_data,
+                                              info->GetChildID(),
                                               info->GetRouteID());
+  AppendChromeSyncGaiaHeader(request, resource_context);
 #endif
 
-  ProfileIOData* io_data = ProfileIOData::FromResourceContext(resource_context);
   if (io_data->resource_prefetch_predictor_observer()) {
     io_data->resource_prefetch_predictor_observer()->OnRequestRedirected(
         redirect_url, request);

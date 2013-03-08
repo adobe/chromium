@@ -20,8 +20,8 @@
 #include "base/i18n/time_formatting.h"
 #include "base/json/json_writer.h"
 #include "base/string16.h"
-#include "base/string_number_conversions.h"
 #include "base/stringprintf.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
@@ -908,7 +908,14 @@ void InternetOptionsHandler::ShowMorePlanInfoCallback(const ListValue* args) {
   if (!web_ui())
     return;
 
-  const chromeos::CellularNetwork* cellular = cros_->cellular_network();
+  std::string service_path;
+  if (args->GetSize() != 1 || !args->GetString(0, &service_path)) {
+    NOTREACHED();
+    return;
+  }
+
+  const chromeos::CellularNetwork* cellular =
+      cros_->FindCellularNetworkByPath(service_path);
   if (!cellular)
     return;
 
@@ -1542,12 +1549,14 @@ void InternetOptionsHandler::PopulateCellularDetails(
   }
 
   SetCellularButtonsVisibility(cellular,
-                                dictionary,
-                                cros_->GetCellularHomeCarrierId());
+                               device,
+                               dictionary,
+                               cros_->GetCellularHomeCarrierId());
 }
 
 void InternetOptionsHandler::SetCellularButtonsVisibility(
     const chromeos::CellularNetwork* cellular,
+    const chromeos::NetworkDevice* device,
     DictionaryValue* dictionary,
     const std::string& carrier_id) {
   dictionary->SetBoolean(
@@ -1562,9 +1571,23 @@ void InternetOptionsHandler::SetCellularButtonsVisibility(
     const chromeos::MobileConfig::Carrier* carrier =
         chromeos::MobileConfig::GetInstance()->GetCarrier(carrier_id);
     if (carrier && carrier->show_portal_button()) {
-      // This will trigger BuyDataPlanCallback() so that
-      // chrome://mobilesetup/ will open carrier specific portal.
-      dictionary->SetBoolean(kTagShowViewAccountButton, true);
+      // The button should be shown for a LTE network even when the LTE network
+      // is not connected, but CrOS is online. This is done to enable users to
+      // update their plan even if they are out of credits.
+      // The button should not be shown when the device's mdn is not set,
+      // because the network's proper portal url cannot be generated without it
+      chromeos::NetworkTechnology technology = cellular->network_technology();
+      bool force_show_view_account_button =
+          (technology == chromeos::NETWORK_TECHNOLOGY_LTE ||
+           technology == chromeos::NETWORK_TECHNOLOGY_LTE_ADVANCED) &&
+          cros_->connected_network() &&
+          cros_->connected_network()->online() &&
+          device && !device->mdn().empty();
+
+      // The button will trigger ShowMorePlanInfoCallback() which will open
+      // carrier specific portal.
+      if (cellular->connected() || force_show_view_account_button)
+        dictionary->SetBoolean(kTagShowViewAccountButton, true);
     }
   }
 }

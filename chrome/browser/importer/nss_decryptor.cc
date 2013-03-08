@@ -9,8 +9,8 @@
 
 #include "base/base64.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/string_split.h"
 #include "base/string_util.h"
+#include "base/strings/string_split.h"
 #include "base/utf_string_conversions.h"
 #include "content/public/common/password_form.h"
 #include "sql/connection.h"
@@ -232,7 +232,7 @@ void NSSDecryptor::ParseSignons(
   }
 }
 
-bool NSSDecryptor::ReadAndParseSignons(const FilePath& sqlite_file,
+bool NSSDecryptor::ReadAndParseSignons(const base::FilePath& sqlite_file,
     std::vector<content::PasswordForm>* forms) {
   sql::Connection db;
   if (!db.Open(sqlite_file))

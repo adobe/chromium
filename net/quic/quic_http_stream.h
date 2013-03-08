@@ -91,7 +91,7 @@ class NET_EXPORT_PRIVATE QuicHttpStream :
 
   void BufferResponseBody(const char* data, int length);
 
-  State io_state_;
+  State next_state_;
 
   QuicReliableClientStream* stream_;  // Non-owning.
 
@@ -134,6 +134,8 @@ class NET_EXPORT_PRIVATE QuicHttpStream :
   scoped_refptr<IOBufferWithSize> raw_request_body_buf_;
   // Wraps raw_request_body_buf_ to read the remaining data progressively.
   scoped_refptr<DrainableIOBuffer> request_body_buf_;
+
+  BoundNetLog stream_net_log_;
 
   base::WeakPtrFactory<QuicHttpStream> weak_factory_;
 };

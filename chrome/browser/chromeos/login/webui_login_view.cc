@@ -8,7 +8,7 @@
 #include "ash/system/tray/system_tray.h"
 #include "base/bind.h"
 #include "base/callback.h"
-#include "base/command_line.h"
+#include "base/debug/trace_event.h"
 #include "base/i18n/rtl.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
@@ -25,7 +25,6 @@
 #include "chrome/browser/ui/web_contents_modal_dialog_manager.h"
 #include "chrome/browser/ui/webui/chromeos/login/oobe_ui.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "chrome/common/chrome_switches.h"
 #include "chrome/common/render_messages.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/session_manager_client.h"
@@ -34,6 +33,7 @@
 #include "content/public/browser/render_view_host_observer.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_view.h"
 #include "content/public/browser/web_ui.h"
 #include "ui/aura/env.h"
 #include "ui/gfx/rect.h"
@@ -46,8 +46,6 @@ using content::RenderViewHost;
 using content::WebContents;
 
 namespace {
-
-const char kViewClassName[] = "browser/chromeos/login/WebUILoginView";
 
 // These strings must be kept in sync with handleAccelerator() in oobe.js.
 const char kAccelNameCancel[] = "cancel";
@@ -69,7 +67,7 @@ class SnifferObserver : public content::RenderViewHostObserver {
   virtual ~SnifferObserver() {}
 
   // IPC::Listener implementation.
-  virtual bool OnMessageReceived(const IPC::Message& message) {
+  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE {
     bool handled = true;
     IPC_BEGIN_MESSAGE_MAP(SnifferObserver, message)
       IPC_MESSAGE_HANDLER(ChromeViewHostMsg_FrameLoadingError, OnError)
@@ -111,6 +109,10 @@ void RightAlignedView::ChildPreferredSizeChanged(View* child) {
 }  // namespace
 
 namespace chromeos {
+
+// static
+const char WebUILoginView::kViewClassName[] =
+    "browser/chromeos/login/WebUILoginView";
 
 // WebUILoginView public: ------------------------------------------------------
 
@@ -210,18 +212,15 @@ void WebUILoginView::LoadURL(const GURL & url) {
   webui_login_->LoadInitialURL(url);
   webui_login_->RequestFocus();
 
-  CommandLine* command_line = CommandLine::ForCurrentProcess();
-  if (!command_line->HasSwitch(switches::kDisableNewOobe)) {
-    // TODO(nkostylev): Use WebContentsObserver::RenderViewCreated to track
-    // when RenderView is created.
-    // Use a background with transparency to trigger transparency in Webkit.
-    SkBitmap background;
-    background.setConfig(SkBitmap::kARGB_8888_Config, 1, 1);
-    background.allocPixels();
-    background.eraseARGB(0x00, 0x00, 0x00, 0x00);
-    content::RenderViewHost* host = GetWebContents()->GetRenderViewHost();
-    host->GetView()->SetBackground(background);
-  }
+  // TODO(nkostylev): Use WebContentsObserver::RenderViewCreated to track
+  // when RenderView is created.
+  // Use a background with transparency to trigger transparency in Webkit.
+  SkBitmap background;
+  background.setConfig(SkBitmap::kARGB_8888_Config, 1, 1);
+  background.allocPixels();
+  background.eraseARGB(0x00, 0x00, 0x00, 0x00);
+  content::RenderViewHost* host = GetWebContents()->GetRenderViewHost();
+  host->GetView()->SetBackground(background);
 }
 
 content::WebUI* WebUILoginView::GetWebUI() {
@@ -280,6 +279,7 @@ void WebUILoginView::AboutToRequestFocusFromTabTraversal(bool reverse) {
   // Return the focus to the web contents.
   webui_login_->web_contents()->FocusThroughTabTraversal(reverse);
   GetWidget()->Activate();
+  webui_login_->web_contents()->GetView()->Focus();
 }
 
 void WebUILoginView::Observe(int type,
@@ -365,7 +365,7 @@ void WebUILoginView::OnLoginPromptVisible() {
     LOG(INFO) << "Login WebUI >> not emitting signal, hidden: " << is_hidden_;
     return;
   }
-
+  TRACE_EVENT0("chromeos", "WebUILoginView::OnLoginPromoptVisible");
   if (should_emit_login_prompt_visible_) {
     LOG(INFO) << "Login WebUI >> login-prompt-visible";
     chromeos::DBusThreadManager::Get()->GetSessionManagerClient()->

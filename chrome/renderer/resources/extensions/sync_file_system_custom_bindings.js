@@ -5,6 +5,7 @@
 // Custom bindings for the syncFileSystem API.
 
 var chromeHidden = requireNative('chrome_hidden').GetChromeHidden();
+var fileSystemNatives = requireNative('file_system_natives');
 var syncFileSystemNatives = requireNative('sync_file_system');
 
 chromeHidden.registerCustomHook('syncFileSystem', function(bindingsAPI) {
@@ -18,7 +19,7 @@ chromeHidden.registerCustomHook('syncFileSystem', function(bindingsAPI) {
       return [fileSystemUrl, callback];
     });
   }
-  ['getFileSyncStatus']
+  ['getFileStatus']
       .forEach(bindFileEntryFunction);
 
   // Functions which take in an [instanceOf=DOMFileSystem].
@@ -44,4 +45,25 @@ chromeHidden.registerCustomHook('syncFileSystem', function(bindingsAPI) {
       request.callback(result);
     request.callback = null;
   });
+});
+
+chromeHidden.Event.registerArgumentMassager(
+    'syncFileSystem.onFileStatusChanged', function(args, dispatch) {
+  // Make FileEntry object using all the base string fields.
+  var fileSystemType = args[0];
+  var fileSystemName = args[1];
+  var rootUrl = args[2];
+  var filePath = args[3];
+  var fileEntry = fileSystemNatives.GetFileEntry(fileSystemType,
+      fileSystemName, rootUrl, filePath, false);
+
+  // Combine into a single dictionary.
+  var fileInfo = new Object();
+  fileInfo.fileEntry = fileEntry;
+  fileInfo.status = args[4];
+  if (fileInfo.status == "synced") {
+    fileInfo.action = args[5];
+    fileInfo.direction = args[6];
+  }
+  dispatch([fileInfo]);
 });

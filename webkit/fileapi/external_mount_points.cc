@@ -4,10 +4,11 @@
 
 #include "webkit/fileapi/external_mount_points.h"
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/lazy_instance.h"
 #include "base/path_service.h"
 #include "base/stl_util.h"
+#include "webkit/fileapi/file_system_url.h"
 #include "webkit/fileapi/remote_file_system_proxy.h"
 
 namespace {
@@ -19,15 +20,15 @@ namespace {
 // For example, /a/b/c(1)/d would be erroneously resolved as c/d if the
 // following mount points were registered: "/a/b/c", "/a/b/c(1)". (Note:
 // "/a/b/c" < "/a/b/c(1)" < "/a/b/c/").
-FilePath NormalizeFilePath(const FilePath& path) {
+base::FilePath NormalizeFilePath(const base::FilePath& path) {
   if (path.empty())
     return path;
 
-  FilePath::StringType path_str = path.StripTrailingSeparators().value();
-  if (!FilePath::IsSeparator(path_str[path_str.length() - 1]))
+  base::FilePath::StringType path_str = path.StripTrailingSeparators().value();
+  if (!base::FilePath::IsSeparator(path_str[path_str.length() - 1]))
     path_str.append(FILE_PATH_LITERAL("/"));
 
-  return FilePath(path_str).NormalizePathSeparators();
+  return base::FilePath(path_str).NormalizePathSeparators();
 }
 
 // Wrapper around ref-counted ExternalMountPoints that will be used to lazily
@@ -36,7 +37,6 @@ class SystemMountPointsLazyWrapper {
  public:
   SystemMountPointsLazyWrapper()
       : system_mount_points_(fileapi::ExternalMountPoints::CreateRefCounted()) {
-    RegisterDefaultMountPoints();
   }
 
   ~SystemMountPointsLazyWrapper() {}
@@ -46,33 +46,6 @@ class SystemMountPointsLazyWrapper {
   }
 
  private:
-  void RegisterDefaultMountPoints() {
-#if defined(OS_CHROMEOS)
-    // Add default system mount points.
-    system_mount_points_->RegisterFileSystem(
-        "archive",
-        fileapi::kFileSystemTypeNativeLocal,
-        FilePath(FILE_PATH_LITERAL("/media/archive")));
-    system_mount_points_->RegisterFileSystem(
-        "removable",
-        fileapi::kFileSystemTypeNativeLocal,
-        FilePath(FILE_PATH_LITERAL("/media/removable")));
-    system_mount_points_->RegisterFileSystem(
-        "oem",
-        fileapi::kFileSystemTypeRestrictedNativeLocal,
-        FilePath(FILE_PATH_LITERAL("/usr/share/oem")));
-
-    // TODO(tbarzic): Move this out of here.
-    FilePath home_path;
-    if (PathService::Get(base::DIR_HOME, &home_path)) {
-      system_mount_points_->RegisterFileSystem(
-          "Downloads",
-          fileapi::kFileSystemTypeNativeLocal,
-          home_path.AppendASCII("Downloads"));
-    }
-#endif  // defined(OS_CHROMEOS)
-  }
-
   scoped_refptr<fileapi::ExternalMountPoints> system_mount_points_;
 };
 
@@ -86,20 +59,20 @@ namespace fileapi {
 class ExternalMountPoints::Instance {
  public:
   Instance(FileSystemType type,
-           const FilePath& path,
+           const base::FilePath& path,
            RemoteFileSystemProxyInterface* remote_proxy);
 
   ~Instance();
 
   FileSystemType type() const { return type_; }
-  const FilePath& path() const { return path_; }
+  const base::FilePath& path() const { return path_; }
   RemoteFileSystemProxyInterface* remote_proxy() const {
     return remote_proxy_.get();
   }
 
  private:
   const FileSystemType type_;
-  const FilePath path_;
+  const base::FilePath path_;
 
   // For file systems that have a remote file system proxy.
   scoped_refptr<RemoteFileSystemProxyInterface> remote_proxy_;
@@ -108,7 +81,7 @@ class ExternalMountPoints::Instance {
 };
 
 ExternalMountPoints::Instance::Instance(FileSystemType type,
-                                        const FilePath& path,
+                                        const base::FilePath& path,
                                         RemoteFileSystemProxyInterface* proxy)
     : type_(type),
       path_(path.StripTrailingSeparators()),
@@ -133,7 +106,7 @@ scoped_refptr<ExternalMountPoints> ExternalMountPoints::CreateRefCounted() {
 bool ExternalMountPoints::RegisterFileSystem(
     const std::string& mount_name,
     FileSystemType type,
-    const FilePath& path) {
+    const base::FilePath& path) {
   return RegisterRemoteFileSystem(mount_name, type, NULL, path);
 }
 
@@ -141,10 +114,10 @@ bool ExternalMountPoints::RegisterRemoteFileSystem(
     const std::string& mount_name,
     FileSystemType type,
     RemoteFileSystemProxyInterface* remote_proxy,
-    const FilePath& path_in) {
+    const base::FilePath& path_in) {
   base::AutoLock locker(lock_);
 
-  FilePath path = NormalizeFilePath(path_in);
+  base::FilePath path = NormalizeFilePath(path_in);
   if (!ValidateNewMountPoint(mount_name, path))
     return false;
 
@@ -152,6 +125,11 @@ bool ExternalMountPoints::RegisterRemoteFileSystem(
   if (!path.empty())
     path_to_name_map_.insert(std::make_pair(path, mount_name));
   return true;
+}
+
+bool ExternalMountPoints::HandlesFileSystemMountType(
+    FileSystemType type) const {
+  return type == kFileSystemTypeExternal;
 }
 
 bool ExternalMountPoints::RevokeFileSystem(const std::string& mount_name) {
@@ -167,7 +145,7 @@ bool ExternalMountPoints::RevokeFileSystem(const std::string& mount_name) {
 }
 
 bool ExternalMountPoints::GetRegisteredPath(
-    const std::string& filesystem_id, FilePath* path) const {
+    const std::string& filesystem_id, base::FilePath* path) const {
   DCHECK(path);
   base::AutoLock locker(lock_);
   NameToInstance::const_iterator found = instance_map_.find(filesystem_id);
@@ -177,10 +155,10 @@ bool ExternalMountPoints::GetRegisteredPath(
   return true;
 }
 
-bool ExternalMountPoints::CrackVirtualPath(const FilePath& virtual_path,
+bool ExternalMountPoints::CrackVirtualPath(const base::FilePath& virtual_path,
                                            std::string* mount_name,
                                            FileSystemType* type,
-                                           FilePath* path) const {
+                                           base::FilePath* path) const {
   DCHECK(mount_name);
   DCHECK(path);
 
@@ -189,18 +167,18 @@ bool ExternalMountPoints::CrackVirtualPath(const FilePath& virtual_path,
     return false;
 
   // The virtual_path should comprise of <mount_name> and <relative_path> parts.
-  std::vector<FilePath::StringType> components;
+  std::vector<base::FilePath::StringType> components;
   virtual_path.GetComponents(&components);
   if (components.size() < 1)
     return false;
 
-  std::vector<FilePath::StringType>::iterator component_iter =
+  std::vector<base::FilePath::StringType>::iterator component_iter =
       components.begin();
-  std::string maybe_mount_name = FilePath(*component_iter++).MaybeAsASCII();
+  std::string maybe_mount_name = base::FilePath(*component_iter++).MaybeAsASCII();
   if (maybe_mount_name.empty())
     return false;
 
-  FilePath cracked_path;
+  base::FilePath cracked_path;
   {
     base::AutoLock locker(lock_);
     NameToInstance::const_iterator found_instance =
@@ -219,6 +197,32 @@ bool ExternalMountPoints::CrackVirtualPath(const FilePath& virtual_path,
     cracked_path = cracked_path.Append(*component_iter);
   *path = cracked_path;
   return true;
+}
+
+FileSystemURL ExternalMountPoints::CrackURL(const GURL& url) const {
+  FileSystemURL filesystem_url = FileSystemURL(url);
+  if (!filesystem_url.is_valid())
+    return FileSystemURL();
+  return CreateCrackedFileSystemURL(filesystem_url.origin(),
+                                    filesystem_url.mount_type(),
+                                    filesystem_url.path());
+}
+
+FileSystemURL ExternalMountPoints::CreateCrackedFileSystemURL(
+    const GURL& origin,
+    FileSystemType type,
+    const base::FilePath& path) const {
+  if (!HandlesFileSystemMountType(type))
+    return FileSystemURL();
+
+  std::string mount_name;
+  FileSystemType cracked_type;
+  base::FilePath cracked_path;
+  if (!CrackVirtualPath(path, &mount_name, &cracked_type, &cracked_path))
+    return FileSystemURL();
+
+  return FileSystemURL(origin, type, path,
+                       mount_name, cracked_type, cracked_path);
 }
 
 RemoteFileSystemProxyInterface* ExternalMountPoints::GetRemoteFileSystemProxy(
@@ -240,14 +244,14 @@ void ExternalMountPoints::AddMountPointInfosTo(
   }
 }
 
-bool ExternalMountPoints::GetVirtualPath(const FilePath& path_in,
-                                         FilePath* virtual_path) {
+bool ExternalMountPoints::GetVirtualPath(const base::FilePath& path_in,
+                                         base::FilePath* virtual_path) {
   DCHECK(virtual_path);
 
   base::AutoLock locker(lock_);
 
-  FilePath path = NormalizeFilePath(path_in);
-  std::map<FilePath, std::string>::reverse_iterator iter(
+  base::FilePath path = NormalizeFilePath(path_in);
+  std::map<base::FilePath, std::string>::reverse_iterator iter(
       path_to_name_map_.upper_bound(path));
   if (iter == path_to_name_map_.rend())
     return false;
@@ -258,9 +262,9 @@ bool ExternalMountPoints::GetVirtualPath(const FilePath& path_in,
   return iter->first.AppendRelativePath(path, virtual_path);
 }
 
-FilePath ExternalMountPoints::CreateVirtualRootPath(
+base::FilePath ExternalMountPoints::CreateVirtualRootPath(
     const std::string& mount_name) const {
-  return FilePath().AppendASCII(mount_name);
+  return base::FilePath().AppendASCII(mount_name);
 }
 
 ExternalMountPoints::ExternalMountPoints() {}
@@ -271,7 +275,7 @@ ExternalMountPoints::~ExternalMountPoints() {
 }
 
 bool ExternalMountPoints::ValidateNewMountPoint(const std::string& mount_name,
-                                                const FilePath& path) {
+                                                const base::FilePath& path) {
   lock_.AssertAcquired();
 
   // Mount name must not be empty.
@@ -292,7 +296,7 @@ bool ExternalMountPoints::ValidateNewMountPoint(const std::string& mount_name,
     return false;
 
   // Check there the new path does not overlap with one of the existing ones.
-  std::map<FilePath, std::string>::reverse_iterator potential_parent(
+  std::map<base::FilePath, std::string>::reverse_iterator potential_parent(
       path_to_name_map_.upper_bound(path));
   if (potential_parent != path_to_name_map_.rend()) {
     if (potential_parent->first == path ||
@@ -301,7 +305,7 @@ bool ExternalMountPoints::ValidateNewMountPoint(const std::string& mount_name,
     }
   }
 
-  std::map<FilePath, std::string>::iterator potential_child =
+  std::map<base::FilePath, std::string>::iterator potential_child =
       path_to_name_map_.upper_bound(path);
   if (potential_child == path_to_name_map_.end())
     return true;
@@ -312,13 +316,13 @@ bool ExternalMountPoints::ValidateNewMountPoint(const std::string& mount_name,
 ScopedExternalFileSystem::ScopedExternalFileSystem(
     const std::string& mount_name,
     FileSystemType type,
-    const FilePath& path)
+    const base::FilePath& path)
     : mount_name_(mount_name) {
   ExternalMountPoints::GetSystemInstance()->RegisterFileSystem(
       mount_name, type, path);
 }
 
-FilePath ScopedExternalFileSystem::GetVirtualRootPath() const {
+base::FilePath ScopedExternalFileSystem::GetVirtualRootPath() const {
   return ExternalMountPoints::GetSystemInstance()->
       CreateVirtualRootPath(mount_name_);
 }
@@ -328,4 +332,3 @@ ScopedExternalFileSystem::~ScopedExternalFileSystem() {
 }
 
 }  // namespace fileapi
-

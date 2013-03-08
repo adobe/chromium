@@ -7,7 +7,7 @@
 
 #include <string>
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "chrome/browser/chromeos/login/user_image.h"
 #include "chrome/browser/chromeos/login/user_image_manager.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -22,7 +22,7 @@ class MockUserImageManager : public UserImageManager {
   MOCK_METHOD2(SaveUserDefaultImageIndex, void(const std::string&, int));
   MOCK_METHOD2(SaveUserImage, void(const std::string&, const UserImage&));
   MOCK_METHOD2(SaveUserImageFromFile, void(const std::string&,
-                                           const FilePath&));
+                                           const base::FilePath&));
   MOCK_METHOD1(SaveUserImageFromProfileImage, void(const std::string&));
   MOCK_METHOD1(DownloadProfileImage, void(const std::string&));
   MOCK_CONST_METHOD0(DownloadedProfileImage, const gfx::ImageSkia& (void));

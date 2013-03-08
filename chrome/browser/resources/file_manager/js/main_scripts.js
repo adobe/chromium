@@ -8,15 +8,29 @@
 // included file but that's all right since any javascript file should start
 // with a copyright comment anyway.
 
+// If you add a new dependency, you should update build files by rerunning
+// gyp. Otherwise, you'll be bitten by a dependency issue like:
+//
+// 1) You add a new dependency to "whatever.js"
+// 2) You make changes in "whatever.js"
+// 3) Rebuild "resources.pak" and open Files.app
+// 4) You don't see the changes in "whatever.js". Why is that?
+//
+// Because the dependencies are computed at gyp time, the existing build
+// files don't know that "resources.pak" now has a dependency to
+// "whatever.js". You should rerun gyp to let the build files know.
+//
 // //metrics.js initiates load performance tracking
 // //so we want to parse it as early as possible.
 //<include src="metrics.js"/>
 //
+//<include src="../../image_loader/client.js"/>
+//
 //<include src="../../../../../ui/webui/resources/js/load_time_data.js"/>
+//<include src="../../../../../ui/webui/resources/js/cr.js"/>
 //<include src="../../../../../ui/webui/resources/js/util.js"/>
 //<include src="../../../../../ui/webui/resources/js/i18n_template_no_process.js"/>
 //
-//<include src="../../../../../ui/webui/resources/js/cr.js"/>
 //<include src="../../../../../ui/webui/resources/js/event_tracker.js"/>
 //<include src="../../../../../ui/webui/resources/js/cr/ui.js"/>
 //<include src="../../../../../ui/webui/resources/js/cr/event_target.js"/>
@@ -28,6 +42,7 @@
 //<include src="../../../../../ui/webui/resources/js/cr/ui/list_single_selection_model.js"/>
 //<include src="../../../../../ui/webui/resources/js/cr/ui/list_selection_controller.js"/>
 //<include src="../../../../../ui/webui/resources/js/cr/ui/list.js"/>
+//<include src="../../../../../ui/webui/resources/js/cr/ui/autocomplete_list.js"/>
 //
 //<include src="../../../../../ui/webui/resources/js/cr/ui/splitter.js"/>
 //<include src="../../../../../ui/webui/resources/js/cr/ui/table/table_splitter.js"/>

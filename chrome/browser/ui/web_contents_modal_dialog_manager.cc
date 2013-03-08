@@ -4,7 +4,6 @@
 
 #include "chrome/browser/ui/web_contents_modal_dialog_manager.h"
 
-#include "chrome/browser/ui/web_contents_modal_dialog.h"
 #include "chrome/browser/ui/web_contents_modal_dialog_manager_delegate.h"
 #include "chrome/common/render_messages.h"
 #include "content/public/browser/navigation_details.h"
@@ -21,27 +20,14 @@ WebContentsModalDialogManager::~WebContentsModalDialogManager() {
   DCHECK(child_dialogs_.empty());
 }
 
-void WebContentsModalDialogManager::AddDialog(
-    WebContentsModalDialog* dialog) {
+void WebContentsModalDialogManager::ShowDialog(
+    NativeWebContentsModalDialog dialog) {
   child_dialogs_.push_back(dialog);
 
-  if (child_dialogs_.size() == 1) {
-    dialog->ShowWebContentsModalDialog();
-    BlockWebContentsInteraction(true);
-  }
-}
+  native_manager_->ManageDialog(dialog);
 
-void WebContentsModalDialogManager::WillClose(WebContentsModalDialog* dialog) {
-  WebContentsModalDialogList::iterator i(
-      std::find(child_dialogs_.begin(), child_dialogs_.end(), dialog));
-  bool removed_topmost_dialog = i == child_dialogs_.begin();
-  if (i != child_dialogs_.end())
-    child_dialogs_.erase(i);
-  if (child_dialogs_.empty()) {
-    BlockWebContentsInteraction(false);
-  } else {
-    if (removed_topmost_dialog)
-      child_dialogs_[0]->ShowWebContentsModalDialog();
+  if (child_dialogs_.size() == 1) {
+    native_manager_->ShowDialog(dialog);
     BlockWebContentsInteraction(true);
   }
 }
@@ -70,30 +56,46 @@ bool WebContentsModalDialogManager::IsShowingDialog() const {
 
 void WebContentsModalDialogManager::FocusTopmostDialog() {
   DCHECK(dialog_count());
-  WebContentsModalDialog* window = *dialog_begin();
-  DCHECK(window);
-  window->FocusWebContentsModalDialog();
+  native_manager_->FocusDialog(*dialog_begin());
+}
+
+void WebContentsModalDialogManager::WillClose(
+    NativeWebContentsModalDialog dialog) {
+  WebContentsModalDialogList::iterator i(
+      std::find(child_dialogs_.begin(),
+                child_dialogs_.end(),
+                dialog));
+  bool removed_topmost_dialog = i == child_dialogs_.begin();
+  if (i != child_dialogs_.end())
+    child_dialogs_.erase(i);
+  if (child_dialogs_.empty()) {
+    BlockWebContentsInteraction(false);
+  } else {
+    if (removed_topmost_dialog)
+      native_manager_->ShowDialog(child_dialogs_[0]);
+    BlockWebContentsInteraction(true);
+  }
 }
 
 WebContentsModalDialogManager::WebContentsModalDialogManager(
     content::WebContents* web_contents)
     : content::WebContentsObserver(web_contents),
-      delegate_(NULL) {
+      delegate_(NULL),
+      native_manager_(
+          ALLOW_THIS_IN_INITIALIZER_LIST(CreateNativeManager(this))) {
+  DCHECK(native_manager_);
 }
 
 void WebContentsModalDialogManager::CloseAllDialogs() {
   // Clear out any dialogs since we are leaving this page entirely.  To ensure
   // that we iterate over every element in child_dialogs_ we need to use a copy
-  // of child_dialogs_. Otherwise if dialog->CloseWebContentsModalDialog()
-  // modifies child_dialogs_ we could end up skipping some elements.
+  // of child_dialogs_. Otherwise if closing a dialog causes child_dialogs_ to
+  // be modified, we could end up skipping some elements.
   WebContentsModalDialogList child_dialogs_copy(child_dialogs_);
   for (WebContentsModalDialogList::iterator it = child_dialogs_copy.begin();
        it != child_dialogs_copy.end(); ++it) {
-    WebContentsModalDialog* dialog = *it;
-    if (dialog) {
-      dialog->CloseWebContentsModalDialog();
-      BlockWebContentsInteraction(false);
-    }
+    native_manager_->CloseDialog(*it);
+    BlockWebContentsInteraction(false);
   }
 }
 
@@ -107,10 +109,8 @@ void WebContentsModalDialogManager::DidNavigateMainFrame(
 }
 
 void WebContentsModalDialogManager::DidGetIgnoredUIEvent() {
-  if (dialog_count()) {
-    WebContentsModalDialog* dialog = *dialog_begin();
-    dialog->FocusWebContentsModalDialog();
-  }
+  if (dialog_count())
+    native_manager_->FocusDialog(*dialog_begin());
 }
 
 void WebContentsModalDialogManager::WebContentsDestroyed(WebContents* tab) {

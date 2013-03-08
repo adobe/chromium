@@ -7,6 +7,7 @@
 #include "base/win/registry.h"
 #include "base/version.h"
 #include "chrome/common/chrome_constants.h"
+#include "chrome/installer/setup/setup_util.h"
 #include "chrome/installer/util/delete_reg_key_work_item.h"
 #include "chrome/installer/util/create_reg_key_work_item.h"
 #include "chrome/installer/util/helper.h"
@@ -55,15 +56,16 @@ class MockWorkItemList : public WorkItemList {
                                               const std::wstring&,
                                               CopyOverWriteOption,
                                               const std::wstring&));
-  MOCK_METHOD1(AddCreateDirWorkItem, WorkItem* (const FilePath&));
+  MOCK_METHOD1(AddCreateDirWorkItem, WorkItem* (const base::FilePath&));
   MOCK_METHOD2(AddCreateRegKeyWorkItem, WorkItem* (HKEY, const std::wstring&));
   MOCK_METHOD2(AddDeleteRegKeyWorkItem, WorkItem* (HKEY, const std::wstring&));
   MOCK_METHOD3(AddDeleteRegValueWorkItem, WorkItem* (HKEY,
                                                      const std::wstring&,
                                                      const std::wstring&));
-  MOCK_METHOD2(AddDeleteTreeWorkItem, WorkItem* (const FilePath&,
-                                                 const std::vector<FilePath>&));
-  MOCK_METHOD1(AddDeleteTreeWorkItem, WorkItem* (const FilePath&));
+  MOCK_METHOD2(AddDeleteTreeWorkItem, WorkItem* (
+      const base::FilePath&,
+      const std::vector<base::FilePath>&));
+  MOCK_METHOD1(AddDeleteTreeWorkItem, WorkItem* (const base::FilePath&));
   MOCK_METHOD3(AddMoveTreeWorkItem, WorkItem* (const std::wstring&,
                                                const std::wstring&,
                                                const std::wstring&));
@@ -116,7 +118,7 @@ class MockProductState : public ProductState {
     oem_install_ = oem_install;
   }
   void clear_oem_install() { has_oem_install_ = false; }
-  void SetUninstallProgram(const FilePath& setup_exe) {
+  void SetUninstallProgram(const base::FilePath& setup_exe) {
     uninstall_command_ = CommandLine(setup_exe);
   }
   void AddUninstallSwitch(const std::string& option) {
@@ -171,14 +173,17 @@ class InstallWorkerTest : public testing::Test {
     // Don't bother ensuring that these paths exist. Since we're just
     // building the work item lists and not running them, they shouldn't
     // actually be touched.
-    archive_path_ = FilePath(L"C:\\UnlikelyPath\\Temp\\chrome_123\\chrome.7z");
+    archive_path_ =
+        base::FilePath(L"C:\\UnlikelyPath\\Temp\\chrome_123\\chrome.7z");
     // TODO(robertshield): Take this from the BrowserDistribution once that
     // no longer depends on MasterPreferences.
-    installation_path_ = FilePath(L"C:\\Program Files\\Google\\Chrome\\");
-    src_path_ =
-        FilePath(L"C:\\UnlikelyPath\\Temp\\chrome_123\\source\\Chrome-bin");
-    setup_path_ = FilePath(L"C:\\UnlikelyPath\\Temp\\CR_123.tmp\\setup.exe");
-    temp_dir_ = FilePath(L"C:\\UnlikelyPath\\Temp\\chrome_123");
+    installation_path_ =
+        base::FilePath(L"C:\\Program Files\\Google\\Chrome\\");
+    src_path_ = base::FilePath(
+        L"C:\\UnlikelyPath\\Temp\\chrome_123\\source\\Chrome-bin");
+    setup_path_ = base::FilePath(
+        L"C:\\UnlikelyPath\\Temp\\CR_123.tmp\\setup.exe");
+    temp_dir_ = base::FilePath(L"C:\\UnlikelyPath\\Temp\\chrome_123");
   }
 
   virtual void TearDown() {
@@ -196,7 +201,7 @@ class InstallWorkerTest : public testing::Test {
       BrowserDistribution* dist =
           BrowserDistribution::GetSpecificDistribution(
               BrowserDistribution::CHROME_BINARIES);
-      FilePath install_path =
+      base::FilePath install_path =
           installer::GetChromeInstallPath(system_level, dist);
       product_state.SetUninstallProgram(
           install_path.AppendASCII(current_version_->GetString())
@@ -227,7 +232,7 @@ class InstallWorkerTest : public testing::Test {
     BrowserDistribution* dist =
         BrowserDistribution::GetSpecificDistribution(
             BrowserDistribution::CHROME_BROWSER);
-    FilePath install_path =
+    base::FilePath install_path =
         installer::GetChromeInstallPath(system_level, dist);
     product_state.SetUninstallProgram(
       install_path.AppendASCII(current_version_->GetString())
@@ -265,7 +270,7 @@ class InstallWorkerTest : public testing::Test {
         BrowserDistribution::GetSpecificDistribution(
             multi_install ? BrowserDistribution::CHROME_BINARIES :
                 BrowserDistribution::CHROME_FRAME);
-    FilePath install_path =
+    base::FilePath install_path =
         installer::GetChromeInstallPath(system_level, dist);
     product_state.SetUninstallProgram(
       install_path.AppendASCII(current_version_->GetString())
@@ -399,8 +404,15 @@ class InstallWorkerTest : public testing::Test {
     scoped_ptr<MockInstallerState> installer_state(
         BuildBasicInstallerState(system_install, multi_install, machine_state,
                                  operation));
-    if (multi_install)
-      AddChromeBinariesToInstallerState(machine_state, installer_state.get());
+    if (multi_install) {
+      // We don't want to include Chrome Binaries for uninstall if the machine
+      // has other products. For simplicity, we check Chrome Frame only.
+      bool machine_has_other_products =
+          machine_state.GetProductState(system_install,
+              BrowserDistribution::CHROME_FRAME) != NULL;
+      if (operation != InstallerState::UNINSTALL || !machine_has_other_products)
+        AddChromeBinariesToInstallerState(machine_state, installer_state.get());
+    }
     AddChromeToInstallerState(machine_state, installer_state.get());
     return installer_state.release();
   }
@@ -426,11 +438,11 @@ class InstallWorkerTest : public testing::Test {
  protected:
   scoped_ptr<Version> current_version_;
   scoped_ptr<Version> new_version_;
-  FilePath archive_path_;
-  FilePath installation_path_;
-  FilePath setup_path_;
-  FilePath src_path_;
-  FilePath temp_dir_;
+  base::FilePath archive_path_;
+  base::FilePath installation_path_;
+  base::FilePath setup_path_;
+  base::FilePath src_path_;
+  base::FilePath temp_dir_;
 };
 
 // Tests
@@ -938,6 +950,92 @@ TEST_F(QuickEnablePresentTest, UninstallMultiChromeFrame) {
                                      setup_path_,
                                      *new_version_.get(),
                                      &work_item_list_);
+}
+
+TEST_F(InstallWorkerTest, WillProductBePresentAfterSetup) {
+  BrowserDistribution::Type prod_type_list[] = {
+    BrowserDistribution::CHROME_BROWSER,
+    BrowserDistribution::CHROME_FRAME,
+    // Excluding BrowserDistribution::CHROME_BINARIES, since it is installed
+    // along with other products.
+  };
+  enum {  // Index into prod_type_list[].
+    TYPE_BROWSER = 0,
+    TYPE_CF,
+    NUM_TYPE  // This must appear last.
+  };
+  DCHECK(arraysize(prod_type_list) == NUM_TYPE);
+  InstallerState::Operation op_list[] = {
+    InstallerState::UNINSTALL,
+    InstallerState::SINGLE_INSTALL_OR_UPDATE
+  };
+
+  const bool system_level = false;
+  const bool multi_install = true;
+
+  // Loop over machine states: {No product, Chrome, CF, Chrome + CF}.
+  for (int i_mach = 0; i_mach < (1 << NUM_TYPE); ++i_mach) {
+    // i_mach is the machine state before operation, as bit mask.
+    scoped_ptr<MockInstallationState> machine_state(
+        new MockInstallationState());
+    if ((i_mach & (1 << TYPE_BROWSER)) != 0) {  // Add Chrome.
+      AddChromeToInstallationState(system_level, multi_install, false,
+                                   machine_state.get());
+    }
+    if ((i_mach & (1 << TYPE_CF)) != 0) {  // Add Chrome Frame.
+      AddChromeFrameToInstallationState(system_level, multi_install, false,
+                                        machine_state.get());
+    }
+
+    // Loop over operations: {uninstall, install/update}.
+    for (int i_op = 0; i_op < arraysize(op_list); ++i_op) {
+
+      // Loop over product types to operate on: {TYPE_BROWSER, TYPE_CF}.
+      for (int i_type_op = 0; i_type_op < NUM_TYPE; ++i_type_op) {
+        scoped_ptr<InstallerState> installer_state;
+        if (i_type_op == TYPE_BROWSER) {
+          installer_state.reset(BuildChromeInstallerState(
+              system_level, multi_install, *machine_state, op_list[i_op]));
+        } else if (i_type_op == TYPE_CF) {
+          // Skip the CF uninstall case due to limitations in
+          // BuildChromeFrameInstallerState().
+          if (op_list[i_op] == InstallerState::UNINSTALL)
+            continue;
+
+          installer_state.reset(BuildChromeFrameInstallerState(
+              system_level, multi_install, false, *machine_state,
+              op_list[i_op]));
+        } else {
+          NOTREACHED();
+        }
+
+        // Calculate the machine state after operation, as bit mask.
+        // If uninstall, remove product with bitwise AND; else add with OR.
+        int mach_after = (op_list[i_op] == InstallerState::UNINSTALL) ?
+            i_mach & ~(1 << i_type_op) : i_mach | (1 << i_type_op);
+
+        // Verify predicted presence of Chrome Binaries.
+        bool bin_res = installer::WillProductBePresentAfterSetup(
+            *installer_state,
+            *machine_state,
+            BrowserDistribution::CHROME_BINARIES);
+        // Binaries are expected to be present iff any product is installed.
+        bool bin_expect = mach_after != 0;
+        EXPECT_EQ(bin_expect, bin_res);
+
+        // Loop over product types to check: {TYPE_BROWSER, TYPE_CF}.
+        for (int i_type_check = 0; i_type_check < NUM_TYPE; ++i_type_check) {
+          // Verify predicted presence of product.
+          bool prod_res = installer::WillProductBePresentAfterSetup(
+              *installer_state,
+              *machine_state,
+              prod_type_list[i_type_check]);
+          bool prod_expect = (mach_after & (1 << i_type_check)) != 0;
+          EXPECT_EQ(prod_expect, prod_res);
+        }
+      }
+    }
+  }
 }
 
 #endif  // defined(GOOGLE_CHROME_BUILD)

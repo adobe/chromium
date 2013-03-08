@@ -12,16 +12,17 @@
 #include "base/command_line.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/metrics/histogram.h"
+#include "base/prefs/pref_service.h"
 #include "chrome/browser/content_settings/content_settings_rule.h"
 #include "chrome/browser/content_settings/content_settings_utils.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/content_settings.h"
 #include "chrome/common/content_settings_pattern.h"
 #include "chrome/common/pref_names.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
@@ -71,13 +72,13 @@ namespace content_settings {
 //
 
 // static
-void PrefProvider::RegisterUserPrefs(PrefServiceSyncable* prefs) {
-  prefs->RegisterIntegerPref(
+void PrefProvider::RegisterUserPrefs(PrefRegistrySyncable* registry) {
+  registry->RegisterIntegerPref(
       prefs::kContentSettingsVersion,
       ContentSettingsPattern::kContentSettingsPatternVersion,
-      PrefServiceSyncable::UNSYNCABLE_PREF);
-  prefs->RegisterDictionaryPref(prefs::kContentSettingsPatternPairs,
-                                PrefServiceSyncable::SYNCABLE_PREF);
+      PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterDictionaryPref(prefs::kContentSettingsPatternPairs,
+                                   PrefRegistrySyncable::SYNCABLE_PREF);
 }
 
 PrefProvider::PrefProvider(PrefService* prefs,
@@ -386,9 +387,12 @@ void PrefProvider::ReadContentSettingsFromPref(bool overwrite) {
   // Convert all Unicode patterns into punycode form, then read.
   CanonicalizeContentSettingsExceptions(mutable_settings);
 
-  for (DictionaryValue::key_iterator i(mutable_settings->begin_keys());
-       i != mutable_settings->end_keys(); ++i) {
-    const std::string& pattern_str(*i);
+  size_t cookies_block_exception_count = 0;
+  size_t cookies_allow_exception_count = 0;
+  size_t cookies_session_only_exception_count = 0;
+  for (DictionaryValue::Iterator i(*mutable_settings); !i.IsAtEnd();
+       i.Advance()) {
+    const std::string& pattern_str(i.key());
     std::pair<ContentSettingsPattern, ContentSettingsPattern> pattern_pair =
         ParsePatternString(pattern_str);
     if (!pattern_pair.first.IsValid() ||
@@ -399,27 +403,24 @@ void PrefProvider::ReadContentSettingsFromPref(bool overwrite) {
 
     // Get settings dictionary for the current pattern string, and read
     // settings from the dictionary.
-    DictionaryValue* settings_dictionary = NULL;
-    bool found = mutable_settings->GetDictionaryWithoutPathExpansion(
-        pattern_str, &settings_dictionary);
-    DCHECK(found);
+    const DictionaryValue* settings_dictionary = NULL;
+    bool is_dictionary = i.value().GetAsDictionary(&settings_dictionary);
+    DCHECK(is_dictionary);
 
     for (size_t i = 0; i < CONTENT_SETTINGS_NUM_TYPES; ++i) {
       ContentSettingsType content_type = static_cast<ContentSettingsType>(i);
 
       std::string res_dictionary_path;
       if (GetResourceTypeName(content_type, &res_dictionary_path)) {
-        DictionaryValue* resource_dictionary = NULL;
+        const DictionaryValue* resource_dictionary = NULL;
         if (settings_dictionary->GetDictionary(
                 res_dictionary_path, &resource_dictionary)) {
-          for (DictionaryValue::key_iterator j(
-                   resource_dictionary->begin_keys());
-               j != resource_dictionary->end_keys();
-               ++j) {
-            const std::string& resource_identifier(*j);
+          for (DictionaryValue::Iterator j(*resource_dictionary); !j.IsAtEnd();
+               j.Advance()) {
+            const std::string& resource_identifier(j.key());
             int setting = CONTENT_SETTING_DEFAULT;
-            found = resource_dictionary->GetIntegerWithoutPathExpansion(
-                resource_identifier, &setting);
+            bool is_integer = j.value().GetAsInteger(&setting);
+            DCHECK(is_integer);
             DCHECK_NE(CONTENT_SETTING_DEFAULT, setting);
             value_map_.SetValue(pattern_pair.first,
                                 pattern_pair.second,
@@ -431,7 +432,7 @@ void PrefProvider::ReadContentSettingsFromPref(bool overwrite) {
       }
       Value* value = NULL;
       if (HostContentSettingsMap::ContentTypeHasCompoundValue(content_type)) {
-        DictionaryValue* setting = NULL;
+        const DictionaryValue* setting = NULL;
         // TODO(xians): Handle the non-dictionary types.
         if (settings_dictionary->GetDictionaryWithoutPathExpansion(
             GetTypeName(ContentSettingsType(i)), &setting)) {
@@ -456,9 +457,32 @@ void PrefProvider::ReadContentSettingsFromPref(bool overwrite) {
                             content_type,
                             ResourceIdentifier(""),
                             value);
+        if (content_type == CONTENT_SETTINGS_TYPE_COOKIES) {
+          ContentSetting s = ValueToContentSetting(value);
+          switch (s) {
+            case CONTENT_SETTING_ALLOW :
+              ++cookies_allow_exception_count;
+              break;
+            case CONTENT_SETTING_BLOCK :
+              ++cookies_block_exception_count;
+              break;
+            case CONTENT_SETTING_SESSION_ONLY :
+              ++cookies_session_only_exception_count;
+              break;
+            default:
+              NOTREACHED();
+              break;
+          }
+        }
       }
     }
   }
+  UMA_HISTOGRAM_COUNTS("ContentSettings.NumberOfBlockCookiesExceptions",
+                       cookies_block_exception_count);
+  UMA_HISTOGRAM_COUNTS("ContentSettings.NumberOfAllowCookiesExceptions",
+                       cookies_allow_exception_count);
+  UMA_HISTOGRAM_COUNTS("ContentSettings.NumberOfSessionOnlyCookiesExceptions",
+                       cookies_session_only_exception_count);
 }
 
 void PrefProvider::OnContentSettingsPatternPairsChanged() {
@@ -482,9 +506,9 @@ void PrefProvider::CanonicalizeContentSettingsExceptions(
 
   std::vector<std::string> remove_items;
   std::vector<std::pair<std::string, std::string> > move_items;
-  for (DictionaryValue::key_iterator i(all_settings_dictionary->begin_keys());
-       i != all_settings_dictionary->end_keys(); ++i) {
-    const std::string& pattern_str(*i);
+  for (DictionaryValue::Iterator i(*all_settings_dictionary); !i.IsAtEnd();
+       i.Advance()) {
+    const std::string& pattern_str(i.key());
     std::pair<ContentSettingsPattern, ContentSettingsPattern> pattern_pair =
          ParsePatternString(pattern_str);
     if (!pattern_pair.first.IsValid() ||
@@ -497,11 +521,12 @@ void PrefProvider::CanonicalizeContentSettingsExceptions(
         pattern_pair.first, pattern_pair.second);
 
     if (canonicalized_pattern_str.empty() ||
-        canonicalized_pattern_str == pattern_str)
+        canonicalized_pattern_str == pattern_str) {
       continue;
+    }
 
     // Clear old pattern if prefs already have canonicalized pattern.
-    DictionaryValue* new_pattern_settings_dictionary = NULL;
+    const DictionaryValue* new_pattern_settings_dictionary = NULL;
     if (all_settings_dictionary->GetDictionaryWithoutPathExpansion(
             canonicalized_pattern_str, &new_pattern_settings_dictionary)) {
       remove_items.push_back(pattern_str);
@@ -509,9 +534,8 @@ void PrefProvider::CanonicalizeContentSettingsExceptions(
     }
 
     // Move old pattern to canonicalized pattern.
-    DictionaryValue* old_pattern_settings_dictionary = NULL;
-    if (all_settings_dictionary->GetDictionaryWithoutPathExpansion(
-            pattern_str, &old_pattern_settings_dictionary)) {
+    const DictionaryValue* old_pattern_settings_dictionary = NULL;
+    if (i.value().GetAsDictionary(&old_pattern_settings_dictionary)) {
       move_items.push_back(
           std::make_pair(pattern_str, canonicalized_pattern_str));
     }

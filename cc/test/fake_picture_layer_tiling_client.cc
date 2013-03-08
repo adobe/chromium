@@ -6,9 +6,23 @@
 
 namespace cc {
 
+class FakeInfinitePicturePileImpl : public PicturePileImpl
+{
+ public:
+  FakeInfinitePicturePileImpl() {
+    gfx::Size size(std::numeric_limits<int>::max(),
+                   std::numeric_limits<int>::max());
+    Resize(size);
+    recorded_region_ = Region(gfx::Rect(size));
+  }
+
+ protected:
+  ~FakeInfinitePicturePileImpl() {}
+};
+
 FakePictureLayerTilingClient::FakePictureLayerTilingClient()
-    : tile_manager_(&tile_manager_client_, NULL, 1),
-      pile_(PicturePileImpl::Create()) {
+    : tile_manager_(&tile_manager_client_, NULL, 1, false),
+      pile_(new FakeInfinitePicturePileImpl()) {
 }
 
 FakePictureLayerTilingClient::~FakePictureLayerTilingClient() {
@@ -22,11 +36,19 @@ scoped_refptr<Tile> FakePictureLayerTilingClient::CreateTile(
                                      tile_size_,
                                      GL_RGBA,
                                      rect,
-                                     1));
+                                     gfx::Rect(),
+                                     1,
+                                     0));
 }
 
 void FakePictureLayerTilingClient::SetTileSize(gfx::Size tile_size) {
-    tile_size_ = tile_size;
+  tile_size_ = tile_size;
+}
+
+gfx::Size FakePictureLayerTilingClient::CalculateTileSize(
+    gfx::Size /* current_tile_size */,
+    gfx::Size /* content_bounds */) {
+  return tile_size_;
 }
 
 }  // namespace cc

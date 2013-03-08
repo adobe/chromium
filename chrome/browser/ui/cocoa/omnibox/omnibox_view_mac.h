@@ -51,7 +51,8 @@ class OmniboxViewMac : public OmniboxView,
   virtual void ApplyCaretVisibility() OVERRIDE;
   virtual void OnTemporaryTextMaybeChanged(
       const string16& display_text,
-      bool save_original_selection) OVERRIDE;
+      bool save_original_selection,
+      bool notify_text_changed) OVERRIDE;
   virtual bool OnInlineAutocompleteTextMaybeChanged(
       const string16& display_text, size_t user_text_length) OVERRIDE;
   virtual void OnStartingIME() OVERRIDE;
@@ -99,6 +100,9 @@ class OmniboxViewMac : public OmniboxView,
   // Otherwise return the PNG image from the resource bundle.
   static NSImage* ImageForResource(int resource_id);
 
+  // Color used to draw suggest text.
+  static NSColor* SuggestTextColor();
+
   AutocompleteTextField* field() const { return field_; }
 
  private:
@@ -137,12 +141,6 @@ class OmniboxViewMac : public OmniboxView,
   void SetTextAndSelectedRange(const string16& display_text,
                                const NSRange range);
 
-  // Returns the non-suggest portion of |field_|'s string value.
-  NSString* GetNonSuggestTextSubstring() const;
-
-  // Returns the suggest portion of |field_|'s string value.
-  NSString* GetSuggestTextSubstring() const;
-
   // Pass the current content of |field_| to SetText(), maintaining
   // any selection.  Named to be consistent with GTK and Windows,
   // though here we cannot really do the in-place operation they do.
@@ -175,10 +173,6 @@ class OmniboxViewMac : public OmniboxView,
   string16 text_before_change_;
   NSRange marked_range_before_change_;
 
-  // Length of the suggest text.  The suggest text always appears at the end of
-  // the field.
-  size_t suggest_text_length_;
-
   // Was delete pressed?
   bool delete_was_pressed_;
 
@@ -187,6 +181,8 @@ class OmniboxViewMac : public OmniboxView,
 
   // The maximum/standard line height for the displayed text.
   CGFloat line_height_;
+
+  string16 suggest_text_;
 
   DISALLOW_COPY_AND_ASSIGN(OmniboxViewMac);
 };

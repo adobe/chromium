@@ -5,6 +5,7 @@
 #include "ash/wm/session_state_controller_impl.h"
 
 #include "ash/ash_switches.h"
+#include "ash/cancel_mode.h"
 #include "ash/shell.h"
 #include "ash/shell_delegate.h"
 #include "ash/shell_window_ids.h"
@@ -52,7 +53,7 @@ void SessionStateControllerImpl::OnAppTerminating() {
     shutting_down_ = true;
     Shell* shell = ash::Shell::GetInstance();
     shell->env_filter()->set_cursor_hidden_by_filter(false);
-    shell->cursor_manager()->DisableMouseEvents();
+    shell->cursor_manager()->HideCursor();
     animator_->StartAnimation(
         internal::SessionStateAnimator::kAllContainersMask,
         internal::SessionStateAnimator::ANIMATION_HIDE_IMMEDIATELY,
@@ -71,6 +72,7 @@ void SessionStateControllerImpl::OnLockStateChanged(bool locked) {
         internal::SessionStateAnimator::LOCK_SCREEN_CONTAINERS,
         internal::SessionStateAnimator::ANIMATION_FADE_IN,
         internal::SessionStateAnimator::ANIMATION_SPEED_SHOW_LOCK_SCREEN);
+    DispatchCancelMode();
     FOR_EACH_OBSERVER(SessionStateObserver, observers_,
         OnSessionStateEvent(
             SessionStateObserver::EVENT_LOCK_ANIMATION_STARTED));
@@ -105,6 +107,7 @@ void SessionStateControllerImpl::OnStartingLock() {
       internal::SessionStateAnimator::ANIMATION_FULL_CLOSE,
       internal::SessionStateAnimator::ANIMATION_SPEED_FAST);
 
+  DispatchCancelMode();
   FOR_EACH_OBSERVER(SessionStateObserver, observers_,
       OnSessionStateEvent(SessionStateObserver::EVENT_LOCK_ANIMATION_STARTED));
 
@@ -120,6 +123,7 @@ void SessionStateControllerImpl::StartLockAnimationAndLockImmediately() {
       internal::SessionStateAnimator::NON_LOCK_SCREEN_CONTAINERS,
       internal::SessionStateAnimator::ANIMATION_PARTIAL_CLOSE,
       internal::SessionStateAnimator::ANIMATION_SPEED_UNDOABLE);
+  DispatchCancelMode();
   FOR_EACH_OBSERVER(SessionStateObserver, observers_,
       OnSessionStateEvent(SessionStateObserver::EVENT_LOCK_ANIMATION_STARTED));
   OnLockTimeout();
@@ -132,6 +136,7 @@ void SessionStateControllerImpl::StartLockAnimation(bool shutdown_after_lock) {
       internal::SessionStateAnimator::NON_LOCK_SCREEN_CONTAINERS,
       internal::SessionStateAnimator::ANIMATION_PARTIAL_CLOSE,
       internal::SessionStateAnimator::ANIMATION_SPEED_UNDOABLE);
+  DispatchCancelMode();
   FOR_EACH_OBSERVER(SessionStateObserver, observers_,
       OnSessionStateEvent(
           SessionStateObserver::EVENT_PRELOCK_ANIMATION_STARTED));
@@ -219,7 +224,7 @@ void SessionStateControllerImpl::RequestShutdownImpl() {
 
   Shell* shell = ash::Shell::GetInstance();
   shell->env_filter()->set_cursor_hidden_by_filter(false);
-  shell->cursor_manager()->DisableMouseEvents();
+  shell->cursor_manager()->HideCursor();
 
   if (login_status_ != user::LOGGED_IN_NONE) {
     // Hide the other containers before starting the animation.

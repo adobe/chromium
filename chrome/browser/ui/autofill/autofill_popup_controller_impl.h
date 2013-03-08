@@ -6,11 +6,13 @@
 #define CHROME_BROWSER_UI_AUTOFILL_AUTOFILL_POPUP_CONTROLLER_IMPL_H_
 
 #include "base/gtest_prod_util.h"
+#include "base/memory/weak_ptr.h"
 #include "base/string16.h"
 #include "chrome/browser/ui/autofill/autofill_popup_controller.h"
 #include "content/public/browser/keyboard_listener.h"
 #include "ui/gfx/font.h"
 #include "ui/gfx/rect.h"
+#include "ui/gfx/rect_f.h"
 
 class AutofillPopupDelegate;
 class AutofillPopupView;
@@ -32,11 +34,11 @@ class AutofillPopupControllerImpl : public AutofillPopupController,
   // Creates a new |AutofillPopupControllerImpl|, or reuses |previous| if
   // the construction arguments are the same. |previous| may be invalidated by
   // this call.
-  static AutofillPopupControllerImpl* GetOrCreate(
-      AutofillPopupControllerImpl* previous,
+  static base::WeakPtr<AutofillPopupControllerImpl> GetOrCreate(
+      base::WeakPtr<AutofillPopupControllerImpl> previous,
       AutofillPopupDelegate* delegate,
       gfx::NativeView container_view,
-      const gfx::Rect& element_bounds);
+      const gfx::RectF& element_bounds);
 
   // Shows the popup, or updates the existing popup with the given values.
   void Show(const std::vector<string16>& names,
@@ -58,7 +60,7 @@ class AutofillPopupControllerImpl : public AutofillPopupController,
 
   AutofillPopupControllerImpl(AutofillPopupDelegate* delegate,
                               gfx::NativeView container_view,
-                              const gfx::Rect& element_bounds);
+                              const gfx::RectF& element_bounds);
   virtual ~AutofillPopupControllerImpl();
 
   // AutofillPopupController implementation.
@@ -74,21 +76,17 @@ class AutofillPopupControllerImpl : public AutofillPopupController,
   virtual void SetPopupBounds(const gfx::Rect& bounds) OVERRIDE;
   virtual const gfx::Rect& popup_bounds() const OVERRIDE;
   virtual gfx::NativeView container_view() const OVERRIDE;
-  virtual const gfx::Rect& element_bounds() const OVERRIDE;
+  virtual const gfx::RectF& element_bounds() const OVERRIDE;
+
   virtual const std::vector<string16>& names() const OVERRIDE;
   virtual const std::vector<string16>& subtexts() const OVERRIDE;
   virtual const std::vector<string16>& icons() const OVERRIDE;
   virtual const std::vector<int>& identifiers() const OVERRIDE;
 #if !defined(OS_ANDROID)
-  virtual const gfx::Font& name_font() const OVERRIDE;
+  virtual const gfx::Font& GetNameFontForRow(size_t index) const OVERRIDE;
   virtual const gfx::Font& subtext_font() const OVERRIDE;
 #endif
   virtual int selected_line() const OVERRIDE;
-  virtual bool delete_icon_hovered() const OVERRIDE;
-
-  // Like Hide(), but doesn't invalidate |delegate_| (the delegate will still
-  // be informed of destruction).
-  void HideInternal();
 
   // Change which line is currently selected by the user.
   void SetSelectedLine(int selected_line);
@@ -111,10 +109,6 @@ class AutofillPopupControllerImpl : public AutofillPopupController,
   // Returns the height of a row depending on its type.
   int GetRowHeightFromId(int identifier) const;
 
-  // Returns true if the given |x| and |y| coordinates refer to a point that
-  // hits the delete icon in the current selected line.
-  bool DeleteIconIsUnder(int x, int y);
-
   // Returns true if the given id refers to an element that can be accepted.
   bool CanAccept(int id);
 
@@ -136,7 +130,10 @@ class AutofillPopupControllerImpl : public AutofillPopupController,
   int GetDesiredPopupHeight() const;
 #endif
 
+  base::WeakPtr<AutofillPopupControllerImpl> GetWeakPtr();
+
  private:
+  const gfx::Rect RoundedElementBounds() const;
 #if !defined(OS_ANDROID)
   // Calculate the width of the row, excluding all the text. This provides
   // the size of the row that won't be reducible (since all the text can be
@@ -172,7 +169,7 @@ class AutofillPopupControllerImpl : public AutofillPopupController,
 
   // The bounds of the text element that is the focus of the Autofill.
   // These coordinates are in screen space.
-  const gfx::Rect element_bounds_;
+  const gfx::RectF element_bounds_;
 
   // The bounds of the Autofill popup.
   gfx::Rect popup_bounds_;
@@ -191,20 +188,17 @@ class AutofillPopupControllerImpl : public AutofillPopupController,
   // The fonts for the popup text.
   gfx::Font name_font_;
   gfx::Font subtext_font_;
+  gfx::Font warning_font_;
 #endif
 
   // The line that is currently selected by the user.
   // |kNoSelection| indicates that no line is currently selected.
   int selected_line_;
 
-  // Used to indicate if the delete icon within a row is currently selected.
-  bool delete_icon_hovered_;
-
   // True if |HideInternal| has already been called.
   bool is_hiding_;
 
-  // True if the delegate should be informed when |this| is destroyed.
-  bool inform_delegate_of_destruction_;
+  base::WeakPtrFactory<AutofillPopupControllerImpl> weak_ptr_factory_;
 };
 
 #endif  // CHROME_BROWSER_UI_AUTOFILL_AUTOFILL_POPUP_CONTROLLER_IMPL_H_

@@ -8,7 +8,7 @@
 #include <string>
 
 #include "base/compiler_specific.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/version.h"
@@ -17,6 +17,7 @@
 #include "chrome/browser/extensions/sandboxed_unpacker.h"
 #include "chrome/browser/extensions/webstore_installer.h"
 #include "chrome/common/extensions/extension.h"
+#include "chrome/common/extensions/manifest.h"
 #include "chrome/common/web_apps.h"
 #include "sync/api/string_ordinal.h"
 
@@ -88,10 +89,10 @@ class CrxInstaller
       const WebstoreInstaller::Approval* approval);
 
   // Install the crx in |source_file|.
-  void InstallCrx(const FilePath& source_file);
+  void InstallCrx(const base::FilePath& source_file);
 
   // Convert the specified user script into an extension and install it.
-  void InstallUserScript(const FilePath& source_file,
+  void InstallUserScript(const base::FilePath& source_file,
                          const GURL& download_url);
 
   // Convert the specified web app into an extension and install it.
@@ -107,12 +108,12 @@ class CrxInstaller
   const GURL& download_url() const { return download_url_; }
   void set_download_url(const GURL& val) { download_url_ = val; }
 
-  const FilePath& source_file() const { return source_file_; }
+  const base::FilePath& source_file() const { return source_file_; }
 
-  Extension::Location install_source() const {
+  Manifest::Location install_source() const {
     return install_source_;
   }
-  void set_install_source(Extension::Location source) {
+  void set_install_source(Manifest::Location source) {
     install_source_ = source;
   }
 
@@ -128,6 +129,10 @@ class CrxInstaller
 
   bool allow_silent_install() const { return allow_silent_install_; }
   void set_allow_silent_install(bool val) { allow_silent_install_ = val; }
+
+  void set_bypass_blacklist_for_test(bool val) {
+    bypass_blacklist_for_test_ = val;
+  }
 
   bool is_gallery_install() const {
     return (creation_flags_ & Extension::FROM_WEBSTORE) > 0;
@@ -203,7 +208,7 @@ class CrxInstaller
 
   // Converts the source web app to an extension.
   void ConvertWebAppOnFileThread(const WebApplicationInfo& web_app,
-                                 const FilePath& install_directory);
+                                 const base::FilePath& install_directory);
 
   // Called after OnUnpackSuccess as a last check to see whether the install
   // should complete.
@@ -211,14 +216,10 @@ class CrxInstaller
 
   // SandboxedUnpackerClient
   virtual void OnUnpackFailure(const string16& error_message) OVERRIDE;
-  virtual void OnUnpackSuccess(const FilePath& temp_dir,
-                               const FilePath& extension_dir,
+  virtual void OnUnpackSuccess(const base::FilePath& temp_dir,
+                               const base::FilePath& extension_dir,
                                const base::DictionaryValue* original_manifest,
                                const Extension* extension) OVERRIDE;
-
-  // Returns true if we can skip confirmation because the install was
-  // whitelisted.
-  bool CanSkipConfirmation();
 
   // Called on the UI thread to start the requirements check on the extension.
   void CheckRequirements();
@@ -239,27 +240,34 @@ class CrxInstaller
   void ReportFailureFromUIThread(const CrxInstallerError& error);
   void ReportSuccessFromFileThread();
   void ReportSuccessFromUIThread();
-  void NotifyCrxInstallComplete(const Extension* extension);
+  void HandleIsBlacklistedResponse(const base::Closure& on_success,
+                                   bool success);
+  void NotifyCrxInstallComplete(bool success);
 
   // Deletes temporary directory and crx file if needed.
   void CleanupTempFiles();
 
-  // Creates sequenced task runner for extension install file I/O operations.
-  scoped_refptr<base::SequencedTaskRunner> CreateSequencedTaskRunner();
+  // Checks whether the current installation is initiated by the user from
+  // the extension settings page to update an existing extension or app.
+  void CheckUpdateFromSettingsPage();
+
+  // Show re-enable prompt if the update is initiated from the settings page
+  // and needs additional permissions.
+  void ConfirmReEnable();
 
   // The file we're installing.
-  FilePath source_file_;
+  base::FilePath source_file_;
 
   // The URL the file was downloaded from.
   GURL download_url_;
 
   // The directory extensions are installed to.
-  FilePath install_directory_;
+  base::FilePath install_directory_;
 
   // The location the installation came from (bundled with Chromium, registry,
   // manual install, etc). This metadata is saved with the installation if
   // successful. Defaults to INTERNAL.
-  Extension::Location install_source_;
+  Manifest::Location install_source_;
 
   // Indicates whether the user has already approved the extension to be
   // installed. If true, |expected_manifest_| and |expected_id_| must match
@@ -318,7 +326,7 @@ class CrxInstaller
 
   // The temp directory extension resources were unpacked to. We own this and
   // must delete it when we are done with it.
-  FilePath temp_dir_;
+  base::FilePath temp_dir_;
 
   // The frontend we will report results back to.
   base::WeakPtr<ExtensionService> frontend_weak_;
@@ -334,7 +342,7 @@ class CrxInstaller
 
   // The root of the unpacked extension directory. This is a subdirectory of
   // temp_dir_, so we don't have to delete it explicitly.
-  FilePath unpacked_extension_root_;
+  base::FilePath unpacked_extension_root_;
 
   // True when the CRX being installed was just downloaded.
   // Used to trigger extra checks before installing.
@@ -342,10 +350,11 @@ class CrxInstaller
 
   // Allows for the possibility of a normal install (one in which a |client|
   // is provided in the ctor) to procede without showing the permissions prompt
-  // dialog. Note that this will only take place if |allow_silent_install_|
-  // is true AND the unpacked id of the extension is whitelisted with
-  // SetWhitelistedInstallId().
+  // dialog.
   bool allow_silent_install_;
+
+  // Allows for bypassing the blacklist check. Only use for tests.
+  bool bypass_blacklist_for_test_;
 
   // The value of the content type header sent with the CRX.
   // Ignorred unless |require_extension_mime_type_| is true.
@@ -388,6 +397,10 @@ class CrxInstaller
 
   // Used to show the install dialog.
   ExtensionInstallPrompt::ShowDialogCallback show_dialog_callback_;
+
+  // Whether the update is initiated by the user from the extension settings
+  // page.
+  bool update_from_settings_page_;
 
   DISALLOW_COPY_AND_ASSIGN(CrxInstaller);
 };

@@ -10,7 +10,9 @@
 #include <linux/filter.h>
 #include <signal.h>
 #include <string.h>
+#include <sys/ioctl.h>
 #include <sys/prctl.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <ucontext.h>
@@ -18,6 +20,7 @@
 
 #include <vector>
 
+#include "base/basictypes.h"
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "content/common/sandbox_linux.h"
@@ -44,6 +47,14 @@ namespace {
 
 void StartSandboxWithPolicy(Sandbox::EvaluateSyscall syscall_policy,
                             BrokerProcess* broker_process);
+
+inline bool RunningOnASAN() {
+#if defined(ADDRESS_SANITIZER)
+  return true;
+#else
+  return false;
+#endif
+}
 
 inline bool IsChromeOS() {
 #if defined(OS_CHROMEOS)
@@ -96,6 +107,57 @@ intptr_t CrashSIGSYS_Handler(const struct arch_seccomp_data& args, void* aux) {
   // for paranoia.
   syscall &= 0xfffUL;
   addr = reinterpret_cast<volatile char*>(syscall);
+  *addr = '\0';
+  for (;;)
+    _exit(1);
+}
+
+// TODO(jln): rewrite reporting functions.
+intptr_t ReportCloneFailure(const struct arch_seccomp_data& args, void* aux) {
+  // "flags" in the first argument in the kernel's clone().
+  // Mark as volatile to be able to find the value on the stack in a minidump.
+#if !defined(NDEBUG)
+  RAW_LOG(ERROR, __FILE__":**CRASHING**:clone() failure\n");
+#endif
+  volatile uint64_t clone_flags = args.args[0];
+  volatile char* addr;
+  if (IsArchitectureX86_64()) {
+    addr = reinterpret_cast<volatile char*>(clone_flags & 0xFFFFFF);
+    *addr = '\0';
+  }
+  // Hit the NULL page if this fails to fault.
+  addr = reinterpret_cast<volatile char*>(clone_flags & 0xFFF);
+  *addr = '\0';
+  for (;;)
+    _exit(1);
+}
+
+// TODO(jln): rewrite reporting functions.
+intptr_t ReportPrctlFailure(const struct arch_seccomp_data& args,
+                            void* /* aux */) {
+  // Mark as volatile to be able to find the value on the stack in a minidump.
+#if !defined(NDEBUG)
+  RAW_LOG(ERROR, __FILE__":**CRASHING**:prctl() failure\n");
+#endif
+  volatile uint64_t option = args.args[0];
+  volatile char* addr =
+      reinterpret_cast<volatile char*>(option & 0xFFF);
+  *addr = '\0';
+  for (;;)
+    _exit(1);
+}
+
+intptr_t ReportIoctlFailure(const struct arch_seccomp_data& args,
+                            void* /* aux */) {
+  // Make "request" volatile so that we can see it on the stack in a minidump.
+#if !defined(NDEBUG)
+  RAW_LOG(ERROR, __FILE__":**CRASHING**:ioctl() failure\n");
+#endif
+  volatile uint64_t request = args.args[1];
+  volatile char* addr = reinterpret_cast<volatile char*>(request & 0xFFFF);
+  *addr = '\0';
+  // Hit the NULL page if this fails.
+  addr = reinterpret_cast<volatile char*>(request & 0xFFF);
   *addr = '\0';
   for (;;)
     _exit(1);
@@ -537,11 +599,11 @@ bool IsAllowedGetOrModifySocket(int sysno) {
   switch (sysno) {
     case __NR_pipe:
     case __NR_pipe2:
+      return true;
+    default:
 #if defined(__x86_64__) || defined(__arm__)
     case __NR_socketpair:  // We will want to inspect its argument.
 #endif
-      return true;
-    default:
       return false;
   }
 }
@@ -1170,7 +1232,16 @@ bool IsBaselinePolicyWatched(int sysno) {
   }
 }
 
-ErrorCode BaselinePolicy(int sysno) {
+ErrorCode BaselinePolicy(Sandbox *sandbox, int sysno) {
+#if defined(__x86_64__) || defined(__arm__)
+  if (sysno == __NR_socketpair) {
+    // Only allow AF_UNIX, PF_UNIX. Crash if anything else is seen.
+    COMPILE_ASSERT(AF_UNIX == PF_UNIX, af_unix_pf_unix_different);
+    return sandbox->Cond(0, ErrorCode::TP_32BIT, ErrorCode::OP_EQUAL, AF_UNIX,
+                         ErrorCode(ErrorCode::ERR_ALLOWED),
+                         sandbox->Trap(CrashSIGSYS_Handler, NULL));
+  }
+#endif
   if (IsBaselinePolicyAllowed(sysno)) {
     return ErrorCode(ErrorCode::ERR_ALLOWED);
   }
@@ -1196,50 +1267,102 @@ ErrorCode BaselinePolicy(int sysno) {
   if (IsBaselinePolicyWatched(sysno)) {
     // Previously unseen syscalls. TODO(jln): some of these should
     // be denied gracefully right away.
-    return Sandbox::Trap(CrashSIGSYS_Handler, NULL);
+    return sandbox->Trap(CrashSIGSYS_Handler, NULL);
   }
   // In any other case crash the program with our SIGSYS handler
-  return Sandbox::Trap(CrashSIGSYS_Handler, NULL);
+  return sandbox->Trap(CrashSIGSYS_Handler, NULL);
 }
 
 // x86_64/i386 for now. Needs to be adapted and tested for ARM.
-ErrorCode GpuProcessPolicy(int sysno, void *broker_process) {
+ErrorCode GpuProcessPolicy(Sandbox *sandbox, int sysno,
+                           void *broker_process) {
   switch(sysno) {
     case __NR_ioctl:
-#if defined(ADDRESS_SANITIZER)
-    // Allow to call sched_getaffinity under AddressSanitizer.
     case __NR_sched_getaffinity:
-#endif
       return ErrorCode(ErrorCode::ERR_ALLOWED);
     case __NR_open:
     case __NR_openat:
-        return Sandbox::Trap(GpuOpenSIGSYS_Handler, broker_process);
+        return sandbox->Trap(GpuOpenSIGSYS_Handler, broker_process);
     default:
+#if defined(__x86_64__) || defined(__arm__)
+      if (IsSystemVSharedMemory(sysno))
+        return ErrorCode(EACCES);
+#endif
       if (IsEventFd(sysno))
         return ErrorCode(ErrorCode::ERR_ALLOWED);
 
       // Default on the baseline policy.
-      return BaselinePolicy(sysno);
+      return BaselinePolicy(sandbox, sysno);
   }
 }
 
 // x86_64/i386 for now. Needs to be adapted and tested for ARM.
 // A GPU broker policy is the same as a GPU policy with open and
 // openat allowed.
-ErrorCode GpuBrokerProcessPolicy(int sysno, void*) {
+ErrorCode GpuBrokerProcessPolicy(Sandbox *sandbox, int sysno, void *aux) {
+  // "aux" would typically be NULL, when called from
+  // "EnableGpuBrokerPolicyCallBack"
   switch(sysno) {
     case __NR_open:
     case __NR_openat:
       return ErrorCode(ErrorCode::ERR_ALLOWED);
     default:
-      return GpuProcessPolicy(sysno, NULL);
+      return GpuProcessPolicy(sandbox, sysno, aux);
   }
 }
 
-ErrorCode RendererOrWorkerProcessPolicy(int sysno, void *) {
+// Allow clone for threads, crash if anything else is attempted.
+// Don't restrict on ASAN.
+ErrorCode RestrictCloneToThreads(Sandbox *sandbox) {
+  // Glibc's pthread.
+  if (!RunningOnASAN()) {
+    return sandbox->Cond(0, ErrorCode::TP_32BIT, ErrorCode::OP_EQUAL,
+        CLONE_VM | CLONE_FS | CLONE_FILES | CLONE_SIGHAND |
+        CLONE_THREAD | CLONE_SYSVSEM | CLONE_SETTLS |
+        CLONE_PARENT_SETTID | CLONE_CHILD_CLEARTID,
+        ErrorCode(ErrorCode::ERR_ALLOWED),
+        sandbox->Trap(ReportCloneFailure, NULL));
+  } else {
+    return ErrorCode(ErrorCode::ERR_ALLOWED);
+  }
+}
+
+ErrorCode RestrictPrctl(Sandbox *sandbox) {
+  // Allow PR_SET_NAME, PR_SET_DUMPABLE, PR_GET_DUMPABLE. Will need to add
+  // seccomp compositing in the future.
+  // PR_SET_PTRACER is used by breakpad but not needed anymore.
+  return sandbox->Cond(0, ErrorCode::TP_32BIT, ErrorCode::OP_EQUAL,
+                       PR_SET_NAME, ErrorCode(ErrorCode::ERR_ALLOWED),
+         sandbox->Cond(0, ErrorCode::TP_32BIT, ErrorCode::OP_EQUAL,
+                       PR_SET_DUMPABLE, ErrorCode(ErrorCode::ERR_ALLOWED),
+         sandbox->Cond(0, ErrorCode::TP_32BIT, ErrorCode::OP_EQUAL,
+                       PR_GET_DUMPABLE, ErrorCode(ErrorCode::ERR_ALLOWED),
+         sandbox->Trap(ReportPrctlFailure, NULL))));
+}
+
+ErrorCode RestrictIoctl(Sandbox *sandbox) {
+  // Allow TCGETS and FIONREAD, trap to ReportIoctlFailure otherwise.
+  return sandbox->Cond(1, ErrorCode::TP_64BIT, ErrorCode::OP_EQUAL, TCGETS,
+                       ErrorCode(ErrorCode::ERR_ALLOWED),
+         sandbox->Cond(1, ErrorCode::TP_64BIT, ErrorCode::OP_EQUAL, FIONREAD,
+                       ErrorCode(ErrorCode::ERR_ALLOWED),
+                       sandbox->Trap(ReportIoctlFailure, NULL)));
+}
+
+ErrorCode RendererOrWorkerProcessPolicy(Sandbox *sandbox, int sysno, void *) {
   switch (sysno) {
-    case __NR_ioctl:  // TODO(jln) investigate legitimate use in the renderer
-                      // and see if alternatives can be used.
+    case __NR_clone:
+      return RestrictCloneToThreads(sandbox);
+    case __NR_ioctl:
+      // Restrict IOCTL on x86_64.
+      if (IsArchitectureX86_64()) {
+        return RestrictIoctl(sandbox);
+      } else {
+        return ErrorCode(ErrorCode::ERR_ALLOWED);
+      }
+    case __NR_prctl:
+      return RestrictPrctl(sandbox);
+    // Allow the system calls below.
     case __NR_fdatasync:
     case __NR_fsync:
 #if defined(__i386__) || defined(__x86_64__)
@@ -1248,10 +1371,7 @@ ErrorCode RendererOrWorkerProcessPolicy(int sysno, void *) {
     case __NR_mremap:   // See crbug.com/149834.
     case __NR_pread64:
     case __NR_pwrite64:
-#if defined(ADDRESS_SANITIZER)
-    // Allow to call sched_getaffinity() under AddressSanitizer.
     case __NR_sched_getaffinity:
-#endif
     case __NR_sched_get_priority_max:
     case __NR_sched_get_priority_min:
     case __NR_sched_getparam:
@@ -1276,13 +1396,17 @@ ErrorCode RendererOrWorkerProcessPolicy(int sysno, void *) {
 #endif
 
       // Default on the baseline policy.
-      return BaselinePolicy(sysno);
+      return BaselinePolicy(sandbox, sysno);
   }
 }
 
-ErrorCode FlashProcessPolicy(int sysno, void *) {
+ErrorCode FlashProcessPolicy(Sandbox *sandbox, int sysno, void *) {
   switch (sysno) {
+    case __NR_sched_get_priority_max:
+    case __NR_sched_get_priority_min:
     case __NR_sched_getaffinity:
+    case __NR_sched_getparam:
+    case __NR_sched_getscheduler:
     case __NR_sched_setscheduler:
     case __NR_times:
       return ErrorCode(ErrorCode::ERR_ALLOWED);
@@ -1300,18 +1424,18 @@ ErrorCode FlashProcessPolicy(int sysno, void *) {
 #endif
 
       // Default on the baseline policy.
-      return BaselinePolicy(sysno);
+      return BaselinePolicy(sandbox, sysno);
   }
 }
 
-ErrorCode BlacklistDebugAndNumaPolicy(int sysno, void *) {
+ErrorCode BlacklistDebugAndNumaPolicy(Sandbox *sandbox, int sysno, void *) {
   if (!Sandbox::IsValidSyscallNumber(sysno)) {
     // TODO(jln) we should not have to do that in a trivial policy.
     return ErrorCode(ENOSYS);
   }
 
   if (IsDebug(sysno) || IsNuma(sysno))
-    return Sandbox::Trap(CrashSIGSYS_Handler, NULL);
+    return sandbox->Trap(CrashSIGSYS_Handler, NULL);
 
   return ErrorCode(ErrorCode::ERR_ALLOWED);
 }
@@ -1319,7 +1443,7 @@ ErrorCode BlacklistDebugAndNumaPolicy(int sysno, void *) {
 // Allow all syscalls.
 // This will still deny x32 or IA32 calls in 64 bits mode or
 // 64 bits system calls in compatibility mode.
-ErrorCode AllowAllPolicy(int sysno, void *) {
+ErrorCode AllowAllPolicy(Sandbox *, int sysno, void *) {
   if (!Sandbox::IsValidSyscallNumber(sysno)) {
     // TODO(jln) we should not have to do that in a trivial policy.
     return ErrorCode(ENOSYS);
@@ -1415,9 +1539,14 @@ Sandbox::EvaluateSyscall GetProcessSyscallPolicy(
 // broker_process can be NULL if there is no need for one.
 void StartSandboxWithPolicy(Sandbox::EvaluateSyscall syscall_policy,
                             BrokerProcess* broker_process) {
-
-  Sandbox::SetSandboxPolicy(syscall_policy, broker_process);
-  Sandbox::StartSandbox();
+  // Starting the sandbox is a one-way operation. The kernel doesn't allow
+  // us to unload a sandbox policy after it has been started. Nonetheless,
+  // in order to make the use of the "Sandbox" object easier, we allow for
+  // the object to be destroyed after the sandbox has been started. Note that
+  // doing so does not stop the sandbox.
+  Sandbox sandbox;
+  sandbox.SetSandboxPolicy(syscall_policy, broker_process);
+  sandbox.StartSandbox();
 }
 
 // Initialize the seccomp-bpf sandbox.

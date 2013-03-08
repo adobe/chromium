@@ -176,6 +176,7 @@ void APIPermissionInfo::RegisterAllPermissions(
       IDS_EXTENSION_PROMPT_WARNING_CLIPBOARD,
       PermissionMessage::kClipboard },
     { APIPermission::kClipboardWrite, "clipboardWrite" },
+    { APIPermission::kDeclarativeContent, "declarativeContent" },
     { APIPermission::kDeclarativeWebRequest, "declarativeWebRequest" },
     { APIPermission::kDownloads, "downloads", kFlagNone,
       IDS_EXTENSION_PROMPT_WARNING_DOWNLOADS,
@@ -185,6 +186,7 @@ void APIPermissionInfo::RegisterAllPermissions(
       IDS_EXTENSION_PROMPT_WARNING_GEOLOCATION,
       PermissionMessage::kGeolocation },
     { APIPermission::kNotification, "notifications" },
+    { APIPermission::kScreensaver, "screensaver" },
     { APIPermission::kUnlimitedStorage, "unlimitedStorage",
       kFlagCannotBeOptional },
 
@@ -216,9 +218,11 @@ void APIPermissionInfo::RegisterAllPermissions(
     { APIPermission::kManagement, "management", kFlagNone,
       IDS_EXTENSION_PROMPT_WARNING_MANAGEMENT,
       PermissionMessage::kManagement },
+    { APIPermission::kNativeMessaging, "nativeMessaging" },
     { APIPermission::kPrivacy, "privacy", kFlagNone,
       IDS_EXTENSION_PROMPT_WARNING_PRIVACY,
       PermissionMessage::kPrivacy },
+    { APIPermission::kSessionRestore, "sessionRestore" },
     { APIPermission::kStorage, "storage" },
     // TODO(kinuko): syncFileSystem permission should take the service name
     // parameter.
@@ -249,9 +253,12 @@ void APIPermissionInfo::RegisterAllPermissions(
     { APIPermission::kDeveloperPrivate, "developerPrivate",
       kFlagCannotBeOptional },
     { APIPermission::kDial, "dial", kFlagCannotBeOptional },
+    { APIPermission::kDownloadsInternal, "downloadsInternal" },
     { APIPermission::kFileBrowserHandlerInternal, "fileBrowserHandlerInternal",
       kFlagCannotBeOptional },
     { APIPermission::kFileBrowserPrivate, "fileBrowserPrivate",
+      kFlagCannotBeOptional },
+    { APIPermission::kNetworkingPrivate, "networkingPrivate",
       kFlagCannotBeOptional },
     { APIPermission::kManagedModePrivate, "managedModePrivate",
       kFlagCannotBeOptional },
@@ -349,7 +356,9 @@ void APIPermissionInfo::RegisterAllPermissions(
     { APIPermission::kSystemIndicator, "systemIndicator", kFlagNone,
       IDS_EXTENSION_PROMPT_WARNING_SYSTEM_INDICATOR,
       PermissionMessage::kSystemIndicator },
+    { APIPermission::kSystemInfoDisplay, "systemInfo.display" },
     { APIPermission::kPointerLock, "pointerLock" },
+    { APIPermission::kFullscreen, "fullscreen" },
   };
 
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(PermissionsToRegister); ++i) {

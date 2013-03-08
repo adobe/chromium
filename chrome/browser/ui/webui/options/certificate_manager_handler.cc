@@ -13,7 +13,7 @@
 #include "base/id_map.h"
 #include "base/memory/scoped_vector.h"
 #include "base/safe_strerror_posix.h"
-#include "base/string_number_conversions.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/certificate_viewer.h"
@@ -183,10 +183,10 @@ class FileAccessProvider
   // parameter is the number of bytes written on success.
   typedef base::Callback<void(const int*, const int*)> WriteCallback;
 
-  CancelableTaskTracker::TaskId StartRead(const FilePath& path,
+  CancelableTaskTracker::TaskId StartRead(const base::FilePath& path,
                                           const ReadCallback& callback,
                                           CancelableTaskTracker* tracker);
-  CancelableTaskTracker::TaskId StartWrite(const FilePath& path,
+  CancelableTaskTracker::TaskId StartWrite(const base::FilePath& path,
                                            const std::string& data,
                                            const WriteCallback& callback,
                                            CancelableTaskTracker* tracker);
@@ -197,19 +197,19 @@ class FileAccessProvider
 
   // Reads file at |path|. |saved_errno| is 0 on success or errno on failure.
   // When success, |data| has file content.
-  void DoRead(const FilePath& path,
+  void DoRead(const base::FilePath& path,
               int* saved_errno,
               std::string* data);
   // Writes data to file at |path|. |saved_errno| is 0 on success or errno on
   // failure. When success, |bytes_written| has number of bytes written.
-  void DoWrite(const FilePath& path,
+  void DoWrite(const base::FilePath& path,
                const std::string& data,
                int* saved_errno,
                int* bytes_written);
 };
 
 CancelableTaskTracker::TaskId FileAccessProvider::StartRead(
-    const FilePath& path,
+    const base::FilePath& path,
     const ReadCallback& callback,
     CancelableTaskTracker* tracker) {
   // Owned by reply callback posted below.
@@ -225,7 +225,7 @@ CancelableTaskTracker::TaskId FileAccessProvider::StartRead(
 }
 
 CancelableTaskTracker::TaskId FileAccessProvider::StartWrite(
-    const FilePath& path,
+    const base::FilePath& path,
     const std::string& data,
     const WriteCallback& callback,
     CancelableTaskTracker* tracker) {
@@ -243,14 +243,14 @@ CancelableTaskTracker::TaskId FileAccessProvider::StartWrite(
                  base::Owned(saved_errno), base::Owned(bytes_written)));
 }
 
-void FileAccessProvider::DoRead(const FilePath& path,
+void FileAccessProvider::DoRead(const base::FilePath& path,
                                 int* saved_errno,
                                 std::string* data) {
   bool success = file_util::ReadFileToString(path, data);
   *saved_errno = success ? 0 : errno;
 }
 
-void FileAccessProvider::DoWrite(const FilePath& path,
+void FileAccessProvider::DoWrite(const base::FilePath& path,
                                  const std::string& data,
                                  int* saved_errno,
                                  int* bytes_written) {
@@ -467,7 +467,8 @@ void CertificateManagerHandler::CertificatesRefreshed() {
   VLOG(1) << "populating finished";
 }
 
-void CertificateManagerHandler::FileSelected(const FilePath& path, int index,
+void CertificateManagerHandler::FileSelected(const base::FilePath& path,
+                                             int index,
                                              void* params) {
   switch (reinterpret_cast<intptr_t>(params)) {
     case EXPORT_PERSONAL_FILE_SELECTED:
@@ -574,13 +575,13 @@ void CertificateManagerHandler::ExportPersonal(const ListValue* args) {
   file_type_info.extension_description_overrides.push_back(
       l10n_util::GetStringUTF16(IDS_CERT_MANAGER_PKCS12_FILES));
   file_type_info.include_all_files = true;
-  // TODO(kinaba): http://crbug.com/140425. Turn file_type_info.support_gdata
+  // TODO(kinaba): http://crbug.com/140425. Turn file_type_info.support_drive
   // on once Google Drive client on ChromeOS fully supports file writing.
   select_file_dialog_ = ui::SelectFileDialog::Create(
       this, new ChromeSelectFilePolicy(web_ui()->GetWebContents()));
   select_file_dialog_->SelectFile(
       ui::SelectFileDialog::SELECT_SAVEAS_FILE, string16(),
-      FilePath(), &file_type_info, 1, FILE_PATH_LITERAL("p12"),
+      base::FilePath(), &file_type_info, 1, FILE_PATH_LITERAL("p12"),
       GetParentWindow(),
       reinterpret_cast<void*>(EXPORT_PERSONAL_FILE_SELECTED));
 }
@@ -590,7 +591,7 @@ void CertificateManagerHandler::ExportAllPersonal(const ListValue* args) {
 }
 
 void CertificateManagerHandler::ExportPersonalFileSelected(
-    const FilePath& path) {
+    const base::FilePath& path) {
   file_path_ = path;
   web_ui()->CallJavascriptFunction(
       "CertificateManager.exportPersonalAskPassword");
@@ -666,18 +667,18 @@ void CertificateManagerHandler::StartImportPersonal(const ListValue* args) {
   file_type_info.extension_description_overrides.push_back(
       l10n_util::GetStringUTF16(IDS_CERT_MANAGER_PKCS12_FILES));
   file_type_info.include_all_files = true;
-  file_type_info.support_gdata = true;
+  file_type_info.support_drive = true;
   select_file_dialog_ = ui::SelectFileDialog::Create(
       this, new ChromeSelectFilePolicy(web_ui()->GetWebContents()));
   select_file_dialog_->SelectFile(
       ui::SelectFileDialog::SELECT_OPEN_FILE, string16(),
-      FilePath(), &file_type_info, 1, FILE_PATH_LITERAL("p12"),
+      base::FilePath(), &file_type_info, 1, FILE_PATH_LITERAL("p12"),
       GetParentWindow(),
       reinterpret_cast<void*>(IMPORT_PERSONAL_FILE_SELECTED));
 }
 
 void CertificateManagerHandler::ImportPersonalFileSelected(
-    const FilePath& path) {
+    const base::FilePath& path) {
   file_path_ = path;
   web_ui()->CallJavascriptFunction(
       "CertificateManager.importPersonalAskPassword");
@@ -790,12 +791,13 @@ void CertificateManagerHandler::ImportServer(const ListValue* args) {
   ShowCertSelectFileDialog(
       select_file_dialog_.get(),
       ui::SelectFileDialog::SELECT_OPEN_FILE,
-      FilePath(),
+      base::FilePath(),
       GetParentWindow(),
       reinterpret_cast<void*>(IMPORT_SERVER_FILE_SELECTED));
 }
 
-void CertificateManagerHandler::ImportServerFileSelected(const FilePath& path) {
+void CertificateManagerHandler::ImportServerFileSelected(
+    const base::FilePath& path) {
   file_path_ = path;
   file_access_provider_->StartRead(
       file_path_,
@@ -848,12 +850,13 @@ void CertificateManagerHandler::ImportCA(const ListValue* args) {
       this, new ChromeSelectFilePolicy(web_ui()->GetWebContents()));
   ShowCertSelectFileDialog(select_file_dialog_.get(),
                            ui::SelectFileDialog::SELECT_OPEN_FILE,
-                           FilePath(),
+                           base::FilePath(),
                            GetParentWindow(),
                            reinterpret_cast<void*>(IMPORT_CA_FILE_SELECTED));
 }
 
-void CertificateManagerHandler::ImportCAFileSelected(const FilePath& path) {
+void CertificateManagerHandler::ImportCAFileSelected(
+    const base::FilePath& path) {
   file_path_ = path;
   file_access_provider_->StartRead(
       file_path_,

@@ -13,7 +13,7 @@
 #include "base/utf_string_conversions.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-using base::Histogram;
+using base::HistogramBase;
 using base::HistogramSamples;
 using base::StatisticsRecorder;
 
@@ -37,7 +37,7 @@ class SpellcheckHostMetricsTest : public testing::Test {
 
 TEST_F(SpellcheckHostMetricsTest, RecordEnabledStats) {
   scoped_ptr<HistogramSamples> baseline;
-  Histogram* histogram =
+  HistogramBase* histogram =
       StatisticsRecorder::FindHistogram("SpellCheck.Enabled");
   if (histogram)
     baseline = histogram->SnapshotSamples();
@@ -69,7 +69,7 @@ TEST_F(SpellcheckHostMetricsTest, RecordEnabledStats) {
 TEST_F(SpellcheckHostMetricsTest, CustomWordStats) {
   metrics()->RecordCustomWordCountStats(123);
 
-  Histogram* histogram =
+  HistogramBase* histogram =
       StatisticsRecorder::FindHistogram("SpellCheck.CustomWords");
   ASSERT_TRUE(histogram != NULL);
   scoped_ptr<HistogramSamples> baseline = histogram->SnapshotSamples();
@@ -102,7 +102,7 @@ TEST_F(SpellcheckHostMetricsTest, RecordWordCountsDiscardsDuplicates) {
   // Get baselines for all affected histograms.
   scoped_ptr<HistogramSamples> baselines[arraysize(histogramName)];
   for (size_t i = 0; i < arraysize(histogramName); ++i) {
-    Histogram* histogram =
+    HistogramBase* histogram =
         StatisticsRecorder::FindHistogram(histogramName[i]);
     if (histogram)
       baselines[i] = histogram->SnapshotSamples();
@@ -114,7 +114,7 @@ TEST_F(SpellcheckHostMetricsTest, RecordWordCountsDiscardsDuplicates) {
   // Get samples for all affected histograms.
   scoped_ptr<HistogramSamples> samples[arraysize(histogramName)];
   for (size_t i = 0; i < arraysize(histogramName); ++i) {
-    Histogram* histogram =
+    HistogramBase* histogram =
         StatisticsRecorder::FindHistogram(histogramName[i]);
     ASSERT_TRUE(histogram != NULL);
     samples[i] = histogram->SnapshotSamples();
@@ -123,4 +123,35 @@ TEST_F(SpellcheckHostMetricsTest, RecordWordCountsDiscardsDuplicates) {
 
     EXPECT_EQ(0, samples[i]->TotalCount());
   }
+}
+
+TEST_F(SpellcheckHostMetricsTest, RecordSpellingServiceStats) {
+  const char kMetricName[] = "SpellCheck.SpellingService.Enabled";
+  scoped_ptr<HistogramSamples> baseline;
+  HistogramBase* histogram = StatisticsRecorder::FindHistogram(kMetricName);
+  if (histogram)
+    baseline = histogram->SnapshotSamples();
+
+  metrics()->RecordSpellingServiceStats(false);
+
+  histogram =
+      StatisticsRecorder::FindHistogram(kMetricName);
+  ASSERT_TRUE(histogram != NULL);
+  scoped_ptr<HistogramSamples> samples(histogram->SnapshotSamples());
+  if (baseline.get())
+    samples->Subtract(*baseline);
+  EXPECT_EQ(1, samples->GetCount(0));
+  EXPECT_EQ(0, samples->GetCount(1));
+
+  baseline.reset(samples.release());
+
+  metrics()->RecordSpellingServiceStats(true);
+
+  histogram =
+      StatisticsRecorder::FindHistogram(kMetricName);
+  ASSERT_TRUE(histogram != NULL);
+  samples = histogram->SnapshotSamples();
+  samples->Subtract(*baseline);
+  EXPECT_EQ(0, samples->GetCount(0));
+  EXPECT_EQ(1, samples->GetCount(1));
 }

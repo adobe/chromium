@@ -23,35 +23,35 @@ class TestAppCacheFrontend : public appcache::AppCacheFrontend {
   }
 
   virtual void OnCacheSelected(
-      int host_id, const appcache::AppCacheInfo& info) {
+      int host_id, const appcache::AppCacheInfo& info) OVERRIDE {
     last_host_id_ = host_id;
     last_cache_id_ = info.cache_id;
     last_status_ = info.status;
   }
 
   virtual void OnStatusChanged(const std::vector<int>& host_ids,
-                               appcache::Status status) {
+                               appcache::Status status) OVERRIDE {
   }
 
   virtual void OnEventRaised(const std::vector<int>& host_ids,
-                             appcache::EventID event_id) {
+                             appcache::EventID event_id) OVERRIDE {
   }
 
   virtual void OnErrorEventRaised(const std::vector<int>& host_ids,
-                                  const std::string& message) {
+                                  const std::string& message) OVERRIDE {
   }
 
   virtual void OnProgressEventRaised(const std::vector<int>& host_ids,
                                      const GURL& url,
-                                     int num_total, int num_complete) {
+                                     int num_total, int num_complete) OVERRIDE {
   }
 
   virtual void OnLogMessage(int host_id, appcache::LogLevel log_level,
-                            const std::string& message) {
+                            const std::string& message) OVERRIDE {
   }
 
   virtual void OnContentBlocked(int host_id,
-                                const GURL& manifest_url) {
+                                const GURL& manifest_url) OVERRIDE {
   }
 
   int last_host_id_;
@@ -68,7 +68,7 @@ class TestUpdateObserver : public AppCacheGroup::UpdateObserver {
   TestUpdateObserver() : update_completed_(false), group_has_cache_(false) {
   }
 
-  virtual void OnUpdateComplete(AppCacheGroup* group) {
+  virtual void OnUpdateComplete(AppCacheGroup* group) OVERRIDE {
     update_completed_ = true;
     group_has_cache_ = group->HasCache();
   }
@@ -88,7 +88,7 @@ class TestAppCacheHost : public AppCacheHost {
         update_completed_(false) {
   }
 
-  virtual void OnUpdateComplete(AppCacheGroup* group) {
+  virtual void OnUpdateComplete(AppCacheGroup* group) OVERRIDE {
     update_completed_ = true;
   }
 
@@ -103,38 +103,39 @@ class AppCacheGroupTest : public testing::Test {
 TEST_F(AppCacheGroupTest, AddRemoveCache) {
   MockAppCacheService service;
   scoped_refptr<AppCacheGroup> group(
-      new AppCacheGroup(&service, GURL("http://foo.com"), 111));
+      new AppCacheGroup(service.storage(), GURL("http://foo.com"), 111));
 
   base::Time now = base::Time::Now();
 
-  scoped_refptr<AppCache> cache1(new AppCache(&service, 111));
+  scoped_refptr<AppCache> cache1(new AppCache(service.storage(), 111));
   cache1->set_complete(true);
   cache1->set_update_time(now);
   group->AddCache(cache1);
   EXPECT_EQ(cache1, group->newest_complete_cache());
 
   // Adding older cache does not change newest complete cache.
-  scoped_refptr<AppCache> cache2(new AppCache(&service, 222));
+  scoped_refptr<AppCache> cache2(new AppCache(service.storage(), 222));
   cache2->set_complete(true);
   cache2->set_update_time(now - base::TimeDelta::FromDays(1));
   group->AddCache(cache2);
   EXPECT_EQ(cache1, group->newest_complete_cache());
 
   // Adding newer cache does change newest complete cache.
-  scoped_refptr<AppCache> cache3(new AppCache(&service, 333));
+  scoped_refptr<AppCache> cache3(new AppCache(service.storage(), 333));
   cache3->set_complete(true);
   cache3->set_update_time(now + base::TimeDelta::FromDays(1));
   group->AddCache(cache3);
   EXPECT_EQ(cache3, group->newest_complete_cache());
 
   // Adding cache with same update time uses one with larger ID.
-  scoped_refptr<AppCache> cache4(new AppCache(&service, 444));
+  scoped_refptr<AppCache> cache4(new AppCache(service.storage(), 444));
   cache4->set_complete(true);
   cache4->set_update_time(now + base::TimeDelta::FromDays(1));  // same as 3
   group->AddCache(cache4);
   EXPECT_EQ(cache4, group->newest_complete_cache());
 
-  scoped_refptr<AppCache> cache5(new AppCache(&service, 55));  // smaller id
+  // smaller id
+  scoped_refptr<AppCache> cache5(new AppCache(service.storage(), 55));
   cache5->set_complete(true);
   cache5->set_update_time(now + base::TimeDelta::FromDays(1));  // same as 4
   group->AddCache(cache5);
@@ -173,14 +174,14 @@ TEST_F(AppCacheGroupTest, CleanupUnusedGroup) {
   MockAppCacheService service;
   TestAppCacheFrontend frontend;
   AppCacheGroup* group =
-      new AppCacheGroup(&service, GURL("http://foo.com"), 111);
+      new AppCacheGroup(service.storage(), GURL("http://foo.com"), 111);
 
   AppCacheHost host1(1, &frontend, &service);
   AppCacheHost host2(2, &frontend, &service);
 
   base::Time now = base::Time::Now();
 
-  AppCache* cache1 = new AppCache(&service, 111);
+  AppCache* cache1 = new AppCache(service.storage(), 111);
   cache1->set_complete(true);
   cache1->set_update_time(now);
   group->AddCache(cache1);
@@ -196,7 +197,7 @@ TEST_F(AppCacheGroupTest, CleanupUnusedGroup) {
   EXPECT_EQ(frontend.last_cache_id_, cache1->cache_id());
   EXPECT_EQ(frontend.last_status_, appcache::IDLE);
 
-  AppCache* cache2 = new AppCache(&service, 222);
+  AppCache* cache2 = new AppCache(service.storage(), 222);
   cache2->set_complete(true);
   cache2->set_update_time(now + base::TimeDelta::FromDays(1));
   group->AddCache(cache2);
@@ -213,7 +214,7 @@ TEST_F(AppCacheGroupTest, CleanupUnusedGroup) {
 TEST_F(AppCacheGroupTest, StartUpdate) {
   MockAppCacheService service;
   scoped_refptr<AppCacheGroup> group(
-      new AppCacheGroup(&service, GURL("http://foo.com"), 111));
+      new AppCacheGroup(service.storage(), GURL("http://foo.com"), 111));
 
   // Set state to checking to prevent update job from executing fetches.
   group->update_status_ = AppCacheGroup::CHECKING;
@@ -234,7 +235,7 @@ TEST_F(AppCacheGroupTest, StartUpdate) {
 TEST_F(AppCacheGroupTest, CancelUpdate) {
   MockAppCacheService service;
   scoped_refptr<AppCacheGroup> group(
-      new AppCacheGroup(&service, GURL("http://foo.com"), 111));
+      new AppCacheGroup(service.storage(), GURL("http://foo.com"), 111));
 
   // Set state to checking to prevent update job from executing fetches.
   group->update_status_ = AppCacheGroup::CHECKING;
@@ -253,7 +254,7 @@ TEST_F(AppCacheGroupTest, CancelUpdate) {
 TEST_F(AppCacheGroupTest, QueueUpdate) {
   MockAppCacheService service;
   scoped_refptr<AppCacheGroup> group(
-      new AppCacheGroup(&service, GURL("http://foo.com"), 111));
+      new AppCacheGroup(service.storage(), GURL("http://foo.com"), 111));
 
   // Set state to checking to prevent update job from executing fetches.
   group->update_status_ = AppCacheGroup::CHECKING;

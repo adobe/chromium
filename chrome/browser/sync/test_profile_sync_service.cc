@@ -104,6 +104,7 @@ void SyncBackendHostForProfileSyncTest::UpdateCredentials(
 void SyncBackendHostForProfileSyncTest::RequestConfigureSyncer(
     syncer::ConfigureReason reason,
     syncer::ModelTypeSet types_to_config,
+    syncer::ModelTypeSet failed_types,
     const syncer::ModelSafeRoutingInfo& routing_info,
     const base::Callback<void(syncer::ModelTypeSet)>& ready_task,
     const base::Closure& retry_callback) {
@@ -178,9 +179,8 @@ void SyncBackendHostForProfileSyncTest::EmitOnInvalidatorStateChange(
 }
 
 void SyncBackendHostForProfileSyncTest::EmitOnIncomingInvalidation(
-    const syncer::ObjectIdInvalidationMap& invalidation_map,
-    const syncer::IncomingInvalidationSource source) {
-  frontend()->OnIncomingInvalidation(invalidation_map, source);
+    const syncer::ObjectIdInvalidationMap& invalidation_map) {
+  frontend()->OnIncomingInvalidation(invalidation_map);
 }
 
 void SyncBackendHostForProfileSyncTest::ContinueInitialization(

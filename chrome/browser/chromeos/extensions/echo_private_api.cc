@@ -6,17 +6,36 @@
 
 #include <string>
 
+#include "base/bind.h"
 #include "base/compiler_specific.h"
+#include "base/file_util.h"
+#include "base/location.h"
+#include "base/stringprintf.h"
+#include "base/time.h"
 #include "base/values.h"
 #include "chrome/browser/chromeos/kiosk_mode/kiosk_mode_settings.h"
+#include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/chromeos/system/statistics_provider.h"
 #include "chrome/common/extensions/extension.h"
+#include "content/public/browser/browser_thread.h"
 
-namespace {
+using content::BrowserThread;
 
-// For a given registration code type, returns the code value from the
-// underlying system. Caller owns the returned pointer.
-base::Value* GetValueForRegistrationCodeType(std::string& type) {
+EchoPrivateGetRegistrationCodeFunction::
+    EchoPrivateGetRegistrationCodeFunction() {}
+
+EchoPrivateGetRegistrationCodeFunction::
+    ~EchoPrivateGetRegistrationCodeFunction() {}
+
+void EchoPrivateGetRegistrationCodeFunction::GetRegistrationCode(
+    const std::string& type) {
+  if (!chromeos::KioskModeSettings::Get()->is_initialized()) {
+    chromeos::KioskModeSettings::Get()->Initialize(base::Bind(
+        &EchoPrivateGetRegistrationCodeFunction::GetRegistrationCode,
+        base::Unretained(this),
+        type));
+    return;
+  }
   // Possible ECHO code type and corresponding key name in StatisticsProvider.
   const std::string kCouponType = "COUPON_CODE";
   const std::string kCouponCodeKey = "ubind_attribute";
@@ -34,21 +53,86 @@ base::Value* GetValueForRegistrationCodeType(std::string& type) {
     else if (type == kGroupType)
       provider->GetMachineStatistic(kGroupCodeKey, &result);
   }
-  return new base::StringValue(result);
+  SetResult(new base::StringValue(result));
+  SendResponse(true);
 }
 
-}  // namespace
-
-
-GetRegistrationCodeFunction::GetRegistrationCodeFunction() {
-}
-
-GetRegistrationCodeFunction::~GetRegistrationCodeFunction() {
-}
-
-bool GetRegistrationCodeFunction::RunImpl() {
+bool EchoPrivateGetRegistrationCodeFunction::RunImpl() {
   std::string type;
   EXTENSION_FUNCTION_VALIDATE(args_->GetString(0, &type));
-  SetResult(GetValueForRegistrationCodeType(type));
+  GetRegistrationCode(type);
+  return true;
+}
+
+EchoPrivateGetOobeTimestampFunction::EchoPrivateGetOobeTimestampFunction() {
+}
+
+EchoPrivateGetOobeTimestampFunction::~EchoPrivateGetOobeTimestampFunction() {
+}
+
+bool EchoPrivateGetOobeTimestampFunction::RunImpl() {
+  BrowserThread::PostTaskAndReplyWithResult(
+      BrowserThread::FILE, FROM_HERE,
+      base::Bind(
+          &EchoPrivateGetOobeTimestampFunction::GetOobeTimestampOnFileThread,
+          this),
+      base::Bind(
+          &EchoPrivateGetOobeTimestampFunction::SendResponse, this));
+  return true;
+}
+
+// Get the OOBE timestamp from file /home/chronos/.oobe_completed.
+// The timestamp is used to determine when the user first activates the device.
+// If we can get the timestamp info, return it as yyyy-mm-dd, otherwise, return
+// an empty string.
+bool EchoPrivateGetOobeTimestampFunction::GetOobeTimestampOnFileThread() {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
+
+  const char kOobeTimestampFile[] = "/home/chronos/.oobe_completed";
+  std::string timestamp = "";
+  base::PlatformFileInfo fileInfo;
+  if (file_util::GetFileInfo(base::FilePath(kOobeTimestampFile), &fileInfo)) {
+    base::Time::Exploded ctime;
+    fileInfo.creation_time.UTCExplode(&ctime);
+    timestamp += base::StringPrintf("%u-%u-%u",
+                                    ctime.year,
+                                    ctime.month,
+                                    ctime.day_of_month);
+  }
+  SetResult(new base::StringValue(timestamp));
+  return true;
+}
+
+EchoPrivateCheckAllowRedeemOffersFunction::
+    EchoPrivateCheckAllowRedeemOffersFunction() {
+}
+
+EchoPrivateCheckAllowRedeemOffersFunction::
+    ~EchoPrivateCheckAllowRedeemOffersFunction() {
+}
+
+void EchoPrivateCheckAllowRedeemOffersFunction::CheckAllowRedeemOffers() {
+  chromeos::CrosSettingsProvider::TrustedStatus status =
+      chromeos::CrosSettings::Get()->PrepareTrustedValues(
+          base::Bind(&EchoPrivateCheckAllowRedeemOffersFunction::
+                     CheckAllowRedeemOffers,
+                     base::Unretained(this)));
+  if (status == chromeos::CrosSettingsProvider::TEMPORARILY_UNTRUSTED)
+    return;
+
+  bool allow;
+  if (!chromeos::CrosSettings::Get()->GetBoolean(
+          chromeos::kAllowRedeemChromeOsRegistrationOffers, &allow)) {
+    allow = true;
+  }
+  SetResult(new base::FundamentalValue(allow));
+  SendResponse(true);
+}
+
+// Check the enterprise policy kAllowRedeemChromeOsRegistrationOffers flag
+// value. This policy is used to control whether user can redeem offers using
+// enterprise device.
+bool EchoPrivateCheckAllowRedeemOffersFunction::RunImpl() {
+  CheckAllowRedeemOffers();
   return true;
 }

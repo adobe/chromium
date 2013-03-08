@@ -22,19 +22,19 @@
 #include "chrome/browser/metrics/tracking_synchronizer_observer.h"
 #include "chrome/common/metrics/metrics_service_base.h"
 #include "chrome/installer/util/google_update_settings.h"
+#include "content/public/browser/browser_child_process_observer.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
+#include "content/public/browser/user_metrics.h"
 #include "net/url_request/url_fetcher_delegate.h"
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/external_metrics.h"
 #endif
 
-class BookmarkModel;
-class BookmarkNode;
 class MetricsReportingScheduler;
 class PrefService;
-class PrefServiceSimple;
+class PrefRegistrySimple;
 class Profile;
 class TemplateURLService;
 
@@ -70,6 +70,7 @@ struct WebPluginInfo;
 
 class MetricsService
     : public chrome_browser_metrics::TrackingSynchronizerObserver,
+      public content::BrowserChildProcessObserver,
       public content::NotificationObserver,
       public net::URLFetcherDelegate,
       public MetricsServiceBase {
@@ -124,13 +125,21 @@ class MetricsService
 
   // At startup, prefs needs to be called with a list of all the pref names and
   // types we'll be using.
-  static void RegisterPrefs(PrefServiceSimple* local_state);
+  static void RegisterPrefs(PrefRegistrySimple* registry);
 
   // Set up notifications which indicate that a user is performing work. This is
   // useful to allow some features to sleep, until the machine becomes active,
   // such as precluding UMA uploads unless there was recent activity.
   static void SetUpNotifications(content::NotificationRegistrar* registrar,
                                  content::NotificationObserver* observer);
+
+  // Implementation of content::BrowserChildProcessObserver
+  virtual void BrowserChildProcessHostConnected(
+      const content::ChildProcessData& data) OVERRIDE;
+  virtual void BrowserChildProcessCrashed(
+      const content::ChildProcessData& data) OVERRIDE;
+  virtual void BrowserChildProcessInstanceCreated(
+      const content::ChildProcessData& data) OVERRIDE;
 
   // Implementation of content::NotificationObserver
   virtual void Observe(int type,
@@ -151,7 +160,10 @@ class MetricsService
 
   // Called when the application is coming out of background mode.
   void OnAppEnterForeground();
-#endif
+#else
+  // Set the dirty flag, which will require a later call to LogCleanShutdown().
+  static void LogNeedForCleanShutdown();
+#endif  // defined(OS_ANDROID) || defined(OS_IOS)
 
   // Saves in the preferences if the crash report registration was successful.
   // This count is eventually send via UMA logs.
@@ -177,14 +189,11 @@ class MetricsService
   bool recording_active() const;
   bool reporting_active() const;
 
-  void LogPluginLoadingError(const FilePath& plugin_path);
+  void LogPluginLoadingError(const base::FilePath& plugin_path);
 
   // Redundant test to ensure that we are notified of a clean exit.
   // This value should be true when process has completed shutdown.
   static bool UmaMetricsProperlyShutdown();
-
-  // Set the dirty flag, which will require a later call to LogCleanShutdown().
-  static void LogNeedForCleanShutdown();
 
  private:
   // The MetricsService has a lifecycle that is stored as a state.
@@ -212,6 +221,8 @@ class MetricsService
     LAST_ENTROPY_HIGH,
   };
 
+  struct ChildProcessStats;
+
   // First part of the init task. Called on the FILE thread to load hardware
   // class information.
   static void InitTaskGetHardwareClass(base::WeakPtr<MetricsService> self,
@@ -235,6 +246,8 @@ class MetricsService
   // loading profiler data.
   void OnInitTaskGotGoogleUpdateData(
       const GoogleUpdateMetrics& google_update_metrics);
+
+  void OnUserAction(const std::string& action);
 
   // TrackingSynchronizerObserver:
   virtual void ReceivedProfilerData(
@@ -361,22 +374,9 @@ class MetricsService
   // Records that the browser was shut down cleanly.
   void LogCleanShutdown();
 
-  // Set the value in preferences for the number of bookmarks and folders
-  // in node. The pref key for the number of bookmarks in num_bookmarks_key and
-  // the pref key for number of folders in num_folders_key.
-  void LogBookmarks(const BookmarkNode* node,
-                    const char* num_bookmarks_key,
-                    const char* num_folders_key);
-
-  // Sets preferences for the number of bookmarks in model.
-  void LogBookmarks(BookmarkModel* model);
-
-  // Records a child process related notification.  These are recorded to an
-  // in-object buffer because these notifications are sent on page load, and we
-  // don't want to slow that down.
-  void LogChildProcessChange(int type,
-                             const content::NotificationSource& source,
-                             const content::NotificationDetails& details);
+  // Returns reference to ChildProcessStats corresponding to |data|.
+  ChildProcessStats& GetChildProcessStats(
+      const content::ChildProcessData& data);
 
   // Logs the number of keywords.
   void LogKeywordCount(size_t keyword_count);
@@ -398,9 +398,7 @@ class MetricsService
                        const content::NotificationDetails& details);
 
   // Checks whether a notification can be logged.
-  bool CanLogNotification(int type,
-                          const content::NotificationSource& source,
-                          const content::NotificationDetails& details);
+  bool CanLogNotification();
 
   // Sets the value of the specified path in prefs and schedules a save.
   void RecordBooleanPrefValue(const char* path, bool value);
@@ -408,6 +406,8 @@ class MetricsService
   // Returns true if process of type |type| should be counted as a plugin
   // process, and false otherwise.
   static bool IsPluginProcess(content::ProcessType type);
+
+  content::ActionCallback action_callback_;
 
   content::NotificationRegistrar registrar_;
 
@@ -474,9 +474,7 @@ class MetricsService
   WindowMap window_map_;
   int next_window_id_;
 
-  // Buffer of child process notifications for quick access.  See
-  // ChildProcessStats documentation above for more details.
-  struct ChildProcessStats;
+  // Buffer of child process notifications for quick access.
   std::map<string16, ChildProcessStats> child_process_stats_buffer_;
 
   // Weak pointers factory used to post task on different threads. All weak

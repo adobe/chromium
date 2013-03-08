@@ -10,7 +10,7 @@
 #include "base/memory/scoped_vector.h"
 #include "base/path_service.h"
 #include "base/stl_util.h"
-#include "base/string_number_conversions.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/defaults.h"
@@ -61,9 +61,9 @@ class SessionServiceTest : public BrowserWithTestWindowTest,
   }
 
   // Upon notification, increment the sync_save_count variable
-  void Observe(int type,
-               const content::NotificationSource& source,
-               const content::NotificationDetails& details) {
+  virtual void Observe(int type,
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE {
     ASSERT_EQ(type, chrome::NOTIFICATION_SESSION_SERVICE_SAVED);
     sync_save_count_++;
   }
@@ -166,7 +166,7 @@ class SessionServiceTest : public BrowserWithTestWindowTest,
 
   // Path used in testing.
   base::ScopedTempDir temp_dir_;
-  FilePath path_;
+  base::FilePath path_;
 
   SessionServiceTestHelper helper_;
 };
@@ -834,14 +834,14 @@ TEST_F(SessionServiceTest, RemovePostDataWithPasswords) {
 #if defined(OS_CHROMEOS)
 // Verifies migration of tab/window closed works.
 TEST_F(SessionServiceTest, CanOpenV1TabClosed) {
-  FilePath v1_file_path;
+  base::FilePath v1_file_path;
   ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &v1_file_path));
   // v1_session_file contains a tab closed command with the original id. The
   // file was generated from ClosingTabStaysClosed. If we successfully processed
   // the file we'll have one tab.
   v1_file_path =
       v1_file_path.AppendASCII("sessions").AppendASCII("v1_session_file");
-  FilePath dest_file_path(path_);
+  base::FilePath dest_file_path(path_);
   dest_file_path = dest_file_path.AppendASCII("Current Session");
 
   // Forces closing the file.

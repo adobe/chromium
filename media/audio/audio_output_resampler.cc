@@ -21,10 +21,6 @@
 #include "media/base/limits.h"
 #include "media/base/media_switches.h"
 
-#if defined(OS_WIN)
-#include "media/audio/win/core_audio_util_win.h"
-#endif
-
 namespace media {
 
 class OnMoreDataConverter
@@ -76,10 +72,6 @@ class OnMoreDataConverter
   // Handles resampling, buffering, and channel mixing between input and output
   // parameters.
   AudioConverter audio_converter_;
-
-  // If we're using WaveOut on Windows' we always have to wait for DataReady()
-  // before calling |source_callback_|.
-  bool waveout_wait_hack_;
 
   DISALLOW_COPY_AND_ASSIGN(OnMoreDataConverter);
 };
@@ -196,7 +188,7 @@ bool AudioOutputResampler::OpenStream() {
 
   // If we've already tried to open the stream in high latency mode or we've
   // successfully opened a stream previously, there's nothing more to be done.
-  if (output_params_.format() == AudioParameters::AUDIO_PCM_LINEAR ||
+  if (output_params_.format() != AudioParameters::AUDIO_PCM_LOW_LATENCY ||
       streams_opened_ || !callbacks_.empty()) {
     return false;
   }
@@ -218,9 +210,26 @@ bool AudioOutputResampler::OpenStream() {
   RecordFallbackStats(output_params_);
   output_params_ = SetupFallbackParams(params_, output_params_);
   Initialize();
+  if (dispatcher_->OpenStream()) {
+    streams_opened_ = true;
+    return true;
+  }
 
-  // Retry, if this fails, there's nothing left to do but report the error back.
-  return dispatcher_->OpenStream();
+  DLOG(ERROR) << "Unable to open audio device in high latency mode.  Falling "
+              << "back to fake audio output.";
+
+  // Finally fall back to a fake audio output device.
+  output_params_.Reset(
+      AudioParameters::AUDIO_FAKE, params_.channel_layout(),
+      params_.input_channels(), params_.sample_rate(),
+      params_.bits_per_sample(), params_.frames_per_buffer());
+  Initialize();
+  if (dispatcher_->OpenStream()) {
+    streams_opened_ = true;
+    return true;
+  }
+
+  return false;
 }
 
 bool AudioOutputResampler::StartStream(
@@ -287,30 +296,22 @@ OnMoreDataConverter::OnMoreDataConverter(const AudioParameters& input_params,
     : source_callback_(NULL),
       source_bus_(NULL),
       input_bytes_per_second_(input_params.GetBytesPerSecond()),
-      audio_converter_(input_params, output_params, false),
-      waveout_wait_hack_(false) {
+      audio_converter_(input_params, output_params, false) {
   io_ratio_ =
       static_cast<double>(input_params.GetBytesPerSecond()) /
       output_params.GetBytesPerSecond();
-
-  // TODO(dalecurtis): We should require all render side clients to use a
-  // buffer size that's a multiple of the hardware buffer size scaled by the
-  // request_sample_rate / hw_sample_rate.  Doing so ensures each hardware
-  // request for audio data results in only a single render side callback and
-  // would allow us to remove this hack.  See http://crbug.com/162207.
-#if defined(OS_WIN)
-  waveout_wait_hack_ =
-      output_params.format() == AudioParameters::AUDIO_PCM_LINEAR ||
-      !CoreAudioUtil::IsSupported();
-#endif
 }
 
-OnMoreDataConverter::~OnMoreDataConverter() {}
+OnMoreDataConverter::~OnMoreDataConverter() {
+  // Ensure Stop() has been called so we don't end up with an AudioOutputStream
+  // calling back into OnMoreData() after destruction.
+  CHECK(!source_callback_);
+}
 
 void OnMoreDataConverter::Start(
     AudioOutputStream::AudioSourceCallback* callback) {
   base::AutoLock auto_lock(source_lock_);
-  DCHECK(!source_callback_);
+  CHECK(!source_callback_);
   source_callback_ = callback;
 
   // While AudioConverter can handle multiple inputs, we're using it only with
@@ -321,6 +322,7 @@ void OnMoreDataConverter::Start(
 
 void OnMoreDataConverter::Stop() {
   base::AutoLock auto_lock(source_lock_);
+  CHECK(source_callback_);
   source_callback_ = NULL;
   audio_converter_.RemoveInput(this);
 }
@@ -360,9 +362,6 @@ double OnMoreDataConverter::ProvideInput(AudioBus* dest,
   new_buffers_state.pending_bytes =
       io_ratio_ * (current_buffers_state_.total_bytes() +
                    buffer_delay.InSecondsF() * input_bytes_per_second_);
-
-  if (waveout_wait_hack_)
-    source_callback_->WaitTillDataReady();
 
   // Retrieve data from the original callback.
   int frames = source_callback_->OnMoreIOData(

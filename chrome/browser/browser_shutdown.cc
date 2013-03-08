@@ -9,13 +9,15 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/metrics/histogram.h"
 #include "base/path_service.h"
+#include "base/prefs/pref_registry_simple.h"
+#include "base/prefs/pref_service.h"
 #include "base/process_util.h"
-#include "base/string_number_conversions.h"
 #include "base/stringprintf.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/time.h"
@@ -26,10 +28,8 @@
 #include "chrome/browser/jankometer.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/metrics/metrics_service.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/service/service_process_control.h"
-#include "chrome/browser/ui/webui/chrome_url_data_manager.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
@@ -78,10 +78,10 @@ int shutdown_num_processes_slow_;
 
 const char kShutdownMsFile[] = "chrome_shutdown_ms.txt";
 
-void RegisterPrefs(PrefServiceSimple* local_state) {
-  local_state->RegisterIntegerPref(prefs::kShutdownType, NOT_VALID);
-  local_state->RegisterIntegerPref(prefs::kShutdownNumProcesses, 0);
-  local_state->RegisterIntegerPref(prefs::kShutdownNumProcessesSlow, 0);
+void RegisterPrefs(PrefRegistrySimple* registry) {
+  registry->RegisterIntegerPref(prefs::kShutdownType, NOT_VALID);
+  registry->RegisterIntegerPref(prefs::kShutdownNumProcesses, 0);
+  registry->RegisterIntegerPref(prefs::kShutdownNumProcessesSlow, 0);
 }
 
 ShutdownType GetShutdownType() {
@@ -114,8 +114,8 @@ void OnShutdownStarting(ShutdownType type) {
   }
 }
 
-FilePath GetShutdownMsPath() {
-  FilePath shutdown_ms_file;
+base::FilePath GetShutdownMsPath() {
+  base::FilePath shutdown_ms_file;
   PathService::Get(chrome::DIR_USER_DATA, &shutdown_ms_file);
   return shutdown_ms_file.AppendASCII(kShutdownMsFile);
 }
@@ -248,24 +248,21 @@ void ShutdownPostThreadsStop(bool restart_last_session) {
     std::string shutdown_ms =
         base::Int64ToString(shutdown_delta.InMilliseconds());
     int len = static_cast<int>(shutdown_ms.length()) + 1;
-    FilePath shutdown_ms_file = GetShutdownMsPath();
+    base::FilePath shutdown_ms_file = GetShutdownMsPath();
     file_util::WriteFile(shutdown_ms_file, shutdown_ms.c_str(), len);
   }
 
 #if defined(OS_CHROMEOS)
-  browser::NotifyAndTerminate(false);
+  chrome::NotifyAndTerminate(false);
 #endif
-
-  ChromeURLDataManager::DeleteDataSources();
 }
 
-void ReadLastShutdownFile(
-    ShutdownType type,
-    int num_procs,
-    int num_procs_slow) {
+void ReadLastShutdownFile(ShutdownType type,
+                          int num_procs,
+                          int num_procs_slow) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
 
-  FilePath shutdown_ms_file = GetShutdownMsPath();
+  base::FilePath shutdown_ms_file = GetShutdownMsPath();
   std::string shutdown_ms_str;
   int64 shutdown_ms = 0;
   if (file_util::ReadFileToString(shutdown_ms_file, &shutdown_ms_str))
@@ -275,8 +272,8 @@ void ReadLastShutdownFile(
   if (type == NOT_VALID || shutdown_ms == 0 || num_procs == 0)
     return;
 
-  const char *time_fmt = "Shutdown.%s.time";
-  const char *time_per_fmt = "Shutdown.%s.time_per_process";
+  const char* time_fmt = "Shutdown.%s.time";
+  const char* time_per_fmt = "Shutdown.%s.time_per_process";
   std::string time;
   std::string time_per;
   if (type == WINDOW_CLOSE) {

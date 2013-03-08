@@ -3,8 +3,8 @@
 // found in the LICENSE file.
 
 #include "base/command_line.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
@@ -37,7 +37,8 @@ using content::WebContents;
 
 namespace {
 
-static const FilePath::CharType* kTestDir = FILE_PATH_LITERAL("popup_blocker");
+static const base::FilePath::CharType* kTestDir =
+    FILE_PATH_LITERAL("popup_blocker");
 
 class PopupBlockerBrowserTest : public InProcessBrowserTest {
  public:
@@ -46,8 +47,8 @@ class PopupBlockerBrowserTest : public InProcessBrowserTest {
   // Returns a url that shows one popup.
   GURL GetTestURL() {
     return ui_test_utils::GetTestUrl(
-      FilePath(kTestDir),
-      FilePath(FILE_PATH_LITERAL("popup-blocked-to-post-blank.html")));
+      base::FilePath(kTestDir),
+      base::FilePath(FILE_PATH_LITERAL("popup-blocked-to-post-blank.html")));
   }
 
   std::vector<WebContents*> GetBlockedContents(Browser* browser) {
@@ -69,7 +70,8 @@ class PopupBlockerBrowserTest : public InProcessBrowserTest {
     ui_test_utils::NavigateToURL(browser, url);
     observer.Wait();
 
-    ASSERT_EQ(2u, chrome::GetBrowserCount(browser->profile()));
+    ASSERT_EQ(2u, chrome::GetBrowserCount(browser->profile(),
+                                          browser->host_desktop_type()));
 
     std::vector<WebContents*> blocked_contents = GetBlockedContents(browser);
     ASSERT_TRUE(blocked_contents.empty());
@@ -82,7 +84,8 @@ class PopupBlockerBrowserTest : public InProcessBrowserTest {
     // If the popup blocker blocked the blank post, there should be only one
     // tab in only one browser window and the URL of current tab must be equal
     // to the original URL.
-    EXPECT_EQ(1u, chrome::GetBrowserCount(browser->profile()));
+    EXPECT_EQ(1u, chrome::GetBrowserCount(browser->profile(),
+                                          browser->host_desktop_type()));
     EXPECT_EQ(1, browser->tab_strip_model()->count());
     WebContents* web_contents =
         browser->tab_strip_model()->GetActiveWebContents();
@@ -113,8 +116,8 @@ IN_PROC_BROWSER_TEST_F(PopupBlockerBrowserTest,
 }
 
 IN_PROC_BROWSER_TEST_F(PopupBlockerBrowserTest, MultiplePopups) {
-  GURL url(ui_test_utils::GetTestUrl(
-      FilePath(kTestDir), FilePath(FILE_PATH_LITERAL("popup-many.html"))));
+  GURL url(ui_test_utils::GetTestUrl(base::FilePath(
+      kTestDir), base::FilePath(FILE_PATH_LITERAL("popup-many.html"))));
   ui_test_utils::NavigateToURL(browser(), url);
   std::vector<WebContents*> blocked_contents = GetBlockedContents(browser());
   ASSERT_EQ(2u, blocked_contents.size());
@@ -138,8 +141,8 @@ IN_PROC_BROWSER_TEST_F(PopupBlockerBrowserTest, PopupsLaunchWhenTabIsClosed) {
   CommandLine::ForCurrentProcess()->AppendSwitch(
       switches::kDisablePopupBlocking);
   GURL url = ui_test_utils::GetTestUrl(
-      FilePath(kTestDir),
-      FilePath(FILE_PATH_LITERAL("popup-on-unload.html")));
+      base::FilePath(kTestDir),
+      base::FilePath(FILE_PATH_LITERAL("popup-on-unload.html")));
   ui_test_utils::NavigateToURL(browser(), url);
 
   NavigateAndCheckPopupShown(browser(), GURL(chrome::kAboutBlankURL));

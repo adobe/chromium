@@ -7,7 +7,7 @@
 #include <string>
 #include <vector>
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/stringprintf.h"
 #include "chrome/test/automation/value_conversion_util.h"
 #include "chrome/test/webdriver/commands/response.h"
@@ -67,14 +67,14 @@ void ExtensionsCommand::ExecuteGet(Response* const response) {
       return;
     }
 
-    id_list.Append(Value::CreateStringValue(extension_id));
+    id_list.Append(new base::StringValue(extension_id));
   }
 
   response->SetValue(id_list.DeepCopy());
 }
 
 void ExtensionsCommand::ExecutePost(Response* const response) {
-  FilePath::StringType path_string;
+  base::FilePath::StringType path_string;
   if (!GetStringParameter("path", &path_string)) {
     response->SetError(new Error(kBadRequest, "'path' missing or invalid"));
     return;
@@ -82,12 +82,12 @@ void ExtensionsCommand::ExecutePost(Response* const response) {
 
   std::string extension_id;
   Error* error = session_->InstallExtension(
-      FilePath(path_string), &extension_id);
+      base::FilePath(path_string), &extension_id);
   if (error) {
     response->SetError(error);
     return;
   }
-  response->SetValue(Value::CreateStringValue(extension_id));
+  response->SetValue(new base::StringValue(extension_id));
 }
 
 ExtensionCommand::ExtensionCommand(

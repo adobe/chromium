@@ -14,7 +14,7 @@
 
 #if defined(OS_LINUX)
 #include "chrome/browser/ui/libgtk2ui/gtk2_ui.h"
-#include "ui/base/linux_ui.h"
+#include "ui/linux_ui/linux_ui.h"
 #else
 #endif
 
@@ -28,7 +28,7 @@ ChromeBrowserMainExtraPartsAura::ChromeBrowserMainExtraPartsAura() {
 ChromeBrowserMainExtraPartsAura::~ChromeBrowserMainExtraPartsAura() {
 }
 
-void ChromeBrowserMainExtraPartsAura::PreProfileInit() {
+void ChromeBrowserMainExtraPartsAura::ToolkitInitialized() {
 #if !defined(OS_CHROMEOS)
 #if defined(USE_ASH)
   active_desktop_monitor_.reset(new ActiveDesktopMonitor);

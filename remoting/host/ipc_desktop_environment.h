@@ -13,6 +13,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
+#include "remoting/host/curtain_mode.h"
 #include "remoting/host/desktop_environment.h"
 #include "remoting/host/desktop_session_connector.h"
 
@@ -21,7 +22,7 @@ class SingleThreadTaskRunner;
 }  // base
 
 namespace IPC {
-class ChannelProxy;
+class Sender;
 }  // namespace IPC
 
 namespace remoting {
@@ -37,9 +38,11 @@ class IpcDesktopEnvironment : public DesktopEnvironment {
   // restarted.
   IpcDesktopEnvironment(
       scoped_refptr<base::SingleThreadTaskRunner> caller_task_runner,
+      scoped_refptr<base::SingleThreadTaskRunner> io_task_runner,
       const std::string& client_jid,
       const base::Closure& disconnect_callback,
-      base::WeakPtr<DesktopSessionConnector> desktop_session_connector);
+      base::WeakPtr<DesktopSessionConnector> desktop_session_connector,
+      bool curtain_required);
   virtual ~IpcDesktopEnvironment();
 
   // DesktopEnvironment implementation.
@@ -48,7 +51,7 @@ class IpcDesktopEnvironment : public DesktopEnvironment {
   virtual scoped_ptr<EventExecutor> CreateEventExecutor(
       scoped_refptr<base::SingleThreadTaskRunner> input_task_runner,
       scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner) OVERRIDE;
-  virtual scoped_ptr<VideoFrameCapturer> CreateVideoCapturer(
+  virtual scoped_ptr<media::ScreenCapturer> CreateVideoCapturer(
       scoped_refptr<base::SingleThreadTaskRunner> capture_task_runner,
       scoped_refptr<base::SingleThreadTaskRunner> encode_task_runner) OVERRIDE;
 
@@ -74,15 +77,20 @@ class IpcDesktopEnvironment : public DesktopEnvironment {
 // Used to create IpcDesktopEnvironment objects integrating with the desktop via
 // a helper process and talking to that process via IPC.
 class IpcDesktopEnvironmentFactory
-    : public DesktopEnvironmentFactory,
+    : public CurtainMode,
+      public DesktopEnvironmentFactory,
       public DesktopSessionConnector {
  public:
   // Passes a reference to the IPC channel connected to the daemon process and
   // relevant task runners. |daemon_channel| must outlive this object.
   IpcDesktopEnvironmentFactory(
       scoped_refptr<base::SingleThreadTaskRunner> caller_task_runner,
-      IPC::ChannelProxy* daemon_channel);
+      scoped_refptr<base::SingleThreadTaskRunner> io_task_runner,
+      IPC::Sender* daemon_channel);
   virtual ~IpcDesktopEnvironmentFactory();
+
+  // CurtainMode implementation.
+  virtual void SetActivated(bool activated) OVERRIDE;
 
   // DesktopEnvironmentFactory implementation.
   virtual scoped_ptr<DesktopEnvironment> Create(
@@ -97,7 +105,7 @@ class IpcDesktopEnvironmentFactory
       scoped_refptr<DesktopSessionProxy> desktop_session_proxy) OVERRIDE;
   virtual void OnDesktopSessionAgentAttached(
       int terminal_id,
-      IPC::PlatformFileForTransit desktop_process,
+      base::ProcessHandle desktop_process,
       IPC::PlatformFileForTransit desktop_pipe) OVERRIDE;
   virtual void OnTerminalDisconnected(int terminal_id) OVERRIDE;
 
@@ -105,8 +113,14 @@ class IpcDesktopEnvironmentFactory
   // Task runner on which public methods of this class should be called.
   scoped_refptr<base::SingleThreadTaskRunner> caller_task_runner_;
 
+  // Task runner used for running background I/O.
+  scoped_refptr<base::SingleThreadTaskRunner> io_task_runner_;
+
+  // True if curtain mode is activated.
+  bool curtain_activated_;
+
   // IPC channel connected to the daemon process.
-  IPC::ChannelProxy* daemon_channel_;
+  IPC::Sender* daemon_channel_;
 
   // List of DesktopEnvironment instances we've told the daemon process about.
   typedef std::map<int, scoped_refptr<DesktopSessionProxy> >

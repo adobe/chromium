@@ -9,9 +9,12 @@
 #include "ui/app_list/app_list_model.h"
 #include "ui/app_list/app_list_view_delegate.h"
 #include "ui/app_list/pagination_model.h"
+#include "ui/app_list/signin_delegate.h"
 #include "ui/app_list/views/app_list_background.h"
 #include "ui/app_list/views/app_list_main_view.h"
 #include "ui/app_list/views/search_box_view.h"
+#include "ui/app_list/views/signin_view.h"
+#include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/insets.h"
 #include "ui/gfx/path.h"
 #include "ui/gfx/skia_util.h"
@@ -35,12 +38,18 @@ const int kArrowOffset = 10;
 AppListView::AppListView(AppListViewDelegate* delegate)
     : model_(new AppListModel),
       delegate_(delegate),
-      app_list_main_view_(NULL) {
+      app_list_main_view_(NULL),
+      signin_view_(NULL) {
   if (delegate_)
     delegate_->SetModel(model_.get());
+  if (GetSigninDelegate())
+    GetSigninDelegate()->AddObserver(this);
 }
 
 AppListView::~AppListView() {
+  if (GetSigninDelegate())
+    GetSigninDelegate()->RemoveObserver(this);
+
   // Models are going away, ensure their references are cleared.
   RemoveAllChildViews(true);
 }
@@ -50,20 +59,24 @@ void AppListView::InitAsBubble(
     PaginationModel* pagination_model,
     views::View* anchor,
     const gfx::Point& anchor_point,
-    views::BubbleBorder::ArrowLocation arrow_location) {
+    views::BubbleBorder::ArrowLocation arrow_location,
+    bool border_accepts_events) {
+
   app_list_main_view_ = new AppListMainView(delegate_.get(),
                                             model_.get(),
                                             pagination_model,
                                             anchor);
-  SetLayoutManager(new views::FillLayout());
-
+  AddChildView(app_list_main_view_);
 #if defined(USE_AURA)
   app_list_main_view_->SetPaintToLayer(true);
   app_list_main_view_->SetFillsBoundsOpaquely(false);
   app_list_main_view_->layer()->SetMasksToBounds(true);
 #endif
 
-  AddChildView(app_list_main_view_);
+  signin_view_ = new SigninView(
+      GetSigninDelegate(),
+      app_list_main_view_->GetPreferredSize().width());
+  AddChildView(signin_view_);
 
   set_anchor_view(anchor);
   set_anchor_point(anchor_point);
@@ -75,6 +88,7 @@ void AppListView::InitAsBubble(
   set_close_on_esc(false);
   set_anchor_insets(gfx::Insets(kArrowOffset, kArrowOffset,
                                 kArrowOffset, kArrowOffset));
+  set_border_accepts_events(border_accepts_events);
   set_shadow(views::BubbleBorder::BIG_SHADOW);
   views::BubbleDelegateView::CreateBubble(this);
   SetBubbleArrowLocation(arrow_location);
@@ -121,8 +135,19 @@ void AppListView::UpdateBounds() {
   SizeToContents();
 }
 
+gfx::Size AppListView::GetPreferredSize() {
+  return app_list_main_view_->GetPreferredSize();
+}
+
 views::View* AppListView::GetInitiallyFocusedView() {
   return app_list_main_view_->search_box_view()->search_box();
+}
+
+gfx::ImageSkia AppListView::GetWindowIcon() {
+  if (delegate_.get())
+    return delegate_->GetWindowIcon();
+
+  return gfx::ImageSkia();
 }
 
 bool AppListView::WidgetHasHitTestMask() const {
@@ -145,8 +170,24 @@ bool AppListView::AcceleratorPressed(const ui::Accelerator& accelerator) {
   return false;
 }
 
-void AppListView::OnWidgetClosing(views::Widget* widget) {
-  BubbleDelegateView::OnWidgetClosing(widget);
+void AppListView::Layout() {
+  if (!signin_view_) {
+    app_list_main_view_->SetBounds(0, 0, width(), height());
+    return;
+  }
+
+  if (GetSigninDelegate() && GetSigninDelegate()->NeedSignin()) {
+    signin_view_->SetBounds(0, 0, width(), height());
+    app_list_main_view_->SetBounds(width(), 0, width(), height());
+    return;
+  }
+
+  signin_view_->SetBounds(-width(), 0, width(), height());
+  app_list_main_view_->SetBounds(0, 0, width(), height());
+}
+
+void AppListView::OnWidgetDestroying(views::Widget* widget) {
+  BubbleDelegateView::OnWidgetDestroying(widget);
   if (delegate_.get() && widget == GetWidget())
     delegate_->ViewClosing();
 }
@@ -157,6 +198,26 @@ void AppListView::OnWidgetActivationChanged(views::Widget* widget,
   // functionality is not used.
   if (delegate_.get() && widget == GetWidget())
     delegate_->ViewActivationChanged(active);
+}
+
+void AppListView::OnWidgetVisibilityChanged(views::Widget* widget,
+                                            bool visible) {
+  BubbleDelegateView::OnWidgetVisibilityChanged(widget, visible);
+
+  if (widget != GetWidget())
+    return;
+
+  // Whether we need to signin or not may have changed since last time we were
+  // shown.
+  Layout();
+}
+
+void AppListView::OnSigninSuccess() {
+  Layout();
+}
+
+SigninDelegate* AppListView::GetSigninDelegate() {
+  return delegate_ ? delegate_->GetSigninDelegate() : NULL;
 }
 
 }  // namespace app_list

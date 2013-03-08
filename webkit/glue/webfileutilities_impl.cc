@@ -4,14 +4,14 @@
 
 #include "webkit/glue/webfileutilities_impl.h"
 
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "net/base/file_stream.h"
 #include "net/base/net_util.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebFileInfo.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebString.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebURL.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebFileInfo.h"
 #include "webkit/base/file_path_string_conversions.h"
 #include "webkit/glue/webkit_glue.h"
 
@@ -27,7 +27,7 @@ WebFileUtilitiesImpl::~WebFileUtilitiesImpl() {
 }
 
 bool WebFileUtilitiesImpl::fileExists(const WebString& path) {
-  FilePath file_path = webkit_base::WebStringToFilePath(path);
+  base::FilePath file_path = webkit_base::WebStringToFilePath(path);
   return file_util::PathExists(file_path);
 }
 
@@ -58,33 +58,33 @@ bool WebFileUtilitiesImpl::getFileInfo(const WebString& path,
 }
 
 WebString WebFileUtilitiesImpl::directoryName(const WebString& path) {
-  FilePath file_path(webkit_base::WebStringToFilePath(path));
+  base::FilePath file_path(webkit_base::WebStringToFilePath(path));
   return webkit_base::FilePathToWebString(file_path.DirName());
 }
 
 WebString WebFileUtilitiesImpl::pathByAppendingComponent(
     const WebString& webkit_path,
     const WebString& webkit_component) {
-  FilePath path(webkit_base::WebStringToFilePath(webkit_path));
-  FilePath component(webkit_base::WebStringToFilePath(webkit_component));
-  FilePath combined_path = path.Append(component);
+  base::FilePath path(webkit_base::WebStringToFilePath(webkit_path));
+  base::FilePath component(webkit_base::WebStringToFilePath(webkit_component));
+  base::FilePath combined_path = path.Append(component);
   return webkit_base::FilePathStringToWebString(combined_path.value());
 }
 
 bool WebFileUtilitiesImpl::makeAllDirectories(const WebString& path) {
   DCHECK(!sandbox_enabled_);
-  FilePath file_path = webkit_base::WebStringToFilePath(path);
+  base::FilePath file_path = webkit_base::WebStringToFilePath(path);
   return file_util::CreateDirectory(file_path);
 }
 
 WebString WebFileUtilitiesImpl::getAbsolutePath(const WebString& path) {
-  FilePath file_path(webkit_base::WebStringToFilePath(path));
+  base::FilePath file_path(webkit_base::WebStringToFilePath(path));
   file_util::AbsolutePath(&file_path);
   return webkit_base::FilePathStringToWebString(file_path.value());
 }
 
 bool WebFileUtilitiesImpl::isDirectory(const WebString& path) {
-  FilePath file_path(webkit_base::WebStringToFilePath(path));
+  base::FilePath file_path(webkit_base::WebStringToFilePath(path));
   return file_util::DirectoryExists(file_path);
 }
 

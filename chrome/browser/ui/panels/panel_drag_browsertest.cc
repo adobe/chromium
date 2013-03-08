@@ -27,12 +27,12 @@ class PanelDragBrowserTest : public BasePanelBrowserTest {
   virtual void SetUpOnMainThread() OVERRIDE {
     BasePanelBrowserTest::SetUpOnMainThread();
 
-    // All the tests here assume using mocked 800x600 screen area for the
+    // All the tests here assume using mocked 800x600 display area for the
     // primary monitor. Do the check now.
-    gfx::Rect primary_screen_area = PanelManager::GetInstance()->
-        display_settings_provider()->GetPrimaryScreenArea();
-    DCHECK(primary_screen_area.width() == 800);
-    DCHECK(primary_screen_area.height() == 600);
+    gfx::Rect primary_display_area = PanelManager::GetInstance()->
+        display_settings_provider()->GetPrimaryDisplayArea();
+    DCHECK(primary_display_area.width() == 800);
+    DCHECK(primary_display_area.height() == 600);
   }
 
   // Drag |panel| from its origin by the offset |delta|.
@@ -92,7 +92,7 @@ class PanelDragBrowserTest : public BasePanelBrowserTest {
 
   static gfx::Vector2d GetDragDeltaToRemainDetached(Panel* panel) {
     int distance =
-      panel->manager()->docked_collection()->display_area().bottom() -
+      panel->manager()->docked_collection()->work_area().bottom() -
       panel->GetBounds().bottom();
     return gfx::Vector2d(
         -5,
@@ -102,7 +102,7 @@ class PanelDragBrowserTest : public BasePanelBrowserTest {
 
   static gfx::Vector2d GetDragDeltaToAttach(Panel* panel) {
     int distance =
-        panel->manager()->docked_collection()->display_area().bottom() -
+        panel->manager()->docked_collection()->work_area().bottom() -
         panel->GetBounds().bottom();
     return gfx::Vector2d(
         -20,
@@ -768,7 +768,13 @@ IN_PROC_BROWSER_TEST_F(PanelDragBrowserTest, CloseDockedPanelOnDrag) {
   panel_manager->CloseAll();
 }
 
-IN_PROC_BROWSER_TEST_F(PanelDragBrowserTest, DragOneDetachedPanel) {
+// http://crbug.com/175760; several panel tests failing regularly on mac.
+#if defined(OS_MACOSX)
+#define MAYBE_DragOneDetachedPanel DISABLED_DragOneDetachedPanel
+#else
+#define MAYBE_DragOneDetachedPanel DragOneDetachedPanel
+#endif
+IN_PROC_BROWSER_TEST_F(PanelDragBrowserTest, MAYBE_DragOneDetachedPanel) {
   Panel* panel = CreateDetachedPanel("1", gfx::Rect(300, 200, 250, 200));
 
   // Test that the detached panel can be dragged almost anywhere except getting
@@ -1020,7 +1026,13 @@ IN_PROC_BROWSER_TEST_F(PanelDragBrowserTest, Detach) {
   panel_manager->CloseAll();
 }
 
-IN_PROC_BROWSER_TEST_F(PanelDragBrowserTest, DetachAndCancel) {
+// http://crbug.com/175760; several panel tests failing regularly on mac.
+#if defined(OS_MACOSX)
+#define MAYBE_DetachAndCancel DISABLED_DetachAndCancel
+#else
+#define MAYBE_DetachAndCancel DetachAndCancel
+#endif
+IN_PROC_BROWSER_TEST_F(PanelDragBrowserTest, MAYBE_DetachAndCancel) {
   PanelManager* panel_manager = PanelManager::GetInstance();
   DockedPanelCollection* docked_collection = panel_manager->docked_collection();
   DetachedPanelCollection* detached_collection =
@@ -1076,7 +1088,13 @@ IN_PROC_BROWSER_TEST_F(PanelDragBrowserTest, DetachAndCancel) {
   panel_manager->CloseAll();
 }
 
-IN_PROC_BROWSER_TEST_F(PanelDragBrowserTest, Attach) {
+// http://crbug.com/175760; several panel tests failing regularly on mac.
+#if defined(OS_MACOSX)
+#define MAYBE_Attach DISABLED_Attach
+#else
+#define MAYBE_Attach Attach
+#endif
+IN_PROC_BROWSER_TEST_F(PanelDragBrowserTest, MAYBE_Attach) {
   PanelManager* panel_manager = PanelManager::GetInstance();
   DockedPanelCollection* docked_collection = panel_manager->docked_collection();
   DetachedPanelCollection* detached_collection =
@@ -1130,13 +1148,19 @@ IN_PROC_BROWSER_TEST_F(PanelDragBrowserTest, Attach) {
   panel_new_bounds.set_x(
       docked_collection->StartingRightPosition() - panel_new_bounds.width());
   panel_new_bounds.set_y(
-      docked_collection->display_area().bottom() - panel_new_bounds.height());
+      docked_collection->work_area().bottom() - panel_new_bounds.height());
   EXPECT_EQ(panel_new_bounds, panel->GetBounds());
 
   panel_manager->CloseAll();
 }
 
-IN_PROC_BROWSER_TEST_F(PanelDragBrowserTest, AttachAndCancel) {
+// http://crbug.com/175760; several panel tests failing regularly on mac.
+#if defined(OS_MACOSX)
+#define MAYBE_AttachAndCancel DISABLED_AttachAndCancel
+#else
+#define MAYBE_AttachAndCancel AttachAndCancel
+#endif
+IN_PROC_BROWSER_TEST_F(PanelDragBrowserTest, MAYBE_AttachAndCancel) {
   PanelManager* panel_manager = PanelManager::GetInstance();
   DockedPanelCollection* docked_collection = panel_manager->docked_collection();
   DetachedPanelCollection* detached_collection =
@@ -1254,7 +1278,13 @@ IN_PROC_BROWSER_TEST_F(PanelDragBrowserTest, DetachAttachAndCancel) {
   panel_manager->CloseAll();
 }
 
-IN_PROC_BROWSER_TEST_F(PanelDragBrowserTest, DetachWithSqueeze) {
+// http://crbug.com/175760; several panel tests failing regularly on mac.
+#if defined(OS_MACOSX)
+#define MAYBE_DetachWithSqueeze DISABLED_DetachWithSqueeze
+#else
+#define MAYBE_DetachWithSqueeze DetachWithSqueeze
+#endif
+IN_PROC_BROWSER_TEST_F(PanelDragBrowserTest, MAYBE_DetachWithSqueeze) {
   PanelManager* panel_manager = PanelManager::GetInstance();
   DockedPanelCollection* docked_collection = panel_manager->docked_collection();
   DetachedPanelCollection* detached_collection =
@@ -1336,8 +1366,8 @@ IN_PROC_BROWSER_TEST_F(PanelDragBrowserTest, DetachWithSqueeze) {
   panel_manager->CloseAll();
 }
 
-// http://crbug.com/143247
-#if defined(OS_LINUX)
+// http://crbug.com/143247, http://crbug.com/175760
+#if defined(OS_LINUX) || defined(OS_MACOSX)
 #define MAYBE_AttachWithSqueeze DISABLED_AttachWithSqueeze
 #else
 #define MAYBE_AttachWithSqueeze AttachWithSqueeze
@@ -1456,11 +1486,18 @@ IN_PROC_BROWSER_TEST_F(PanelDragBrowserTest, MAYBE_AttachWithSqueeze) {
   panel_manager->CloseAll();
 }
 
-IN_PROC_BROWSER_TEST_F(PanelDragBrowserTest, DragDetachedPanelToTop) {
+// http://crbug.com/175760; several panel tests failing regularly on mac.
+#if defined(OS_MACOSX)
+#define MAYBE_DragDetachedPanelToTop DISABLED_DragDetachedPanelToTop
+#else
+#define MAYBE_DragDetachedPanelToTop DragDetachedPanelToTop
+#endif
+IN_PROC_BROWSER_TEST_F(PanelDragBrowserTest, MAYBE_DragDetachedPanelToTop) {
   // Setup the test areas to have top-aligned bar excluded from work area.
-  const gfx::Rect primary_screen_area(0, 0, 800, 600);
-  const gfx::Rect work_area(0, 10, 800, 590);
-  SetTestingAreas(primary_screen_area, work_area);
+  const gfx::Rect primary_display_area(0, 0, 800, 600);
+  const gfx::Rect primary_work_area(0, 10, 800, 590);
+  mock_display_settings_provider()->SetPrimaryDisplay(
+      primary_display_area, primary_work_area);
 
   PanelManager* panel_manager = PanelManager::GetInstance();
   Panel* panel = CreateDetachedPanel("1", gfx::Rect(300, 200, 250, 200));
@@ -1471,7 +1508,7 @@ IN_PROC_BROWSER_TEST_F(PanelDragBrowserTest, DragDetachedPanelToTop) {
   DragPanelToMouseLocation(panel, drag_to_location);
   EXPECT_EQ(PanelCollection::DETACHED, panel->collection()->type());
   EXPECT_EQ(drag_to_location.x(), panel->GetBounds().origin().x());
-  EXPECT_EQ(work_area.y(), panel->GetBounds().origin().y());
+  EXPECT_EQ(primary_work_area.y(), panel->GetBounds().origin().y());
 
   // Drag down the panel. Expect that the panel can be dragged without
   // constraint.
@@ -1481,6 +1518,60 @@ IN_PROC_BROWSER_TEST_F(PanelDragBrowserTest, DragDetachedPanelToTop) {
   EXPECT_EQ(drag_to_location, panel->GetBounds().origin());
 
   panel_manager->CloseAll();
+}
+
+IN_PROC_BROWSER_TEST_F(PanelDragBrowserTest,
+                       DragDockedPanelToSecondaryDisplay) {
+  // Setup 2 displays with secondary display on the right side of primary
+  // display.
+  mock_display_settings_provider()->SetPrimaryDisplay(
+      gfx::Rect(0, 0, 400, 600), gfx::Rect(0, 0, 400, 560));
+  gfx::Rect secondary_display_area(400, 100, 400, 500);
+  mock_display_settings_provider()->SetSecondaryDisplay(
+      secondary_display_area, secondary_display_area);
+
+  // Create a docked panel.
+  gfx::Size panel_size(100, 100);
+  Panel* panel = CreateDockedPanel("1", gfx::Rect(gfx::Point(), panel_size));
+  EXPECT_EQ(PanelCollection::DOCKED, panel->collection()->type());
+
+  // Drag the panel to the secondary display horizontally.
+  // Expected that the panel should become detached.
+  gfx::Point drag_to_location(secondary_display_area.x() + 100,
+                              panel->GetBounds().y());
+  DragPanelToMouseLocation(panel, drag_to_location);
+  EXPECT_EQ(PanelCollection::DETACHED, panel->collection()->type());
+  gfx::Rect expected_bounds(drag_to_location, panel_size);
+  EXPECT_EQ(expected_bounds, panel->GetBounds());
+
+  PanelManager::GetInstance()->CloseAll();
+}
+
+IN_PROC_BROWSER_TEST_F(PanelDragBrowserTest,
+                       DragDetachedPanelToSecondaryDisplay) {
+  // Setup 2 displays with secondary display at the bottom of primary display.
+  mock_display_settings_provider()->SetPrimaryDisplay(
+      gfx::Rect(0, 0, 800, 300), gfx::Rect(0, 0, 800, 260));
+  gfx::Rect secondary_display_area(100, 300, 700, 250);
+  mock_display_settings_provider()->SetSecondaryDisplay(
+      secondary_display_area, secondary_display_area);
+
+  // Create a detached panel on the primary display.
+  gfx::Rect initial_panel_bounds(300, 50, 100, 100);
+  Panel* panel = CreateDetachedPanel("1", initial_panel_bounds);
+  EXPECT_EQ(PanelCollection::DETACHED, panel->collection()->type());
+  EXPECT_EQ(initial_panel_bounds, panel->GetBounds());
+
+  // Drag down the panel to the secondary display vertically.
+  // Expected that the panel should remain detached.
+  gfx::Point drag_to_location(initial_panel_bounds.x(),
+                              secondary_display_area.y() + 100);
+  DragPanelToMouseLocation(panel, drag_to_location);
+  EXPECT_EQ(PanelCollection::DETACHED, panel->collection()->type());
+  gfx::Rect expected_bounds(drag_to_location, initial_panel_bounds.size());
+  EXPECT_EQ(expected_bounds, panel->GetBounds());
+
+  PanelManager::GetInstance()->CloseAll();
 }
 
 // TODO(jianli): to be enabled for other platforms when grouping and snapping
@@ -1598,8 +1689,8 @@ IN_PROC_BROWSER_TEST_F(PanelDragBrowserTest, GroupPanelAndPanelFromTop) {
       panel_manager->detached_collection();
 
   // Create two detached panels.
-  Panel* panel1 = CreateDetachedPanel("1", gfx::Rect(300, 200, 200, 100));
-  Panel* panel2 = CreateDetachedPanel("2", gfx::Rect(100, 100, 150, 150));
+  Panel* panel1 = CreateDetachedPanel("1", gfx::Rect(300, 300, 200, 100));
+  Panel* panel2 = CreateDetachedPanel("2", gfx::Rect(100, 200, 150, 150));
   ASSERT_EQ(2, detached_collection->num_panels());
   ASSERT_EQ(0, panel_manager->num_stacks());
   EXPECT_EQ(PanelCollection::DETACHED, panel1->collection()->type());
@@ -2313,7 +2404,7 @@ IN_PROC_BROWSER_TEST_F(PanelDragBrowserTest,
 
   // Create 4 stacked panels.
   StackedPanelCollection* stack = panel_manager->CreateStack();
-  gfx::Rect panel1_initial_bounds = gfx::Rect(100, 50, 200, 150);
+  gfx::Rect panel1_initial_bounds = gfx::Rect(100, 120, 200, 100);
   Panel* panel1 = CreateStackedPanel("1", panel1_initial_bounds, stack);
   gfx::Rect panel2_initial_bounds = gfx::Rect(0, 0, 150, 100);
   Panel* panel2 = CreateStackedPanel("2", panel2_initial_bounds, stack);
@@ -2458,7 +2549,7 @@ IN_PROC_BROWSER_TEST_F(PanelDragBrowserTest, UngroupAndAttach) {
   EXPECT_EQ(panel1_expected_bounds, panel1->GetBounds());
   panel2_expected_bounds.set_x(docked_collection->StartingRightPosition() -
       panel2_expected_bounds.width());
-  panel2_expected_bounds.set_y(docked_collection->display_area().bottom() -
+  panel2_expected_bounds.set_y(docked_collection->work_area().bottom() -
       panel2_expected_bounds.height());
   EXPECT_EQ(panel2_expected_bounds, panel2->GetBounds());
 
@@ -2839,6 +2930,136 @@ IN_PROC_BROWSER_TEST_F(PanelDragBrowserTest, DragTopStackedPanel) {
   EXPECT_EQ(panel2_expected_bounds, panel2->GetBounds());
   panel3_expected_bounds.Offset(drag_delta);
   EXPECT_EQ(panel3_expected_bounds, panel3->GetBounds());
+
+  panel_manager->CloseAll();
+}
+
+IN_PROC_BROWSER_TEST_F(PanelDragBrowserTest, SnapDetachedPanelToScreenEdge) {
+  PanelManager* panel_manager = PanelManager::GetInstance();
+  int small_distance =
+      PanelDragController::GetSnapPanelToScreenEdgeThresholdForTesting() / 2;
+
+  // Setup 2 displays with secondary display on the right side of primary
+  // display.
+  gfx::Rect primary_display_area(0, 0, 400, 600);
+  gfx::Rect primary_work_area(0, 0, 400, 560);
+  mock_display_settings_provider()->SetPrimaryDisplay(
+      primary_display_area, primary_work_area);
+  gfx::Rect secondary_display_area(400, 100, 400, 500);
+  gfx::Rect secondary_work_area(400, 140, 400, 460);
+  mock_display_settings_provider()->SetSecondaryDisplay(
+      secondary_display_area, secondary_work_area);
+
+  // Create one detached panel on the primary display.
+  gfx::Rect initial_bounds = gfx::Rect(100, 100, 200, 150);
+  Panel* panel = CreateDetachedPanel("1", initial_bounds);
+  gfx::Rect expected_bounds(initial_bounds);
+  EXPECT_EQ(expected_bounds, panel->GetBounds());
+
+  // Drag the panel close to the right edge of the primary display.
+  // Expect that the panel should snap to the right edge.
+  gfx::Point drag_to_location(
+      primary_work_area.right() - small_distance - panel->GetBounds().width(),
+      panel->GetBounds().y());
+  DragPanelToMouseLocation(panel, drag_to_location);
+  expected_bounds.set_x(primary_work_area.right() - panel->GetBounds().width());
+  EXPECT_EQ(expected_bounds, panel->GetBounds());
+
+  // Drag the panel close to the top-left corner of the primary display.
+  // Expect that the panel should snap to the top-left corner.
+  drag_to_location = gfx::Point(
+      primary_work_area.x() + small_distance,
+      primary_work_area.y() - small_distance);
+  DragPanelToMouseLocation(panel, drag_to_location);
+  expected_bounds.set_origin(primary_work_area.origin());
+  EXPECT_EQ(expected_bounds, panel->GetBounds());
+
+  // Drag the panel close to the top-right corner of the secondary display.
+  // Expect that the panel should snap to the top-right corner.
+  drag_to_location = gfx::Point(
+      secondary_work_area.right() - small_distance - panel->GetBounds().width(),
+      secondary_work_area.y() + small_distance);
+  DragPanelToMouseLocation(panel, drag_to_location);
+  expected_bounds.set_x(
+      secondary_work_area.right() - panel->GetBounds().width());
+  expected_bounds.set_y(secondary_work_area.y());
+  EXPECT_EQ(expected_bounds, panel->GetBounds());
+
+  panel_manager->CloseAll();
+}
+
+IN_PROC_BROWSER_TEST_F(PanelDragBrowserTest, SnapStackedPanelToScreenEdge) {
+  PanelManager* panel_manager = PanelManager::GetInstance();
+  int small_distance =
+      PanelDragController::GetSnapPanelToScreenEdgeThresholdForTesting() / 2;
+
+  // Setup 2 displays with secondary display on the right side of primary
+  // display.
+  gfx::Rect primary_display_area(0, 0, 400, 600);
+  gfx::Rect primary_work_area(0, 0, 400, 560);
+  mock_display_settings_provider()->SetPrimaryDisplay(
+      primary_display_area, primary_work_area);
+  gfx::Rect secondary_display_area(400, 100, 400, 500);
+  gfx::Rect secondary_work_area(400, 140, 400, 460);
+  mock_display_settings_provider()->SetSecondaryDisplay(
+      secondary_display_area, secondary_work_area);
+
+  // Create 2 stacked panels on the primary display.
+  StackedPanelCollection* stack = panel_manager->CreateStack();
+  gfx::Rect panel1_initial_bounds = gfx::Rect(300, 100, 200, 150);
+  Panel* panel1 = CreateStackedPanel("1", panel1_initial_bounds, stack);
+  gfx::Rect panel2_initial_bounds = gfx::Rect(0, 0, 150, 100);
+  Panel* panel2 = CreateStackedPanel("2", panel2_initial_bounds, stack);
+
+  gfx::Rect panel1_expected_bounds(panel1_initial_bounds);
+  EXPECT_EQ(panel1_expected_bounds, panel1->GetBounds());
+  gfx::Rect panel2_expected_bounds = GetStackedAtBottomPanelBounds(
+      panel2_initial_bounds, panel1_expected_bounds);
+  EXPECT_EQ(panel2_expected_bounds, panel2->GetBounds());
+
+  // Drag the stack close to the left edge of the primary display.
+  // Expect that the stack should snap to the left edge.
+  gfx::Point drag_to_location(
+      primary_work_area.x() + small_distance, panel1->GetBounds().y());
+  DragPanelToMouseLocation(panel1, drag_to_location);
+
+  panel1_expected_bounds.set_x(primary_work_area.x());
+  EXPECT_EQ(panel1_expected_bounds, panel1->GetBounds());
+  panel2_expected_bounds.set_x(primary_work_area.x());
+  EXPECT_EQ(panel2_expected_bounds, panel2->GetBounds());
+
+  // Drag the stack close to the bottom-right corner of the primary display.
+  // Expect that the stack should snap to the bottom-right corner.
+  drag_to_location = gfx::Point(
+      primary_work_area.right() + small_distance - panel1->GetBounds().width(),
+      primary_work_area.bottom() - small_distance -
+          panel1->GetBounds().height() - panel2->GetBounds().height());
+  DragPanelToMouseLocation(panel1, drag_to_location);
+
+  int expected_x = primary_work_area.right() - panel1->GetBounds().width();
+  panel1_expected_bounds.set_x(expected_x);
+  panel1_expected_bounds.set_y(primary_work_area.bottom() -
+      panel1->GetBounds().height() - panel2->GetBounds().height());
+  EXPECT_EQ(panel1_expected_bounds, panel1->GetBounds());
+  panel2_expected_bounds.set_x(expected_x);
+  panel2_expected_bounds.set_y(primary_work_area.bottom() -
+      panel2->GetBounds().height());
+  EXPECT_EQ(panel2_expected_bounds, panel2->GetBounds());
+
+  // Drag the stack close to the top-left corner of the secondary display.
+  // Expect that the stack should snap to the top-left corner.
+  drag_to_location = gfx::Point(
+      secondary_work_area.x() + small_distance,
+      secondary_work_area.y() + small_distance);
+  DragPanelToMouseLocation(panel1, drag_to_location);
+
+  expected_x = secondary_work_area.x();
+  panel1_expected_bounds.set_x(expected_x);
+  panel1_expected_bounds.set_y(secondary_work_area.y());
+  EXPECT_EQ(panel1_expected_bounds, panel1->GetBounds());
+  panel2_expected_bounds.set_x(expected_x);
+  panel2_expected_bounds.set_y(panel1_expected_bounds.bottom());
+  EXPECT_EQ(panel2_expected_bounds, panel2->GetBounds());
 
   panel_manager->CloseAll();
 }

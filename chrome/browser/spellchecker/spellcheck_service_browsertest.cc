@@ -43,9 +43,9 @@ class SpellcheckServiceBrowserTest : public InProcessBrowserTest {
 // run this test on Mac because Mac does not use hunspell by default.
 IN_PROC_BROWSER_TEST_F(SpellcheckServiceBrowserTest, DeleteCorruptedBDICT) {
   // Write the corrupted BDICT data to create a corrupted BDICT file.
-  FilePath dict_dir;
+  base::FilePath dict_dir;
   ASSERT_TRUE(PathService::Get(chrome::DIR_APP_DICTIONARIES, &dict_dir));
-  FilePath bdict_path =
+  base::FilePath bdict_path =
       chrome::spellcheck_common::GetVersionedFileName("en-US", dict_dir);
 
   size_t actual = file_util::WriteFile(bdict_path,
@@ -67,8 +67,10 @@ IN_PROC_BROWSER_TEST_F(SpellcheckServiceBrowserTest, DeleteCorruptedBDICT) {
   // Check the received event. Also we check if Chrome has successfully deleted
   // the corrupted dictionary. We delete the corrupted dictionary to avoid
   // leaking it when this test fails.
-  int type = SpellcheckService::WaitStatusEvent();
-  EXPECT_EQ(SpellcheckService::BDICT_CORRUPTED, type);
+  content::RunAllPendingInMessageLoop(content::BrowserThread::FILE);
+  content::RunAllPendingInMessageLoop(content::BrowserThread::UI);
+  EXPECT_EQ(SpellcheckService::BDICT_CORRUPTED,
+            SpellcheckService::GetStatusEvent());
   if (file_util::PathExists(bdict_path)) {
     ADD_FAILURE();
     EXPECT_TRUE(file_util::Delete(bdict_path, true));

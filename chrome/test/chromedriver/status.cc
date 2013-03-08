@@ -4,6 +4,8 @@
 
 #include "chrome/test/chromedriver/status.h"
 
+#include "base/stringprintf.h"
+
 namespace {
 
 // Returns the string equivalent of the given |ErrorCode|.
@@ -17,18 +19,32 @@ const char* DefaultMessageForStatusCode(StatusCode code) {
       return "unknown command";
     case kStaleElementReference:
       return "stale element reference";
+    case kElementNotVisible:
+      return "element not visible";
+    case kInvalidElementState:
+      return "invalid element state";
     case kUnknownError:
       return "unknown error";
     case kXPathLookupError:
       return "xpath lookup error";
+    case kNoSuchWindow:
+      return "no such window";
+    case kUnexpectedAlertOpen:
+      return "unexpected alert open";
+    case kNoAlertOpen:
+      return "no alert open";
     case kInvalidSelector:
       return "invalid selector";
     case kSessionNotCreatedException:
       return "session not created exception";
     case kNoSuchSession:
       return "no such session";
+    case kNoSuchFrame:
+      return "no such frame";
     case kChromeNotReachable:
       return "chrome not reachable";
+    case kDisconnected:
+      return "disconnected";
     default:
       return "<unknown>";
   }
@@ -58,6 +74,10 @@ Status::Status(StatusCode code,
 }
 
 Status::~Status() {}
+
+void Status::AddDetails(const std::string& details) {
+  msg_ += base::StringPrintf("\n  (%s)", details.c_str());
+}
 
 bool Status::IsOk() const {
   return code_ == kOk;

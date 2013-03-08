@@ -9,38 +9,35 @@
 #include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
 #include "content/common/content_export.h"
-#include "third_party/WebKit/Source/Platform/chromium/public/WebMediaStreamDescriptor.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebMediaStream.h"
 
 namespace webrtc {
 class MediaStreamInterface;
-class LocalMediaStreamInterface;
 }  // namespace webrtc
 
 namespace content {
 
 class CONTENT_EXPORT MediaStreamExtraData
-    : NON_EXPORTED_BASE(public WebKit::WebMediaStreamDescriptor::ExtraData) {
+    : NON_EXPORTED_BASE(public WebKit::WebMediaStream::ExtraData) {
  public:
   typedef base::Callback<void(const std::string& label)> StreamStopCallback;
 
-  explicit MediaStreamExtraData(webrtc::MediaStreamInterface* remote_stream);
-  explicit MediaStreamExtraData(
-      webrtc::LocalMediaStreamInterface* local_stream);
+  MediaStreamExtraData(webrtc::MediaStreamInterface* stream, bool is_local);
   virtual ~MediaStreamExtraData();
+
+  bool is_local() const { return is_local_; }
 
   void SetLocalStreamStopCallback(
       const StreamStopCallback& stop_callback);
   void OnLocalStreamStop();
 
-  webrtc::MediaStreamInterface* remote_stream() { return remote_stream_.get(); }
-  webrtc::LocalMediaStreamInterface* local_stream() {
-    return local_stream_.get();
+  const scoped_refptr<webrtc::MediaStreamInterface>& stream() const {
+    return stream_;
   }
-
  private:
   StreamStopCallback stream_stop_callback_;
-  scoped_refptr<webrtc::MediaStreamInterface> remote_stream_;
-  scoped_refptr<webrtc::LocalMediaStreamInterface> local_stream_;
+  scoped_refptr<webrtc::MediaStreamInterface> stream_;
+  bool is_local_;
 
   DISALLOW_COPY_AND_ASSIGN(MediaStreamExtraData);
 };

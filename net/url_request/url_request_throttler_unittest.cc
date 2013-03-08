@@ -29,6 +29,7 @@ namespace net {
 namespace {
 
 using base::Histogram;
+using base::HistogramBase;
 using base::HistogramSamples;
 using base::StatisticsRecorder;
 
@@ -64,11 +65,11 @@ class MockURLRequestThrottlerEntry : public URLRequestThrottlerEntry {
     backoff_policy_.num_errors_to_ignore = 0;
   }
 
-  const BackoffEntry* GetBackoffEntry() const {
+  virtual const BackoffEntry* GetBackoffEntry() const OVERRIDE {
     return &mock_backoff_entry_;
   }
 
-  BackoffEntry* GetBackoffEntry() {
+  virtual BackoffEntry* GetBackoffEntry() OVERRIDE {
     return &mock_backoff_entry_;
   }
 
@@ -211,7 +212,7 @@ void URLRequestThrottlerEntryTest::SetUp() {
     // Must retrieve original samples for each histogram for comparison
     // as other tests may affect them.
     const char* name = kHistogramNames[i];
-    Histogram* histogram = StatisticsRecorder::FindHistogram(name);
+    HistogramBase* histogram = StatisticsRecorder::FindHistogram(name);
     if (histogram) {
       original_samples_[name] = histogram->SnapshotSamples().release();
     } else {
@@ -230,9 +231,9 @@ void URLRequestThrottlerEntryTest::CalculateHistogramDeltas() {
     const char* name = kHistogramNames[i];
     HistogramSamples* original = original_samples_[name];
 
-    Histogram* histogram = StatisticsRecorder::FindHistogram(name);
+    HistogramBase* histogram = StatisticsRecorder::FindHistogram(name);
     if (histogram) {
-      ASSERT_EQ(Histogram::kUmaTargetedHistogramFlag, histogram->flags());
+      ASSERT_EQ(HistogramBase::kUmaTargetedHistogramFlag, histogram->flags());
 
       scoped_ptr<HistogramSamples> samples(histogram->SnapshotSamples());
       if (original)

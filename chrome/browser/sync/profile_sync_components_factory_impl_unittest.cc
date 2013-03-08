@@ -5,7 +5,7 @@
 #include <vector>
 
 #include "base/command_line.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "chrome/browser/sync/glue/data_type_controller.h"
@@ -26,7 +26,7 @@ class ProfileSyncComponentsFactoryImplTest : public testing::Test {
 
   virtual void SetUp() {
     profile_.reset(new TestingProfile());
-    FilePath program_path(FILE_PATH_LITERAL("chrome.exe"));
+    base::FilePath program_path(FILE_PATH_LITERAL("chrome.exe"));
     command_line_.reset(new CommandLine(program_path));
   }
 
@@ -39,12 +39,16 @@ class ProfileSyncComponentsFactoryImplTest : public testing::Test {
     datatypes.push_back(syncer::AUTOFILL);
     datatypes.push_back(syncer::AUTOFILL_PROFILE);
     datatypes.push_back(syncer::BOOKMARKS);
+#if defined(OS_LINUX) || defined(OS_WIN) || defined(OS_CHROMEOS)
+    datatypes.push_back(syncer::DICTIONARY);
+#endif
     datatypes.push_back(syncer::EXTENSIONS);
     datatypes.push_back(syncer::EXTENSION_SETTINGS);
     datatypes.push_back(syncer::PASSWORDS);
     datatypes.push_back(syncer::PREFERENCES);
     datatypes.push_back(syncer::SEARCH_ENGINES);
     datatypes.push_back(syncer::SESSIONS);
+    datatypes.push_back(syncer::PROXY_TABS);
     datatypes.push_back(syncer::THEMES);
     datatypes.push_back(syncer::TYPED_URLS);
     return datatypes;

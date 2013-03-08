@@ -12,11 +12,14 @@
 #include "base/basictypes.h"
 #include "base/bind.h"
 #include "base/command_line.h"
+#include "base/prefs/pref_service.h"
 #include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/prefs/pref_service.h"
+#include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/spellchecker/spellcheck_factory.h"
+#include "chrome/browser/spellchecker/spellcheck_service.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
@@ -40,51 +43,60 @@ LanguageOptionsHandlerCommon::~LanguageOptionsHandlerCommon() {
 void LanguageOptionsHandlerCommon::GetLocalizedValues(
     DictionaryValue* localized_strings) {
   DCHECK(localized_strings);
-  string16 product_name = GetProductName();
-  localized_strings->SetString("add_button",
-      l10n_util::GetStringUTF16(IDS_OPTIONS_SETTINGS_LANGUAGES_ADD_BUTTON));
-  localized_strings->SetString("languages",
-      l10n_util::GetStringUTF16(IDS_OPTIONS_SETTINGS_LANGUAGES_LANGUAGES));
-  localized_strings->SetString("add_language_instructions",
-      l10n_util::GetStringUTF16(
-          IDS_OPTIONS_SETTINGS_LANGUAGES_ADD_LANGUAGE_INSTRUCTIONS));
-  localized_strings->SetString("cannot_be_displayed_in_this_language",
-      l10n_util::GetStringFUTF16(
-          IDS_OPTIONS_SETTINGS_LANGUAGES_CANNOT_BE_DISPLAYED_IN_THIS_LANGUAGE,
-          product_name));
-  localized_strings->SetString("is_displayed_in_this_language",
-      l10n_util::GetStringFUTF16(
-          IDS_OPTIONS_SETTINGS_LANGUAGES_IS_DISPLAYED_IN_THIS_LANGUAGE,
-          product_name));
-  localized_strings->SetString("display_in_this_language",
-      l10n_util::GetStringFUTF16(
-          IDS_OPTIONS_SETTINGS_LANGUAGES_DISPLAY_IN_THIS_LANGUAGE,
-          product_name));
-  localized_strings->SetString("restart_required",
-          l10n_util::GetStringUTF16(IDS_OPTIONS_RELAUNCH_REQUIRED));
+  static OptionsStringResource resources[] = {
+    { "add_button", IDS_OPTIONS_SETTINGS_LANGUAGES_ADD_BUTTON },
+    { "languages", IDS_OPTIONS_SETTINGS_LANGUAGES_LANGUAGES },
+    { "add_language_instructions",
+      IDS_OPTIONS_SETTINGS_LANGUAGES_ADD_LANGUAGE_INSTRUCTIONS },
+    { "cannot_be_displayed_in_this_language",
+      IDS_OPTIONS_SETTINGS_LANGUAGES_CANNOT_BE_DISPLAYED_IN_THIS_LANGUAGE,
+      IDS_PRODUCT_NAME },
+    { "is_displayed_in_this_language",
+      IDS_OPTIONS_SETTINGS_LANGUAGES_IS_DISPLAYED_IN_THIS_LANGUAGE,
+      IDS_PRODUCT_NAME },
+    { "display_in_this_language",
+      IDS_OPTIONS_SETTINGS_LANGUAGES_DISPLAY_IN_THIS_LANGUAGE,
+      IDS_PRODUCT_NAME },
+    { "restart_required", IDS_OPTIONS_RELAUNCH_REQUIRED },
   // OS X uses the OS native spellchecker so no need for these strings.
 #if !defined(OS_MACOSX)
-  localized_strings->SetString("use_this_for_spell_checking",
-      l10n_util::GetStringUTF16(
-          IDS_OPTIONS_SETTINGS_USE_THIS_FOR_SPELL_CHECKING));
-  localized_strings->SetString("cannot_be_used_for_spell_checking",
-      l10n_util::GetStringUTF16(
-          IDS_OPTIONS_SETTINGS_CANNOT_BE_USED_FOR_SPELL_CHECKING));
-  localized_strings->SetString("is_used_for_spell_checking",
-      l10n_util::GetStringUTF16(
-          IDS_OPTIONS_SETTINGS_IS_USED_FOR_SPELL_CHECKING));
-  localized_strings->SetString("enable_spell_check",
-          l10n_util::GetStringUTF16(IDS_OPTIONS_ENABLE_SPELLCHECK));
-  localized_strings->SetString("enable_auto_spell_correction",
-          l10n_util::GetStringUTF16(IDS_OPTIONS_ENABLE_AUTO_SPELL_CORRECTION));
+    { "use_this_for_spell_checking",
+      IDS_OPTIONS_SETTINGS_USE_THIS_FOR_SPELL_CHECKING },
+    { "cannot_be_used_for_spell_checking",
+      IDS_OPTIONS_SETTINGS_CANNOT_BE_USED_FOR_SPELL_CHECKING },
+    { "is_used_for_spell_checking",
+      IDS_OPTIONS_SETTINGS_IS_USED_FOR_SPELL_CHECKING },
+    { "enable_spell_check", IDS_OPTIONS_ENABLE_SPELLCHECK },
+    { "enable_auto_spell_correction",
+      IDS_OPTIONS_ENABLE_AUTO_SPELL_CORRECTION },
+    { "downloading_dictionary", IDS_OPTIONS_DICTIONARY_DOWNLOADING },
+    { "download_failed", IDS_OPTIONS_DICTIONARY_DOWNLOAD_FAILED },
+    { "retry_button", IDS_OPTIONS_DICTIONARY_DOWNLOAD_RETRY },
+    { "download_fail_help", IDS_OPTIONS_DICTIONARY_DOWNLOAD_FAIL_HELP },
 #endif  // !OS_MACOSX
-  localized_strings->SetString("add_language_title",
-          l10n_util::GetStringUTF16(IDS_OPTIONS_LANGUAGES_ADD_TITLE));
-  localized_strings->SetString("add_language_select_label",
-          l10n_util::GetStringUTF16(IDS_OPTIONS_LANGUAGES_ADD_SELECT_LABEL));
-  localized_strings->SetString("restart_button",
-      l10n_util::GetStringUTF16(
-          IDS_OPTIONS_SETTINGS_LANGUAGES_RELAUNCH_BUTTON));
+    { "add_language_title", IDS_OPTIONS_LANGUAGES_ADD_TITLE },
+    { "add_language_select_label", IDS_OPTIONS_LANGUAGES_ADD_SELECT_LABEL },
+    { "restart_button", IDS_OPTIONS_SETTINGS_LANGUAGES_RELAUNCH_BUTTON }
+  };
+
+#if defined(ENABLE_SETTINGS_APP)
+  static OptionsStringResource app_resources[] = {
+    { "cannot_be_displayed_in_this_language",
+      IDS_OPTIONS_SETTINGS_LANGUAGES_CANNOT_BE_DISPLAYED_IN_THIS_LANGUAGE,
+      IDS_SETTINGS_APP_LAUNCHER_PRODUCT_NAME },
+    { "is_displayed_in_this_language",
+      IDS_OPTIONS_SETTINGS_LANGUAGES_IS_DISPLAYED_IN_THIS_LANGUAGE,
+      IDS_SETTINGS_APP_LAUNCHER_PRODUCT_NAME },
+    { "display_in_this_language",
+      IDS_OPTIONS_SETTINGS_LANGUAGES_DISPLAY_IN_THIS_LANGUAGE,
+      IDS_SETTINGS_APP_LAUNCHER_PRODUCT_NAME },
+  };
+  DictionaryValue* app_values = NULL;
+  CHECK(localized_strings->GetDictionary(kSettingsAppKey, &app_values));
+  RegisterStrings(app_values, app_resources, arraysize(app_resources));
+#endif
+
+  RegisterStrings(localized_strings, resources, arraysize(resources));
 
   // The following are resources, rather than local strings.
   std::string application_locale = g_browser_process->GetApplicationLocale();
@@ -104,6 +116,12 @@ void LanguageOptionsHandlerCommon::GetLocalizedValues(
       enable_spelling_auto_correct);
 }
 
+void LanguageOptionsHandlerCommon::Uninitialize() {
+  if (hunspell_dictionary_.get())
+    hunspell_dictionary_->RemoveObserver(this);
+  hunspell_dictionary_.reset();
+}
+
 void LanguageOptionsHandlerCommon::RegisterMessages() {
   web_ui()->RegisterMessageCallback("languageOptionsOpen",
       base::Bind(
@@ -117,15 +135,39 @@ void LanguageOptionsHandlerCommon::RegisterMessages() {
       base::Bind(
           &LanguageOptionsHandlerCommon::UiLanguageChangeCallback,
           base::Unretained(this)));
+  web_ui()->RegisterMessageCallback("retryDictionaryDownload",
+      base::Bind(
+          &LanguageOptionsHandlerCommon::RetrySpellcheckDictionaryDownload,
+          base::Unretained(this)));
+}
+
+void LanguageOptionsHandlerCommon::OnHunspellDictionaryInitialized() {
+}
+
+void LanguageOptionsHandlerCommon::OnHunspellDictionaryDownloadBegin() {
+  web_ui()->CallJavascriptFunction(
+      "options.LanguageOptions.onDictionaryDownloadBegin",
+      StringValue(GetHunspellDictionary()->GetLanguage()));
+}
+
+void LanguageOptionsHandlerCommon::OnHunspellDictionaryDownloadSuccess() {
+  web_ui()->CallJavascriptFunction(
+      "options.LanguageOptions.onDictionaryDownloadSuccess",
+      StringValue(GetHunspellDictionary()->GetLanguage()));
+}
+
+void LanguageOptionsHandlerCommon::OnHunspellDictionaryDownloadFailure() {
+  web_ui()->CallJavascriptFunction(
+      "options.LanguageOptions.onDictionaryDownloadFailure",
+      StringValue(GetHunspellDictionary()->GetLanguage()));
 }
 
 DictionaryValue* LanguageOptionsHandlerCommon::GetUILanguageCodeSet() {
   DictionaryValue* dictionary = new DictionaryValue();
   const std::vector<std::string>& available_locales =
       l10n_util::GetAvailableLocales();
-  for (size_t i = 0; i < available_locales.size(); ++i) {
+  for (size_t i = 0; i < available_locales.size(); ++i)
     dictionary->SetBoolean(available_locales[i], true);
-  }
   return dictionary;
 }
 
@@ -142,6 +184,13 @@ DictionaryValue* LanguageOptionsHandlerCommon::GetSpellCheckLanguageCodeSet() {
 void LanguageOptionsHandlerCommon::LanguageOptionsOpenCallback(
     const ListValue* args) {
   content::RecordAction(UserMetricsAction("LanguageOptions_Open"));
+  RefreshHunspellDictionary();
+  if (hunspell_dictionary_->IsDownloadInProgress())
+    OnHunspellDictionaryDownloadBegin();
+  else if (hunspell_dictionary_->IsDownloadFailure())
+    OnHunspellDictionaryDownloadFailure();
+  else
+    OnHunspellDictionaryDownloadSuccess();
 }
 
 void LanguageOptionsHandlerCommon::UiLanguageChangeCallback(
@@ -164,6 +213,29 @@ void LanguageOptionsHandlerCommon::SpellCheckLanguageChangeCallback(
   const std::string action = base::StringPrintf(
       "LanguageOptions_SpellCheckLanguageChange_%s", language_code.c_str());
   content::RecordComputedAction(action);
+  RefreshHunspellDictionary();
+}
+
+void LanguageOptionsHandlerCommon::RetrySpellcheckDictionaryDownload(
+    const ListValue* args) {
+  GetHunspellDictionary()->RetryDownloadDictionary(
+      Profile::FromWebUI(web_ui())->GetRequestContext());
+}
+
+void LanguageOptionsHandlerCommon::RefreshHunspellDictionary() {
+  if (hunspell_dictionary_.get())
+    hunspell_dictionary_->RemoveObserver(this);
+  hunspell_dictionary_.reset();
+  hunspell_dictionary_ = SpellcheckServiceFactory::GetForProfile(
+      Profile::FromWebUI(web_ui()))->GetHunspellDictionary()->AsWeakPtr();
+  hunspell_dictionary_->AddObserver(this);
+}
+
+base::WeakPtr<SpellcheckHunspellDictionary>&
+    LanguageOptionsHandlerCommon::GetHunspellDictionary() {
+  if (!hunspell_dictionary_.get())
+    RefreshHunspellDictionary();
+  return hunspell_dictionary_;
 }
 
 }  // namespace options

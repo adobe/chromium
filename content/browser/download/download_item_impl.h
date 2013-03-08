@@ -9,7 +9,7 @@
 
 #include "base/basictypes.h"
 #include "base/callback_forward.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
@@ -53,14 +53,17 @@ class CONTENT_EXPORT DownloadItemImpl
   // |bound_net_log| is constructed externally for our use.
   DownloadItemImpl(DownloadItemImplDelegate* delegate,
                    DownloadId download_id,
-                   const FilePath& path,
-                   const GURL& url,
+                   const base::FilePath& current_path,
+                   const base::FilePath& target_path,
+                   const std::vector<GURL>& url_chain,
                    const GURL& referrer_url,
                    const base::Time& start_time,
                    const base::Time& end_time,
                    int64 received_bytes,
                    int64 total_bytes,
                    DownloadItem::DownloadState state,
+                   DownloadDangerType danger_type,
+                   DownloadInterruptReason interrupt_reason,
                    bool opened,
                    const net::BoundNetLog& bound_net_log);
 
@@ -73,10 +76,11 @@ class CONTENT_EXPORT DownloadItemImpl
   // Constructing for the "Save Page As..." feature:
   // |bound_net_log| is constructed externally for our use.
   DownloadItemImpl(DownloadItemImplDelegate* delegate,
-                   const FilePath& path,
+                   const base::FilePath& path,
                    const GURL& url,
                    DownloadId download_id,
                    const std::string& mime_type,
+                   scoped_ptr<DownloadRequestHandleInterface> request_handle,
                    const net::BoundNetLog& bound_net_log);
 
   virtual ~DownloadItemImpl();
@@ -119,11 +123,11 @@ class CONTENT_EXPORT DownloadItemImpl
   virtual const std::string& GetLastModifiedTime() const OVERRIDE;
   virtual const std::string& GetETag() const OVERRIDE;
   virtual bool IsSavePackageDownload() const OVERRIDE;
-  virtual const FilePath& GetFullPath() const OVERRIDE;
-  virtual const FilePath& GetTargetFilePath() const OVERRIDE;
-  virtual const FilePath& GetForcedFilePath() const OVERRIDE;
-  virtual FilePath GetUserVerifiedFilePath() const OVERRIDE;
-  virtual FilePath GetFileNameToReportUser() const OVERRIDE;
+  virtual const base::FilePath& GetFullPath() const OVERRIDE;
+  virtual const base::FilePath& GetTargetFilePath() const OVERRIDE;
+  virtual const base::FilePath& GetForcedFilePath() const OVERRIDE;
+  virtual base::FilePath GetUserVerifiedFilePath() const OVERRIDE;
+  virtual base::FilePath GetFileNameToReportUser() const OVERRIDE;
   virtual TargetDisposition GetTargetDisposition() const OVERRIDE;
   virtual const std::string& GetHash() const OVERRIDE;
   virtual const std::string& GetHashState() const OVERRIDE;
@@ -150,7 +154,7 @@ class CONTENT_EXPORT DownloadItemImpl
   virtual void SetOpenWhenComplete(bool open) OVERRIDE;
   virtual void SetIsTemporary(bool temporary) OVERRIDE;
   virtual void SetOpened(bool opened) OVERRIDE;
-  virtual void SetDisplayName(const FilePath& name) OVERRIDE;
+  virtual void SetDisplayName(const base::FilePath& name) OVERRIDE;
   virtual std::string DebugString(bool verbose) const OVERRIDE;
 
   // All remaining public interfaces virtual to allow for DownloadItemImpl
@@ -258,16 +262,16 @@ class CONTENT_EXPORT DownloadItemImpl
   // |target_path| as determined by the caller. |intermediate_path| is the path
   // to use to store the download until OnDownloadCompleting() is called.
   virtual void OnDownloadTargetDetermined(
-      const FilePath& target_path,
+      const base::FilePath& target_path,
       TargetDisposition disposition,
       DownloadDangerType danger_type,
-      const FilePath& intermediate_path);
+      const base::FilePath& intermediate_path);
 
   // Callback from file thread when we initialize the DownloadFile.
   void OnDownloadFileInitialized(DownloadInterruptReason result);
 
   void OnDownloadRenamedToIntermediateName(
-      DownloadInterruptReason reason, const FilePath& full_path);
+      DownloadInterruptReason reason, const base::FilePath& full_path);
 
   // If all pre-requisites have been met, complete download processing, i.e. do
   // internal cleanup, file rename, and potentially auto-open.  (Dangerous
@@ -280,7 +284,7 @@ class CONTENT_EXPORT DownloadItemImpl
   void OnDownloadCompleting();
 
   void OnDownloadRenamedToFinalName(DownloadInterruptReason reason,
-                                    const FilePath& full_path);
+                                    const base::FilePath& full_path);
 
   // Called if the embedder took over opening a download, to indicate that
   // the download has been opened.
@@ -309,7 +313,7 @@ class CONTENT_EXPORT DownloadItemImpl
   // Set the |danger_type_| and invoke obserers if necessary.
   void SetDangerType(DownloadDangerType danger_type);
 
-  void SetFullPath(const FilePath& new_path);
+  void SetFullPath(const base::FilePath& new_path);
 
   void AutoResumeIfValid();
 
@@ -335,18 +339,18 @@ class CONTENT_EXPORT DownloadItemImpl
 
   // Display name for the download. If this is empty, then the display name is
   // considered to be |target_path_.BaseName()|.
-  FilePath display_name_;
+  base::FilePath display_name_;
 
   // Full path to the downloaded or downloading file. This is the path to the
   // physical file, if one exists. The final target path is specified by
   // |target_path_|. |current_path_| can be empty if the in-progress path hasn't
   // been determined.
-  FilePath current_path_;
+  base::FilePath current_path_;
 
   // Target path of an in-progress download. We may be downloading to a
   // temporary or intermediate file (specified by |current_path_|.  Once the
   // download completes, we will rename the file to |target_path_|.
-  FilePath target_path_;
+  base::FilePath target_path_;
 
   // Whether the target should be overwritten, uniquified or prompted for.
   TargetDisposition target_disposition_;
@@ -364,7 +368,7 @@ class CONTENT_EXPORT DownloadItemImpl
 
   // If non-empty, contains an externally supplied path that should be used as
   // the target path.
-  FilePath forced_file_path_;
+  base::FilePath forced_file_path_;
 
   // Page transition that triggerred the download.
   PageTransition transition_type_;

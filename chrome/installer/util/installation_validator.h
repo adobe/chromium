@@ -6,6 +6,7 @@
 #define CHROME_INSTALLER_UTIL_INSTALLATION_VALIDATOR_H_
 
 #include <map>
+#include <set>
 #include <utility>
 #include <vector>
 
@@ -15,7 +16,10 @@
 #include "chrome/installer/util/browser_distribution.h"
 
 class CommandLine;
+
+namespace base {
 class FilePath;
+}
 
 namespace installer {
 
@@ -95,7 +99,7 @@ class InstallationValidator {
   struct ProductContext;
   typedef std::vector<std::pair<std::string, bool> > SwitchExpectations;
   typedef void (*CommandValidatorFn)(const ProductContext& ctx,
-                                     const AppCommand& command,
+                                     const AppCommand& app_cmd,
                                      bool* is_valid);
   typedef std::map<string16, CommandValidatorFn> CommandExpectations;
 
@@ -186,18 +190,38 @@ class InstallationValidator {
     const ProductRules& rules;
   };
 
-  static void ValidateOnOsUpgradeCommand(const ProductContext& ctx,
-                                         const AppCommand& command,
-                                         bool* is_valid);
+  // Helper to validate the values of bool elements in AppCommand, and to output
+  // error messages. |flag_expect| is a bit mask specifying the expected
+  // presence/absence of bool variables.
+  static void ValidateAppCommandFlags(const ProductContext& ctx,
+                                      const AppCommand& app_cmd,
+                                      const std::set<string16>& flags_expected,
+                                      const string16& name,
+                                      bool* is_valid);
+  static void ValidateInstallCommand(const ProductContext& ctx,
+                                     const AppCommand& app_cmd,
+                                     const wchar_t* expected_command,
+                                     const wchar_t* expected_app_name,
+                                     const char* expected_switch,
+                                     bool* is_valid);
   static void ValidateInstallAppCommand(const ProductContext& ctx,
-                                        const AppCommand& command,
+                                        const AppCommand& app_cmd,
                                         bool* is_valid);
+  static void ValidateInstallExtensionCommand(const ProductContext& ctx,
+                                              const AppCommand& app_cmd,
+                                              bool* is_valid);
+  static void ValidateOnOsUpgradeCommand(const ProductContext& ctx,
+                                         const AppCommand& app_cmd,
+                                         bool* is_valid);
+  static void ValidateQueryEULAAcceptanceCommand(const ProductContext& ctx,
+                                                 const AppCommand& app_cmd,
+                                                 bool* is_valid);
   static void ValidateQuickEnableCfCommand(const ProductContext& ctx,
-                                           const AppCommand& command,
+                                           const AppCommand& app_cmd,
                                            bool* is_valid);
   static void ValidateQuickEnableApplicationHostCommand(
     const ProductContext& ctx,
-    const AppCommand& command,
+    const AppCommand& app_cmd,
     bool* is_valid);
 
   static void ValidateAppCommandExpectations(
@@ -211,17 +235,17 @@ class InstallationValidator {
                                const ProductState& binaries_state,
                                bool* is_valid);
   static void ValidateSetupPath(const ProductContext& ctx,
-                                const FilePath& setup_exe,
-                                const char* purpose,
+                                const base::FilePath& setup_exe,
+                                const string16& purpose,
                                 bool* is_valid);
   static void ValidateCommandExpectations(const ProductContext& ctx,
                                           const CommandLine& command,
                                           const SwitchExpectations& expected,
-                                          const char* source,
+                                          const string16& source,
                                           bool* is_valid);
   static void ValidateUninstallCommand(const ProductContext& ctx,
                                        const CommandLine& command,
-                                       const char* source,
+                                       const string16& source,
                                        bool* is_valid);
   static void ValidateRenameCommand(const ProductContext& ctx,
                                     bool* is_valid);

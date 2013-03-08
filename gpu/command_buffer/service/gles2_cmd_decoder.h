@@ -53,6 +53,7 @@ class GPU_EXPORT GLES2Decoder : public base::SupportsWeakPtr<GLES2Decoder>,
  public:
   typedef error::Error Error;
   typedef base::Callback<void(int32 id, const std::string& msg)> MsgCallback;
+  typedef base::Callback<bool(uint32 id)> WaitSyncPointCallback;
 
   // Creates a decoder.
   static GLES2Decoder* Create(ContextGroup* group);
@@ -142,6 +143,17 @@ class GPU_EXPORT GLES2Decoder : public base::SupportsWeakPtr<GLES2Decoder>,
   // Gets the service id for any simulated backbuffer fbo.
   virtual void RestoreState() const = 0;
 
+  // Restore States.
+  virtual void RestoreActiveTexture() const = 0;
+  virtual void RestoreAttribute(unsigned index) const = 0;
+  virtual void RestoreBufferBindings() const = 0;
+  virtual void RestoreFramebufferBindings() const = 0;
+  virtual void RestoreGlobalState() const = 0;
+  virtual void RestoreProgramBindings() const = 0;
+  virtual void RestoreRenderbufferBindings() const = 0;
+  virtual void RestoreTextureState(unsigned service_id) const = 0;
+  virtual void RestoreTextureUnitBindings(unsigned unit) const = 0;
+
   // Gets the QueryManager for this context.
   virtual QueryManager* GetQueryManager() = 0;
 
@@ -187,8 +199,42 @@ class GPU_EXPORT GLES2Decoder : public base::SupportsWeakPtr<GLES2Decoder>,
   // Gets the GL error for this context.
   virtual uint32 GetGLError() = 0;
 
+  // Sets a GL error.
+  virtual void SetGLError(
+      unsigned error,
+      const char* function_name,
+      const char* msg) = 0;
+  virtual void SetGLErrorInvalidEnum(
+      const char* function_name,
+      unsigned value,
+      const char* label) = 0;
+  virtual void SetGLErrorInvalidParam(
+      unsigned error,
+      const char* function_name,
+      unsigned pname,
+      int param) = 0;
+
+  // Copies the real GL errors to the wrapper. This is so we can
+  // make sure there are no native GL errors before calling some GL function
+  // so that on return we know any error generated was for that specific
+  // command.
+  virtual void CopyRealGLErrorsToWrapper() = 0;
+
+  // Gets the GLError and stores it in our wrapper. Effectively
+  // this lets us peek at the error without losing it.
+  virtual unsigned PeekGLError() = 0;
+
+  // Clear all real GL errors. This is to prevent the client from seeing any
+  // errors caused by GL calls that it was not responsible for issuing.
+  virtual void ClearRealGLErrors() = 0;
+
   // A callback for messages from the decoder.
   virtual void SetMsgCallback(const MsgCallback& callback) = 0;
+
+  // Sets the callback for waiting on a sync point. The callback returns the
+  // scheduling status (i.e. true if the channel is still scheduled).
+  virtual void SetWaitSyncPointCallback(
+      const WaitSyncPointCallback& callback) = 0;
 
   virtual uint32 GetTextureUploadCount() = 0;
   virtual base::TimeDelta GetTotalTextureUploadTime() = 0;
@@ -220,5 +266,4 @@ class GPU_EXPORT GLES2Decoder : public base::SupportsWeakPtr<GLES2Decoder>,
 
 }  // namespace gles2
 }  // namespace gpu
-
 #endif  // GPU_COMMAND_BUFFER_SERVICE_GLES2_CMD_DECODER_H_

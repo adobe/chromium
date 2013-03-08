@@ -5,16 +5,19 @@
 #ifndef SANDBOX_LINUX_SECCOMP_BPF_DIE_H__
 #define SANDBOX_LINUX_SECCOMP_BPF_DIE_H__
 
+#include "sandbox/linux/seccomp-bpf/port.h"
+
+
 namespace playground2 {
 
 class Die {
  public:
   // This is the main API for using this file. Prints a error message and
   // exits with a fatal error.
-  #define SANDBOX_DIE(m) Die::SandboxDie(m, __FILE__, __LINE__)
+  #define SANDBOX_DIE(m) playground2::Die::SandboxDie(m, __FILE__, __LINE__)
 
   // Adds an informational message to the log file or stderr as appropriate.
-  #define SANDBOX_INFO(m) Die::SandboxInfo(m, __FILE__, __LINE__)
+  #define SANDBOX_INFO(m) playground2::Die::SandboxInfo(m, __FILE__, __LINE__)
 
   // Terminate the program, even if the current sandbox policy prevents some
   // of the more commonly used functions used for exiting.

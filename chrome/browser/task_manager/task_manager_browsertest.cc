@@ -4,7 +4,7 @@
 
 #include "chrome/browser/task_manager/task_manager.h"
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/api/infobars/confirm_infobar_delegate.h"
@@ -23,7 +23,6 @@
 #include "chrome/browser/task_manager/task_manager_browsertest_util.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_navigator.h"
-#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/panels/panel.h"
 #include "chrome/browser/ui/panels/panel_manager.h"
@@ -58,7 +57,7 @@ using content::WebContents;
 
 namespace {
 
-const FilePath::CharType* kTitle1File = FILE_PATH_LITERAL("title1.html");
+const base::FilePath::CharType* kTitle1File = FILE_PATH_LITERAL("title1.html");
 
 }  // namespace
 
@@ -120,8 +119,8 @@ IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest, MAYBE_ShutdownWhileOpen) {
 IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest, NoticeTabContentsChanges) {
   int resource_count = TaskManager::GetInstance()->model()->ResourceCount();
   // Open a new tab and make sure we notice that.
-  GURL url(ui_test_utils::GetTestUrl(FilePath(FilePath::kCurrentDirectory),
-                                     FilePath(kTitle1File)));
+  GURL url(ui_test_utils::GetTestUrl(base::FilePath(
+      base::FilePath::kCurrentDirectory), base::FilePath(kTitle1File)));
   AddTabAtIndex(0, url, content::PAGE_TRANSITION_TYPED);
   TaskManagerBrowserTestUtil::WaitForWebResourceChange(2);
 
@@ -185,8 +184,8 @@ IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest, MAYBE_NoticePanelChanges) {
 
 IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest, NoticeBGContentsChanges) {
   // Open a new background contents and make sure we notice that.
-  GURL url(ui_test_utils::GetTestUrl(FilePath(FilePath::kCurrentDirectory),
-                                     FilePath(kTitle1File)));
+  GURL url(ui_test_utils::GetTestUrl(base::FilePath(
+      base::FilePath::kCurrentDirectory), base::FilePath(kTitle1File)));
 
   BackgroundContentsService* service =
       BackgroundContentsServiceFactory::GetForProfile(browser()->profile());
@@ -208,8 +207,8 @@ IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest, KillBGContents) {
   int resource_count = TaskManager::GetInstance()->model()->ResourceCount();
 
   // Open a new background contents and make sure we notice that.
-  GURL url(ui_test_utils::GetTestUrl(FilePath(FilePath::kCurrentDirectory),
-                                     FilePath(kTitle1File)));
+  GURL url(ui_test_utils::GetTestUrl(base::FilePath(
+      base::FilePath::kCurrentDirectory), base::FilePath(kTitle1File)));
 
   content::WindowedNotificationObserver observer(
       chrome::NOTIFICATION_BACKGROUND_CONTENTS_NAVIGATED,
@@ -473,7 +472,7 @@ IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest,
   // manager is still visible. Make sure we don't crash and the extension
   // gets reloaded and noticed in the task manager.
   InfoBarService* infobar_service = InfoBarService::FromWebContents(
-      chrome::GetActiveWebContents(browser()));
+      browser()->tab_strip_model()->GetActiveWebContents());
   ASSERT_EQ(1U, infobar_service->GetInfoBarCount());
   ConfirmInfoBarDelegate* delegate = infobar_service->
       GetInfoBarDelegateAt(0)->AsConfirmInfoBarDelegate();
@@ -534,8 +533,8 @@ IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest,
   int resource_count = TaskManager::GetInstance()->model()->ResourceCount();
 
   // Open a new tab and make sure we notice that.
-  GURL url(ui_test_utils::GetTestUrl(FilePath(FilePath::kCurrentDirectory),
-                                     FilePath(kTitle1File)));
+  GURL url(ui_test_utils::GetTestUrl(base::FilePath(
+      base::FilePath::kCurrentDirectory), base::FilePath(kTitle1File)));
   AddTabAtIndex(0, url, content::PAGE_TRANSITION_TYPED);
   TaskManagerBrowserTestUtil::WaitForWebResourceChange(2);
 

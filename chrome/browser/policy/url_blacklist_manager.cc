@@ -6,13 +6,14 @@
 
 #include "base/bind.h"
 #include "base/message_loop.h"
+#include "base/prefs/pref_service.h"
 #include "base/stl_util.h"
-#include "base/string_number_conversions.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/net/url_fixer_upper.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
@@ -139,6 +140,10 @@ bool URLBlacklist::IsURLBlocked(const GURL& url) const {
     return false;
 
   return !max->allow;
+}
+
+size_t URLBlacklist::Size() const {
+  return filters_.size();
 }
 
 // static
@@ -355,11 +360,11 @@ bool URLBlacklistManager::IsURLBlocked(const GURL& url) const {
 }
 
 // static
-void URLBlacklistManager::RegisterUserPrefs(PrefServiceSyncable* pref_service) {
-  pref_service->RegisterListPref(prefs::kUrlBlacklist,
-                                 PrefServiceSyncable::UNSYNCABLE_PREF);
-  pref_service->RegisterListPref(prefs::kUrlWhitelist,
-                                 PrefServiceSyncable::UNSYNCABLE_PREF);
+void URLBlacklistManager::RegisterUserPrefs(PrefRegistrySyncable* registry) {
+  registry->RegisterListPref(prefs::kUrlBlacklist,
+                             PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterListPref(prefs::kUrlWhitelist,
+                             PrefRegistrySyncable::UNSYNCABLE_PREF);
 }
 
 }  // namespace policy

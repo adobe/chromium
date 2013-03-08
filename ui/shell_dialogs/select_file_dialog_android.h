@@ -8,7 +8,7 @@
 #include <jni.h>
 
 #include "base/android/scoped_java_ref.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "ui/shell_dialogs/select_file_dialog.h"
 
 namespace ui {
@@ -32,7 +32,7 @@ class SelectFileDialogImpl : public ui::SelectFileDialog {
   virtual void SelectFileImpl(
       ui::SelectFileDialog::Type type,
       const string16& title,
-      const FilePath& default_path,
+      const base::FilePath& default_path,
       const ui::SelectFileDialog::FileTypeInfo* file_types,
       int file_type_index,
       const std::string& default_extension,

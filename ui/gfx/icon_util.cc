@@ -138,10 +138,10 @@ SkBitmap* IconUtil::CreateSkBitmapFromHICON(HICON icon, const gfx::Size& s) {
 scoped_ptr<SkBitmap> IconUtil::CreateSkBitmapFromIconResource(HMODULE module,
                                                               int resource_id,
                                                               int size) {
-  DCHECK_LE(size, 256);
+  DCHECK_LE(size, kLargeIconSize);
 
   // For everything except the Vista+ 256x256 icons, use |LoadImage()|.
-  if (size != 256) {
+  if (size != kLargeIconSize) {
     HICON icon_handle =
         static_cast<HICON>(LoadImage(module, MAKEINTRESOURCE(resource_id),
                                      IMAGE_ICON, size, size,
@@ -344,7 +344,7 @@ SkBitmap IconUtil::CreateSkBitmapFromHICONHelper(HICON icon,
 
 bool IconUtil::CreateIconFileFromSkBitmap(const SkBitmap& bitmap,
                                           const SkBitmap& large_bitmap,
-                                          const FilePath& icon_path) {
+                                          const base::FilePath& icon_path) {
   // Only 32 bit ARGB bitmaps are supported. We also make sure the bitmap has
   // been properly initialized.
   SkAutoLockPixels bitmap_lock(bitmap);
@@ -357,8 +357,8 @@ bool IconUtil::CreateIconFileFromSkBitmap(const SkBitmap& bitmap,
   // If |large_bitmap| was specified, validate its dimension and convert to PNG.
   scoped_refptr<base::RefCountedMemory> png_bytes;
   if (!large_bitmap.empty()) {
-    CHECK_EQ(256, large_bitmap.width());
-    CHECK_EQ(256, large_bitmap.height());
+    CHECK_EQ(kLargeIconSize, large_bitmap.width());
+    CHECK_EQ(kLargeIconSize, large_bitmap.height());
     png_bytes = gfx::Image::CreateFrom1xBitmap(large_bitmap).As1xPNGBytes();
   }
 

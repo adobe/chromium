@@ -8,9 +8,10 @@
 #include "base/memory/scoped_ptr.h"
 #import "chrome/browser/ui/cocoa/gradient_button_cell.h"
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 
 class DownloadItemModel;
+@class IndeterminateProgressTimer;
 
 // A button cell that implements the weird button/popup button hybrid that is
 // used by the download items.
@@ -32,11 +33,15 @@ enum DownloadItemMousePosition {
   scoped_nsobject<NSTrackingArea> trackingAreaButton_;
   scoped_nsobject<NSTrackingArea> trackingAreaDropdown_;
 
-  FilePath downloadPath_;  // stored unelided
+  base::FilePath downloadPath_;  // stored unelided
   NSString* secondaryTitle_;
   NSFont* secondaryFont_;
   int percentDone_;
   scoped_nsobject<NSAnimation> completionAnimation_;
+
+  // In degrees, for downloads with no known total size.
+  int indeterminateProgressAngle_;
+  scoped_nsobject<IndeterminateProgressTimer> indeterminateProgressTimer_;
 
   BOOL isStatusTextVisible_;
   CGFloat titleY_;
@@ -62,6 +67,7 @@ enum DownloadItemMousePosition {
 - (void)skipVisibilityAnimation;
 - (void)showSecondaryTitle;
 - (void)hideSecondaryTitle;
+- (IndeterminateProgressTimer*)indeterminateProgressTimer;
 @end
 
 #endif  // CHROME_BROWSER_UI_COCOA_DOWNLOAD_DOWNLOAD_ITEM_CELL_H_

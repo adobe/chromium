@@ -10730,6 +10730,40 @@ COMPILE_ASSERT(offsetof(AsyncTexImage2DCHROMIUM, pixels_shm_id) == 36,
 COMPILE_ASSERT(offsetof(AsyncTexImage2DCHROMIUM, pixels_shm_offset) == 40,
                OffsetOf_AsyncTexImage2DCHROMIUM_pixels_shm_offset_not_40);
 
+struct WaitAsyncTexImage2DCHROMIUM {
+  typedef WaitAsyncTexImage2DCHROMIUM ValueType;
+  static const CommandId kCmdId = kWaitAsyncTexImage2DCHROMIUM;
+  static const cmd::ArgFlags kArgFlags = cmd::kFixed;
+
+  static uint32 ComputeSize() {
+    return static_cast<uint32>(sizeof(ValueType));  // NOLINT
+  }
+
+  void SetHeader() {
+    header.SetCmd<ValueType>();
+  }
+
+  void Init(GLenum _target) {
+    SetHeader();
+    target = _target;
+  }
+
+  void* Set(void* cmd, GLenum _target) {
+    static_cast<ValueType*>(cmd)->Init(_target);
+    return NextCmdAddress<ValueType>(cmd);
+  }
+
+  gpu::CommandHeader header;
+  uint32 target;
+};
+
+COMPILE_ASSERT(sizeof(WaitAsyncTexImage2DCHROMIUM) == 8,
+               Sizeof_WaitAsyncTexImage2DCHROMIUM_is_not_8);
+COMPILE_ASSERT(offsetof(WaitAsyncTexImage2DCHROMIUM, header) == 0,
+               OffsetOf_WaitAsyncTexImage2DCHROMIUM_header_not_0);
+COMPILE_ASSERT(offsetof(WaitAsyncTexImage2DCHROMIUM, target) == 4,
+               OffsetOf_WaitAsyncTexImage2DCHROMIUM_target_not_4);
+
 struct DiscardFramebufferEXT {
   typedef DiscardFramebufferEXT ValueType;
   static const CommandId kCmdId = kDiscardFramebufferEXT;
@@ -10867,6 +10901,40 @@ COMPILE_ASSERT(offsetof(LoseContextCHROMIUM, current) == 4,
                OffsetOf_LoseContextCHROMIUM_current_not_4);
 COMPILE_ASSERT(offsetof(LoseContextCHROMIUM, other) == 8,
                OffsetOf_LoseContextCHROMIUM_other_not_8);
+
+struct WaitSyncPointCHROMIUM {
+  typedef WaitSyncPointCHROMIUM ValueType;
+  static const CommandId kCmdId = kWaitSyncPointCHROMIUM;
+  static const cmd::ArgFlags kArgFlags = cmd::kFixed;
+
+  static uint32 ComputeSize() {
+    return static_cast<uint32>(sizeof(ValueType));  // NOLINT
+  }
+
+  void SetHeader() {
+    header.SetCmd<ValueType>();
+  }
+
+  void Init(GLuint _sync_point) {
+    SetHeader();
+    sync_point = _sync_point;
+  }
+
+  void* Set(void* cmd, GLuint _sync_point) {
+    static_cast<ValueType*>(cmd)->Init(_sync_point);
+    return NextCmdAddress<ValueType>(cmd);
+  }
+
+  gpu::CommandHeader header;
+  uint32 sync_point;
+};
+
+COMPILE_ASSERT(sizeof(WaitSyncPointCHROMIUM) == 8,
+               Sizeof_WaitSyncPointCHROMIUM_is_not_8);
+COMPILE_ASSERT(offsetof(WaitSyncPointCHROMIUM, header) == 0,
+               OffsetOf_WaitSyncPointCHROMIUM_header_not_0);
+COMPILE_ASSERT(offsetof(WaitSyncPointCHROMIUM, sync_point) == 4,
+               OffsetOf_WaitSyncPointCHROMIUM_sync_point_not_4);
 
 
 #endif  // GPU_COMMAND_BUFFER_COMMON_GLES2_CMD_FORMAT_AUTOGEN_H_

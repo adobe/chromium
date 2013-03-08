@@ -6,18 +6,18 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/i18n/time_formatting.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
+#include "base/prefs/pref_service.h"
 #include "base/string16.h"
-#include "base/stringprintf.h"
 #include "base/string_util.h"
+#include "base/stringprintf.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/download/download_prefs.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/chrome_paths.h"
@@ -114,7 +114,7 @@ bool ScreenshotSource::AreScreenshotsDisabled() {
 }
 
 // static
-bool ScreenshotSource::GetScreenshotDirectory(FilePath* directory) {
+bool ScreenshotSource::GetScreenshotDirectory(base::FilePath* directory) {
   if (ScreenshotSource::AreScreenshotsDisabled())
     return false;
 
@@ -192,7 +192,7 @@ void ScreenshotSource::SendScreenshot(
     std::string decoded_filename = UTF16ToASCII(string16(
         decoded.data(), decoded.length()));
 
-    FilePath download_path;
+    base::FilePath download_path;
     GetScreenshotDirectory(&download_path);
     if (drive::util::IsUnderDriveMountPoint(download_path)) {
       drive::DriveFileSystemInterface* file_system =
@@ -200,6 +200,7 @@ void ScreenshotSource::SendScreenshot(
               profile_)->file_system();
       file_system->GetFileByResourceId(
           decoded_filename,
+          drive::DriveClientContext(drive::USER_INITIATED),
           base::Bind(&ScreenshotSource::GetSavedScreenshotCallback,
                      base::Unretained(this), screenshot_path, callback),
           google_apis::GetContentCallback());
@@ -222,7 +223,7 @@ void ScreenshotSource::SendScreenshot(
 void ScreenshotSource::SendSavedScreenshot(
     const std::string& screenshot_path,
     const content::URLDataSource::GotDataCallback& callback,
-    const FilePath& file) {
+    const base::FilePath& file) {
   ScreenshotDataPtr read_bytes(new ScreenshotData);
   int64 file_size = 0;
 
@@ -243,7 +244,7 @@ void ScreenshotSource::GetSavedScreenshotCallback(
     const std::string& screenshot_path,
     const content::URLDataSource::GotDataCallback& callback,
     drive::DriveFileError error,
-    const FilePath& file,
+    const base::FilePath& file,
     const std::string& unused_mime_type,
     drive::DriveFileType file_type) {
   if (error != drive::DRIVE_FILE_OK || file_type != drive::REGULAR_FILE) {

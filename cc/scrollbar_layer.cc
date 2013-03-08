@@ -70,6 +70,9 @@ int ScrollbarLayer::maxTextureSize() {
 }
 
 float ScrollbarLayer::clampScaleToMaxTextureSize(float scale) {
+    if (layerTreeHost()->settings().solidColorScrollbars)
+        return scale;
+
     // If the scaled contentBounds() is bigger than the max texture size of the
     // device, we need to clamp it by rescaling, since contentBounds() is used
     // below to set the texture size.
@@ -85,12 +88,14 @@ float ScrollbarLayer::clampScaleToMaxTextureSize(float scale) {
 
 void ScrollbarLayer::calculateContentsScale(
   float idealContentsScale,
+  bool animatingTransformToScreen,
   float* contentsScaleX,
   float* contentsScaleY,
   gfx::Size* contentBounds)
 {
     ContentsScalingLayer::calculateContentsScale(
         clampScaleToMaxTextureSize(idealContentsScale),
+        animatingTransformToScreen,
         contentsScaleX,
         contentsScaleY,
         contentBounds);
@@ -227,6 +232,9 @@ void ScrollbarLayer::setLayerTreeHost(LayerTreeHost* host)
 
 void ScrollbarLayer::createUpdaterIfNeeded()
 {
+    if (layerTreeHost()->settings().solidColorScrollbars)
+        return;
+
     m_textureFormat = layerTreeHost()->rendererCapabilities().bestTextureFormat;
 
     if (!m_backTrackUpdater)
@@ -248,8 +256,11 @@ void ScrollbarLayer::createUpdaterIfNeeded()
         m_thumb = m_thumbUpdater->createResource(layerTreeHost()->contentsTextureManager());
 }
 
-void ScrollbarLayer::updatePart(CachingBitmapContentLayerUpdater* painter, LayerUpdater::Resource* resource, const gfx::Rect& rect, ResourceUpdateQueue& queue, RenderingStats& stats)
+void ScrollbarLayer::updatePart(CachingBitmapContentLayerUpdater* painter, LayerUpdater::Resource* resource, const gfx::Rect& rect, ResourceUpdateQueue& queue, RenderingStats* stats)
 {
+    if (layerTreeHost()->settings().solidColorScrollbars)
+        return;
+
     // Skip painting and uploading if there are no invalidations and
     // we already have valid texture data.
     if (resource->texture()->haveBackingTexture() &&
@@ -288,6 +299,9 @@ gfx::Rect ScrollbarLayer::scrollbarLayerRectToContentRect(const gfx::Rect& layer
 
 void ScrollbarLayer::setTexturePriorities(const PriorityCalculator&)
 {
+    if (layerTreeHost()->settings().solidColorScrollbars)
+        return;
+
     if (contentBounds().IsEmpty())
         return;
     DCHECK_LE(contentBounds().width(), maxTextureSize());
@@ -311,7 +325,7 @@ void ScrollbarLayer::setTexturePriorities(const PriorityCalculator&)
     }
 }
 
-void ScrollbarLayer::update(ResourceUpdateQueue& queue, const OcclusionTracker* occlusion, RenderingStats& stats)
+void ScrollbarLayer::update(ResourceUpdateQueue& queue, const OcclusionTracker* occlusion, RenderingStats* stats)
 {
     ContentsScalingLayer::update(queue, occlusion, stats);
 

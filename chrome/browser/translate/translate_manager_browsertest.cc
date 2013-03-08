@@ -9,6 +9,7 @@
 
 #include "base/json/json_writer.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/prefs/pref_service.h"
 #include "base/prefs/public/pref_change_registrar.h"
 #include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
@@ -17,7 +18,6 @@
 #include "chrome/browser/api/infobars/infobar_service.h"
 #include "chrome/browser/extensions/test_extension_system.h"
 #include "chrome/browser/infobars/infobar.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prefs/session_startup_pref.h"
 #include "chrome/browser/tab_contents/render_view_context_menu.h"
 #include "chrome/browser/translate/translate_infobar_delegate.h"
@@ -25,7 +25,7 @@
 #include "chrome/browser/translate/translate_prefs.h"
 #include "chrome/browser/translate/translate_tab_helper.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_tabstrip.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/render_messages.h"
@@ -73,7 +73,7 @@ class NavEntryCommittedObserver : public content::NotificationObserver {
 
   virtual void Observe(int type,
                        const content::NotificationSource& source,
-                       const content::NotificationDetails& details) {
+                       const content::NotificationDetails& details) OVERRIDE {
     DCHECK(type == content::NOTIFICATION_NAV_ENTRY_COMMITTED);
     details_ =
         *(content::Details<content::LoadCommittedDetails>(details).ptr());
@@ -342,11 +342,11 @@ class TestRenderViewContextMenu : public RenderViewContextMenu {
     return menu_model_.GetIndexOfCommandId(id) != -1;
   }
 
-  virtual void PlatformInit() { }
-  virtual void PlatformCancel() { }
+  virtual void PlatformInit() OVERRIDE { }
+  virtual void PlatformCancel() OVERRIDE { }
   virtual bool GetAcceleratorForCommandId(
       int command_id,
-      ui::Accelerator* accelerator) { return false; }
+      ui::Accelerator* accelerator) OVERRIDE { return false; }
 
  private:
   TestRenderViewContextMenu(WebContents* web_contents,
@@ -551,25 +551,25 @@ TEST_F(TranslateManagerTest, TestAllLanguages) {
   // kSupportedLanguages.
   bool kExpectations[] = {
     // 0-9
-    false, true, true, true, true, true, true, true, true, true,
+    false, true, true, true, true, true, false, true, true, true,
     // 10-19
-    true, true, true, true, true, true, true, true, true, true,
+    false, true, true, true, true, true, true, true, true, true,
     // 20-29
     true, true, true, true, true, false, false, true, true, true,
     // 30-39
-    true, true, true, true, true, true, true, false, true, false,
+    true, true, false, true, true, true, true, false, true, false,
     // 40-49
     true, false, true, false, false, true, false, true, false, false,
     // 50-59
-    true, false, false, true, true, true, false, true, false, false,
+    false, false, false, true, true, true, true, false, false, false,
     // 60-69
     false, false, true, true, false, true, true, false, true, true,
     // 70-79
-    false, false, false, false, true, true, false, true, false, false,
+    false, false, false, false, false, false, false, true, false, false,
     // 80-89
     false, true, true, false, false, false, false, false, false, false,
     // 90-99
-    false, true, false, false, false, false, false, true, false, false,
+    false, true, false, false, false, false, false, false, false, false,
     // 100-109
     false, true, false, false, false, false, false, false, false, false,
     // 110-119
@@ -684,42 +684,6 @@ std::string GetLanguageListString(
   language_list_str += language_list_json_str;
   language_list_str += ")";
   return language_list_str;
-}
-
-// Test Language Code synonyms.
-TEST_F(TranslateManagerTest, LanguageCodeSynonyms) {
-  // The current set of synonyms are {"nb", "no"}, {"he", "iw"}, {"jw", "jv"}.
-
-  std::vector<std::string> language_list;
-  // Add some values around ht potential synonyms.
-  language_list.push_back("fr");
-  language_list.push_back("nb");
-  language_list.push_back("en");
-  TranslateManager::SetSupportedLanguages(GetLanguageListString(language_list));
-
-  EXPECT_TRUE(TranslateManager::IsSupportedLanguage("no"));
-  EXPECT_TRUE(TranslateManager::IsSupportedLanguage("nb"));
-
-  EXPECT_FALSE(TranslateManager::IsSupportedLanguage("he"));
-  EXPECT_FALSE(TranslateManager::IsSupportedLanguage("iw"));
-  EXPECT_FALSE(TranslateManager::IsSupportedLanguage("jw"));
-  EXPECT_FALSE(TranslateManager::IsSupportedLanguage("jv"));
-
-  language_list.push_back("iw");
-  TranslateManager::SetSupportedLanguages(GetLanguageListString(language_list));
-  EXPECT_TRUE(TranslateManager::IsSupportedLanguage("he"));
-  EXPECT_TRUE(TranslateManager::IsSupportedLanguage("iw"));
-
-  language_list.clear();
-  language_list.push_back("jw");
-  TranslateManager::SetSupportedLanguages(GetLanguageListString(language_list));
-  EXPECT_TRUE(TranslateManager::IsSupportedLanguage("jw"));
-  EXPECT_TRUE(TranslateManager::IsSupportedLanguage("jv"));
-
-  EXPECT_FALSE(TranslateManager::IsSupportedLanguage("no"));
-  EXPECT_FALSE(TranslateManager::IsSupportedLanguage("nb"));
-  EXPECT_FALSE(TranslateManager::IsSupportedLanguage("he"));
-  EXPECT_FALSE(TranslateManager::IsSupportedLanguage("iw"));
 }
 
 // Tests auto-translate on page.
@@ -1511,7 +1475,8 @@ IN_PROC_BROWSER_TEST_F(InProcessBrowserTest,
   SessionStartupPref pref(SessionStartupPref::LAST);
   SessionStartupPref::SetStartupPref(browser()->profile(), pref);
 
-  WebContents* current_web_contents = chrome::GetActiveWebContents(browser());
+  WebContents* current_web_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
   TranslateTabHelper* translate_tab_helper =
       TranslateTabHelper::FromWebContents(current_web_contents);
   content::Source<WebContents> source(current_web_contents);
@@ -1521,7 +1486,7 @@ IN_PROC_BROWSER_TEST_F(InProcessBrowserTest,
                                   source);
 
   GURL french_url = ui_test_utils::GetTestUrl(
-      FilePath(), FilePath(FILE_PATH_LITERAL("french_page.html")));
+      base::FilePath(), base::FilePath(FILE_PATH_LITERAL("french_page.html")));
   ui_test_utils::NavigateToURL(browser(), french_url);
   fr_language_detected_signal.Wait();
   std::string lang;
@@ -1537,7 +1502,8 @@ IN_PROC_BROWSER_TEST_F(InProcessBrowserTest,
 #define MAYBE_TranslateSessionRestore TranslateSessionRestore
 #endif
 IN_PROC_BROWSER_TEST_F(InProcessBrowserTest, MAYBE_TranslateSessionRestore) {
-  WebContents* current_web_contents = chrome::GetActiveWebContents(browser());
+  WebContents* current_web_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
   content::Source<WebContents> source(current_web_contents);
 
   ui_test_utils::WindowedNotificationObserverWithDetails<std::string>

@@ -9,8 +9,8 @@
 #include "base/file_util.h"
 #include "base/files/important_file_writer.h"
 #include "base/md5.h"
-#include "base/string_number_conversions.h"
-#include "base/string_split.h"
+#include "base/strings/string_number_conversions.h"
+#include "base/strings/string_split.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/spellcheck_messages.h"
@@ -26,7 +26,7 @@ using chrome::spellcheck_common::WordList;
 namespace {
 
 // Filename extension for backup dictionary file.
-const FilePath::CharType BACKUP_EXTENSION[] = FILE_PATH_LITERAL("backup");
+const base::FilePath::CharType BACKUP_EXTENSION[] = FILE_PATH_LITERAL("backup");
 
 // Prefix for the checksum in the dictionary file.
 const char CHECKSUM_PREFIX[] = "checksum_v1 = ";
@@ -55,7 +55,7 @@ enum ChangeSanitationResult {
 // Loads the file at |file_path| into the |words| container. If the file has a
 // valid checksum, then returns ChecksumStatus::VALID. If the file has an
 // invalid checksum, then returns ChecksumStatus::INVALID and clears |words|.
-ChecksumStatus LoadFile(const FilePath& file_path, WordList& words) {
+ChecksumStatus LoadFile(const base::FilePath& file_path, WordList& words) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
   words.clear();
   std::string contents;
@@ -74,11 +74,12 @@ ChecksumStatus LoadFile(const FilePath& file_path, WordList& words) {
 
 // Returns true for invalid words and false for valid words.
 bool IsInvalidWord(const std::string& word) {
+  std::string tmp;
   return !IsStringUTF8(word) ||
       word.length() >
           chrome::spellcheck_common::MAX_CUSTOM_DICTIONARY_WORD_BYTES ||
       word.empty() ||
-      word.find_first_of(kWhitespaceASCII) != std::string::npos;
+      TRIM_NONE != TrimWhitespaceASCII(word, TRIM_ALL, &tmp);
 }
 
 // Loads the custom spellcheck dictionary from |path| into |custom_words|. If
@@ -86,13 +87,14 @@ bool IsInvalidWord(const std::string& word) {
 // restores the backup and loads that into |custom_words| instead. If the backup
 // is invalid too, then clears |custom_words|. Must be called on the file
 // thread.
-void LoadDictionaryFileReliably(WordList& custom_words, const FilePath& path) {
+void LoadDictionaryFileReliably(WordList& custom_words,
+                                const base::FilePath& path) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
   // Load the contents and verify the checksum.
   if (LoadFile(path, custom_words) == VALID_CHECKSUM)
     return;
   // Checksum is not valid. See if there's a backup.
-  FilePath backup = path.AddExtension(BACKUP_EXTENSION);
+  base::FilePath backup = path.AddExtension(BACKUP_EXTENSION);
   if (!file_util::PathExists(backup))
     return;
   // Load the backup and verify its checksum.
@@ -106,7 +108,7 @@ void LoadDictionaryFileReliably(WordList& custom_words, const FilePath& path) {
 // the custom spellcheck dictionary at |path|.
 void SaveDictionaryFileReliably(
     const WordList& custom_words,
-    const FilePath& path) {
+    const base::FilePath& path) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
   std::stringstream content;
   for (WordList::const_iterator it = custom_words.begin();
@@ -217,14 +219,13 @@ bool SpellcheckCustomDictionary::Change::empty() const {
   return to_add_.empty() && to_remove_.empty();
 }
 
-SpellcheckCustomDictionary::SpellcheckCustomDictionary(Profile* profile)
-    : SpellcheckDictionary(profile),
-      custom_dictionary_path_(),
+SpellcheckCustomDictionary::SpellcheckCustomDictionary(
+    const base::FilePath& path)
+    : custom_dictionary_path_(),
       weak_ptr_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)),
       is_loaded_(false) {
-  DCHECK(profile);
   custom_dictionary_path_ =
-      profile_->GetPath().Append(chrome::kCustomDictionaryFileName);
+      path.Append(chrome::kCustomDictionaryFileName);
 }
 
 SpellcheckCustomDictionary::~SpellcheckCustomDictionary() {
@@ -401,7 +402,8 @@ syncer::SyncError SpellcheckCustomDictionary::ProcessSyncChanges(
 }
 
 // static
-WordList SpellcheckCustomDictionary::LoadDictionaryFile(const FilePath& path) {
+WordList SpellcheckCustomDictionary::LoadDictionaryFile(
+    const base::FilePath& path) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
   WordList words;
   LoadDictionaryFileReliably(words, path);
@@ -413,7 +415,7 @@ WordList SpellcheckCustomDictionary::LoadDictionaryFile(const FilePath& path) {
 // static
 void SpellcheckCustomDictionary::UpdateDictionaryFile(
     const SpellcheckCustomDictionary::Change& dictionary_change,
-    const FilePath& path) {
+    const base::FilePath& path) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
   if (dictionary_change.empty())
     return;

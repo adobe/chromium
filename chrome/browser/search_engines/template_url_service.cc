@@ -10,19 +10,20 @@
 #include "base/environment.h"
 #include "base/guid.h"
 #include "base/i18n/case_conversion.h"
+#include "base/memory/scoped_vector.h"
 #include "base/metrics/histogram.h"
+#include "base/prefs/pref_service.h"
 #include "base/stl_util.h"
-#include "base/string_number_conversions.h"
-#include "base/string_split.h"
 #include "base/string_util.h"
+#include "base/strings/string_number_conversions.h"
+#include "base/strings/string_split.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/google/google_url_tracker.h"
-#include "chrome/browser/history/history.h"
 #include "chrome/browser/history/history_notifications.h"
+#include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/net/url_fixer_upper.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/rlz/rlz.h"
 #include "chrome/browser/search_engines/search_host_to_urls_map.h"
@@ -65,6 +66,14 @@ const char kReplacementTerm[] = "blah.blah.blah.blah.blah";
 // The name of the histogram used to track default search changes. See the
 // comment for DefaultSearchChangeOrigin.
 const char kDSPChangeHistogramName[] = "Search.DefaultSearchChangeOrigin";
+
+// The name of the histogram used to track whether or not the user has a default
+// search provider.
+const char kHasDSPHistogramName[] = "Search.HasDefaultSearchProvider";
+
+// The name of the histogram used to store the id of the default search
+// provider.
+const char kDSPHistogramName[] = "Search.DefaultSearchProvider";
 
 bool TemplateURLsHaveSamePrefs(const TemplateURL* url1,
                                const TemplateURL* url2) {
@@ -628,7 +637,6 @@ void TemplateURLService::SetDefaultSearchProvider(TemplateURL* url) {
 TemplateURL* TemplateURLService::GetDefaultSearchProvider() {
   if (loaded_ && !load_failed_)
     return default_search_provider_;
-
   // We're not loaded, rely on the default search provider stored in prefs.
   return initial_default_search_provider_.get();
 }
@@ -810,13 +818,21 @@ void TemplateURLService::OnWebDataServiceRequestDone(
   if (!is_default_search_managed_) {
     bool has_default_search_provider = default_search_provider_ != NULL &&
         default_search_provider_->SupportsReplacement();
-    UMA_HISTOGRAM_BOOLEAN("Search.HasDefaultSearchProvider",
+    UMA_HISTOGRAM_BOOLEAN(kHasDSPHistogramName,
                           has_default_search_provider);
     // Ensure that default search provider exists. See http://crbug.com/116952.
     if (!has_default_search_provider) {
       bool success =
           SetDefaultSearchProviderNoNotify(FindNewDefaultSearchProvider());
       DCHECK(success);
+    }
+    // Don't log anything if the user has a NULL default search provider. A
+    // logged value of 0 indicates a custom default search provider.
+    if (default_search_provider_) {
+      UMA_HISTOGRAM_ENUMERATION(
+          kDSPHistogramName,
+          default_search_provider_->prepopulate_id(),
+          TemplateURLPrepopulateData::kMaxPrepopulatedEngineID);
     }
   }
 
@@ -1316,15 +1332,18 @@ TemplateURL* TemplateURLService::CreateTemplateURLFromTemplateURLAndSyncData(
   data.search_terms_replacement_key = specifics.search_terms_replacement_key();
 
   TemplateURL* turl = new TemplateURL(profile, data);
+  // If this TemplateURL matches a built-in prepopulated template URL, it's
+  // possible that sync is trying to modify fields that should not be touched.
+  // Revert these fields to the built-in values.
+  UpdateTemplateURLIfPrepopulated(turl, profile);
   DCHECK(!turl->IsExtensionKeyword());
   if (reset_keyword || deduped) {
     if (reset_keyword)
       turl->ResetKeywordIfNecessary(true);
     syncer::SyncData sync_data = CreateSyncDataFromTemplateURL(*turl);
-    change_list->push_back(
-        syncer::SyncChange(FROM_HERE,
-                           syncer::SyncChange::ACTION_UPDATE,
-                           sync_data));
+    change_list->push_back(syncer::SyncChange(FROM_HERE,
+                                              syncer::SyncChange::ACTION_UPDATE,
+                                              sync_data));
   } else if (turl->IsGoogleSearchURLWithReplaceableKeyword()) {
     if (!existing_turl) {
       // We're adding a new TemplateURL that uses the Google base URL, so set
@@ -1803,6 +1822,28 @@ bool TemplateURLService::UpdateNoNotify(
     DCHECK(success);
   }
   return true;
+}
+
+// static
+void TemplateURLService::UpdateTemplateURLIfPrepopulated(
+    TemplateURL* template_url,
+    Profile* profile) {
+  int prepopulate_id = template_url->prepopulate_id();
+  if (template_url->prepopulate_id() == 0)
+    return;
+
+  ScopedVector<TemplateURL> prepopulated_urls;
+  size_t default_search_index;
+  TemplateURLPrepopulateData::GetPrepopulatedEngines(profile,
+      &prepopulated_urls.get(), &default_search_index);
+
+  for (size_t i = 0; i < prepopulated_urls.size(); ++i) {
+    if (prepopulated_urls[i]->prepopulate_id() == prepopulate_id) {
+      MergeIntoPrepopulatedEngineData(&prepopulated_urls[i]->data_,
+                                      template_url);
+      template_url->CopyFrom(*prepopulated_urls[i]);
+    }
+  }
 }
 
 PrefService* TemplateURLService::GetPrefs() {

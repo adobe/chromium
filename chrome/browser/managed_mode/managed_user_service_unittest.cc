@@ -3,11 +3,11 @@
 // found in the LICENSE file.
 
 #include "base/path_service.h"
+#include "base/prefs/pref_service.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/extensions/extension_service_unittest.h"
 #include "chrome/browser/extensions/unpacked_installer.h"
 #include "chrome/browser/managed_mode/managed_user_service.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
@@ -72,7 +72,10 @@ TEST(ManagedUserServiceTest, ExtensionManagementPolicyProvider) {
   profile.GetPrefs()->SetBoolean(prefs::kProfileIsManaged, true);
   {
     ManagedUserService managed_user_service(&profile);
+    ManagedModeURLFilterObserver observer(
+        managed_user_service.GetURLFilterForUIThread());
     EXPECT_TRUE(managed_user_service.ProfileIsManaged());
+    managed_user_service.Init();
 
     string16 error_1;
     EXPECT_FALSE(managed_user_service.UserMayLoad(NULL, &error_1));
@@ -83,8 +86,10 @@ TEST(ManagedUserServiceTest, ExtensionManagementPolicyProvider) {
     EXPECT_FALSE(error_2.empty());
 
 #ifndef NDEBUG
-  EXPECT_FALSE(managed_user_service.GetDebugPolicyProviderName().empty());
+    EXPECT_FALSE(managed_user_service.GetDebugPolicyProviderName().empty());
 #endif
+    // Wait for the initial update to finish (otherwise we'll get leaks).
+    observer.Wait();
   }
 }
 
@@ -107,6 +112,7 @@ class ManagedUserServiceExtensionTest : public ExtensionServiceTestBase {
 
 TEST_F(ManagedUserServiceExtensionTest, NoContentPacks) {
   ManagedUserService managed_user_service(profile_.get());
+  managed_user_service.Init();
   ManagedModeURLFilter* url_filter =
       managed_user_service.GetURLFilterForUIThread();
 
@@ -121,7 +127,8 @@ TEST_F(ManagedUserServiceExtensionTest, NoContentPacks) {
 TEST_F(ManagedUserServiceExtensionTest, InstallContentPacks) {
   profile_->GetPrefs()->SetBoolean(prefs::kProfileIsManaged, true);
   ManagedUserService managed_user_service(profile_.get());
-  managed_user_service.SetElevatedForTesting(true);
+  managed_user_service.Init();
+  managed_user_service.SetElevated(true);
   ManagedModeURLFilter* url_filter =
       managed_user_service.GetURLFilterForUIThread();
   ManagedModeURLFilterObserver observer(url_filter);
@@ -141,9 +148,9 @@ TEST_F(ManagedUserServiceExtensionTest, InstallContentPacks) {
   scoped_refptr<extensions::UnpackedInstaller> installer(
       extensions::UnpackedInstaller::Create(service_));
   installer->set_prompt_for_plugins(false);
-  FilePath test_data_dir;
+  base::FilePath test_data_dir;
   ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &test_data_dir));
-  FilePath extension_path =
+  base::FilePath extension_path =
       test_data_dir.AppendASCII("extensions/managed_mode/content_pack");
   content::WindowedNotificationObserver extension_load_observer(
       chrome::NOTIFICATION_EXTENSION_LOADED,
@@ -167,8 +174,10 @@ TEST_F(ManagedUserServiceExtensionTest, InstallContentPacks) {
   EXPECT_EQ(ASCIIToUTF16("Homestar Runner"), sites[1].name);
   EXPECT_EQ(string16(), sites[2].name);
 
+#if defined(ENABLE_CONFIGURATION_POLICY)
   EXPECT_EQ(ManagedModeURLFilter::ALLOW,
             url_filter->GetFilteringBehaviorForURL(example_url));
+#endif
   EXPECT_EQ(ManagedModeURLFilter::WARN,
             url_filter->GetFilteringBehaviorForURL(moose_url));
 
@@ -196,10 +205,12 @@ TEST_F(ManagedUserServiceExtensionTest, InstallContentPacks) {
   EXPECT_TRUE(site_names.count(std::string()) == 1u);
   EXPECT_TRUE(site_names.count("Moose") == 1u);
 
+#if defined(ENABLE_CONFIGURATION_POLICY)
   EXPECT_EQ(ManagedModeURLFilter::ALLOW,
             url_filter->GetFilteringBehaviorForURL(example_url));
   EXPECT_EQ(ManagedModeURLFilter::ALLOW,
             url_filter->GetFilteringBehaviorForURL(moose_url));
+#endif
 
   // Disable the first content pack.
   service_->DisableExtension(extension->id(),
@@ -215,6 +226,8 @@ TEST_F(ManagedUserServiceExtensionTest, InstallContentPacks) {
 
   EXPECT_EQ(ManagedModeURLFilter::WARN,
             url_filter->GetFilteringBehaviorForURL(example_url));
+#if defined(ENABLE_CONFIGURATION_POLICY)
   EXPECT_EQ(ManagedModeURLFilter::ALLOW,
             url_filter->GetFilteringBehaviorForURL(moose_url));
+#endif
 }

@@ -41,7 +41,8 @@ class GURL;
 namespace content {
 
 class BrowserContext;
-class ShellJavaScriptDialogCreator;
+class ShellDevToolsFrontend;
+class ShellJavaScriptDialogManager;
 class SiteInstance;
 class WebContents;
 
@@ -53,6 +54,7 @@ class Shell : public WebContentsDelegate,
   virtual ~Shell();
 
   void LoadURL(const GURL& url);
+  void LoadURLForFrame(const GURL& url, const std::string& frame_name);
   void GoBackOrForward(int offset);
   void Reload();
   void Stop();
@@ -60,9 +62,13 @@ class Shell : public WebContentsDelegate,
   void Close();
   void ShowDevTools();
   void CloseDevTools();
+#if (defined(OS_WIN) && !defined(USE_AURA)) || defined(TOOLKIT_GTK)
+  // Resizes the main window to the given dimensions.
+  void SizeTo(int width, int height);
+#endif
 
   // Do one time initialization at application startup.
-  static void PlatformInitialize();
+  static void Initialize();
 
   static Shell* CreateNewWindow(BrowserContext* browser_context,
                                 const GURL& url,
@@ -121,7 +127,7 @@ class Shell : public WebContentsDelegate,
                                   WebContents* new_contents) OVERRIDE;
   virtual void DidNavigateMainFramePostCommit(
       WebContents* web_contents) OVERRIDE;
-  virtual JavaScriptDialogCreator* GetJavaScriptDialogCreator() OVERRIDE;
+  virtual JavaScriptDialogManager* GetJavaScriptDialogManager() OVERRIDE;
 #if defined(OS_MACOSX)
   virtual void HandleKeyboardEvent(
       WebContents* source,
@@ -133,6 +139,8 @@ class Shell : public WebContentsDelegate,
                                    int32 line_no,
                                    const string16& source_id) OVERRIDE;
   virtual void RendererUnresponsive(WebContents* source) OVERRIDE;
+  virtual void ActivateContents(WebContents* contents) OVERRIDE;
+  virtual void DeactivateContents(WebContents* contents) OVERRIDE;
 
  private:
   enum UIControl {
@@ -145,6 +153,9 @@ class Shell : public WebContentsDelegate,
 
   // Helper to create a new Shell given a newly created WebContents.
   static Shell* CreateShell(WebContents* web_contents);
+
+  // Helper for one time initialization of application
+  static void PlatformInitialize(const gfx::Size& default_window_size);
 
   // All the methods that begin with Platform need to be implemented by the
   // platform specific Shell implementation.
@@ -169,11 +180,6 @@ class Shell : public WebContentsDelegate,
                                           bool enter_fullscreen);
   bool PlatformIsFullscreenForTabOrPending(
       const WebContents* web_contents) const;
-#endif
-
-#if (defined(OS_WIN) && !defined(USE_AURA)) || defined(TOOLKIT_GTK)
-  // Resizes the main window to the given dimensions.
-  void SizeTo(int width, int height);
 #endif
 
   gfx::NativeView GetContentView();
@@ -203,11 +209,11 @@ class Shell : public WebContentsDelegate,
                      GObject*, guint, GdkModifierType);
 #endif
 
-  scoped_ptr<ShellJavaScriptDialogCreator> dialog_creator_;
+  scoped_ptr<ShellJavaScriptDialogManager> dialog_manager_;
 
   scoped_ptr<WebContents> web_contents_;
 
-  Shell* dev_tools_;
+  ShellDevToolsFrontend* devtools_frontend_;
 
   bool is_fullscreen_;
 

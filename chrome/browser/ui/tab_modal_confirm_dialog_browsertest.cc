@@ -9,7 +9,7 @@
 #include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_dialogs.h"
-#include "chrome/browser/ui/browser_tabstrip.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -50,9 +50,9 @@ TabModalConfirmDialogTest::TabModalConfirmDialogTest()
 
 void TabModalConfirmDialogTest::SetUpOnMainThread() {
   delegate_ = new MockTabModalConfirmDialogDelegate(
-      chrome::GetActiveWebContents(browser()), this);
+      browser()->tab_strip_model()->GetActiveWebContents(), this);
   dialog_ = TabModalConfirmDialog::Create(
-      delegate_, chrome::GetActiveWebContents(browser()));
+      delegate_, browser()->tab_strip_model()->GetActiveWebContents());
   content::RunAllPendingInMessageLoop();
 }
 
@@ -88,7 +88,7 @@ IN_PROC_BROWSER_TEST_F(TabModalConfirmDialogTest, CancelSelf) {
 
 IN_PROC_BROWSER_TEST_F(TabModalConfirmDialogTest, Quit) {
   MessageLoopForUI::current()->PostTask(FROM_HERE,
-                                        base::Bind(&browser::AttemptExit));
+                                        base::Bind(&chrome::AttemptExit));
   content::RunMessageLoop();
   EXPECT_EQ(0, accepted_count_);
   EXPECT_EQ(1, canceled_count_);

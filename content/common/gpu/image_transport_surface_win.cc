@@ -40,7 +40,7 @@ class PbufferImageTransportSurface
   virtual bool SwapBuffers() OVERRIDE;
   virtual bool PostSubBuffer(int x, int y, int width, int height) OVERRIDE;
   virtual std::string GetExtensions() OVERRIDE;
-  virtual void SetBackbufferAllocation(bool allocated) OVERRIDE;
+  virtual bool SetBackbufferAllocation(bool allocated) OVERRIDE;
   virtual void SetFrontbufferAllocation(bool allocated) OVERRIDE;
 
  protected:
@@ -155,16 +155,17 @@ bool PbufferImageTransportSurface::PostSubBuffer(
   return false;
 }
 
-void PbufferImageTransportSurface::SetBackbufferAllocation(bool allocation) {
+bool PbufferImageTransportSurface::SetBackbufferAllocation(bool allocation) {
   if (backbuffer_suggested_allocation_ == allocation)
-    return;
+    return true;
   backbuffer_suggested_allocation_ = allocation;
 
-  if (backbuffer_suggested_allocation_)
-    Resize(visible_size_);
-  else
-    Resize(gfx::Size(1, 1));
   DestroySurface();
+
+  if (backbuffer_suggested_allocation_)
+    return Resize(visible_size_);
+  else
+    return Resize(gfx::Size(1, 1));
 }
 
 void PbufferImageTransportSurface::SetFrontbufferAllocation(bool allocation) {
@@ -238,13 +239,16 @@ scoped_refptr<gfx::GLSurface> ImageTransportSurface::CreateSurface(
     const gfx::GLSurfaceHandle& handle) {
   scoped_refptr<gfx::GLSurface> surface;
 
-  if (!handle.handle) {
+  if (handle.transport_type == gfx::TEXTURE_TRANSPORT) {
     // If we don't have a valid handle with the transport flag set, then we're
     // coming from a renderer and we want to render the webpage contents to a
     // texture.
-    DCHECK(handle.transport);
+    DCHECK(!handle.handle);
     surface = new TextureImageTransportSurface(manager, stub, handle);
   } else {
+    DCHECK(handle.handle);
+    DCHECK(handle.transport_type == gfx::NATIVE_DIRECT ||
+           handle.transport_type == gfx::NATIVE_TRANSPORT);
     if (gfx::GetGLImplementation() == gfx::kGLImplementationEGLGLES2 &&
         !CommandLine::ForCurrentProcess()->HasSwitch(
             switches::kDisableImageTransportSurface)) {
@@ -272,7 +276,7 @@ scoped_refptr<gfx::GLSurface> ImageTransportSurface::CreateSurface(
       surface = new PassThroughImageTransportSurface(manager,
                                                     stub,
                                                     surface.get(),
-                                                    handle.transport);
+                                                    handle.is_transport());
     }
   }
 

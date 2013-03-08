@@ -9,7 +9,7 @@
 #include <string>
 
 #include "base/file_util.h"
-#include "content/browser/trace_subscriber_stdio.h"
+#include "content/browser/tracing/trace_subscriber_stdio.h"
 
 namespace content {
 
@@ -18,7 +18,7 @@ bool RegisterTracingIntentHandler(JNIEnv* env);
 
 class TracingIntentHandler : public TraceSubscriberStdio {
  public:
-  explicit TracingIntentHandler(const FilePath& path);
+  explicit TracingIntentHandler(const base::FilePath& path);
   virtual ~TracingIntentHandler();
 
   // TraceSubscriber implementation

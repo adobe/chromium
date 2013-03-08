@@ -20,7 +20,7 @@ namespace {
 
 // Unzips |source_zip_file| and sets the filename of the unzipped image to
 // |source_image_file|.
-void UnzipImage(const FilePath& source_zip_file,
+void UnzipImage(const base::FilePath& source_zip_file,
                 const std::string& image_name,
                 scoped_refptr<base::RefCountedString> source_image_file) {
   if (zip::Unzip(source_zip_file, source_zip_file.DirName())) {
@@ -37,18 +37,18 @@ class BurnLibraryImpl : public BurnLibrary {
   // BurnLibrary implementation.
   virtual void AddObserver(Observer* observer) OVERRIDE;
   virtual void RemoveObserver(Observer* observer) OVERRIDE;
-  virtual void DoBurn(const FilePath& source_path,
+  virtual void DoBurn(const base::FilePath& source_path,
                       const std::string& image_name,
-                      const FilePath& target_file_path,
-                      const FilePath& target_device_path) OVERRIDE;
+                      const base::FilePath& target_file_path,
+                      const base::FilePath& target_device_path) OVERRIDE;
   virtual void CancelBurnImage() OVERRIDE;
 
   void OnImageUnzipped(scoped_refptr<base::RefCountedString> source_image_file);
 
  private:
-  void Init();
+  virtual void Init() OVERRIDE;
   void BurnImage();
-  static void DevicesUnmountedCallback(void* object, bool success);
+  void DevicesUnmountedCallback(bool success);
   void UpdateBurnStatus(const ImageBurnStatus& status, BurnEvent evt);
   void OnBurnFinished(const std::string& target_path,
                       bool success,
@@ -112,10 +112,10 @@ void BurnLibraryImpl::CancelBurnImage() {
   cancelled_ = true;
 }
 
-void BurnLibraryImpl::DoBurn(const FilePath& source_path,
+void BurnLibraryImpl::DoBurn(const base::FilePath& source_path,
     const std::string& image_name,
-    const FilePath& target_file_path,
-    const FilePath& target_device_path) {
+    const base::FilePath& target_file_path,
+    const base::FilePath& target_device_path) {
   if (unzipping_) {
     // We have unzip in progress, maybe it was "cancelled" before and did not
     // finish yet. In that case, let's pretend cancel did not happen.
@@ -161,10 +161,10 @@ void BurnLibraryImpl::OnImageUnzipped(
 
   burning_ = true;
 
-  chromeos::disks::DiskMountManager::GetInstance()->
-      UnmountDeviceRecursive(target_device_path_,
-                             &BurnLibraryImpl::DevicesUnmountedCallback,
-                             this);
+  chromeos::disks::DiskMountManager::GetInstance()->UnmountDeviceRecursively(
+      target_device_path_,
+      base::Bind(&BurnLibraryImpl::DevicesUnmountedCallback,
+                 weak_ptr_factory_.GetWeakPtr()));
 }
 
 void BurnLibraryImpl::OnBurnFinished(const std::string& target_path,
@@ -183,13 +183,11 @@ void BurnLibraryImpl::OnBurnImageFail() {
   UpdateBurnStatus(ImageBurnStatus(0, 0), BURN_FAIL);
 }
 
-void BurnLibraryImpl::DevicesUnmountedCallback(void* object, bool success) {
-  DCHECK(object);
-  BurnLibraryImpl* self = static_cast<BurnLibraryImpl*>(object);
+void BurnLibraryImpl::DevicesUnmountedCallback(bool success) {
   if (success) {
-    self->BurnImage();
+    BurnImage();
   } else {
-    self->UpdateBurnStatus(ImageBurnStatus(0, 0), BURN_FAIL);
+    UpdateBurnStatus(ImageBurnStatus(0, 0), BURN_FAIL);
   }
 }
 
@@ -230,10 +228,10 @@ class BurnLibraryStubImpl : public BurnLibrary {
   virtual void Init() OVERRIDE {}
   virtual void AddObserver(Observer* observer) OVERRIDE {}
   virtual void RemoveObserver(Observer* observer) OVERRIDE {}
-  virtual void DoBurn(const FilePath& source_path,
+  virtual void DoBurn(const base::FilePath& source_path,
                       const std::string& image_name,
-                      const FilePath& target_file_path,
-                      const FilePath& target_device_path) OVERRIDE {
+                      const base::FilePath& target_file_path,
+                      const base::FilePath& target_device_path) OVERRIDE {
   }
   virtual void CancelBurnImage() OVERRIDE {}
 

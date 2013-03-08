@@ -21,12 +21,12 @@
 #include "chrome/browser/metrics/tracking_synchronizer.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/task_profiler/task_profiler_data_serializer.h"
-#include "chrome/browser/ui/webui/chrome_web_ui_data_source.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/url_data_source.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
+#include "content/public/browser/web_ui_data_source.h"
 #include "content/public/browser/web_ui_message_handler.h"
 #include "grit/browser_resources.h"
 #include "grit/generated_resources.h"
@@ -68,7 +68,7 @@ class ProfilerWebUIDataSource : public content::URLDataSource {
       const std::string& path,
       bool is_incognito,
       const content::URLDataSource::GotDataCallback& callback) OVERRIDE {
-    FilePath base_path;
+    base::FilePath base_path;
     PathService::Get(base::DIR_SOURCE_ROOT, &base_path);
     base_path = base_path.AppendASCII("chrome");
     base_path = base_path.AppendASCII("browser");
@@ -78,7 +78,7 @@ class ProfilerWebUIDataSource : public content::URLDataSource {
     // If no resource was specified, default to profiler.html.
     std::string filename = path.empty() ? "profiler.html" : path;
 
-    FilePath file_path;
+    base::FilePath file_path;
     file_path = base_path.AppendASCII(filename);
 
     // Read the file synchronously and send it as the response.
@@ -100,7 +100,7 @@ class ProfilerWebUIDataSource : public content::URLDataSource {
 
 content::WebUIDataSource* CreateProfilerHTMLSource() {
   content::WebUIDataSource* source =
-      ChromeWebUIDataSource::Create(chrome::kChromeUIProfilerHost);
+      content::WebUIDataSource::Create(chrome::kChromeUIProfilerHost);
 
   source->SetJsonPath("strings.js");
   source->AddResourcePath("profiler.js", IDR_PROFILER_JS);
@@ -157,9 +157,9 @@ ProfilerUI::ProfilerUI(content::WebUI* web_ui)
   // Set up the chrome://profiler/ source.
   Profile* profile = Profile::FromWebUI(web_ui);
 #if defined(USE_SOURCE_FILES_DIRECTLY)
-  ChromeURLDataManager::AddDataSource(profile, new ProfilerWebUIDataSource);
+  content::URLDataSource::Add(profile, new ProfilerWebUIDataSource);
 #else
-  ChromeURLDataManager::AddWebUIDataSource(profile, CreateProfilerHTMLSource());
+  content::WebUIDataSource::Add(profile, CreateProfilerHTMLSource());
 #endif
 }
 

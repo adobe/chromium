@@ -10,8 +10,8 @@
 #include "chrome/browser/background/background_application_list_model.h"
 
 #include "base/command_line.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "base/stl_util.h"
@@ -36,8 +36,8 @@ using extensions::APIPermission;
 using extensions::Extension;
 
 // For ExtensionService interface when it requires a path that is not used.
-FilePath bogus_file_path() {
-  return FilePath(FILE_PATH_LITERAL("//foobar_nonexistent"));
+base::FilePath bogus_file_path() {
+  return base::FilePath(FILE_PATH_LITERAL("//foobar_nonexistent"));
 }
 
 class BackgroundApplicationListModelTest : public ExtensionServiceTestBase {
@@ -73,7 +73,7 @@ static scoped_refptr<Extension> CreateExtension(const std::string& name,
   std::string error;
   scoped_refptr<Extension> extension = Extension::Create(
       bogus_file_path().AppendASCII(name),
-      Extension::INVALID,
+      extensions::Manifest::INVALID_LOCATION,
       manifest,
       Extension::NO_FLAGS,
       &error);

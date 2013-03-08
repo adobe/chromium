@@ -7,13 +7,14 @@
 #include "base/bind.h"
 #include "base/json/json_reader.h"
 #include "base/message_loop.h"
+#include "base/prefs/pref_registry_simple.h"
+#include "base/prefs/pref_service.h"
 #include "base/stl_util.h"
 #include "base/sys_string_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/plugins/plugin_metadata.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/plugin_service.h"
@@ -48,7 +49,8 @@ static string16 GetGroupName(const webkit::WebPluginInfo& plugin) {
   if (!plugin.name.empty())
     return plugin.name;
 
-  FilePath::StringType path = plugin.path.BaseName().RemoveExtension().value();
+  base::FilePath::StringType path =
+      plugin.path.BaseName().RemoveExtension().value();
 #if defined(OS_POSIX)
   return UTF8ToUTF16(path);
 #elif defined(OS_WIN)
@@ -135,8 +137,8 @@ PluginMetadata* CreatePluginMetadata(
 }  // namespace
 
 // static
-void PluginFinder::RegisterPrefs(PrefServiceSimple* local_state) {
-  local_state->RegisterBooleanPref(prefs::kDisablePluginFinder, false);
+void PluginFinder::RegisterPrefs(PrefRegistrySimple* registry) {
+  registry->RegisterBooleanPref(prefs::kDisablePluginFinder, false);
 }
 
 // static
@@ -146,35 +148,21 @@ PluginFinder* PluginFinder::GetInstance() {
   return Singleton<PluginFinder>::get();
 }
 
-PluginFinder::PluginFinder() {
+PluginFinder::PluginFinder() : version_(-1) {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
 }
 
 void PluginFinder::Init() {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
-  plugin_list_.reset(ComputePluginList());
-  DCHECK(plugin_list_.get());
-
-  InitInternal();
+  // Load the built-in plug-in list first. If we have a newer version stored
+  // locally or download one, we will replace this one with it.
+  scoped_ptr<DictionaryValue> plugin_list(LoadBuiltInPluginList());
+  DCHECK(plugin_list);
+  ReinitializePlugins(plugin_list.get());
 }
 
 // static
-DictionaryValue* PluginFinder::ComputePluginList() {
-#if defined(ENABLE_PLUGIN_INSTALLATION)
-  const base::DictionaryValue* metadata =
-      g_browser_process->local_state()->GetDictionary(prefs::kPluginsMetadata);
-  if (!metadata->empty())
-    return metadata->DeepCopy();
-#endif
-  base::DictionaryValue* result = LoadPluginList();
-  if (result)
-    return result;
-  return new base::DictionaryValue();
-}
-
-// static
-DictionaryValue* PluginFinder::LoadPluginList() {
-#if defined(OS_WIN) || defined(OS_MACOSX) || defined(OS_LINUX)
+DictionaryValue* PluginFinder::LoadBuiltInPluginList() {
   base::StringPiece json_resource(
       ResourceBundle::GetSharedInstance().GetRawDataResource(
           IDR_PLUGIN_DB_JSON));
@@ -191,9 +179,6 @@ DictionaryValue* PluginFinder::LoadPluginList() {
   if (value->GetType() != base::Value::TYPE_DICTIONARY)
     return NULL;
   return static_cast<base::DictionaryValue*>(value.release());
-#else
-  return new DictionaryValue();
-#endif
 }
 
 PluginFinder::~PluginFinder() {
@@ -209,10 +194,10 @@ bool PluginFinder::FindPlugin(
     const std::string& language,
     PluginInstaller** installer,
     scoped_ptr<PluginMetadata>* plugin_metadata) {
-  base::AutoLock lock(mutex_);
   if (g_browser_process->local_state()->GetBoolean(prefs::kDisablePluginFinder))
     return false;
 
+  base::AutoLock lock(mutex_);
   PluginMap::const_iterator metadata_it = identifier_plugin_.begin();
   for (; metadata_it != identifier_plugin_.end(); ++metadata_it) {
     if (language == metadata_it->second->language() &&
@@ -248,17 +233,37 @@ bool PluginFinder::FindPluginWithIdentifier(
   }
   return true;
 }
+#endif
 
 void PluginFinder::ReinitializePlugins(
-    const base::DictionaryValue& json_metadata) {
+    const base::DictionaryValue* plugin_list) {
   base::AutoLock lock(mutex_);
+  int version = 0;  // If no version is defined, we default to 0.
+  const char kVersionKey[] = "x-version";
+  plugin_list->GetInteger(kVersionKey, &version);
+  if (version <= version_)
+    return;
+
+  version_ = version;
+
   STLDeleteValues(&identifier_plugin_);
   identifier_plugin_.clear();
 
-  plugin_list_.reset(json_metadata.DeepCopy());
-  InitInternal();
-}
+  for (DictionaryValue::Iterator plugin_it(*plugin_list);
+      plugin_it.HasNext(); plugin_it.Advance()) {
+    const DictionaryValue* plugin = NULL;
+    const std::string& identifier = plugin_it.key();
+    if (plugin_list->GetDictionaryWithoutPathExpansion(identifier, &plugin)) {
+      DCHECK(!identifier_plugin_[identifier]);
+      identifier_plugin_[identifier] = CreatePluginMetadata(identifier, plugin);
+
+#if defined(ENABLE_PLUGIN_INSTALLATION)
+      if (installers_.find(identifier) == installers_.end())
+        installers_[identifier] = new PluginInstaller();
 #endif
+    }
+  }
+}
 
 string16 PluginFinder::FindPluginNameWithIdentifier(
     const std::string& identifier) {
@@ -300,21 +305,4 @@ scoped_ptr<PluginMetadata> PluginFinder::GetPluginMetadata(
   DCHECK(identifier_plugin_.find(identifier) == identifier_plugin_.end());
   identifier_plugin_[identifier] = metadata;
   return metadata->Clone();
-}
-
-void PluginFinder::InitInternal() {
-  for (DictionaryValue::Iterator plugin_it(*plugin_list_);
-      plugin_it.HasNext(); plugin_it.Advance()) {
-    DictionaryValue* plugin = NULL;
-    const std::string& identifier = plugin_it.key();
-    if (plugin_list_->GetDictionaryWithoutPathExpansion(identifier, &plugin)) {
-      DCHECK(!identifier_plugin_[identifier]);
-      identifier_plugin_[identifier] = CreatePluginMetadata(identifier, plugin);
-
-#if defined(ENABLE_PLUGIN_INSTALLATION)
-      if (installers_.find(identifier) == installers_.end())
-        installers_[identifier] = new PluginInstaller();
-#endif
-    }
-  }
 }

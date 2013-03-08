@@ -12,7 +12,6 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/extensions/application_launch.h"
 #include "chrome/browser/ui/extensions/native_app_window.h"
-#include "chrome/browser/ui/extensions/shell_window.h"
 #include "chrome/common/chrome_switches.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/test/test_utils.h"
@@ -29,7 +28,7 @@ void PlatformAppBrowserTest::SetUpCommandLine(CommandLine* command_line) {
 
   // Make event pages get suspended quicker.
   command_line->AppendSwitchASCII(switches::kEventPageIdleTime, "1");
-  command_line->AppendSwitchASCII(switches::kEventPageUnloadingTime, "1");
+  command_line->AppendSwitchASCII(switches::kEventPageSuspendingTime, "1");
 }
 
 const Extension* PlatformAppBrowserTest::LoadAndLaunchPlatformApp(
@@ -42,9 +41,10 @@ const Extension* PlatformAppBrowserTest::LoadAndLaunchPlatformApp(
       test_data_dir_.AppendASCII("platform_apps").AppendASCII(name));
   EXPECT_TRUE(extension);
 
-  application_launch::OpenApplication(application_launch::LaunchParams(
-          browser()->profile(), extension, extension_misc::LAUNCH_NONE,
-          NEW_WINDOW));
+  chrome::OpenApplication(chrome::AppLaunchParams(browser()->profile(),
+                                                  extension,
+                                                  extension_misc::LAUNCH_NONE,
+                                                  NEW_WINDOW));
 
   app_loaded_observer.Wait();
 
@@ -61,9 +61,10 @@ const Extension* PlatformAppBrowserTest::InstallAndLaunchPlatformApp(
       test_data_dir_.AppendASCII("platform_apps").AppendASCII(name), 1);
   EXPECT_TRUE(extension);
 
-  application_launch::OpenApplication(application_launch::LaunchParams(
-          browser()->profile(), extension, extension_misc::LAUNCH_NONE,
-          NEW_WINDOW));
+  chrome::OpenApplication(chrome::AppLaunchParams(browser()->profile(),
+                                                  extension,
+                                                  extension_misc::LAUNCH_NONE,
+                                                  NEW_WINDOW));
 
   app_loaded_observer.Wait();
 
@@ -132,7 +133,7 @@ void PlatformAppBrowserTest::ClearCommandLineArgs() {
 void PlatformAppBrowserTest::SetCommandLineArg(const std::string& test_file) {
   ClearCommandLineArgs();
   CommandLine* command_line = CommandLine::ForCurrentProcess();
-  FilePath test_doc(test_data_dir_.AppendASCII(test_file));
+  base::FilePath test_doc(test_data_dir_.AppendASCII(test_file));
   test_doc = test_doc.NormalizePathSeparators();
   command_line->AppendArgPath(test_doc);
 }
@@ -140,6 +141,12 @@ void PlatformAppBrowserTest::SetCommandLineArg(const std::string& test_file) {
 ShellWindow* PlatformAppBrowserTest::CreateShellWindow(
     const Extension* extension) {
   ShellWindow::CreateParams params;
+  return ShellWindow::Create(
+      browser()->profile(), extension, GURL(""), params);
+}
+
+ShellWindow* PlatformAppBrowserTest::CreateShellWindowFromParams(
+    const Extension* extension, const ShellWindow::CreateParams& params) {
   return ShellWindow::Create(
       browser()->profile(), extension, GURL(""), params);
 }

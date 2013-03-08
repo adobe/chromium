@@ -451,13 +451,17 @@ DeterministicSocketData::DeterministicSocketData(MockRead* reads,
       current_write_(),
       stopping_sequence_number_(0),
       stopped_(false),
-      print_debug_(false) {
+      print_debug_(false),
+      is_running_(false) {
   VerifyCorrectSequenceNumbers(reads, reads_count, writes, writes_count);
 }
 
 DeterministicSocketData::~DeterministicSocketData() {}
 
 void DeterministicSocketData::Run() {
+  DCHECK(!is_running_);
+  is_running_ = true;
+
   SetStopped(false);
   int counter = 0;
   // Continue to consume data until all data has run out, or the stopped_ flag
@@ -481,6 +485,7 @@ void DeterministicSocketData::Run() {
     MessageLoop::current()->RunUntilIdle();
   }
   SetStopped(false);
+  is_running_ = false;
 }
 
 void DeterministicSocketData::RunFor(int steps) {
@@ -500,7 +505,6 @@ void DeterministicSocketData::StopAfter(int seq) {
 
 MockRead DeterministicSocketData::GetNextRead() {
   current_read_ = StaticSocketDataProvider::PeekRead();
-  EXPECT_LE(sequence_number_, current_read_.sequence_number);
 
   // Synchronous read while stopped is an error
   if (stopped() && current_read_.mode == SYNCHRONOUS) {
@@ -586,14 +590,14 @@ void DeterministicSocketData::Reset() {
 void DeterministicSocketData::InvokeCallbacks() {
   if (socket_ && socket_->write_pending() &&
       (current_write().sequence_number == sequence_number())) {
-    socket_->CompleteWrite();
     NextStep();
+    socket_->CompleteWrite();
     return;
   }
   if (socket_ && socket_->read_pending() &&
       (current_read().sequence_number == sequence_number())) {
-    socket_->CompleteRead();
     NextStep();
+    socket_->CompleteRead();
     return;
   }
 }
@@ -689,10 +693,10 @@ void MockClientSocketFactory::ClearSSLSessionCache() {
 
 const char MockClientSocket::kTlsUnique[] = "MOCK_TLSUNIQ";
 
-MockClientSocket::MockClientSocket(net::NetLog* net_log)
+MockClientSocket::MockClientSocket(const BoundNetLog& net_log)
     : ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)),
       connected_(false),
-      net_log_(BoundNetLog::Make(net_log, net::NetLog::SOURCE_NONE)) {
+      net_log_(net_log) {
   IPAddressNumber ip;
   CHECK(ParseIPLiteralToNumber("192.0.2.33", &ip));
   peer_addr_ = IPEndPoint(ip, 0);
@@ -783,7 +787,7 @@ void MockClientSocket::RunCallback(const net::CompletionCallback& callback,
 MockTCPClientSocket::MockTCPClientSocket(const AddressList& addresses,
                                          net::NetLog* net_log,
                                          SocketDataProvider* data)
-    : MockClientSocket(net_log),
+    : MockClientSocket(BoundNetLog::Make(net_log, net::NetLog::SOURCE_NONE)),
       addresses_(addresses),
       data_(data),
       read_offset_(0),
@@ -978,7 +982,7 @@ int MockTCPClientSocket::CompleteRead() {
 
 DeterministicMockTCPClientSocket::DeterministicMockTCPClientSocket(
     net::NetLog* net_log, DeterministicSocketData* data)
-    : MockClientSocket(net_log),
+    : MockClientSocket(BoundNetLog::Make(net_log, net::NetLog::SOURCE_NONE)),
       write_pending_(false),
       write_result_(0),
       read_data_(),
@@ -1140,7 +1144,10 @@ MockSSLClientSocket::MockSSLClientSocket(
     const HostPortPair& host_port_pair,
     const SSLConfig& ssl_config,
     SSLSocketDataProvider* data)
-    : MockClientSocket(transport_socket->socket()->NetLog().net_log()),
+    : MockClientSocket(
+         // Have to use the right BoundNetLog for LoadTimingInfo regression
+         // tests.
+         transport_socket->socket()->NetLog()),
       transport_(transport_socket),
       data_(data),
       is_npn_state_set_(false),
@@ -1289,6 +1296,7 @@ MockUDPClientSocket::MockUDPClientSocket(SocketDataProvider* data,
       ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)) {
   DCHECK(data_);
   data_->Reset();
+  peer_addr_ = data->connect_data().peer_addr;
 }
 
 MockUDPClientSocket::~MockUDPClientSocket() {}
@@ -1352,7 +1360,7 @@ void MockUDPClientSocket::Close() {
 }
 
 int MockUDPClientSocket::GetPeerAddress(IPEndPoint* address) const {
-  NOTIMPLEMENTED();
+  *address = peer_addr_;
   return OK;
 }
 

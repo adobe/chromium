@@ -23,6 +23,9 @@ class CdmVideoDecoder {
   // returns |cdm::kSuccess| when an output frame is available. Returns
   // |cdm::kNeedMoreData| when |compressed_frame| does not produce an output
   // frame. Returns |cdm::kDecodeError| when decoding fails.
+  //
+  // A null |compressed_frame| will attempt to flush the decoder of any
+  // remaining frames. |compressed_frame_size| and |timestamp| are ignored.
   virtual cdm::Status DecodeFrame(const uint8_t* compressed_frame,
                                   int32_t compressed_frame_size,
                                   int64_t timestamp,
@@ -33,8 +36,7 @@ class CdmVideoDecoder {
 // |config.codec|. Returns a scoped_ptr containing a non-null initialized
 // CdmVideoDecoder* upon success.
 scoped_ptr<CdmVideoDecoder> CreateVideoDecoder(
-    cdm::Allocator* allocator,
-    const cdm::VideoDecoderConfig& config);
+    cdm::Host* host, const cdm::VideoDecoderConfig& config);
 
 }  // namespace webkit_media
 

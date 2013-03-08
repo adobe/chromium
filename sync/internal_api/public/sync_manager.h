@@ -10,7 +10,7 @@
 
 #include "base/basictypes.h"
 #include "base/callback_forward.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/memory/ref_counted.h"
 #include "base/task_runner.h"
 #include "base/threading/thread_checker.h"
@@ -301,7 +301,7 @@ class SYNC_EXPORT SyncManager {
   // TODO(akalin): Replace the |post_factory| parameter with a
   // URLFetcher parameter.
   virtual void Init(
-      const FilePath& database_location,
+      const base::FilePath& database_location,
       const WeakHandle<JsEventHandler>& event_handler,
       const std::string& sync_server_and_path,
       int sync_server_port,
@@ -354,6 +354,11 @@ class SYNC_EXPORT SyncManager {
   virtual void UnregisterInvalidationHandler(
       InvalidationHandler* handler) = 0;
 
+  // Forwards to the underlying notifier (see comments in invalidator.h).
+  virtual void AcknowledgeInvalidation(
+      const invalidation::ObjectId& id,
+      const syncer::AckHandle& ack_handle) = 0;
+
   // Put the syncer in normal mode ready to perform nudges and polls.
   virtual void StartSyncingNormally(
       const ModelSafeRoutingInfo& routing_info) = 0;
@@ -362,6 +367,9 @@ class SYNC_EXPORT SyncManager {
   // any configuration tasks needed as determined by the params. Once complete,
   // syncer will remain in CONFIGURATION_MODE until StartSyncingNormally is
   // called.
+  // Data whose types are not in |new_routing_info| are purged from sync
+  // directory. The purged data is backed up in delete journal for recovery in
+  // next session if its type is in |failed_types|.
   // |ready_task| is invoked when the configuration completes.
   // |retry_task| is invoked if the configuration job could not immediately
   //              execute. |ready_task| will still be called when it eventually
@@ -369,6 +377,7 @@ class SYNC_EXPORT SyncManager {
   virtual void ConfigureSyncer(
       ConfigureReason reason,
       ModelTypeSet types_to_config,
+      ModelTypeSet failed_types,
       const ModelSafeRoutingInfo& new_routing_info,
       const base::Closure& ready_task,
       const base::Closure& retry_task) = 0;
@@ -422,6 +431,9 @@ class SYNC_EXPORT SyncManager {
 
   // Returns the SyncManager's encryption handler.
   virtual SyncEncryptionHandler* GetEncryptionHandler() = 0;
+
+  // Ask the SyncManager to fetch updates for the given types.
+  virtual void RefreshTypes(ModelTypeSet types) = 0;
 };
 
 }  // namespace syncer

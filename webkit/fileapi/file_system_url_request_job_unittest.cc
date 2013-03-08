@@ -7,8 +7,8 @@
 #include <string>
 
 #include "base/bind.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/format_macros.h"
 #include "base/memory/weak_ptr.h"
@@ -28,6 +28,7 @@
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_test_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "webkit/fileapi/external_mount_points.h"
 #include "webkit/fileapi/file_system_context.h"
 #include "webkit/fileapi/file_system_file_util.h"
 #include "webkit/fileapi/file_system_operation_context.h"
@@ -65,6 +66,7 @@ class FileSystemURLRequestJobTest : public testing::Test {
     file_system_context_ =
         new FileSystemContext(
             FileSystemTaskRunners::CreateMockTaskRunners(),
+            ExternalMountPoints::CreateRefCounted().get(),
             special_storage_policy_, NULL,
             temp_dir_.path(),
             CreateDisallowFileAccessOptions());
@@ -133,9 +135,10 @@ class FileSystemURLRequestJobTest : public testing::Test {
   void CreateDirectory(const base::StringPiece& dir_name) {
     FileSystemFileUtil* file_util = file_system_context_->
         sandbox_provider()->GetFileUtil(kFileSystemTypeTemporary);
-    FileSystemURL url(GURL("http://remote"),
-                      kFileSystemTypeTemporary,
-                      FilePath().AppendASCII(dir_name));
+    FileSystemURL url = file_system_context_->CreateCrackedFileSystemURL(
+        GURL("http://remote"),
+        kFileSystemTypeTemporary,
+        base::FilePath().AppendASCII(dir_name));
 
     FileSystemOperationContext context(file_system_context_);
     context.set_allowed_bytes_growth(1024);
@@ -151,9 +154,10 @@ class FileSystemURLRequestJobTest : public testing::Test {
                  const char* buf, int buf_size) {
     FileSystemFileUtil* file_util = file_system_context_->
         sandbox_provider()->GetFileUtil(kFileSystemTypeTemporary);
-    FileSystemURL url(GURL("http://remote"),
-                      kFileSystemTypeTemporary,
-                      FilePath().AppendASCII(file_name));
+    FileSystemURL url = file_system_context_->CreateCrackedFileSystemURL(
+        GURL("http://remote"),
+        kFileSystemTypeTemporary,
+        base::FilePath().AppendASCII(file_name));
 
     FileSystemOperationContext context(file_system_context_);
     context.set_allowed_bytes_growth(1024);
@@ -349,8 +353,8 @@ TEST_F(FileSystemURLRequestJobTest, GetMimeType) {
   const char kFilename[] = "hoge.html";
 
   std::string mime_type_direct;
-  FilePath::StringType extension =
-      FilePath().AppendASCII(kFilename).Extension();
+  base::FilePath::StringType extension =
+      base::FilePath().AppendASCII(kFilename).Extension();
   if (!extension.empty())
     extension = extension.substr(1);
   EXPECT_TRUE(net::GetWellKnownMimeTypeFromExtension(

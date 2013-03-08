@@ -9,7 +9,7 @@
 
 #include "base/basictypes.h"
 #include "base/command_line.h"
-#include "base/string_number_conversions.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/api/infobars/confirm_infobar_delegate.h"
@@ -20,6 +20,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ssl/ssl_add_cert_handler.h"
 #include "chrome/browser/ssl/ssl_client_certificate_selector.h"
+#include "chrome/browser/ui/browser_finder.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "content/public/browser/notification_details.h"
@@ -144,7 +145,7 @@ class SSLTabHelper::SSLAddCertData
   // content::NotificationObserver:
   virtual void Observe(int type,
                        const content::NotificationSource& source,
-                       const content::NotificationDetails& details);
+                       const content::NotificationDetails& details) OVERRIDE;
 
   InfoBarService* infobar_service_;
   InfoBarDelegate* infobar_delegate_;
@@ -191,10 +192,19 @@ void SSLTabHelper::SSLAddCertData::Observe(
 DEFINE_WEB_CONTENTS_USER_DATA_KEY(SSLTabHelper);
 
 SSLTabHelper::SSLTabHelper(content::WebContents* contents)
-    : web_contents_(contents) {
+    : WebContentsObserver(contents),
+      web_contents_(contents) {
 }
 
 SSLTabHelper::~SSLTabHelper() {
+}
+
+void SSLTabHelper::DidChangeVisibleSSLState() {
+#if !defined(OS_ANDROID)
+  Browser* browser = chrome::FindBrowserWithWebContents(web_contents_);
+  if (browser)
+    browser->VisibleSSLStateChanged(web_contents_);
+#endif  // !defined(OS_ANDROID)
 }
 
 void SSLTabHelper::ShowClientCertificateRequestDialog(

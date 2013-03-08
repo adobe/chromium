@@ -39,7 +39,7 @@ enum { NM_DEVICE_TYPE_WIFI = 2 };
 class NetworkManagerWlanApi : public WifiDataProviderCommon::WlanApiInterface {
  public:
   NetworkManagerWlanApi();
-  ~NetworkManagerWlanApi();
+  virtual ~NetworkManagerWlanApi();
 
   // Must be called before any other interface method. Will return false if the
   // NetworkManager session cannot be created (e.g. not present on this distro),
@@ -53,7 +53,7 @@ class NetworkManagerWlanApi : public WifiDataProviderCommon::WlanApiInterface {
   //
   // This function makes blocking D-Bus calls, but it's totally fine as
   // the code runs in "Geolocation" thread, not the browser's UI thread.
-  virtual bool GetAccessPointData(WifiData::AccessPointDataSet* data);
+  virtual bool GetAccessPointData(WifiData::AccessPointDataSet* data) OVERRIDE;
 
  private:
   // Enumerates the list of available network adapter devices known to
@@ -67,10 +67,11 @@ class NetworkManagerWlanApi : public WifiDataProviderCommon::WlanApiInterface {
                                  WifiData::AccessPointDataSet* data);
 
   // Internal method used by |GetAccessPointsForAdapter|, given a wifi access
-  // point proxy retrieves the named property and returns it. Returns NULL if
-  // the property could not be read.
-  dbus::Response* GetAccessPointProperty(dbus::ObjectProxy* proxy,
-                                         const std::string& property_name);
+  // point proxy retrieves the named property and returns it. Returns NULL in
+  // a scoped_ptr if the property could not be read.
+  scoped_ptr<dbus::Response> GetAccessPointProperty(
+      dbus::ObjectProxy* proxy,
+      const std::string& property_name);
 
   scoped_refptr<dbus::Bus> system_bus_;
   dbus::ObjectProxy* network_manager_proxy_;
@@ -324,20 +325,20 @@ bool NetworkManagerWlanApi::GetAccessPointsForAdapter(
   return true;
 }
 
-dbus::Response* NetworkManagerWlanApi::GetAccessPointProperty(
+scoped_ptr<dbus::Response> NetworkManagerWlanApi::GetAccessPointProperty(
     dbus::ObjectProxy* access_point_proxy,
     const std::string& property_name) {
   dbus::MethodCall method_call(DBUS_INTERFACE_PROPERTIES, "Get");
   dbus::MessageWriter builder(&method_call);
   builder.AppendString("org.freedesktop.NetworkManager.AccessPoint");
   builder.AppendString(property_name);
-  dbus::Response* response = access_point_proxy->CallMethodAndBlock(
+  scoped_ptr<dbus::Response> response = access_point_proxy->CallMethodAndBlock(
       &method_call,
       dbus::ObjectProxy::TIMEOUT_USE_DEFAULT);
-  if (!response) {
+  if (!response.get()) {
     LOG(WARNING) << "Failed to get property for " << property_name;
   }
-  return response;
+  return response.Pass();
 }
 
 }  // namespace

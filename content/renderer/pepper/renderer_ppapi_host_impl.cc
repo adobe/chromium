@@ -4,7 +4,7 @@
 
 #include "content/renderer/pepper/renderer_ppapi_host_impl.h"
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "content/renderer/pepper/pepper_graphics_2d_host.h"
 #include "content/renderer/pepper/pepper_in_process_resource_creation.h"
@@ -33,7 +33,7 @@ CONTENT_EXPORT RendererPpapiHost*
 RendererPpapiHost::CreateExternalPluginModule(
     scoped_refptr<PluginModule> plugin_module,
     PluginInstance* plugin_instance,
-    const FilePath& file_path,
+    const base::FilePath& file_path,
     ppapi::PpapiPermissions permissions,
     const IPC::ChannelHandle& channel_handle,
     base::ProcessId plugin_pid,

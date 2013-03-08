@@ -8,7 +8,7 @@
 #include <vector>
 
 #include "base/basictypes.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/memory/ref_counted.h"
 #include "base/time.h"
 #include "googleurl/src/gurl.h"
@@ -30,7 +30,7 @@ class WEBKIT_STORAGE_EXPORT BlobData : public base::RefCounted<BlobData> {
 
   void AppendData(const char* data, size_t length);
 
-  void AppendFile(const FilePath& file_path, uint64 offset, uint64 length,
+  void AppendFile(const base::FilePath& file_path, uint64 offset, uint64 length,
                   const base::Time& expected_modification_time);
 
   void AppendBlob(const GURL& blob_url, uint64 offset, uint64 length);

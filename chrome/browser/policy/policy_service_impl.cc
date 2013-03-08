@@ -15,8 +15,9 @@
 namespace policy {
 
 PolicyServiceImpl::PolicyChangeInfo::PolicyChangeInfo(
-    const PolicyBundle::PolicyNamespace& policy_namespace,
-    const PolicyMap& previous, const PolicyMap& current)
+    const PolicyNamespace& policy_namespace,
+    const PolicyMap& previous,
+    const PolicyMap& current)
     : policy_namespace_(policy_namespace) {
   previous_.CopyFrom(previous);
   current_.CopyFrom(current);
@@ -29,12 +30,16 @@ typedef PolicyServiceImpl::Providers::const_iterator Iterator;
 
 PolicyServiceImpl::PolicyServiceImpl(const Providers& providers)
     : ALLOW_THIS_IN_INITIALIZER_LIST(weak_ptr_factory_(this)) {
-  initialization_complete_ = true;
+  for (int domain = 0; domain < POLICY_DOMAIN_SIZE; ++domain)
+    initialization_complete_[domain] = true;
   providers_ = providers;
   for (Iterator it = providers.begin(); it != providers.end(); ++it) {
     ConfigurationPolicyProvider* provider = *it;
     provider->AddObserver(this);
-    initialization_complete_ &= provider->IsInitializationComplete();
+    for (int domain = 0; domain < POLICY_DOMAIN_SIZE; ++domain) {
+      initialization_complete_[domain] &=
+          provider->IsInitializationComplete(static_cast<PolicyDomain>(domain));
+    }
   }
   // There are no observers yet, but calls to GetPolicies() should already get
   // the processed policy values.
@@ -69,14 +74,21 @@ void PolicyServiceImpl::RemoveObserver(PolicyDomain domain,
   }
 }
 
-const PolicyMap& PolicyServiceImpl::GetPolicies(
+void PolicyServiceImpl::RegisterPolicyDomain(
     PolicyDomain domain,
-    const std::string& component_id) const {
-  return policy_bundle_.Get(domain, component_id);
+    const std::set<std::string>& components) {
+  for (Iterator it = providers_.begin(); it != providers_.end(); ++it)
+    (*it)->RegisterPolicyDomain(domain, components);
 }
 
-bool PolicyServiceImpl::IsInitializationComplete() const {
-  return initialization_complete_;
+const PolicyMap& PolicyServiceImpl::GetPolicies(
+    const PolicyNamespace& ns) const {
+  return policy_bundle_.Get(ns);
+}
+
+bool PolicyServiceImpl::IsInitializationComplete(PolicyDomain domain) const {
+  DCHECK(domain >= 0 && domain < POLICY_DOMAIN_SIZE);
+  return initialization_complete_[domain];
 }
 
 void PolicyServiceImpl::RefreshPolicies(const base::Closure& callback) {
@@ -103,7 +115,7 @@ void PolicyServiceImpl::OnUpdatePolicy(ConfigurationPolicyProvider* provider) {
 }
 
 void PolicyServiceImpl::NotifyNamespaceUpdated(
-    const PolicyBundle::PolicyNamespace& ns,
+    const PolicyNamespace& ns,
     const PolicyMap& previous,
     const PolicyMap& current) {
   // If running a unit test that hasn't setup a MessageLoop, don't send any
@@ -113,7 +125,7 @@ void PolicyServiceImpl::NotifyNamespaceUpdated(
 
   // Don't queue up a task if we have no observers - that way Observers added
   // later don't get notified of changes that happened during construction time.
-  if (observers_.find(ns.first) == observers_.end())
+  if (observers_.find(ns.domain) == observers_.end())
     return;
 
   // Notify Observers via a queued task, so Observers can't trigger a re-entrant
@@ -130,13 +142,12 @@ void PolicyServiceImpl::NotifyNamespaceUpdated(
 void PolicyServiceImpl::NotifyNamespaceUpdatedTask(
     scoped_ptr<PolicyChangeInfo> changes) {
   ObserverMap::iterator iterator = observers_.find(
-      changes->policy_namespace_.first);
+      changes->policy_namespace_.domain);
   if (iterator != observers_.end()) {
     FOR_EACH_OBSERVER(
         PolicyService::Observer,
         *iterator->second,
-        OnPolicyUpdated(changes->policy_namespace_.first,
-                        changes->policy_namespace_.second,
+        OnPolicyUpdated(changes->policy_namespace_,
                         changes->previous_,
                         changes->current_));
   }
@@ -163,7 +174,7 @@ void PolicyServiceImpl::MergeAndTriggerUpdates() {
       // A new namespace is available.
       NotifyNamespaceUpdated(it_new->first, kEmpty, *it_new->second);
       ++it_new;
-    } else if (it_new->first > it_old->first) {
+    } else if (it_old->first < it_new->first) {
       // A previously available namespace is now gone.
       NotifyNamespaceUpdated(it_old->first, *it_old->second, kEmpty);
       ++it_old;
@@ -190,21 +201,28 @@ void PolicyServiceImpl::MergeAndTriggerUpdates() {
 }
 
 void PolicyServiceImpl::CheckInitializationComplete() {
-  // Check if all providers became initialized just now, if they weren't before.
-  if (!initialization_complete_) {
-    initialization_complete_ = true;
+  // Check if all the providers just became initialized for each domain; if so,
+  // notify that domain's observers.
+  for (int domain = 0; domain < POLICY_DOMAIN_SIZE; ++domain) {
+    if (initialization_complete_[domain])
+      continue;
+
+    PolicyDomain policy_domain = static_cast<PolicyDomain>(domain);
+
+    bool all_complete = true;
     for (Iterator it = providers_.begin(); it != providers_.end(); ++it) {
-      if (!(*it)->IsInitializationComplete()) {
-        initialization_complete_ = false;
+      if (!(*it)->IsInitializationComplete(policy_domain)) {
+        all_complete = false;
         break;
       }
     }
-    if (initialization_complete_) {
-      for (ObserverMap::iterator iter = observers_.begin();
-           iter != observers_.end(); ++iter) {
+    if (all_complete) {
+      initialization_complete_[domain] = true;
+      ObserverMap::iterator iter = observers_.find(policy_domain);
+      if (iter != observers_.end()) {
         FOR_EACH_OBSERVER(PolicyService::Observer,
                           *iter->second,
-                          OnPolicyServiceInitialized());
+                          OnPolicyServiceInitialized(policy_domain));
       }
     }
   }

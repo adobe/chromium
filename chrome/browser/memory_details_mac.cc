@@ -9,8 +9,8 @@
 
 #include "base/basictypes.h"
 #include "base/bind.h"
-#include "base/file_path.h"
 #include "base/file_version_info.h"
+#include "base/files/file_path.h"
 #include "base/mac/mac_util.h"
 #include "base/process_util.h"
 #include "base/string_util.h"
@@ -157,8 +157,8 @@ void MemoryDetails::CollectProcessData(
       ProcessInfoSnapshot::ProcInfoEntry proc_info;
       if (process_info.GetProcInfo(info.pid, &proc_info)) {
         if (proc_info.command.length() > 1 && proc_info.command[0] == '/') {
-          FilePath bundle_name =
-              base::mac::GetAppBundlePath(FilePath(proc_info.command));
+          base::FilePath bundle_name =
+              base::mac::GetAppBundlePath(base::FilePath(proc_info.command));
           if (!bundle_name.empty()) {
             version_info.reset(FileVersionInfo::CreateFileVersionInfo(
                 bundle_name));

@@ -28,16 +28,16 @@ struct BluetoothOutOfBandPairingData;
 
 namespace chromeos {
 
-class BluetoothAdapterChromeOs;
+class BluetoothAdapterChromeOS;
 
-// The BluetoothDeviceChromeOs class is an implementation of BluetoothDevice
+// The BluetoothDeviceChromeOS class is an implementation of BluetoothDevice
 // for Chrome OS platform.
-class BluetoothDeviceChromeOs
+class BluetoothDeviceChromeOS
     : public device::BluetoothDevice,
       public BluetoothDeviceClient::Observer,
       public BluetoothAgentServiceProvider::Delegate {
  public:
-  virtual ~BluetoothDeviceChromeOs();
+  virtual ~BluetoothDeviceChromeOS();
 
   // BluetoothDevice override
   virtual bool IsPaired() const OVERRIDE;
@@ -45,7 +45,6 @@ class BluetoothDeviceChromeOs
   virtual void GetServiceRecords(
       const ServiceRecordsCallback& callback,
       const ErrorCallback& error_callback) OVERRIDE;
-  virtual bool ProvidesServiceWithUUID(const std::string& uuid) const OVERRIDE;
   virtual void ProvidesServiceWithName(
       const std::string& name,
       const ProvidesServiceCallback& callback) OVERRIDE;
@@ -77,10 +76,10 @@ class BluetoothDeviceChromeOs
       const ErrorCallback& error_callback) OVERRIDE;
 
  private:
-  friend class BluetoothAdapterChromeOs;
+  friend class BluetoothAdapterChromeOS;
   friend class device::MockBluetoothDevice;
 
-  explicit BluetoothDeviceChromeOs(BluetoothAdapterChromeOs* adapter);
+  explicit BluetoothDeviceChromeOS(BluetoothAdapterChromeOS* adapter);
 
   // Sets the dbus object path for the device to |object_path|, indicating
   // that the device has gone from being discovered to paired or bonded.
@@ -115,7 +114,7 @@ class BluetoothDeviceChromeOs
                            const std::string& error_name,
                            const std::string& error_message);
 
-  // Called by BluetoothAdapterClient when a call to DiscoverServices()
+  // Called by BluetoothAdapterClient when a call to GetServiceRecords()
   // completes.  |callback| and |error_callback| are the callbacks provided to
   // GetServiceRecords.
   void CollectServiceRecordsCallback(
@@ -125,13 +124,44 @@ class BluetoothDeviceChromeOs
       const BluetoothDeviceClient::ServiceMap& service_map,
       bool success);
 
+  // Called by CollectServiceRecordsCallback() every time |service_records_| is
+  // updated. |OnServiceRecordsChanged| updates the derived properties that
+  // depend on |service_records_|.
+  void OnServiceRecordsChanged(void);
+
   // Called by BluetoothProperty when the call to Set() for the Trusted
   // property completes. |success| indicates whether or not the request
-  // succeeded, |callback| and |error_callback| are the callbacks provided to
-  // Connect().
-  void OnSetTrusted(const base::Closure& callback,
-                    const ErrorCallback& error_callback,
-                    bool success);
+  // succeeded.
+  void OnSetTrusted(bool success);
+
+  // Called by BluetoothAdapterClient when a call to GetServiceRecords()
+  // fails.  |callback| and |error_callback| are the callbacks provided to
+  // GetServiceRecords().
+  void OnGetServiceRecordsError(const ServiceRecordsCallback& callback,
+                                const ErrorCallback& error_callback);
+
+  // Called by BluetoothAdapterClient when the initial call to
+  // GetServiceRecords() after pairing completes. |callback| and
+  // |error_callback| are the callbacks provided to Connect().
+  void OnInitialGetServiceRecords(const base::Closure& callback,
+                                  const ConnectErrorCallback& error_callback,
+                                  const ServiceRecordList& list);
+
+  // Called by BluetoothAdapterClient when the initial call to
+  // GetServiceRecords() after pairing fails. |callback| and |error_callback|
+  // are the callbacks provided to Connect().
+  void OnInitialGetServiceRecordsError(
+      const base::Closure& callback,
+      const ConnectErrorCallback& error_callback);
+
+  // Called by Connect() when it succeeds. The |callback| is the value passed to
+  // the Connect() call.
+  void OnConnectCallbackCalled(const base::Closure& callback);
+
+  // Called by Connect() when it fails. The |error_callback| is the value passed
+  // to the Connect() call.
+  void OnConnectErrorCallbackCalled(const ConnectErrorCallback& error_callback,
+                                    enum ConnectErrorCode error_code);
 
   // Connect application-level protocols of the device to the system, called
   // on a successful connection or to reconnect to a device that is already
@@ -335,12 +365,12 @@ class BluetoothDeviceChromeOs
   // the request failed before a reply was returned from the device.
   virtual void Cancel() OVERRIDE;
 
-  // Creates a new BluetoothDeviceChromeOs object bound to the adapter
+  // Creates a new BluetoothDeviceChromeOS object bound to the adapter
   // |adapter|.
-  static BluetoothDeviceChromeOs* Create(BluetoothAdapterChromeOs* adapter);
+  static BluetoothDeviceChromeOS* Create(BluetoothAdapterChromeOS* adapter);
 
   // The adapter that owns this device instance.
-  BluetoothAdapterChromeOs* adapter_;
+  BluetoothAdapterChromeOS* adapter_;
 
   // The dbus object path of the device, will be empty if the device has only
   // been discovered and not yet paired with.
@@ -368,11 +398,21 @@ class BluetoothDeviceChromeOs
   // Used to keep track of pending application connection requests.
   int connecting_applications_counter_;
 
+  // Used to keep track of ongoing calls to Connect().
+  int connecting_calls_;
+
+  // A service records cache.
+  ServiceRecordList service_records_;
+
+  // This says whether the |service_records_| cache is initialized. Note that an
+  // empty |service_records_| list can be a valid list.
+  bool service_records_loaded_;
+
   // Note: This should remain the last member so it'll be destroyed and
   // invalidate its weak pointers before any other members are destroyed.
-  base::WeakPtrFactory<BluetoothDeviceChromeOs> weak_ptr_factory_;
+  base::WeakPtrFactory<BluetoothDeviceChromeOS> weak_ptr_factory_;
 
-  DISALLOW_COPY_AND_ASSIGN(BluetoothDeviceChromeOs);
+  DISALLOW_COPY_AND_ASSIGN(BluetoothDeviceChromeOS);
 };
 
 }  // namespace chromeos

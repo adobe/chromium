@@ -18,7 +18,7 @@
 
 class BackingStore;
 class GURL;
-class PrefServiceSyncable;
+class PrefRegistrySyncable;
 class SkBitmap;
 
 namespace base {
@@ -36,10 +36,6 @@ struct InjectDetails;
 }  // namespace tabs
 }  // namespace api
 }  // namespace extensions
-
-namespace skia {
-class PlatformBitmap;
-}
 
 // Windows
 class WindowsGetFunction : public SyncExtensionFunction {
@@ -181,7 +177,7 @@ class TabsDetectLanguageFunction : public AsyncExtensionFunction,
 class TabsCaptureVisibleTabFunction : public AsyncExtensionFunction,
                                   public content::NotificationObserver {
  public:
-  static void RegisterUserPrefs(PrefServiceSyncable* service);
+  static void RegisterUserPrefs(PrefRegistrySyncable* registry);
 
  protected:
   enum ImageFormat {
@@ -201,8 +197,8 @@ class TabsCaptureVisibleTabFunction : public AsyncExtensionFunction,
   void SendResultFromBitmap(const SkBitmap& screen_capture);
 
  private:
-  void CopyFromBackingStoreComplete(skia::PlatformBitmap* bitmap,
-                                    bool succeeded);
+  void CopyFromBackingStoreComplete(bool succeeded,
+                                    const SkBitmap& bitmap);
 
   content::NotificationRegistrar registrar_;
 
@@ -247,7 +243,7 @@ class ExecuteCodeInTabFunction : public AsyncExtensionFunction {
   void LocalizeCSS(
       const std::string& data,
       const std::string& extension_id,
-      const FilePath& extension_path,
+      const base::FilePath& extension_path,
       const std::string& extension_default_locale);
 
   // Called when contents from the loaded file have been localized.

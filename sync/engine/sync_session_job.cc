@@ -16,15 +16,12 @@ SyncSessionJob::SyncSessionJob(
     Purpose purpose,
     base::TimeTicks start,
     scoped_ptr<sessions::SyncSession> session,
-    const ConfigurationParams& config_params,
-    const tracked_objects::Location& from_location)
+    const ConfigurationParams& config_params)
     : purpose_(purpose),
       scheduled_start_(start),
       session_(session.Pass()),
-      is_canary_(false),
       config_params_(config_params),
-      finished_(NOT_FINISHED),
-      from_location_(from_location) {
+      finished_(NOT_FINISHED) {
 }
 
 void SyncSessionJob::set_destruction_observer(
@@ -90,33 +87,20 @@ scoped_ptr<SyncSessionJob> SyncSessionJob::CloneAndAbandon() {
   // Clone |this|, and abandon it by NULL-ing session_.
   return scoped_ptr<SyncSessionJob> (new SyncSessionJob(
       purpose_, scheduled_start_, session_.Pass(),
-      config_params_, from_location_));
+      config_params_));
 }
 
 scoped_ptr<SyncSessionJob> SyncSessionJob::Clone() const {
   DCHECK_GT(finished_, NOT_FINISHED);
   return scoped_ptr<SyncSessionJob>(new SyncSessionJob(
       purpose_, scheduled_start_, CloneSession().Pass(),
-      config_params_, from_location_));
-}
-
-scoped_ptr<SyncSessionJob> SyncSessionJob::CloneFromLocation(
-    const tracked_objects::Location& from_here) const {
-  DCHECK_GT(finished_, NOT_FINISHED);
-  return scoped_ptr<SyncSessionJob>(new SyncSessionJob(
-      purpose_, scheduled_start_, CloneSession().Pass(),
-      config_params_, from_here));
+      config_params_));
 }
 
 scoped_ptr<sessions::SyncSession> SyncSessionJob::CloneSession() const {
   return scoped_ptr<sessions::SyncSession>(
       new sessions::SyncSession(session_->context(),
-          session_->delegate(), session_->source(), session_->routing_info(),
-          session_->workers()));
-}
-
-bool SyncSessionJob::is_canary() const {
-  return is_canary_;
+          session_->delegate(), session_->source()));
 }
 
 SyncSessionJob::Purpose SyncSessionJob::purpose() const {
@@ -139,18 +123,8 @@ sessions::SyncSession* SyncSessionJob::mutable_session() {
   return session_.get();
 }
 
-const tracked_objects::Location& SyncSessionJob::from_location() const {
-  return from_location_;
-}
-
 ConfigurationParams SyncSessionJob::config_params() const {
   return config_params_;
-}
-
-void SyncSessionJob::GrantCanaryPrivilege() {
-  DCHECK_EQ(finished_, NOT_FINISHED);
-  DVLOG(2) << "Granting canary priviliege to " << session_.get();
-  is_canary_ = true;
 }
 
 SyncerStep SyncSessionJob::start_step() const {

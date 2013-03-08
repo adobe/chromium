@@ -18,7 +18,7 @@
 #include "chrome/browser/sync/test_profile_sync_service.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/test/base/testing_pref_service.h"
+#include "chrome/test/base/testing_pref_service_syncable.h"
 #include "chrome/test/base/testing_profile.h"
 #include "content/public/common/content_client.h"
 #include "content/public/test/test_browser_thread.h"
@@ -123,7 +123,7 @@ class ProfileSyncServiceTestHarness {
         profile->GetPrefs()->SetBoolean(prefs::kSyncHasSetupCompleted, false);
 
       // Register the bookmark data type.
-      ON_CALL(*factory, CreateDataTypeManager(_, _, _, _)).
+      ON_CALL(*factory, CreateDataTypeManager(_, _, _, _, _)).
           WillByDefault(ReturnNewDataTypeManager());
 
       if (issue_auth_token) {
@@ -241,7 +241,7 @@ TEST_F(ProfileSyncServiceTest, AbortedByShutdown) {
       signin,
       ProfileSyncService::AUTO_START,
       true));
-  EXPECT_CALL(*factory, CreateDataTypeManager(_, _, _, _)).Times(0);
+  EXPECT_CALL(*factory, CreateDataTypeManager(_, _, _, _, _)).Times(0);
   EXPECT_CALL(*factory, CreateBookmarkSyncComponents(_, _)).
       Times(0);
   harness_.service->RegisterDataTypeController(
@@ -267,7 +267,7 @@ TEST_F(ProfileSyncServiceTest, DisableAndEnableSyncTemporarily) {
       ProfileSyncService::AUTO_START,
       true));
   // Register the bookmark data type.
-  EXPECT_CALL(*factory, CreateDataTypeManager(_, _, _, _)).
+  EXPECT_CALL(*factory, CreateDataTypeManager(_, _, _, _, _)).
       WillRepeatedly(ReturnNewDataTypeManager());
 
   harness_.IssueTestTokens();
@@ -287,6 +287,34 @@ TEST_F(ProfileSyncServiceTest, DisableAndEnableSyncTemporarily) {
   EXPECT_TRUE(harness_.service->sync_initialized());
   EXPECT_FALSE(
       harness_.profile->GetPrefs()->GetBoolean(prefs::kSyncSuppressStart));
+}
+
+TEST_F(ProfileSyncServiceTest, EnableSyncAndSignOut) {
+  SigninManager* signin =
+      SigninManagerFactory::GetForProfile(harness_.profile.get());
+  signin->SetAuthenticatedUsername("test@test.com");
+  ProfileSyncComponentsFactoryMock* factory =
+      new ProfileSyncComponentsFactoryMock();
+  harness_.service.reset(new TestProfileSyncService(
+      factory,
+      harness_.profile.get(),
+      signin,
+      ProfileSyncService::AUTO_START,
+      true));
+  // Register the bookmark data type.
+  EXPECT_CALL(*factory, CreateDataTypeManager(_, _, _, _, _)).
+      WillRepeatedly(ReturnNewDataTypeManager());
+
+  harness_.IssueTestTokens();
+
+  harness_.service->Initialize();
+  EXPECT_TRUE(harness_.service->sync_initialized());
+  EXPECT_TRUE(harness_.service->GetBackendForTest() != NULL);
+  EXPECT_FALSE(
+      harness_.profile->GetPrefs()->GetBoolean(prefs::kSyncSuppressStart));
+
+  signin->SignOut();
+  EXPECT_FALSE(harness_.service->sync_initialized());
 }
 
 TEST_F(ProfileSyncServiceTest, JsControllerHandlersBasic) {
@@ -372,12 +400,12 @@ TEST_F(ProfileSyncServiceTest, TestStartupWithOldSyncData) {
   const char* nonsense1 = "reginald";
   const char* nonsense2 = "beartato";
   const char* nonsense3 = "harrison";
-  FilePath temp_directory =
+  base::FilePath temp_directory =
       harness_.profile->GetPath().AppendASCII("Sync Data");
-  FilePath sync_file1 =
+  base::FilePath sync_file1 =
       temp_directory.AppendASCII("BookmarkSyncSettings.sqlite3");
-  FilePath sync_file2 = temp_directory.AppendASCII("SyncData.sqlite3");
-  FilePath sync_file3 = temp_directory.AppendASCII("nonsense_file");
+  base::FilePath sync_file2 = temp_directory.AppendASCII("SyncData.sqlite3");
+  base::FilePath sync_file3 = temp_directory.AppendASCII("nonsense_file");
   ASSERT_TRUE(file_util::CreateDirectory(temp_directory));
   ASSERT_NE(-1,
             file_util::WriteFile(sync_file1, nonsense1, strlen(nonsense1)));
@@ -486,9 +514,8 @@ TEST_F(ProfileSyncServiceTest, UpdateRegisteredInvalidationIdsPersistence) {
   backend->EmitOnInvalidatorStateChange(syncer::INVALIDATIONS_ENABLED);
   EXPECT_EQ(syncer::INVALIDATIONS_ENABLED, handler.GetInvalidatorState());
 
-  backend->EmitOnIncomingInvalidation(states, syncer::REMOTE_INVALIDATION);
+  backend->EmitOnIncomingInvalidation(states);
   EXPECT_THAT(states, Eq(handler.GetLastInvalidationMap()));
-  EXPECT_EQ(syncer::REMOTE_INVALIDATION, handler.GetLastInvalidationSource());
 
   backend->EmitOnInvalidatorStateChange(syncer::TRANSIENT_INVALIDATION_ERROR);
   EXPECT_EQ(syncer::TRANSIENT_INVALIDATION_ERROR,
@@ -520,15 +547,16 @@ class ProfileSyncServiceInvalidator : public syncer::Invalidator {
     service_->UnregisterInvalidationHandler(handler);
   }
 
+  virtual void Acknowledge(const invalidation::ObjectId& id,
+                           const syncer::AckHandle& ack_handle) OVERRIDE {
+    // Do nothing.
+  }
+
   virtual syncer::InvalidatorState GetInvalidatorState() const OVERRIDE {
     return service_->GetInvalidatorState();
   }
 
   virtual void SetUniqueId(const std::string& unique_id) OVERRIDE {
-    // Do nothing.
-  }
-
-  virtual void SetStateDeprecated(const std::string& state) OVERRIDE {
     // Do nothing.
   }
 
@@ -590,14 +618,9 @@ class ProfileSyncServiceInvalidatorTestDelegate {
   }
 
   void TriggerOnIncomingInvalidation(
-      const syncer::ObjectIdInvalidationMap& invalidation_map,
-      syncer::IncomingInvalidationSource source) {
+      const syncer::ObjectIdInvalidationMap& invalidation_map) {
     harness_.service->GetBackendForTest()->EmitOnIncomingInvalidation(
-        invalidation_map, source);
-  }
-
-  static bool InvalidatorHandlesDeprecatedState() {
-    return false;
+        invalidation_map);
   }
 
  private:

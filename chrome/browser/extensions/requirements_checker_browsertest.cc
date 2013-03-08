@@ -6,7 +6,7 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/memory/ref_counted.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
@@ -29,7 +29,7 @@ namespace extensions {
 
 class RequirementsCheckerBrowserTest : public ExtensionBrowserTest {
  public:
-  void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
     // In linux, we need to launch GPU process to decide if WebGL is allowed.
     // Run it on top of osmesa to avoid bot driver issues.
 #if defined(OS_LINUX)
@@ -41,13 +41,13 @@ class RequirementsCheckerBrowserTest : public ExtensionBrowserTest {
 
   scoped_refptr<const Extension> LoadExtensionFromDirName(
       const std::string& extension_dir_name) {
-    FilePath extension_path;
+    base::FilePath extension_path;
     std::string load_error;
     PathService::Get(chrome::DIR_TEST_DATA, &extension_path);
     extension_path = extension_path.AppendASCII("requirements_checker")
                                    .AppendASCII(extension_dir_name);
     scoped_refptr<const Extension> extension =
-        extension_file_util::LoadExtension(extension_path, Extension::LOAD,
+        extension_file_util::LoadExtension(extension_path, Manifest::UNPACKED,
                                            0, &load_error);
     CHECK(load_error.length() == 0u);
     return extension;

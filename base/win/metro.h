@@ -10,7 +10,7 @@
 
 #include "base/base_export.h"
 #include "base/callback.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/string16.h"
 
 namespace base {
@@ -90,9 +90,6 @@ BASE_EXPORT void SetForceToUseTSF();
 // Allocates and returns the destination string via the LocalAlloc API after
 // copying the src to it.
 BASE_EXPORT wchar_t* LocalAllocAndCopyString(const string16& src);
-
-// Returns true if the screen supports touch.
-BASE_EXPORT bool IsTouchEnabled();
 
 // Returns true if Windows Parental control activity logging is enabled. This
 // feature is available on Windows Vista and beyond.

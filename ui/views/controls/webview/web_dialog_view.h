@@ -86,6 +86,8 @@ class WEBVIEW_EXPORT WebDialogView : public views::ClientView,
       content::WebUI* webui,
       content::RenderViewHost* render_view_host) OVERRIDE;
   virtual void OnDialogClosed(const std::string& json_retval) OVERRIDE;
+  virtual void OnDialogCloseFromWebUI(
+      const std::string& json_retval) OVERRIDE;
   virtual void OnCloseContents(content::WebContents* source,
                                bool* out_close_dialog) OVERRIDE;
   virtual bool ShouldShowDialogTitle() const OVERRIDE;
@@ -109,6 +111,9 @@ class WEBVIEW_EXPORT WebDialogView : public views::ClientView,
                               bool user_gesture,
                               bool* was_blocked) OVERRIDE;
   virtual void LoadingStateChanged(content::WebContents* source) OVERRIDE;
+  virtual void BeforeUnloadFired(content::WebContents* tab,
+                                 bool proceed,
+                                 bool* proceed_to_fire_unload) OVERRIDE;
 
  private:
   FRIEND_TEST_ALL_PREFIXES(WebDialogBrowserTest, WebContentRendered);
@@ -128,6 +133,24 @@ class WEBVIEW_EXPORT WebDialogView : public views::ClientView,
   ui::WebDialogDelegate* delegate_;
 
   views::WebView* web_view_;
+
+  // Whether user is attempting to close the dialog and we are processing
+  // beforeunload event.
+  bool is_attempting_close_dialog_;
+
+  // Whether beforeunload event has been fired and we have finished processing
+  // beforeunload event.
+  bool before_unload_fired_;
+
+  // Whether the dialog is closed from WebUI in response to a "DialogClose"
+  // message.
+  bool closed_via_webui_;
+
+  // A json string returned to WebUI from a "DialogClosed" message.
+  std::string dialog_close_retval_;
+
+  // Whether CloseContents() has been called.
+  bool close_contents_called_;
 
   DISALLOW_COPY_AND_ASSIGN(WebDialogView);
 };

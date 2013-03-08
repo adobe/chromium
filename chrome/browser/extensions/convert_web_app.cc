@@ -10,8 +10,8 @@
 #include <vector>
 
 #include "base/base64.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/json/json_file_value_serializer.h"
 #include "base/logging.h"
@@ -86,8 +86,8 @@ std::string ConvertTimeToExtensionVersion(const Time& create_time) {
 scoped_refptr<Extension> ConvertWebAppToExtension(
     const WebApplicationInfo& web_app,
     const Time& create_time,
-    const FilePath& extensions_dir) {
-  FilePath install_temp_dir =
+    const base::FilePath& extensions_dir) {
+  base::FilePath install_temp_dir =
       extension_file_util::GetInstallTempDir(extensions_dir);
   if (install_temp_dir.empty()) {
     LOG(ERROR) << "Could not get path to profile temporary directory.";
@@ -143,7 +143,7 @@ scoped_refptr<Extension> ConvertWebAppToExtension(
   }
 
   // Write the manifest.
-  FilePath manifest_path = temp_dir.path().Append(
+  base::FilePath manifest_path = temp_dir.path().Append(
       Extension::kManifestFilename);
   JSONFileValueSerializer serializer(manifest_path);
   if (!serializer.Serialize(*root)) {
@@ -152,7 +152,7 @@ scoped_refptr<Extension> ConvertWebAppToExtension(
   }
 
   // Write the icon files.
-  FilePath icons_dir = temp_dir.path().AppendASCII(kIconsDirName);
+  base::FilePath icons_dir = temp_dir.path().AppendASCII(kIconsDirName);
   if (!file_util::CreateDirectory(icons_dir)) {
     LOG(ERROR) << "Could not create icons directory.";
     return NULL;
@@ -162,7 +162,7 @@ scoped_refptr<Extension> ConvertWebAppToExtension(
     if (web_app.icons[i].data.config() == SkBitmap::kNo_Config)
       continue;
 
-    FilePath icon_file = icons_dir.AppendASCII(
+    base::FilePath icon_file = icons_dir.AppendASCII(
         StringPrintf("%i.png", web_app.icons[i].width));
     std::vector<unsigned char> image_data;
     if (!gfx::PNGCodec::EncodeBGRASkBitmap(web_app.icons[i].data,
@@ -186,7 +186,7 @@ scoped_refptr<Extension> ConvertWebAppToExtension(
     extension_flags |= Extension::FROM_BOOKMARK;
   scoped_refptr<Extension> extension = Extension::Create(
       temp_dir.path(),
-      Extension::INTERNAL,
+      Manifest::INTERNAL,
       *root,
       extension_flags,
       &error);

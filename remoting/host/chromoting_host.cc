@@ -78,7 +78,8 @@ ChromotingHost::ChromotingHost(
       protocol_config_(protocol::CandidateSessionConfig::CreateDefault()),
       login_backoff_(&kDefaultBackoffPolicy),
       authenticating_client_(false),
-      reject_authenticating_client_(false) {
+      reject_authenticating_client_(false),
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)) {
   DCHECK(signal_strategy);
   DCHECK(network_task_runner_->BelongsToCurrentThread());
 
@@ -266,11 +267,13 @@ void ChromotingHost::OnSessionRouteChange(
                                         route));
 }
 
-void ChromotingHost::OnClientDimensionsChanged(ClientSession* session,
-                                               const SkISize& size) {
+void ChromotingHost::OnClientResolutionChanged(ClientSession* session,
+                                               const SkISize& size,
+                                               const SkIPoint& dpi) {
   DCHECK(network_task_runner_->BelongsToCurrentThread());
   FOR_EACH_OBSERVER(HostStatusObserver, status_observers_,
-                    OnClientDimensionsChanged(session->client_jid(), size));
+                    OnClientResolutionChanged(session->client_jid(),
+                                              size, dpi));
 }
 
 void ChromotingHost::OnSessionManagerReady() {
@@ -407,6 +410,8 @@ void ChromotingHost::ShutdownFinish() {
     it->Run();
   }
   shutdown_tasks_.clear();
+
+  weak_factory_.InvalidateWeakPtrs();
 }
 
 }  // namespace remoting

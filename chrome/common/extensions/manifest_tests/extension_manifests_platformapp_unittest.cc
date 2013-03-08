@@ -2,18 +2,28 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/common/extensions/manifest_tests/extension_manifest_test.h"
-
 #include "base/command_line.h"
-#include "base/files/scoped_temp_dir.h"
 #include "base/json/json_file_value_serializer.h"
+#include "base/memory/linked_ptr.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/extensions/background_info.h"
+#include "chrome/common/extensions/csp_handler.h"
 #include "chrome/common/extensions/extension_manifest_constants.h"
+#include "chrome/common/extensions/manifest_tests/extension_manifest_test.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace errors = extension_manifest_errors;
 
-TEST_F(ExtensionManifestTest, PlatformApps) {
+namespace extensions {
+
+class PlatformAppsManifestTest : public ExtensionManifestTest {
+  virtual void SetUp() OVERRIDE {
+    (new BackgroundManifestHandler)->Register();
+    (new CSPHandler(true))->Register();  // platform app.
+  }
+};
+
+TEST_F(PlatformAppsManifestTest, PlatformApps) {
   scoped_refptr<extensions::Extension> extension =
       LoadAndExpectSuccess("init_valid_platform_app.json");
   EXPECT_TRUE(extension->is_storage_isolated());
@@ -54,7 +64,7 @@ TEST_F(ExtensionManifestTest, PlatformApps) {
       warning_testcases, arraysize(warning_testcases), EXPECT_TYPE_WARNING);
 }
 
-TEST_F(ExtensionManifestTest, PlatformAppContentSecurityPolicy) {
+TEST_F(PlatformAppsManifestTest, PlatformAppContentSecurityPolicy) {
   // Normal platform apps can't specify a CSP value.
   Testcase warning_testcases[] = {
     Testcase(
@@ -89,7 +99,7 @@ TEST_F(ExtensionManifestTest, PlatformAppContentSecurityPolicy) {
       errors::kInsecureContentSecurityPolicy);
 }
 
-TEST_F(ExtensionManifestTest, CertainApisRequirePlatformApps) {
+TEST_F(PlatformAppsManifestTest, CertainApisRequirePlatformApps) {
   // Put APIs here that should be restricted to platform apps, but that haven't
   // yet graduated from experimental.
   const char* kPlatformAppExperimentalApis[] = {
@@ -103,34 +113,25 @@ TEST_F(ExtensionManifestTest, CertainApisRequirePlatformApps) {
   // testing. The requirements are that (1) it be a valid platform app, and (2)
   // it contain no permissions dictionary.
   std::string error;
-  scoped_ptr<DictionaryValue> manifest(
-      LoadManifestFile("init_valid_platform_app.json", &error));
+  scoped_ptr<base::DictionaryValue> manifest(
+      LoadManifest("init_valid_platform_app.json", &error));
 
-  base::ScopedTempDir temp_dir;
-  ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
-
+  std::vector<linked_ptr<DictionaryValue> > manifests;
   // Create each manifest.
   for (size_t i = 0; i < arraysize(kPlatformAppExperimentalApis); ++i) {
     const char* api_name = kPlatformAppExperimentalApis[i];
 
     // DictionaryValue will take ownership of this ListValue.
-    ListValue *permissions = new ListValue();
-    permissions->Append(base::Value::CreateStringValue("experimental"));
-    permissions->Append(base::Value::CreateStringValue(api_name));
+    base::ListValue *permissions = new base::ListValue();
+    permissions->Append(new base::StringValue("experimental"));
+    permissions->Append(new base::StringValue(api_name));
     manifest->Set("permissions", permissions);
-
-    // Each of these files lives in the scoped temp directory, so it will be
-    // cleaned up at test teardown.
-    FilePath file_path = temp_dir.path().AppendASCII(api_name);
-    JSONFileValueSerializer serializer(file_path);
-    serializer.Serialize(*(manifest.get()));
+    manifests.push_back(make_linked_ptr(manifest->DeepCopy()));
   }
 
   // First try to load without any flags. This should fail for every API.
   for (size_t i = 0; i < arraysize(kPlatformAppExperimentalApis); ++i) {
-    const char* api_name = kPlatformAppExperimentalApis[i];
-    FilePath file_path = temp_dir.path().AppendASCII(api_name);
-    LoadAndExpectError(file_path.MaybeAsASCII().c_str(),
+    LoadAndExpectError(Manifest(manifests[i].get(), ""),
                        errors::kExperimentalFlagRequired);
   }
 
@@ -138,8 +139,8 @@ TEST_F(ExtensionManifestTest, CertainApisRequirePlatformApps) {
   CommandLine::ForCurrentProcess()->AppendSwitch(
       switches::kEnableExperimentalExtensionApis);
   for (size_t i = 0; i < arraysize(kPlatformAppExperimentalApis); ++i) {
-    const char* api_name = kPlatformAppExperimentalApis[i];
-    FilePath file_path = temp_dir.path().AppendASCII(api_name);
-    LoadAndExpectSuccess(file_path.MaybeAsASCII().c_str());
+    LoadAndExpectSuccess(Manifest(manifests[i].get(), ""));
   }
 }
+
+}  // namespace extensions

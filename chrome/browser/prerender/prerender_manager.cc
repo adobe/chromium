@@ -14,6 +14,7 @@
 #include "base/logging.h"
 #include "base/memory/weak_ptr.h"
 #include "base/metrics/histogram.h"
+#include "base/prefs/pref_service.h"
 #include "base/stl_util.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
@@ -21,7 +22,6 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/common/cancelable_request.h"
 #include "chrome/browser/favicon/favicon_tab_helper.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prerender/prerender_condition.h"
 #include "chrome/browser/prerender/prerender_contents.h"
 #include "chrome/browser/prerender/prerender_field_trial.h"
@@ -271,6 +271,20 @@ PrerenderHandle* PrerenderManager::AddPrerenderFromLinkRelPrerender(
             .GetDefaultSessionStorageNamespace();
   }
 
+  // If the prerender request comes from a recently cancelled prerender that
+  // |this| still owns, then abort the prerender.
+  for (ScopedVector<PrerenderData>::iterator it = to_delete_prerenders_.begin();
+       it != to_delete_prerenders_.end(); ++it) {
+    PrerenderContents* prerender_contents = (*it)->contents();
+    int contents_child_id;
+    int contents_route_id;
+    if (prerender_contents->GetChildId(&contents_child_id) &&
+        prerender_contents->GetRouteId(&contents_route_id) &&
+        contents_child_id == process_id && contents_route_id == route_id) {
+      return NULL;
+    }
+  }
+
   if (PrerenderData* parent_prerender_data =
           FindPrerenderDataForChildAndRoute(process_id, route_id)) {
     // Instead of prerendering from inside of a running prerender, we will defer
@@ -442,7 +456,17 @@ bool PrerenderManager::MaybeUsePrerenderedPage(WebContents* web_contents,
   prerender_contents->CommitHistory(new_web_contents);
 
   GURL icon_url = prerender_contents->icon_url();
+
   if (!icon_url.is_empty()) {
+#if defined(OS_ANDROID)
+    // Do the delayed icon fetch since we didn't download
+    // the favicon during prerendering on mobile devices.
+    FaviconTabHelper * favicon_tap_helper =
+        FaviconTabHelper::FromWebContents(new_web_contents);
+    favicon_tap_helper->set_should_fetch_icons(true);
+    favicon_tap_helper->FetchFavicon(icon_url);
+#endif  // defined(OS_ANDROID)
+
     std::vector<content::FaviconURL> urls;
     urls.push_back(content::FaviconURL(icon_url, content::FaviconURL::FAVICON));
     FaviconTabHelper::FromWebContents(new_web_contents)->

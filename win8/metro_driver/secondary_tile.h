@@ -4,7 +4,7 @@
 #ifndef CHROME_BROWSER_UI_METRO_DRIVER_SECONDARY_TILE_H_
 #define CHROME_BROWSER_UI_METRO_DRIVER_SECONDARY_TILE_H_
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/string16.h"
 #include "base/win/metro.h"
 
@@ -21,7 +21,7 @@ void MetroPinToStartScreen(
     const string16& tile_id,
     const string16& title,
     const string16& url,
-    const FilePath& logo_path,
+    const base::FilePath& logo_path,
     const base::win::MetroPinUmaResultCallback& callback);
 
 #endif  // CHROME_BROWSER_UI_METRO_DRIVER_SECONDARY_TILE_H_

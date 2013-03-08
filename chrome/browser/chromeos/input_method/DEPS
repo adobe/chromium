@@ -7,7 +7,14 @@ include_rules = [
 specific_include_rules = {
   # The configuration layer.
   '(input_method_delegate_impl|input_method_persistence|browser_state_monitor)'
-  '(_unittest)?\.(h|cc)': [
+  '\.(h|cc)': [
+    "+chrome/common",
+    "+chrome/browser",
+    "+chrome/test",
+    "+content/public",
+  ],
+  # For testing.
+  '.*(_browsertest|_unittest|_test_helper|)\.(h|cc)': [
     "+chrome/common",
     "+chrome/browser",
     "+chrome/test",
@@ -21,9 +28,6 @@ specific_include_rules = {
     # TODO(erikwright): Much/all of language_preferences can/should be decoupled
     # from chrome/browser.
     "!chrome/browser/chromeos/language_preferences.h"
-  ],
-  'ibus_controller_impl\.cc|xkeyboard\.cc': [
-    "!content/public/browser/browser_thread.h",
   ],
   'xkeyboard_unittest\.cc': [
     "!content/public/test/test_browser_thread.h",

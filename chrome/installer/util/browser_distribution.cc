@@ -11,9 +11,9 @@
 
 #include "base/atomicops.h"
 #include "base/command_line.h"
-#include "base/file_path.h"
-#include "base/path_service.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
+#include "base/path_service.h"
 #include "base/win/registry.h"
 #include "base/win/windows_version.h"
 #include "chrome/common/env_vars.h"
@@ -33,6 +33,9 @@ using installer::MasterPreferences;
 
 namespace {
 
+const wchar_t kChromiumActiveSetupGuid[] =
+    L"{7D2B3E1D-D096-4594-9D8F-A6667F12E0AC}";
+
 const wchar_t kCommandExecuteImplUuid[] =
     L"{A2DF06F9-A21A-44A8-8A99-8B9C84F29160}";
 
@@ -44,9 +47,9 @@ BrowserDistribution* g_chrome_app_host_distribution = NULL;
 
 // Returns true if currently running in npchrome_frame.dll
 bool IsChromeFrameModule() {
-  FilePath module_path;
+  base::FilePath module_path;
   PathService::Get(base::FILE_MODULE, &module_path);
-  return FilePath::CompareEqualIgnoreCase(module_path.BaseName().value(),
+  return base::FilePath::CompareEqualIgnoreCase(module_path.BaseName().value(),
                                           installer::kChromeFrameDll);
 }
 
@@ -135,8 +138,12 @@ BrowserDistribution* BrowserDistribution::GetSpecificDistribution(
 }
 
 void BrowserDistribution::DoPostUninstallOperations(
-    const Version& version, const FilePath& local_data_path,
+    const Version& version, const base::FilePath& local_data_path,
     const string16& distribution_data) {
+}
+
+string16 BrowserDistribution::GetActiveSetupGuid() {
+  return kChromiumActiveSetupGuid;
 }
 
 string16 BrowserDistribution::GetAppGuid() {
@@ -261,7 +268,7 @@ bool BrowserDistribution::GetExperimentDetails(
 }
 
 void BrowserDistribution::LaunchUserExperiment(
-    const FilePath& setup_path, installer::InstallStatus status,
+    const base::FilePath& setup_path, installer::InstallStatus status,
     const Version& version, const installer::Product& product,
     bool system_level) {
 }
@@ -273,5 +280,5 @@ bool BrowserDistribution::ShouldSetExperimentLabels() {
 void BrowserDistribution::InactiveUserToastExperiment(int flavor,
     const string16& experiment_group,
     const installer::Product& installation,
-    const FilePath& application_path) {
+    const base::FilePath& application_path) {
 }

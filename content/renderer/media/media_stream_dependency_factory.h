@@ -33,9 +33,7 @@ class PeerConnection;
 namespace WebKit {
 class WebFrame;
 class WebMediaConstraints;
-class WebMediaStreamDescriptor;
-class WebPeerConnection00Handler;
-class WebPeerConnection00HandlerClient;
+class WebMediaStream;
 class WebRTCPeerConnectionHandler;
 class WebRTCPeerConnectionHandlerClient;
 }
@@ -53,17 +51,12 @@ class CONTENT_EXPORT MediaStreamDependencyFactory
     : NON_EXPORTED_BASE(public base::NonThreadSafe) {
  public:
   // MediaSourcesCreatedCallback is used in CreateNativeMediaSources.
-  typedef base::Callback<void(WebKit::WebMediaStreamDescriptor* description,
+  typedef base::Callback<void(WebKit::WebMediaStream* description,
                               bool live)> MediaSourcesCreatedCallback;
   MediaStreamDependencyFactory(
       VideoCaptureImplManager* vc_manager,
       P2PSocketDispatcher* p2p_socket_dispatcher);
   virtual ~MediaStreamDependencyFactory();
-
-  // Create a PeerConnectionHandlerJsep object that implements the
-  // WebKit WebPeerConnection00Handler interface.
-  WebKit::WebPeerConnection00Handler* CreatePeerConnectionHandlerJsep(
-      WebKit::WebPeerConnection00HandlerClient* client);
 
   // Create a RTCPeerConnectionHandler object that implements the
   // WebKit WebRTCPeerConnectionHandler interface.
@@ -80,36 +73,38 @@ class CONTENT_EXPORT MediaStreamDependencyFactory
   void CreateNativeMediaSources(
       const WebKit::WebMediaConstraints& audio_constraints,
       const WebKit::WebMediaConstraints& video_constraints,
-      WebKit::WebMediaStreamDescriptor* description,
+      WebKit::WebMediaStream* description,
       const MediaSourcesCreatedCallback& sources_created);
 
   // Creates a libjingle representation of a MediaStream and stores
   // it in the extra data field of |description|.
   void CreateNativeLocalMediaStream(
-      WebKit::WebMediaStreamDescriptor* description);
+      WebKit::WebMediaStream* description);
 
   // Creates a libjingle representation of a MediaStream and stores
   // it in the extra data field of |description|.
   // |stream_stopped| is a callback that is run when a MediaStream have been
   // stopped.
   void CreateNativeLocalMediaStream(
-      WebKit::WebMediaStreamDescriptor* description,
+      WebKit::WebMediaStream* description,
       const MediaStreamExtraData::StreamStopCallback& stream_stop);
 
   // Asks the libjingle PeerConnection factory to create a libjingle
   // PeerConnection object.
   // The PeerConnection object is owned by PeerConnectionHandler.
   virtual scoped_refptr<webrtc::PeerConnectionInterface>
-      CreatePeerConnection(const webrtc::JsepInterface::IceServers& ice_servers,
-                           const webrtc::MediaConstraintsInterface* constraints,
-                           WebKit::WebFrame* web_frame,
-                           webrtc::PeerConnectionObserver* observer);
+      CreatePeerConnection(
+          const webrtc::PeerConnectionInterface::IceServers& ice_servers,
+          const webrtc::MediaConstraintsInterface* constraints,
+          WebKit::WebFrame* web_frame,
+          webrtc::PeerConnectionObserver* observer);
 
   // Creates a libjingle representation of a Session description. Used by a
   // RTCPeerConnectionHandler instance.
   virtual webrtc::SessionDescriptionInterface* CreateSessionDescription(
       const std::string& type,
-      const std::string& sdp);
+      const std::string& sdp,
+      webrtc::SdpParseError* error);
 
   // Creates a libjingle representation of an ice candidate.
   virtual webrtc::IceCandidateInterface* CreateIceCandidate(
@@ -121,14 +116,20 @@ class CONTENT_EXPORT MediaStreamDependencyFactory
 
  protected:
   // Asks the PeerConnection factory to create a Local MediaStream object.
-  virtual scoped_refptr<webrtc::LocalMediaStreamInterface>
+  virtual scoped_refptr<webrtc::MediaStreamInterface>
       CreateLocalMediaStream(const std::string& label);
+
+  // Asks the PeerConnection factory to create a Local Audio Source.
+  virtual scoped_refptr<webrtc::AudioSourceInterface>
+      CreateLocalAudioSource(
+          const webrtc::MediaConstraintsInterface* constraints);
 
   // Asks the PeerConnection factory to create a Local Video Source.
   virtual scoped_refptr<webrtc::VideoSourceInterface>
-      CreateVideoSource(int video_session_id,
-                        bool is_screen_cast,
-                        const webrtc::MediaConstraintsInterface* constraints);
+      CreateLocalVideoSource(
+          int video_session_id,
+          bool is_screen_cast,
+          const webrtc::MediaConstraintsInterface* constraints);
 
   // Initializes the source using audio parameters for the selected
   // capture device and specifies which capture device to use as capture
@@ -141,15 +142,15 @@ class CONTENT_EXPORT MediaStreamDependencyFactory
   // WebRtcAudioCapturer.
   virtual bool CreateWebAudioSource(WebKit::WebMediaStreamSource* source);
 
+  // Asks the PeerConnection factory to create a Local AudioTrack object.
+  virtual scoped_refptr<webrtc::AudioTrackInterface>
+      CreateLocalAudioTrack(const std::string& id,
+                            webrtc::AudioSourceInterface* source);
+
   // Asks the PeerConnection factory to create a Local VideoTrack object.
   virtual scoped_refptr<webrtc::VideoTrackInterface>
-      CreateLocalVideoTrack(const std::string& label,
+      CreateLocalVideoTrack(const std::string& id,
                             webrtc::VideoSourceInterface* source);
-
-  // Asks the PeerConnection factory to create a Local AudioTrack object.
-  virtual scoped_refptr<webrtc::LocalAudioTrackInterface>
-      CreateLocalAudioTrack(const std::string& label,
-                            webrtc::AudioDeviceModule* audio_device);
 
   virtual bool EnsurePeerConnectionFactory();
   virtual bool PeerConnectionFactoryCreated();

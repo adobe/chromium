@@ -5,9 +5,9 @@
 #include "chrome/browser/content_settings/cookie_settings.h"
 
 #include "base/command_line.h"
+#include "base/prefs/pref_service.h"
 #include "chrome/browser/content_settings/content_settings_utils.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_dependency_manager.h"
 #include "chrome/browser/profiles/profile_keyed_service.h"
@@ -15,6 +15,7 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/content_settings_pattern.h"
 #include "chrome/common/pref_names.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
@@ -65,10 +66,10 @@ CookieSettings::Factory::Factory()
 CookieSettings::Factory::~Factory() {}
 
 void CookieSettings::Factory::RegisterUserPrefs(
-    PrefServiceSyncable* user_prefs) {
-  user_prefs->RegisterBooleanPref(prefs::kBlockThirdPartyCookies,
-                                  false,
-                                  PrefServiceSyncable::SYNCABLE_PREF);
+    PrefRegistrySyncable* registry) {
+  registry->RegisterBooleanPref(prefs::kBlockThirdPartyCookies,
+                                false,
+                                PrefRegistrySyncable::SYNCABLE_PREF);
 }
 
 bool CookieSettings::Factory::ServiceRedirectedInIncognito() const {

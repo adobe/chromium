@@ -12,13 +12,14 @@
 #include <openssl/opensslv.h>
 
 #include "base/bind.h"
+#include "base/callback_helpers.h"
 #include "base/memory/singleton.h"
 #include "base/metrics/histogram.h"
 #include "base/synchronization/lock.h"
 #include "crypto/openssl_util.h"
 #include "net/base/cert_verifier.h"
 #include "net/base/net_errors.h"
-#include "net/base/openssl_private_key_store.h"
+#include "net/base/openssl_client_key_store.h"
 #include "net/base/single_request_cert_verifier.h"
 #include "net/base/ssl_cert_request_info.h"
 #include "net/base/ssl_connection_status_flags.h"
@@ -41,6 +42,10 @@ namespace {
 
 const int kSessionCacheTimeoutSeconds = 60 * 60;
 const size_t kSessionCacheMaxEntires = 1024;
+
+// This constant can be any non-negative/non-zero value (eg: it does not
+// overlap with any value of the net::Error range, including net::OK).
+const int kNoPendingReadResult = 1;
 
 // If a client doesn't have a list of protocols that it supports, but
 // the server supports NPN, choosing "http/1.1" is the best answer.
@@ -424,6 +429,7 @@ SSLClientSocketOpenSSL::SSLClientSocketOpenSSL(
     : transport_send_busy_(false),
       transport_recv_busy_(false),
       transport_recv_eof_(false),
+      pending_read_error_(kNoPendingReadResult),
       completed_handshake_(false),
       client_auth_cert_needed_(false),
       cert_verifier_(context.cert_verifier),
@@ -584,15 +590,18 @@ int SSLClientSocketOpenSSL::ClientCertRequestCallback(SSL* ssl,
 
   // Second pass: a client certificate should have been selected.
   if (ssl_config_.client_cert) {
-    EVP_PKEY* privkey = OpenSSLPrivateKeyStore::GetInstance()->FetchPrivateKey(
-        X509_PUBKEY_get(X509_get_X509_PUBKEY(
-            ssl_config_.client_cert->os_cert_handle())));
-    if (privkey) {
+    // A note about ownership: FetchClientCertPrivateKey() increments
+    // the reference count of the EVP_PKEY. Ownership of this reference
+    // is passed directly to OpenSSL, which will release the reference
+    // using EVP_PKEY_free() when the SSL object is destroyed.
+    OpenSSLClientKeyStore::ScopedEVP_PKEY privkey;
+    if (OpenSSLClientKeyStore::GetInstance()->FetchClientCertPrivateKey(
+            ssl_config_.client_cert.get(), &privkey)) {
       // TODO(joth): (copied from NSS) We should wait for server certificate
       // verification before sending our credentials. See http://crbug.com/13934
       *x509 = X509Certificate::DupOSCertHandle(
           ssl_config_.client_cert->os_cert_handle());
-      *pkey = privkey;
+      *pkey = privkey.release();
       return 1;
     }
     LOG(WARNING) << "Client cert found without private key";
@@ -638,10 +647,11 @@ bool SSLClientSocketOpenSSL::GetSSLInfo(SSLInfo* ssl_info) {
   if (ssl_config_.version_fallback)
     ssl_info->connection_status |= SSL_CONNECTION_VERSION_FALLBACK;
 
+  ssl_info->handshake_type = SSL_session_reused(ssl_) ?
+      SSLInfo::HANDSHAKE_RESUME : SSLInfo::HANDSHAKE_FULL;
+
   DVLOG(3) << "Encoded connection status: cipher suite = "
       << SSLConnectionStatusToCipherSuite(ssl_info->connection_status)
-      << " compression = "
-      << SSLConnectionStatusToCompression(ssl_info->connection_status)
       << " version = "
       << SSLConnectionStatusToVersion(ssl_info->connection_status);
   return true;
@@ -651,7 +661,6 @@ void SSLClientSocketOpenSSL::GetSSLCertRequestInfo(
     SSLCertRequestInfo* cert_request_info) {
   cert_request_info->host_and_port = host_and_port_.ToString();
   cert_request_info->cert_authorities = cert_authorities_;
-  cert_request_info->client_certs = client_certs_;
 }
 
 int SSLClientSocketOpenSSL::ExportKeyingMaterial(
@@ -696,21 +705,17 @@ SSLClientSocketOpenSSL::GetServerBoundCertService() const {
 void SSLClientSocketOpenSSL::DoReadCallback(int rv) {
   // Since Run may result in Read being called, clear |user_read_callback_|
   // up front.
-  CompletionCallback c = user_read_callback_;
-  user_read_callback_.Reset();
   user_read_buf_ = NULL;
   user_read_buf_len_ = 0;
-  c.Run(rv);
+  base::ResetAndReturn(&user_read_callback_).Run(rv);
 }
 
 void SSLClientSocketOpenSSL::DoWriteCallback(int rv) {
   // Since Run may result in Write being called, clear |user_write_callback_|
   // up front.
-  CompletionCallback c = user_write_callback_;
-  user_write_callback_.Reset();
   user_write_buf_ = NULL;
   user_write_buf_len_ = 0;
-  c.Run(rv);
+  base::ResetAndReturn(&user_write_callback_).Run(rv);
 }
 
 // StreamSocket implementation.
@@ -774,7 +779,6 @@ void SSLClientSocketOpenSSL::Disconnect() {
   completed_handshake_ = false;
 
   cert_authorities_.clear();
-  client_certs_.clear();
   client_auth_cert_needed_ = false;
 }
 
@@ -1182,13 +1186,31 @@ void SSLClientSocketOpenSSL::OnRecvComplete(int result) {
 }
 
 bool SSLClientSocketOpenSSL::IsConnected() const {
-  bool ret = completed_handshake_ && transport_->socket()->IsConnected();
-  return ret;
+  // If the handshake has not yet completed.
+  if (!completed_handshake_)
+    return false;
+  // If an asynchronous operation is still pending.
+  if (user_read_buf_ || user_write_buf_)
+    return true;
+
+  return transport_->socket()->IsConnected();
 }
 
 bool SSLClientSocketOpenSSL::IsConnectedAndIdle() const {
-  bool ret = completed_handshake_ && transport_->socket()->IsConnectedAndIdle();
-  return ret;
+  // If the handshake has not yet completed.
+  if (!completed_handshake_)
+    return false;
+  // If an asynchronous operation is still pending.
+  if (user_read_buf_ || user_write_buf_)
+    return false;
+  // If there is data waiting to be sent, or data read from the network that
+  // has not yet been consumed.
+  if (BIO_ctrl_pending(transport_bio_) > 0 ||
+      BIO_ctrl_wpending(transport_bio_) > 0) {
+    return false;
+  }
+
+  return transport_->socket()->IsConnectedAndIdle();
 }
 
 int SSLClientSocketOpenSSL::GetPeerAddress(IPEndPoint* addressList) const {
@@ -1327,20 +1349,69 @@ bool SSLClientSocketOpenSSL::SetSendBufferSize(int32 size) {
 
 int SSLClientSocketOpenSSL::DoPayloadRead() {
   crypto::OpenSSLErrStackTracer err_tracer(FROM_HERE);
-  int rv = SSL_read(ssl_, user_read_buf_->data(), user_read_buf_len_);
-  // We don't need to invalidate the non-client-authenticated SSL session
-  // because the server will renegotiate anyway.
-  if (client_auth_cert_needed_)
-    return ERR_SSL_CLIENT_AUTH_CERT_NEEDED;
+
+  int rv;
+  if (pending_read_error_ != kNoPendingReadResult) {
+    rv = pending_read_error_;
+    pending_read_error_ = kNoPendingReadResult;
+    if (rv == 0) {
+      net_log_.AddByteTransferEvent(NetLog::TYPE_SSL_SOCKET_BYTES_RECEIVED,
+                                    rv, user_read_buf_->data());
+    }
+    return rv;
+  }
+
+  int total_bytes_read = 0;
+  do {
+    rv = SSL_read(ssl_, user_read_buf_->data() + total_bytes_read,
+                  user_read_buf_len_ - total_bytes_read);
+    if (rv > 0)
+      total_bytes_read += rv;
+  } while (total_bytes_read < user_read_buf_len_ && rv > 0);
+
+  if (total_bytes_read == user_read_buf_len_) {
+    rv = total_bytes_read;
+  } else {
+    // Otherwise, an error occurred (rv <= 0). The error needs to be handled
+    // immediately, while the OpenSSL errors are still available in
+    // thread-local storage. However, the handled/remapped error code should
+    // only be returned if no application data was already read; if it was, the
+    // error code should be deferred until the next call of DoPayloadRead.
+    //
+    // If no data was read, |*next_result| will point to the return value of
+    // this function. If at least some data was read, |*next_result| will point
+    // to |pending_read_error_|, to be returned in a future call to
+    // DoPayloadRead() (e.g.: after the current data is handled).
+    int *next_result = &rv;
+    if (total_bytes_read > 0) {
+      pending_read_error_ = rv;
+      rv = total_bytes_read;
+      next_result = &pending_read_error_;
+    }
+
+    if (client_auth_cert_needed_) {
+      *next_result = ERR_SSL_CLIENT_AUTH_CERT_NEEDED;
+    } else if (*next_result < 0) {
+      int err = SSL_get_error(ssl_, *next_result);
+      *next_result = MapOpenSSLError(err, err_tracer);
+      if (rv > 0 && *next_result == ERR_IO_PENDING) {
+          // If at least some data was read from SSL_read(), do not treat
+          // insufficient data as an error to return in the next call to
+          // DoPayloadRead() - instead, let the call fall through to check
+          // SSL_read() again. This is because DoTransportIO() may complete
+          // in between the next call to DoPayloadRead(), and thus it is
+          // important to check SSL_read() on subsequent invocations to see
+          // if a complete record may now be read.
+        *next_result = kNoPendingReadResult;
+      }
+    }
+  }
 
   if (rv >= 0) {
     net_log_.AddByteTransferEvent(NetLog::TYPE_SSL_SOCKET_BYTES_RECEIVED, rv,
                                   user_read_buf_->data());
-    return rv;
   }
-
-  int err = SSL_get_error(ssl_, rv);
-  return MapOpenSSLError(err, err_tracer);
+  return rv;
 }
 
 int SSLClientSocketOpenSSL::DoPayloadWrite() {

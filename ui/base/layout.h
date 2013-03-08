@@ -14,10 +14,6 @@
 namespace ui {
 
 enum DisplayLayout {
-  // Layout optimized for ASH.  This enum value should go away as soon as
-  // LAYOUT_DESKTOP and LAYOUT_ASH are the same.
-  LAYOUT_ASH,
-
   // The typical layout for e.g. Windows, Mac and Linux.
   LAYOUT_DESKTOP,
 
@@ -28,6 +24,8 @@ enum DisplayLayout {
 // Returns the display layout that should be used.  This could be used
 // e.g. to tweak hard-coded padding that's layout specific, or choose
 // the .pak file of theme resources to load.
+// WARNING: this is deprecated and will be nuked as soon as aura is the default
+// on windows.
 UI_EXPORT DisplayLayout GetDisplayLayout();
 
 // Supported UI scale factors for the platform. This is used as an index
@@ -38,6 +36,7 @@ UI_EXPORT DisplayLayout GetDisplayLayout();
 enum ScaleFactor {
   SCALE_FACTOR_NONE = 0,
   SCALE_FACTOR_100P,
+  SCALE_FACTOR_133P,
   SCALE_FACTOR_140P,
   SCALE_FACTOR_150P,
   SCALE_FACTOR_180P,
@@ -70,8 +69,25 @@ UI_EXPORT bool IsScaleFactorSupported(ScaleFactor scale_factor);
 
 namespace test {
 
+// Changes the value of GetSupportedScaleFactors() to |scale_factors|.
+// Use ScopedSetSupportedScaleFactors for unit tests as not to affect the
+// state of other tests.
 UI_EXPORT void SetSupportedScaleFactors(
     const std::vector<ScaleFactor>& scale_factors);
+
+// Class which changes the value of GetSupportedScaleFactors() to
+// |new_scale_factors| for the duration of its lifetime.
+class UI_EXPORT ScopedSetSupportedScaleFactors {
+ public:
+  explicit ScopedSetSupportedScaleFactors(
+      const std::vector<ui::ScaleFactor>& new_scale_factors);
+  ~ScopedSetSupportedScaleFactors();
+
+ private:
+  const std::vector<ui::ScaleFactor> original_scale_factors_;
+
+  DISALLOW_COPY_AND_ASSIGN(ScopedSetSupportedScaleFactors);
+};
 
 }  // namespace test
 

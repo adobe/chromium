@@ -42,12 +42,12 @@ class SocketApiTest : public ExtensionApiTest {
     command_line->AppendSwitch(switches::kEnableExperimentalExtensionApis);
   }
 
-  void SetUpOnMainThread() OVERRIDE {
+  virtual void SetUpOnMainThread() OVERRIDE {
     extensions::HostResolverWrapper::GetInstance()->SetHostResolverForTesting(
         resolver_creator_->CreateMockHostResolver());
   }
 
-  void CleanUpOnMainThread() OVERRIDE {
+  virtual void CleanUpOnMainThread() OVERRIDE {
     extensions::HostResolverWrapper::GetInstance()->
         SetHostResolverForTesting(NULL);
     resolver_creator_->DeleteMockHostResolver();
@@ -124,7 +124,7 @@ IN_PROC_BROWSER_TEST_F(SocketApiTest, SocketUDPExtension) {
   scoped_ptr<net::TestServer> test_server(
       new net::TestServer(net::TestServer::TYPE_UDP_ECHO,
                           net::TestServer::kLocalhost,
-                          FilePath(FILE_PATH_LITERAL("net/data"))));
+                          base::FilePath(FILE_PATH_LITERAL("net/data"))));
   EXPECT_TRUE(test_server->Start());
 
   net::HostPortPair host_port_pair = test_server->host_port_pair();
@@ -151,7 +151,7 @@ IN_PROC_BROWSER_TEST_F(SocketApiTest, SocketTCPExtension) {
   scoped_ptr<net::TestServer> test_server(
       new net::TestServer(net::TestServer::TYPE_TCP_ECHO,
                           net::TestServer::kLocalhost,
-                          FilePath(FILE_PATH_LITERAL("net/data"))));
+                          base::FilePath(FILE_PATH_LITERAL("net/data"))));
   EXPECT_TRUE(test_server->Start());
 
   net::HostPortPair host_port_pair = test_server->host_port_pair();
@@ -186,13 +186,16 @@ IN_PROC_BROWSER_TEST_F(SocketApiTest, SocketTCPServerExtension) {
   EXPECT_TRUE(catcher.GetNextResult()) << catcher.message();
 }
 
-#if defined(OS_WIN)
-// Failing flakily on Windows, http://crbug.com/169646
-#define MAYBE_SocketTCPServerUnbindOnUnload DISABLED_SocketTCPServerUnbindOnUnload
-#else
-#define MAYBE_SocketTCPServerUnbindOnUnload SocketTCPServerUnbindOnUnload
-#endif
-IN_PROC_BROWSER_TEST_F(SocketApiTest, MAYBE_SocketTCPServerUnbindOnUnload) {
-  ASSERT_TRUE(RunExtensionTest("socket/unload")) << message_;
-  ASSERT_TRUE(RunExtensionTest("socket/unload")) << message_;
+IN_PROC_BROWSER_TEST_F(SocketApiTest, SocketTCPServerUnbindOnUnload) {
+  ResultCatcher catcher;
+  const Extension* extension =
+      LoadExtension(test_data_dir_.AppendASCII("socket/unload"));
+  ASSERT_TRUE(extension);
+  EXPECT_TRUE(catcher.GetNextResult()) << catcher.message();
+
+  UnloadExtension(extension->id());
+
+  ASSERT_TRUE(LoadExtension(test_data_dir_.AppendASCII("socket/unload")))
+      << message_;
+  EXPECT_TRUE(catcher.GetNextResult()) << catcher.message();
 }

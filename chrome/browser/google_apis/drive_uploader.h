@@ -15,17 +15,20 @@
 #include "chrome/browser/google_apis/gdata_errorcode.h"
 #include "chrome/browser/google_apis/gdata_wapi_parser.h"
 
-class FilePath;
 class GURL;
+
+namespace base {
+class FilePath;
+}
 
 namespace google_apis {
 class DriveServiceInterface;
-struct ResumeUploadResponse;
+struct UploadRangeResponse;
 
 // Callback to be invoked once the upload has completed.
 typedef base::Callback<void(DriveUploadError error,
-                            const FilePath& drive_path,
-                            const FilePath& file_path,
+                            const base::FilePath& drive_path,
+                            const base::FilePath& file_path,
                             scoped_ptr<ResourceEntry> resource_entry)>
     UploadCompletionCallback;
 
@@ -36,8 +39,8 @@ class DriveUploaderInterface {
   // Uploads a new file to a directory specified by |upload_location|.
   // Returns the upload_id.
   //
-  // upload_location:
-  //   the "resumable-create-media" URL of the destination directory.
+  // parent_resource_id:
+  //   resource id of the destination directory.
   //
   // drive_file_path:
   //   The destination path like "drive/foo/bar.txt".
@@ -54,9 +57,9 @@ class DriveUploaderInterface {
   // callback:
   //   Called when an upload is done regardless of it was successful or not.
   //   Must not be null.
-  virtual void UploadNewFile(const GURL& upload_location,
-                             const FilePath& drive_file_path,
-                             const FilePath& local_file_path,
+  virtual void UploadNewFile(const std::string& parent_resource_id,
+                             const base::FilePath& drive_file_path,
+                             const base::FilePath& local_file_path,
                              const std::string& title,
                              const std::string& content_type,
                              const UploadCompletionCallback& callback) = 0;
@@ -65,13 +68,16 @@ class DriveUploaderInterface {
   //
   // See comments at UploadNewFile() about common parameters.
   //
+  // resource_id:
+  //   resource id of the existing file to be overwritten.
+  //
   // etag:
   //   Expected ETag for the destination file. If it does not match, the upload
   //   fails with UPLOAD_ERROR_CONFLICT.
   //   If |etag| is empty, the test is skipped.
-  virtual void UploadExistingFile(const GURL& upload_location,
-                                  const FilePath& drive_file_path,
-                                  const FilePath& local_file_path,
+  virtual void UploadExistingFile(const std::string& resource_id,
+                                  const base::FilePath& drive_file_path,
+                                  const base::FilePath& local_file_path,
                                   const std::string& content_type,
                                   const std::string& etag,
                                   const UploadCompletionCallback& callback) = 0;
@@ -83,30 +89,50 @@ class DriveUploader : public DriveUploaderInterface {
   virtual ~DriveUploader();
 
   // DriveUploaderInterface overrides.
-  virtual void UploadNewFile(const GURL& upload_location,
-                             const FilePath& drive_file_path,
-                             const FilePath& local_file_path,
+  virtual void UploadNewFile(const std::string& parent_resource_id,
+                             const base::FilePath& drive_file_path,
+                             const base::FilePath& local_file_path,
                              const std::string& title,
                              const std::string& content_type,
                              const UploadCompletionCallback& callback) OVERRIDE;
   virtual void UploadExistingFile(
-      const GURL& upload_location,
-      const FilePath& drive_file_path,
-      const FilePath& local_file_path,
+      const std::string& resource_id,
+      const base::FilePath& drive_file_path,
+      const base::FilePath& local_file_path,
       const std::string& content_type,
       const std::string& etag,
       const UploadCompletionCallback& callback) OVERRIDE;
 
  private:
   struct UploadFileInfo;
+  typedef base::Callback<void(scoped_ptr<UploadFileInfo> upload_file_info)>
+      StartInitiateUploadCallback;
 
   // Starts uploading a file with |upload_file_info|.
-  void StartUploadFile(scoped_ptr<UploadFileInfo> upload_file_info);
+  void StartUploadFile(
+      scoped_ptr<UploadFileInfo> upload_file_info,
+      const StartInitiateUploadCallback& start_initiate_upload_callback);
 
   // net::FileStream::Open completion callback. The result of the file open
   // operation is passed as |result|, and the size is stored in |file_size|.
-  void OpenCompletionCallback(scoped_ptr<UploadFileInfo> upload_file_info,
-                              int64 file_size);
+  void OpenCompletionCallback(
+      scoped_ptr<UploadFileInfo> upload_file_info,
+      const StartInitiateUploadCallback& start_initiate_upload_callback,
+      int64 file_size);
+
+  // Starts to initate the new file uploading.
+  // Upon completion, OnUploadLocationReceived should be called.
+  void StartInitiateUploadNewFile(
+      const std::string& parent_resource_id,
+      const std::string& title,
+      scoped_ptr<UploadFileInfo> upload_file_info);
+
+  // Starts to initate the existing file uploading.
+  // Upon completion, OnUploadLocationReceived should be called.
+  void StartInitiateUploadExistingFile(
+      const std::string& resource_id,
+      const std::string& etag,
+      scoped_ptr<UploadFileInfo> upload_file_info);
 
   // DriveService callback for InitiateUpload.
   void OnUploadLocationReceived(scoped_ptr<UploadFileInfo> upload_file_info,
@@ -126,9 +152,9 @@ class DriveUploader : public DriveUploaderInterface {
                     int bytes_to_send);
 
   // DriveService callback for ResumeUpload.
-  void OnResumeUploadResponseReceived(
+  void OnUploadRangeResponseReceived(
       scoped_ptr<UploadFileInfo> upload_file_info,
-      const ResumeUploadResponse& response,
+      const UploadRangeResponse& response,
       scoped_ptr<ResourceEntry> entry);
 
   // Handle failed uploads.

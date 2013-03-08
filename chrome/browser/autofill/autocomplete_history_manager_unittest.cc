@@ -5,12 +5,16 @@
 #include <vector>
 
 #include "base/memory/ref_counted.h"
+#include "base/prefs/testing_pref_service.h"
 #include "base/string16.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/autofill/autocomplete_history_manager.h"
-#include "chrome/browser/autofill/test_autofill_external_delegate.h"
+#include "chrome/browser/autofill/autofill_external_delegate.h"
+#include "chrome/browser/autofill/autofill_manager.h"
+#include "chrome/browser/autofill/test_autofill_manager_delegate.h"
 #include "chrome/browser/webdata/autofill_web_data_service_impl.h"
 #include "chrome/browser/webdata/web_data_service.h"
+#include "chrome/browser/webdata/web_data_service_factory.h"
 #include "chrome/common/form_data.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "chrome/test/base/testing_browser_process.h"
@@ -24,39 +28,72 @@ using content::BrowserThread;
 using content::WebContents;
 using testing::_;
 
+namespace {
+
 class MockWebDataService : public WebDataService {
  public:
-  MOCK_METHOD1(AddFormFields,
-               void(const std::vector<FormFieldData>&));  // NOLINT
+  MockWebDataService() {
+    current_mock_web_data_service_ = this;
+  }
+
+  static scoped_refptr<RefcountedProfileKeyedService> Build(Profile* profile) {
+    return current_mock_web_data_service_;
+  }
+
+  virtual void ShutdownOnUIThread() OVERRIDE {}
+
+  MOCK_METHOD1(AddFormFields, void(const std::vector<FormFieldData>&));
 
  protected:
   virtual ~MockWebDataService() {}
+
+ private:
+  // Keep track of the most recently created instance, so that it can be
+  // associated with the current profile when Build() is called.
+  static MockWebDataService* current_mock_web_data_service_;
 };
+
+MockWebDataService* MockWebDataService::current_mock_web_data_service_ = NULL;
+
+class MockAutofillManagerDelegate
+    : public autofill::TestAutofillManagerDelegate {
+ public:
+  MockAutofillManagerDelegate() {}
+  virtual ~MockAutofillManagerDelegate() {}
+  virtual PrefService* GetPrefs() { return &prefs_; }
+
+ private:
+  TestingPrefServiceSimple prefs_;
+
+  DISALLOW_COPY_AND_ASSIGN(MockAutofillManagerDelegate);
+};
+
+}  // namespace
 
 class AutocompleteHistoryManagerTest : public ChromeRenderViewHostTestHarness {
  protected:
   AutocompleteHistoryManagerTest()
-      : ui_thread_(BrowserThread::UI, MessageLoopForUI::current()),
-        db_thread_(BrowserThread::DB) {
+      : db_thread_(BrowserThread::DB) {
   }
 
-  virtual void SetUp() {
+  virtual void SetUp() OVERRIDE {
     ChromeRenderViewHostTestHarness::SetUp();
     web_data_service_ = new MockWebDataService();
-    autocomplete_manager_.reset(
-        new AutocompleteHistoryManager(
-            web_contents(),
-            &profile_,
-            scoped_ptr<AutofillWebDataService>(
-                new AutofillWebDataServiceImpl(web_data_service_))));
+    WebDataServiceFactory::GetInstance()->SetTestingFactory(
+        profile(), MockWebDataService::Build);
+    autocomplete_manager_.reset(new AutocompleteHistoryManager(web_contents()));
   }
 
-  content::TestBrowserThread ui_thread_;
-  content::TestBrowserThread db_thread_;
+  virtual void TearDown() OVERRIDE {
+    autocomplete_manager_.reset();
+    web_data_service_ = NULL;
+    ChromeRenderViewHostTestHarness::TearDown();
+  }
 
-  TestingProfile profile_;
+  content::TestBrowserThread db_thread_;
   scoped_refptr<MockWebDataService> web_data_service_;
   scoped_ptr<AutocompleteHistoryManager> autocomplete_manager_;
+  MockAutofillManagerDelegate manager_delegate;
 };
 
 // Tests that credit card numbers are not sent to the WebDatabase to be saved.
@@ -146,18 +183,12 @@ TEST_F(AutocompleteHistoryManagerTest, SearchField) {
 
 namespace {
 
-class MockAutofillExternalDelegate :
-      public autofill::TestAutofillExternalDelegate {
+class MockAutofillExternalDelegate : public AutofillExternalDelegate {
  public:
   explicit MockAutofillExternalDelegate(content::WebContents* web_contents)
-      : TestAutofillExternalDelegate(web_contents, NULL) {}
+      : AutofillExternalDelegate(
+            web_contents, AutofillManager::FromWebContents(web_contents)) {}
   virtual ~MockAutofillExternalDelegate() {}
-
-  virtual void ApplyAutofillSuggestions(
-      const std::vector<string16>& autofill_values,
-      const std::vector<string16>& autofill_labels,
-      const std::vector<string16>& autofill_icons,
-      const std::vector<int>& autofill_unique_ids) OVERRIDE {};
 
   MOCK_METHOD5(OnSuggestionsReturned,
                void(int query_id,
@@ -172,14 +203,19 @@ class MockAutofillExternalDelegate :
 
 class AutocompleteHistoryManagerStubSend : public AutocompleteHistoryManager {
  public:
-  explicit AutocompleteHistoryManagerStubSend(
-      WebContents* web_contents,
-      Profile* profile,
-      scoped_ptr<AutofillWebDataService> wds)
-      : AutocompleteHistoryManager(web_contents, profile, wds.Pass()) {}
+  explicit AutocompleteHistoryManagerStubSend(WebContents* web_contents)
+      : AutocompleteHistoryManager(web_contents) {}
+
+  // Increase visibility for testing.
+  void SendSuggestions(const std::vector<string16>* suggestions) {
+    AutocompleteHistoryManager::SendSuggestions(suggestions);
+  }
 
   // Intentionally swallow the message.
-  virtual bool Send(IPC::Message* message) { delete message; return true; }
+  virtual bool Send(IPC::Message* message) OVERRIDE {
+    delete message;
+    return true;
+  }
 };
 
 }  // namespace
@@ -188,15 +224,15 @@ class AutocompleteHistoryManagerStubSend : public AutocompleteHistoryManager {
 TEST_F(AutocompleteHistoryManagerTest, ExternalDelegate) {
   // Local version with a stubbed out Send()
   AutocompleteHistoryManagerStubSend autocomplete_history_manager(
-      web_contents(),
-      &profile_,
-      scoped_ptr<AutofillWebDataService>(
-          new AutofillWebDataServiceImpl(web_data_service_)));
+      web_contents());
+
+  AutofillManager::CreateForWebContentsAndDelegate(
+      web_contents(), &manager_delegate);
 
   MockAutofillExternalDelegate external_delegate(web_contents());
-  EXPECT_CALL(external_delegate, OnSuggestionsReturned(_, _,  _,  _,  _));
   autocomplete_history_manager.SetExternalDelegate(&external_delegate);
 
   // Should trigger a call to OnSuggestionsReturned, verified by the mock.
+  EXPECT_CALL(external_delegate, OnSuggestionsReturned(_, _, _, _, _));
   autocomplete_history_manager.SendSuggestions(NULL);
 }

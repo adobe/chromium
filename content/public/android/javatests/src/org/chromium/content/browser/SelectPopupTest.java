@@ -6,7 +6,9 @@ package org.chromium.content.browser;
 
 import android.test.suitebuilder.annotation.LargeTest;
 
+import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Feature;
+import org.chromium.base.test.util.UrlUtils;
 import org.chromium.content.browser.test.util.Criteria;
 import org.chromium.content.browser.test.util.CriteriaHelper;
 import org.chromium.content.browser.test.util.DOMUtils;
@@ -18,8 +20,8 @@ import java.util.concurrent.TimeUnit;
 
 public class SelectPopupTest extends ContentShellTestBase {
     private static final int WAIT_TIMEOUT_SECONDS = 2;
-    private static final String SELECT_URL =
-            "data:text/html;utf-8,<html><body>" +
+    private static final String SELECT_URL = UrlUtils.encodeHtmlDataUri(
+            "<html><body>" +
             "Which animal is the strongest:<br/>" +
             "<select id=\"select\">" +
             "<option>Black bear</option>" +
@@ -30,7 +32,7 @@ public class SelectPopupTest extends ContentShellTestBase {
             "<option>Gorilla</option>" +
             "<option>Chipmunk</option>" +
             "</select>" +
-            "</body></html>";
+            "</body></html>");
 
     private static class PopupShowingCriteria implements Criteria {
         @Override
@@ -52,9 +54,11 @@ public class SelectPopupTest extends ContentShellTestBase {
     /**
      * Tests that showing a select popup and having the page reload while the popup is showing does
      * not assert.
+     * @LargeTest
+     * @Feature({"Browser"})
+     * BUG 172967
      */
-    @LargeTest
-    @Feature({"Browser"})
+    @DisabledTest
     public void testReloadWhilePopupShowing() throws InterruptedException, Exception, Throwable {
         // Load the test page.
         launchContentShellWithUrl(SELECT_URL);

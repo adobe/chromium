@@ -4,7 +4,7 @@
 
 #include "content/public/test/web_contents_tester.h"
 
-#include "content/browser/web_contents/test_web_contents.h"
+#include "content/test/test_web_contents.h"
 
 namespace content {
 
@@ -12,40 +12,6 @@ namespace {
 
 // The two subclasses here are instantiated via the deprecated
 // CreateWebContentsFor... factories below.
-
-class TestWebContentsCountFocus : public TestWebContents {
- public:
-  explicit TestWebContentsCountFocus(BrowserContext* browser_context)
-      : TestWebContents(browser_context), focus_called_(0) {
-  }
-
-  virtual int GetNumberOfFocusCalls() OVERRIDE {
-    return focus_called_;
-  }
-
-  virtual void Focus() OVERRIDE {
-    focus_called_++;
-  }
-
- private:
-  int focus_called_;
-};
-
-class TestWebContentsCountSetFocusToLocationBar : public TestWebContents {
- public:
-  explicit TestWebContentsCountSetFocusToLocationBar(
-      BrowserContext* browser_context)
-      : TestWebContents(browser_context), focus_called_(0) {
-  }
-
-  virtual void SetFocusToLocationBar(bool select_all) { ++focus_called_; }
-  virtual int GetNumberOfFocusCalls() OVERRIDE {
-    return focus_called_;
-  }
-
- private:
-  int focus_called_;
-};
 
 }  // namespace
 
@@ -62,23 +28,4 @@ WebContents* WebContentsTester::CreateTestWebContents(
 }
 
 // static
-WebContents* WebContentsTester::CreateTestWebContentsCountSetFocusToLocationBar(
-    BrowserContext* browser_context,
-    SiteInstance* instance) {
-  TestWebContentsCountSetFocusToLocationBar* web_contents =
-      new TestWebContentsCountSetFocusToLocationBar(browser_context);
-  web_contents->Init(WebContents::CreateParams(browser_context, instance));
-  return web_contents;
-}
-
-// static
-WebContents* WebContentsTester::CreateTestWebContentsCountFocus(
-    BrowserContext* browser_context,
-    SiteInstance* instance) {
-  TestWebContentsCountFocus* web_contents =
-      new TestWebContentsCountFocus(browser_context);
-  web_contents->Init(WebContents::CreateParams(browser_context, instance));
-  return web_contents;
-}
-
 }  // namespace content

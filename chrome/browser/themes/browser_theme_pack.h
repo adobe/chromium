@@ -15,13 +15,13 @@
 #include "base/sequenced_task_runner_helpers.h"
 #include "chrome/common/extensions/extension.h"
 #include "content/public/browser/browser_thread.h"
+#include "third_party/skia/include/core/SkColor.h"
 #include "ui/base/layout.h"
 #include "ui/gfx/color_utils.h"
 
-class FilePath;
-
 namespace base {
 class DictionaryValue;
+class FilePath;
 class RefCountedMemory;
 }
 
@@ -67,14 +67,14 @@ class BrowserThemePack : public base::RefCountedThreadSafe<
   // operation should be relatively fast, as it should be an mmap() and some
   // pointer swizzling. Returns NULL on any error attempting to read |path|.
   static scoped_refptr<BrowserThemePack> BuildFromDataPack(
-      const FilePath& path, const std::string& expected_id);
+      const base::FilePath& path, const std::string& expected_id);
 
   // Builds a data pack on disk at |path| for future quick loading by
   // BuildFromDataPack(). Often (but not always) called from the file thread;
   // implementation should be threadsafe because neither thread will write to
   // |image_memory_| and the worker thread will keep a reference to prevent
   // destruction.
-  bool WriteToDisk(const FilePath& path) const;
+  bool WriteToDisk(const base::FilePath& path) const;
 
   // If this theme specifies data for the corresponding |id|, return true and
   // write the corresponding value to the output parameter. These functions
@@ -91,6 +91,10 @@ class BrowserThemePack : public base::RefCountedThreadSafe<
   // supposed to work for the NTP attribution and background resources.
   base::RefCountedMemory* GetRawData(int id,
                                      ui::ScaleFactor scale_factor) const;
+
+  // Returns the set of image idrs which can be overwritten by a user provided
+  // theme.
+  static void GetThemeableImageIDRs(std::set<int>* result);
 
   // Whether this theme provides an image for |id|.
   bool HasCustomImage(int id) const;
@@ -112,8 +116,8 @@ class BrowserThemePack : public base::RefCountedThreadSafe<
   // The type passed to ui::DataPack::WritePack.
   typedef std::map<uint16, base::StringPiece> RawDataForWriting;
 
-  // An association between an id and the FilePath that has the image data.
-  typedef std::map<int, FilePath> FilePathMap;
+  // An association between an id and the base::FilePath that has the image data.
+  typedef std::map<int, base::FilePath> FilePathMap;
 
   // Default. Everything is empty.
   BrowserThemePack();
@@ -141,7 +145,7 @@ class BrowserThemePack : public base::RefCountedThreadSafe<
 
   // Parses the image names out of an extension.
   void ParseImageNamesFromJSON(base::DictionaryValue* images_value,
-                               const FilePath& images_path,
+                               const base::FilePath& images_path,
                                FilePathMap* file_paths) const;
 
   // Creates the data for |source_images_| from |file_paths|.

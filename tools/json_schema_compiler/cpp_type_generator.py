@@ -5,74 +5,63 @@
 from code import Code
 from model import Namespace, PropertyType, Type
 import cpp_util
-import operator
+from json_parse import OrderedDict
+from operator import attrgetter
 import schema_util
+
+class _TypeDependency(object):
+  """Contains information about a dependency a namespace has on a type: the
+  type's model, and whether that dependency is "hard" meaning that it cannot be
+  forward declared.
+  """
+  def __init__(self, type_, hard=False):
+    self.type_ = type_
+    self.hard = hard
+
+  def GetSortKey(self):
+    return '%s.%s' % (self.type_.namespace.name, self.type_.name)
 
 class CppTypeGenerator(object):
   """Manages the types of properties and provides utilities for getting the
   C++ type out of a model.Property
   """
-  def __init__(self, root_namespace, namespace=None, cpp_namespace=None):
+  def __init__(self, model, default_namespace=None):
     """Creates a cpp_type_generator. The given root_namespace should be of the
     format extensions::api::sub. The generator will generate code suitable for
-    use in the given namespace.
+    use in the given model's namespace.
     """
     self._type_namespaces = {}
-    self._root_namespace = root_namespace.split('::')
-    self._cpp_namespaces = {}
-    if namespace and cpp_namespace:
-      self._namespace = namespace
-      self.AddNamespace(namespace, cpp_namespace)
-    else:
-      self._namespace = None
+    self._default_namespace = default_namespace
 
-  def AddNamespace(self, namespace, cpp_namespace):
-    """Maps a model.Namespace to its C++ namespace name. All mappings are
-    beneath the root namespace.
-    """
-    self._cpp_namespaces[namespace] = cpp_namespace
-    for type_name in namespace.types:
-      # Allow $refs to refer to just 'Type' within namespaces. Otherwise they
-      # must be qualified with 'namespace.Type'.
-      type_aliases = ['%s.%s' % (namespace.name, type_name)]
-      if namespace is self._namespace:
-        type_aliases.append(type_name)
-      for alias in type_aliases:
-        self._type_namespaces[alias] = namespace
+    for referenced_namespace in model.namespaces.values():
+      if self._default_namespace is None:
+        self._default_namespace = referenced_namespace
+      for type_name in referenced_namespace.types:
+        # Allow $refs to refer to just 'Type' within referenced_namespaces.
+        # Otherwise they must be qualified with 'namespace.Type'.
+        type_aliases = ['%s.%s' % (referenced_namespace.name, type_name)]
+        if referenced_namespace is self._default_namespace:
+          type_aliases.append(type_name)
+        for alias in type_aliases:
+          self._type_namespaces[alias] = referenced_namespace
 
   def GetCppNamespaceName(self, namespace):
     """Gets the mapped C++ namespace name for the given namespace relative to
     the root namespace.
     """
-    return self._cpp_namespaces[namespace]
-
-  def GetRootNamespaceStart(self):
-    """Get opening root namespace declarations.
-    """
-    c = Code()
-    for namespace in self._root_namespace:
-      c.Append('namespace %s {' % namespace)
-    return c
-
-  def GetRootNamespaceEnd(self):
-    """Get closing root namespace declarations.
-    """
-    c = Code()
-    for namespace in reversed(self._root_namespace):
-      c.Append('}  // %s' % namespace)
-    return c
+    return namespace.unix_name
 
   def GetNamespaceStart(self):
-    """Get opening self._namespace namespace declaration.
+    """Get opening self._default_namespace namespace declaration.
     """
     return Code().Append('namespace %s {' %
-        self.GetCppNamespaceName(self._namespace))
+        self.GetCppNamespaceName(self._default_namespace))
 
   def GetNamespaceEnd(self):
-    """Get closing self._namespace namespace declaration.
+    """Get closing self._default_namespace namespace declaration.
     """
     return Code().Append('}  // %s' %
-        self.GetCppNamespaceName(self._namespace))
+        self.GetCppNamespaceName(self._default_namespace))
 
   def GetEnumNoneValue(self, type_):
     """Gets the enum value in the given model.Property indicating no value has
@@ -102,15 +91,13 @@ class CppTypeGenerator(object):
     """
     cpp_type = None
     if type_.property_type == PropertyType.REF:
-      ref = type_.ref_type
-      dependency_namespace = self._ResolveTypeNamespace(ref)
-      if not dependency_namespace:
-        raise KeyError('Cannot find referenced type: %s' % ref)
-      if self._namespace != dependency_namespace:
-        cpp_type = '%s::%s' % (self._cpp_namespaces[dependency_namespace],
-                               schema_util.StripSchemaNamespace(ref))
+      ref_type = self._FindType(type_.ref_type)
+      if ref_type is None:
+        raise KeyError('Cannot find referenced type: %s' % type_.ref_type)
+      if self._default_namespace is ref_type.namespace:
+        cpp_type = ref_type.name
       else:
-        cpp_type = schema_util.StripSchemaNamespace(ref)
+        cpp_type = '%s::%s' % (ref_type.namespace.unix_name, ref_type.name)
     elif type_.property_type == PropertyType.BOOLEAN:
       cpp_type = 'bool'
     elif type_.property_type == PropertyType.INTEGER:
@@ -159,55 +146,43 @@ class CppTypeGenerator(object):
                                                         PropertyType.CHOICES))
 
   def GenerateForwardDeclarations(self):
-    """Returns the forward declarations for self._namespace.
-
-    Use after GetRootNamespaceStart. Assumes all namespaces are relative to
-    self._root_namespace.
+    """Returns the forward declarations for self._default_namespace.
     """
     c = Code()
-    namespace_type_dependencies = self._NamespaceTypeDependencies()
-    for namespace in sorted(namespace_type_dependencies.keys(),
-                            key=operator.attrgetter('name')):
-      c.Append('namespace %s {' % namespace.name)
-      for type_name in sorted(namespace_type_dependencies[namespace],
-                              key=schema_util.StripSchemaNamespace):
-        simple_type_name = schema_util.StripSchemaNamespace(type_name)
-        type_ = namespace.types[simple_type_name]
+
+    for namespace, dependencies in self._NamespaceTypeDependencies().items():
+      c.Append('namespace %s {' % namespace.unix_name)
+      for dependency in dependencies:
+        # No point forward-declaring hard dependencies.
+        if dependency.hard:
+          continue
         # Add more ways to forward declare things as necessary.
-        if type_.property_type == PropertyType.OBJECT:
-          c.Append('struct %s;' % simple_type_name)
+        if dependency.type_.property_type == PropertyType.OBJECT:
+          c.Append('struct %s;' % dependency.type_.name)
       c.Append('}')
-    c.Concat(self.GetNamespaceStart())
-    for (name, type_) in self._namespace.types.items():
-      if not type_.functions and type_.property_type == PropertyType.OBJECT:
-        c.Append('struct %s;' % schema_util.StripSchemaNamespace(name))
-    c.Concat(self.GetNamespaceEnd())
+
     return c
 
-  def GenerateIncludes(self):
-    """Returns the #include lines for self._namespace.
+  def GenerateIncludes(self, include_soft=False):
+    """Returns the #include lines for self._default_namespace.
     """
     c = Code()
-    for header in sorted(
-        ['%s/%s.h' % (dependency.source_file_dir,
-                      self._cpp_namespaces[dependency])
-         for dependency in self._NamespaceTypeDependencies().keys()]):
-      c.Append('#include "%s"' % header)
-    c.Append('#include "base/string_number_conversions.h"')
-
-    if self._namespace.events:
-      c.Append('#include "base/json/json_writer.h"')
+    for namespace, dependencies in self._NamespaceTypeDependencies().items():
+      for dependency in dependencies:
+        if dependency.hard or include_soft:
+          c.Append('#include "%s/%s.h"' % (namespace.source_file_dir,
+                                           namespace.unix_name))
     return c
 
-  def _ResolveTypeNamespace(self, qualified_name):
-    """Resolves a type, which must be explicitly qualified, to its enclosing
-    namespace.
+  def _FindType(self, full_name):
+    """Finds the model.Type with name |qualified_name|. If it's not from
+    |self._default_namespace| then it needs to be qualified.
     """
-    namespace = self._type_namespaces.get(qualified_name, None)
+    namespace = self._type_namespaces.get(full_name, None)
     if namespace is None:
       raise KeyError('Cannot resolve type %s. Maybe it needs a prefix '
-                     'if it comes from another namespace?' % qualified_type)
-    return namespace
+                     'if it comes from another namespace?' % full_name)
+    return namespace.types[schema_util.StripNamespace(full_name)]
 
   def FollowRef(self, type_):
     """Follows $ref link of types to resolve the concrete type a ref refers to.
@@ -215,54 +190,64 @@ class CppTypeGenerator(object):
     If the property passed in is not of type PropertyType.REF, it will be
     returned unchanged.
     """
-    if not type_.property_type == PropertyType.REF:
+    if type_.property_type != PropertyType.REF:
       return type_
-    ref = type_.ref_type
-
-    without_namespace = ref
-    if '.' in ref:
-      without_namespace = ref.split('.', 1)[1]
-
-    # TODO(kalman): Do we need to keep on resolving?
-    return self._ResolveTypeNamespace(ref).types[without_namespace]
+    return self.FollowRef(self._FindType(type_.ref_type))
 
   def _NamespaceTypeDependencies(self):
-    """Returns a dict containing a mapping of model.Namespace to the C++ type
-    of type dependencies for self._namespace.
+    """Returns a dict ordered by namespace name containing a mapping of
+    model.Namespace to every _TypeDependency for |self._default_namespace|,
+    sorted by the type's name.
     """
     dependencies = set()
-    for function in self._namespace.functions.values():
+    for function in self._default_namespace.functions.values():
       for param in function.params:
-        dependencies |= self._TypeDependencies(param.type_)
+        dependencies |= self._TypeDependencies(param.type_,
+                                               hard=not param.optional)
       if function.callback:
         for param in function.callback.params:
-          dependencies |= self._TypeDependencies(param.type_)
-    for type_ in self._namespace.types.values():
+          dependencies |= self._TypeDependencies(param.type_,
+                                                 hard=not param.optional)
+    for type_ in self._default_namespace.types.values():
       for prop in type_.properties.values():
-        dependencies |= self._TypeDependencies(prop.type_)
-    for event in self._namespace.events.values():
+        dependencies |= self._TypeDependencies(prop.type_,
+                                               hard=not prop.optional)
+    for event in self._default_namespace.events.values():
       for param in event.params:
-        dependencies |= self._TypeDependencies(param.type_)
+        dependencies |= self._TypeDependencies(param.type_,
+                                               hard=not param.optional)
 
-    dependency_namespaces = dict()
-    for dependency in dependencies:
-      namespace = self._ResolveTypeNamespace(dependency)
-      if namespace != self._namespace:
-        dependency_namespaces.setdefault(namespace, [])
-        dependency_namespaces[namespace].append(dependency)
+    # Make sure that the dependencies are returned in alphabetical order.
+    dependency_namespaces = OrderedDict()
+    for dependency in sorted(dependencies, key=_TypeDependency.GetSortKey):
+      namespace = dependency.type_.namespace
+      if namespace is self._default_namespace:
+        continue
+      if namespace not in dependency_namespaces:
+        dependency_namespaces[namespace] = []
+      dependency_namespaces[namespace].append(dependency)
+
     return dependency_namespaces
 
-  def _TypeDependencies(self, type_):
-    """Recursively gets all the type dependencies of a property.
+  def _TypeDependencies(self, type_, hard=False):
+    """Gets all the type dependencies of a property.
     """
     deps = set()
     if type_.property_type == PropertyType.REF:
-      deps.add(type_.ref_type)
+      deps.add(_TypeDependency(self._FindType(type_.ref_type), hard=hard))
     elif type_.property_type == PropertyType.ARRAY:
-      deps = self._TypeDependencies(type_.item_type)
+      # Non-copyable types are not hard because they are wrapped in linked_ptrs
+      # when generated. Otherwise they're typedefs, so they're hard (though we
+      # could generate those typedefs in every dependent namespace, but that
+      # seems weird).
+      deps = self._TypeDependencies(type_.item_type,
+                                    hard=self.IsCopyable(type_.item_type))
+    elif type_.property_type == PropertyType.CHOICES:
+      for type_ in type_.choices:
+        deps |= self._TypeDependencies(type_, hard=self.IsCopyable(type_))
     elif type_.property_type == PropertyType.OBJECT:
       for p in type_.properties.values():
-        deps |= self._TypeDependencies(p.type_)
+        deps |= self._TypeDependencies(p.type_, hard=not p.optional)
     return deps
 
   def GeneratePropertyValues(self, property, line, nodoc=False):

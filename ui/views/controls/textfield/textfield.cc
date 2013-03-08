@@ -15,9 +15,11 @@
 #include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/base/range/range.h"
 #include "ui/base/ui_base_switches.h"
+#include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/insets.h"
 #include "ui/gfx/selection_model.h"
 #include "ui/native_theme/native_theme.h"
+#include "ui/views/controls/image_view.h"
 #include "ui/views/controls/native/native_view_host.h"
 #include "ui/views/controls/textfield/native_textfield_views.h"
 #include "ui/views/controls/textfield/native_textfield_wrapper.h"
@@ -49,8 +51,12 @@ const char Textfield::kViewClassName[] = "views/Textfield";
 // static
 bool Textfield::IsViewsTextfieldEnabled() {
 #if defined(OS_WIN) && !defined(USE_AURA)
-  return CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kEnableViewsTextfield);
+  CommandLine* command_line = CommandLine::ForCurrentProcess();
+  if (command_line->HasSwitch(switches::kDisableViewsTextfield))
+    return false;
+  if (command_line->HasSwitch(switches::kEnableViewsTextfield))
+    return true;
+  return false;
 #endif
   return true;
 }
@@ -72,6 +78,7 @@ Textfield::Textfield()
       horizontal_margins_were_set_(false),
       vertical_margins_were_set_(false),
       placeholder_text_color_(kDefaultPlaceholderTextColor),
+      icon_view_(NULL),
       text_input_type_(ui::TEXT_INPUT_TYPE_TEXT) {
   set_focusable(true);
 }
@@ -93,6 +100,7 @@ Textfield::Textfield(StyleFlags style)
       horizontal_margins_were_set_(false),
       vertical_margins_were_set_(false),
       placeholder_text_color_(kDefaultPlaceholderTextColor),
+      icon_view_(NULL),
       text_input_type_(ui::TEXT_INPUT_TYPE_TEXT) {
   set_focusable(true);
   if (IsObscured())
@@ -191,10 +199,9 @@ void Textfield::ClearSelection() const {
 }
 
 bool Textfield::HasSelection() const {
-  ui::Range range;
   if (native_wrapper_)
-    native_wrapper_->GetSelectedRange(&range);
-  return !range.is_empty();
+    return !native_wrapper_->GetSelectedRange().is_empty();
+  return false;
 }
 
 SkColor Textfield::GetTextColor() const {
@@ -296,11 +303,42 @@ void Textfield::UseDefaultBorderColor() {
   native_wrapper_->UpdateBorderColor();
 }
 
+void Textfield::SetIcon(const gfx::ImageSkia& icon) {
+  if (icon.isNull()) {
+    if (icon_view_) {
+      RemoveChildView(icon_view_);
+      delete icon_view_;
+      icon_view_ = NULL;
+    }
+
+    return;
+  }
+
+  if (!icon_view_) {
+    icon_view_ = new ImageView();
+    AddChildView(icon_view_);
+  }
+
+  icon_view_->SetImage(icon);
+  PreferredSizeChanged();
+}
+
 bool Textfield::GetHorizontalMargins(int* left, int* right) {
   if (!horizontal_margins_were_set_)
     return false;
+
+  // Add the width of the icon as well as a margin for the icon.
+  int icon_width = 0;
+  if (icon_view_)
+    icon_width = icon_view_->GetPreferredSize().width() + margins_.right();
+
   *left = margins_.left();
   *right = margins_.right();
+  if (base::i18n::IsRTL())
+    *left += icon_width;
+  else
+    *right += icon_width;
+
   return true;
 }
 
@@ -343,9 +381,9 @@ bool Textfield::IsIMEComposing() const {
   return native_wrapper_ && native_wrapper_->IsIMEComposing();
 }
 
-void Textfield::GetSelectedRange(ui::Range* range) const {
+ui::Range Textfield::GetSelectedRange() const {
   DCHECK(native_wrapper_);
-  native_wrapper_->GetSelectedRange(range);
+  return native_wrapper_->GetSelectedRange();
 }
 
 void Textfield::SelectRange(const ui::Range& range) {
@@ -353,9 +391,9 @@ void Textfield::SelectRange(const ui::Range& range) {
   native_wrapper_->SelectRange(range);
 }
 
-void Textfield::GetSelectionModel(gfx::SelectionModel* sel) const {
+gfx::SelectionModel Textfield::GetSelectionModel() const {
   DCHECK(native_wrapper_);
-  native_wrapper_->GetSelectionModel(sel);
+  return native_wrapper_->GetSelectionModel();
 }
 
 void Textfield::SelectSelectionModel(const gfx::SelectionModel& sel) {
@@ -368,14 +406,26 @@ size_t Textfield::GetCursorPosition() const {
   return native_wrapper_->GetCursorPosition();
 }
 
-void Textfield::ApplyStyleRange(const gfx::StyleRange& style) {
+void Textfield::SetColor(SkColor value) {
   DCHECK(native_wrapper_);
-  return native_wrapper_->ApplyStyleRange(style);
+  return native_wrapper_->SetColor(value);
 }
 
-void Textfield::ApplyDefaultStyle() {
+void Textfield::ApplyColor(SkColor value, const ui::Range& range) {
   DCHECK(native_wrapper_);
-  native_wrapper_->ApplyDefaultStyle();
+  return native_wrapper_->ApplyColor(value, range);
+}
+
+void Textfield::SetStyle(gfx::TextStyle style, bool value) {
+  DCHECK(native_wrapper_);
+  return native_wrapper_->SetStyle(style, value);
+}
+
+void Textfield::ApplyStyle(gfx::TextStyle style,
+                           bool value,
+                           const ui::Range& range) {
+  DCHECK(native_wrapper_);
+  return native_wrapper_->ApplyStyle(style, value, range);
 }
 
 void Textfield::ClearEditHistory() {
@@ -398,6 +448,18 @@ void Textfield::Layout() {
   if (native_wrapper_) {
     native_wrapper_->GetView()->SetBoundsRect(GetLocalBounds());
     native_wrapper_->GetView()->Layout();
+  }
+  if (icon_view_) {
+    gfx::Rect bounds = GetLocalBounds();
+    bounds.Inset(margins_);
+
+    // Flush right, vertically centered.
+    gfx::Size pref_size = icon_view_->GetPreferredSize();
+    gfx::Rect icon_bounds(
+        gfx::Point(bounds.right() - pref_size.width(),
+                   bounds.y() + (bounds.height() - pref_size.height()) / 2),
+        pref_size);
+    icon_view_->SetBoundsRect(icon_bounds);
   }
 }
 
@@ -436,9 +498,7 @@ bool Textfield::SkipDefaultKeyEventProcessing(const ui::KeyEvent& e) {
   if (key == ui::VKEY_BACK)
     return true;  // We'll handle BackSpace ourselves.
 
-#if defined(USE_AURA)
-  NOTIMPLEMENTED();
-#elif defined(OS_WIN)
+#if defined(OS_WIN) && !defined(USE_AURA)
   // We don't translate accelerators for ALT + NumPad digit on Windows, they are
   // used for entering special characters.  We do translate alt-home.
   if (e.IsAltDown() && (key != ui::VKEY_HOME) &&
@@ -496,8 +556,7 @@ void Textfield::GetAccessibleState(ui::AccessibleViewState* state) {
   state->value = text_;
 
   DCHECK(native_wrapper_);
-  ui::Range range;
-  native_wrapper_->GetSelectedRange(&range);
+  const ui::Range range = native_wrapper_->GetSelectedRange();
   state->selection_start = range.start();
   state->selection_end = range.end();
 }
@@ -519,7 +578,7 @@ void Textfield::ViewHierarchyChanged(bool is_add, View* parent, View* child) {
     // The native wrapper's lifetime will be managed by the view hierarchy after
     // we call AddChildView.
     native_wrapper_ = NativeTextfieldWrapper::CreateWrapper(this);
-    AddChildView(native_wrapper_->GetView());
+    AddChildViewAt(native_wrapper_->GetView(), 0);
     // TODO(beng): Move this initialization to NativeTextfieldWin once it
     //             subclasses NativeControlWin.
     UpdateAllProperties();

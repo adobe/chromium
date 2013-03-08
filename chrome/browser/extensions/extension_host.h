@@ -13,7 +13,7 @@
 #include "base/perftimer.h"
 #include "chrome/browser/extensions/extension_function_dispatcher.h"
 #include "chrome/common/view_type.h"
-#include "content/public/browser/javascript_dialogs.h"
+#include "content/public/browser/javascript_dialog_manager.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/web_contents_delegate.h"
@@ -36,7 +36,6 @@ namespace content {
 class RenderProcessHost;
 class RenderWidgetHostView;
 class SiteInstance;
-class WebIntentsDispatcher;
 }
 
 namespace extensions {
@@ -124,7 +123,7 @@ class ExtensionHost : public content::WebContentsDelegate,
   // Insert a default style sheet for Extension Infobars.
   void InsertInfobarCSS();
 
-  // Notifications from the JavaScriptDialogCreator when a dialog is being
+  // Notifications from the JavaScriptDialogManager when a dialog is being
   // opened/closed.
   void WillRunJavaScriptDialog();
   void DidCloseJavaScriptDialog();
@@ -154,8 +153,8 @@ class ExtensionHost : public content::WebContentsDelegate,
       const content::NativeWebKeyboardEvent& event) OVERRIDE;
   virtual void ResizeDueToAutoResize(content::WebContents* source,
                                      const gfx::Size& new_size) OVERRIDE;
-  virtual content::JavaScriptDialogCreator*
-      GetJavaScriptDialogCreator() OVERRIDE;
+  virtual content::JavaScriptDialogManager*
+      GetJavaScriptDialogManager() OVERRIDE;
   virtual void RunFileChooser(
       content::WebContents* tab,
       const content::FileChooserParams& params) OVERRIDE;
@@ -166,11 +165,6 @@ class ExtensionHost : public content::WebContentsDelegate,
                               bool user_gesture,
                               bool* was_blocked) OVERRIDE;
   virtual void CloseContents(content::WebContents* contents) OVERRIDE;
-  virtual void OnStartDownload(content::WebContents* source,
-                               content::DownloadItem* download) OVERRIDE;
-  virtual void WebIntentDispatch(
-      content::WebContents* web_contents,
-      content::WebIntentsDispatcher* intents_dispatcher) OVERRIDE;
   virtual void RequestMediaAccessPermission(
       content::WebContents* web_contents,
       const content::MediaStreamRequest& request,
@@ -229,7 +223,7 @@ class ExtensionHost : public content::WebContentsDelegate,
   // Used to create dialog boxes.
   // It must outlive host_contents_ as host_contents_ will access it
   // during destruction.
-  scoped_ptr<content::JavaScriptDialogCreator> dialog_creator_;
+  scoped_ptr<content::JavaScriptDialogManager> dialog_manager_;
 
   // The host for our HTML content.
   scoped_ptr<content::WebContents> host_contents_;

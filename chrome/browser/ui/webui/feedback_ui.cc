@@ -13,8 +13,9 @@
 #include "base/logging.h"
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop.h"
-#include "base/string_number_conversions.h"
+#include "base/prefs/pref_service.h"
 #include "base/string_util.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
@@ -22,7 +23,6 @@
 #include "chrome/browser/download/download_prefs.h"
 #include "chrome/browser/feedback/feedback_data.h"
 #include "chrome/browser/feedback/feedback_util.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/signin/signin_manager.h"
@@ -33,8 +33,6 @@
 #include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/browser/ui/singleton_tabs.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/browser/ui/webui/chrome_url_data_manager.h"
-#include "chrome/browser/ui/webui/chrome_web_ui_data_source.h"
 #include "chrome/browser/ui/webui/screenshot_source.h"
 #include "chrome/browser/ui/window_snapshot/window_snapshot.h"
 #include "chrome/common/cancelable_task_tracker.h"
@@ -44,8 +42,10 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
+#include "content/public/browser/url_data_source.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
+#include "content/public/browser/web_ui_data_source.h"
 #include "content/public/browser/web_ui_message_handler.h"
 #include "grit/browser_resources.h"
 #include "grit/chromium_strings.h"
@@ -263,7 +263,8 @@ class FeedbackHandler : public WebUIMessageHandler,
   void RefreshSavedScreenshotsCallback(
       std::vector<std::string>* saved_screenshots);
   void GetMostRecentScreenshotsDrive(
-      const FilePath& filepath, std::vector<std::string>* saved_screenshots,
+      const base::FilePath& filepath,
+      std::vector<std::string>* saved_screenshots,
       size_t max_saved, base::Closure callback);
 #endif
   void HandleSendReport(const ListValue* args);
@@ -295,7 +296,7 @@ class FeedbackHandler : public WebUIMessageHandler,
 
 content::WebUIDataSource* CreateFeedbackUIHTMLSource(bool successful_init) {
   content::WebUIDataSource* source =
-      ChromeWebUIDataSource::Create(chrome::kChromeUIFeedbackHost);
+      content::WebUIDataSource::Create(chrome::kChromeUIFeedbackHost);
   source->SetUseJsonJSFormatV2();
 
   source->AddLocalizedString("title", IDS_FEEDBACK_TITLE);
@@ -319,6 +320,8 @@ content::WebUIDataSource* CreateFeedbackUIHTMLSource(bool successful_init) {
                              IDS_FEEDBACK_CHOOSE_DIFFERENT_SCREENSHOT);
   source->AddLocalizedString("choose-original-screenshot",
                              IDS_FEEDBACK_CHOOSE_ORIGINAL_SCREENSHOT);
+  source->AddLocalizedString("attach-file-custom-label",
+                             IDS_FEEDBACK_ATTACH_FILE_LABEL);
   source->AddLocalizedString("attach-file-note",
                              IDS_FEEDBACK_ATTACH_FILE_NOTE);
   source->AddLocalizedString("attach-file-to-big",
@@ -377,8 +380,7 @@ void FeedbackHandler::ClobberScreenshotsSource() {
   // setting the screenshot to NULL, effectively disabling the source
   // TODO(rkc): Once there is a method to 'remove' a source, change this code
   Profile* profile = Profile::FromBrowserContext(tab_->GetBrowserContext());
-  ChromeURLDataManager::AddDataSource(profile,
-                                      new ScreenshotSource(NULL, profile));
+  content::URLDataSource::Add(profile, new ScreenshotSource(NULL, profile));
 
   FeedbackUtil::ClearScreenshotPng();
 }
@@ -388,7 +390,7 @@ void FeedbackHandler::SetupScreenshotsSource() {
   screenshot_source_ =
       new ScreenshotSource(FeedbackUtil::GetScreenshotPng(), profile);
   // Add the source to the data manager.
-  ChromeURLDataManager::AddDataSource(profile, screenshot_source_);
+  content::URLDataSource::Add(profile, screenshot_source_);
 }
 
 bool FeedbackHandler::Init() {
@@ -555,7 +557,7 @@ void FeedbackHandler::HandleRefreshCurrentScreenshot(const ListValue*) {
 #if defined(OS_CHROMEOS)
 void FeedbackHandler::HandleRefreshSavedScreenshots(const ListValue*) {
   std::vector<std::string>* saved_screenshots = new std::vector<std::string>;
-  FilePath filepath = DownloadPrefs::FromBrowserContext(
+  base::FilePath filepath = DownloadPrefs::FromBrowserContext(
       tab_->GetBrowserContext())->DownloadPath();
   base::Closure refresh_callback = base::Bind(
       &FeedbackHandler::RefreshSavedScreenshotsCallback,
@@ -581,7 +583,7 @@ void FeedbackHandler::RefreshSavedScreenshotsCallback(
 }
 
 void FeedbackHandler::GetMostRecentScreenshotsDrive(
-    const FilePath& filepath, std::vector<std::string>* saved_screenshots,
+    const base::FilePath& filepath, std::vector<std::string>* saved_screenshots,
     size_t max_saved, base::Closure callback) {
   drive::DriveFileSystemInterface* file_system =
       drive::DriveSystemServiceFactory::GetForProfile(
@@ -628,24 +630,30 @@ void FeedbackHandler::HandleSendReport(const ListValue* list_value) {
     CancelFeedbackCollection();
 
   std::string attached_filename;
-  std::string attached_filedata;
+  std::string* attached_filedata = NULL;
   // If we have an attached file, we'll still have more data in the list.
   if (i != list_value->end()) {
     (*i++)->GetAsString(&attached_filename);
-    std::string encoded_filedata;
-    (*i++)->GetAsString(&encoded_filedata);
-    if (!base::Base64Decode(
-        base::StringPiece(encoded_filedata), &attached_filedata)) {
-      LOG(ERROR) << "Unable to attach file: " << attached_filename;
-      // Clear the filename so feedback_util doesn't try to attach the file.
-      attached_filename = "";
+    if (base::FilePath::IsSeparator(attached_filename[0])) {
+      // We have an attached filepath, not filename, hence we need read this
+      // this file in chrome. We won't have any file data, skip over it.
+      i++;
+    } else {
+      std::string encoded_filedata;
+      attached_filedata = new std::string;
+      (*i++)->GetAsString(&encoded_filedata);
+      if (!base::Base64Decode(
+          base::StringPiece(encoded_filedata), attached_filedata)) {
+        LOG(ERROR) << "Unable to attach file: " << attached_filename;
+        // Clear the filename so feedback_util doesn't try to attach the file.
+        attached_filename = "";
+      }
     }
   }
 #endif
 
   // Update the data in feedback_data_ so it can be sent
   feedback_data_->UpdateData(Profile::FromWebUI(web_ui())
-                             , target_tab_url_
                              , std::string()
                              , page_url
                              , description
@@ -725,13 +733,13 @@ FeedbackUI::FeedbackUI(content::WebUI* web_ui)
 
   // Set up the chrome://feedback/ source.
   Profile* profile = Profile::FromWebUI(web_ui);
-  ChromeURLDataManager::AddWebUIDataSource(profile, html_source);
+  content::WebUIDataSource::Add(profile, html_source);
 }
 
 #if defined(OS_CHROMEOS)
 // static
 void FeedbackUI::GetMostRecentScreenshots(
-    const FilePath& filepath,
+    const base::FilePath& filepath,
     std::vector<std::string>* saved_screenshots,
     size_t max_saved) {
   std::string pattern =
@@ -740,7 +748,7 @@ void FeedbackUI::GetMostRecentScreenshots(
   file_util::FileEnumerator screenshots(filepath, false,
                                         file_util::FileEnumerator::FILES,
                                         pattern);
-  FilePath screenshot = screenshots.Next();
+  base::FilePath screenshot = screenshots.Next();
 
   std::vector<std::string> screenshot_filepaths;
   while (!screenshot.empty()) {

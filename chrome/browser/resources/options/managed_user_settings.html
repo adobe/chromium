@@ -7,7 +7,9 @@
       <h3 i18n-content="installedContentPacks"></h3>
       <list id="content-packs-list"></list>
       <div class="settings-row">
-        <button id="get-content-packs-button" i18n-content="getContentPacks">
+        <button id="get-content-packs-button" i18n-content="getContentPacks"
+            disabled>
+        </button>
       </div>
     </section>
     <!-- Content pack settings -->
@@ -17,7 +19,7 @@
         <label>
           <input type="radio" name="contentpacks" value="0"
               id="contentpacks-allow"
-              pref="profile.managed.default_filtering_behavior">
+              pref="profile.managed.default_filtering_behavior" dialog-pref>
           <span for="contentpacks-allow"
               i18n-content="outsideContentPacksAllow"></span>
         </label>
@@ -26,7 +28,7 @@
         <label>
           <input type="radio" name="contentpacks" value="1"
               id="contentpacks-warn"
-              pref="profile.managed.default_filtering_behavior">
+              pref="profile.managed.default_filtering_behavior" dialog-pref>
           <span for="contentpacks-warn"
               i18n-content="outsideContentPacksWarn"></span>
         </label>
@@ -35,7 +37,7 @@
         <label>
           <input type="radio" name="contentpacks" value="2"
               id="contentpacks-block"
-              pref="profile.managed.default_filtering_behavior">
+              pref="profile.managed.default_filtering_behavior" dialog-pref>
           <span for="contentpacks-block"
               i18n-content="outsideContentPacksBlock"></span>
         </label>
@@ -47,21 +49,22 @@
       <div class="checkbox">
         <label>
           <input type="checkbox" id="safe-search-checkbox"
-              pref="settings.force_safesearch">
+              pref="settings.force_safesearch" dialog-pref>
           <span for="safe-search-checkbox"
               i18n-content="enableSafeSearch"></span>
         </label>
       </div>
       <div class="checkbox">
         <label>
-          <input id="disable-signin-checkbox" type="checkbox">
+          <input id="disable-signin-checkbox" type="checkbox" disabled>
           <span for="disable-signin-checkbox"
               i18n-content="disableProfileSignIn"></span>
         </label>
       </div>
       <div class="checkbox">
         <label>
-          <input id="disable-history-deletion-checkbox" type="checkbox">
+          <input id="disable-history-deletion-checkbox" type="checkbox"
+              disabled>
           <span for="disable-history-deletion-checkbox"
               i18n-content="disableHistoryDeletion"></span>
         </label>
@@ -74,13 +77,21 @@
         </label>
         <button id="set-passphrase" class="link-button"
             i18n-content="setPassphrase">
+        </button>
       </div>
     </section>
   </div>
   <div class="action-area">
+    <button id="lock-settings" i18n-content="lockSettings"></button>
+    <button id="unlock-settings" i18n-content="unlockSettings"></button>
+    <div id="spacer"></div>
     <div class="button-strip">
+      <button id="managed-user-settings-cancel" type="submit"
+          i18n-content="cancel">
+      </button>
       <button id="managed-user-settings-confirm" type="submit"
           i18n-content="ok">
+      </button>
     </div>
   </div>
 </div>

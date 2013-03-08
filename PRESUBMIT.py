@@ -18,6 +18,7 @@ _EXCLUDED_PATHS = (
     r"^breakpad[\\\/].*",
     r"^native_client_sdk[\\\/]src[\\\/]build_tools[\\\/]make_rules.py",
     r"^native_client_sdk[\\\/]src[\\\/]build_tools[\\\/]make_simple.py",
+    r"^native_client_sdk[\\\/]src[\\\/]tools[\\\/].*.mk",
     r"^net[\\\/]tools[\\\/]spdyshark[\\\/].*",
     r"^skia[\\\/].*",
     r"^v8[\\\/].*",
@@ -673,6 +674,24 @@ def _CheckHardcodedGoogleHostsInLowerLayers(input_api, output_api):
     return []
 
 
+def _CheckNoAbbreviationInPngFileName(input_api, output_api):
+  """Makes sure there are no abbreviations in the name of PNG files.
+  """
+  pattern = input_api.re.compile(r'.*_[a-z]_.*\.png$|.*_[a-z]\.png$')
+  errors = []
+  for f in input_api.AffectedFiles(include_deletes=False):
+    if pattern.match(f.LocalPath()):
+      errors.append('    %s' % f.LocalPath())
+
+  results = []
+  if errors:
+    results.append(output_api.PresubmitError(
+        'The name of PNG files should not have abbreviations. \n'
+        'Use _hover.png, _center.png, instead of _h.png, _c.png.\n'
+        'Contact oshima@chromium.org if you have questions.', errors))
+  return results
+
+
 def _CommonChecks(input_api, output_api):
   """Checks common to both upload and commit."""
   results = []
@@ -695,6 +714,7 @@ def _CommonChecks(input_api, output_api):
   results.extend(_CheckForVersionControlConflicts(input_api, output_api))
   results.extend(_CheckPatchFiles(input_api, output_api))
   results.extend(_CheckHardcodedGoogleHostsInLowerLayers(input_api, output_api))
+  results.extend(_CheckNoAbbreviationInPngFileName(input_api, output_api))
 
   if any('PRESUBMIT.py' == f.LocalPath() for f in input_api.AffectedFiles()):
     results.extend(input_api.canned_checks.RunUnitTestsInDirectory(
@@ -824,9 +844,9 @@ def GetPreferredTrySlaves(project, change):
     return []
 
   if all(re.search('\.(m|mm)$|(^|[/_])mac[/_.]', f) for f in files):
-    return ['mac_rel', 'mac_asan']
+    return ['mac_rel', 'mac_asan', 'mac:compile']
   if all(re.search('(^|[/_])win[/_.]', f) for f in files):
-    return ['win_rel']
+    return ['win_rel', 'win7_aura', 'win:compile']
   if all(re.search('(^|[/_])android[/_.]', f) for f in files):
     return ['android_dbg', 'android_clang_dbg']
   if all(re.search('^native_client_sdk', f) for f in files):
@@ -846,8 +866,10 @@ def GetPreferredTrySlaves(project, change):
       'linux_rel',
       'mac_asan',
       'mac_rel',
+      'mac:compile',
       'win7_aura',
       'win_rel',
+      'win:compile',
   ]
 
   # Match things like path/aura/file.cc and path/file_aura.cc.

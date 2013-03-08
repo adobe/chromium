@@ -1,5 +1,5 @@
 {
-  'TOOLS': ['newlib', 'glibc', 'win', 'linux'],
+  'TOOLS': ['newlib', 'glibc', 'pnacl', 'win', 'linux'],
   'TARGETS': [
     {
       'NAME' : 'gtest_ppapi',
@@ -27,9 +27,6 @@
       ],
       'DEST': 'include/gtest_ppapi',
     },
-  ],
-  'DATA': [
-    'Makefile'
   ],
   'DEST': 'testlibs',
   'NAME': 'gtest_ppapi',

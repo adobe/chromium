@@ -7,8 +7,8 @@
 #include "base/command_line.h"
 #include "base/json/json_writer.h"
 #include "base/lazy_instance.h"
-#include "base/string_number_conversions.h"
 #include "base/stringprintf.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
@@ -17,16 +17,18 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/file_select_helper.h"
-#include "chrome/browser/prefs/pref_service.h"
+#include "chrome/browser/prefs/pref_service_syncable.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sessions/session_tab_helper.h"
+#include "chrome/browser/themes/theme_properties.h"
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_iterator.h"
 #include "chrome/browser/ui/browser_list.h"
-#include "chrome/browser/ui/browser_list_impl.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/host_desktop.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
@@ -34,8 +36,10 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/url_constants.h"
-#include "content/public/browser/content_browser_client.h"
+#include "components/user_prefs/pref_registry_syncable.h"
+#include "content/public/browser/child_process_security_policy.h"
 #include "content/public/browser/devtools_agent_host.h"
+#include "content/public/browser/devtools_client_host.h"
 #include "content/public/browser/devtools_manager.h"
 #include "content/public/browser/favicon_status.h"
 #include "content/public/browser/load_notification_details.h"
@@ -49,6 +53,7 @@
 #include "content/public/common/bindings_policy.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/page_transition_types.h"
+#include "content/public/common/url_constants.h"
 #include "grit/generated_resources.h"
 
 typedef std::vector<DevToolsWindow*> DevToolsWindowList;
@@ -89,17 +94,29 @@ const int kMinDevToolsWidth = 150;
 const int kMinContentsSize = 50;
 
 // static
-void DevToolsWindow::RegisterUserPrefs(PrefServiceSyncable* prefs) {
-  prefs->RegisterBooleanPref(prefs::kDevToolsOpenDocked,
-                             true,
-                             PrefServiceSyncable::UNSYNCABLE_PREF);
-  prefs->RegisterStringPref(prefs::kDevToolsDockSide,
-                            kDockSideBottom,
-                            PrefServiceSyncable::UNSYNCABLE_PREF);
-  prefs->RegisterDictionaryPref(prefs::kDevToolsEditedFiles,
-                                PrefServiceSyncable::UNSYNCABLE_PREF);
-  prefs->RegisterDictionaryPref(prefs::kDevToolsFileSystemPaths,
-                                PrefServiceSyncable::UNSYNCABLE_PREF);
+std::string DevToolsWindow::GetDevToolsWindowPlacementPrefKey() {
+  std::string wp_key;
+  wp_key.append(prefs::kBrowserWindowPlacement);
+  wp_key.append("_");
+  wp_key.append(kDevToolsApp);
+  return wp_key;
+}
+
+// static
+void DevToolsWindow::RegisterUserPrefs(PrefRegistrySyncable* registry) {
+  registry->RegisterBooleanPref(prefs::kDevToolsOpenDocked,
+                                true,
+                                PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterStringPref(prefs::kDevToolsDockSide,
+                               kDockSideBottom,
+                               PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterDictionaryPref(prefs::kDevToolsEditedFiles,
+                                   PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterDictionaryPref(prefs::kDevToolsFileSystemPaths,
+                                   PrefRegistrySyncable::UNSYNCABLE_PREF);
+
+  registry->RegisterDictionaryPref(GetDevToolsWindowPlacementPrefKey().c_str(),
+                                   PrefRegistrySyncable::UNSYNCABLE_PREF);
 }
 
 // static
@@ -184,7 +201,6 @@ void DevToolsWindow::InspectElement(RenderViewHost* inspected_rvh,
   OpenDevToolsWindow(inspected_rvh);
 }
 
-
 DevToolsWindow* DevToolsWindow::Create(
     Profile* profile,
     RenderViewHost* inspected_rvh,
@@ -198,6 +214,12 @@ DevToolsWindow* DevToolsWindow::Create(
       content::Referrer(),
       content::PAGE_TRANSITION_AUTO_TOPLEVEL,
       std::string());
+
+  RenderViewHost* render_view_host = web_contents->GetRenderViewHost();
+  int process_id = render_view_host->GetProcess()->GetID();
+  content::ChildProcessSecurityPolicy::GetInstance()->GrantScheme(
+      process_id, chrome::kFileScheme);
+  content::DevToolsClientHost::SetupDevToolsFrontendClient(render_view_host);
   return new DevToolsWindow(web_contents, profile, inspected_rvh, dock_side);
 }
 
@@ -372,18 +394,8 @@ RenderViewHost* DevToolsWindow::GetRenderViewHost() {
 }
 
 void DevToolsWindow::CreateDevToolsBrowser() {
-  // TODO(pfeldman): Make browser's getter for this key static.
-  std::string wp_key;
-  wp_key.append(prefs::kBrowserWindowPlacement);
-  wp_key.append("_");
-  wp_key.append(kDevToolsApp);
-
-  PrefServiceSyncable* prefs = profile_->GetPrefs();
-  if (!prefs->FindPreference(wp_key.c_str())) {
-    prefs->RegisterDictionaryPref(wp_key.c_str(),
-                                  PrefServiceSyncable::UNSYNCABLE_PREF);
-  }
-
+  std::string wp_key = GetDevToolsWindowPlacementPrefKey();
+  PrefService* prefs = profile_->GetPrefs();
   const DictionaryValue* wp_pref = prefs->GetDictionary(wp_key.c_str());
   if (!wp_pref || wp_pref->empty()) {
     DictionaryPrefUpdate update(prefs, wp_key.c_str());
@@ -396,7 +408,12 @@ void DevToolsWindow::CreateDevToolsBrowser() {
     defaults->SetBoolean("always_on_top", false);
   }
 
-  browser_ = new Browser(Browser::CreateParams::CreateForDevTools(profile_));
+  chrome::HostDesktopType host_desktop_type =
+      chrome::GetHostDesktopTypeForNativeView(
+          web_contents_->GetView()->GetNativeView());
+
+  browser_ = new Browser(Browser::CreateParams::CreateForDevTools(
+                             profile_, host_desktop_type));
   browser_->tab_strip_model()->AddWebContents(
       web_contents_, -1, content::PAGE_TRANSITION_AUTO_TOPLEVEL,
       TabStripModel::ADD_ACTIVE);
@@ -407,34 +424,8 @@ bool DevToolsWindow::FindInspectedBrowserAndTabIndex(Browser** browser,
   if (!inspected_web_contents_)
     return false;
 
-  bool found = FindInspectedBrowserAndTabIndexFromBrowserList(
-      chrome::BrowserListImpl::GetInstance(chrome::HOST_DESKTOP_TYPE_NATIVE),
-      browser,
-      tab);
-  // On Windows 8 we can have the desktop environment and the ASH environment
-  // active concurrently. If we fail to find the inspected web contents in the
-  // native browser list, then we should look in the ASH browser list.
-#if defined(OS_WIN) && defined(USE_AURA)
-  if (!found) {
-    found = FindInspectedBrowserAndTabIndexFromBrowserList(
-        chrome::BrowserListImpl::GetInstance(chrome::HOST_DESKTOP_TYPE_ASH),
-        browser,
-        tab);
-  }
-#endif
-  return found;
-}
-
-bool DevToolsWindow::FindInspectedBrowserAndTabIndexFromBrowserList(
-    chrome::BrowserListImpl* browser_list,
-    Browser** browser,
-    int* tab) {
-  if (!inspected_web_contents_)
-    return false;
-
-  for (chrome::BrowserListImpl::const_iterator it = browser_list->begin();
-       it != browser_list->end(); ++it) {
-    int tab_index = (*it)->tab_strip_model()->GetIndexOfWebContents(
+  for (chrome::BrowserIterator it; !it.done(); it.Next()) {
+    int tab_index = it->tab_strip_model()->GetIndexOfWebContents(
         inspected_web_contents_);
     if (tab_index != TabStripModel::kNoTab) {
       *browser = *it;
@@ -594,9 +585,9 @@ GURL DevToolsWindow::GetDevToolsUrl(Profile* profile,
   CHECK(tp);
 
   SkColor color_toolbar =
-      tp->GetColor(ThemeService::COLOR_TOOLBAR);
+      tp->GetColor(ThemeProperties::COLOR_TOOLBAR);
   SkColor color_tab_text =
-      tp->GetColor(ThemeService::COLOR_BOOKMARK_TEXT);
+      tp->GetColor(ThemeProperties::COLOR_BOOKMARK_TEXT);
 
   const CommandLine& command_line = *CommandLine::ForCurrentProcess();
   bool experiments_enabled =
@@ -618,9 +609,9 @@ void DevToolsWindow::UpdateTheme() {
   CHECK(tp);
 
   SkColor color_toolbar =
-      tp->GetColor(ThemeService::COLOR_TOOLBAR);
+      tp->GetColor(ThemeProperties::COLOR_TOOLBAR);
   SkColor color_tab_text =
-      tp->GetColor(ThemeService::COLOR_BOOKMARK_TEXT);
+      tp->GetColor(ThemeProperties::COLOR_BOOKMARK_TEXT);
   std::string command = StringPrintf(
       "InspectorFrontendAPI.setToolbarColors(\"%s\", \"%s\")",
       SkColorToRGBAString(color_toolbar).c_str(),
@@ -745,6 +736,17 @@ void DevToolsWindow::ActivateWindow() {
   }
 }
 
+void DevToolsWindow::ChangeAttachedWindowHeight(unsigned height) {
+  if (dock_side_ != DEVTOOLS_DOCK_SIDE_BOTTOM)
+    return;
+
+  SetHeight(height);
+  // Update inspected window to adjust heights.
+  BrowserWindow* inspected_window = GetInspectedBrowserWindow();
+  if (inspected_window)
+    inspected_window->UpdateDevTools();
+}
+
 void DevToolsWindow::CloseWindow() {
   DCHECK(IsDocked());
   DevToolsManager::GetInstance()->ClientHostClosing(frontend_host_.get());
@@ -813,8 +815,20 @@ void DevToolsWindow::OpenInNewTab(const std::string& url) {
   if (inspected_web_contents_) {
     inspected_web_contents_->OpenURL(params);
   } else {
-    for (BrowserList::const_iterator it = BrowserList::begin();
-         it != BrowserList::end(); ++it) {
+    chrome::HostDesktopType host_desktop_type;
+    if (browser_) {
+      host_desktop_type = browser_->host_desktop_type();
+    } else {
+      // There should always be a browser when there are no inspected web
+      // contents.
+      NOTREACHED();
+      host_desktop_type = chrome::GetActiveDesktop();
+    }
+
+    const BrowserList* browser_list =
+        BrowserList::GetInstance(host_desktop_type);
+    for (BrowserList::const_iterator it = browser_list->begin();
+         it != browser_list->end(); ++it) {
       if ((*it)->type() == Browser::TYPE_TABBED) {
         (*it)->OpenURL(params);
         break;
@@ -852,19 +866,19 @@ DictionaryValue* CreateFileSystemValue(
 } // namespace
 
 void DevToolsWindow::RequestFileSystems() {
-  CHECK(content::GetContentClient()->HasWebUIScheme(web_contents_->GetURL()));
+  CHECK(content::HasWebUIScheme(web_contents_->GetURL()));
   file_helper_->RequestFileSystems(
       Bind(&DevToolsWindow::FileSystemsLoaded, weak_factory_.GetWeakPtr()));
 }
 
 void DevToolsWindow::AddFileSystem() {
-  CHECK(content::GetContentClient()->HasWebUIScheme(web_contents_->GetURL()));
+  CHECK(content::HasWebUIScheme(web_contents_->GetURL()));
   file_helper_->AddFileSystem(
       Bind(&DevToolsWindow::FileSystemAdded, weak_factory_.GetWeakPtr()));
 }
 
 void DevToolsWindow::RemoveFileSystem(const std::string& file_system_path) {
-  CHECK(content::GetContentClient()->HasWebUIScheme(web_contents_->GetURL()));
+  CHECK(content::HasWebUIScheme(web_contents_->GetURL()));
   file_helper_->RemoveFileSystem(file_system_path);
   StringValue file_system_path_value(file_system_path);
   CallClientFunction("InspectorFrontendAPI.fileSystemRemoved",
@@ -905,12 +919,12 @@ void DevToolsWindow::FileSystemAdded(
     delete file_system_value;
 }
 
-content::JavaScriptDialogCreator* DevToolsWindow::GetJavaScriptDialogCreator() {
+content::JavaScriptDialogManager* DevToolsWindow::GetJavaScriptDialogManager() {
   if (inspected_web_contents_ && inspected_web_contents_->GetDelegate()) {
     return inspected_web_contents_->GetDelegate()->
-        GetJavaScriptDialogCreator();
+        GetJavaScriptDialogManager();
   }
-  return content::WebContentsDelegate::GetJavaScriptDialogCreator();
+  return content::WebContentsDelegate::GetJavaScriptDialogManager();
 }
 
 void DevToolsWindow::RunFileChooser(WebContents* web_contents,

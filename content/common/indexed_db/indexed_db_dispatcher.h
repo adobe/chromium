@@ -8,6 +8,7 @@
 #include <map>
 #include <vector>
 
+#include "base/gtest_prod_util.h"
 #include "base/id_map.h"
 #include "base/nullable_string16.h"
 #include "content/common/content_export.h"
@@ -17,17 +18,16 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBCursor.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBDatabase.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBDatabaseCallbacks.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBTransaction.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBTransactionCallbacks.h"
 #include "webkit/glue/worker_task_runner.h"
 
+struct IndexedDBDatabaseMetadata;
 struct IndexedDBMsg_CallbacksSuccessCursorContinue_Params;
 struct IndexedDBMsg_CallbacksSuccessCursorPrefetch_Params;
 struct IndexedDBMsg_CallbacksSuccessIDBCursor_Params;
 
 namespace WebKit {
+class WebData;
 class WebFrame;
-class WebIDBKeyRange;
 }
 
 namespace content {
@@ -36,7 +36,6 @@ class IndexedDBKeyPath;
 class IndexedDBKeyRange;
 class RendererWebIDBCursorImpl;
 class RendererWebIDBDatabaseImpl;
-class SerializedScriptValue;
 
 CONTENT_EXPORT extern const size_t kMaxIDBValueSizeInBytes;
 
@@ -55,6 +54,9 @@ class CONTENT_EXPORT IndexedDBDispatcher
 
   // webkit_glue::WorkerTaskRunner::Observer implementation.
   virtual void OnWorkerRunLoopStopped() OVERRIDE;
+
+  static WebKit::WebIDBMetadata ConvertMetadata(
+      const IndexedDBDatabaseMetadata& idb_metadata);
 
   void OnMessageReceived(const IPC::Message& msg);
   static bool Send(IPC::Message* msg);
@@ -93,13 +95,13 @@ class CONTENT_EXPORT IndexedDBDispatcher
       int32 ipc_cursor_id,
       WebKit::WebExceptionCode* ec);
 
-  void RequestIDBCursorContinue(
+  virtual void RequestIDBCursorContinue(
       const IndexedDBKey& key,
       WebKit::WebIDBCallbacks* callbacks_ptr,
       int32 ipc_cursor_id,
       WebKit::WebExceptionCode* ec);
 
-  void RequestIDBCursorPrefetch(
+  virtual void RequestIDBCursorPrefetch(
       int n,
       WebKit::WebIDBCallbacks* callbacks_ptr,
       int32 ipc_cursor_id,
@@ -136,7 +138,7 @@ class CONTENT_EXPORT IndexedDBDispatcher
       int32 ipc_database_id,
       int64 transaction_id,
       int64 object_store_id,
-      WebKit::WebVector<unsigned char>* value,
+      const WebKit::WebData& value,
       const IndexedDBKey& key,
       WebKit::WebIDBDatabase::PutMode put_mode,
       WebKit::WebIDBCallbacks* callbacks,
@@ -176,14 +178,8 @@ class CONTENT_EXPORT IndexedDBDispatcher
       int64 object_store_id,
       WebKit::WebIDBCallbacks* callbacks);
 
-  void RegisterWebIDBTransactionCallbacks(
-      WebKit::WebIDBTransactionCallbacks* callbacks,
-      int32 id);
-
-  void CursorDestroyed(int32 ipc_cursor_id);
+  virtual void CursorDestroyed(int32 ipc_cursor_id);
   void DatabaseDestroyed(int32 ipc_database_id);
-
-  static int32 TransactionId(const WebKit::WebIDBTransaction& transaction);
 
  private:
   FRIEND_TEST_ALL_PREFIXES(IndexedDBDispatcherTest, ValueSizeTest);
@@ -202,10 +198,12 @@ class CONTENT_EXPORT IndexedDBDispatcher
   // IDBCallback message handlers.
   void OnSuccessIDBDatabase(int32 ipc_thread_id,
                             int32 ipc_response_id,
-                            int32 ipc_object_id);
+                            int32 ipc_object_id,
+                            const IndexedDBDatabaseMetadata& idb_metadata);
   void OnSuccessIndexedDBKey(int32 ipc_thread_id,
                              int32 ipc_response_id,
                              const IndexedDBKey& key);
+
   void OnSuccessOpenCursor(
       const IndexedDBMsg_CallbacksSuccessIDBCursor_Params& p);
   void OnSuccessCursorContinue(
@@ -215,14 +213,14 @@ class CONTENT_EXPORT IndexedDBDispatcher
   void OnSuccessStringList(int32 ipc_thread_id,
                            int32 ipc_response_id,
                            const std::vector<string16>& value);
-  void OnSuccessSerializedScriptValue(
+  void OnSuccessValue(
       int32 ipc_thread_id,
       int32 ipc_response_id,
-      const SerializedScriptValue& value);
-  void OnSuccessSerializedScriptValueWithKey(
+      const std::vector<char>& value);
+  void OnSuccessValueWithKey(
       int32 ipc_thread_id,
       int32 ipc_response_id,
-      const SerializedScriptValue& value,
+      const std::vector<char>& value,
       const IndexedDBKey& primary_key,
       const IndexedDBKeyPath& key_path);
   void OnSuccessInteger(
@@ -236,24 +234,18 @@ class CONTENT_EXPORT IndexedDBDispatcher
                int32 ipc_response_id,
                int code,
                const string16& message);
-  void OnBlocked(int32 ipc_thread_id, int32 ipc_response_id);
   void OnIntBlocked(int32 ipc_thread_id, int32 ipc_response_id,
                     int64 existing_version);
   void OnUpgradeNeeded(int32 ipc_thread_id,
                        int32 ipc_response_id,
-                       int32 ipc_transaction_id,
                        int32 ipc_database_id,
-                       int64 old_version);
-  void OnAbortOld(int32 ipc_thread_id,
-                  int32 ipc_transaction_id,
-                  int code,
-                  const string16& message);
+                       int64 old_version,
+                       const IndexedDBDatabaseMetadata& metdata);
   void OnAbort(int32 ipc_thread_id,
                int32 ipc_database_id,
                int64 transaction_id,
                int code,
                const string16& message);
-  void OnCompleteOld(int32 ipc_thread_id, int32 ipc_transaction_id);
   void OnComplete(int32 ipc_thread_id,
                   int32 ipc_database_id,
                   int64 transaction_id);
@@ -272,8 +264,6 @@ class CONTENT_EXPORT IndexedDBDispatcher
   // Careful! WebIDBCallbacks wraps non-threadsafe data types. It must be
   // destroyed and used on the same thread it was created on.
   IDMap<WebKit::WebIDBCallbacks, IDMapOwnPointer> pending_callbacks_;
-  IDMap<WebKit::WebIDBTransactionCallbacks, IDMapOwnPointer>
-      pending_transaction_callbacks_;
   IDMap<WebKit::WebIDBDatabaseCallbacks, IDMapOwnPointer>
       pending_database_callbacks_;
 

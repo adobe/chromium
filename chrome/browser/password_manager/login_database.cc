@@ -7,8 +7,8 @@
 #include <algorithm>
 #include <limits>
 
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
 #include "base/time.h"
@@ -48,7 +48,7 @@ LoginDatabase::LoginDatabase() {
 LoginDatabase::~LoginDatabase() {
 }
 
-bool LoginDatabase::Init(const FilePath& db_path) {
+bool LoginDatabase::Init(const base::FilePath& db_path) {
   // Set pragmas for a small, private database (based on WebDatabase).
   db_.set_page_size(2048);
   db_.set_cache_size(32);

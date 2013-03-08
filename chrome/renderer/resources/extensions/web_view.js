@@ -9,7 +9,8 @@
 
 var watchForTag = require("tagWatcher").watchForTag;
 
-var WEB_VIEW_ATTRIBUTES = ['name', 'src', 'partition'];
+var WEB_VIEW_ATTRIBUTES = ['name', 'src', 'partition', 'autosize', 'minheight',
+    'minwidth', 'maxheight', 'maxwidth'];
 
 // All exposed api methods for <webview>, these are forwarded to the browser
 // plugin.
@@ -71,13 +72,6 @@ function WebView(node) {
     };
   }, this);
 
-  node['executeScript'] = function(var_args) {
-    var args = [self.objectNode_.getProcessId(),
-                self.objectNode_.getRouteId()].concat(
-                    Array.prototype.slice.call(arguments));
-    chrome.webview.executeScript.apply(null, args);
-  }
-
   // Map attribute modifications on the <webview> tag to property changes in
   // the underlying <object> node.
   var handleMutation = this.handleMutation_.bind(this);
@@ -128,6 +122,8 @@ function WebView(node) {
   for (var eventName in WEB_VIEW_EVENTS) {
     this.setupEvent_(eventName, WEB_VIEW_EVENTS[eventName]);
   }
+  this.maybeSetupPermissionEvent_();
+  this.maybeSetupExecuteScript_();
 }
 
 /**
@@ -155,8 +151,17 @@ WebView.prototype.handleObjectMutation_ = function(mutation) {
     this.node_.removeAttribute(mutation.attributeName);
   } else {
     // Update the <webview> attribute to match the BrowserPlugin attribute.
-    this.node_.setAttribute(mutation.attributeName,
-        this.objectNode_.getAttribute(mutation.attributeName));
+    // Note: Calling setAttribute on <webview> will trigger its mutation
+    // observer which will then propagate that attribute to BrowserPlugin. In
+    // cases where we permit assigning a BrowserPlugin attribute the same value
+    // again (such as navigation when crashed), this could end up in an infinite
+    // loop. Thus, we avoid this loop by only updating the <webview> attribute
+    // if the BrowserPlugin attributes differs from it.
+    var oldValue = this.node_.getAttribute(mutation.attributeName);
+    var newValue = this.objectNode_.getAttribute(mutation.attributeName);
+    if (newValue != oldValue) {
+      this.node_.setAttribute(mutation.attributeName, newValue);
+    }
   }
 };
 
@@ -166,11 +171,25 @@ WebView.prototype.handleObjectMutation_ = function(mutation) {
 WebView.prototype.setupEvent_ = function(eventname, attribs) {
   var node = this.node_;
   this.objectNode_.addEventListener('-internal-' + eventname, function(e) {
-    var evt = new Event(eventname);
+    var evt = new Event(eventname, { bubbles: true });
     var detail = e.detail ? JSON.parse(e.detail) : {};
     attribs.forEach(function(attribName) {
       evt[attribName] = detail[attribName];
     });
     node.dispatchEvent(evt);
   });
-}
+};
+
+/**
+ * Implemented when experimental permission is available.
+ * @private
+ */
+WebView.prototype.maybeSetupPermissionEvent_ = function() {};
+
+/**
+ * Implemented when experimental permission is available.
+ * @private
+ */
+WebView.prototype.maybeSetupExecuteScript_ = function() {};
+
+exports.WebView = WebView;

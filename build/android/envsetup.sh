@@ -1,3 +1,4 @@
+#!/bin/bash
 # Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -7,6 +8,14 @@
 # NDK/SDK: ". build/android/envsetup.sh".  Environment variable
 # ANDROID_SDK_BUILD=1 will then be defined and used in the rest of the setup to
 # specifiy build type.
+
+# TODO(ilevy): Figure out the right check here. This breaks the webkit build as
+# is since it's sourced from another script:
+# http://build.webkit.org/builders/Chromium%20Android%20Release/builds/34681
+#if [ "$_" == "$0" ]; then
+#  echo "ERROR: envsetup must be sourced."
+#  exit 1
+#fi
 
 # Source functions script.  The file is in the same directory as this script.
 . "$(dirname $BASH_SOURCE)"/envsetup_functions.sh
@@ -21,8 +30,8 @@ if [[ "${CHROME_ANDROID_BUILD_WEBVIEW}" -eq 1 ]]; then
   export ANDROID_SDK_BUILD=0
 fi
 
-if [[ "${ANDROID_SDK_BUILD}" -eq 1 ]]; then
-  echo "Using SDK build"
+if [[ "${ANDROID_SDK_BUILD}" -ne 1 ]]; then
+  echo "Initializing for non-SDK build."
 fi
 
 # Get host architecture, and abort if it is 32-bit, unless --try-32
@@ -49,8 +58,6 @@ very large binaries."
     echo "Try running this script on a Linux/x86_64 machine instead."
     return 1
 esac
-
-host_os=$(uname -s | sed -e 's/Linux/linux/;s/Darwin/mac/')
 
 case "${host_os}" in
   "linux")
@@ -102,6 +109,26 @@ elif [[ -z "$ANDROID_BUILD_TOP" || \
   return 1
 elif [[ -n "$CHROME_ANDROID_BUILD_WEBVIEW" ]]; then
   webview_build_init
+fi
+
+java -version 2>&1 | grep -qs "Java HotSpot"
+if [ $? -ne 0 ]; then
+  echo "Please check and make sure you are using the Oracle Java SDK, and it"
+  echo "appears before other Java SDKs in your path."
+  echo "Refer to the \"Install prerequisites\" section here:"
+  echo "https://code.google.com/p/chromium/wiki/AndroidBuildInstructions"
+  return 1
+fi
+
+if [[ -n "$JAVA_HOME" && -x "$JAVA_HOME/bin/java" ]]; then
+  "$JAVA_HOME/bin/java" -version 2>&1 | grep -qs "Java HotSpot"
+  if [ $? -ne 0 ]; then
+    echo "If JAVA_HOME is defined then it must refer to the install location"
+    echo "of the Oracle Java SDK."
+    echo "Refer to the \"Install prerequisites\" section here:"
+    echo "https://code.google.com/p/chromium/wiki/AndroidBuildInstructions"
+    return 1
+  fi
 fi
 
 # Workaround for valgrind build

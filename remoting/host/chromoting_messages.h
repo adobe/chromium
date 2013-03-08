@@ -6,7 +6,9 @@
 #define REMOTING_HOST_CHROMOTING_MESSAGES_H_
 
 #include "ipc/ipc_platform_file.h"
-#include "remoting/capturer/mouse_cursor_shape.h"
+#include "media/video/capture/screen/mouse_cursor_shape.h"
+#include "net/base/ip_endpoint.h"
+#include "remoting/protocol/transport.h"
 #include "third_party/skia/include/core/SkPoint.h"
 #include "third_party/skia/include/core/SkRect.h"
 #include "third_party/skia/include/core/SkSize.h"
@@ -40,7 +42,7 @@ IPC_MESSAGE_CONTROL1(ChromotingDaemonNetworkMsg_TerminalDisconnected,
 
 // Notifies the network process that |terminal_id| is now attached to
 // a desktop integration process. |desktop_process| is the handle of the desktop
-// process |desktop_pipe| is the client end of the desktop-to-network pipe
+// process. |desktop_pipe| is the client end of the desktop-to-network pipe
 // opened.
 //
 // Windows only: |desktop_pipe| has to be duplicated from the desktop process
@@ -48,7 +50,7 @@ IPC_MESSAGE_CONTROL1(ChromotingDaemonNetworkMsg_TerminalDisconnected,
 // the sender.
 IPC_MESSAGE_CONTROL3(ChromotingDaemonNetworkMsg_DesktopAttached,
                      int /* terminal_id */,
-                     IPC::PlatformFileForTransit /* desktop_process */,
+                     base::ProcessHandle /* desktop_process */,
                      IPC::PlatformFileForTransit /* desktop_pipe */)
 
 //-----------------------------------------------------------------------------
@@ -67,6 +69,39 @@ IPC_MESSAGE_CONTROL1(ChromotingNetworkHostMsg_ConnectTerminal,
 // connected to.
 IPC_MESSAGE_CONTROL1(ChromotingNetworkHostMsg_DisconnectTerminal,
                      int /* terminal_id */)
+
+// Serialized remoting::protocol::TransportRoute structure.
+IPC_STRUCT_BEGIN(SerializedTransportRoute)
+  IPC_STRUCT_MEMBER(int, type)
+  IPC_STRUCT_MEMBER(net::IPAddressNumber, remote_address)
+  IPC_STRUCT_MEMBER(int, remote_port)
+  IPC_STRUCT_MEMBER(net::IPAddressNumber, local_address)
+  IPC_STRUCT_MEMBER(int, local_port)
+IPC_STRUCT_END()
+
+// Hosts status notifications (see HostStatusObserver interface) sent by
+// IpcHostEventLogger.
+IPC_MESSAGE_CONTROL1(ChromotingNetworkDaemonMsg_AccessDenied,
+                     std::string /* jid */)
+
+IPC_MESSAGE_CONTROL1(ChromotingNetworkDaemonMsg_ClientAuthenticated,
+                     std::string /* jid */)
+
+IPC_MESSAGE_CONTROL1(ChromotingNetworkDaemonMsg_ClientConnected,
+                     std::string /* jid */)
+
+IPC_MESSAGE_CONTROL1(ChromotingNetworkDaemonMsg_ClientDisconnected,
+                     std::string /* jid */)
+
+IPC_MESSAGE_CONTROL3(ChromotingNetworkDaemonMsg_ClientRouteChange,
+                     std::string /* jid */,
+                     std::string /* channel_name */,
+                     SerializedTransportRoute /* route */)
+
+IPC_MESSAGE_CONTROL1(ChromotingNetworkDaemonMsg_HostStarted,
+                     std::string /* xmpp_login */)
+
+IPC_MESSAGE_CONTROL0(ChromotingNetworkDaemonMsg_HostShutdown)
 
 //-----------------------------------------------------------------------------
 // Chromoting messages sent from the daemon to the desktop process.
@@ -128,13 +163,13 @@ IPC_STRUCT_TRAITS_BEGIN(SkISize)
   IPC_STRUCT_TRAITS_MEMBER(fHeight)
 IPC_STRUCT_TRAITS_END()
 
-IPC_STRUCT_TRAITS_BEGIN(remoting::MouseCursorShape)
+IPC_STRUCT_TRAITS_BEGIN(media::MouseCursorShape)
   IPC_STRUCT_TRAITS_MEMBER(size)
   IPC_STRUCT_TRAITS_MEMBER(hotspot)
   IPC_STRUCT_TRAITS_MEMBER(data)
 IPC_STRUCT_TRAITS_END()
 
-// Serialized CaptureData structure.
+// Serialized media::ScreenCaptureData structure.
 IPC_STRUCT_BEGIN(SerializedCapturedData)
   // ID of the shared memory buffer containing the pixels.
   IPC_STRUCT_MEMBER(int, shared_buffer_id)
@@ -164,7 +199,7 @@ IPC_MESSAGE_CONTROL1(ChromotingDesktopNetworkMsg_CaptureCompleted,
 
 // Carries a cursor share update from the desktop session agent to the client.
 IPC_MESSAGE_CONTROL1(ChromotingDesktopNetworkMsg_CursorShapeChanged,
-                     remoting::MouseCursorShape /* cursor_shape */ )
+                     media::MouseCursorShape /* cursor_shape */ )
 
 // Carries a clipboard event from the desktop session agent to the client.
 // |serialized_event| is a serialized protocol::ClipboardEvent.

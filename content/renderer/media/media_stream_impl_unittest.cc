@@ -3,18 +3,16 @@
 // found in the LICENSE file.
 
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop.h"
 #include "base/utf_string_conversions.h"
 #include "content/renderer/media/media_stream_extra_data.h"
 #include "content/renderer/media/media_stream_impl.h"
 #include "content/renderer/media/mock_media_stream_dependency_factory.h"
 #include "content/renderer/media/mock_media_stream_dispatcher.h"
 #include "content/renderer/media/video_capture_impl_manager.h"
-#include "media/base/video_decoder.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/WebKit/Source/Platform/chromium/public/WebMediaStreamComponent.h"
-#include "third_party/WebKit/Source/Platform/chromium/public/WebMediaStreamDescriptor.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebMediaStream.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebMediaStreamSource.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebMediaStreamTrack.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebString.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebVector.h"
 
@@ -49,34 +47,34 @@ class MediaStreamImplUnderTest : public MediaStreamImpl {
   }
 
   virtual void CompleteGetUserMediaRequest(
-      const WebKit::WebMediaStreamDescriptor& stream,
+      const WebKit::WebMediaStream& stream,
       WebKit::WebUserMediaRequest* request_info,
       bool request_succeeded) OVERRIDE {
     last_generated_stream_ = stream;
     state_ = request_succeeded ? REQUEST_SUCCEEDED : REQUEST_FAILED;
   }
 
-  virtual WebKit::WebMediaStreamDescriptor GetMediaStream(
+  virtual WebKit::WebMediaStream GetMediaStream(
       const GURL& url) OVERRIDE {
     return last_generated_stream_;
   }
 
   using MediaStreamImpl::OnLocalMediaStreamStop;
 
-  const WebKit::WebMediaStreamDescriptor& last_generated_stream() {
+  const WebKit::WebMediaStream& last_generated_stream() {
     return last_generated_stream_;
   }
 
   RequestState request_state() const { return state_; }
 
  private:
-  WebKit::WebMediaStreamDescriptor last_generated_stream_;
+  WebKit::WebMediaStream last_generated_stream_;
   RequestState state_;
 };
 
 class MediaStreamImplTest : public ::testing::Test {
  public:
-  void SetUp() {
+  virtual void SetUp() {
     // Create our test object.
     ms_dispatcher_.reset(new MockMediaStreamDispatcher());
     scoped_refptr<VideoCaptureImplManager> vc_manager(
@@ -87,33 +85,33 @@ class MediaStreamImplTest : public ::testing::Test {
                                                 dependency_factory_.get()));
   }
 
-  WebKit::WebMediaStreamDescriptor RequestLocalMediaStream(bool audio,
+  WebKit::WebMediaStream RequestLocalMediaStream(bool audio,
                                                            bool video) {
     ms_impl_->RequestUserMedia(audio, video);
     FakeMediaStreamDispatcherComplete();
-    if (video) {
-      // TODO(perkj): Only change the video source at the moment since audio
-      // sources are not implemented.
-      ChangeSourceStateToLive();
-    }
+    if (video)
+      ChangeVideoSourceStateToLive();
+    if (audio)
+      ChangeAudioSourceStateToLive();
+
     EXPECT_EQ(MediaStreamImplUnderTest::REQUEST_SUCCEEDED,
               ms_impl_->request_state());
 
-    WebKit::WebMediaStreamDescriptor desc = ms_impl_->last_generated_stream();
+    WebKit::WebMediaStream desc = ms_impl_->last_generated_stream();
     content::MediaStreamExtraData* extra_data =
         static_cast<content::MediaStreamExtraData*>(desc.extraData());
-    if (!extra_data || !extra_data->local_stream()) {
+    if (!extra_data || !extra_data->stream()) {
       ADD_FAILURE();
       return desc;
     }
 
     if (audio)
-      EXPECT_EQ(1u, extra_data->local_stream()->audio_tracks()->count());
+      EXPECT_EQ(1u, extra_data->stream()->GetAudioTracks().size());
     if (video)
-      EXPECT_EQ(1u, extra_data->local_stream()->video_tracks()->count());
+      EXPECT_EQ(1u, extra_data->stream()->GetVideoTracks().size());
     if (audio && video) {
-      EXPECT_NE(extra_data->local_stream()->audio_tracks()->at(0)->id(),
-                extra_data->local_stream()->video_tracks()->at(0)->id());
+      EXPECT_NE(extra_data->stream()->GetAudioTracks()[0]->id(),
+                extra_data->stream()->GetVideoTracks()[0]->id());
     }
     return desc;
   }
@@ -126,15 +124,27 @@ class MediaStreamImplTest : public ::testing::Test {
                                 ms_dispatcher_->video_array());
   }
 
-  void ChangeSourceStateToLive() {
+  void ChangeVideoSourceStateToLive() {
     if (dependency_factory_->last_video_source() != NULL) {
       dependency_factory_->last_video_source()->SetLive();
     }
   }
 
-  void ChangeSourceStateToEnded() {
+  void ChangeAudioSourceStateToLive() {
+    if (dependency_factory_->last_audio_source() != NULL) {
+      dependency_factory_->last_audio_source()->SetLive();
+    }
+  }
+
+  void ChangeVideoSourceStateToEnded() {
     if (dependency_factory_->last_video_source() != NULL) {
       dependency_factory_->last_video_source()->SetEnded();
+    }
+  }
+
+  void ChangeAudioSourceStateToEnded() {
+    if (dependency_factory_->last_audio_source() != NULL) {
+      dependency_factory_->last_audio_source()->SetEnded();
     }
   }
 
@@ -146,26 +156,13 @@ class MediaStreamImplTest : public ::testing::Test {
 
 TEST_F(MediaStreamImplTest, LocalMediaStream) {
   // Test a stream with both audio and video.
-  WebKit::WebMediaStreamDescriptor mixed_desc = RequestLocalMediaStream(true,
-                                                                        true);
-  // Create a renderer for the stream.
-  scoped_refptr<media::VideoDecoder> mixed_decoder(
-      ms_impl_->GetVideoDecoder(GURL(), base::MessageLoopProxy::current()));
-  EXPECT_TRUE(mixed_decoder.get() != NULL);
+  WebKit::WebMediaStream mixed_desc = RequestLocalMediaStream(true, true);
 
   // Test a stream with audio only.
-  WebKit::WebMediaStreamDescriptor audio_desc = RequestLocalMediaStream(true,
-                                                                        false);
-  scoped_refptr<media::VideoDecoder> audio_decoder(
-      ms_impl_->GetVideoDecoder(GURL(), base::MessageLoopProxy::current()));
-  EXPECT_TRUE(audio_decoder.get() == NULL);
+  WebKit::WebMediaStream audio_desc = RequestLocalMediaStream(true, false);
 
   // Test a stream with video only.
-  WebKit::WebMediaStreamDescriptor video_desc = RequestLocalMediaStream(false,
-                                                                        true);
-  scoped_refptr<media::VideoDecoder> video_decoder(
-      ms_impl_->GetVideoDecoder(GURL(), base::MessageLoopProxy::current()));
-  EXPECT_TRUE(video_decoder.get() != NULL);
+  WebKit::WebMediaStream video_desc = RequestLocalMediaStream(false, true);
 
   // Stop generated local streams.
   ms_impl_->OnLocalMediaStreamStop(mixed_desc.label().utf8());
@@ -183,7 +180,8 @@ TEST_F(MediaStreamImplTest, LocalMediaStream) {
 TEST_F(MediaStreamImplTest, MediaSourceFailToStart) {
   ms_impl_->RequestUserMedia(true, true);
   FakeMediaStreamDispatcherComplete();
-  ChangeSourceStateToEnded();
+  ChangeVideoSourceStateToEnded();
+  ChangeAudioSourceStateToEnded();
   EXPECT_EQ(MediaStreamImplUnderTest::REQUEST_FAILED,
             ms_impl_->request_state());
   EXPECT_EQ(1, ms_dispatcher_->request_stream_counter());
@@ -199,7 +197,8 @@ TEST_F(MediaStreamImplTest, MediaStreamImplShutDown) {
   EXPECT_EQ(MediaStreamImplUnderTest::REQUEST_NOT_COMPLETE,
             ms_impl_->request_state());
   ms_impl_.reset();
-  ChangeSourceStateToLive();
+  ChangeAudioSourceStateToLive();
+  ChangeVideoSourceStateToLive();
 }
 
 // This test what happens if the WebFrame is closed while the MediaStream is
@@ -209,7 +208,8 @@ TEST_F(MediaStreamImplTest, ReloadFrameWhileGeneratingStream) {
   ms_impl_->FrameWillClose(NULL);
   EXPECT_EQ(1, ms_dispatcher_->request_stream_counter());
   EXPECT_EQ(0, ms_dispatcher_->stop_stream_counter());
-  ChangeSourceStateToLive();
+  ChangeAudioSourceStateToLive();
+  ChangeVideoSourceStateToLive();
   EXPECT_EQ(MediaStreamImplUnderTest::REQUEST_NOT_COMPLETE,
             ms_impl_->request_state());
 }
@@ -223,7 +223,8 @@ TEST_F(MediaStreamImplTest, ReloadFrameWhileGeneratingSources) {
   EXPECT_EQ(1, ms_dispatcher_->request_stream_counter());
   ms_impl_->FrameWillClose(NULL);
   EXPECT_EQ(1, ms_dispatcher_->stop_stream_counter());
-  ChangeSourceStateToLive();
+  ChangeAudioSourceStateToLive();
+  ChangeVideoSourceStateToLive();
   EXPECT_EQ(MediaStreamImplUnderTest::REQUEST_NOT_COMPLETE,
             ms_impl_->request_state());
 }
@@ -231,8 +232,7 @@ TEST_F(MediaStreamImplTest, ReloadFrameWhileGeneratingSources) {
 // This test what happens if stop is called on a stream after the frame has
 // been reloaded.
 TEST_F(MediaStreamImplTest, StopStreamAfterReload) {
-  WebKit::WebMediaStreamDescriptor mixed_desc = RequestLocalMediaStream(true,
-                                                                        true);
+  WebKit::WebMediaStream mixed_desc = RequestLocalMediaStream(true, true);
   EXPECT_EQ(0, ms_dispatcher_->stop_stream_counter());
   EXPECT_EQ(1, ms_dispatcher_->request_stream_counter());
   ms_impl_->FrameWillClose(NULL);

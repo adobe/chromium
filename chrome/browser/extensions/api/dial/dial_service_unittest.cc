@@ -3,13 +3,16 @@
 // found in the LICENSE file.
 
 #include "base/memory/ref_counted.h"
+#include "base/message_loop.h"
 #include "chrome/browser/extensions/api/dial/dial_device_data.h"
 #include "chrome/browser/extensions/api/dial/dial_service.h"
 #include "net/base/capturing_net_log.h"
+#include "net/base/ip_endpoint.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using base::Time;
+using base::TimeDelta;
 using ::testing::A;
 using ::testing::AtLeast;
 using ::testing::Return;
@@ -32,50 +35,69 @@ class MockObserver : public DialService::Observer {
   MOCK_METHOD1(OnDiscoveryRequest, void(DialService*));
   MOCK_METHOD2(OnDeviceDiscovered, void(DialService*, const DialDeviceData&));
   MOCK_METHOD1(OnDiscoveryFinished, void(DialService*));
-  MOCK_METHOD2(OnError, void(DialService*, const std::string&));
+  MOCK_METHOD2(OnError, void(DialService*,
+                             const DialService::DialServiceErrorCode&));
 };
 
 class DialServiceTest : public testing::Test {
  public:
-  DialServiceTest() {
-    dial_service_ = new DialServiceImpl(&capturing_net_log_);
-    dial_service_->AddObserver(&mock_observer_);
+  DialServiceTest() : dial_service_(&capturing_net_log_) {
+    CHECK(net::ParseIPLiteralToNumber("0.0.0.0", &mock_ip_));
+    dial_service_.AddObserver(&mock_observer_);
   }
  protected:
   net::CapturingNetLog capturing_net_log_;
-  scoped_refptr<DialServiceImpl> dial_service_;
+  net::IPAddressNumber mock_ip_;
+  DialServiceImpl dial_service_;
   MockObserver mock_observer_;
 };
 
-TEST_F(DialServiceTest, TestOnDiscoveryRequest) {
-  dial_service_->discovery_active_ = true;
-  size_t num_bytes = dial_service_->send_buffer_->size();
+TEST_F(DialServiceTest, TestSendMultipleRequests) {
+  MessageLoop loop(MessageLoop::TYPE_IO);
+  // Setting the finish delay to zero disables the timer that invokes
+  // FinishDiscovery().
+  dial_service_.finish_delay_ = TimeDelta::FromSeconds(0);
+  dial_service_.request_interval_ = TimeDelta::FromSeconds(0);
+  dial_service_.max_requests_ = 4;
+  dial_service_.discovery_active_ = true;
+  EXPECT_CALL(mock_observer_, OnDiscoveryRequest(A<DialService*>())).Times(4);
+  EXPECT_CALL(mock_observer_, OnDiscoveryFinished(A<DialService*>())).Times(1);
+  dial_service_.BindSocketAndSendRequest(mock_ip_);
+  loop.RunUntilIdle();
+  dial_service_.FinishDiscovery();
+}
 
+TEST_F(DialServiceTest, TestOnDiscoveryRequest) {
+  dial_service_.discovery_active_ = true;
+  dial_service_.num_requests_sent_ = 1;
+  dial_service_.max_requests_ = 1;
+  size_t num_bytes = dial_service_.send_buffer_->size();
   EXPECT_CALL(mock_observer_, OnDiscoveryRequest(A<DialService*>())).Times(1);
-  dial_service_->OnSocketWrite(num_bytes);
+  dial_service_.OnSocketWrite(num_bytes);
 }
 
 TEST_F(DialServiceTest, TestOnDeviceDiscovered) {
-  dial_service_->discovery_active_ = true;
+  dial_service_.discovery_active_ = true;
   int response_size = arraysize(kValidResponse) - 1;
-  dial_service_->recv_buffer_ = new net::IOBufferWithSize(response_size);
-  strncpy(dial_service_->recv_buffer_->data(), kValidResponse, response_size);
+  dial_service_.recv_buffer_ = new net::IOBufferWithSize(response_size);
+  strncpy(dial_service_.recv_buffer_->data(), kValidResponse, response_size);
+  dial_service_.recv_address_ = net::IPEndPoint(mock_ip_, 12345);
 
   DialDeviceData expected_device;
   expected_device.set_device_id("some_id");
 
   EXPECT_CALL(mock_observer_,
               OnDeviceDiscovered(A<DialService*>(), expected_device))
-    .Times(1);
-  dial_service_->OnSocketRead(response_size);
+      .Times(1);
+  dial_service_.OnSocketRead(response_size);
 };
 
 TEST_F(DialServiceTest, TestOnDiscoveryFinished) {
-  dial_service_->discovery_active_ = true;
+  dial_service_.discovery_active_ = true;
 
   EXPECT_CALL(mock_observer_, OnDiscoveryFinished(A<DialService*>())).Times(1);
-  dial_service_->FinishDiscovery();
-  EXPECT_FALSE(dial_service_->discovery_active_);
+  dial_service_.FinishDiscovery();
+  EXPECT_FALSE(dial_service_.discovery_active_);
 }
 
 TEST_F(DialServiceTest, TestResponseParsing) {

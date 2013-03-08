@@ -4,10 +4,18 @@
 
 #include "chrome/browser/gpu/gl_string_manager.h"
 
+#include "base/prefs/pref_registry_simple.h"
+#include "base/prefs/pref_service.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/gpu_data_manager.h"
+
+// static
+void GLStringManager::RegisterPrefs(PrefRegistrySimple* registry) {
+  registry->RegisterStringPref(prefs::kGLVendorString, std::string());
+  registry->RegisterStringPref(prefs::kGLRendererString, std::string());
+  registry->RegisterStringPref(prefs::kGLVersionString, std::string());
+}
 
 GLStringManager::GLStringManager() {
 }
@@ -21,14 +29,9 @@ void GLStringManager::Initialize() {
   // We never remove this observer from GpuDataManager.
   content::GpuDataManager::GetInstance()->AddObserver(this);
 
-  PrefServiceSimple* local_state = g_browser_process->local_state();
+  PrefService* local_state = g_browser_process->local_state();
   if (!local_state)
     return;
-
-  // TODO(joi): This should happen via browser_prefs::RegisterLocalState().
-  local_state->RegisterStringPref(prefs::kGLVendorString, gl_vendor_);
-  local_state->RegisterStringPref(prefs::kGLRendererString, gl_renderer_);
-  local_state->RegisterStringPref(prefs::kGLVersionString, gl_version_);
 
   gl_vendor_ = local_state->GetString(prefs::kGLVendorString);
   gl_renderer_ = local_state->GetString(prefs::kGLRendererString);

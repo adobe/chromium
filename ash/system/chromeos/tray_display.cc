@@ -8,6 +8,7 @@
 #include "ash/display/display_manager.h"
 #include "ash/screen_ash.h"
 #include "ash/shell.h"
+#include "ash/system/tray/fixed_sized_image_view.h"
 #include "ash/system/tray/system_tray.h"
 #include "ash/system/tray/system_tray_delegate.h"
 #include "ash/system/tray/tray_constants.h"
@@ -22,6 +23,11 @@
 #include "ui/views/controls/image_view.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/layout/box_layout.h"
+
+#if defined(USE_X11)
+#include "chromeos/display/output_configurator.h"
+#include "ui/base/x/x11_util.h"
+#endif
 
 namespace ash {
 namespace internal {
@@ -63,8 +69,7 @@ class DisplayView : public ash::internal::ActionableView {
         SetVisible(true);
         return;
       }
-      case chromeos::STATE_DUAL_PRIMARY_ONLY:
-      case chromeos::STATE_DUAL_SECONDARY_ONLY:
+      case chromeos::STATE_DUAL_EXTENDED:
       case chromeos::STATE_DUAL_UNKNOWN: {
         label_->SetText(l10n_util::GetStringFUTF16(
             IDS_ASH_STATUS_TRAY_DISPLAY_EXTENDED, GetExternalDisplayName()));
@@ -79,24 +84,42 @@ class DisplayView : public ash::internal::ActionableView {
  private:
   // Returns the name of the currently connected external display.
   string16 GetExternalDisplayName() {
+#if defined(USE_X11)
     DisplayManager* display_manager = Shell::GetInstance()->display_manager();
+    int64 internal_display_id = gfx::Display::InternalDisplayId();
+    int64 primary_display_id =
+        gfx::Screen::GetNativeScreen()->GetPrimaryDisplay().id();
 
-    gfx::Display external_display(gfx::Display::kInvalidDisplayID);
-    if (display_manager->HasInternalDisplay()) {
-      for (size_t i = 0; i < display_manager->GetNumDisplays(); ++i) {
-        gfx::Display* display = display_manager->GetDisplayAt(i);
-        if (!display_manager->IsInternalDisplayId(display->id())) {
-          external_display = *display;
-          break;
+    // Use xrandr features rather than DisplayManager to find out the external
+    // display's name. DisplayManager's API doesn't work well in mirroring mode
+    // since it's based on gfx::Display but in mirroring mode there's only one
+    // gfx::Display instance which represents both displays.
+    std::vector<XID> outputs;
+    ui::GetOutputDeviceHandles(&outputs);
+    for (size_t i = 0; i < outputs.size(); ++i) {
+      std::string name;
+      uint16 manufacturer_id = 0;
+      uint16 product_code = 0;
+      if (ui::GetOutputDeviceData(
+              outputs[i], &manufacturer_id, &product_code, &name)) {
+        int64 display_id = gfx::Display::GetID(
+            manufacturer_id, product_code, i);
+        if (display_id == internal_display_id)
+          continue;
+        // Some systems like stumpy don't have the internal display at all. It
+        // means both of the displays are external but we need to choose either
+        // one. Currently we adopt simple heuristics which just avoids the
+        // primary display.
+        if (!display_manager->HasInternalDisplay() &&
+            display_id == primary_display_id) {
+          continue;
         }
-      }
-    } else {
-      // Falls back to the secondary display since the system doesn't
-      // distinguish the displays.
-      external_display = ScreenAsh::GetSecondaryDisplay();
-    }
 
-    return UTF8ToUTF16(display_manager->GetDisplayNameFor(external_display));
+        return UTF8ToUTF16(name);
+      }
+    }
+#endif
+    return l10n_util::GetStringUTF16(IDS_ASH_STATUS_TRAY_UNKNOWN_DISPLAY_NAME);
   }
 
   // Overridden from ActionableView.
@@ -110,7 +133,7 @@ class DisplayView : public ash::internal::ActionableView {
     return true;
   }
 
-  virtual void OnBoundsChanged(const gfx::Rect& previous_bounds) {
+  virtual void OnBoundsChanged(const gfx::Rect& previous_bounds) OVERRIDE {
     int label_max_width = bounds().width() - kTrayPopupPaddingHorizontal * 2 -
         kTrayPopupPaddingBetweenItems - image_->GetPreferredSize().width();
     label_->SizeToFit(label_max_width);

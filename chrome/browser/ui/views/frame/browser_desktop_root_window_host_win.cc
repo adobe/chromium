@@ -6,10 +6,15 @@
 
 #include <dwmapi.h>
 
+#include "chrome/browser/themes/theme_service.h"
+#include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/ui/views/frame/browser_frame.h"
+#include "chrome/browser/ui/views/frame/browser_frame_common_win.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/frame/system_menu_insertion_delegate_win.h"
 #include "chrome/browser/ui/views/tabs/tab_strip.h"
+#include "chrome/browser/ui/views/theme_image_mapper.h"
+#include "grit/theme_resources.h"
 #include "ui/base/theme_provider.h"
 #include "ui/views/controls/menu/native_menu_win.h"
 
@@ -21,6 +26,45 @@ const int kClientEdgeThickness = 3;
 // We need to offset the DWMFrame into the toolbar so that the blackness
 // doesn't show up on our rounded corners.
 const int kDWMFrameTopOffset = 3;
+
+// DesktopThemeProvider maps resource ids using MapThemeImage(). This is
+// necessary for BrowserDesktopRootWindowHostWin so that it uses the windows
+// theme images rather than the ash theme images.
+class DesktopThemeProvider : public ui::ThemeProvider {
+ public:
+  explicit DesktopThemeProvider(ui::ThemeProvider* delegate)
+      : delegate_(delegate) {
+  }
+
+  virtual gfx::ImageSkia* GetImageSkiaNamed(int id) const OVERRIDE {
+    return delegate_->GetImageSkiaNamed(
+        chrome::MapThemeImage(chrome::HOST_DESKTOP_TYPE_NATIVE, id));
+  }
+  virtual SkColor GetColor(int id) const OVERRIDE {
+    return delegate_->GetColor(id);
+  }
+  virtual bool GetDisplayProperty(int id, int* result) const OVERRIDE {
+    return delegate_->GetDisplayProperty(id, result);
+  }
+  virtual bool ShouldUseNativeFrame() const OVERRIDE {
+    return delegate_->ShouldUseNativeFrame();
+  }
+  virtual bool HasCustomImage(int id) const OVERRIDE {
+    return delegate_->HasCustomImage(
+        chrome::MapThemeImage(chrome::HOST_DESKTOP_TYPE_NATIVE, id));
+
+  }
+  virtual base::RefCountedMemory* GetRawData(
+      int id,
+      ui::ScaleFactor scale_factor) const OVERRIDE {
+    return delegate_->GetRawData(id, scale_factor);
+  }
+
+ private:
+  ui::ThemeProvider* delegate_;
+
+  DISALLOW_COPY_AND_ASSIGN(DesktopThemeProvider);
+};
 
 }  // namespace
 
@@ -38,6 +82,10 @@ BrowserDesktopRootWindowHostWin::BrowserDesktopRootWindowHostWin(
                                initial_bounds),
       browser_view_(browser_view),
       browser_frame_(browser_frame) {
+  scoped_ptr<ui::ThemeProvider> theme_provider(
+      new DesktopThemeProvider(ThemeServiceFactory::GetForProfile(
+                                   browser_view->browser()->profile())));
+  browser_frame->SetThemeProvider(theme_provider.Pass());
 }
 
 BrowserDesktopRootWindowHostWin::~BrowserDesktopRootWindowHostWin() {
@@ -118,7 +166,7 @@ bool BrowserDesktopRootWindowHostWin::PreHandleMSG(UINT message,
         minimize_button_metrics_.OnHWNDActivated();
       return false;
     case WM_ENDSESSION:
-      browser::SessionEnding();
+      chrome::SessionEnding();
       return true;
     case WM_INITMENUPOPUP:
       GetSystemMenu()->UpdateStates();
@@ -174,6 +222,17 @@ bool BrowserDesktopRootWindowHostWin::IsUsingCustomFrame() const {
   // Otherwise, we use the native frame when we're told we should by the theme
   // provider (e.g. no custom theme is active).
   return !GetWidget()->GetThemeProvider()->ShouldUseNativeFrame();
+}
+
+bool BrowserDesktopRootWindowHostWin::ShouldUseNativeFrame() {
+  if (!views::DesktopRootWindowHostWin::ShouldUseNativeFrame())
+    return false;
+  // This function can get called when the Browser window is closed i.e. in the
+  // context of the BrowserView destructor.
+  if (!browser_view_->browser())
+    return false;
+  return chrome::ShouldUseNativeFrame(browser_view_,
+                                      GetWidget()->GetThemeProvider());
 }
 
 ////////////////////////////////////////////////////////////////////////////////

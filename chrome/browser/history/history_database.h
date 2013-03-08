@@ -23,7 +23,9 @@
 #include "chrome/browser/history/android/android_urls_database.h"
 #endif
 
+namespace base {
 class FilePath;
+}
 
 namespace history {
 
@@ -67,8 +69,12 @@ class HistoryDatabase : public DownloadDatabase,
   // Must call this function to complete initialization. Will return
   // sql::INIT_OK on success. Otherwise, no other function should be called. You
   // may want to call BeginExclusiveMode after this when you are ready.
-  sql::InitStatus Init(const FilePath& history_name,
+  sql::InitStatus Init(const base::FilePath& history_name,
                        sql::ErrorDelegate* error_delegate);
+
+  // Computes and records various metrics for the database. Should only be
+  // called once and only upon successful Init.
+  void ComputeDatabaseMetrics(const base::FilePath& filename);
 
   // Call to set the mode on the database to exclusive. The default locking mode
   // is "normal" but we want to run in exclusive mode for slightly better

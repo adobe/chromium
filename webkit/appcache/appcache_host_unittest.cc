@@ -43,38 +43,41 @@ class AppCacheHostTest : public testing::Test {
     }
 
     virtual void OnCacheSelected(
-        int host_id, const appcache::AppCacheInfo& info) {
+        int host_id, const appcache::AppCacheInfo& info) OVERRIDE {
       last_host_id_ = host_id;
       last_cache_id_ = info.cache_id;
       last_status_ = info.status;
     }
 
     virtual void OnStatusChanged(const std::vector<int>& host_ids,
-                                 appcache::Status status) {
+                                 appcache::Status status) OVERRIDE {
       last_status_changed_ = status;
     }
 
     virtual void OnEventRaised(const std::vector<int>& host_ids,
-                               appcache::EventID event_id) {
+                               appcache::EventID event_id) OVERRIDE {
       last_event_id_ = event_id;
     }
 
     virtual void OnErrorEventRaised(const std::vector<int>& host_ids,
-                                    const std::string& message) {
+                                    const std::string& message) OVERRIDE {
       last_event_id_ = ERROR_EVENT;
     }
 
     virtual void OnProgressEventRaised(const std::vector<int>& host_ids,
                                        const GURL& url,
-                                       int num_total, int num_complete) {
+                                       int num_total,
+                                       int num_complete) OVERRIDE {
       last_event_id_ = PROGRESS_EVENT;
     }
 
-    virtual void OnLogMessage(int host_id, appcache::LogLevel log_level,
-                              const std::string& message) {
+    virtual void OnLogMessage(int host_id,
+                              appcache::LogLevel log_level,
+                              const std::string& message) OVERRIDE {
     }
 
-    virtual void OnContentBlocked(int host_id, const GURL& manifest_url) {
+    virtual void OnContentBlocked(int host_id,
+                                  const GURL& manifest_url) OVERRIDE {
       content_blocked_ = true;
     }
 
@@ -91,20 +94,20 @@ class AppCacheHostTest : public testing::Test {
     MockQuotaManagerProxy() : QuotaManagerProxy(NULL, NULL) {}
 
     // Not needed for our tests.
-    virtual void RegisterClient(quota::QuotaClient* client) {}
+    virtual void RegisterClient(quota::QuotaClient* client) OVERRIDE {}
     virtual void NotifyStorageAccessed(quota::QuotaClient::ID client_id,
                                        const GURL& origin,
-                                       quota::StorageType type) {}
+                                       quota::StorageType type) OVERRIDE {}
     virtual void NotifyStorageModified(quota::QuotaClient::ID client_id,
                                        const GURL& origin,
                                        quota::StorageType type,
-                                       int64 delta) {}
+                                       int64 delta) OVERRIDE {}
 
-    virtual void NotifyOriginInUse(const GURL& origin) {
+    virtual void NotifyOriginInUse(const GURL& origin) OVERRIDE {
       inuse_[origin] += 1;
     }
 
-    virtual void NotifyOriginNoLongerInUse(const GURL& origin) {
+    virtual void NotifyOriginNoLongerInUse(const GURL& origin) OVERRIDE {
       inuse_[origin] -= 1;
     }
 
@@ -225,7 +228,7 @@ TEST_F(AppCacheHostTest, ForeignEntry) {
   // Precondition, a cache with an entry that is not marked as foreign.
   const int kCacheId = 22;
   const GURL kDocumentURL("http://origin/document");
-  scoped_refptr<AppCache> cache = new AppCache(&service_, kCacheId);
+  scoped_refptr<AppCache> cache = new AppCache(service_.storage(), kCacheId);
   cache->AddEntry(kDocumentURL, AppCacheEntry(AppCacheEntry::EXPLICIT));
 
   AppCacheHost host(1, &mock_frontend_, &service_);
@@ -256,7 +259,7 @@ TEST_F(AppCacheHostTest, ForeignFallbackEntry) {
   // Precondition, a cache with a fallback entry that is not marked as foreign.
   const int kCacheId = 22;
   const GURL kFallbackURL("http://origin/fallback_resource");
-  scoped_refptr<AppCache> cache = new AppCache(&service_, kCacheId);
+  scoped_refptr<AppCache> cache = new AppCache(service_.storage(), kCacheId);
   cache->AddEntry(kFallbackURL, AppCacheEntry(AppCacheEntry::FALLBACK));
 
   AppCacheHost host(1, &mock_frontend_, &service_);
@@ -345,12 +348,12 @@ TEST_F(AppCacheHostTest, SetSwappableCache) {
   host.SetSwappableCache(NULL);
   EXPECT_FALSE(host.swappable_cache_.get());
 
-  scoped_refptr<AppCacheGroup> group1(
-      new AppCacheGroup(&service_, GURL(), service_.storage()->NewGroupId()));
+  scoped_refptr<AppCacheGroup> group1(new AppCacheGroup(
+      service_.storage(), GURL(), service_.storage()->NewGroupId()));
   host.SetSwappableCache(group1);
   EXPECT_FALSE(host.swappable_cache_.get());
 
-  AppCache* cache1 = new AppCache(&service_, 111);
+  AppCache* cache1 = new AppCache(service_.storage(), 111);
   cache1->set_complete(true);
   group1->AddCache(cache1);
   host.SetSwappableCache(group1);
@@ -366,19 +369,19 @@ TEST_F(AppCacheHostTest, SetSwappableCache) {
   EXPECT_EQ(cache1->cache_id(), mock_frontend_.last_cache_id_);
   EXPECT_EQ(appcache::IDLE, mock_frontend_.last_status_);
 
-  AppCache* cache2 = new AppCache(&service_, 222);
+  AppCache* cache2 = new AppCache(service_.storage(), 222);
   cache2->set_complete(true);
   group1->AddCache(cache2);
   EXPECT_EQ(cache2, host.swappable_cache_.get());  // updated to newest
 
   scoped_refptr<AppCacheGroup> group2(
-      new AppCacheGroup(&service_, GURL("http://foo.com"),
+      new AppCacheGroup(service_.storage(), GURL("http://foo.com"),
                         service_.storage()->NewGroupId()));
-  AppCache* cache3 = new AppCache(&service_, 333);
+  AppCache* cache3 = new AppCache(service_.storage(), 333);
   cache3->set_complete(true);
   group2->AddCache(cache3);
 
-  AppCache* cache4 = new AppCache(&service_, 444);
+  AppCache* cache4 = new AppCache(service_.storage(), 444);
   cache4->set_complete(true);
   group2->AddCache(cache4);
   EXPECT_EQ(cache2, host.swappable_cache_.get());  // unchanged
@@ -392,7 +395,7 @@ TEST_F(AppCacheHostTest, SetSwappableCache) {
   EXPECT_FALSE(group2->HasCache());  // both caches in group2 have refcount 0
 
   // Host adds reference to newest cache when an update is complete.
-  AppCache* cache5 = new AppCache(&service_, 555);
+  AppCache* cache5 = new AppCache(service_.storage(), 555);
   cache5->set_complete(true);
   group2->AddCache(cache5);
   host.group_being_updated_ = group2;

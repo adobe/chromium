@@ -6,9 +6,10 @@
 
 #include "base/command_line.h"
 #include "base/logging.h"
-#include "chrome/browser/prefs/pref_service.h"
+#include "base/prefs/pref_service.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 
 #if defined(OS_WIN)
 #include "base/win/metro.h"
@@ -52,11 +53,10 @@ void IncognitoModePrefs::SetAvailability(PrefService* prefs,
 }
 
 // static
-void IncognitoModePrefs::RegisterUserPrefs(PrefServiceSyncable* pref_service) {
-  DCHECK(pref_service);
-  pref_service->RegisterIntegerPref(prefs::kIncognitoModeAvailability,
-                                    IncognitoModePrefs::ENABLED,
-                                    PrefServiceSyncable::UNSYNCABLE_PREF);
+void IncognitoModePrefs::RegisterUserPrefs(PrefRegistrySyncable* registry) {
+  registry->RegisterIntegerPref(prefs::kIncognitoModeAvailability,
+                                IncognitoModePrefs::ENABLED,
+                                PrefRegistrySyncable::UNSYNCABLE_PREF);
 }
 
 // static

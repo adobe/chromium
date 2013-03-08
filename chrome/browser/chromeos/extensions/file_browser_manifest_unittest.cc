@@ -2,11 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/string_number_conversions.h"
+#include "base/strings/string_number_conversions.h"
 #include "chrome/browser/chromeos/extensions/file_browser_handler.h"
 #include "chrome/common/extensions/extension_builder.h"
 #include "chrome/common/extensions/extension_manifest_constants.h"
-#include "chrome/common/extensions/manifest_handler.h"
 #include "chrome/common/extensions/manifest_tests/extension_manifest_test.h"
 #include "chrome/common/extensions/manifest_url_handler.h"
 #include "chrome/common/extensions/value_builder.h"
@@ -25,12 +24,8 @@ namespace {
 class FileBrowserHandlerManifestTest : public ExtensionManifestTest {
   virtual void SetUp() OVERRIDE {
     ExtensionManifestTest::SetUp();
-    extensions::ManifestHandler::Register(
-        extension_manifest_keys::kFileBrowserHandlers,
-        new FileBrowserHandlerParser);
-    extensions::ManifestHandler::Register(
-        keys::kChromeURLOverrides,
-        new extensions::URLOverridesHandler);
+    (new FileBrowserHandlerParser)->Register();
+    (new extensions::URLOverridesHandler)->Register();
   }
 };
 
@@ -205,7 +200,7 @@ TEST_F(FileBrowserHandlerManifestTest, FileManagerURLOverride) {
   // A component extention can override chrome://files/ URL.
   std::string error;
   LoadExtension(Manifest(manifest_value.get(), "override_files"),
-                &error, Extension::COMPONENT, Extension::NO_FLAGS);
+                &error, extensions::Manifest::COMPONENT, Extension::NO_FLAGS);
 #if defined(FILE_MANAGER_EXTENSION)
   EXPECT_EQ("", error);
 #else

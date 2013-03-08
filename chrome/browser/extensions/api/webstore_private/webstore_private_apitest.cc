@@ -4,8 +4,8 @@
 
 #include <vector>
 
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/extensions/api/webstore_private/webstore_private_api.h"
@@ -18,7 +18,7 @@
 #include "chrome/browser/extensions/webstore_installer.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_tabstrip.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/test_launcher_utils.h"
@@ -44,7 +44,7 @@ class WebstoreInstallListener : public WebstoreInstaller::Delegate {
   WebstoreInstallListener()
       : received_failure_(false), received_success_(false), waiting_(false) {}
 
-  void OnExtensionInstallSuccess(const std::string& id) OVERRIDE {
+  virtual void OnExtensionInstallSuccess(const std::string& id) OVERRIDE {
     received_success_ = true;
     id_ = id;
 
@@ -54,7 +54,7 @@ class WebstoreInstallListener : public WebstoreInstaller::Delegate {
     }
   }
 
-  void OnExtensionInstallFailure(
+  virtual void OnExtensionInstallFailure(
       const std::string& id,
       const std::string& error,
       WebstoreInstaller::FailureReason reason) OVERRIDE {
@@ -91,7 +91,7 @@ class WebstoreInstallListener : public WebstoreInstaller::Delegate {
 // A base class for tests below.
 class ExtensionWebstorePrivateApiTest : public ExtensionApiTest {
  public:
-  void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
     ExtensionApiTest::SetUpCommandLine(command_line);
     command_line->AppendSwitchASCII(
         switches::kAppsGalleryURL,
@@ -100,7 +100,7 @@ class ExtensionWebstorePrivateApiTest : public ExtensionApiTest {
         switches::kAppsGalleryInstallAutoConfirmForTests, "accept");
   }
 
-  void SetUpInProcessBrowserTestFixture() OVERRIDE {
+  virtual void SetUpInProcessBrowserTestFixture() OVERRIDE {
     // Start up the test server and get us ready for calling the install
     // API functions.
     host_resolver()->AddRule("www.example.com", "127.0.0.1");
@@ -156,7 +156,7 @@ class ExtensionWebstorePrivateApiTest : public ExtensionApiTest {
 class ExtensionWebstorePrivateBundleTest
     : public ExtensionWebstorePrivateApiTest {
  public:
-  void SetUpInProcessBrowserTestFixture() OVERRIDE {
+  virtual void SetUpInProcessBrowserTestFixture() OVERRIDE {
     ExtensionWebstorePrivateApiTest::SetUpInProcessBrowserTestFixture();
 
     // The test server needs to have already started, so setup the switch here
@@ -166,7 +166,7 @@ class ExtensionWebstorePrivateBundleTest
         GetTestServerURL("bundle/%s.crx").spec());
   }
 
-  void TearDownInProcessBrowserTestFixture() OVERRIDE {
+  virtual void TearDownInProcessBrowserTestFixture() OVERRIDE {
     ExtensionWebstorePrivateApiTest::TearDownInProcessBrowserTestFixture();
     for (size_t i = 0; i < test_crx_.size(); ++i)
       ASSERT_TRUE(file_util::Delete(test_crx_[i], false));
@@ -180,9 +180,10 @@ class ExtensionWebstorePrivateBundleTest
     ASSERT_TRUE(tmp.CreateUniqueTempDir());
     ASSERT_TRUE(file_util::CreateDirectory(tmp.path()));
 
-    FilePath tmp_manifest = tmp.path().AppendASCII("manifest.json");
-    FilePath data_path = test_data_dir_.AppendASCII("webstore_private/bundle");
-    FilePath manifest_path = data_path.AppendASCII(manifest);
+    base::FilePath tmp_manifest = tmp.path().AppendASCII("manifest.json");
+    base::FilePath data_path =
+        test_data_dir_.AppendASCII("webstore_private/bundle");
+    base::FilePath manifest_path = data_path.AppendASCII(manifest);
 
     ASSERT_TRUE(file_util::PathExists(manifest_path));
     ASSERT_TRUE(file_util::CopyFile(manifest_path, tmp_manifest));
@@ -191,12 +192,13 @@ class ExtensionWebstorePrivateBundleTest
   }
 
   // Packs the extension at |ext_path| using |id|'s PEM key.
-  void PackCRX(const std::string& id, const FilePath& ext_path) {
-    FilePath data_path = tmp_.path().AppendASCII("webstore_private/bundle");
-    FilePath pem_path = data_path.AppendASCII(id + ".pem");
-    FilePath crx_path = data_path.AppendASCII(id + ".crx");
-    FilePath destination = PackExtensionWithOptions(
-        ext_path, crx_path, pem_path, FilePath());
+  void PackCRX(const std::string& id, const base::FilePath& ext_path) {
+    base::FilePath data_path =
+        tmp_.path().AppendASCII("webstore_private/bundle");
+    base::FilePath pem_path = data_path.AppendASCII(id + ".pem");
+    base::FilePath crx_path = data_path.AppendASCII(id + ".crx");
+    base::FilePath destination = PackExtensionWithOptions(
+        ext_path, crx_path, pem_path, base::FilePath());
 
     ASSERT_FALSE(destination.empty());
     ASSERT_EQ(destination, crx_path);
@@ -206,10 +208,10 @@ class ExtensionWebstorePrivateBundleTest
 
   // Creates an invalid CRX.
   void PackInvalidCRX(const std::string& id) {
-    FilePath contents = test_data_dir_
+    base::FilePath contents = test_data_dir_
         .AppendASCII("webstore_private")
         .AppendASCII("install_bundle_invalid.html");
-    FilePath crx_path = test_data_dir_
+    base::FilePath crx_path = test_data_dir_
         .AppendASCII("webstore_private/bundle")
         .AppendASCII(id + ".crx");
 
@@ -219,12 +221,12 @@ class ExtensionWebstorePrivateBundleTest
   }
 
  private:
-  std::vector<FilePath> test_crx_;
+  std::vector<base::FilePath> test_crx_;
 };
 
 class ExtensionWebstoreGetWebGLStatusTest : public InProcessBrowserTest {
  public:
-  void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
     // In linux, we need to launch GPU process to decide if WebGL is allowed.
     // Run it on top of osmesa to avoid bot driver issues.
 #if defined(OS_LINUX)
@@ -243,10 +245,10 @@ class ExtensionWebstoreGetWebGLStatusTest : public InProcessBrowserTest {
         new GetWebGLStatusFunction();
     scoped_ptr<base::Value> result(utils::RunFunctionAndReturnSingleResult(
             function.get(), kEmptyArgs, browser()));
+    ASSERT_TRUE(result);
     EXPECT_EQ(base::Value::TYPE_STRING, result->GetType());
-    StringValue* value = static_cast<StringValue*>(result.get());
     std::string webgl_status = "";
-    EXPECT_TRUE(value && value->GetAsString(&webgl_status));
+    EXPECT_TRUE(result->GetAsString(&webgl_status));
     EXPECT_STREQ(webgl_allowed ? kWebGLStatusAllowed : kWebGLStatusBlocked,
                  webgl_status.c_str());
   }
@@ -255,7 +257,8 @@ class ExtensionWebstoreGetWebGLStatusTest : public InProcessBrowserTest {
 // Test cases for webstore origin frame blocking.
 IN_PROC_BROWSER_TEST_F(ExtensionWebstorePrivateApiTest,
                        FrameWebstorePageBlocked) {
-  content::WebContents* contents = chrome::GetActiveWebContents(browser());
+  content::WebContents* contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
   string16 expected_title = UTF8ToUTF16("PASS: about:blank");
   string16 failure_title = UTF8ToUTF16("FAIL");
   content::TitleWatcher watcher(contents, expected_title);
@@ -269,7 +272,8 @@ IN_PROC_BROWSER_TEST_F(ExtensionWebstorePrivateApiTest,
 
 IN_PROC_BROWSER_TEST_F(ExtensionWebstorePrivateApiTest,
                        FrameErrorPageBlocked) {
-  content::WebContents* contents = chrome::GetActiveWebContents(browser());
+  content::WebContents* contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
   string16 expected_title = UTF8ToUTF16("PASS: about:blank");
   string16 failure_title = UTF8ToUTF16("FAIL");
   content::TitleWatcher watcher(contents, expected_title);
@@ -291,7 +295,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionWebstorePrivateApiTest, MissingDownloadDir) {
   // Set a non-existent directory as the download path.
   base::ScopedTempDir temp_dir;
   EXPECT_TRUE(temp_dir.CreateUniqueTempDir());
-  FilePath missing_directory = temp_dir.Take();
+  base::FilePath missing_directory = temp_dir.Take();
   EXPECT_TRUE(file_util::Delete(missing_directory, true));
   WebstoreInstaller::SetDownloadDirectoryForTests(&missing_directory);
 
@@ -323,9 +327,17 @@ IN_PROC_BROWSER_TEST_F(ExtensionWebstorePrivateApiTest, IncorrectManifest2) {
   ASSERT_TRUE(RunInstallTest("incorrect_manifest2.html", "extension.crx"));
 }
 
+// Disabled: http://crbug.com/174399
+#if defined(OS_WIN) && defined(USE_AURA)
+#define MAYBE_AppInstallBubble DISABLED_AppInstallBubble
+#else
+#define MAYBE_AppInstallBubble AppInstallBubble
+#endif
+
 // Tests that we can request an app installed bubble (instead of the default
 // UI when an app is installed).
-IN_PROC_BROWSER_TEST_F(ExtensionWebstorePrivateApiTest, AppInstallBubble) {
+IN_PROC_BROWSER_TEST_F(ExtensionWebstorePrivateApiTest,
+                       MAYBE_AppInstallBubble) {
   WebstoreInstallListener listener;
   WebstorePrivateApi::SetWebstoreInstallerDelegateForTesting(&listener);
   ASSERT_TRUE(RunInstallTest("app_install_bubble.html", "app.crx"));

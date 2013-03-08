@@ -8,8 +8,8 @@
 #include <functional>
 
 #include "base/bind.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/memory/singleton.h"
 #include "base/path_service.h"
 #include "base/threading/thread_restrictions.h"
@@ -19,7 +19,6 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/ui/webui/chrome_url_data_manager.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/in_process_browser_test.h"
@@ -51,9 +50,9 @@ class TestData {
     base::ThreadRestrictions::ScopedAllowIO allow_io;
 
     if (test_data_.empty()) {
-      FilePath test_data_directory;
+      base::FilePath test_data_directory;
       PathService::Get(chrome::DIR_TEST_DATA, &test_data_directory);
-      FilePath test_file =
+      base::FilePath test_file =
           test_data_directory.AppendASCII("printing/cloud_print_uitest.html");
       file_util::ReadFileToString(test_file, &test_data_);
     }
@@ -79,7 +78,7 @@ class SimpleTestJob : public net::URLRequestTestJob {
                                TestData::GetInstance()->GetTestData(),
                                true) {}
 
-  virtual void GetResponseInfo(net::HttpResponseInfo* info) {
+  virtual void GetResponseInfo(net::HttpResponseInfo* info) OVERRIDE {
     net::URLRequestTestJob::GetResponseInfo(info);
     if (request_->url().SchemeIsSecure()) {
       // Make up a fake certificate for this response since we don't have
@@ -99,7 +98,7 @@ class SimpleTestJob : public net::URLRequestTestJob {
   }
 
  private:
-  ~SimpleTestJob() {}
+  virtual ~SimpleTestJob() {}
 };
 
 class TestController {
@@ -160,7 +159,7 @@ class PrintDialogCloudTest : public InProcessBrowserTest {
    public:
     AutoQuitDelegate() {}
 
-    virtual void OnResponseCompleted(net::URLRequest* request) {
+    virtual void OnResponseCompleted(net::URLRequest* request) OVERRIDE {
       BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
                               MessageLoop::QuitClosure());
     }
@@ -209,11 +208,11 @@ class PrintDialogCloudTest : public InProcessBrowserTest {
   }
 
   void CreateDialogForTest() {
-    FilePath path_to_pdf =
+    base::FilePath path_to_pdf =
         test_data_directory_.AppendASCII("printing/cloud_print_uitest.pdf");
     BrowserThread::PostTask(
         BrowserThread::UI, FROM_HERE,
-        base::Bind(&internal_cloud_print_helpers::CreateDialogFullImpl,
+        base::Bind(&print_dialog_cloud::CreatePrintDialogForFile,
                    browser()->profile(), browser()->window()->GetNativeWindow(),
                    path_to_pdf, string16(), string16(),
                    std::string("application/pdf"), false));
@@ -234,7 +233,7 @@ class PrintDialogCloudTest : public InProcessBrowserTest {
   bool handler_added_;
   std::string scheme_;
   std::string host_name_;
-  FilePath test_data_directory_;
+  base::FilePath test_data_directory_;
   AutoQuitDelegate delegate_;
 };
 
@@ -256,12 +255,7 @@ net::URLRequestJob* PrintDialogCloudTest::Factory(
                                     true);
 }
 
-#if defined(OS_WIN)
-#define MAYBE_HandlersRegistered DISABLED_HandlersRegistered
-#else
-#define MAYBE_HandlersRegistered HandlersRegistered
-#endif
-IN_PROC_BROWSER_TEST_F(PrintDialogCloudTest, MAYBE_HandlersRegistered) {
+IN_PROC_BROWSER_TEST_F(PrintDialogCloudTest, HandlersRegistered) {
   AddTestHandlers();
 
   TestController::GetInstance()->set_use_delegate(true);

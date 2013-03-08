@@ -26,9 +26,6 @@ class ChromeWebUIControllerFactory : public content::WebUIControllerFactory {
                               const GURL& url) const OVERRIDE;
   virtual bool UseWebUIBindingsForURL(content::BrowserContext* browser_context,
                                       const GURL& url) const OVERRIDE;
-  virtual bool IsURLAcceptableForWebUI(content::BrowserContext* browser_context,
-                                       const GURL& url,
-                                       bool data_urls_allowed) const OVERRIDE;
   virtual content::WebUIController* CreateWebUIControllerForURL(
       content::WebUI* web_ui,
       const GURL& url) const OVERRIDE;
@@ -48,7 +45,6 @@ class ChromeWebUIControllerFactory : public content::WebUIControllerFactory {
   virtual ~ChromeWebUIControllerFactory();
 
  private:
-
   friend struct DefaultSingletonTraits<ChromeWebUIControllerFactory>;
 
   // Gets the data for the favicon for a WebUI page. Returns NULL if the WebUI

@@ -5,7 +5,8 @@
 #ifndef CONTENT_BROWSER_DEVTOOLS_DEVTOOLS_TRACING_HANDLER_H_
 #define CONTENT_BROWSER_DEVTOOLS_DEVTOOLS_TRACING_HANDLER_H_
 
-#include "content/browser/devtools/devtools_browser_target.h"
+#include "base/debug/trace_event.h"
+#include "content/browser/devtools/devtools_protocol.h"
 #include "content/public/browser/trace_subscriber.h"
 
 namespace content {
@@ -16,8 +17,10 @@ class DevToolsWebSocketSender;
 // infrastructure.
 class DevToolsTracingHandler
     : public TraceSubscriber,
-      public DevToolsBrowserTarget::DomainHandler {
+      public DevToolsProtocol::Handler {
  public:
+  static const char kDomain[];
+
   DevToolsTracingHandler();
   virtual ~DevToolsTracingHandler();
 
@@ -27,10 +30,13 @@ class DevToolsTracingHandler
       const scoped_refptr<base::RefCountedString>& trace_fragment) OVERRIDE;
 
  private:
-  base::DictionaryValue* OnStart(const base::DictionaryValue* params,
-                                 base::Value** error_out);
-  base::DictionaryValue* OnEnd(const base::DictionaryValue* params,
-                               base::Value** error_out);
+  scoped_ptr<DevToolsProtocol::Response> OnStart(
+      DevToolsProtocol::Command* command);
+  scoped_ptr<DevToolsProtocol::Response> OnEnd(
+      DevToolsProtocol::Command* command);
+
+  base::debug::TraceLog::Options TraceOptionsFromString(
+      const std::string& options);
 
   bool is_running_;
 

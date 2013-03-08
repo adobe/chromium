@@ -37,8 +37,9 @@ NSString* const kBrowserActionButtonDraggingNotification =
 NSString* const kBrowserActionButtonDragEndNotification =
     @"BrowserActionButtonDragEndNotification";
 
-const CGFloat kBrowserActionBadgeOriginYOffset = 5;
-const CGFloat kAnimationDuration = 0.2;
+static const CGFloat kBrowserActionBadgeOriginYOffset = 5;
+static const CGFloat kAnimationDuration = 0.2;
+static const CGFloat kMinimumDragDistance = 5;
 
 // A helper class to bridge the asynchronous Skia bitmap loading mechanism to
 // the extension's button.
@@ -47,10 +48,11 @@ class ExtensionActionIconFactoryBridge
       public ExtensionActionIconFactory::Observer {
  public:
   ExtensionActionIconFactoryBridge(BrowserActionButton* owner,
+                                   Profile* profile,
                                    const Extension* extension)
       : owner_(owner),
         browser_action_([[owner cell] extensionAction]),
-        icon_factory_(extension, browser_action_, this) {
+        icon_factory_(profile, extension, browser_action_, this) {
     registrar_.Add(
         this, chrome::NOTIFICATION_EXTENSION_BROWSER_ACTION_UPDATED,
         content::Source<ExtensionAction>(browser_action_));
@@ -58,15 +60,16 @@ class ExtensionActionIconFactoryBridge
 
   virtual ~ExtensionActionIconFactoryBridge() {}
 
-  // ImageLoadingTracker::Observer implementation.
-  void OnIconUpdated() OVERRIDE {
+  // ExtensionActionIconFactory::Observer implementation.
+  virtual void OnIconUpdated() OVERRIDE {
     [owner_ updateState];
   }
 
   // Overridden from content::NotificationObserver.
-  void Observe(int type,
-               const content::NotificationSource& source,
-               const content::NotificationDetails& details) {
+  virtual void Observe(
+      int type,
+      const content::NotificationSource& source,
+      const content::NotificationDetails& details) OVERRIDE {
     if (type == chrome::NOTIFICATION_EXTENSION_BROWSER_ACTION_UPDATED)
       [owner_ updateState];
     else
@@ -154,8 +157,8 @@ class ExtensionActionIconFactoryBridge
 
     tabId_ = tabId;
     extension_ = extension;
-    iconFactoryBridge_.reset(
-        new ExtensionActionIconFactoryBridge(self, extension));
+    iconFactoryBridge_.reset(new ExtensionActionIconFactoryBridge(
+        self, browser->profile(), extension));
 
     moveAnimation_.reset([[NSViewAnimation alloc] init]);
     [moveAnimation_ gtm_setDuration:kAnimationDuration
@@ -175,6 +178,7 @@ class ExtensionActionIconFactoryBridge
 - (void)mouseDown:(NSEvent*)theEvent {
   [[self cell] setHighlighted:YES];
   dragCouldStart_ = YES;
+  dragStartPoint_ = [theEvent locationInWindow];
 }
 
 - (void)mouseDragged:(NSEvent*)theEvent {
@@ -182,6 +186,13 @@ class ExtensionActionIconFactoryBridge
     return;
 
   if (!isBeingDragged_) {
+    // Don't initiate a drag until it moves at least kMinimumDragDistance.
+    NSPoint currentPoint = [theEvent locationInWindow];
+    CGFloat dx = currentPoint.x - dragStartPoint_.x;
+    CGFloat dy = currentPoint.y - dragStartPoint_.y;
+    if (dx*dx + dy*dy < kMinimumDragDistance*kMinimumDragDistance)
+      return;
+
     // The start of a drag. Position the button above all others.
     [[self superview] addSubview:self positioned:NSWindowAbove relativeTo:nil];
   }

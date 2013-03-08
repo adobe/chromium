@@ -7,15 +7,17 @@
 #include <string>
 
 #include "base/bind.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/message_loop_proxy.h"
 #include "base/platform_file.h"
 #include "base/sequenced_task_runner.h"
 #include "webkit/blob/local_file_stream_reader.h"
+#include "webkit/fileapi/async_file_util_adapter.h"
 #include "webkit/fileapi/file_system_callback_dispatcher.h"
 #include "webkit/fileapi/file_system_context.h"
 #include "webkit/fileapi/file_system_file_stream_reader.h"
+#include "webkit/fileapi/file_system_operation_context.h"
 #include "webkit/fileapi/file_system_task_runners.h"
 #include "webkit/fileapi/file_system_types.h"
 #include "webkit/fileapi/file_system_util.h"
@@ -28,22 +30,31 @@
 #include "webkit/fileapi/native_file_util.h"
 
 #if defined(SUPPORT_MTP_DEVICE_FILESYSTEM)
+#include "webkit/fileapi/media/device_media_async_file_util.h"
 #include "webkit/fileapi/media/device_media_file_util.h"
 #endif
 
 namespace fileapi {
 
 IsolatedMountPointProvider::IsolatedMountPointProvider(
-    const FilePath& profile_path)
+    const base::FilePath& profile_path)
     : profile_path_(profile_path),
       media_path_filter_(new MediaPathFilter()),
-      isolated_file_util_(new IsolatedFileUtil()),
-      dragged_file_util_(new DraggedFileUtil()),
-      native_media_file_util_(new NativeMediaFileUtil()) {
+      isolated_file_util_(new AsyncFileUtilAdapter(new IsolatedFileUtil())),
+      dragged_file_util_(new AsyncFileUtilAdapter(new DraggedFileUtil())),
+      native_media_file_util_(
+          new AsyncFileUtilAdapter(new NativeMediaFileUtil())) {
 #if defined(SUPPORT_MTP_DEVICE_FILESYSTEM)
   // TODO(kmadhusu): Initialize |device_media_file_util_| in
   // initialization list.
-  device_media_file_util_.reset(new DeviceMediaFileUtil(profile_path_));
+  device_media_async_file_util_.reset(
+      DeviceMediaAsyncFileUtil::Create(profile_path_));
+  if (!device_media_async_file_util_.get()) {
+    // DeviceMediaAsyncFileUtil is not supported.
+    // Fallback to AsyncFileUtilAdapter.
+    device_media_file_util_adapter_.reset(
+        new AsyncFileUtilAdapter(new DeviceMediaFileUtil(profile_path_)));
+  }
 #endif
 }
 
@@ -61,26 +72,36 @@ void IsolatedMountPointProvider::ValidateFileSystemRoot(
       base::Bind(callback, base::PLATFORM_FILE_ERROR_SECURITY));
 }
 
-FilePath IsolatedMountPointProvider::GetFileSystemRootPathOnFileThread(
+base::FilePath IsolatedMountPointProvider::GetFileSystemRootPathOnFileThread(
     const FileSystemURL& url,
     bool create) {
   // This is not supposed to be used.
   NOTREACHED();
-  return FilePath();
-}
-
-bool IsolatedMountPointProvider::IsAccessAllowed(const FileSystemURL& url) {
-  return true;
-}
-
-bool IsolatedMountPointProvider::IsRestrictedFileName(
-    const FilePath& filename) const {
-  // TODO(kinuko): We need to check platform-specific restricted file names
-  // before we actually start allowing file creation in isolated file systems.
-  return false;
+  return base::FilePath();
 }
 
 FileSystemFileUtil* IsolatedMountPointProvider::GetFileUtil(
+    FileSystemType type) {
+  switch (type) {
+    case kFileSystemTypeNativeLocal:
+      return isolated_file_util_->sync_file_util();
+    case kFileSystemTypeDragged:
+      return dragged_file_util_->sync_file_util();
+    case kFileSystemTypeNativeMedia:
+      return native_media_file_util_->sync_file_util();
+    case kFileSystemTypeDeviceMedia:
+#if defined(SUPPORT_MTP_DEVICE_FILESYSTEM)
+      if (device_media_file_util_adapter_.get())
+        return device_media_file_util_adapter_->sync_file_util();
+      return NULL;
+#endif
+    default:
+      NOTREACHED();
+  }
+  return NULL;
+}
+
+AsyncFileUtil* IsolatedMountPointProvider::GetAsyncFileUtil(
     FileSystemType type) {
   switch (type) {
     case kFileSystemTypeNativeLocal:
@@ -91,9 +112,10 @@ FileSystemFileUtil* IsolatedMountPointProvider::GetFileUtil(
       return native_media_file_util_.get();
     case kFileSystemTypeDeviceMedia:
 #if defined(SUPPORT_MTP_DEVICE_FILESYSTEM)
-      return device_media_file_util_.get();
+      if (device_media_async_file_util_.get())
+        return device_media_async_file_util_.get();
+      return device_media_file_util_adapter_.get();
 #endif
-
     default:
       NOTREACHED();
   }
@@ -104,7 +126,7 @@ FilePermissionPolicy IsolatedMountPointProvider::GetPermissionPolicy(
     const FileSystemURL& url, int permissions) const {
   if (url.type() == kFileSystemTypeDragged && url.path().empty()) {
     // The root directory of the dragged filesystem must be always read-only.
-    if (permissions != kReadFilePermissions)
+    if (permissions & ~fileapi::kReadFilePermissions)
       return FILE_PERMISSION_ALWAYS_DENY;
   }
   // Access to isolated file systems should be checked using per-filesystem

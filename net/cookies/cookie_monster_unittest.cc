@@ -14,7 +14,7 @@
 #include "base/metrics/histogram.h"
 #include "base/metrics/histogram_samples.h"
 #include "base/stringprintf.h"
-#include "base/string_tokenizer.h"
+#include "base/strings/string_tokenizer.h"
 #include "base/threading/thread.h"
 #include "base/time.h"
 #include "googleurl/src/gurl.h"
@@ -379,15 +379,6 @@ class MockGetCookiesCallback
   MOCK_METHOD1(Invoke, void(const std::string& cookies));
 };
 
-class MockGetCookieInfoCallback
-  : public MockCookieCallback<MockGetCookieInfoCallback,
-                              CookieStore::GetCookieInfoCallback> {
- public:
-  MOCK_METHOD2(Invoke,
-               void(const std::string& cookies,
-                    const std::vector<CookieStore::CookieInfo>& cookie_infos));
-};
-
 class MockSetCookiesCallback
   : public MockCookieCallback<MockSetCookiesCallback,
                               CookieStore::SetCookiesCallback> {
@@ -433,10 +424,6 @@ ACTION_P4(DeleteCookieAction, cookie_monster, url, name, callback) {
 }
 ACTION_P3(GetCookiesAction, cookie_monster, url, callback) {
   cookie_monster->GetCookiesWithOptionsAsync(
-      url, CookieOptions(), callback->AsCallback());
-}
-ACTION_P3(GetCookiesWithInfoAction, cookie_monster, url, callback) {
-  cookie_monster->GetCookiesWithInfoAsync(
       url, CookieOptions(), callback->AsCallback());
 }
 ACTION_P4(SetCookieAction, cookie_monster, url, cookie_line, callback) {
@@ -615,27 +602,6 @@ TEST_F(DeferredCookieTaskTest, DeferredGetCookies) {
   EXPECT_CALL(get_cookies_callback, Invoke("X=1")).WillOnce(
       GetCookiesAction(&cookie_monster(), url_google_, &get_cookies_callback));
   EXPECT_CALL(get_cookies_callback, Invoke("X=1")).WillOnce(
-      QuitCurrentMessageLoop());
-
-  CompleteLoadingAndWait();
-}
-
-TEST_F(DeferredCookieTaskTest, DeferredGetCookiesWithInfo) {
-  DeclareLoadedCookie("www.google.izzle",
-                      "X=1; path=/; expires=Mon, 18-Apr-22 22:50:14 GMT",
-                      Time::Now() + TimeDelta::FromDays(3));
-
-  MockGetCookieInfoCallback get_cookie_info_callback;
-
-  BeginWithForDomainKey("google.izzle", GetCookiesWithInfoAction(
-      &cookie_monster(), url_google_, &get_cookie_info_callback));
-
-  WaitForLoadCall();
-
-  EXPECT_CALL(get_cookie_info_callback, Invoke("X=1", testing::_)).WillOnce(
-      GetCookiesWithInfoAction(
-          &cookie_monster(), url_google_, &get_cookie_info_callback));
-  EXPECT_CALL(get_cookie_info_callback, Invoke("X=1", testing::_)).WillOnce(
       QuitCurrentMessageLoop());
 
   CompleteLoadingAndWait();
@@ -855,7 +821,7 @@ TEST_F(DeferredCookieTaskTest, DeferredTaskOrder) {
   MockGetCookiesCallback get_cookies_callback;
   MockSetCookiesCallback set_cookies_callback;
   MockClosure delete_cookie_callback;
-  MockGetCookieInfoCallback get_cookie_info_callback;
+  MockGetCookiesCallback get_cookies_callback_deferred;
 
   EXPECT_CALL(*this, Begin()).WillOnce(testing::DoAll(
       GetCookiesAction(
@@ -870,9 +836,9 @@ TEST_F(DeferredCookieTaskTest, DeferredTaskOrder) {
 
   WaitForLoadCall();
   EXPECT_CALL(get_cookies_callback, Invoke("X=1")).WillOnce(
-      GetCookiesWithInfoAction(
-          &cookie_monster(), url_google_, &get_cookie_info_callback));
-  EXPECT_CALL(get_cookie_info_callback, Invoke("X=1", testing::_)).WillOnce(
+      GetCookiesAction(
+          &cookie_monster(), url_google_, &get_cookies_callback_deferred));
+  EXPECT_CALL(get_cookies_callback_deferred, Invoke("X=1")).WillOnce(
       QuitCurrentMessageLoop());
   EXPECT_CALL(set_cookies_callback, Invoke(true));
   EXPECT_CALL(delete_cookie_callback, Invoke());
@@ -1810,24 +1776,25 @@ class FlushablePersistentStore : public CookieMonster::PersistentCookieStore {
  public:
   FlushablePersistentStore() : flush_count_(0) {}
 
-  void Load(const LoadedCallback& loaded_callback) {
+  virtual void Load(const LoadedCallback& loaded_callback) OVERRIDE {
     std::vector<CanonicalCookie*> out_cookies;
     MessageLoop::current()->PostTask(FROM_HERE,
       base::Bind(&net::LoadedCallbackTask::Run,
                  new net::LoadedCallbackTask(loaded_callback, out_cookies)));
   }
 
-  void LoadCookiesForKey(const std::string& key,
-      const LoadedCallback& loaded_callback) {
+  virtual void LoadCookiesForKey(
+      const std::string& key,
+      const LoadedCallback& loaded_callback) OVERRIDE {
     Load(loaded_callback);
   }
 
-  void AddCookie(const CanonicalCookie&) {}
-  void UpdateCookieAccessTime(const CanonicalCookie&) {}
-  void DeleteCookie(const CanonicalCookie&) {}
-  void SetForceKeepSessionState() {}
+  virtual void AddCookie(const CanonicalCookie&) OVERRIDE {}
+  virtual void UpdateCookieAccessTime(const CanonicalCookie&) OVERRIDE {}
+  virtual void DeleteCookie(const CanonicalCookie&) OVERRIDE {}
+  virtual void SetForceKeepSessionState() OVERRIDE {}
 
-  void Flush(const base::Closure& callback) {
+  virtual void Flush(const base::Closure& callback) OVERRIDE {
     ++flush_count_;
     if (!callback.is_null())
       callback.Run();

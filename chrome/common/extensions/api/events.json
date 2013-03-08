@@ -6,12 +6,38 @@
   {
     "namespace": "events",
     "compiler_options": {
-      "implemented_in": "chrome/browser/extensions/api/declarative/declarative_api.h",
-      "generate_type_functions": true
+      "implemented_in": "chrome/browser/extensions/api/declarative/declarative_api.h"
     },
     "internal": true,
     "unprivileged": true,
     "types": [
+      {
+        "id": "Rule",
+        "type": "object",
+        "description": "Description of a declarative rule for handling events.",
+        "properties": {
+          "id": {
+            "type": "string",
+            "optional": true,
+            "description": "Optional identifier that allows referencing this rule."
+          },
+          "conditions": {
+            "type": "array",
+            "items": {"type": "any"},
+            "description": "List of conditions that can trigger the actions."
+          },
+          "actions": {
+            "type": "array",
+            "items": {"type": "any"},
+            "description": "List of actions that are triggered if one of the condtions is fulfilled."
+          },
+          "priority": {
+            "type": "integer",
+            "optional": true,
+            "description": "Optional priority of this rule. Defaults to 100."
+          }
+        }
+      },
       {
         "id": "Event",
         "type": "object",
@@ -164,33 +190,6 @@
             ]
           }
         ]
-      },
-      {
-        "id": "Rule",
-        "type": "object",
-        "description": "Description of a declarative rule for handling events.",
-        "properties": {
-          "id": {
-            "type": "string",
-            "optional": true,
-            "description": "Optional identifier that allows referencing this rule."
-          },
-          "conditions": {
-            "type": "array",
-            "items": {"type": "any"},
-            "description": "List of conditions that can trigger the actions."
-          },
-          "actions": {
-            "type": "array",
-            "items": {"type": "any"},
-            "description": "List of actions that are triggered if one of the condtions is fulfilled."
-          },
-          "priority": {
-            "type": "integer",
-            "optional": true,
-            "description": "Optional priority of this rule. Defaults to 100."
-          }
-        }
       },
       {
         "id": "UrlFilter",

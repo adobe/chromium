@@ -4,10 +4,10 @@
 
 import logging
 
-from telemetry import multi_page_benchmark
-from telemetry import util
+from telemetry.core import util
+from telemetry.page import page_benchmark
 
-class SpaceportBenchmark(multi_page_benchmark.MultiPageBenchmark):
+class SpaceportBenchmark(page_benchmark.PageBenchmark):
   def CustomizeBrowserOptions(self, options):
     options.extra_browser_args.extend(['--disable-gpu-vsync'])
 

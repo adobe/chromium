@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 The Chromium Authors. All rights reserved.
+ * Copyright 2012 The Chromium Authors. All rights reserved.
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
  */
@@ -34,4 +34,16 @@ img {
 
 .url {
   color: #a0a0a0;
+}
+
+.debug {
+  margin: 1px;
+}
+
+.debug span+span {
+  padding-left: 5px;
+}
+
+.timestamp {
+  color: blue;
 }

@@ -10,7 +10,7 @@
 #include <vector>
 
 #include "base/callback_forward.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/string16.h"
@@ -24,10 +24,9 @@
 #include "chrome/test/webdriver/webdriver_element_id.h"
 #include "chrome/test/webdriver/webdriver_logging.h"
 
-class FilePath;
-
 namespace base {
 class DictionaryValue;
+class FilePath;
 class ListValue;
 class Value;
 class WaitableEvent;
@@ -120,8 +119,9 @@ class Session {
   Error* SendKeys(const string16& keys);
 
   // Sets the file paths to the file upload control under the given location.
-  Error* DragAndDropFilePaths(const Point& location,
-                              const std::vector<FilePath::StringType>& paths);
+  Error* DragAndDropFilePaths(
+      const Point& location,
+      const std::vector<base::FilePath::StringType>& paths);
 
   // Clicks the mouse at the given location using the given button.
   Error* MouseMoveAndClick(const Point& location,
@@ -315,7 +315,7 @@ class Session {
   Error* WaitForAllViewsToStopLoading();
 
   // Install extension at |path|.
-  Error* InstallExtension(const FilePath& path, std::string* extension_id);
+  Error* InstallExtension(const base::FilePath& path, std::string* extension_id);
 
   Error* GetExtensionsInfo(base::ListValue* extension_ids);
 
@@ -393,7 +393,7 @@ class Session {
 
   const Logger& logger() const;
 
-  const FilePath& temp_dir() const;
+  const base::FilePath& temp_dir() const;
 
   const Capabilities& capabilities() const;
 

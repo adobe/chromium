@@ -8,8 +8,8 @@
 #include <string>
 
 #include "base/gtest_prod_util.h"
-#include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "base/threading/thread_checker.h"
 #include "base/timer.h"
@@ -52,8 +52,13 @@ class DialDeviceData;
 //
 // TODO(mfoltz): Port this into net/.
 // See https://code.google.com/p/chromium/issues/detail?id=164473
-class DialService : public base::RefCountedThreadSafe<DialService> {
+class DialService {
  public:
+  enum DialServiceErrorCode {
+    DIAL_SERVICE_NO_INTERFACES = 0,
+    DIAL_SERVICE_SOCKET_ERROR
+  };
+
   class Observer {
    public:
     // Called when a single discovery request was sent.
@@ -67,11 +72,14 @@ class DialService : public base::RefCountedThreadSafe<DialService> {
     virtual void OnDiscoveryFinished(DialService* service) = 0;
 
     // Called when an error occurs.
-    virtual void OnError(DialService* service, const std::string& msg) = 0;
+    virtual void OnError(DialService* service,
+                         const DialServiceErrorCode& code) = 0;
 
    protected:
     virtual ~Observer() {}
   };
+
+  virtual ~DialService() {}
 
   // Starts a new round of discovery.  Returns |true| if discovery was started
   // successfully or there is already one active. Returns |false| on error.
@@ -81,17 +89,19 @@ class DialService : public base::RefCountedThreadSafe<DialService> {
   virtual void AddObserver(Observer* observer) = 0;
   virtual void RemoveObserver(Observer* observer) = 0;
   virtual bool HasObserver(Observer* observer) = 0;
-
- protected:
-  virtual ~DialService() {}
-
- private:
-  friend class base::RefCountedThreadSafe<DialService>;
 };
 
-class DialServiceImpl : public DialService {
+// Implements DialService.
+//
+// NOTE(mfoltz): It would make this class cleaner to refactor most of the state
+// associated with a single discovery cycle into its own |DiscoveryOperation|
+// object.  This would also simplify lifetime of the object w.r.t. DialRegistry;
+// the Registry would not need to create/destroy the Service on demand.
+class DialServiceImpl : public DialService,
+                        public base::SupportsWeakPtr<DialServiceImpl> {
  public:
   explicit DialServiceImpl(net::NetLog* net_log);
+  virtual ~DialServiceImpl();
 
   // DialService implementation
   virtual bool Discover() OVERRIDE;
@@ -100,21 +110,19 @@ class DialServiceImpl : public DialService {
   virtual bool HasObserver(Observer* observer) OVERRIDE;
 
  private:
-  virtual ~DialServiceImpl();
+  // Starts the control flow for one discovery cycle.
+  void StartDiscovery();
 
-  // Starts the flow to construct and send a discovery request.
-  void StartRequest();
+  // Establishes the UDP socket that is used for requests and responses,
+  // establishes a read callback on the socket, and sends the first discovery
+  // request.  Returns true if successful.
+  bool BindSocketAndSendRequest(const net::IPAddressNumber& bind_ip_address);
 
-  // Establishes the UDP socket that is used for requests and responses, then
-  // sends a discovery request on the bound socket.  Returns |true| if
-  // successful.
-  bool BindAndWriteSocket(const net::NetworkInterface& bind_interface);
+  // Sends a single discovery request over the socket.
+  void SendOneRequest();
 
   // Callback invoked for socket writes.
   void OnSocketWrite(int result);
-
-  // Method to get the network list on the FILE thread.
-  void DoGetNetworkList();
 
   // Send the network list to IO thread.
   void SendNetworkList(const net::NetworkInterfaceList& list);
@@ -182,11 +190,22 @@ class DialServiceImpl : public DialService {
   // The number of requests that have been sent in the current discovery.
   int num_requests_sent_;
 
+  // The maximum number of requests to send per discovery cycle.
+  int max_requests_;
+
   // Timer for finishing discovery.
   base::OneShotTimer<DialServiceImpl> finish_timer_;
 
   // The delay for |finish_timer_|; how long to wait for discovery to finish.
+  // Setting this to zero disables the timer.
   base::TimeDelta finish_delay_;
+
+  // Timer for sending multiple requests at fixed intervals.
+  base::RepeatingTimer<DialServiceImpl> request_timer_;
+
+  // The delay for |request_timer_|; how long to wait between successive
+  // requests.
+  base::TimeDelta request_interval_;
 
   // List of observers.
   ObserverList<Observer> observer_list_;
@@ -194,6 +213,7 @@ class DialServiceImpl : public DialService {
   // Thread checker.
   base::ThreadChecker thread_checker_;
 
+  FRIEND_TEST_ALL_PREFIXES(DialServiceTest, TestSendMultipleRequests);
   FRIEND_TEST_ALL_PREFIXES(DialServiceTest, TestOnDeviceDiscovered);
   FRIEND_TEST_ALL_PREFIXES(DialServiceTest, TestOnDiscoveryFinished);
   FRIEND_TEST_ALL_PREFIXES(DialServiceTest, TestOnDiscoveryRequest);

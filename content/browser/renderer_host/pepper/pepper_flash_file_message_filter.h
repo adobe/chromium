@@ -6,7 +6,7 @@
 #define CONTENT_BROWSER_RENDERER_HOST_PEPPER_PEPPER_FLASH_FILE_MESSAGE_FILTER_H_
 
 #include "base/compiler_specific.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/memory/ref_counted.h"
 #include "base/process.h"
 #include "ppapi/c/pp_instance.h"
@@ -37,7 +37,7 @@ class PepperFlashFileMessageFilter : public ppapi::host::ResourceMessageFilter {
   PepperFlashFileMessageFilter(PP_Instance instance,
                                BrowserPpapiHost* host);
 
-  static FilePath GetDataDirName(const FilePath& profile_path);
+  static base::FilePath GetDataDirName(const base::FilePath& profile_path);
 
  private:
   virtual ~PepperFlashFileMessageFilter();
@@ -66,11 +66,11 @@ class PepperFlashFileMessageFilter : public ppapi::host::ResourceMessageFilter {
                            const ppapi::PepperFilePath& path);
   int32_t OnCreateTemporaryFile(ppapi::host::HostMessageContext* context);
 
-  FilePath ValidateAndConvertPepperFilePath(
+  base::FilePath ValidateAndConvertPepperFilePath(
       const ppapi::PepperFilePath& pepper_path,
       int flags);
 
-  FilePath plugin_data_directory_;
+  base::FilePath plugin_data_directory_;
   int render_process_id_;
   base::ProcessHandle plugin_process_handle_;
 

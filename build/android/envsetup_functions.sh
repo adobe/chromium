@@ -134,8 +134,15 @@ common_vars_defines() {
 common_gyp_vars() {
   export GYP_DEFINES="${DEFINES}"
 
-  # Set GYP_GENERATORS to make-android if it's currently unset or null.
-  export GYP_GENERATORS="${GYP_GENERATORS:-make-android}"
+  # Set GYP_GENERATORS to ninja if it's currently unset or null.
+  if [ -z "$GYP_GENERATORS" ]; then
+    echo "Defaulting GYP_GENERATORS to ninja."
+    GYP_GENERATORS=ninja
+  elif [ "$GYP_GENERATORS" != "ninja" ]; then
+    echo "Warning: GYP_GENERATORS set to '$GYP_GENERATORS'."
+    echo "Only GYP_GENERATORS=ninja has continuous coverage."
+  fi
+  export GYP_GENERATORS
 
   # Use our All target as the default
   export GYP_GENERATOR_FLAGS="${GYP_GENERATOR_FLAGS} default_target=All"
@@ -151,6 +158,7 @@ common_gyp_vars() {
 print_usage() {
   echo "usage: ${0##*/} [--target-arch=value] [--help]" >& 2
   echo "--target-arch=value     target CPU architecture (arm=default, x86)" >& 2
+  echo "--host-os=value         override host OS detection (linux, mac)" >&2
   echo "--try-32bit-host        try building a 32-bit host architecture" >&2
   echo "--help                  this help" >& 2
 }
@@ -162,11 +170,15 @@ print_usage() {
 # --help          Prints out help message.
 ################################################################################
 process_options() {
+  host_os=$(uname -s | sed -e 's/Linux/linux/;s/Darwin/mac/')
   try_32bit_host_build=
   while [[ $1 ]]; do
     case "$1" in
       --target-arch=*)
         target_arch="$(echo "$1" | sed 's/^[^=]*=//')"
+        ;;
+      --host-os=*)
+        host_os="$(echo "$1" | sed 's/^[^=]*=//')"
         ;;
       --try-32bit-host)
         try_32bit_host_build=true

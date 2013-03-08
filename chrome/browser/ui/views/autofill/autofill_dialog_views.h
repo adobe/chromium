@@ -11,15 +11,19 @@
 #include "chrome/browser/ui/autofill/autofill_dialog_view.h"
 #include "ui/views/controls/button/button.h"
 #include "ui/views/controls/button/menu_button_listener.h"
+#include "ui/views/controls/combobox/combobox_listener.h"
 #include "ui/views/controls/link_listener.h"
+#include "ui/views/controls/progress_bar.h"
 #include "ui/views/controls/textfield/textfield_controller.h"
 #include "ui/views/focus/focus_manager.h"
 #include "ui/views/window/dialog_delegate.h"
 
-class ConstrainedWindowViews;
-
 namespace content {
 class KeyboardListener;
+}
+
+namespace gfx {
+class Image;
 }
 
 namespace views {
@@ -27,11 +31,14 @@ class Checkbox;
 class Combobox;
 class FocusManager;
 class ImageButton;
+class ImageView;
 class Label;
+class Link;
 class MenuRunner;
 class TextButton;
 class Textfield;
 class WebView;
+class Widget;
 }
 
 namespace ui {
@@ -50,21 +57,31 @@ class AutofillDialogViews : public AutofillDialogView,
                             public views::ButtonListener,
                             public views::TextfieldController,
                             public views::FocusChangeListener,
-                            public views::LinkListener {
+                            public views::LinkListener,
+                            public views::ComboboxListener {
  public:
   explicit AutofillDialogViews(AutofillDialogController* controller);
   virtual ~AutofillDialogViews();
 
   // AutofillDialogView implementation:
   virtual void Show() OVERRIDE;
+  virtual void Hide() OVERRIDE;
+  virtual void UpdateAccountChooser() OVERRIDE;
+  virtual void UpdateButtonStrip() OVERRIDE;
   virtual void UpdateNotificationArea() OVERRIDE;
   virtual void UpdateSection(DialogSection section) OVERRIDE;
   virtual void GetUserInput(DialogSection section,
                             DetailOutputMap* output) OVERRIDE;
+  virtual string16 GetCvc() OVERRIDE;
   virtual bool UseBillingForShipping() OVERRIDE;
+  virtual bool SaveDetailsInWallet() OVERRIDE;
   virtual bool SaveDetailsLocally() OVERRIDE;
   virtual const content::NavigationController& ShowSignIn() OVERRIDE;
   virtual void HideSignIn() OVERRIDE;
+  virtual void UpdateProgressBar(double value) OVERRIDE;
+  virtual void ModelChanged() OVERRIDE;
+  virtual void SubmitForTesting() OVERRIDE;
+  virtual void CancelForTesting() OVERRIDE;
 
   // views::DialogDelegate implementation:
   virtual string16 GetWindowTitle() const OVERRIDE;
@@ -75,9 +92,13 @@ class AutofillDialogViews : public AutofillDialogView,
   virtual views::View* GetContentsView() OVERRIDE;
   virtual string16 GetDialogButtonLabel(ui::DialogButton button) const OVERRIDE;
   virtual bool IsDialogButtonEnabled(ui::DialogButton button) const OVERRIDE;
-  virtual views::View* GetExtraView() OVERRIDE;
+  virtual views::View* CreateExtraView() OVERRIDE;
+  virtual views::View* CreateTitlebarExtraView() OVERRIDE;
+  virtual views::View* CreateFootnoteView() OVERRIDE;
   virtual bool Cancel() OVERRIDE;
   virtual bool Accept() OVERRIDE;
+  virtual views::NonClientFrameView* CreateNonClientFrameView(
+      views::Widget* widget) OVERRIDE;
 
   // views::ButtonListener implementation:
   virtual void ButtonPressed(views::Button* sender,
@@ -100,9 +121,12 @@ class AutofillDialogViews : public AutofillDialogView,
   // views::LinkListener implementation:
   virtual void LinkClicked(views::Link* source, int event_flags) OVERRIDE;
 
+  // views::ComboboxListener implementation:
+  virtual void OnSelectedIndexChanged(views::Combobox* combobox) OVERRIDE;
+
  private:
-  // A class which holds a textfield and draws extra stuff on top, like credit
-  // card icons or invalid content indications.
+  // A class which holds a textfield and draws extra stuff on top, like
+  // invalid content indications.
   class DecoratedTextfield : public views::View {
    public:
     DecoratedTextfield(const string16& default_value,
@@ -127,6 +151,77 @@ class AutofillDialogViews : public AutofillDialogView,
     bool invalid_;
 
     DISALLOW_COPY_AND_ASSIGN(DecoratedTextfield);
+  };
+
+  // A View which displays the currently selected account and lets the user
+  // switch accounts.
+  class AccountChooser : public views::View,
+                         public views::LinkListener {
+   public:
+    explicit AccountChooser(AutofillDialogController* controller);
+    virtual ~AccountChooser();
+
+    // Updates the view based on the state that |controller_| reports.
+    void Update();
+
+    // views::View implementation.
+    virtual bool OnMousePressed(const ui::MouseEvent& event) OVERRIDE;
+    virtual void OnMouseReleased(const ui::MouseEvent& event) OVERRIDE;
+
+    // views::LinkListener implementation.
+    virtual void LinkClicked(views::Link* source, int event_flags) OVERRIDE;
+
+   private:
+    // The icon for the currently in-use account.
+    views::ImageView* image_;
+
+    // The label for the currently in-use account.
+    views::Label* label_;
+
+    // The drop arrow.
+    views::ImageView* arrow_;
+
+    // The signin link.
+    views::Link* link_;
+
+    // The controller |this| queries for logic and state.
+    AutofillDialogController* controller_;
+
+    // Runs the suggestion menu (triggered by each section's |suggested_button|.
+    scoped_ptr<views::MenuRunner> menu_runner_;
+
+    DISALLOW_COPY_AND_ASSIGN(AccountChooser);
+  };
+
+  // An area for notifications. Some notifications point at the account chooser.
+  class NotificationArea : public views::View {
+   public:
+    NotificationArea();
+    virtual ~NotificationArea();
+
+    views::Checkbox* checkbox() { return checkbox_; }
+
+    void set_arrow_centering_anchor(views::View* arrow_centering_anchor) {
+      arrow_centering_anchor_ = arrow_centering_anchor;
+    }
+
+    void SetNotification(const DialogNotification& notification);
+
+    // views::View implementation.
+    virtual std::string GetClassName() const OVERRIDE;
+    virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
+
+   private:
+    views::View* container_;
+    views::Checkbox* checkbox_;
+    views::Label* label_;
+
+    // If |notification_.HasArrow()| is true, the arrow should point at this.
+    views::View* arrow_centering_anchor_;  // weak.
+
+    DialogNotification notification_;
+
+    DISALLOW_COPY_AND_ASSIGN(NotificationArea);
   };
 
   typedef std::map<const DetailInput*, DecoratedTextfield*> TextfieldMap;
@@ -168,16 +263,33 @@ class AutofillDialogViews : public AutofillDialogView,
   class SuggestionView : public views::View {
    public:
     SuggestionView(const string16& edit_label,
-                   views::LinkListener* edit_listener);
+                   AutofillDialogViews* autofill_dialog);
     virtual ~SuggestionView();
 
-    // Sets the display text of the suggestion. TODO(estade): this needs to
-    // support credit card icons as well.
+    // Sets the display text of the suggestion.
     void SetSuggestionText(const string16& text);
+
+    // Sets the icon which should be displayed ahead of the text.
+    void SetSuggestionIcon(const gfx::Image& image);
+
+    // Shows an auxiliary textfield to the right of the suggestion icon and
+    // text. This is currently only used to show a CVC field for the CC section.
+    void ShowTextfield(const string16& placeholder_text,
+                       const gfx::ImageSkia& icon);
+
+    DecoratedTextfield* decorated_textfield() { return decorated_; }
 
    private:
     // The label that holds the suggestion description text.
     views::Label* label_;
+    // The second (and greater) line of text that describes the suggestion.
+    views::Label* label_line_2_;
+    // The icon that comes just before |label_|.
+    views::ImageView* icon_;
+    // A view to contain |label_| and |icon_|.
+    views::View* label_container_;
+    // The input set by ShowTextfield.
+    DecoratedTextfield* decorated_;
 
     DISALLOW_COPY_AND_ASSIGN(SuggestionView);
   };
@@ -203,6 +315,17 @@ class AutofillDialogViews : public AutofillDialogView,
     SuggestionView* suggested_info;
     // The view that allows selecting other data suggestions.
     views::ImageButton* suggested_button;
+  };
+
+  class AutocheckoutProgressBar : public views::ProgressBar {
+   public:
+    AutocheckoutProgressBar();
+
+   private:
+    // Overidden from View:
+    virtual gfx::Size GetPreferredSize() OVERRIDE;
+
+    DISALLOW_COPY_AND_ASSIGN(AutocheckoutProgressBar);
   };
 
   typedef std::map<DialogSection, DetailsGroup> DetailGroupMap;
@@ -259,15 +382,15 @@ class AutofillDialogViews : public AutofillDialogView,
   // the input.
   void TextfieldEditedOrActivated(views::Textfield* textfield, bool was_edit);
 
+  // Call this when the size of anything in |contents_| might've changed.
+  void ContentsPreferredSizeChanged();
+
   // The controller that drives this view. Weak pointer, always non-NULL.
   AutofillDialogController* const controller_;
 
-  // True if the termination action was a submit.
-  bool did_submit_;
-
   // The window that displays |contents_|. Weak pointer; may be NULL when the
   // dialog is closing.
-  ConstrainedWindowViews* window_;
+  views::Widget* window_;
 
   // The top-level View for the dialog. Owned by the constrained window.
   views::View* contents_;
@@ -276,7 +399,7 @@ class AutofillDialogViews : public AutofillDialogView,
   DetailGroupMap detail_groups_;
 
   // Somewhere to show notification messages about errors, warnings, or promos.
-  views::Label* notification_label_;
+  NotificationArea* notification_area_;
 
   // The checkbox that controls whether to use the billing details for shipping
   // as well.
@@ -285,8 +408,8 @@ class AutofillDialogViews : public AutofillDialogView,
   // Runs the suggestion menu (triggered by each section's |suggested_button|.
   scoped_ptr<views::MenuRunner> menu_runner_;
 
-  // The link that initiates the sign in flow.
-  views::Link* sign_in_link_;
+  // The view that allows the user to toggle the data source.
+  AccountChooser* account_chooser_;
 
   // View to host the signin dialog and related controls.
   views::View* sign_in_container_;
@@ -308,6 +431,12 @@ class AutofillDialogViews : public AutofillDialogView,
   // This checkbox controls whether new details are saved to the Autofill
   // database. It lives in |extra_view_|.
   views::Checkbox* save_in_chrome_checkbox_;
+
+  // View to host |autocheckout_progress_bar_| and its label.
+  views::View* autocheckout_progress_bar_view_;
+
+  // Progress bar for displaying Autocheckout progress.
+  AutocheckoutProgressBar* autocheckout_progress_bar_;
 
   // The focus manager for |window_|.
   views::FocusManager* focus_manager_;

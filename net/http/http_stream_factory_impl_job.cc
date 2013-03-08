@@ -168,9 +168,15 @@ LoadState HttpStreamFactoryImpl::Job::GetLoadState() const {
   }
 }
 
-void HttpStreamFactoryImpl::Job::MarkAsAlternate(const GURL& original_url) {
+void HttpStreamFactoryImpl::Job::MarkAsAlternate(
+    const GURL& original_url,
+    PortAlternateProtocolPair alternate) {
   DCHECK(!original_url_.get());
   original_url_.reset(new GURL(original_url));
+  if (alternate.protocol == QUIC_1) {
+    DCHECK(session_->params().enable_quic);
+    using_quic_ = true;
+  }
 }
 
 void HttpStreamFactoryImpl::Job::WaitFor(Job* job) {
@@ -649,9 +655,9 @@ bool HttpStreamFactoryImpl::Job::ShouldForceSpdyWithoutSSL() const {
 }
 
 bool HttpStreamFactoryImpl::Job::ShouldForceQuic() const {
-  return session_->params().origin_port_to_force_quic_on == origin_.port()
-      && session_->params().origin_port_to_force_quic_on != 0
-      && proxy_info_.is_direct();
+  return session_->params().enable_quic &&
+      session_->params().origin_port_to_force_quic_on == origin_.port() &&
+      proxy_info_.is_direct();
 }
 
 int HttpStreamFactoryImpl::Job::DoWaitForJob() {
@@ -676,9 +682,17 @@ int HttpStreamFactoryImpl::Job::DoInitConnection() {
   using_ssl_ = request_info_.url.SchemeIs("https") || ShouldForceSpdySSL();
   using_spdy_ = false;
 
-  if (ShouldForceQuic()) {
-    next_state_ = STATE_CREATE_STREAM;
+  if (ShouldForceQuic())
     using_quic_ = true;
+
+  if (using_quic_) {
+    DCHECK(session_->params().enable_quic);
+    if (!proxy_info_.is_direct()) {
+      NOTREACHED();
+      // TODO(rch): support QUIC proxies.
+      return ERR_NOT_IMPLEMENTED;
+    }
+    next_state_ = STATE_CREATE_STREAM;
     return OK;
   }
 
@@ -1175,19 +1189,26 @@ int HttpStreamFactoryImpl::Job::ReconsiderProxyAfterError(int error) {
     case ERR_INTERNET_DISCONNECTED:
     case ERR_ADDRESS_UNREACHABLE:
     case ERR_CONNECTION_CLOSED:
+    case ERR_CONNECTION_TIMED_OUT:
     case ERR_CONNECTION_RESET:
     case ERR_CONNECTION_REFUSED:
     case ERR_CONNECTION_ABORTED:
     case ERR_TIMED_OUT:
     case ERR_TUNNEL_CONNECTION_FAILED:
     case ERR_SOCKS_CONNECTION_FAILED:
+    // This can happen in the case of trying to talk to a proxy using SSL, and
+    // ending up talking to a captive portal that supports SSL instead.
+    case ERR_PROXY_CERTIFICATE_INVALID:
+    // This can happen when trying to talk SSL to a non-SSL server (Like a
+    // captive portal).
+    case ERR_SSL_PROTOCOL_ERROR:
       break;
     case ERR_SOCKS_CONNECTION_HOST_UNREACHABLE:
       // Remap the SOCKS-specific "host unreachable" error to a more
       // generic error code (this way consumers like the link doctor
       // know to substitute their error page).
       //
-      // Note that if the host resolving was done by the SOCSK5 proxy, we can't
+      // Note that if the host resolving was done by the SOCKS5 proxy, we can't
       // differentiate between a proxy-side "host not found" versus a proxy-side
       // "address unreachable" error, and will report both of these failures as
       // ERR_ADDRESS_UNREACHABLE.

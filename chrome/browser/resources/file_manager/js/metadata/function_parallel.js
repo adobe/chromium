@@ -3,12 +3,14 @@
 // found in the LICENSE file.
 
 /**
- * @constructor
  * @class FunctionSequence to invoke steps in sequence
  *
- * @param steps             array of functions to invoke in parallel
- * @param callback          callback to invoke on success
- * @param failureCallback   callback to invoke on failure
+ * @param {string} name  // TODO(JSDOC).
+ * @param {Array.<function>} steps Array of functions to invoke in parallel.
+ * @param {Object} logger  // TODO(JSDOC).
+ * @param {function()} callback Callback to invoke on success.
+ * @param {function(string)} failureCallback Callback to invoke on failure.
+ * @constructor
  */
 function FunctionParallel(name, steps, logger, callback, failureCallback) {
   // Private variables hidden in closure
@@ -31,7 +33,8 @@ function FunctionParallel(name, steps, logger, callback, failureCallback) {
 /**
  * Error handling function, which fires error callback.
  *
- * @param err error message
+ * @param {string} err Error message.
+ * @private
  */
 FunctionParallel.prototype.onError_ = function(err) {
   if (!this.failed_) {
@@ -44,6 +47,8 @@ FunctionParallel.prototype.onError_ = function(err) {
  * Advances to next step. This method should not be used externally. In external
  * cases should be used nextStep function, which is defined in closure and thus
  * has access to internal variables of functionsequence.
+ *
+ * @private
  */
 FunctionParallel.prototype.nextStep_ = function() {
   if (--this.remaining == 0 && !this.failed_) {
@@ -54,20 +59,21 @@ FunctionParallel.prototype.nextStep_ = function() {
 /**
  * This function should be called only once on start, so start all the children
  * at once
+ * @param {...} var_args  // TODO(JSDOC).
  */
 FunctionParallel.prototype.start = function(var_args) {
-  this.logger.vlog('Starting [' + this.steps_.length + '] parallel tasks with '
-                    + arguments.length + ' argument(s)');
+  this.logger.vlog('Starting [' + this.steps_.length + '] parallel tasks ' +
+                   'with ' + arguments.length + ' argument(s)');
   if (this.logger.verbose) {
     for (var j = 0; j < arguments.length; j++) {
       this.logger.vlog(arguments[j]);
     }
   }
-  for (var i=0; i < this.steps_.length; i++) {
+  for (var i = 0; i < this.steps_.length; i++) {
     this.logger.vlog('Attempting to start step [' + this.steps_[i].name + ']');
     try {
       this.steps_[i].apply(this, arguments);
-    } catch(e) {
+    } catch (e) {
       this.onError(e.toString());
     }
   }

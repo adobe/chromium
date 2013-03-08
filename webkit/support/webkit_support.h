@@ -17,15 +17,18 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDevToolsAgentClient.h"
 #include "ui/base/keycodes/keyboard_codes.h"
 
+namespace base {
 class FilePath;
+}
 
 namespace WebKit {
+class Platform;
 class WebApplicationCacheHost;
 class WebApplicationCacheHostClient;
 class WebFileSystemCallbacks;
 class WebFrame;
 class WebGamepads;
-class WebKitPlatformSupport;
+class WebLayerTreeView;
 class WebMediaPlayer;
 class WebMediaPlayerClient;
 class WebPlugin;
@@ -56,7 +59,7 @@ namespace webkit_support {
 // webkit-in-chromium build, this is the root directory of the checkout. In a
 // standalone webkit build, it is Source/WebKit/chromium relative from the
 // checkout's root directory.
-FilePath GetChromiumRootDirFilePath();
+base::FilePath GetChromiumRootDirFilePath();
 
 // Initializes or terminates a test environment.
 // |unit_test_mode| should be set to true when running in a TestSuite, in which
@@ -74,12 +77,11 @@ void SetUpTestEnvironment(WebKit::Platform* shadow_platform_delegate);
 void SetUpTestEnvironmentForUnitTests(
     WebKit::Platform* shadow_platform_delegate);
 void TearDownTestEnvironment();
-void ResetTestEnvironment();
 
-// Returns a pointer to a WebKitPlatformSupport implementation for
+// Returns a pointer to a Platform implementation for
 // DumpRenderTree.  Needs to call SetUpTestEnvironment() before this.
 // This returns a pointer to a static instance.  Don't delete it.
-WebKit::WebKitPlatformSupport* GetWebKitPlatformSupport();
+WebKit::Platform* GetWebKitPlatformSupport();
 
 // This is used by WebFrameClient::createPlugin().
 WebKit::WebPlugin* CreateWebPlugin(WebKit::WebFrame* frame,
@@ -130,6 +132,26 @@ GraphicsContext3DImplementation GetGraphicsContext3DImplementation();
 WebKit::WebGraphicsContext3D* CreateGraphicsContext3D(
     const WebKit::WebGraphicsContext3D::Attributes& attributes,
     WebKit::WebView* web_view);
+
+enum LayerTreeViewType {
+  FAKE_CONTEXT,
+  SOFTWARE_CONTEXT,
+  MESA_CONTEXT
+};
+
+class DRTLayerTreeViewClient {
+ public:
+  virtual ~DRTLayerTreeViewClient() { }
+  virtual void Layout() = 0;
+  virtual void ScheduleComposite() = 0;
+};
+
+WebKit::WebLayerTreeView* CreateLayerTreeView(
+    LayerTreeViewType type,
+    DRTLayerTreeViewClient* client,
+    WebKit::WebThread* thread);
+
+void SetThreadedCompositorEnabled(bool enabled);
 
 // ------- URL load mocking.
 // Registers the file at |file_path| to be served when |url| is requested.

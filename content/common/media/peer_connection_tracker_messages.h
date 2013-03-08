@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/values.h"
 #include "content/common/content_export.h"
 #include "ipc/ipc_message_macros.h"
 
@@ -21,3 +22,13 @@ IPC_MESSAGE_CONTROL1(PeerConnectionTrackerHost_AddPeerConnection,
                      PeerConnectionInfo /* info */)
 IPC_MESSAGE_CONTROL1(PeerConnectionTrackerHost_RemovePeerConnection,
                      int /* lid */)
+IPC_MESSAGE_CONTROL3(PeerConnectionTrackerHost_UpdatePeerConnection,
+                     int /* lid */,
+                     std::string /* type */,
+                     std::string /* value */)
+IPC_MESSAGE_CONTROL2(PeerConnectionTrackerHost_AddStats,
+                     int /* lid */,
+                     base::ListValue /* value */)
+
+// Messages sent to PeerConnectionTracker.
+IPC_MESSAGE_CONTROL0(PeerConnectionTracker_GetAllStats)

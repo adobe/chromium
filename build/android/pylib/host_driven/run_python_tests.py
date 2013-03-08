@@ -13,8 +13,7 @@ from pylib import android_commands
 from pylib import constants
 from pylib.base.test_result import TestResults
 from pylib.instrumentation import apk_info
-from pylib.instrumentation import run_java_tests
-from pylib.instrumentation.run_java_tests import FatalTestException
+from pylib.instrumentation import test_runner
 
 import python_test_base
 from python_test_caller import CallPythonTest
@@ -61,7 +60,7 @@ def DispatchPythonTests(options):
 
   attached_devices = android_commands.GetAttachedDevices()
   if not attached_devices:
-    raise FatalTestException('You have no devices attached or visible!')
+    raise Exception('You have no devices attached or visible!')
   if options.device:
     attached_devices = [options.device]
 
@@ -86,8 +85,8 @@ def DispatchPythonTests(options):
   for device_id in attached_devices:
     logging.debug('Pushing files to device %s', device_id)
     apks = [apk_info.ApkInfo(options.test_apk_path, options.test_apk_jar_path)]
-    test_files_copier = run_java_tests.TestRunner(options, device_id,
-                                                  None, False, 0, apks, [])
+    test_files_copier = test_runner.TestRunner(options, device_id, 0, False,
+                                               apks, [])
     test_files_copier.CopyTestFilesOnce()
 
   # Actually run the tests.
@@ -118,9 +117,9 @@ def _GetTestModules(python_test_root, is_official_build):
   # By default run all python tests under pythonDrivenTests.
   python_test_file_list = []
   for root, _, files in os.walk(python_test_root):
-    if (root.endswith('pythonDrivenTests')
-        or (is_official_build
-            and root.endswith('pythonDrivenTests/official'))):
+    if (root.endswith('host_driven_tests') or
+        root.endswith('pythonDrivenTests') or
+        (is_official_build and root.endswith('pythonDrivenTests/official'))):
       python_test_file_list += _GetPythonFiles(root, files)
   python_test_file_list.sort()
 

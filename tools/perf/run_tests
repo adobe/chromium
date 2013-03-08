@@ -12,17 +12,20 @@ import os
 import sys
 
 import perf_tools
-import telemetry.run_tests
+from telemetry.test import gtest_testrunner
+from telemetry.test import run_tests
 
 if __name__ == '__main__':
-  top_level_dir = os.path.abspath(
-    os.path.dirname(__file__))
+  top_level_dir = os.path.abspath(os.path.dirname(__file__))
+  runner = gtest_testrunner.GTestTestRunner(print_result_after_run=False)
   start_dir = 'perf_tools'
-  ret = telemetry.run_tests.Main(
-    sys.argv[1:], start_dir, top_level_dir)
+  ret = run_tests.Main(sys.argv[1:], start_dir, top_level_dir, runner)
 
   start_dir = 'page_sets'
-  ret = telemetry.run_tests.Main(
-    sys.argv[1:], start_dir, top_level_dir)
+  ret = ret + run_tests.Main(sys.argv[1:], start_dir, top_level_dir, runner)
 
-  sys.exit(ret)
+  if runner.result:
+    runner.result.PrintSummary()
+    sys.exit(min(ret + runner.result.num_errors, 255))
+  else:
+    sys.exit(ret)

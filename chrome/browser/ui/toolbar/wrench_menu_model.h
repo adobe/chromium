@@ -5,9 +5,10 @@
 #ifndef CHROME_BROWSER_UI_TOOLBAR_WRENCH_MENU_MODEL_H_
 #define CHROME_BROWSER_UI_TOOLBAR_WRENCH_MENU_MODEL_H_
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
+#include "content/public/browser/host_zoom_map.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "ui/base/accelerators/accelerator.h"
@@ -16,7 +17,6 @@
 
 class BookmarkSubMenuModel;
 class Browser;
-class GlobalError;
 class RecentTabsSubMenuModel;
 class TabStripModel;
 
@@ -148,11 +148,7 @@ class WrenchMenuModel : public ui::SimpleMenuModel,
   // |new_menu| should be set to true.
   void CreateZoomMenu(bool new_menu);
 
-  // Various GlobalError objects share a single menu item. This helper routine
-  // returns the GlobalError object that is currently displaying a message in
-  // that item, otherwise returns NULL if we should display one of the default
-  // messages.
-  GlobalError* GetActiveSignedInServiceError() const;
+  void OnZoomLevelChanged(const std::string& host);
 
   // Models for the special menu items with buttons.
   scoped_ptr<ui::ButtonMenuItemModel> edit_menu_item_model_;
@@ -175,6 +171,7 @@ class WrenchMenuModel : public ui::SimpleMenuModel,
   Browser* browser_;  // weak
   TabStripModel* tab_strip_model_; // weak
 
+  content::HostZoomMap::ZoomLevelChangedCallback zoom_callback_;
   content::NotificationRegistrar registrar_;
 
   DISALLOW_COPY_AND_ASSIGN(WrenchMenuModel);

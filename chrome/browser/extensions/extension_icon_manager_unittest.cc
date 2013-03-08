@@ -17,6 +17,7 @@
 
 using content::BrowserThread;
 using extensions::Extension;
+using extensions::Manifest;
 
 // Our test class that takes care of managing the necessary threads for loading
 // extension icons, and waiting for those loads to happen.
@@ -75,9 +76,8 @@ class TestIconManager : public ExtensionIconManager {
   explicit TestIconManager(ExtensionIconManagerTest* test) : test_(test) {}
   virtual ~TestIconManager() {}
 
-  // Implements the ImageLoadingTracker::Observer interface, and calls through
-  // to the base class' implementation. Then it lets the test know that an
-  // image load was observed.
+  // Overrides the ImageLoader callback, and calls through to the base class'
+  // implementation. Then it lets the test know that an image load was observed.
   virtual void OnImageLoaded(const std::string& extension_id,
                              const gfx::Image& image) OVERRIDE {
     ExtensionIconManager::OnImageLoaded(extension_id, image);
@@ -104,9 +104,9 @@ TEST_F(ExtensionIconManagerTest, LoadRemoveLoad) {
   scoped_ptr<Profile> profile(new TestingProfile());
   SkBitmap default_icon = GetDefaultIcon();
 
-  FilePath test_dir;
+  base::FilePath test_dir;
   ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &test_dir));
-  FilePath manifest_path = test_dir.AppendASCII(
+  base::FilePath manifest_path = test_dir.AppendASCII(
       "extensions/image_loading_tracker/app.json");
 
   JSONFileValueSerializer serializer(manifest_path);
@@ -116,7 +116,7 @@ TEST_F(ExtensionIconManagerTest, LoadRemoveLoad) {
 
   std::string error;
   scoped_refptr<Extension> extension(Extension::Create(
-      manifest_path.DirName(), Extension::INVALID, *manifest.get(),
+      manifest_path.DirName(), Manifest::INVALID_LOCATION, *manifest.get(),
       Extension::NO_FLAGS, &error));
   ASSERT_TRUE(extension.get());
   TestIconManager icon_manager(this);
@@ -145,9 +145,9 @@ TEST_F(ExtensionIconManagerTest, LoadRemoveLoad) {
 TEST_F(ExtensionIconManagerTest, LoadComponentExtensionResource) {
   SkBitmap default_icon = GetDefaultIcon();
 
-  FilePath test_dir;
+  base::FilePath test_dir;
   ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &test_dir));
-  FilePath manifest_path = test_dir.AppendASCII(
+  base::FilePath manifest_path = test_dir.AppendASCII(
       "extensions/file_manager/app.json");
 
   JSONFileValueSerializer serializer(manifest_path);
@@ -157,7 +157,7 @@ TEST_F(ExtensionIconManagerTest, LoadComponentExtensionResource) {
 
   std::string error;
   scoped_refptr<Extension> extension(Extension::Create(
-      manifest_path.DirName(), Extension::COMPONENT, *manifest.get(),
+      manifest_path.DirName(), Manifest::COMPONENT, *manifest.get(),
       Extension::NO_FLAGS, &error));
   ASSERT_TRUE(extension.get());
 

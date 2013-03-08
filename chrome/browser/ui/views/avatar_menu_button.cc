@@ -4,10 +4,10 @@
 
 #include "chrome/browser/ui/views/avatar_menu_button.h"
 
+#include "base/prefs/pref_service.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/command_updater.h"
 #include "chrome/browser/managed_mode/managed_mode.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/avatar_menu_model.h"
 #include "chrome/browser/profiles/profile_info_util.h"
 #include "chrome/browser/profiles/profile_metrics.h"
@@ -20,71 +20,8 @@
 #include "ui/gfx/canvas.h"
 #include "ui/views/widget/widget.h"
 
-
-#if defined(OS_WIN)
-#include <shobjidl.h>
-#include "base/win/scoped_comptr.h"
-#include "base/win/windows_version.h"
-#include "skia/ext/image_operations.h"
-#include "ui/gfx/icon_util.h"
-#endif
-
 static inline int Round(double x) {
   return static_cast<int>(x + 0.5);
-}
-
-// The Windows 7 taskbar supports dynamic overlays and effects, we use this
-// to ovelay the avatar icon there. The overlay only applies if the taskbar
-// is in "default large icon mode". This function is a best effort deal so
-// we bail out silently at any error condition.
-// See http://msdn.microsoft.com/en-us/library/dd391696(VS.85).aspx for
-// more information.
-void DrawTaskBarDecoration(gfx::NativeWindow window, const gfx::Image* image) {
-#if defined(OS_WIN) && !defined(USE_AURA)
-  if (base::win::GetVersion() < base::win::VERSION_WIN7)
-    return;
-
-  // SetOverlayIcon does nothing if the window is not visible so testing
-  // here avoids all the wasted effort of the image resizing.
-  if (!::IsWindowVisible(window))
-    return;
-
-  base::win::ScopedComPtr<ITaskbarList3> taskbar;
-  HRESULT result = taskbar.CreateInstance(CLSID_TaskbarList, NULL,
-                                          CLSCTX_INPROC_SERVER);
-  if (FAILED(result) || FAILED(taskbar->HrInit()))
-    return;
-  HICON icon = NULL;
-  if (image) {
-    const SkBitmap* bitmap = image->ToSkBitmap();
-    const SkBitmap* source_bitmap = NULL;
-    SkBitmap squarer_bitmap;
-    if ((bitmap->width() == profiles::kAvatarIconWidth) &&
-        (bitmap->height() == profiles::kAvatarIconHeight)) {
-      // Shave a couple of columns so the bitmap is more square. So when
-      // resized to a square aspect ratio it looks pretty.
-      int x = 2;
-      bitmap->extractSubset(&squarer_bitmap, SkIRect::MakeXYWH(x, 0,
-          profiles::kAvatarIconWidth - x * 2, profiles::kAvatarIconHeight));
-      source_bitmap = &squarer_bitmap;
-    } else {
-      // The image's size has changed. Resize what we have.
-      source_bitmap = bitmap;
-    }
-    // Since the target size is so small, we use our best resizer. Never pass
-    // windows a different size because it will badly hammer it to 16x16.
-    SkBitmap sk_icon = skia::ImageOperations::Resize(
-        *source_bitmap,
-        skia::ImageOperations::RESIZE_LANCZOS3,
-        16, 16);
-    icon = IconUtil::CreateHICONFromSkBitmap(sk_icon);
-    if (!icon)
-      return;
-  }
-  taskbar->SetOverlayIcon(window, icon, L"");
-  if (icon)
-    DestroyIcon(icon);
-#endif
 }
 
 AvatarMenuButton::AvatarMenuButton(Browser* browser, bool incognito)

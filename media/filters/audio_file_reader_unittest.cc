@@ -73,6 +73,19 @@ class AudioFileReaderTest : public testing::Test {
     ReadAndVerify(hash, trimmed_frames);
   }
 
+  void RunTestFailingDemux(const char* fn) {
+    Initialize(fn);
+    EXPECT_FALSE(reader_->Open());
+  }
+
+  void RunTestFailingDecode(const char* fn) {
+    Initialize(fn);
+    EXPECT_TRUE(reader_->Open());
+    scoped_ptr<AudioBus> decoded_audio_data = AudioBus::Create(
+        reader_->channels(), reader_->number_of_frames());
+    EXPECT_EQ(reader_->Read(decoded_audio_data.get()), 0);
+  }
+
  protected:
   scoped_refptr<DecoderBuffer> data_;
   scoped_ptr<InMemoryUrlProtocol> protocol_;
@@ -86,8 +99,7 @@ TEST_F(AudioFileReaderTest, WithoutOpen) {
 }
 
 TEST_F(AudioFileReaderTest, InvalidFile) {
-  Initialize("ten_byte_file");
-  ASSERT_FALSE(reader_->Open());
+  RunTestFailingDemux("ten_byte_file");
 }
 
 TEST_F(AudioFileReaderTest, WithVideo) {
@@ -130,6 +142,19 @@ TEST_F(AudioFileReaderTest, AAC) {
   RunTest("sfx.m4a", NULL, 1, 44100,
           base::TimeDelta::FromMicroseconds(312001), 13759, 13312);
 }
+
+TEST_F(AudioFileReaderTest, MidStreamConfigChangesFail) {
+  RunTestFailingDecode("midstream_config_change.mp3");
+}
 #endif
+
+TEST_F(AudioFileReaderTest, VorbisInvalidChannelLayout) {
+  RunTestFailingDemux("9ch.ogg");
+}
+
+TEST_F(AudioFileReaderTest, WaveValidFourChannelLayout) {
+  RunTest("4ch.wav", "d40bb7dbe532b2f1cf2e3558e780caa2", 4, 44100,
+          base::TimeDelta::FromMicroseconds(100001), 4410, 4410);
+}
 
 }  // namespace media

@@ -18,6 +18,11 @@ class PluginPrefs;
 
 namespace extension_browsing_data_api_constants {
 
+// Parameter name keys.
+extern const char kDataRemovalPermittedKey[];
+extern const char kDataToRemoveKey[];
+extern const char kOptionsKey[];
+
 // Type keys.
 extern const char kAppCacheKey[];
 extern const char kCacheKey[];
@@ -40,19 +45,43 @@ extern const char kSinceKey[];
 extern const char kUnprotectedWebKey[];
 
 // Errors!
+extern const char kBadDataTypeDetails[];
+extern const char kDeleteProhibitedError[];
 extern const char kOneAtATimeError[];
 
 }  // namespace extension_browsing_data_api_constants
 
-// This serves as a base class from which the browsing data API functions will
-// inherit. Each needs to be an observer of BrowsingDataRemover events, and each
-// will handle those events in the same way (by calling the passed-in callback
-// function).
+
+class BrowsingDataSettingsFunction : public SyncExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("browsingData.settings", BROWSINGDATA_SETTINGS)
+
+  // ExtensionFunction:
+  virtual bool RunImpl() OVERRIDE;
+
+ protected:
+  virtual ~BrowsingDataSettingsFunction() {}
+
+ private:
+  // Sets a boolean value in the |selected_dict| with the |data_type| as a key,
+  // indicating whether the data type is both selected and permitted to be
+  // removed; and a value in the |permitted_dict| with the |data_type| as a
+  // key, indicating only whether the data type is permitted to be removed.
+  void SetDetails(DictionaryValue* selected_dict,
+                  DictionaryValue* permitted_dict,
+                  const char* data_type,
+                  bool is_selected);
+};
+
+// This serves as a base class from which the browsing data API removal
+// functions will inherit. Each needs to be an observer of BrowsingDataRemover
+// events, and each will handle those events in the same way (by calling the
+// passed-in callback function).
 //
 // Each child class must implement GetRemovalMask(), which returns the bitmask
 // of data types to remove.
-class BrowsingDataExtensionFunction : public AsyncExtensionFunction,
-                                      public BrowsingDataRemover::Observer {
+class BrowsingDataRemoveFunction : public AsyncExtensionFunction,
+                                   public BrowsingDataRemover::Observer {
  public:
   // BrowsingDataRemover::Observer interface method.
   virtual void OnBrowsingDataRemoverDone() OVERRIDE;
@@ -61,11 +90,11 @@ class BrowsingDataExtensionFunction : public AsyncExtensionFunction,
   virtual bool RunImpl() OVERRIDE;
 
  protected:
-  virtual ~BrowsingDataExtensionFunction() {}
+  virtual ~BrowsingDataRemoveFunction() {}
 
   // Children should override this method to provide the proper removal mask
   // based on the API call they represent.
-  virtual int GetRemovalMask() const = 0;
+  virtual int GetRemovalMask() = 0;
 
  private:
   // Updates the removal bitmask according to whether removing plugin data is
@@ -85,7 +114,7 @@ class BrowsingDataExtensionFunction : public AsyncExtensionFunction,
   int origin_set_mask_;
 };
 
-class RemoveAppCacheFunction : public BrowsingDataExtensionFunction {
+class RemoveAppCacheFunction : public BrowsingDataRemoveFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("browsingData.removeAppcache",
                              BROWSINGDATA_REMOVEAPPCACHE)
@@ -94,21 +123,21 @@ class RemoveAppCacheFunction : public BrowsingDataExtensionFunction {
   virtual ~RemoveAppCacheFunction() {}
 
   // BrowsingDataTypeExtensionFunction:
-  virtual int GetRemovalMask() const OVERRIDE;
+  virtual int GetRemovalMask() OVERRIDE;
 };
 
-class RemoveBrowsingDataFunction : public BrowsingDataExtensionFunction {
+class RemoveBrowsingDataFunction : public BrowsingDataRemoveFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("browsingData.remove", BROWSINGDATA_REMOVE)
 
  protected:
   virtual ~RemoveBrowsingDataFunction() {}
 
-  // BrowsingDataExtensionFunction:
-  virtual int GetRemovalMask() const OVERRIDE;
+  // BrowsingDataRemoveFunction:
+  virtual int GetRemovalMask() OVERRIDE;
 };
 
-class RemoveCacheFunction : public BrowsingDataExtensionFunction {
+class RemoveCacheFunction : public BrowsingDataRemoveFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("browsingData.removeCache",
                              BROWSINGDATA_REMOVECACHE)
@@ -116,11 +145,11 @@ class RemoveCacheFunction : public BrowsingDataExtensionFunction {
  protected:
   virtual ~RemoveCacheFunction() {}
 
-  // BrowsingDataExtensionFunction:
-  virtual int GetRemovalMask() const OVERRIDE;
+  // BrowsingDataRemoveFunction:
+  virtual int GetRemovalMask() OVERRIDE;
 };
 
-class RemoveCookiesFunction : public BrowsingDataExtensionFunction {
+class RemoveCookiesFunction : public BrowsingDataRemoveFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("browsingData.removeCookies",
                              BROWSINGDATA_REMOVECOOKIES)
@@ -128,11 +157,11 @@ class RemoveCookiesFunction : public BrowsingDataExtensionFunction {
  protected:
   virtual ~RemoveCookiesFunction() {}
 
-  // BrowsingDataExtensionFunction:
-  virtual int GetRemovalMask() const OVERRIDE;
+  // BrowsingDataRemoveFunction:
+  virtual int GetRemovalMask() OVERRIDE;
 };
 
-class RemoveDownloadsFunction : public BrowsingDataExtensionFunction {
+class RemoveDownloadsFunction : public BrowsingDataRemoveFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("browsingData.removeDownloads",
                              BROWSINGDATA_REMOVEDOWNLOADS)
@@ -140,11 +169,11 @@ class RemoveDownloadsFunction : public BrowsingDataExtensionFunction {
  protected:
   virtual ~RemoveDownloadsFunction() {}
 
-  // BrowsingDataExtensionFunction:
-  virtual int GetRemovalMask() const OVERRIDE;
+  // BrowsingDataRemoveFunction:
+  virtual int GetRemovalMask() OVERRIDE;
 };
 
-class RemoveFileSystemsFunction : public BrowsingDataExtensionFunction {
+class RemoveFileSystemsFunction : public BrowsingDataRemoveFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("browsingData.removeFileSystems",
                              BROWSINGDATA_REMOVEFILESYSTEMS)
@@ -152,11 +181,11 @@ class RemoveFileSystemsFunction : public BrowsingDataExtensionFunction {
  protected:
   virtual ~RemoveFileSystemsFunction() {}
 
-  // BrowsingDataExtensionFunction:
-  virtual int GetRemovalMask() const OVERRIDE;
+  // BrowsingDataRemoveFunction:
+  virtual int GetRemovalMask() OVERRIDE;
 };
 
-class RemoveFormDataFunction : public BrowsingDataExtensionFunction {
+class RemoveFormDataFunction : public BrowsingDataRemoveFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("browsingData.removeFormData",
                              BROWSINGDATA_REMOVEFORMDATA)
@@ -164,11 +193,11 @@ class RemoveFormDataFunction : public BrowsingDataExtensionFunction {
  protected:
   virtual ~RemoveFormDataFunction() {}
 
-  // BrowsingDataExtensionFunction:
-  virtual int GetRemovalMask() const OVERRIDE;
+  // BrowsingDataRemoveFunction:
+  virtual int GetRemovalMask() OVERRIDE;
 };
 
-class RemoveHistoryFunction : public BrowsingDataExtensionFunction {
+class RemoveHistoryFunction : public BrowsingDataRemoveFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("browsingData.removeHistory",
                              BROWSINGDATA_REMOVEHISTORY)
@@ -176,11 +205,11 @@ class RemoveHistoryFunction : public BrowsingDataExtensionFunction {
  protected:
   virtual ~RemoveHistoryFunction() {}
 
-  // BrowsingDataExtensionFunction:
-  virtual int GetRemovalMask() const OVERRIDE;
+  // BrowsingDataRemoveFunction:
+  virtual int GetRemovalMask() OVERRIDE;
 };
 
-class RemoveIndexedDBFunction : public BrowsingDataExtensionFunction {
+class RemoveIndexedDBFunction : public BrowsingDataRemoveFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("browsingData.removeIndexedDB",
                              BROWSINGDATA_REMOVEINDEXEDDB)
@@ -188,11 +217,11 @@ class RemoveIndexedDBFunction : public BrowsingDataExtensionFunction {
  protected:
   virtual ~RemoveIndexedDBFunction() {}
 
-  // BrowsingDataExtensionFunction:
-  virtual int GetRemovalMask() const OVERRIDE;
+  // BrowsingDataRemoveFunction:
+  virtual int GetRemovalMask() OVERRIDE;
 };
 
-class RemoveLocalStorageFunction : public BrowsingDataExtensionFunction {
+class RemoveLocalStorageFunction : public BrowsingDataRemoveFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("browsingData.removeLocalStorage",
                              BROWSINGDATA_REMOVELOCALSTORAGE)
@@ -200,11 +229,11 @@ class RemoveLocalStorageFunction : public BrowsingDataExtensionFunction {
  protected:
   virtual ~RemoveLocalStorageFunction() {}
 
-  // BrowsingDataExtensionFunction:
-  virtual int GetRemovalMask() const OVERRIDE;
+  // BrowsingDataRemoveFunction:
+  virtual int GetRemovalMask() OVERRIDE;
 };
 
-class RemovePluginDataFunction : public BrowsingDataExtensionFunction {
+class RemovePluginDataFunction : public BrowsingDataRemoveFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("browsingData.removePluginData",
                              BROWSINGDATA_REMOVEPLUGINDATA)
@@ -212,11 +241,11 @@ class RemovePluginDataFunction : public BrowsingDataExtensionFunction {
  protected:
   virtual ~RemovePluginDataFunction() {}
 
-  // BrowsingDataExtensionFunction:
-  virtual int GetRemovalMask() const OVERRIDE;
+  // BrowsingDataRemoveFunction:
+  virtual int GetRemovalMask() OVERRIDE;
 };
 
-class RemovePasswordsFunction : public BrowsingDataExtensionFunction {
+class RemovePasswordsFunction : public BrowsingDataRemoveFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("browsingData.removePasswords",
                              BROWSINGDATA_REMOVEPASSWORDS)
@@ -224,11 +253,11 @@ class RemovePasswordsFunction : public BrowsingDataExtensionFunction {
  protected:
   virtual ~RemovePasswordsFunction() {}
 
-  // BrowsingDataExtensionFunction:
-  virtual int GetRemovalMask() const OVERRIDE;
+  // BrowsingDataRemoveFunction:
+  virtual int GetRemovalMask() OVERRIDE;
 };
 
-class RemoveWebSQLFunction : public BrowsingDataExtensionFunction {
+class RemoveWebSQLFunction : public BrowsingDataRemoveFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("browsingData.removeWebSQL",
                              BROWSINGDATA_REMOVEWEBSQL)
@@ -236,8 +265,8 @@ class RemoveWebSQLFunction : public BrowsingDataExtensionFunction {
  protected:
   virtual ~RemoveWebSQLFunction() {}
 
-  // BrowsingDataExtensionFunction:
-  virtual int GetRemovalMask() const OVERRIDE;
+  // BrowsingDataRemoveFunction:
+  virtual int GetRemovalMask() OVERRIDE;
 };
 
 #endif  // CHROME_BROWSER_EXTENSIONS_API_BROWSING_DATA_BROWSING_DATA_API_H_

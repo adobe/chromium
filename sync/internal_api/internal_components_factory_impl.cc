@@ -41,18 +41,20 @@ InternalComponentsFactoryImpl::BuildContext(
     ThrottledDataTypeTracker* throttled_data_type_tracker,
     const std::vector<SyncEngineEventListener*>& listeners,
     sessions::DebugInfoGetter* debug_info_getter,
-    TrafficRecorder* traffic_recorder) {
+    TrafficRecorder* traffic_recorder,
+    const std::string& invalidation_client_id) {
   return scoped_ptr<sessions::SyncSessionContext>(
       new sessions::SyncSessionContext(
           connection_manager, directory, workers, monitor,
           throttled_data_type_tracker, listeners, debug_info_getter,
           traffic_recorder,
-          switches_.encryption_method == ENCRYPTION_KEYSTORE));
+          switches_.encryption_method == ENCRYPTION_KEYSTORE,
+          invalidation_client_id));
 }
 
 scoped_ptr<syncable::DirectoryBackingStore>
 InternalComponentsFactoryImpl::BuildDirectoryBackingStore(
-      const std::string& dir_name, const FilePath& backing_filepath) {
+      const std::string& dir_name, const base::FilePath& backing_filepath) {
   return scoped_ptr<syncable::DirectoryBackingStore>(
       new syncable::OnDiskDirectoryBackingStore(dir_name, backing_filepath));
 }

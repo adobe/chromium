@@ -14,6 +14,10 @@ namespace aura {
 class Window;
 }
 
+namespace extensions {
+class Extension;
+}
+
 class ChromeLauncherController;
 
 // Item controller for an app shortcut. Shortcuts track app and launcher ids,
@@ -33,19 +37,31 @@ class AppShortcutLauncherItemController : public LauncherItemController {
   virtual void Launch(int event_flags) OVERRIDE;
   virtual void Activate() OVERRIDE;
   virtual void Close() OVERRIDE;
-  virtual void Clicked() OVERRIDE;
+  virtual void Clicked(const ui::Event& event) OVERRIDE;
   virtual void OnRemoved() OVERRIDE;
   virtual void LauncherItemChanged(
       int model_index,
       const ash::LauncherItem& old_item) OVERRIDE;
-  virtual ChromeLauncherAppMenuItems* GetApplicationList() OVERRIDE;
+  virtual ChromeLauncherAppMenuItems GetApplicationList() OVERRIDE;
   std::vector<content::WebContents*> GetRunningApplications();
 
-  // Stores the optional refocus url pattern for this item.
+  // Get the refocus url pattern, which can be used to identify this application
+  // from a URL link.
   const GURL& refocus_url() const { return refocus_url_; }
+  // Set the refocus url pattern. Used by unit tests.
   void set_refocus_url(const GURL& refocus_url) { refocus_url_ = refocus_url; }
 
  private:
+  // Get the last running application.
+  content::WebContents* GetLRUApplication();
+
+  // Returns true if this app matches the given |web_contents|. To accelerate
+  // the matching, the app managing |extension| as well as the parsed
+  // |refocus_pattern| get passed.
+  bool WebContentMatchesApp(const extensions::Extension* extension,
+                            const URLPattern& refocus_pattern,
+                            content::WebContents* web_contents);
+
   GURL refocus_url_;
   ChromeLauncherControllerPerApp* app_controller_;
 

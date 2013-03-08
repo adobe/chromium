@@ -5,7 +5,7 @@
 #ifndef CHROME_BROWSER_UI_PANELS_DETACHED_PANEL_COLLECTION_H_
 #define CHROME_BROWSER_UI_PANELS_DETACHED_PANEL_COLLECTION_H_
 
-#include <set>
+#include <list>
 #include "base/basictypes.h"
 #include "chrome/browser/ui/panels/panel.h"
 #include "chrome/browser/ui/panels/panel_collection.h"
@@ -17,17 +17,18 @@ class PanelManager;
 // This class manages a group of free-floating panels.
 class DetachedPanelCollection : public PanelCollection {
  public:
-  typedef std::set<Panel*> Panels;
+  typedef std::list<Panel*> Panels;
+  typedef bool (*PanelsComparer)(Panel* panel1, Panel* panel2);
 
   explicit DetachedPanelCollection(PanelManager* panel_manager);
   virtual ~DetachedPanelCollection();
 
   // PanelCollection OVERRIDES:
-  virtual void OnDisplayAreaChanged(const gfx::Rect& old_display_area) OVERRIDE;
+  virtual void OnDisplayChanged() OVERRIDE;
   virtual void RefreshLayout() OVERRIDE;
   virtual void AddPanel(Panel* panel,
                         PositioningMask positioning_mask) OVERRIDE;
-  virtual void RemovePanel(Panel* panel) OVERRIDE;
+  virtual void RemovePanel(Panel* panel, RemovalReason reason) OVERRIDE;
   virtual void CloseAll() OVERRIDE;
   virtual void ResizePanelWindow(
       Panel* panel,
@@ -57,6 +58,8 @@ class DetachedPanelCollection : public PanelCollection {
   virtual void OnPanelActiveStateChanged(Panel* panel) OVERRIDE;
 
   bool HasPanel(Panel* panel) const;
+
+  void SortPanels(PanelsComparer comparer);
 
   int num_panels() const { return panels_.size(); }
   const Panels& panels() const { return panels_; }

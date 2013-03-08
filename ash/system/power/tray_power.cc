@@ -30,7 +30,6 @@
 #include "ui/gfx/image/image_skia_operations.h"
 #include "ui/gfx/size.h"
 #include "ui/views/controls/button/button.h"
-#include "ui/views/controls/button/text_button.h"
 #include "ui/views/controls/image_view.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/layout/box_layout.h"
@@ -167,12 +166,10 @@ gfx::ImageSkia TrayPower::GetBatteryImage(int image_index, IconSet icon_set) {
       icon_set == ICON_DARK ?
       IDR_AURA_UBER_TRAY_POWER_SMALL_DARK : IDR_AURA_UBER_TRAY_POWER_SMALL);
 
-  // TODO(mbolohan): Remove the 2px offset when the assets are centered. See
-  // crbug.com/119832.
   gfx::Rect region(
-      ((image_index & 0x1) ? kBatteryImageWidth : 0) + 2,
+      (image_index & 0x1) ? kBatteryImageWidth : 0,
       (image_index >> 1) * kBatteryImageHeight,
-      kBatteryImageWidth - 2, kBatteryImageHeight);
+      kBatteryImageWidth, kBatteryImageHeight);
   return gfx::ImageSkiaOperations::ExtractSubset(*all.ToImageSkia(), region);
 }
 
@@ -245,7 +242,7 @@ bool TrayPower::UpdateNotificationState(const PowerSupplyStatus& status) {
     return false;
   }
 
-  int remaining_seconds = status.battery_seconds_to_empty;
+  int remaining_seconds = status.averaged_battery_time_to_empty;
   if (remaining_seconds >= kNoWarningSeconds) {
     notification_state_ = NOTIFICATION_NONE;
     return false;

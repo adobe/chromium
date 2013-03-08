@@ -73,6 +73,12 @@ class TabDragController : public content::WebContentsDelegate,
     REORDER
   };
 
+  // Indicates the event source that initiated the drag.
+  enum EventSource {
+    EVENT_SOURCE_MOUSE,
+    EVENT_SOURCE_TOUCH,
+  };
+
   // Amount above or below the tabstrip the user has to drag before detaching.
   static const int kTouchVerticalDetachMagnetism;
   static const int kVerticalDetachMagnetism;
@@ -95,7 +101,8 @@ class TabDragController : public content::WebContentsDelegate,
             int source_tab_offset,
             const ui::ListSelectionModel& initial_selection_model,
             DetachBehavior detach_behavior,
-            MoveBehavior move_behavior);
+            MoveBehavior move_behavior,
+            EventSource event_source);
 
   // Returns true if there is a drag underway and the drag is attached to
   // |tab_strip|.
@@ -109,6 +116,8 @@ class TabDragController : public content::WebContentsDelegate,
   // Sets the move behavior. Has no effect if started_drag() is true.
   void SetMoveBehavior(MoveBehavior behavior);
   MoveBehavior move_behavior() const { return move_behavior_; }
+
+  EventSource event_source() const { return event_source_; }
 
   // See description above fields for details on these.
   bool active() const { return active_; }
@@ -230,8 +239,8 @@ class TabDragController : public content::WebContentsDelegate,
                               bool* was_blocked) OVERRIDE;
   virtual void LoadingStateChanged(content::WebContents* source) OVERRIDE;
   virtual bool ShouldSuppressDialogs() OVERRIDE;
-  virtual content::JavaScriptDialogCreator*
-      GetJavaScriptDialogCreator() OVERRIDE;
+  virtual content::JavaScriptDialogManager*
+      GetJavaScriptDialogManager() OVERRIDE;
 
   // Overridden from content::NotificationObserver:
   virtual void Observe(int type,
@@ -468,6 +477,8 @@ class TabDragController : public content::WebContentsDelegate,
 
   // Handles registering for notifications.
   content::NotificationRegistrar registrar_;
+
+  EventSource event_source_;
 
   // The TabStrip the drag originated from.
   TabStrip* source_tabstrip_;

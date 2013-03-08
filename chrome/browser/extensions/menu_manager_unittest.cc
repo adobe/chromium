@@ -9,6 +9,7 @@
 #include "base/memory/scoped_vector.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
+#include "base/prefs/pref_service.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/event_names.h"
@@ -17,7 +18,7 @@
 #include "chrome/browser/extensions/menu_manager.h"
 #include "chrome/browser/extensions/test_extension_prefs.h"
 #include "chrome/browser/extensions/test_extension_system.h"
-#include "chrome/browser/prefs/pref_service.h"
+#include "chrome/browser/prefs/pref_service_syncable.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/extension.h"
@@ -476,7 +477,7 @@ class MockExtensionSystem : public TestExtensionSystem {
   explicit MockExtensionSystem(Profile* profile)
       : TestExtensionSystem(profile) {}
 
-  virtual EventRouter* event_router() {
+  virtual EventRouter* event_router() OVERRIDE {
     if (!mock_event_router_.get())
       mock_event_router_.reset(new MockEventRouter(profile_));
     return mock_event_router_.get();

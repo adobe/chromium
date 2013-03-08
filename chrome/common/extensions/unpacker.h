@@ -8,10 +8,10 @@
 #include <string>
 #include <vector>
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/tuple.h"
-#include "chrome/common/extensions/extension.h"
+#include "chrome/common/extensions/manifest.h"
 
 class SkBitmap;
 
@@ -27,11 +27,11 @@ namespace extensions {
 // and writes them back out to disk for later use.
 class Unpacker {
  public:
-  typedef std::vector< Tuple2<SkBitmap, FilePath> > DecodedImages;
+  typedef std::vector< Tuple2<SkBitmap, base::FilePath> > DecodedImages;
 
-  Unpacker(const FilePath& extension_path,
+  Unpacker(const base::FilePath& extension_path,
            const std::string& extension_id,
-           Extension::Location location,
+           Manifest::Location location,
            int creation_flags);
   ~Unpacker();
 
@@ -52,13 +52,13 @@ class Unpacker {
   // Read the decoded images back from the file we saved them to.
   // |extension_path| is the path to the extension we unpacked that wrote the
   // data. Returns true on success.
-  static bool ReadImagesFromFile(const FilePath& extension_path,
+  static bool ReadImagesFromFile(const base::FilePath& extension_path,
                                  DecodedImages* images);
 
   // Read the decoded message catalogs back from the file we saved them to.
   // |extension_path| is the path to the extension we unpacked that wrote the
   // data. Returns true on success.
-  static bool ReadMessageCatalogsFromFile(const FilePath& extension_path,
+  static bool ReadMessageCatalogsFromFile(const base::FilePath& extension_path,
                                           base::DictionaryValue* catalogs);
 
   const string16& error_message() { return error_message_; }
@@ -78,30 +78,30 @@ class Unpacker {
 
   // Decodes the image at the given path and puts it in our list of decoded
   // images.
-  bool AddDecodedImage(const FilePath& path);
+  bool AddDecodedImage(const base::FilePath& path);
 
   // Parses the catalog at the given path and puts it in our list of parsed
   // catalogs.
-  bool ReadMessageCatalog(const FilePath& message_path);
+  bool ReadMessageCatalog(const base::FilePath& message_path);
 
   // Set the error message.
   void SetError(const std::string& error);
   void SetUTF16Error(const string16& error);
 
   // The extension to unpack.
-  FilePath extension_path_;
+  base::FilePath extension_path_;
 
   // The extension ID if known.
   std::string extension_id_;
 
   // The location to use for the created extension.
-  Extension::Location location_;
+  Manifest::Location location_;
 
   // The creation flags to use with the created extension.
   int creation_flags_;
 
   // The place we unpacked the extension to.
-  FilePath temp_install_dir_;
+  base::FilePath temp_install_dir_;
 
   // The parsed version of the manifest JSON contained in the extension.
   scoped_ptr<base::DictionaryValue> parsed_manifest_;

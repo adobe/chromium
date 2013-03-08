@@ -15,6 +15,7 @@
 class PrintPreviewDataService;
 class PrintPreviewHandler;
 struct PrintHostMsg_DidGetPreviewPageCount_Params;
+struct PrintHostMsg_RequestPrintPreview_Params;
 
 namespace base {
 class RefCountedBytes;
@@ -52,16 +53,20 @@ class PrintPreviewUI : public ConstrainedWebDialogUI {
   int GetAvailableDraftPageCount();
 
   // Setters
-  void SetInitiatorTabURLAndTitle(const std::string& initiator_url,
-                                  const string16& initiator_tab_title);
+  void SetInitiatorTabTitle(const string16& initiator_tab_title);
 
   string16 initiator_tab_title() { return initiator_tab_title_; }
 
   bool source_is_modifiable() { return source_is_modifiable_; }
 
-  // Set |source_is_modifiable_| for |print_preview_dialog|'s PrintPreviewUI.
-  static void SetSourceIsModifiable(content::WebContents* print_preview_dialog,
-                                    bool source_is_modifiable);
+  bool source_has_selection() { return source_has_selection_; }
+
+  bool print_selection_only() { return print_selection_only_; }
+
+  // Set initial settings for PrintPreviewUI.
+  static void SetInitialParams(
+      content::WebContents* print_preview_dialog,
+      const PrintHostMsg_RequestPrintPreview_Params& params);
 
   // Determines whether to cancel a print preview request based on
   // |preview_ui_id| and |request_id|.
@@ -167,12 +172,14 @@ class PrintPreviewUI : public ConstrainedWebDialogUI {
   // Weak pointer to the WebUI handler.
   PrintPreviewHandler* handler_;
 
-  // Store the |initiator_url| in order to display an accurate error message
-  // when the initiator tab is closed/crashed.
-  std::string initiator_url_;
-
   // Indicates whether the source document can be modified.
   bool source_is_modifiable_;
+
+  // Indicates whether the source document has selection.
+  bool source_has_selection_;
+
+  // Indicates whether only the selection should be printed.
+  bool print_selection_only_;
 
   // Store the initiator tab title, used for populating the print preview dialog
   // title.

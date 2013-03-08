@@ -297,7 +297,7 @@ section {
 .host-list-empty-instructions {
   padding-__MSG_@@bidi_start_edge__: 36px;
   color: #666;
-  background-image: url('host_setup_instructions.png');
+  background-image: url('host_setup_instructions.webp');
   background-repeat: no-repeat;
   background-position: -3px -2px;
 }
@@ -336,12 +336,17 @@ section {
 }
 
 .error-state {
-  background-image: url('icon_warning.png');
+  background-image: url('icon_warning.webp');
   background-repeat: no-repeat;
   background-position: top __MSG_@@bidi_start_edge__;
   padding-__MSG_@@bidi_start_edge__: 30px;
   padding-top: 5px;
   color: #900;
+}
+
+.error-state.multi-line-error-state {
+  padding-top: 0;
+  min-height: 22px;
 }
 
 .expiring {
@@ -369,6 +374,7 @@ section {
   padding: 8px 16px;
   text-align: center;
   font-size: 12px;
+  margin-top: 30px;
 }
 
 .message {
@@ -427,6 +433,17 @@ td {
 .host-list-main-icon {
   margin-__MSG_@@bidi_end_edge__: 10px;
   vertical-align: middle;
+  position: relative;
+}
+
+.host-list-main-icon > span {
+  background-image: url('icon_warning.webp');
+  background-repeat: no-repeat;
+  position: absolute;
+  width: 22px;
+  height: 22px;
+  bottom: -5px;
+  right: -10px;
 }
 
 .host-offline .host-list-label,
@@ -542,10 +559,6 @@ button {
   height: 0;
 }
 
-#nat-box {
-  margin-top: 30px;
-}
-
 /* The NAT traversal state is independent of the app mode, and both need
  * to be combined to determine the visibility of the butter bar. We use
  * a style for the former and the 'hidden' property for the latter. */
@@ -570,7 +583,6 @@ button {
 
 #set-pin-table td {
   border-bottom: 6px solid transparent;
-  text-align: right;
 }
 
 #top-secondary {
@@ -579,11 +591,6 @@ button {
 
 #webapp-description {
   margin-bottom: 10px;
-}
-
-#why-is-this-safe {
-  display: inline-block;
-  margin-top: 7px;
 }
 
 * {

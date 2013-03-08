@@ -454,22 +454,41 @@ class SDKManifest(object):
     return self._manifest_data[BUNDLES_KEY]
 
   def SetBundle(self, new_bundle):
-    """Replace named bundle.  Add if absent.
+    """Add or replace a bundle in the manifest.
+
+    Note: If a bundle in the manifest already exists with this name, it will be
+    overwritten with a copy of this bundle, at the same index as the original.
 
     Args:
       bundle: The bundle.
     """
     name = new_bundle[NAME_KEY]
+    bundles = self.GetBundles()
+    new_bundle_copy = copy.deepcopy(new_bundle)
+    for i, bundle in enumerate(bundles):
+      if bundle[NAME_KEY] == name:
+        bundles[i] = new_bundle_copy
+        return
+    # Bundle not already in list, append it.
+    bundles.append(new_bundle_copy)
+
+  def RemoveBundle(self, name):
+    """Remove a bundle by name.
+
+    Args:
+      name: the name of the bundle to remove.
+    Return:
+      True if the bundle was removed, False if there is no bundle with that
+      name.
+    """
     if not BUNDLES_KEY in self._manifest_data:
-      self._manifest_data[BUNDLES_KEY] = []
+      return False
     bundles = self._manifest_data[BUNDLES_KEY]
-    # Delete any bundles from the list, then add the new one.  This has the
-    # effect of replacing the bundle if it already exists.  It also removes all
-    # duplicate bundles.
     for i, bundle in enumerate(bundles):
       if bundle[NAME_KEY] == name:
         del bundles[i]
-    bundles.append(copy.deepcopy(new_bundle))
+        return True
+    return False
 
   def BundleNeedsUpdate(self, bundle):
     """Decides if a bundle needs to be updated.

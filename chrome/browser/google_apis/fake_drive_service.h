@@ -58,17 +58,30 @@ class FakeDriveService : public DriveServiceInterface {
     return account_metadata_load_count_;
   }
 
+  // Returns the number of times the about resource is successfully loaded
+  // by GetAboutResource().
+  int about_resource_load_count() const {
+    return about_resource_load_count_;
+  }
+
+  // Returns the (fake) URL for the link.
+  static GURL GetFakeLinkUrl(const std::string& resource_id);
+
   // DriveServiceInterface Overrides
   virtual void Initialize(Profile* profile) OVERRIDE;
   virtual void AddObserver(DriveServiceObserver* observer) OVERRIDE;
   virtual void RemoveObserver(DriveServiceObserver* observer) OVERRIDE;
   virtual bool CanStartOperation() const OVERRIDE;
   virtual void CancelAll() OVERRIDE;
-  virtual bool CancelForFilePath(const FilePath& file_path) OVERRIDE;
+  virtual bool CancelForFilePath(const base::FilePath& file_path) OVERRIDE;
   virtual OperationProgressStatusList GetProgressStatusList() const OVERRIDE;
   virtual std::string GetRootResourceId() const OVERRIDE;
   virtual bool HasAccessToken() const OVERRIDE;
   virtual bool HasRefreshToken() const OVERRIDE;
+  virtual void ClearAccessToken() OVERRIDE;
+  virtual void ClearRefreshToken() OVERRIDE;
+  // See the comment for EntryMatchWidthQuery() in .cc file for details about
+  // the supported search query types.
   virtual void GetResourceList(
       const GURL& feed_url,
       int64 start_changestamp,
@@ -81,19 +94,16 @@ class FakeDriveService : public DriveServiceInterface {
       const GetResourceEntryCallback& callback) OVERRIDE;
   virtual void GetAccountMetadata(
       const GetAccountMetadataCallback& callback) OVERRIDE;
+  virtual void GetAboutResource(
+      const GetAboutResourceCallback& callback) OVERRIDE;
   virtual void GetAppList(const GetAppListCallback& callback) OVERRIDE;
-  virtual void DeleteResource(const GURL& edit_url,
+  virtual void DeleteResource(const std::string& resource_id,
+                              const std::string& etag,
                               const EntryActionCallback& callback) OVERRIDE;
-  virtual void DownloadHostedDocument(
-      const FilePath& virtual_path,
-      const FilePath& local_cache_path,
-      const GURL& content_url,
-      DocumentExportFormat format,
-      const DownloadActionCallback& callback) OVERRIDE;
   virtual void DownloadFile(
-      const FilePath& virtual_path,
-      const FilePath& local_cache_path,
-      const GURL& content_url,
+      const base::FilePath& virtual_path,
+      const base::FilePath& local_cache_path,
+      const GURL& download_url,
       const DownloadActionCallback& download_action_callback,
       const GetContentCallback& get_content_callback) OVERRIDE;
   // The new resource ID for the copied document will look like
@@ -102,25 +112,51 @@ class FakeDriveService : public DriveServiceInterface {
       const std::string& resource_id,
       const std::string& new_name,
       const GetResourceEntryCallback& callback) OVERRIDE;
-  virtual void RenameResource(const GURL& edit_url,
+  virtual void RenameResource(const std::string& resource_id,
                               const std::string& new_name,
                               const EntryActionCallback& callback) OVERRIDE;
   virtual void AddResourceToDirectory(
-      const GURL& parent_content_url,
-      const GURL& edit_url,
+      const std::string& parent_resource_id,
+      const std::string& resource_id,
       const EntryActionCallback& callback) OVERRIDE;
   virtual void RemoveResourceFromDirectory(
-      const GURL& parent_content_url,
+      const std::string& parent_resource_id,
       const std::string& resource_id,
       const EntryActionCallback& callback) OVERRIDE;
   virtual void AddNewDirectory(
-      const GURL& parent_content_url,
+      const std::string& parent_resource_id,
       const std::string& directory_name,
       const GetResourceEntryCallback& callback) OVERRIDE;
-  virtual void InitiateUpload(const InitiateUploadParams& params,
-                              const InitiateUploadCallback& callback) OVERRIDE;
-  virtual void ResumeUpload(const ResumeUploadParams& params,
-                            const ResumeUploadCallback& callback) OVERRIDE;
+  virtual void InitiateUploadNewFile(
+      const base::FilePath& drive_file_path,
+      const std::string& content_type,
+      int64 content_length,
+      const std::string& parent_resource_id,
+      const std::string& title,
+      const InitiateUploadCallback& callback) OVERRIDE;
+  virtual void InitiateUploadExistingFile(
+      const base::FilePath& drive_file_path,
+      const std::string& content_type,
+      int64 content_length,
+      const std::string& resource_id,
+      const std::string& etag,
+      const InitiateUploadCallback& callback) OVERRIDE;
+  virtual void ResumeUpload(
+      UploadMode upload_mode,
+      const base::FilePath& drive_file_path,
+      const GURL& upload_url,
+      int64 start_position,
+      int64 end_position,
+      int64 content_length,
+      const std::string& content_type,
+      const scoped_refptr<net::IOBuffer>& buf,
+      const UploadRangeCallback& callback) OVERRIDE;
+  virtual void GetUploadStatus(
+      UploadMode upload_mode,
+      const base::FilePath& drive_file_path,
+      const GURL& upload_url,
+      int64 content_length,
+      const UploadRangeCallback& callback) OVERRIDE;
   virtual void AuthorizeApp(const GURL& edit_url,
                             const std::string& app_id,
                             const AuthorizeAppCallback& callback) OVERRIDE;
@@ -130,13 +166,13 @@ class FakeDriveService : public DriveServiceInterface {
   // not found.
   base::DictionaryValue* FindEntryByResourceId(const std::string& resource_id);
 
-  // Returns a pointer to the entry that matches |edit_url|, or NULL if not
-  // found.
-  base::DictionaryValue* FindEntryByEditUrl(const GURL& edit_url);
-
   // Returns a pointer to the entry that matches |content_url|, or NULL if
   // not found.
   base::DictionaryValue* FindEntryByContentUrl(const GURL& content_url);
+
+  // Returns a pointer to the entry that matches |upload_url|, or NULL if
+  // not found.
+  base::DictionaryValue* FindEntryByUploadUrl(const GURL& upload_url);
 
   // Returns a new resource ID, which looks like "resource_id_<num>" where
   // <num> is a monotonically increasing number starting from 1.
@@ -154,6 +190,7 @@ class FakeDriveService : public DriveServiceInterface {
   int resource_id_count_;
   int resource_list_load_count_;
   int account_metadata_load_count_;
+  int about_resource_load_count_;
   bool offline_;
 
   DISALLOW_COPY_AND_ASSIGN(FakeDriveService);

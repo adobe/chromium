@@ -13,10 +13,9 @@
 #include "chrome/installer/util/browser_distribution.h"
 #include "chrome/installer/util/util_constants.h"
 
-class FilePath;
-
 namespace base {
 class DictionaryValue;
+class FilePath;
 }
 
 class GoogleChromeDistribution : public BrowserDistribution {
@@ -32,8 +31,10 @@ class GoogleChromeDistribution : public BrowserDistribution {
   //   the user has opted in to providing anonymous usage data.
   virtual void DoPostUninstallOperations(
       const Version& version,
-      const FilePath& local_data_path,
+      const base::FilePath& local_data_path,
       const string16& distribution_data) OVERRIDE;
+
+  virtual string16 GetActiveSetupGuid() OVERRIDE;
 
   virtual string16 GetAppGuid() OVERRIDE;
 
@@ -90,7 +91,7 @@ class GoogleChromeDistribution : public BrowserDistribution {
                                     int flavor) OVERRIDE;
 
   virtual void LaunchUserExperiment(
-      const FilePath& setup_path,
+      const base::FilePath& setup_path,
       installer::InstallStatus status,
       const Version& version,
       const installer::Product& product,
@@ -103,7 +104,7 @@ class GoogleChromeDistribution : public BrowserDistribution {
       int flavor,
       const string16& experiment_group,
       const installer::Product& installation,
-      const FilePath& application_path) OVERRIDE;
+      const base::FilePath& application_path) OVERRIDE;
 
   virtual bool ShouldSetExperimentLabels() OVERRIDE;
 
@@ -126,7 +127,7 @@ class GoogleChromeDistribution : public BrowserDistribution {
   // Returns true if uninstall_metrics has been successfully populated with
   // the uninstall metrics, false otherwise.
   virtual bool ExtractUninstallMetricsFromFile(
-      const FilePath& file_path, string16* uninstall_metrics);
+      const base::FilePath& file_path, string16* uninstall_metrics);
 
   // Extracts uninstall metrics from the given JSON value.
   virtual bool ExtractUninstallMetrics(const base::DictionaryValue& root,

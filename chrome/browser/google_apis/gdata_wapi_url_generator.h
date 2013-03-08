@@ -27,9 +27,9 @@ class GDataWapiUrlGenerator {
   // show folders in the feed are added to document feed URLs.
   static GURL AddStandardUrlParams(const GURL& url);
 
-  // Adds additional parameters to metadata feed to include installed 3rd
-  // party applications.
-  static GURL AddMetadataUrlParams(const GURL& url);
+  // Adds additional parameters for initiate uploading as well as standard
+  // url params (as AddStandardUrlParams above does).
+  static GURL AddInitiateUploadUrlParams(const GURL& url);
 
   // Adds additional parameters for API version, output content type and to
   // show folders in the feed are added to document feed URLs.
@@ -78,8 +78,37 @@ class GDataWapiUrlGenerator {
       bool shared_with_me,
       const std::string& directory_resource_id) const;
 
-  // Generates a URL for getting the resource entry of the given resource ID.
-  GURL GenerateResourceEntryUrl(const std::string& resource_id) const;
+  // Generates a URL for getting or editing the resource entry of
+  // the given resource ID.
+  GURL GenerateEditUrl(const std::string& resource_id) const;
+
+  // Generates a URL for getting or editing the resource entry of the
+  // given resource ID without query params.
+  // Note that, in order to access to the WAPI server, it is necessary to
+  // append some query parameters to the URL. GenerateEditUrl declared above
+  // should be used in such cases. This method is designed for constructing
+  // the data, such as xml element/attributes in request body containing
+  // edit urls.
+  GURL GenerateEditUrlWithoutParams(const std::string& resource_id) const;
+
+  // Generates a URL for editing the contents in the directory specified
+  // by the given resource ID.
+  GURL GenerateContentUrl(const std::string& resource_id) const;
+
+  // Generates a URL to remove an entry specified by |resource_id| from
+  // the directory specified by the given |parent_resource_id|.
+  GURL GenerateResourceUrlForRemoval(const std::string& parent_resource_id,
+                                     const std::string& resource_id) const;
+
+  // Generates a URL to initiate uploading a new file to a directory
+  // specified by |parent_resource_id|.
+  GURL GenerateInitiateUploadNewFileUrl(
+      const std::string& parent_resource_id) const;
+
+  // Generates a URL to initiate uploading file content to overwrite a
+  // file specified by |resource_id|.
+  GURL GenerateInitiateUploadExistingFileUrl(
+      const std::string& resource_id) const;
 
   // Generates a URL for getting the root resource list feed.
   // Used to make changes in the root directory (ex. create a directory in the
@@ -87,10 +116,9 @@ class GDataWapiUrlGenerator {
   GURL GenerateResourceListRootUrl() const;
 
   // Generates a URL for getting the account metadata feed.
-  GURL GenerateAccountMetadataUrl() const;
-
-  // Generates a URL for getting the root directory's content URL.
-  GURL GenerateRootContentUrl() const;
+  // If |include_installed_apps| is set to true, the response will include the
+  // list of installed third party applications.
+  GURL GenerateAccountMetadataUrl(bool include_installed_apps) const;
 
  private:
   const GURL base_url_;

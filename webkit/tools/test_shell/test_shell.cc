@@ -9,8 +9,8 @@
 #include "base/base_paths.h"
 #include "base/command_line.h"
 #include "base/debug/debug_on_start_win.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/md5.h"
 #include "base/message_loop.h"
 #include "base/metrics/stats_table.h"
@@ -27,6 +27,7 @@
 #include "net/url_request/url_request_filter.h"
 #include "skia/ext/bitmap_platform_device.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebRect.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebSize.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebString.h"
@@ -35,12 +36,11 @@
 #include "third_party/WebKit/Source/Platform/chromium/public/WebURLResponse.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebAccessibilityObject.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDeviceOrientationClientMock.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebGeolocationClientMock.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebGeolocationClientMock.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebKit.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebScriptController.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
-#include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/codec/png_codec.h"
 #include "ui/gfx/size.h"
 #include "webkit/glue/glue_serialize.h"
@@ -88,7 +88,7 @@ class URLRequestTestShellFileJob : public net::URLRequestFileJob {
       net::URLRequest* request,
       net::NetworkDelegate* network_delegate,
       const std::string& scheme) {
-    FilePath path;
+    base::FilePath path;
     PathService::Get(base::DIR_EXE, &path);
     path = path.AppendASCII("resources");
     path = path.AppendASCII("inspector");
@@ -99,7 +99,7 @@ class URLRequestTestShellFileJob : public net::URLRequestFileJob {
  private:
   URLRequestTestShellFileJob(net::URLRequest* request,
                              net::NetworkDelegate* network_delegate,
-                             const FilePath& path)
+                             const base::FilePath& path)
       : net::URLRequestFileJob(request, network_delegate, path) {
   }
   virtual ~URLRequestTestShellFileJob() { }
@@ -263,7 +263,7 @@ void TestShell::InitLogging(bool suppress_error_dialogs,
       destination = logging::LOG_ONLY_TO_FILE;
 
     // We might have multiple test_shell processes going at once
-    FilePath log_filename;
+    base::FilePath log_filename;
     PathService::Get(base::DIR_EXE, &log_filename);
     log_filename = log_filename.AppendASCII("test_shell.log");
     logging::InitLogging(
@@ -360,7 +360,6 @@ void TestShell::ResetWebPreferences() {
         web_prefs_->site_specific_quirks_enabled = true;
         web_prefs_->shrinks_standalone_images_to_fit = false;
         web_prefs_->uses_universal_detector = false;
-        web_prefs_->text_areas_are_resizable = false;
         web_prefs_->java_enabled = false;
         web_prefs_->allow_scripts_to_close_windows = false;
         web_prefs_->javascript_can_access_clipboard = true;
@@ -460,9 +459,9 @@ WebView* TestShell::CreateWebView() {
 
 void TestShell::ShowDevTools() {
   if (!devtools_shell_) {
-    FilePath dir_exe;
+    base::FilePath dir_exe;
     PathService::Get(base::DIR_EXE, &dir_exe);
-    FilePath devtools_path =
+    base::FilePath devtools_path =
         dir_exe.AppendASCII("resources/inspector/devtools.html");
     TestShell* devtools_shell;
     TestShell::CreateNewWindow(GURL(devtools_path.value()),
@@ -503,7 +502,7 @@ void TestShell::ResetTestController() {
     geolocation_client_mock_->resetMock();
 }
 
-void TestShell::LoadFile(const FilePath& file) {
+void TestShell::LoadFile(const base::FilePath& file) {
   LoadURLForFrame(net::FilePathToFileURL(file), string16());
 }
 
@@ -560,7 +559,7 @@ void TestShell::GoBackOrForward(int offset) {
 }
 
 void TestShell::DumpDocumentText() {
-  FilePath file_path;
+  base::FilePath file_path;
   if (!PromptForSaveFile(L"Dump document text", &file_path))
       return;
 
@@ -570,7 +569,7 @@ void TestShell::DumpDocumentText() {
 }
 
 void TestShell::DumpRenderTree() {
-  FilePath file_path;
+  base::FilePath file_path;
   if (!PromptForSaveFile(L"Dump render tree", &file_path))
     return;
 

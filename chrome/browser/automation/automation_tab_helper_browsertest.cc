@@ -4,7 +4,7 @@
 
 #include <string>
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/path_service.h"
 #include "base/string16.h"
 #include "base/stringprintf.h"
@@ -107,7 +107,7 @@ class AutomationTabHelperBrowserTest : public InProcessBrowserTest {
   }
 
  protected:
-  FilePath test_data_dir_;
+  base::FilePath test_data_dir_;
 };
 
 IN_PROC_BROWSER_TEST_F(AutomationTabHelperBrowserTest, FormSubmission) {
@@ -211,5 +211,5 @@ IN_PROC_BROWSER_TEST_F(AutomationTabHelperBrowserTest,
   EXPECT_CALL(mock_tab_observer, OnFirstPendingLoad(_));
   EXPECT_CALL(mock_tab_observer, OnNoMorePendingLoads(_));
 
-  ui_test_utils::NavigateToURL(browser(), GURL(chrome::kChromeUICrashURL));
+  ui_test_utils::NavigateToURL(browser(), GURL(content::kChromeUICrashURL));
 }

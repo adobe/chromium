@@ -7,13 +7,13 @@
 #include <errno.h>
 #include <sys/mman.h>
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "net/disk_cache/disk_cache.h"
 
 namespace disk_cache {
 
-void* MappedFile::Init(const FilePath& name, size_t size) {
+void* MappedFile::Init(const base::FilePath& name, size_t size) {
   DCHECK(!init_);
   if (init_ || !File::Init(name))
     return NULL;

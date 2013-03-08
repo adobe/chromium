@@ -14,7 +14,7 @@
 
 #include "base/base_export.h"
 #include "base/basictypes.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/time.h"
 
 namespace base {
@@ -134,6 +134,8 @@ BASE_EXPORT PlatformFile CreatePlatformFileUnsafe(const FilePath& name,
                                                   int flags,
                                                   bool* created,
                                                   PlatformFileError* error);
+
+BASE_EXPORT FILE* FdopenPlatformFile(PlatformFile file, const char* mode);
 
 // Closes a file handle. Returns |true| on success and |false| otherwise.
 BASE_EXPORT bool ClosePlatformFile(PlatformFile file);

@@ -7,14 +7,14 @@
 #include <algorithm>
 
 #include "base/bind.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/i18n/file_util_icu.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/stl_util.h"
 #include "base/string_piece.h"
-#include "base/string_split.h"
+#include "base/strings/string_split.h"
 #include "base/sys_string_conversions.h"
 #include "base/threading/thread.h"
 #include "base/utf_string_conversions.h"
@@ -79,16 +79,16 @@ const uint32 kMaxFileOrdinalNumberPartLength = 6;
 // Strip current ordinal number, if any. Should only be used on pure
 // file names, i.e. those stripped of their extensions.
 // TODO(estade): improve this to not choke on alternate encodings.
-FilePath::StringType StripOrdinalNumber(
-    const FilePath::StringType& pure_file_name) {
-  FilePath::StringType::size_type r_paren_index =
+base::FilePath::StringType StripOrdinalNumber(
+    const base::FilePath::StringType& pure_file_name) {
+  base::FilePath::StringType::size_type r_paren_index =
       pure_file_name.rfind(FILE_PATH_LITERAL(')'));
-  FilePath::StringType::size_type l_paren_index =
+  base::FilePath::StringType::size_type l_paren_index =
       pure_file_name.rfind(FILE_PATH_LITERAL('('));
   if (l_paren_index >= r_paren_index)
     return pure_file_name;
 
-  for (FilePath::StringType::size_type i = l_paren_index + 1;
+  for (base::FilePath::StringType::size_type i = l_paren_index + 1;
        i != r_paren_index; ++i) {
     if (!IsAsciiDigit(pure_file_name[i]))
       return pure_file_name;
@@ -105,9 +105,34 @@ bool CanSaveAsComplete(const std::string& contents_mime_type) {
          contents_mime_type == "application/xhtml+xml";
 }
 
+// Request handle for SavePackage downloads. Currently doesn't support
+// pause/resume/cancel, but returns a WebContents.
+class SavePackageRequestHandle : public DownloadRequestHandleInterface {
+ public:
+  SavePackageRequestHandle(base::WeakPtr<SavePackage> save_package)
+      : save_package_(save_package) {}
+
+  // DownloadRequestHandleInterface
+  virtual WebContents* GetWebContents() const OVERRIDE {
+    return save_package_.get() ? save_package_->web_contents() : NULL;
+  }
+  virtual DownloadManager* GetDownloadManager() const OVERRIDE {
+    return NULL;
+  }
+  virtual void PauseRequest() const OVERRIDE {}
+  virtual void ResumeRequest() const OVERRIDE {}
+  virtual void CancelRequest() const OVERRIDE {}
+  virtual std::string DebugString() const OVERRIDE {
+    return "SavePackage DownloadRequestHandle";
+  }
+
+ private:
+  base::WeakPtr<SavePackage> save_package_;
+};
+
 }  // namespace
 
-const FilePath::CharType SavePackage::kDefaultHtmlExtension[] =
+const base::FilePath::CharType SavePackage::kDefaultHtmlExtension[] =
 #if defined(OS_WIN)
     FILE_PATH_LITERAL("htm");
 #else
@@ -116,8 +141,8 @@ const FilePath::CharType SavePackage::kDefaultHtmlExtension[] =
 
 SavePackage::SavePackage(WebContents* web_contents,
                          SavePageType save_type,
-                         const FilePath& file_full_path,
-                         const FilePath& directory_full_path)
+                         const base::FilePath& file_full_path,
+                         const base::FilePath& directory_full_path)
     : WebContentsObserver(web_contents),
       file_manager_(NULL),
       download_manager_(NULL),
@@ -133,7 +158,7 @@ SavePackage::SavePackage(WebContents* web_contents,
       disk_error_occurred_(false),
       save_type_(save_type),
       all_save_items_count_(0),
-      file_name_set_(&FilePath::CompareLessIgnoreCase),
+      file_name_set_(&base::FilePath::CompareLessIgnoreCase),
       wait_state_(INITIALIZE),
       contents_id_(web_contents->GetRenderProcessHost()->GetID()),
       unique_id_(g_save_package_id++),
@@ -164,7 +189,7 @@ SavePackage::SavePackage(WebContents* web_contents)
       disk_error_occurred_(false),
       save_type_(SAVE_PAGE_TYPE_UNKNOWN),
       all_save_items_count_(0),
-      file_name_set_(&FilePath::CompareLessIgnoreCase),
+      file_name_set_(&base::FilePath::CompareLessIgnoreCase),
       wait_state_(INITIALIZE),
       contents_id_(web_contents->GetRenderProcessHost()->GetID()),
       unique_id_(g_save_package_id++),
@@ -178,8 +203,8 @@ SavePackage::SavePackage(WebContents* web_contents)
 // method Cancel to be be called in destructor in test mode.
 // We also don't call InternalInit().
 SavePackage::SavePackage(WebContents* web_contents,
-                         const FilePath& file_full_path,
-                         const FilePath& directory_full_path)
+                         const base::FilePath& file_full_path,
+                         const base::FilePath& directory_full_path)
     : WebContentsObserver(web_contents),
       file_manager_(NULL),
       download_manager_(NULL),
@@ -193,7 +218,7 @@ SavePackage::SavePackage(WebContents* web_contents,
       disk_error_occurred_(false),
       save_type_(SAVE_PAGE_TYPE_UNKNOWN),
       all_save_items_count_(0),
-      file_name_set_(&FilePath::CompareLessIgnoreCase),
+      file_name_set_(&base::FilePath::CompareLessIgnoreCase),
       wait_state_(INITIALIZE),
       contents_id_(0),
       unique_id_(g_save_package_id++),
@@ -285,12 +310,15 @@ bool SavePackage::Init(
     return false;
   }
 
+  scoped_ptr<DownloadRequestHandleInterface> request_handle(
+      new SavePackageRequestHandle(AsWeakPtr()));
   // The download manager keeps ownership but adds us as an observer.
   download_ = download_manager_->CreateSavePackageDownloadItem(
       saved_main_file_path_,
       page_url_,
       ((save_type_ == SAVE_PAGE_TYPE_AS_MHTML) ?
        "multipart/related" : "text/html"),
+      request_handle.Pass(),
       this);
   // Confirm above didn't delete the tab out from under us.
   if (!download_created_callback.is_null())
@@ -305,6 +333,7 @@ bool SavePackage::Init(
     web_contents()->GenerateMHTML(saved_main_file_path_, base::Bind(
         &SavePackage::OnMHTMLGenerated, this));
   } else {
+    DCHECK_EQ(SAVE_PAGE_TYPE_AS_ONLY_HTML, save_type_) << save_type_;
     wait_state_ = NET_FILES;
     SaveFileCreateInfo::SaveFileSource save_source = page_url_.SchemeIsFile() ?
         SaveFileCreateInfo::SAVE_FILE_FROM_FILE :
@@ -324,7 +353,7 @@ bool SavePackage::Init(
   return true;
 }
 
-void SavePackage::OnMHTMLGenerated(const FilePath& path, int64 size) {
+void SavePackage::OnMHTMLGenerated(const base::FilePath& path, int64 size) {
   if (size <= 0) {
     Cancel(false);
     return;
@@ -357,7 +386,8 @@ void SavePackage::OnMHTMLGenerated(const FilePath& path, int64 size) {
 // On POSIX, the length of |pure_file_name| + |file_name_ext| is further
 // restricted by NAME_MAX. The maximum allowed path looks like:
 // '/path/to/save_dir' + '/' + NAME_MAX.
-uint32 SavePackage::GetMaxPathLengthForDirectory(const FilePath& base_dir) {
+uint32 SavePackage::GetMaxPathLengthForDirectory(
+    const base::FilePath& base_dir) {
 #if defined(OS_POSIX)
   return std::min(kMaxFilePathLength,
                   static_cast<uint32>(base_dir.value().length()) +
@@ -384,10 +414,11 @@ uint32 SavePackage::GetMaxPathLengthForDirectory(const FilePath& base_dir) {
 // part for making sure the length of specified file path is less than
 // specified maximum length of file path. Return false if the function can
 // not get a safe pure file name, otherwise it returns true.
-bool SavePackage::GetSafePureFileName(const FilePath& dir_path,
-                                      const FilePath::StringType& file_name_ext,
-                                      uint32 max_file_path_len,
-                                      FilePath::StringType* pure_file_name) {
+bool SavePackage::GetSafePureFileName(
+    const base::FilePath& dir_path,
+    const base::FilePath::StringType& file_name_ext,
+    uint32 max_file_path_len,
+    base::FilePath::StringType* pure_file_name) {
   DCHECK(!pure_file_name->empty());
   int available_length = static_cast<int>(max_file_path_len -
                                           dir_path.value().length() -
@@ -415,16 +446,16 @@ bool SavePackage::GetSafePureFileName(const FilePath& dir_path,
 bool SavePackage::GenerateFileName(const std::string& disposition,
                                    const GURL& url,
                                    bool need_html_ext,
-                                   FilePath::StringType* generated_name) {
+                                   base::FilePath::StringType* generated_name) {
   // TODO(jungshik): Figure out the referrer charset when having one
   // makes sense and pass it to GenerateFileName.
-  FilePath file_path = net::GenerateFileName(url, disposition, "", "", "",
-                                             kDefaultSaveName);
+  base::FilePath file_path = net::GenerateFileName(url, disposition, "", "", "",
+                                                   kDefaultSaveName);
 
   DCHECK(!file_path.empty());
-  FilePath::StringType pure_file_name =
+  base::FilePath::StringType pure_file_name =
       file_path.RemoveExtension().BaseName().value();
-  FilePath::StringType file_name_ext = file_path.Extension();
+  base::FilePath::StringType file_name_ext = file_path.Extension();
 
   // If it is HTML resource, use ".htm{l,}" as its extension.
   if (need_html_ext) {
@@ -440,7 +471,7 @@ bool SavePackage::GenerateFileName(const std::string& disposition,
                            max_path, &pure_file_name))
     return false;
 
-  FilePath::StringType file_name = pure_file_name + file_name_ext;
+  base::FilePath::StringType file_name = pure_file_name + file_name_ext;
 
   // Check whether we already have same name in a case insensitive manner.
   FileNameSet::const_iterator iter = file_name_set_.find(file_name);
@@ -449,8 +480,9 @@ bool SavePackage::GenerateFileName(const std::string& disposition,
   } else {
     // Found same name, increase the ordinal number for the file name.
     pure_file_name =
-        FilePath(*iter).RemoveExtension().BaseName().value();
-    FilePath::StringType base_file_name = StripOrdinalNumber(pure_file_name);
+        base::FilePath(*iter).RemoveExtension().BaseName().value();
+    base::FilePath::StringType base_file_name =
+        StripOrdinalNumber(pure_file_name);
 
     // We need to make sure the length of base file name plus maximum ordinal
     // number path will be less than or equal to kMaxFilePathLength.
@@ -472,17 +504,17 @@ bool SavePackage::GenerateFileName(const std::string& disposition,
 
     if (ordinal_number > (kMaxFileOrdinalNumber - 1)) {
       // Use a random file from temporary file.
-      FilePath temp_file;
+      base::FilePath temp_file;
       file_util::CreateTemporaryFile(&temp_file);
       file_name = temp_file.RemoveExtension().BaseName().value();
       // Get safe pure file name.
       if (!GetSafePureFileName(saved_main_directory_path_,
-                               FilePath::StringType(),
+                               base::FilePath::StringType(),
                                max_path, &file_name))
         return false;
     } else {
       for (int i = ordinal_number; i < kMaxFileOrdinalNumber; ++i) {
-        FilePath::StringType new_name = base_file_name +
+        base::FilePath::StringType new_name = base_file_name +
             StringPrintf(FILE_PATH_LITERAL("(%d)"), i) + file_name_ext;
         if (file_name_set_.find(new_name) == file_name_set_.end()) {
           // Resolved name conflict.
@@ -524,7 +556,7 @@ void SavePackage::StartSave(const SaveFileCreateInfo* info) {
   // save directory, or prompting the user.
   DCHECK(!save_item->has_final_name());
   if (info->url != page_url_) {
-    FilePath::StringType generated_name;
+    base::FilePath::StringType generated_name;
     // For HTML resource file, make sure it will have .htm as extension name,
     // otherwise, when you open the saved page in Chrome again, download
     // file manager will treat it as downloadable resource, and download it
@@ -555,7 +587,8 @@ void SavePackage::StartSave(const SaveFileCreateInfo* info) {
 
     // Now we get final name retrieved from GenerateFileName, we will use it
     // rename the SaveItem.
-    FilePath final_name = saved_main_directory_path_.Append(generated_name);
+    base::FilePath final_name =
+        saved_main_directory_path_.Append(generated_name);
     save_item->Rename(final_name);
   } else {
     // It is the main HTML file, use the name chosen by the user.
@@ -691,9 +724,9 @@ void SavePackage::CheckFinish() {
   if (in_process_count() || finished_)
     return;
 
-  FilePath dir = (save_type_ == SAVE_PAGE_TYPE_AS_COMPLETE_HTML &&
-                  saved_success_items_.size() > 1) ?
-                  saved_main_directory_path_ : FilePath();
+  base::FilePath dir = (save_type_ == SAVE_PAGE_TYPE_AS_COMPLETE_HTML &&
+                        saved_success_items_.size() > 1) ?
+                        saved_main_directory_path_ : base::FilePath();
 
   // This vector contains the final names of all the successfully saved files
   // along with their save ids. It will be passed to SaveFileManager to do the
@@ -971,7 +1004,7 @@ void SavePackage::GetSerializedHtmlDataForCurrentPageWithLocalLinks() {
   if (wait_state_ != HTML_DATA)
     return;
   std::vector<GURL> saved_links;
-  std::vector<FilePath> saved_file_paths;
+  std::vector<base::FilePath> saved_file_paths;
   int successful_started_items_count = 0;
 
   // Collect all saved items which have local storage.
@@ -1002,7 +1035,7 @@ void SavePackage::GetSerializedHtmlDataForCurrentPageWithLocalLinks() {
   }
 
   // Get the relative directory name.
-  FilePath relative_dir_name = saved_main_directory_path_.BaseName();
+  base::FilePath relative_dir_name = saved_main_directory_path_.BaseName();
 
   Send(new ViewMsg_GetSerializedHtmlDataForCurrentPageWithLocalLinks(
       routing_id(), saved_links, saved_file_paths, relative_dir_name));
@@ -1153,12 +1186,12 @@ void SavePackage::OnReceivedSavableResourceLinksForCurrentPage(
   }
 }
 
-FilePath SavePackage::GetSuggestedNameForSaveAs(
+base::FilePath SavePackage::GetSuggestedNameForSaveAs(
     bool can_save_as_complete,
     const std::string& contents_mime_type,
     const std::string& accept_langs) {
-  FilePath name_with_proper_ext =
-      FilePath::FromWStringHack(UTF16ToWideHack(title_));
+  base::FilePath name_with_proper_ext =
+      base::FilePath::FromWStringHack(UTF16ToWideHack(title_));
 
   // If the page's title matches its URL, use the URL. Try to use the last path
   // component or if there is none, the domain as the file name.
@@ -1186,7 +1219,8 @@ FilePath SavePackage::GetSuggestedNameForSaveAs(
     } else {
       url_path = "dataurl";
     }
-    name_with_proper_ext = FilePath::FromWStringHack(UTF8ToWide(url_path));
+    name_with_proper_ext =
+        base::FilePath::FromWStringHack(UTF8ToWide(url_path));
   }
 
   // Ask user for getting final saving name.
@@ -1196,48 +1230,48 @@ FilePath SavePackage::GetSuggestedNameForSaveAs(
   if (can_save_as_complete)
     name_with_proper_ext = EnsureHtmlExtension(name_with_proper_ext);
 
-  FilePath::StringType file_name = name_with_proper_ext.value();
+  base::FilePath::StringType file_name = name_with_proper_ext.value();
   file_util::ReplaceIllegalCharactersInPath(&file_name, ' ');
-  return FilePath(file_name);
+  return base::FilePath(file_name);
 }
 
-FilePath SavePackage::EnsureHtmlExtension(const FilePath& name) {
+base::FilePath SavePackage::EnsureHtmlExtension(const base::FilePath& name) {
   // If the file name doesn't have an extension suitable for HTML files,
   // append one.
-  FilePath::StringType ext = name.Extension();
+  base::FilePath::StringType ext = name.Extension();
   if (!ext.empty())
     ext.erase(ext.begin());  // Erase preceding '.'.
   std::string mime_type;
   if (!net::GetMimeTypeFromExtension(ext, &mime_type) ||
       !CanSaveAsComplete(mime_type)) {
-    return FilePath(name.value() + FILE_PATH_LITERAL(".") +
-                    kDefaultHtmlExtension);
+    return base::FilePath(name.value() + FILE_PATH_LITERAL(".") +
+                          kDefaultHtmlExtension);
   }
   return name;
 }
 
-FilePath SavePackage::EnsureMimeExtension(const FilePath& name,
+base::FilePath SavePackage::EnsureMimeExtension(const base::FilePath& name,
     const std::string& contents_mime_type) {
   // Start extension at 1 to skip over period if non-empty.
-  FilePath::StringType ext = name.Extension().length() ?
+  base::FilePath::StringType ext = name.Extension().length() ?
       name.Extension().substr(1) : name.Extension();
-  FilePath::StringType suggested_extension =
+  base::FilePath::StringType suggested_extension =
       ExtensionForMimeType(contents_mime_type);
   std::string mime_type;
   if (!suggested_extension.empty() &&
       !net::GetMimeTypeFromExtension(ext, &mime_type)) {
     // Extension is absent or needs to be updated.
-    return FilePath(name.value() + FILE_PATH_LITERAL(".") +
+    return base::FilePath(name.value() + FILE_PATH_LITERAL(".") +
                     suggested_extension);
   }
   return name;
 }
 
-const FilePath::CharType* SavePackage::ExtensionForMimeType(
+const base::FilePath::CharType* SavePackage::ExtensionForMimeType(
     const std::string& contents_mime_type) {
   static const struct {
-    const FilePath::CharType *mime_type;
-    const FilePath::CharType *suggested_extension;
+    const base::FilePath::CharType *mime_type;
+    const base::FilePath::CharType *suggested_extension;
   } extensions[] = {
     { FILE_PATH_LITERAL("text/html"), kDefaultHtmlExtension },
     { FILE_PATH_LITERAL("text/xml"), FILE_PATH_LITERAL("xml") },
@@ -1246,9 +1280,9 @@ const FilePath::CharType* SavePackage::ExtensionForMimeType(
     { FILE_PATH_LITERAL("text/css"), FILE_PATH_LITERAL("css") },
   };
 #if defined(OS_POSIX)
-  FilePath::StringType mime_type(contents_mime_type);
+  base::FilePath::StringType mime_type(contents_mime_type);
 #elif defined(OS_WIN)
-  FilePath::StringType mime_type(UTF8ToWide(contents_mime_type));
+  base::FilePath::StringType mime_type(UTF8ToWide(contents_mime_type));
 #endif  // OS_WIN
   for (uint32 i = 0; i < ARRAYSIZE_UNSAFE(extensions); ++i) {
     if (mime_type == extensions[i].mime_type)
@@ -1264,7 +1298,7 @@ WebContents* SavePackage::web_contents() const {
 void SavePackage::GetSaveInfo() {
   // Can't use web_contents_ in the file thread, so get the data that we need
   // before calling to it.
-  FilePath website_save_dir, download_save_dir;
+  base::FilePath website_save_dir, download_save_dir;
   bool skip_dir_check;
   DCHECK(download_manager_);
   if (download_manager_->GetDelegate()) {
@@ -1285,12 +1319,12 @@ void SavePackage::GetSaveInfo() {
 }
 
 void SavePackage::CreateDirectoryOnFileThread(
-    const FilePath& website_save_dir,
-    const FilePath& download_save_dir,
+    const base::FilePath& website_save_dir,
+    const base::FilePath& download_save_dir,
     bool skip_dir_check,
     const std::string& mime_type,
     const std::string& accept_langs) {
-  FilePath save_dir;
+  base::FilePath save_dir;
   // If the default html/websites save folder doesn't exist...
   // We skip the directory check for gdata directories on ChromeOS.
   if (!skip_dir_check && !file_util::DirectoryExists(website_save_dir)) {
@@ -1306,11 +1340,11 @@ void SavePackage::CreateDirectoryOnFileThread(
   }
 
   bool can_save_as_complete = CanSaveAsComplete(mime_type);
-  FilePath suggested_filename = GetSuggestedNameForSaveAs(
+  base::FilePath suggested_filename = GetSuggestedNameForSaveAs(
       can_save_as_complete, mime_type, accept_langs);
-  FilePath::StringType pure_file_name =
+  base::FilePath::StringType pure_file_name =
       suggested_filename.RemoveExtension().BaseName().value();
-  FilePath::StringType file_name_ext = suggested_filename.Extension();
+  base::FilePath::StringType file_name_ext = suggested_filename.Extension();
 
   // Need to make sure the suggested file name is not too long.
   uint32 max_path = GetMaxPathLengthForDirectory(save_dir);
@@ -1331,7 +1365,7 @@ void SavePackage::CreateDirectoryOnFileThread(
                  can_save_as_complete));
 }
 
-void SavePackage::ContinueGetSaveInfo(const FilePath& suggested_path,
+void SavePackage::ContinueGetSaveInfo(const base::FilePath& suggested_path,
                                       bool can_save_as_complete) {
 
   // The WebContents which owns this SavePackage may have disappeared during
@@ -1340,7 +1374,7 @@ void SavePackage::ContinueGetSaveInfo(const FilePath& suggested_path,
   if (!web_contents() || !download_manager_->GetDelegate())
     return;
 
-  FilePath::StringType default_extension;
+  base::FilePath::StringType default_extension;
   if (can_save_as_complete)
     default_extension = kDefaultHtmlExtension;
 
@@ -1353,9 +1387,12 @@ void SavePackage::ContinueGetSaveInfo(const FilePath& suggested_path,
 }
 
 void SavePackage::OnPathPicked(
-    const FilePath& final_name,
+    const base::FilePath& final_name,
     SavePageType type,
     const SavePackageDownloadCreatedCallback& download_created_callback) {
+  DCHECK((type == SAVE_PAGE_TYPE_AS_ONLY_HTML) ||
+         (type == SAVE_PAGE_TYPE_AS_MHTML) ||
+         (type == SAVE_PAGE_TYPE_AS_COMPLETE_HTML)) << type;
   // Ensure the filename is safe.
   saved_main_file_path_ = final_name;
   // TODO(asanka): This call may block on IO and shouldn't be made
@@ -1392,16 +1429,7 @@ void SavePackage::FinalizeDownloadEntry() {
   DCHECK(download_);
   DCHECK(download_manager_);
 
-  NotificationService::current()->Notify(
-      NOTIFICATION_SAVE_PACKAGE_SUCCESSFULLY_FINISHED,
-      // We use the DownloadManager as the source as that's a
-      // central SavePackage related location that observers can
-      // get to if they want to wait for notifications for a
-      // particular BrowserContext.  Alternatively, we could make
-      // it come from the WebContents, which would be more specific
-      // but less useful to (current) customers.
-      Source<DownloadManager>(download_manager_),
-      Details<DownloadItem>(download_));
+  download_manager_->OnSavePackageSuccessfullyFinished(download_);
   StopObservation();
 }
 

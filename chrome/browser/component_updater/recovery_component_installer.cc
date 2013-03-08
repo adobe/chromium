@@ -8,15 +8,16 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/path_service.h"
+#include "base/prefs/pref_registry_simple.h"
+#include "base/prefs/pref_service.h"
 #include "base/process_util.h"
 #include "base/string_util.h"
 #include "base/values.h"
 #include "chrome/browser/component_updater/component_updater_service.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/browser_thread.h"
@@ -32,7 +33,7 @@ const uint8 sha2_hash[] = {0xdf, 0x39, 0x9a, 0x9b, 0x28, 0x3a, 0x9b, 0x0c,
                            0xf6, 0x29, 0x7c, 0x0a, 0x5f, 0xea, 0x67, 0xb7};
 
 // File name of the recovery binary on different platforms.
-const FilePath::CharType kRecoveryFileName[] =
+const base::FilePath::CharType kRecoveryFileName[] =
 #if defined(OS_WIN)
     FILE_PATH_LITERAL("ChromeRecovery.exe");
 #else  // OS_LINUX, OS_MACOSX, etc.
@@ -53,7 +54,7 @@ class RecoveryComponentInstaller : public ComponentInstaller {
   virtual void OnUpdateError(int error) OVERRIDE;
 
   virtual bool Install(base::DictionaryValue* manifest,
-                       const FilePath& unpack_path) OVERRIDE;
+                       const base::FilePath& unpack_path) OVERRIDE;
 
  private:
   Version current_version_;
@@ -61,12 +62,8 @@ class RecoveryComponentInstaller : public ComponentInstaller {
 };
 
 void RecoveryRegisterHelper(ComponentUpdateService* cus,
-                            PrefServiceSimple* prefs) {
+                            PrefService* prefs) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  // TODO(joi): Registrations for local state prefs shouldn't happen
-  // like this, they should be done via
-  // browser_prefs::RegisterLocalState.
-  prefs->RegisterStringPref(prefs::kRecoveryComponentVersion, "0.0.0.0");
   Version version(prefs->GetString(prefs::kRecoveryComponentVersion));
   if (!version.IsValid()) {
     NOTREACHED();
@@ -99,7 +96,7 @@ void RecoveryComponentInstaller::OnUpdateError(int error) {
 }
 
 bool RecoveryComponentInstaller::Install(base::DictionaryValue* manifest,
-                                         const FilePath& unpack_path) {
+                                         const base::FilePath& unpack_path) {
   std::string name;
   manifest->GetStringASCII("name", &name);
   if (name != kRecoveryManifestName)
@@ -111,7 +108,7 @@ bool RecoveryComponentInstaller::Install(base::DictionaryValue* manifest,
     return false;
   if (current_version_.CompareTo(version) >= 0)
     return false;
-  FilePath main_file = unpack_path.Append(kRecoveryFileName);
+  base::FilePath main_file = unpack_path.Append(kRecoveryFileName);
   if (!file_util::PathExists(main_file))
     return false;
   // Passed the basic tests. The installation continues with the
@@ -134,7 +131,7 @@ bool RecoveryComponentInstaller::Install(base::DictionaryValue* manifest,
 }
 
 void RegisterRecoveryComponent(ComponentUpdateService* cus,
-                               PrefServiceSimple* prefs) {
+                               PrefService* prefs) {
 #if !defined(OS_CHROMEOS)
   // We delay execute the registration because we are not required in
   // the critical path during browser startup.
@@ -144,4 +141,8 @@ void RegisterRecoveryComponent(ComponentUpdateService* cus,
       base::Bind(&RecoveryRegisterHelper, cus, prefs),
       base::TimeDelta::FromSeconds(6));
 #endif
+}
+
+void RegisterPrefsForRecoveryComponent(PrefRegistrySimple* registry) {
+  registry->RegisterStringPref(prefs::kRecoveryComponentVersion, "0.0.0.0");
 }

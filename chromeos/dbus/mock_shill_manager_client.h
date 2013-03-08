@@ -39,12 +39,37 @@ class MockShillManagerClient : public ShillManagerClient {
                                        const base::Closure& callback,
                                        const ErrorCallback& error_callback));
   MOCK_METHOD3(ConfigureService, void(const base::DictionaryValue& properties,
-                                      const base::Closure& callback,
+                                      const ObjectPathCallback& callback,
                                       const ErrorCallback& error_callback));
   MOCK_METHOD3(GetService, void(const base::DictionaryValue& properties,
                                 const ObjectPathCallback& callback,
                                 const ErrorCallback& error_callback));
+  MOCK_METHOD7(VerifyDestination, void(const std::string& certificate,
+                                       const std::string& public_key,
+                                       const std::string& nonce,
+                                       const std::string& signed_data,
+                                       const std::string& device_serial,
+                                       const BooleanCallback& callback,
+                                       const ErrorCallback& error_callback));
+  MOCK_METHOD8(VerifyAndEncryptCredentials,
+               void(const std::string& certificate,
+                    const std::string& public_key,
+                    const std::string& nonce,
+                    const std::string& signed_data,
+                    const std::string& device_serial,
+                    const std::string& service_path,
+                    const StringCallback& callback,
+                    const ErrorCallback& error_callback));
+  MOCK_METHOD8(VerifyAndEncryptData, void(const std::string& certificate,
+                                       const std::string& public_key,
+                                       const std::string& nonce,
+                                       const std::string& signed_data,
+                                       const std::string& device_serial,
+                                       const std::string& data,
+                                       const StringCallback& callback,
+                                       const ErrorCallback& error_callback));
   MOCK_METHOD0(GetTestInterface, TestInterface*());
+
 };
 
 }  // namespace chromeos

@@ -74,8 +74,12 @@ class MigrationTest : public SyncTest {
   enum TriggerMethod { MODIFY_PREF, MODIFY_BOOKMARK, TRIGGER_NOTIFICATION };
 
   syncer::ModelTypeSet GetPreferredDataTypes() {
-    const syncer::ModelTypeSet preferred_data_types =
+    // ProfileSyncService must already have been created before we can call
+    // GetPreferredDataTypes().
+    DCHECK(GetClient(0)->IsSyncAlreadySetup());
+    syncer::ModelTypeSet preferred_data_types =
         GetClient(0)->service()->GetPreferredDataTypes();
+    preferred_data_types.RemoveAll(syncer::ProxyTypes());
     // Make sure all clients have the same preferred data types.
     for (int i = 1; i < num_clients(); ++i) {
       const syncer::ModelTypeSet other_preferred_data_types =

@@ -6,18 +6,17 @@
 
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
+#include "chrome/browser/extensions/app_window_contents.h"
 #include "chrome/browser/extensions/extension_process_manager.h"
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/image_loader.h"
 #include "chrome/browser/extensions/shell_window_geometry_cache.h"
 #include "chrome/browser/extensions/shell_window_registry.h"
 #include "chrome/browser/extensions/suggest_permission_util.h"
-#include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/favicon/favicon_tab_helper.h"
 #include "chrome/browser/file_select_helper.h"
-#include "chrome/browser/intents/web_intents_util.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
-#include "chrome/browser/media/media_internals.h"
+#include "chrome/browser/media/media_capture_devices_dispatcher.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sessions/session_id.h"
 #include "chrome/browser/ui/browser.h"
@@ -25,44 +24,33 @@
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/extensions/native_app_window.h"
-#include "chrome/browser/ui/intents/web_intent_picker_controller.h"
 #include "chrome/browser/ui/web_contents_modal_dialog_manager.h"
 #include "chrome/browser/view_type_utils.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "chrome/common/extensions/api/app_window.h"
+#include "chrome/common/extensions/api/icons/icons_handler.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_messages.h"
 #include "chrome/common/extensions/request_media_access_permission_helper.h"
-#include "content/public/browser/browser_thread.h"
 #include "content/public/browser/invalidate_type.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
-#include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/resource_dispatcher_host.h"
-#include "content/public/browser/site_instance.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/browser/web_intents_dispatcher.h"
 #include "content/public/common/media_stream_request.h"
-#include "content/public/common/renderer_preferences.h"
 #include "skia/ext/image_operations.h"
 #include "third_party/skia/include/core/SkRegion.h"
+#include "ui/gfx/image/image_skia.h"
 
 #if defined(USE_ASH)
 #include "ash/launcher/launcher_types.h"
 #endif
 
-namespace app_window = extensions::api::app_window;
-
-using content::BrowserThread;
 using content::ConsoleMessageLevel;
-using content::RenderViewHost;
-using content::ResourceDispatcherHost;
-using content::SiteInstance;
 using content::WebContents;
 using extensions::APIPermission;
 using extensions::RequestMediaAccessPermissionHelper;
@@ -78,14 +66,6 @@ const int kPreferredIconSize = ash::kLauncherPreferredSize;
 const int kPreferredIconSize = extension_misc::EXTENSION_ICON_SMALL;
 #endif
 
-void SuspendRenderViewHost(RenderViewHost* rvh) {
-  DCHECK(rvh);
-  BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
-      base::Bind(&ResourceDispatcherHost::BlockRequestsForRoute,
-          base::Unretained(ResourceDispatcherHost::Get()),
-          rvh->GetProcess()->GetID(), rvh->GetRoutingID()));
-}
-
 }  // namespace
 
 ShellWindow::CreateParams::CreateParams()
@@ -93,7 +73,7 @@ ShellWindow::CreateParams::CreateParams()
     frame(ShellWindow::FRAME_CHROME),
     transparent_background(false),
     bounds(INT_MIN, INT_MIN, 0, 0),
-    creator_process_id(0), hidden(false) {
+    creator_process_id(0), hidden(false), resizable(true) {
 }
 
 ShellWindow::CreateParams::~CreateParams() {
@@ -105,7 +85,7 @@ ShellWindow* ShellWindow::Create(Profile* profile,
                                  const CreateParams& params) {
   // This object will delete itself when the window is closed.
   ShellWindow* window = new ShellWindow(profile, extension);
-  window->Init(url, params);
+  window->Init(url, new AppWindowContents(window), params);
   extensions::ShellWindowRegistry::Get(profile)->AddShellWindow(window);
   return window;
 }
@@ -114,30 +94,26 @@ ShellWindow::ShellWindow(Profile* profile,
                          const extensions::Extension* extension)
     : profile_(profile),
       extension_(extension),
-      web_contents_(NULL),
       window_type_(WINDOW_TYPE_DEFAULT),
-      ALLOW_THIS_IN_INITIALIZER_LIST(
-          extension_function_dispatcher_(profile, this)),
       ALLOW_THIS_IN_INITIALIZER_LIST(weak_ptr_factory_(this)),
       ALLOW_THIS_IN_INITIALIZER_LIST(image_loader_ptr_factory_(this)) {
 }
 
 void ShellWindow::Init(const GURL& url,
+                       ShellWindowContents* shell_window_contents,
                        const ShellWindow::CreateParams& params) {
+  // Initialize the render interface and web contents
+  shell_window_contents_.reset(shell_window_contents);
+  shell_window_contents_->Initialize(profile(), url);
+  WebContents* web_contents = shell_window_contents_->GetWebContents();
+  WebContentsModalDialogManager::CreateForWebContents(web_contents);
+  FaviconTabHelper::CreateForWebContents(web_contents);
+
+  web_contents->SetDelegate(this);
+  chrome::SetViewType(web_contents, chrome::VIEW_TYPE_APP_SHELL);
+
+  // Initialize the window
   window_type_ = params.window_type;
-
-  web_contents_.reset(WebContents::Create(WebContents::CreateParams(
-      profile(), SiteInstance::CreateForURL(profile(), url))));
-  WebContentsModalDialogManager::CreateForWebContents(web_contents_.get());
-  FaviconTabHelper::CreateForWebContents(web_contents_.get());
-  WebIntentPickerController::CreateForWebContents(web_contents_.get());
-
-  content::WebContentsObserver::Observe(web_contents_.get());
-  web_contents_->SetDelegate(this);
-  chrome::SetViewType(web_contents_.get(), chrome::VIEW_TYPE_APP_SHELL);
-  web_contents_->GetMutableRendererPrefs()->
-      browser_handles_all_top_level_requests = true;
-  web_contents_->GetRenderViewHost()->SyncRendererPrefs();
 
   gfx::Rect bounds = params.bounds;
 
@@ -189,41 +165,19 @@ void ShellWindow::Init(const GURL& url,
   OnNativeWindowChanged();
 
   if (!params.hidden) {
-    if (params.window_type == WINDOW_TYPE_PANEL)
+    if (window_type_is_panel())
       GetBaseWindow()->ShowInactive();  // Panels are not activated by default.
     else
       GetBaseWindow()->Show();
   }
 
-  // If the new view is in the same process as the creator, block the created
-  // RVH from loading anything until the background page has had a chance to do
-  // any initialization it wants. If it's a different process, the new RVH
-  // shouldn't communicate with the background page anyway (e.g. sandboxed).
-  if (web_contents_->GetRenderViewHost()->GetProcess()->GetID() ==
-      params.creator_process_id) {
-    SuspendRenderViewHost(web_contents_->GetRenderViewHost());
-  } else {
-    VLOG(1) << "ShellWindow created in new process ("
-            << web_contents_->GetRenderViewHost()->GetProcess()->GetID()
-            << ") != creator (" << params.creator_process_id
-            << "). Routing disabled.";
-  }
-
-  // TODO(jeremya): there's a bug where navigating a web contents to an
-  // extension URL causes it to create a new RVH and discard the old (perfectly
-  // usable) one. To work around this, we watch for a RVH_CHANGED message from
-  // the web contents (which will be sent during LoadURL) and suspend resource
-  // requests on the new RVH to ensure that we block the new RVH from loading
-  // anything. It should be okay to remove the NOTIFICATION_RVH_CHANGED
-  // registration once http://crbug.com/123007 is fixed.
+  // When the render view host is changed, the native window needs to know
+  // about it in case it has any setup to do to make the renderer appear
+  // properly. In particular, on Windows, the view's clickthrough region needs
+  // to be set.
   registrar_.Add(this, content::NOTIFICATION_RENDER_VIEW_HOST_CHANGED,
                  content::Source<content::NavigationController>(
-                     &web_contents_->GetController()));
-  web_contents_->GetController().LoadURL(
-      url, content::Referrer(), content::PAGE_TRANSITION_LINK,
-      std::string());
-  registrar_.RemoveAll();
-
+                    &web_contents->GetController()));
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_UNLOADED,
                  content::Source<Profile>(profile_));
   // Close when the browser is exiting.
@@ -232,8 +186,10 @@ void ShellWindow::Init(const GURL& url,
   registrar_.Add(this, chrome::NOTIFICATION_APP_TERMINATING,
                  content::NotificationService::AllSources());
 
+  shell_window_contents_->LoadContents(params.creator_process_id);
+
   // Prevent the browser process from shutting down while this window is open.
-  browser::StartKeepAlive();
+  chrome::StartKeepAlive();
 
   UpdateExtensionAppIcon();
 }
@@ -244,7 +200,7 @@ ShellWindow::~ShellWindow() {
   registrar_.RemoveAll();
 
   // Remove shutdown prevention.
-  browser::EndKeepAlive();
+  chrome::EndKeepAlive();
 }
 
 void ShellWindow::RequestMediaAccessPermission(
@@ -253,7 +209,7 @@ void ShellWindow::RequestMediaAccessPermission(
     const content::MediaResponseCallback& callback) {
   // Get the preferred default devices for the request.
   content::MediaStreamDevices devices;
-  media::GetDefaultDevicesForProfile(
+  MediaCaptureDevicesDispatcher::GetInstance()->GetDefaultDevicesForProfile(
       profile_,
       content::IsAudioMediaType(request.audio_type),
       content::IsVideoMediaType(request.video_type),
@@ -265,8 +221,6 @@ void ShellWindow::RequestMediaAccessPermission(
 
 WebContents* ShellWindow::OpenURLFromTab(WebContents* source,
                                          const content::OpenURLParams& params) {
-  DCHECK(source == web_contents_);
-
   // Don't allow the current tab to be navigated. It would be nice to map all
   // anchor tags (even those without target="_blank") to new tabs, but right
   // now we can't distinguish between those and <meta> refreshes or window.href
@@ -314,7 +268,6 @@ void ShellWindow::AddNewContents(WebContents* source,
                                  const gfx::Rect& initial_pos,
                                  bool user_gesture,
                                  bool* was_blocked) {
-  DCHECK(source == web_contents_);
   DCHECK(Profile::FromBrowserContext(new_contents->GetBrowserContext()) ==
       profile_);
   Browser* browser =
@@ -330,7 +283,6 @@ void ShellWindow::AddNewContents(WebContents* source,
 void ShellWindow::HandleKeyboardEvent(
     WebContents* source,
     const content::NativeWebKeyboardEvent& event) {
-  DCHECK_EQ(source, web_contents_);
   native_app_window_->HandleKeyboardEvent(event);
 }
 
@@ -347,37 +299,15 @@ void ShellWindow::RequestToLockMouse(WebContents* web_contents,
 
 void ShellWindow::OnNativeClose() {
   extensions::ShellWindowRegistry::Get(profile_)->RemoveShellWindow(this);
-  content::RenderViewHost* rvh = web_contents_->GetRenderViewHost();
-  rvh->Send(new ExtensionMsg_AppWindowClosed(rvh->GetRoutingID()));
+  if (shell_window_contents_)
+    shell_window_contents_->NativeWindowClosed();
   delete this;
 }
 
 void ShellWindow::OnNativeWindowChanged() {
   SaveWindowPosition();
-  if (!native_app_window_ || !web_contents_)
-    return;
-  ListValue args;
-  DictionaryValue* dictionary = new DictionaryValue();
-  args.Append(dictionary);
-
-  gfx::Rect bounds = native_app_window_->GetBounds();
-  bounds.Inset(native_app_window_->GetFrameInsets());
-  app_window::Bounds update;
-  update.left.reset(new int(bounds.x()));
-  update.top.reset(new int(bounds.y()));
-  update.width.reset(new int(bounds.width()));
-  update.height.reset(new int(bounds.height()));
-  dictionary->Set("bounds", update.ToValue().release());
-  dictionary->SetBoolean("minimized", native_app_window_->IsMinimized());
-  dictionary->SetBoolean("maximized", native_app_window_->IsMaximized());
-
-  content::RenderViewHost* rvh = web_contents_->GetRenderViewHost();
-  rvh->Send(new ExtensionMsg_MessageInvoke(rvh->GetRoutingID(),
-                                           extension_->id(),
-                                           "updateAppWindowProperties",
-                                           args,
-                                           GURL(),
-                                           false));
+  if (shell_window_contents_ && native_app_window_)
+    shell_window_contents_->NativeWindowChanged(native_app_window_.get());
 }
 
 gfx::Image* ShellWindow::GetAppListIcon() {
@@ -395,12 +325,22 @@ gfx::Image* ShellWindow::GetAppListIcon() {
   return new gfx::Image(gfx::ImageSkia::CreateFrom1xBitmap(bmp));
 }
 
+content::WebContents* ShellWindow::web_contents() const {
+  return shell_window_contents_->GetWebContents();
+}
+
 NativeAppWindow* ShellWindow::GetBaseWindow() {
   return native_app_window_.get();
 }
 
 gfx::NativeWindow ShellWindow::GetNativeWindow() {
   return GetBaseWindow()->GetNativeWindow();
+}
+
+gfx::Rect ShellWindow::GetClientBounds() const {
+  gfx::Rect bounds = native_app_window_->GetBounds();
+  bounds.Inset(native_app_window_->GetFrameInsets());
+  return bounds;
 }
 
 string16 ShellWindow::GetTitle() const {
@@ -423,24 +363,21 @@ void ShellWindow::SetAppIconUrl(const GURL& url) {
                                              weak_ptr_factory_.GetWeakPtr()));
 }
 
-//------------------------------------------------------------------------------
-// Private methods
-
-bool ShellWindow::OnMessageReceived(const IPC::Message& message) {
-  bool handled = true;
-  IPC_BEGIN_MESSAGE_MAP(ShellWindow, message)
-    IPC_MESSAGE_HANDLER(ExtensionHostMsg_Request, OnRequest)
-    IPC_MESSAGE_HANDLER(ExtensionHostMsg_UpdateDraggableRegions,
-                        UpdateDraggableRegions)
-    IPC_MESSAGE_UNHANDLED(handled = false)
-  IPC_END_MESSAGE_MAP()
-  return handled;
-}
-
 void ShellWindow::UpdateDraggableRegions(
     const std::vector<extensions::DraggableRegion>& regions) {
   native_app_window_->UpdateDraggableRegions(regions);
 }
+
+void ShellWindow::UpdateAppIcon(const gfx::Image& image) {
+  if (image.IsEmpty())
+    return;
+  app_icon_ = image;
+  native_app_window_->UpdateWindowIcon();
+  extensions::ShellWindowRegistry::Get(profile_)->ShellWindowIconChanged(this);
+}
+
+//------------------------------------------------------------------------------
+// Private methods
 
 void ShellWindow::OnImageLoaded(const gfx::Image& image) {
   UpdateAppIcon(image);
@@ -465,14 +402,6 @@ void ShellWindow::DidDownloadFavicon(int id,
   UpdateAppIcon(gfx::Image::CreateFrom1xBitmap(largest));
 }
 
-void ShellWindow::UpdateAppIcon(const gfx::Image& image) {
-  if (image.IsEmpty())
-    return;
-  app_icon_ = image;
-  native_app_window_->UpdateWindowIcon();
-  extensions::ShellWindowRegistry::Get(profile_)->ShellWindowIconChanged(this);
-}
-
 void ShellWindow::UpdateExtensionAppIcon() {
   // Ensure previously enqueued callbacks are ignored.
   image_loader_ptr_factory_.InvalidateWeakPtrs();
@@ -481,34 +410,20 @@ void ShellWindow::UpdateExtensionAppIcon() {
   extensions::ImageLoader* loader = extensions::ImageLoader::Get(profile());
   loader->LoadImageAsync(
       extension(),
-      extension()->GetIconResource(kPreferredIconSize,
-                                   ExtensionIconSet::MATCH_BIGGER),
+      extensions::IconsInfo::GetIconResource(extension(),
+                                             kPreferredIconSize,
+                                             ExtensionIconSet::MATCH_BIGGER),
       gfx::Size(kPreferredIconSize, kPreferredIconSize),
       base::Bind(&ShellWindow::OnImageLoaded,
                  image_loader_ptr_factory_.GetWeakPtr()));
 }
 
 void ShellWindow::CloseContents(WebContents* contents) {
-  DCHECK(contents == web_contents_);
   native_app_window_->Close();
 }
 
 bool ShellWindow::ShouldSuppressDialogs() {
   return true;
-}
-
-void ShellWindow::WebIntentDispatch(
-    content::WebContents* web_contents,
-    content::WebIntentsDispatcher* intents_dispatcher) {
-  if (!web_intents::IsWebIntentsEnabledForProfile(profile_))
-    return;
-
-  WebIntentPickerController* web_intent_picker_controller =
-      WebIntentPickerController::FromWebContents(web_contents_.get());
-  web_intent_picker_controller->SetIntentsDispatcher(intents_dispatcher);
-  web_intent_picker_controller->ShowDialog(
-      intents_dispatcher->GetIntent().action,
-      intents_dispatcher->GetIntent().type);
 }
 
 void ShellWindow::RunFileChooser(WebContents* tab,
@@ -517,18 +432,15 @@ void ShellWindow::RunFileChooser(WebContents* tab,
 }
 
 bool ShellWindow::IsPopupOrPanel(const WebContents* source) const {
-  DCHECK(source == web_contents_.get());
   return true;
 }
 
 void ShellWindow::MoveContents(WebContents* source, const gfx::Rect& pos) {
-  DCHECK(source == web_contents_.get());
   native_app_window_->SetBounds(pos);
 }
 
 void ShellWindow::NavigationStateChanged(
     const content::WebContents* source, unsigned changed_flags) {
-  DCHECK(source == web_contents_.get());
   if (changed_flags & content::INVALIDATE_TYPE_TITLE)
     native_app_window_->UpdateWindowTitle();
   else if (changed_flags & content::INVALIDATE_TYPE_TAB)
@@ -537,13 +449,17 @@ void ShellWindow::NavigationStateChanged(
 
 void ShellWindow::ToggleFullscreenModeForTab(content::WebContents* source,
                                              bool enter_fullscreen) {
-  DCHECK(source == web_contents_.get());
-  native_app_window_->SetFullscreen(enter_fullscreen);
+  bool has_permission = IsExtensionWithPermissionOrSuggestInConsole(
+      APIPermission::kFullscreen,
+      extension_,
+      source->GetRenderViewHost());
+
+  if (has_permission)
+    native_app_window_->SetFullscreen(enter_fullscreen);
 }
 
 bool ShellWindow::IsFullscreenForTabOrPending(
     const content::WebContents* source) const {
-  DCHECK(source == web_contents_.get());
   return native_app_window_->IsFullscreenOrPending();
 }
 
@@ -552,13 +468,6 @@ void ShellWindow::Observe(int type,
                           const content::NotificationDetails& details) {
   switch (type) {
     case content::NOTIFICATION_RENDER_VIEW_HOST_CHANGED: {
-      // TODO(jeremya): once http://crbug.com/123007 is fixed, we'll no longer
-      // need to suspend resource requests here (the call in the constructor
-      // should be enough).
-      content::Details<std::pair<RenderViewHost*, RenderViewHost*> >
-          host_details(details);
-      if (host_details->first)
-        SuspendRenderViewHost(host_details->second);
       // TODO(jianli): once http://crbug.com/123007 is fixed, we'll no longer
       // need to make the native window (ShellWindowViews specially) update
       // the clickthrough region for the new RVH.
@@ -581,29 +490,15 @@ void ShellWindow::Observe(int type,
   }
 }
 
-extensions::WindowController*
-ShellWindow::GetExtensionWindowController() const {
-  return NULL;
-}
-
-content::WebContents* ShellWindow::GetAssociatedWebContents() const {
-  return web_contents_.get();
-}
-
 extensions::ActiveTabPermissionGranter*
     ShellWindow::GetActiveTabPermissionGranter() {
   // Shell windows don't support the activeTab permission.
   return NULL;
 }
 
-void ShellWindow::OnRequest(const ExtensionHostMsg_Request_Params& params) {
-  extension_function_dispatcher_.Dispatch(params,
-                                          web_contents_->GetRenderViewHost());
-}
-
 void ShellWindow::AddMessageToDevToolsConsole(ConsoleMessageLevel level,
                                               const std::string& message) {
-  content::RenderViewHost* rvh = web_contents_->GetRenderViewHost();
+  content::RenderViewHost* rvh = web_contents()->GetRenderViewHost();
   rvh->Send(new ExtensionMsg_AddMessageToConsole(
       rvh->GetRoutingID(), level, message));
 }
@@ -618,7 +513,8 @@ void ShellWindow::SaveWindowPosition() {
       extensions::ExtensionSystem::Get(profile())->
           shell_window_geometry_cache();
 
-  gfx::Rect bounds = native_app_window_->GetBounds();
+  gfx::Rect bounds = native_app_window_->GetRestoredBounds();
+  bounds.Inset(native_app_window_->GetFrameInsets());
   cache->SaveGeometry(extension()->id(), window_key_, bounds);
 }
 

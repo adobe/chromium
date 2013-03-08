@@ -8,7 +8,7 @@
 #include <map>
 #include <string>
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/synchronization/lock.h"
@@ -36,7 +36,7 @@ namespace dom_storage {
 class WEBKIT_STORAGE_EXPORT SessionStorageDatabase :
     public base::RefCountedThreadSafe<SessionStorageDatabase> {
  public:
-  explicit SessionStorageDatabase(const FilePath& file_path);
+  explicit SessionStorageDatabase(const base::FilePath& file_path);
 
   // Reads the (key, value) pairs for |namespace_id| and |origin|. |result| is
   // assumed to be empty and any duplicate keys will be overwritten. If the
@@ -187,7 +187,7 @@ class WEBKIT_STORAGE_EXPORT SessionStorageDatabase :
   static const char* NextMapIdKey();
 
   scoped_ptr<leveldb::DB> db_;
-  FilePath file_path_;
+  base::FilePath file_path_;
 
   // For protecting the database opening code.
   base::Lock db_lock_;

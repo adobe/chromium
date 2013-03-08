@@ -18,6 +18,10 @@ static const float Scale(float width, const LayerTreeImpl* tree_impl) {
 SkColor DebugColors::TiledContentLayerBorderColor() { return SkColorSetARGB(128, 255, 128, 0); }
 int DebugColors::TiledContentLayerBorderWidth(const LayerTreeImpl* tree_impl) { return Scale(2, tree_impl); }
 
+// Image layers are olive.
+SkColor DebugColors::ImageLayerBorderColor() { return SkColorSetARGB(128, 128, 128, 0); }
+int DebugColors::ImageLayerBorderWidth(const LayerTreeImpl* tree_impl) { return Scale(2, tree_impl); }
+
 // Non-tiled content layers area green.
 SkColor DebugColors::ContentLayerBorderColor() { return SkColorSetARGB(128, 0, 128, 32); }
 int DebugColors::ContentLayerBorderWidth(const LayerTreeImpl* tree_impl) { return Scale(2, tree_impl); }
@@ -38,11 +42,23 @@ int DebugColors::SurfaceBorderWidth(const LayerTreeImpl* tree_impl) { return Sca
 SkColor DebugColors::SurfaceReplicaBorderColor() { return SkColorSetARGB(100, 160, 0, 255); }
 int DebugColors::SurfaceReplicaBorderWidth(const LayerTreeImpl* tree_impl) { return Scale(2, tree_impl); }
 
-// Tile borders are cyan.
-SkColor DebugColors::TileBorderColor() { return SkColorSetARGB(100, 80, 200, 200); }
-int DebugColors::TileBorderWidth(const LayerTreeImpl* tree_impl) { return Scale(1, tree_impl); }
-
 // ======= Tile colors =======
+
+// High-res tile borders are cyan.
+SkColor DebugColors::HighResTileBorderColor() { return SkColorSetARGB(100, 80, 200, 200); }
+int DebugColors::HighResTileBorderWidth(const LayerTreeImpl* tree_impl) { return Scale(1, tree_impl); }
+
+// Low-res tile borders are purple.
+SkColor DebugColors::LowResTileBorderColor() { return SkColorSetARGB(100, 212, 83, 192); }
+int DebugColors::LowResTileBorderWidth(const LayerTreeImpl* tree_impl) { return Scale(2, tree_impl); }
+
+// Other high-resolution tile borders are yellow.
+SkColor DebugColors::ExtraHighResTileBorderColor() { return SkColorSetARGB(100, 239, 231, 20); }
+int DebugColors::ExtraHighResTileBorderWidth(const LayerTreeImpl* tree_impl) { return Scale(2, tree_impl); }
+
+// Other low-resolution tile borders are green.
+SkColor DebugColors::ExtraLowResTileBorderColor() { return SkColorSetARGB(100, 93, 186, 18); }
+int DebugColors::ExtraLowResTileBorderWidth(const LayerTreeImpl* tree_impl) { return Scale(2, tree_impl); }
 
 // Missing tile borders are red.
 SkColor DebugColors::MissingTileBorderColor() { return SkColorSetARGB(100, 255, 0, 0); }
@@ -99,6 +115,12 @@ SkColor DebugColors::OccludingRectFillColor() { return SkColorSetARGB(10, 245, 1
 SkColor DebugColors::NonOccludingRectBorderColor() { return SkColorSetARGB(255, 200, 0, 100); }
 int DebugColors::NonOccludingRectBorderWidth(const LayerTreeImpl* tree_impl) { return Scale(2, tree_impl); }
 SkColor DebugColors::NonOccludingRectFillColor() { return SkColorSetARGB(10, 200, 0, 100); }
+
+// Non-Painted rects in cyan.
+SkColor DebugColors::NonPaintedFillColor() { return SK_ColorCYAN; }
+
+// Missing picture rects in magenta.
+SkColor DebugColors::MissingPictureFillColor() { return SK_ColorMAGENTA; }
 
 // ======= HUD widget colors =======
 

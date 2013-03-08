@@ -4,9 +4,10 @@
 
 #include "chrome/browser/icon_manager.h"
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 
-IconGroupID IconManager::GetGroupIDFromFilepath(const FilePath& filepath) {
+IconGroupID IconManager::GetGroupIDFromFilepath(
+    const base::FilePath& filepath) {
   std::wstring extension = filepath.Extension();
   if (extension != L".exe" && extension != L".dll" && extension != L".ico")
     return extension;

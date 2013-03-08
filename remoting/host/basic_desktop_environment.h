@@ -20,7 +20,7 @@ class BasicDesktopEnvironment
     : public base::NonThreadSafe,
       public DesktopEnvironment {
  public:
-  BasicDesktopEnvironment();
+  explicit BasicDesktopEnvironment(bool use_x_damage);
   virtual ~BasicDesktopEnvironment();
 
   // DesktopEnvironment implementation.
@@ -29,18 +29,21 @@ class BasicDesktopEnvironment
   virtual scoped_ptr<EventExecutor> CreateEventExecutor(
       scoped_refptr<base::SingleThreadTaskRunner> input_task_runner,
       scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner) OVERRIDE;
-  virtual scoped_ptr<VideoFrameCapturer> CreateVideoCapturer(
+  virtual scoped_ptr<media::ScreenCapturer> CreateVideoCapturer(
       scoped_refptr<base::SingleThreadTaskRunner> capture_task_runner,
       scoped_refptr<base::SingleThreadTaskRunner> encode_task_runner) OVERRIDE;
 
  private:
+  // True if X DAMAGE support should be used by the video capturer.
+  bool use_x_damage_;
+
   DISALLOW_COPY_AND_ASSIGN(BasicDesktopEnvironment);
 };
 
 // Used to create |BasicDesktopEnvironment| instances.
 class BasicDesktopEnvironmentFactory : public DesktopEnvironmentFactory {
  public:
-  BasicDesktopEnvironmentFactory();
+  explicit BasicDesktopEnvironmentFactory(bool use_x_damage);
   virtual ~BasicDesktopEnvironmentFactory();
 
   // DesktopEnvironmentFactory implementation.
@@ -50,6 +53,9 @@ class BasicDesktopEnvironmentFactory : public DesktopEnvironmentFactory {
   virtual bool SupportsAudioCapture() const OVERRIDE;
 
  private:
+  // True if X DAMAGE support should be used by the video capturer.
+  bool use_x_damage_;
+
   DISALLOW_COPY_AND_ASSIGN(BasicDesktopEnvironmentFactory);
 };
 

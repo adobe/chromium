@@ -35,19 +35,21 @@ class ExtensionToolbarModelTest : public ExtensionBrowserTest,
     model_->AddObserver(this);
   }
 
-  virtual void CleanUpOnMainThread() {
+  virtual void CleanUpOnMainThread() OVERRIDE {
     model_->RemoveObserver(this);
   }
 
-  virtual void BrowserActionAdded(const Extension* extension, int index) {
+  virtual void BrowserActionAdded(const Extension* extension,
+                                  int index) OVERRIDE {
     inserted_count_++;
   }
 
-  virtual void BrowserActionRemoved(const Extension* extension) {
+  virtual void BrowserActionRemoved(const Extension* extension) OVERRIDE {
     removed_count_++;
   }
 
-  virtual void BrowserActionMoved(const Extension* extension, int index) {
+  virtual void BrowserActionMoved(const Extension* extension,
+                                  int index) OVERRIDE {
     moved_count_++;
   }
 
@@ -114,7 +116,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionToolbarModelTest, ReorderAndReinsert) {
       switches::kEnableExperimentalExtensionApis);
 
   // Load an extension with a browser action.
-  FilePath extension_a_path(test_data_dir_.AppendASCII("api_test")
+  base::FilePath extension_a_path(test_data_dir_.AppendASCII("api_test")
                                           .AppendASCII("browser_action")
                                           .AppendASCII("basics"));
   ASSERT_TRUE(LoadExtension(extension_a_path));
@@ -128,7 +130,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionToolbarModelTest, ReorderAndReinsert) {
                extensionA->name().c_str());
 
   // Load another extension with a browser action.
-  FilePath extension_b_path(test_data_dir_.AppendASCII("api_test")
+  base::FilePath extension_b_path(test_data_dir_.AppendASCII("api_test")
                                           .AppendASCII("browser_action")
                                           .AppendASCII("popup"));
   ASSERT_TRUE(LoadExtension(extension_b_path));
@@ -141,7 +143,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionToolbarModelTest, ReorderAndReinsert) {
   EXPECT_STREQ("Popup tester", extensionB->name().c_str());
 
   // Load yet another extension with a browser action.
-  FilePath extension_c_path(test_data_dir_.AppendASCII("api_test")
+  base::FilePath extension_c_path(test_data_dir_.AppendASCII("api_test")
                                           .AppendASCII("browser_action")
                                           .AppendASCII("remove_popup"));
   ASSERT_TRUE(LoadExtension(extension_c_path));

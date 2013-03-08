@@ -14,7 +14,9 @@
 #include "base/time.h"
 #include "chrome/browser/safe_browsing/safe_browsing_util.h"
 
+namespace base {
 class FilePath;
+}
 
 // SafeBrowsingStore provides a storage abstraction for the
 // safe-browsing data used to build the bloom filter.  The items
@@ -64,6 +66,8 @@ struct SBSubPrefix {
   int32 GetAddChunkId() const { return add_chunk_id; }
   SBPrefix GetAddPrefix() const { return add_prefix; }
 };
+
+typedef std::deque<SBSubPrefix> SBSubPrefixes;
 
 struct SBAddFullHash {
   int32 chunk_id;
@@ -136,7 +140,7 @@ bool SBAddPrefixHashLess(const T& a, const U& b) {
 // but it might make sense to make sorting an API requirement so that
 // the storage can optimize for it.
 void SBProcessSubs(SBAddPrefixes* add_prefixes,
-                   std::vector<SBSubPrefix>* sub_prefixes,
+                   SBSubPrefixes* sub_prefixes,
                    std::vector<SBAddFullHash>* add_full_hashes,
                    std::vector<SBSubFullHash>* sub_full_hashes,
                    const base::hash_set<int32>& add_chunks_deleted,
@@ -163,7 +167,7 @@ class SafeBrowsingStore {
   // is detected, which could happen as part of any call other than
   // Delete().  The appropriate action is to use Delete() to clear the
   // store.
-  virtual void Init(const FilePath& filename,
+  virtual void Init(const base::FilePath& filename,
                     const base::Closure& corruption_callback) = 0;
 
   // Deletes the files which back the store, returning true if

@@ -9,6 +9,8 @@
 
 // Contains constants for known URLs and portions thereof.
 
+class GURL;
+
 // TODO(jam): rename this to content.
 namespace chrome {
 
@@ -20,12 +22,12 @@ CONTENT_EXPORT extern const char kBlobScheme[];
 CONTENT_EXPORT extern const char kChromeDevToolsScheme[];
 CONTENT_EXPORT extern const char kChromeInternalScheme[];
 CONTENT_EXPORT extern const char kChromeUIScheme[];  // Used for WebUIs.
-CONTENT_EXPORT extern const char kCrosScheme[];      // Used for ChromeOS.
 CONTENT_EXPORT extern const char kDataScheme[];
 CONTENT_EXPORT extern const char kFileScheme[];
 CONTENT_EXPORT extern const char kFileSystemScheme[];
 CONTENT_EXPORT extern const char kFtpScheme[];
 CONTENT_EXPORT extern const char kGuestScheme[];
+CONTENT_EXPORT extern const char kChromeUIGpuHost[];
 CONTENT_EXPORT extern const char kHttpScheme[];
 CONTENT_EXPORT extern const char kHttpsScheme[];
 CONTENT_EXPORT extern const char kJavaScriptScheme[];
@@ -42,9 +44,16 @@ CONTENT_EXPORT extern const char kChromeUIBlobInternalsHost[];
 CONTENT_EXPORT extern const char kChromeUIBrowserCrashHost[];
 CONTENT_EXPORT extern const char kChromeUIDevToolsHost[];
 CONTENT_EXPORT extern const char kChromeUIHistogramHost[];
+CONTENT_EXPORT extern const char kChromeUIMediaInternalsHost[];
 CONTENT_EXPORT extern const char kChromeUINetworkViewCacheHost[];
 CONTENT_EXPORT extern const char kChromeUIResourcesHost[];
 CONTENT_EXPORT extern const char kChromeUITcmallocHost[];
+CONTENT_EXPORT extern const char kChromeUITracingHost[];
+CONTENT_EXPORT extern const char kChromeUIWebRTCInternalsHost[];
+
+}  // namespace chrome
+
+namespace content {
 
 // Full about URLs (including schemes).
 CONTENT_EXPORT extern const char kChromeUICrashURL[];
@@ -55,10 +64,6 @@ CONTENT_EXPORT extern const char kChromeUIHangURL[];
 CONTENT_EXPORT extern const char kChromeUIKillURL[];
 CONTENT_EXPORT extern const char kChromeUIPpapiFlashCrashURL[];
 CONTENT_EXPORT extern const char kChromeUIPpapiFlashHangURL[];
-
-}  // namespace chrome
-
-namespace content {
 
 // Used to separate a standard scheme and the hostname: "://".
 CONTENT_EXPORT extern const char kStandardSchemeSeparator[];
@@ -76,6 +81,10 @@ extern const char kSwappedOutURL[];
 // Null terminated list of schemes that are savable. This function can be
 // invoked on any thread.
 CONTENT_EXPORT const char* const* GetSavableSchemes();
+
+// Returns true if the url has a scheme for WebUI.  See also
+// WebUIControllerFactory::UseWebUIForURL in the browser process.
+CONTENT_EXPORT bool HasWebUIScheme(const GURL& url);
 
 }  // namespace content
 

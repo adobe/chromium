@@ -8,6 +8,7 @@
 #include "ash/focus_cycler.h"
 #include "ash/shell.h"
 #include "ash/shell_window_ids.h"
+#include "ash/system/tray/tray_constants.h"
 #include "base/utf_string_conversions.h"
 #include "ui/aura/root_window.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -17,18 +18,15 @@
 #include "ui/views/layout/grid_layout.h"
 #include "ui/views/widget/widget.h"
 
-namespace {
-
-int kTraySpacing = 8;
-
-}  // namespace
-
 namespace ash {
 namespace internal {
 
 StatusAreaWidgetDelegate::StatusAreaWidgetDelegate()
     : focus_cycler_for_testing_(NULL),
       alignment_(SHELF_ALIGNMENT_BOTTOM) {
+  // Allow the launcher to surrender the focus to another window upon
+  // navigation completion by the user.
+  set_allow_deactivate_on_esc(true);
 }
 
 StatusAreaWidgetDelegate::~StatusAreaWidgetDelegate() {
@@ -98,7 +96,7 @@ void StatusAreaWidgetDelegate::UpdateLayout() {
     for (int c = 0; c < child_count(); ++c) {
       if (c != 0)
         columns->AddPaddingColumn(0, kTraySpacing);
-      columns->AddColumn(views::GridLayout::CENTER, views::GridLayout::CENTER,
+      columns->AddColumn(views::GridLayout::CENTER, views::GridLayout::FILL,
                          0, /* resize percent */
                          views::GridLayout::USE_PREF, 0, 0);
     }
@@ -106,7 +104,7 @@ void StatusAreaWidgetDelegate::UpdateLayout() {
     for (int c = child_count() - 1; c >= 0; --c)
       layout->AddView(child_at(c));
   } else {
-    columns->AddColumn(views::GridLayout::CENTER, views::GridLayout::CENTER,
+    columns->AddColumn(views::GridLayout::FILL, views::GridLayout::CENTER,
                        0, /* resize percent */
                        views::GridLayout::USE_PREF, 0, 0);
     for (int c = child_count() - 1; c >= 0; --c) {

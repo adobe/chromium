@@ -18,6 +18,7 @@
 #include "base/utf_string_conversions.h"
 #include "googleurl/src/gurl.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "webkit/fileapi/external_mount_points.h"
 #include "webkit/fileapi/file_system_context.h"
 #include "webkit/fileapi/file_system_task_runners.h"
 #include "webkit/fileapi/file_system_url.h"
@@ -87,7 +88,7 @@ const struct RootPathFileURITest {
 };
 
 const struct CheckValidPathTest {
-  FilePath::StringType path;
+  base::FilePath::StringType path;
   bool expected_valid;
 } kCheckValidPathTestCases[] = {
   { FILE_PATH_LITERAL("//tmp/foo.txt"), false, },
@@ -100,101 +101,10 @@ const struct CheckValidPathTest {
   { FILE_PATH_LITERAL("a/b/../c/.."), false, },
 };
 
-const struct IsRestrictedNameTest {
-  FilePath::StringType name;
-  bool expected_dangerous;
-} kIsRestrictedNameTestCases[] = {
-  // Names that contain strings that used to be restricted, but are now allowed.
-  { FILE_PATH_LITERAL("con"), false, },
-  { FILE_PATH_LITERAL("Con.txt"), false, },
-  { FILE_PATH_LITERAL("Prn.png"), false, },
-  { FILE_PATH_LITERAL("AUX"), false, },
-  { FILE_PATH_LITERAL("nUl."), false, },
-  { FILE_PATH_LITERAL("coM1"), false, },
-  { FILE_PATH_LITERAL("COM3.com"), false, },
-  { FILE_PATH_LITERAL("cOM7"), false, },
-  { FILE_PATH_LITERAL("com9"), false, },
-  { FILE_PATH_LITERAL("lpT1"), false, },
-  { FILE_PATH_LITERAL("LPT4.com"), false, },
-  { FILE_PATH_LITERAL("lPT8"), false, },
-  { FILE_PATH_LITERAL("lPT9"), false, },
-  { FILE_PATH_LITERAL("com1."), false, },
-
-  // Similar cases that have always been allowed.
-  { FILE_PATH_LITERAL("con3"), false, },
-  { FILE_PATH_LITERAL("PrnImage.png"), false, },
-  { FILE_PATH_LITERAL("AUXX"), false, },
-  { FILE_PATH_LITERAL("NULL"), false, },
-  { FILE_PATH_LITERAL("coM0"), false, },
-  { FILE_PATH_LITERAL("COM.com"), false, },
-  { FILE_PATH_LITERAL("lpT0"), false, },
-  { FILE_PATH_LITERAL("LPT.com"), false, },
-
-  // Ends with period or whitespace--used to be banned, now OK.
-  { FILE_PATH_LITERAL("b "), false, },
-  { FILE_PATH_LITERAL("b\t"), false, },
-  { FILE_PATH_LITERAL("b\n"), false, },
-  { FILE_PATH_LITERAL("b\r\n"), false, },
-  { FILE_PATH_LITERAL("b."), false, },
-  { FILE_PATH_LITERAL("b.."), false, },
-
-  // Similar cases that have always been allowed.
-  { FILE_PATH_LITERAL("b c"), false, },
-  { FILE_PATH_LITERAL("b\tc"), false, },
-  { FILE_PATH_LITERAL("b\nc"), false, },
-  { FILE_PATH_LITERAL("b\r\nc"), false, },
-  { FILE_PATH_LITERAL("b c d e f"), false, },
-  { FILE_PATH_LITERAL("b.c"), false, },
-  { FILE_PATH_LITERAL("b..c"), false, },
-
-  // Name that has restricted chars in it.
-  { FILE_PATH_LITERAL("\\"), true, },
-  { FILE_PATH_LITERAL("/"), true, },
-  { FILE_PATH_LITERAL("a\\b"), true, },
-  { FILE_PATH_LITERAL("a/b"), true, },
-  { FILE_PATH_LITERAL("ab\\"), true, },
-  { FILE_PATH_LITERAL("ab/"), true, },
-  { FILE_PATH_LITERAL("\\ab"), true, },
-  { FILE_PATH_LITERAL("/ab"), true, },
-  { FILE_PATH_LITERAL("ab/.txt"), true, },
-  { FILE_PATH_LITERAL("ab\\.txt"), true, },
-
-  // Names that contain chars that were formerly restricted, now OK.
-  { FILE_PATH_LITERAL("a<b"), false, },
-  { FILE_PATH_LITERAL("a>b"), false, },
-  { FILE_PATH_LITERAL("a:b"), false, },
-  { FILE_PATH_LITERAL("a?b"), false, },
-  { FILE_PATH_LITERAL("a|b"), false, },
-  { FILE_PATH_LITERAL("ab<.txt"), false, },
-  { FILE_PATH_LITERAL("ab>.txt"), false, },
-  { FILE_PATH_LITERAL("ab:.txt"), false, },
-  { FILE_PATH_LITERAL("ab?.txt"), false, },
-  { FILE_PATH_LITERAL("ab|.txt"), false, },
-  { FILE_PATH_LITERAL("<ab"), false, },
-  { FILE_PATH_LITERAL(">ab"), false, },
-  { FILE_PATH_LITERAL(":ab"), false, },
-  { FILE_PATH_LITERAL("?ab"), false, },
-  { FILE_PATH_LITERAL("|ab"), false, },
-
-  // Names that are restricted still.
-  { FILE_PATH_LITERAL(".."), true, },
-  { FILE_PATH_LITERAL("."), true, },
-
-  // Similar but safe cases.
-  { FILE_PATH_LITERAL(" ."), false, },
-  { FILE_PATH_LITERAL(". "), false, },
-  { FILE_PATH_LITERAL(" . "), false, },
-  { FILE_PATH_LITERAL(" .."), false, },
-  { FILE_PATH_LITERAL(".. "), false, },
-  { FILE_PATH_LITERAL(" .. "), false, },
-  { FILE_PATH_LITERAL("b."), false, },
-  { FILE_PATH_LITERAL(".b"), false, },
-};
-
 // For External filesystem.
-const FilePath::CharType kMountPoint[] = FILE_PATH_LITERAL("/tmp/testing");
-const FilePath::CharType kRootPath[] = FILE_PATH_LITERAL("/tmp");
-const FilePath::CharType kVirtualPath[] = FILE_PATH_LITERAL("testing");
+const base::FilePath::CharType kMountPoint[] = FILE_PATH_LITERAL("/tmp/testing");
+const base::FilePath::CharType kRootPath[] = FILE_PATH_LITERAL("/tmp");
+const base::FilePath::CharType kVirtualPath[] = FILE_PATH_LITERAL("testing");
 
 }  // namespace
 
@@ -204,23 +114,28 @@ class FileSystemMountPointProviderTest : public testing::Test {
       : ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)) {
   }
 
-  void SetUp() {
+  virtual void SetUp() {
     ASSERT_TRUE(data_dir_.CreateUniqueTempDir());
     special_storage_policy_ = new quota::MockSpecialStoragePolicy;
   }
 
  protected:
   void SetupNewContext(const FileSystemOptions& options) {
+    scoped_refptr<ExternalMountPoints> external_mount_points(
+        ExternalMountPoints::CreateRefCounted());
     file_system_context_ = new FileSystemContext(
         FileSystemTaskRunners::CreateMockTaskRunners(),
+        external_mount_points.get(),
         special_storage_policy_,
         NULL,
         data_dir_.path(),
         options);
 #if defined(OS_CHROMEOS)
-    ExternalFileSystemMountPointProvider* external_provider =
-        file_system_context_->external_provider();
-    external_provider->AddLocalMountPoint(FilePath(kMountPoint));
+    base::FilePath mount_point_path = base::FilePath(kMountPoint);
+    external_mount_points->RegisterFileSystem(
+        mount_point_path.BaseName().AsUTF8Unsafe(),
+        kFileSystemTypeNativeLocal,
+        mount_point_path);
 #endif
   }
 
@@ -232,20 +147,21 @@ class FileSystemMountPointProviderTest : public testing::Test {
   bool GetRootPath(const GURL& origin_url,
                    fileapi::FileSystemType type,
                    bool create,
-                   FilePath* root_path) {
-    FilePath virtual_path = FilePath();
+                   base::FilePath* root_path) {
+    base::FilePath virtual_path = base::FilePath();
     if (type == kFileSystemTypeExternal)
-      virtual_path = FilePath(kVirtualPath);
-    FilePath returned_root_path =
-        provider(type)->GetFileSystemRootPathOnFileThread(
-            FileSystemURL(origin_url, type, virtual_path), create);
+      virtual_path = base::FilePath(kVirtualPath);
+    FileSystemURL url = file_system_context_->CreateCrackedFileSystemURL(
+        origin_url, type, virtual_path);
+    base::FilePath returned_root_path =
+        provider(type)->GetFileSystemRootPathOnFileThread(url, create);
     if (root_path)
       *root_path = returned_root_path;
     return !returned_root_path.empty();
   }
 
-  FilePath data_path() const { return data_dir_.path(); }
-  FilePath file_system_path() const {
+  base::FilePath data_path() const { return data_dir_.path(); }
+  base::FilePath file_system_path() const {
     return data_dir_.path().Append(
         SandboxMountPointProvider::kFileSystemDirectory);
   }
@@ -265,7 +181,7 @@ class FileSystemMountPointProviderTest : public testing::Test {
 };
 
 TEST_F(FileSystemMountPointProviderTest, GetRootPathCreateAndExamine) {
-  std::vector<FilePath> returned_root_path(
+  std::vector<base::FilePath> returned_root_path(
       ARRAYSIZE_UNSAFE(kRootPathTestCases));
   SetupNewContext(CreateAllowFileAccessOptions());
 
@@ -274,13 +190,13 @@ TEST_F(FileSystemMountPointProviderTest, GetRootPathCreateAndExamine) {
     SCOPED_TRACE(testing::Message() << "RootPath (create) #" << i << " "
                  << kRootPathTestCases[i].expected_path);
 
-    FilePath root_path;
+    base::FilePath root_path;
     EXPECT_TRUE(GetRootPath(GURL(kRootPathTestCases[i].origin_url),
                             kRootPathTestCases[i].type,
                             true /* create */, &root_path));
 
     if (kRootPathTestCases[i].type != kFileSystemTypeExternal) {
-      FilePath expected = file_system_path().AppendASCII(
+      base::FilePath expected = file_system_path().AppendASCII(
           kRootPathTestCases[i].expected_path);
       EXPECT_EQ(expected.value(), root_path.value());
       EXPECT_TRUE(file_util::DirectoryExists(root_path));
@@ -299,7 +215,7 @@ TEST_F(FileSystemMountPointProviderTest, GetRootPathCreateAndExamine) {
     SCOPED_TRACE(testing::Message() << "RootPath (get) #" << i << " "
                  << kRootPathTestCases[i].expected_path);
 
-    FilePath root_path;
+    base::FilePath root_path;
     EXPECT_TRUE(GetRootPath(GURL(kRootPathTestCases[i].origin_url),
                             kRootPathTestCases[i].type,
                             false /* create */, &root_path));
@@ -310,18 +226,18 @@ TEST_F(FileSystemMountPointProviderTest, GetRootPathCreateAndExamine) {
 
 TEST_F(FileSystemMountPointProviderTest,
        GetRootPathCreateAndExamineWithNewProvider) {
-  std::vector<FilePath> returned_root_path(
+  std::vector<base::FilePath> returned_root_path(
       ARRAYSIZE_UNSAFE(kRootPathTestCases));
   SetupNewContext(CreateAllowFileAccessOptions());
 
   GURL origin_url("http://foo.com:1/");
 
-  FilePath root_path1;
+  base::FilePath root_path1;
   EXPECT_TRUE(GetRootPath(origin_url,
                           kFileSystemTypeTemporary, true, &root_path1));
 
   SetupNewContext(CreateDisallowFileAccessOptions());
-  FilePath root_path2;
+  base::FilePath root_path2;
   EXPECT_TRUE(GetRootPath(origin_url,
                           kFileSystemTypeTemporary, false, &root_path2));
 
@@ -376,40 +292,15 @@ TEST_F(FileSystemMountPointProviderTest, GetRootPathFileURIWithAllowFlag) {
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(kRootPathFileURITestCases); ++i) {
     SCOPED_TRACE(testing::Message() << "RootPathFileURI (allow) #"
                  << i << " " << kRootPathFileURITestCases[i].expected_path);
-    FilePath root_path;
+    base::FilePath root_path;
     EXPECT_TRUE(GetRootPath(GURL(kRootPathFileURITestCases[i].origin_url),
                             kRootPathFileURITestCases[i].type,
                             true /* create */, &root_path));
-    FilePath expected = file_system_path().AppendASCII(
+    base::FilePath expected = file_system_path().AppendASCII(
         kRootPathFileURITestCases[i].expected_path);
     EXPECT_EQ(expected.value(), root_path.value());
     EXPECT_TRUE(file_util::DirectoryExists(root_path));
   }
 }
-
-TEST_F(FileSystemMountPointProviderTest, IsRestrictedName) {
-  SetupNewContext(CreateDisallowFileAccessOptions());
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(kIsRestrictedNameTestCases); ++i) {
-    SCOPED_TRACE(testing::Message() << "IsRestrictedName #" << i << " "
-                 << kIsRestrictedNameTestCases[i].name);
-    FilePath name(kIsRestrictedNameTestCases[i].name);
-    EXPECT_EQ(kIsRestrictedNameTestCases[i].expected_dangerous,
-              provider(kFileSystemTypeTemporary)->IsRestrictedFileName(name));
-  }
-}
-
-#if defined(OS_CHROMEOS)
-TEST_F(FileSystemMountPointProviderTest, ExternalMountPoints) {
-  SetupNewContext(CreateDisallowFileAccessOptions());
-  ExternalFileSystemMountPointProvider* external_provider =
-      file_system_context()->external_provider();
-  FilePath virtual_unused;
-  EXPECT_TRUE(external_provider->GetVirtualPath(FilePath(kMountPoint),
-                                                &virtual_unused));
-  external_provider->RemoveMountPoint(FilePath(kMountPoint));
-  EXPECT_FALSE(external_provider->GetVirtualPath(FilePath(kMountPoint),
-                                                 &virtual_unused));
-}
-#endif
 
 }  // namespace fileapi

@@ -207,7 +207,7 @@
    fun:_FSOperation
    fun:_FSOperateOnObjectSync
    fun:FSMoveObjectToTrashSync
-   fun:_Z9TrashFuncRK8FilePath
+   fun:_Z9TrashFunc*FilePath
 }
 {
    # See also http://openradar.appspot.com/radar?id=1169404
@@ -258,21 +258,21 @@
    Memcheck:Leak
    ...
    fun:_CFBundleCreate
-   fun:_ZN6webkit5npapi9PluginLib17ReadWebPluginInfoERK8FilePathPNS0_13WebPluginInfoE
+   fun:_ZN6webkit5npapi9PluginLib17ReadWebPluginInfoE*
 }
 {
    bug_85213_e
    Memcheck:Leak
    ...
    fun:CFBundlePreflightExecutable
-   fun:_ZN6webkit5npapi9PluginLib17ReadWebPluginInfoERK8FilePathPNS0_13WebPluginInfoE
+   fun:_ZN6webkit5npapi9PluginLib17ReadWebPluginInfoE*
 }
 {
    bug_85213_f
    Memcheck:Leak
    ...
    fun:CFBundleGetPackageInfo
-   fun:_ZN6webkit5npapi9PluginLib17ReadWebPluginInfoERK8FilePathPNS0_13WebPluginInfoE
+   fun:_ZN6webkit5npapi9PluginLib17ReadWebPluginInfoE*
 }
 {
    bug_86927
@@ -339,11 +339,11 @@
    plugin_unload
    Memcheck:Leak
    fun:_Znw*
-   fun:_ZN4base17LoadNativeLibraryERK8FilePathPSs
+   fun:_ZN4base17LoadNativeLibraryE*
    fun:_ZN6webkit5npapi9PluginLib4LoadEv
    fun:_ZN6webkit5npapi9PluginLib13NP_InitializeEv
-   fun:_ZN6webkit5npapi21WebPluginDelegateImpl6CreateERK8FilePathRKSsy
-   fun:_ZN19TestWebViewDelegate20CreatePluginDelegateERK8FilePathRKSs
+   fun:_ZN6webkit5npapi21WebPluginDelegateImpl6CreateE*
+   fun:_ZN19TestWebViewDelegate20CreatePluginDelegateE*
 }
 {
    # Mac Sandbox test cases are registered in a global map.  This code is only
@@ -490,8 +490,8 @@
    Memcheck:Leak
    ...
    fun:CSBackupSetItemExcluded
-   fun:_ZN8mac_util22SetFileBackupExclusionERK8FilePathb
-   fun:_ZN7history15HistoryDatabase4InitERK8FilePathS3_
+   fun:_ZN8mac_util22SetFileBackupExclusionE*
+   fun:_ZN7history15HistoryDatabase4InitE*
    fun:_ZN7history14HistoryBackend8InitImplEv
    fun:_ZN7history14HistoryBackend4InitEb
 }
@@ -507,8 +507,8 @@
    Memcheck:Unaddressable
    ...
    fun:CSBackupSetItemExcluded
-   fun:_ZN8mac_util22SetFileBackupExclusionERK8FilePathb
-   fun:_ZN7history15HistoryDatabase4InitERK8FilePathS3_
+   fun:_ZN8mac_util22SetFileBackupExclusionE*
+   fun:_ZN7history15HistoryDatabase4InitE*
    fun:_ZN7history14HistoryBackend8InitImplEv
    fun:_ZN7history14HistoryBackend4InitEb
 }
@@ -517,8 +517,8 @@
    Memcheck:Unaddressable
    ...
    fun:CSBackupSetItemExcluded
-   fun:_ZN4base3mac22SetFileBackupExclusionERK8FilePath
-   fun:_ZN7history15HistoryDatabase4InitERK8FilePathS3_
+   fun:_ZN4base3mac22SetFileBackupExclusionE*
+   fun:_ZN7history15HistoryDatabase4InitE*
    fun:_ZN7history14HistoryBackend8InitImplERKSs
    fun:_ZN7history14HistoryBackend4InitERKSsb
 }
@@ -630,7 +630,7 @@
    Memcheck:Leak
    fun:_Znw*
    ...
-   fun:_ZN19extension_file_util13LoadExtensionERK8FilePathbPSs
+   fun:_ZN19extension_file_util13LoadExtensionE*
    fun:_ZN12CrxInstaller15CompleteInstallEv
 }
 {
@@ -669,10 +669,10 @@
    fun:_Znw*
    fun:_ZN11ProfileImpl14InitExtensionsEv
    fun:_ZN14ProfileManager10AddProfileEP7Profileb
-   fun:_ZN14ProfileManager10GetProfileERK8FilePathb
-   fun:_ZN14ProfileManager10GetProfileERK8FilePath
-   fun:_ZN14ProfileManager17GetDefaultProfileERK8FilePath
-   fun:_ZN12_GLOBAL__N_113CreateProfileERK18MainFunctionParamsRK8FilePath
+   fun:_ZN14ProfileManager10GetProfileE*
+   fun:_ZN14ProfileManager10GetProfileE*
+   fun:_ZN14ProfileManager17GetDefaultProfileE*
+   fun:_ZN12_GLOBAL__N_113CreateProfileE*
    fun:_Z11BrowserMainRK18MainFunctionParams
    fun:ChromeMain
    fun:main
@@ -753,7 +753,7 @@
    fun:sqlite3_exec
    fun:_ZN3sql10Connection7ExecuteEPKc
    fun:_ZN17TokenServiceTable4InitEv
-   fun:_ZN11WebDatabase4InitERK8FilePath
+   fun:_ZN11WebDatabase4InitE*
    fun:_ZN14WebDataService29InitializeDatabaseIfNecessaryEv
 }
 {
@@ -761,8 +761,8 @@
    Memcheck:Leak
    fun:_Znw*
    fun:_ZN16ChildProcessHost13CreateChannelEv
-   fun:_ZN18UtilityProcessHost12StartProcessERK8FilePath
-   fun:_ZN18UtilityProcessHost22StartExtensionUnpackerERK8FilePath
+   fun:_ZN18UtilityProcessHost12StartProcessE*
+   fun:_ZN18UtilityProcessHost22StartExtensionUnpackerE*
 }
 {
    bug_52681_b
@@ -770,9 +770,9 @@
    fun:_Znw*
    ...
    fun:_ZN16ChildProcessHost13CreateChannelEv
-   fun:_ZN18UtilityProcessHost12StartProcessERK8FilePath
-   fun:_ZN18UtilityProcessHost22StartExtensionUnpackerERK8FilePath
-   fun:_ZN26SandboxedUnpacker22StartProcessOnIOThreadERK8FilePath
+   fun:_ZN18UtilityProcessHost12StartProcessE*
+   fun:_ZN18UtilityProcessHost22StartExtensionUnpackerE*
+   fun:_ZN26SandboxedUnpacker22StartProcessOnIOThreadE*
 }
 {
    bug_53742_a
@@ -878,8 +878,8 @@
    fun:memcpy
    ...
    fun:FSFindFolder
-   fun:_ZN12_GLOBAL__N_124GetPluginCommonDirectoryEPSt6vectorI8FilePathSaIS1_EEb
-   fun:_ZN6webkit5npapi10PluginList20GetPluginDirectoriesEPSt6vectorI8FilePathSaIS2_EE
+   fun:_ZN12_GLOBAL__N_124GetPluginCommonDirectoryE*
+   fun:_ZN6webkit5npapi10PluginList20GetPluginDirectoriesE*
    fun:_ZN6webkit5npapi10PluginList11LoadPluginsEb
    fun:_ZN6webkit5npapi10PluginList10GetPluginsEbPSt6vectorI13WebPluginInfoSaIS2_EE
    fun:_ZN13PluginUpdater30GetPreferencesDataOnFileThreadEPv
@@ -889,8 +889,8 @@
    Memcheck:Unaddressable
    ...
    fun:FSFindFolder
-   fun:_ZN12_GLOBAL__N_124GetPluginCommonDirectoryEPSt6vectorI8FilePathSaIS1_EEb
-   fun:_ZN6webkit5npapi10PluginList20GetPluginDirectoriesEPSt6vectorI8FilePathSaIS2_EE
+   fun:_ZN12_GLOBAL__N_124GetPluginCommonDirectoryE*
+   fun:_ZN6webkit5npapi10PluginList20GetPluginDirectoriesE*
    fun:_ZN6webkit5npapi10PluginList11LoadPluginsEb
    fun:_ZN6webkit5npapi10PluginList10GetPluginsEbPSt6vectorI13WebPluginInfoSaIS2_EE
    fun:_ZN13PluginUpdater30GetPreferencesDataOnFileThreadEPv
@@ -1051,9 +1051,9 @@
    fun:_ZN11BrowserInit17LaunchWithProfile17OpenURLsInBrowserEP7BrowserbRKSt6vectorI4GURLSaIS4_EE
    fun:_ZN11BrowserInit17LaunchWithProfile17ProcessLaunchURLsEbRKSt6vectorI4GURLSaIS2_EE
    fun:_ZN11BrowserInit17LaunchWithProfile6LaunchEP7Profileb
-   fun:_ZN11BrowserInit13LaunchBrowserERK11CommandLineP7ProfileRK8FilePathNS_16IsProcessStartupENS_10IsFirstRunEPi
-   fun:_ZN11BrowserInit18ProcessCmdLineImplERK11CommandLineRK8FilePathbP7ProfilePiPS_
-   fun:_ZN11BrowserInit5StartERK11CommandLineRK8FilePathP7ProfilePi
+   fun:_ZN11BrowserInit13LaunchBrowserE*
+   fun:_ZN11BrowserInit18ProcessCmdLineImplE*
+   fun:_ZN11BrowserInit5StartE*
 }
 {
    bug_64463
@@ -1331,7 +1331,7 @@
    fun:-[NSSavePanel _initPanelCommon]
    fun:-[NSSavePanel initWithContentRect:styleMask:backing:defer:]
    fun:+[NSSavePanel _crunchyRawUnbonedPanel]
-   fun:_ZN20SelectFileDialogImpl10SelectFileEN16SelectFileDialog4TypeERKSbItN4base20string16_char_traitsESaItEERK8FilePathPKNS0_12FileTypeInfoEiRKSsP8NSWindowPv
+   fun:_ZN20SelectFileDialogImpl10SelectFileEN16SelectFileDialog4TypeERKSbItN4base20string16_char_traitsESaItEE*
    fun:_ZN15DownloadManager24OnPathExistenceAvailableEP18DownloadCreateInfo
 }
 {
@@ -1412,7 +1412,7 @@
    bug_82682
    Memcheck:Leak
    ...
-   fun:_ZN6webkit5npapi12_GLOBAL__N_119ReadPlistPluginInfoERK8FilePathP10__CFBundlePNS0_13WebPluginInfoE
+   fun:_ZN6webkit5npapi12_GLOBAL__N_119ReadPlistPluginInfoE*
 }
 {
    bug_84329
@@ -1459,9 +1459,9 @@
    fun:_ZN11BrowserInit17LaunchWithProfile17OpenURLsInBrowserEP7BrowserbRKSt6vectorI4GURLSaIS4_EE
    fun:_ZN11BrowserInit17LaunchWithProfile17ProcessLaunchURLsEbRKSt6vectorI4GURLSaIS2_EE
    fun:_ZN11BrowserInit17LaunchWithProfile6LaunchEP7ProfileRKSt6vectorI4GURLSaIS4_EEb
-   fun:_ZN11BrowserInit13LaunchBrowserERK11CommandLineP7ProfileRK8FilePathNS_16IsProcessStartupENS_10IsFirstRunEPi
-   fun:_ZN11BrowserInit18ProcessCmdLineImplERK11CommandLineRK8FilePathbP7ProfilePiPS_
-   fun:_ZN11BrowserInit5StartERK11CommandLineRK8FilePathP7ProfilePi
+   fun:_ZN11BrowserInit13LaunchBrowserE*
+   fun:_ZN11BrowserInit18ProcessCmdLineImplE*
+   fun:_ZN11BrowserInit5StartE*
 }
 {
    bug_87629
@@ -1757,8 +1757,8 @@
    Memcheck:Unaddressable
    fun:MDItemCreate
    fun:CSBackupSetItemExcluded
-   fun:_ZN4base3mac22SetFileBackupExclusionERK8FilePath
-   fun:_ZN7history17ThumbnailDatabase4InitERK8FilePathPKNS_16HistoryPublisherEPNS_11URLDatabaseE
+   fun:_ZN4base3mac22SetFileBackupExclusionE*
+   fun:_ZN7history17ThumbnailDatabase4InitE*
    fun:_ZN7history14HistoryBackend8InitImplERKSs
    fun:_ZN7history14HistoryBackend4InitERKSsb
 }
@@ -1796,7 +1796,7 @@
    fun:setenv$UNIX2003
    fun:_ZN12_GLOBAL__N_115EnvironmentImpl10SetVarImplEPKcRKSs
    fun:_ZN12_GLOBAL__N_115EnvironmentImpl6SetVarEPKcRKSs
-   fun:_Z18AppendToPythonPathRK8FilePath
+   fun:_Z18AppendToPythonPath*FilePath
    fun:_ZN*3net15LocalTestServer13SetPythonPathEv
    fun:_ZN3net15LocalTestServer5StartEv
    fun:_ZN12_GLOBAL__N_132MimeTypeTests_MimeTypeTests_Test8TestBodyEv
@@ -2120,31 +2120,6 @@
    fun:_ZN4base14PlatformThread7SetNameEPKc
 }
 {
-   bug_107177
-   Memcheck:Leak
-   fun:calloc
-   fun:CGGlyphBitmapCreate
-   fun:CGFontCreateGlyphBitmap8
-   fun:create_missing_bitmaps
-   fun:CGGlyphLockLockGlyphBitmaps
-   ...
-   fun:draw_glyphs
-   fun:CGContextShowGlyphs
-   fun:_ZN9Offscreen5getCGERK19SkScalerContext_MacRK7SkGlyphbtPm
-   fun:_ZN19SkScalerContext_Mac13generateImageERK7SkGlyph
-   fun:_ZN15SkScalerContext8getImageERK7SkGlyph
-   fun:_ZN12SkGlyphCache9findImageERK7SkGlyph
-   fun:_ZL22D1G_NoBounder_RectClipRK12SkDraw1GlyphiiRK7SkGlyph
-   fun:_ZNK6SkDraw11drawPosTextEPKcmPKffiRK7SkPaint
-   fun:_ZN8SkDevice11drawPosTextERK6SkDrawPKvmPKffiRK7SkPaint
-   fun:_ZN8SkCanvas11drawPosTextEPKvmPK7SkPointRK7SkPaint
-   fun:_ZNK7WebCore4Font10drawGlyphsEPNS_15GraphicsContextEPKNS_14SimpleFontDataERKNS_11GlyphBufferEiiRKNS_10FloatPointE
-   fun:_ZNK7WebCore4Font15drawGlyphBufferEPNS_15GraphicsContextERKNS_7TextRunERKNS_11GlyphBufferERKNS_10FloatPointE
-   fun:_ZNK7WebCore4Font14drawSimpleTextEPNS_15GraphicsContextERKNS_7TextRunERKNS_10FloatPointEii
-   fun:_ZNK7WebCore4Font8drawTextEPNS_15GraphicsContextERKNS_7TextRunERKNS_10FloatPointEii
-   fun:_ZN7WebCore15GraphicsContext8drawTextERKNS_4FontERKNS_7TextRunERKNS_10FloatPointEii
-}
-{
    bug_107179
    Memcheck:Uninitialized
    fun:_ZNK7WebCore13InlineTextBox17expansionBehaviorEv
@@ -2167,7 +2142,7 @@
    fun:_ZN6WebKit12WebFrameImpl16paintWithContextERN7WebCore15GraphicsContextERKNS_7WebRectE
 }
 {
-   bug_107541
+   bug_107541_a
    Memcheck:Leak
    fun:_Znw*
    fun:_ZL14NewFromFontRefPK8__CTFontPKc
@@ -2191,6 +2166,27 @@
    fun:_ZN7WebCore11RenderBlock13paintContentsERNS_9PaintInfoERKNS_*
    fun:_ZN7WebCore11RenderBlock11paintObjectERNS_9PaintInfoERKNS_*
    fun:_ZN7WebCore11RenderBlock5paintERNS_9PaintInfoERKNS_*
+}
+{
+   bug_107541_b
+   Memcheck:Leak
+   fun:calloc
+   fun:CGGlyphBitmapCreate
+   ...
+   fun:CGFontCreateGlyphBitmap*
+   fun:create_missing_bitmaps
+   fun:CGGlyphLockLockGlyphBitmaps
+   ...
+   fun:draw_glyphs
+   fun:CGContextShowGlyphs
+   fun:_ZN9Offscreen5getCGERK19SkScalerContext_MacRK7SkGlyph*
+   fun:_ZN19SkScalerContext_Mac13generateImageERK7SkGlyph
+   fun:_ZN15SkScalerContext8getImageERK7SkGlyph
+   fun:_ZN12SkGlyphCache9findImageERK7SkGlyph
+   fun:_ZL22D1G_NoBounder_RectClipRK12SkDraw1GlyphiiRK7SkGlyph
+   fun:_ZNK6SkDraw*draw*TextE*
+   fun:_ZN8SkDevice*draw*TextE*
+   fun:_ZN8SkCanvas*draw*TextE*
 }
 {
    bug_109994
@@ -2292,7 +2288,7 @@
    bug_127499_e
    Memcheck:Leak
    fun:_Znw*
-   fun:_ZN4base17LoadNativeLibraryERK8FilePathPSs
+   fun:_ZN4base17LoadNativeLibraryE*
    fun:_ZN12_GLOBAL__N_117InitializeVdaApisEv
    fun:_ZN3gfx30VideoDecodeAccelerationSupport6CreateEiiiPKvm
    fun:_ZN3gfx46VideoDecodeAccelerationSupportTest_Create_Test8TestBodyEv
@@ -2353,4 +2349,35 @@
    fun:_Znw*
    fun:_ZN3net12_GLOBAL__N_120URLRequestFtpJobTest9AddSocketEPNS_13MockReadWriteILNS_17MockReadWriteTypeE0EEEmPNS2_ILS3_1EEEm
    ...
+}
+{
+   bug_173779
+   Memcheck:Uninitialized
+   ...
+   fun:img_data_lock
+   fun:CGSImageDataLock
+   fun:ripc_AcquireImage
+   fun:ripc_DrawImages
+   fun:CGContextDrawImages
+   fun:_ZN11CUIRenderer10Draw9PieceElPK13CUIDescriptorm
+   fun:_ZN11CUIRenderer4DrawE6CGRectP9CGContextPK14__CFDictionaryPS5_
+   fun:-[NSButtonCell drawBezelWithFrame:inView:]
+   ...
+}
+{
+   bug_177540
+   Memcheck:Uninitialized
+   fun:_ZN3WTF20TCMalloc_ThreadCache10DeallocateENS_11HardenedSLLEm
+}
+{
+   bug_178424c
+   Memcheck:Param
+   write(buf)
+   fun:write$UNIX2003
+}
+{
+   bug_178424d
+   Memcheck:Param
+   read(buf)
+   fun:read$UNIX2003
 }

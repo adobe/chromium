@@ -8,7 +8,7 @@
 #include <string>
 #include <vector>
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 
 class GURL;
 
@@ -33,7 +33,7 @@ class DevToolsHttpHandlerDelegate {
   virtual bool BundlesFrontendResources() = 0;
 
   // Returns path to the front-end files on the local filesystem for debugging.
-  virtual FilePath GetDebugFrontendDir() = 0;
+  virtual base::FilePath GetDebugFrontendDir() = 0;
 
   // Get a thumbnail for a given page. Returns non-empty string iff we have the
   // thumbnail.

@@ -7,7 +7,7 @@
 #include "base/files/scoped_temp_dir.h"
 #include "base/json/json_string_value_serializer.h"
 #include "base/message_loop.h"
-#include "base/string_number_conversions.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/policy/async_policy_provider.h"
 #include "chrome/browser/policy/config_dir_policy_loader.h"
@@ -20,7 +20,7 @@ namespace policy {
 namespace {
 
 // Subdirectory of the config dir that contains mandatory policies.
-const FilePath::CharType kMandatoryPath[] = FILE_PATH_LITERAL("managed");
+const base::FilePath::CharType kMandatoryPath[] = FILE_PATH_LITERAL("managed");
 
 class TestHarness : public PolicyProviderTestHarness {
  public:
@@ -48,7 +48,7 @@ class TestHarness : public PolicyProviderTestHarness {
   virtual void Install3rdPartyPolicy(
       const base::DictionaryValue* policies) OVERRIDE;
 
-  const FilePath& test_dir() { return test_dir_.path(); }
+  const base::FilePath& test_dir() { return test_dir_.path(); }
 
   // JSON-encode a dictionary and write it to a file.
   void WriteConfigFile(const base::DictionaryValue& dict,
@@ -136,9 +136,9 @@ void TestHarness::WriteConfigFile(const base::DictionaryValue& dict,
   std::string data;
   JSONStringValueSerializer serializer(&data);
   serializer.Serialize(dict);
-  const FilePath mandatory_dir(test_dir().Append(kMandatoryPath));
+  const base::FilePath mandatory_dir(test_dir().Append(kMandatoryPath));
   ASSERT_TRUE(file_util::CreateDirectory(mandatory_dir));
-  const FilePath file_path(mandatory_dir.AppendASCII(file_name));
+  const base::FilePath file_path(mandatory_dir.AppendASCII(file_name));
   ASSERT_EQ((int) data.size(),
             file_util::WriteFile(file_path, data.c_str(), data.size()));
 }
@@ -170,7 +170,7 @@ INSTANTIATE_TEST_CASE_P(
 // Some tests that exercise special functionality in ConfigDirPolicyLoader.
 class ConfigDirPolicyLoaderTest : public PolicyTestBase {
  protected:
-  void SetUp() OVERRIDE {
+  virtual void SetUp() OVERRIDE {
     PolicyTestBase::SetUp();
     harness_.SetUp();
   }
@@ -191,7 +191,7 @@ TEST_F(ConfigDirPolicyLoaderTest, ReadPrefsEmpty) {
 // Reading from a non-existent directory should result in an empty preferences
 // dictionary.
 TEST_F(ConfigDirPolicyLoaderTest, ReadPrefsNonExistentDirectory) {
-  FilePath non_existent_dir(
+  base::FilePath non_existent_dir(
       harness_.test_dir().Append(FILE_PATH_LITERAL("not_there")));
   ConfigDirPolicyLoader loader(non_existent_dir, POLICY_SCOPE_MACHINE);
   scoped_ptr<PolicyBundle> bundle(loader.Load());
@@ -220,7 +220,7 @@ TEST_F(ConfigDirPolicyLoaderTest, ReadPrefsMergePrefs) {
   scoped_ptr<PolicyBundle> bundle(loader.Load());
   ASSERT_TRUE(bundle.get());
   PolicyBundle expected_bundle;
-  expected_bundle.Get(POLICY_DOMAIN_CHROME, "")
+  expected_bundle.Get(PolicyNamespace(POLICY_DOMAIN_CHROME, std::string()))
       .LoadFrom(&test_dict_foo, POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER);
   EXPECT_TRUE(bundle->Equals(expected_bundle));
 }

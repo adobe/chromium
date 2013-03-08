@@ -2,14 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/prefs/pref_service.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_web_ui.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_tabstrip.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/extensions/manifest_url_handler.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/ui_test_utils.h"
@@ -54,7 +54,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionOverrideTest, OverrideNewtab) {
     // Navigate to the new tab page.  The overridden new tab page
     // will call chrome.test.notifyPass() .
     ui_test_utils::NavigateToURL(browser(), GURL("chrome://newtab/"));
-    WebContents* tab = chrome::GetActiveWebContents(browser());
+    WebContents* tab = browser()->tab_strip_model()->GetActiveWebContents();
     ASSERT_TRUE(tab->GetController().GetActiveEntry());
     EXPECT_TRUE(tab->GetController().GetActiveEntry()->GetURL().
                 SchemeIs(extensions::kExtensionScheme));
@@ -79,7 +79,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionOverrideTest, MAYBE_OverrideNewtabIncognito) {
   // new tab page because we can't load chrome-extension URLs in incognito.
   Browser* otr_browser = ui_test_utils::OpenURLOffTheRecord(
       browser()->profile(), GURL("chrome://newtab/"));
-  WebContents* tab = chrome::GetActiveWebContents(otr_browser);
+  WebContents* tab = otr_browser->tab_strip_model()->GetActiveWebContents();
   ASSERT_TRUE(tab->GetController().GetActiveEntry());
   EXPECT_FALSE(tab->GetController().GetActiveEntry()->GetURL().
                SchemeIs(extensions::kExtensionScheme));

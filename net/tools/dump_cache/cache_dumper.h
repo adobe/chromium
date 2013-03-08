@@ -7,8 +7,8 @@
 
 #include <string>
 
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "net/disk_cache/backend_impl.h"
 
 #ifdef WIN32
@@ -63,7 +63,7 @@ class CacheDumper : public CacheDumpWriter {
 // Writes data to a disk.
 class DiskDumper : public CacheDumpWriter {
  public:
-  explicit DiskDumper(const FilePath& path);
+  explicit DiskDumper(const base::FilePath& path);
 
   virtual int CreateEntry(const std::string& key, disk_cache::Entry** entry,
                           const net::CompletionCallback& callback) OVERRIDE;
@@ -74,11 +74,11 @@ class DiskDumper : public CacheDumpWriter {
                           base::Time last_modified) OVERRIDE;
 
  private:
-  FilePath path_;
+  base::FilePath path_;
   // This is a bit of a hack.  As we get a CreateEntry, we coin the current
   // entry_path_ where we write that entry to disk.  Subsequent calls to
   // WriteEntry() utilize this path for writing to disk.
-  FilePath entry_path_;
+  base::FilePath entry_path_;
   std::string entry_url_;
 #ifdef WIN32_LARGE_FILENAME_SUPPORT
   HANDLE entry_;

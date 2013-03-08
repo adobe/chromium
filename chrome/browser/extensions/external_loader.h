@@ -5,7 +5,7 @@
 #ifndef CHROME_BROWSER_EXTENSIONS_EXTERNAL_LOADER_H_
 #define CHROME_BROWSER_EXTENSIONS_EXTERNAL_LOADER_H_
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 
@@ -49,7 +49,7 @@ class ExternalLoader : public base::RefCountedThreadSafe<ExternalLoader> {
   // return the absolute path from which relative paths should be resolved.
   // By default, return an empty path, which indicates that relative paths
   // are not allowed.
-  virtual const FilePath GetBaseCrxFilePath();
+  virtual const base::FilePath GetBaseCrxFilePath();
 
  protected:
   virtual ~ExternalLoader();

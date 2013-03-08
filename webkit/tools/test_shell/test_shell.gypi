@@ -67,10 +67,10 @@
             '<(DEPTH)/third_party/WebKit/Source/WebKit/chromium/WebKit.gyp:webkit',
             '<(DEPTH)/ui/native_theme/native_theme.gyp:native_theme',
             '<(DEPTH)/v8/tools/gyp/v8.gyp:v8',
+            '<(DEPTH)/webkit/gpu/webkit_gpu.gyp:webkit_gpu',
             '<(DEPTH)/webkit/support/webkit_support.gyp:glue',
             '<(DEPTH)/webkit/support/webkit_support.gyp:user_agent',
             '<(DEPTH)/webkit/support/webkit_support.gyp:webkit_base',
-            '<(DEPTH)/webkit/support/webkit_support.gyp:webkit_gpu',
             '<(DEPTH)/webkit/support/webkit_support.gyp:webkit_media',
             '<(DEPTH)/webkit/support/webkit_support.gyp:webkit_resources',
             '<(DEPTH)/webkit/support/webkit_support.gyp:webkit_storage',
@@ -143,17 +143,22 @@
                 'copy_npapi_test_plugin',
               ],
             }],
+            ['use_x11==1', {
+              'dependencies': [
+                '<(DEPTH)/tools/xdisplaycheck/xdisplaycheck.gyp:xdisplaycheck',
+              ],
+            }],
             ['toolkit_uses_gtk == 1', {
               'dependencies': [
                 'test_shell_resources',
                 '<(DEPTH)/build/linux/system.gyp:gtk',
-                '<(DEPTH)/tools/xdisplaycheck/xdisplaycheck.gyp:xdisplaycheck',
               ],
               # for:  test_shell_gtk.cc
               'cflags': ['-Wno-multichar'],
             }],
             ['OS=="win"', {
-              'msvs_disabled_warnings': [ 4800 ],
+              # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
+              'msvs_disabled_warnings': [ 4800, 4267 ],
               'link_settings': {
                 'libraries': [
                   '-lcomctl32.lib',
@@ -384,7 +389,7 @@
             '../../plugins/ppapi/mock_plugin_delegate.cc',
             '../../plugins/ppapi/mock_plugin_delegate.h',
             '../../plugins/ppapi/mock_resource.h',
-            '../../plugins/ppapi/ppb_graphics_2d_impl_unittest.cc',
+            '../../plugins/ppapi/ppapi_plugin_instance_unittest.cc',
             '../../plugins/ppapi/ppapi_unittest.cc',
             '../../plugins/ppapi/ppapi_unittest.h',
             '../../plugins/ppapi/quota_file_io_unittest.cc',
@@ -448,7 +453,8 @@
               ],
             }],
             ['OS=="win"', {
-              'msvs_disabled_warnings': [ 4800 ],
+              # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
+              'msvs_disabled_warnings': [ 4800, 4267 ],
             }],
             ['os_posix == 1 and OS != "mac"', {
               'conditions': [

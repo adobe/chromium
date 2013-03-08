@@ -14,6 +14,7 @@
 #include "chrome/browser/ui/gtk/gtk_chrome_button.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/browser/ui/gtk/infobars/infobar_container_gtk.h"
+#include "chrome/common/extensions/api/icons/icons_handler.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_icon_set.h"
@@ -32,7 +33,11 @@ ExtensionInfoBarGtk::ExtensionInfoBarGtk(InfoBarService* owner,
     : InfoBarGtk(owner, delegate),
       delegate_(delegate),
       view_(NULL),
+      button_(NULL),
+      icon_(NULL),
       ALLOW_THIS_IN_INITIALIZER_LIST(weak_ptr_factory_(this)) {
+  delegate->set_observer(this);
+
   // Always render the close button as if we were doing chrome style widget
   // rendering. For extension infobars, we force chrome style rendering because
   // extension authors are going to expect to match the declared gradient in
@@ -46,12 +51,15 @@ ExtensionInfoBarGtk::ExtensionInfoBarGtk(InfoBarService* owner,
   BuildWidgets();
 }
 
-ExtensionInfoBarGtk::~ExtensionInfoBarGtk() {}
+ExtensionInfoBarGtk::~ExtensionInfoBarGtk() {
+  if (delegate_)
+    delegate_->set_observer(NULL);
+}
 
 void ExtensionInfoBarGtk::PlatformSpecificHide(bool animate) {
   // This view is not owned by us; we can't unparent it because we aren't the
   // owning container.
-  gtk_container_remove(GTK_CONTAINER(alignment_), view_->native_view());
+  gtk_util::RemoveAllChildren(alignment_);
 }
 
 void ExtensionInfoBarGtk::GetTopColor(InfoBarDelegate::Type type,
@@ -78,41 +86,54 @@ void ExtensionInfoBarGtk::OnImageLoaded(const gfx::Image& image) {
   else
     icon = image.ToImageSkia();
 
-  gfx::ImageSkia* drop_image = rb.GetImageSkiaNamed(IDR_APP_DROPARROW);
+  SkBitmap bitmap;
+  if (button_) {
+    gfx::ImageSkia* drop_image = rb.GetImageSkiaNamed(IDR_APP_DROPARROW);
 
-  int image_size = extension_misc::EXTENSION_ICON_BITTY;
-  // The margin between the extension icon and the drop-down arrow bitmap.
-  static const int kDropArrowLeftMargin = 3;
-  scoped_ptr<gfx::Canvas> canvas(new gfx::Canvas(
-      gfx::Size(image_size + kDropArrowLeftMargin + drop_image->width(),
-                image_size), ui::SCALE_FACTOR_100P, false));
-  canvas->DrawImageInt(*icon, 0, 0, icon->width(), icon->height(), 0, 0,
-                       image_size, image_size, false);
-  canvas->DrawImageInt(*drop_image, image_size + kDropArrowLeftMargin,
-                       image_size / 2);
+    int image_size = extension_misc::EXTENSION_ICON_BITTY;
+    // The margin between the extension icon and the drop-down arrow bitmap.
+    static const int kDropArrowLeftMargin = 3;
+    scoped_ptr<gfx::Canvas> canvas(new gfx::Canvas(
+        gfx::Size(image_size + kDropArrowLeftMargin + drop_image->width(),
+                  image_size), ui::SCALE_FACTOR_100P, false));
+    canvas->DrawImageInt(*icon, 0, 0, icon->width(), icon->height(), 0, 0,
+                         image_size, image_size, false);
+    canvas->DrawImageInt(*drop_image, image_size + kDropArrowLeftMargin,
+                         image_size / 2);
+    bitmap = canvas->ExtractImageRep().sk_bitmap();
+  } else {
+    bitmap = *icon->bitmap();
+  }
 
-  SkBitmap bitmap = canvas->ExtractImageRep().sk_bitmap();
   GdkPixbuf* pixbuf = gfx::GdkPixbufFromSkBitmap(bitmap);
   gtk_image_set_from_pixbuf(GTK_IMAGE(icon_), pixbuf);
   g_object_unref(pixbuf);
 }
 
 void ExtensionInfoBarGtk::BuildWidgets() {
-  button_ = gtk_chrome_button_new();
-  gtk_chrome_button_set_use_gtk_rendering(GTK_CHROME_BUTTON(button_), FALSE);
-  g_object_set_data(G_OBJECT(button_), "left-align-popup",
-                    reinterpret_cast<void*>(true));
-
   icon_ = gtk_image_new();
   gtk_misc_set_alignment(GTK_MISC(icon_), 0.5, 0.5);
-  gtk_button_set_image(GTK_BUTTON(button_), icon_);
-  gtk_util::CenterWidgetInHBox(hbox_, button_, false, 0);
 
-  // Start loading the image for the menu button.
   const extensions::Extension* extension =
       delegate_->extension_host()->extension();
-  ExtensionResource icon_resource = extension->GetIconResource(
-      extension_misc::EXTENSION_ICON_BITTY, ExtensionIconSet::MATCH_EXACTLY);
+
+  if (extension->ShowConfigureContextMenus()) {
+    button_ = gtk_chrome_button_new();
+    gtk_chrome_button_set_use_gtk_rendering(GTK_CHROME_BUTTON(button_), FALSE);
+    g_object_set_data(G_OBJECT(button_), "left-align-popup",
+                      reinterpret_cast<void*>(true));
+
+    gtk_button_set_image(GTK_BUTTON(button_), icon_);
+    gtk_util::CenterWidgetInHBox(hbox_, button_, false, 0);
+  } else {
+    gtk_util::CenterWidgetInHBox(hbox_, icon_, false, 0);
+  }
+
+  // Start loading the image for the menu button.
+  ExtensionResource icon_resource = extensions::IconsInfo::GetIconResource(
+      extension,
+      extension_misc::EXTENSION_ICON_BITTY,
+      ExtensionIconSet::MATCH_EXACTLY);
   // Load image asynchronously, calling back OnImageLoaded.
   extensions::ImageLoader* loader =
       extensions::ImageLoader::Get(delegate_->extension_host()->profile());
@@ -136,8 +157,10 @@ void ExtensionInfoBarGtk::BuildWidgets() {
     gtk_container_add(GTK_CONTAINER(alignment_), view_->native_view());
   }
 
-  Signals()->Connect(button_, "button-press-event",
-                     G_CALLBACK(&OnButtonPressThunk), this);
+  if (button_) {
+    Signals()->Connect(button_, "button-press-event",
+                       G_CALLBACK(&OnButtonPressThunk), this);
+  }
   Signals()->Connect(view_->native_view(), "expose-event",
                      G_CALLBACK(&OnExposeThunk), this);
   Signals()->Connect(view_->native_view(), "size_allocate",
@@ -145,7 +168,12 @@ void ExtensionInfoBarGtk::BuildWidgets() {
 }
 
 void ExtensionInfoBarGtk::StoppedShowing() {
-  gtk_chrome_button_unset_paint_state(GTK_CHROME_BUTTON(button_));
+  if (button_)
+    gtk_chrome_button_unset_paint_state(GTK_CHROME_BUTTON(button_));
+}
+
+void ExtensionInfoBarGtk::OnDelegateDeleted() {
+  delegate_ = NULL;
 }
 
 Browser* ExtensionInfoBarGtk::GetBrowser() {
@@ -157,7 +185,7 @@ Browser* ExtensionInfoBarGtk::GetBrowser() {
   return BrowserWindowGtk::GetBrowserWindowForNativeWindow(parent)->browser();
 }
 
-ui::MenuModel* ExtensionInfoBarGtk::BuildMenuModel() {
+ExtensionContextMenuModel* ExtensionInfoBarGtk::BuildMenuModel() {
   const extensions::Extension* extension = delegate_->extension();
   if (!extension->ShowConfigureContextMenus())
     return NULL;
@@ -182,13 +210,15 @@ gboolean ExtensionInfoBarGtk::OnButtonPress(GtkWidget* widget,
   if (event->button != 1)
     return FALSE;
 
-  ui::MenuModel* model = BuildMenuModel();
-  if (!model)
+  DCHECK(button_);
+
+  context_menu_model_ = BuildMenuModel();
+  if (!context_menu_model_)
     return FALSE;
 
   gtk_chrome_button_set_paint_state(GTK_CHROME_BUTTON(widget),
                                     GTK_STATE_ACTIVE);
-  ShowMenuWithModel(widget, this, model);
+  ShowMenuWithModel(widget, this, context_menu_model_);
 
   return TRUE;
 }

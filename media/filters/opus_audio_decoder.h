@@ -41,23 +41,16 @@ class MEDIA_EXPORT OpusAudioDecoder : public AudioDecoder {
   virtual ~OpusAudioDecoder();
 
  private:
-  // Methods running on decoder thread.
-  void DoInitialize(const scoped_refptr<DemuxerStream>& stream,
-                    const PipelineStatusCB& status_cb,
-                    const StatisticsCB& statistics_cb);
-  void DoReset(const base::Closure& closure);
-  void DoRead(const ReadCB& read_cb);
-  void DoDecodeBuffer(DemuxerStream::Status status,
-                      const scoped_refptr<DecoderBuffer>& input);
-
   // Reads from the demuxer stream with corresponding callback method.
   void ReadFromDemuxerStream();
+  void BufferReady(DemuxerStream::Status status,
+                   const scoped_refptr<DecoderBuffer>& input);
+
 
   bool ConfigureDecoder();
   void CloseDecoder();
   void ResetTimestampState();
   bool Decode(const scoped_refptr<DecoderBuffer>& input,
-              bool skip_eos_append,
               scoped_refptr<DataBuffer>* output_buffer);
 
   scoped_refptr<base::MessageLoopProxy> message_loop_;

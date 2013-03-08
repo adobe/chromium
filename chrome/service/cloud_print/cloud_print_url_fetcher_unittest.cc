@@ -23,7 +23,8 @@ using base::TimeDelta;
 
 namespace cloud_print {
 
-const FilePath::CharType kDocRoot[] = FILE_PATH_LITERAL("chrome/test/data");
+const base::FilePath::CharType kDocRoot[] =
+    FILE_PATH_LITERAL("chrome/test/data");
 
 int g_request_context_getter_instances = 0;
 class TrackingTestURLRequestContextGetter
@@ -65,7 +66,7 @@ class TestCloudPrintURLFetcher : public CloudPrintURLFetcher {
       : io_message_loop_proxy_(io_message_loop_proxy) {
   }
 
-  virtual net::URLRequestContextGetter* GetRequestContextGetter() {
+  virtual net::URLRequestContextGetter* GetRequestContextGetter() OVERRIDE {
     return new TrackingTestURLRequestContextGetter(
         io_message_loop_proxy_.get(), throttler_manager());
   }
@@ -99,14 +100,14 @@ class CloudPrintURLFetcherTest : public testing::Test,
       const net::URLRequestStatus& status,
       int response_code,
       const net::ResponseCookies& cookies,
-      const std::string& data);
+      const std::string& data) OVERRIDE;
 
-  virtual CloudPrintURLFetcher::ResponseAction OnRequestAuthError() {
+  virtual CloudPrintURLFetcher::ResponseAction OnRequestAuthError() OVERRIDE {
     ADD_FAILURE();
     return CloudPrintURLFetcher::STOP_PROCESSING;
   }
 
-  virtual std::string GetAuthHeader() {
+  virtual std::string GetAuthHeader() OVERRIDE {
     return std::string();
   }
 
@@ -152,18 +153,18 @@ class CloudPrintURLFetcherBasicTest : public CloudPrintURLFetcherTest {
       const net::URLRequestStatus& status,
       int response_code,
       const net::ResponseCookies& cookies,
-      const std::string& data);
+      const std::string& data) OVERRIDE;
 
   virtual CloudPrintURLFetcher::ResponseAction HandleRawData(
       const net::URLFetcher* source,
       const GURL& url,
-      const std::string& data);
+      const std::string& data) OVERRIDE;
 
   virtual CloudPrintURLFetcher::ResponseAction HandleJSONData(
       const net::URLFetcher* source,
       const GURL& url,
       DictionaryValue* json_data,
-      bool succeeded);
+      bool succeeded) OVERRIDE;
 
   void SetHandleRawResponse(bool handle_raw_response) {
     handle_raw_response_ = handle_raw_response;
@@ -186,7 +187,7 @@ class CloudPrintURLFetcherOverloadTest : public CloudPrintURLFetcherTest {
   virtual CloudPrintURLFetcher::ResponseAction HandleRawData(
       const net::URLFetcher* source,
       const GURL& url,
-      const std::string& data);
+      const std::string& data) OVERRIDE;
 
  private:
   int response_count_;
@@ -202,9 +203,9 @@ class CloudPrintURLFetcherRetryBackoffTest : public CloudPrintURLFetcherTest {
   virtual CloudPrintURLFetcher::ResponseAction HandleRawData(
       const net::URLFetcher* source,
       const GURL& url,
-      const std::string& data);
+      const std::string& data) OVERRIDE;
 
-  virtual void OnRequestGiveUp();
+  virtual void OnRequestGiveUp() OVERRIDE;
 
  private:
   int response_count_;
@@ -329,7 +330,7 @@ void CloudPrintURLFetcherRetryBackoffTest::OnRequestGiveUp() {
 TEST_F(CloudPrintURLFetcherBasicTest, HandleRawResponse) {
   net::TestServer test_server(net::TestServer::TYPE_HTTP,
                               net::TestServer::kLocalhost,
-                              FilePath(kDocRoot));
+                              base::FilePath(kDocRoot));
   ASSERT_TRUE(test_server.Start());
   SetHandleRawResponse(true);
 
@@ -340,7 +341,7 @@ TEST_F(CloudPrintURLFetcherBasicTest, HandleRawResponse) {
 TEST_F(CloudPrintURLFetcherBasicTest, HandleRawData) {
   net::TestServer test_server(net::TestServer::TYPE_HTTP,
                               net::TestServer::kLocalhost,
-                              FilePath(kDocRoot));
+                              base::FilePath(kDocRoot));
   ASSERT_TRUE(test_server.Start());
 
   SetHandleRawData(true);
@@ -351,7 +352,7 @@ TEST_F(CloudPrintURLFetcherBasicTest, HandleRawData) {
 TEST_F(CloudPrintURLFetcherOverloadTest, Protect) {
   net::TestServer test_server(net::TestServer::TYPE_HTTP,
                               net::TestServer::kLocalhost,
-                              FilePath(kDocRoot));
+                              base::FilePath(kDocRoot));
   ASSERT_TRUE(test_server.Start());
 
   GURL url(test_server.GetURL("defaultresponse"));
@@ -363,7 +364,7 @@ TEST_F(CloudPrintURLFetcherOverloadTest, Protect) {
 TEST_F(CloudPrintURLFetcherRetryBackoffTest, GiveUp) {
   net::TestServer test_server(net::TestServer::TYPE_HTTP,
                               net::TestServer::kLocalhost,
-                              FilePath(kDocRoot));
+                              base::FilePath(kDocRoot));
   ASSERT_TRUE(test_server.Start());
 
   GURL url(test_server.GetURL("defaultresponse"));

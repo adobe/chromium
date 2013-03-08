@@ -6,8 +6,8 @@
 
 #include "base/basictypes.h"
 #include "base/command_line.h"
+#include "base/prefs/pref_service.h"
 #include "base/string_util.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/signin_manager.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
@@ -34,7 +34,6 @@ namespace {
 // List of services that are capable of ClientLogin-based authentication.
 const char* kServices[] = {
   GaiaConstants::kSyncService,
-  GaiaConstants::kDeviceManagementService,
   GaiaConstants::kLSOService
 };
 
@@ -113,14 +112,10 @@ void TokenService::AddAuthTokenManually(const std::string& service,
   FireTokenAvailableNotification(service, auth_token);
   SaveAuthTokenToDB(service, auth_token);
 
-#if defined(OS_CHROMEOS)
-  // We don't ever want to fetch OAuth2 tokens from LSO service token in case
-  // when ChromeOS is in forced OAuth2 use mode. OAuth2 token should only
-  // arrive into token service exclusively through UpdateCredentialsWithOAuth2.
-  if (!CommandLine::ForCurrentProcess()->HasSwitch(switches::kForceOAuth1))
-    return;
-#endif
-
+// We don't ever want to fetch OAuth2 tokens from LSO service token in case
+// when ChromeOS is in forced OAuth2 use mode. OAuth2 token should only
+// arrive into token service exclusively through UpdateCredentialsWithOAuth2.
+#if !defined(OS_CHROMEOS)
   // If we got ClientLogin token for "lso" service, and we don't already have
   // OAuth2 tokens, start fetching OAuth2 login scoped token pair.
   if (service == GaiaConstants::kLSOService && !HasOAuthLoginToken()) {
@@ -128,6 +123,7 @@ void TokenService::AddAuthTokenManually(const std::string& service,
     CHECK_GE(index, 0);
     fetchers_[index]->StartLsoForOAuthLoginTokenExchange(auth_token);
   }
+#endif
 }
 
 
@@ -262,16 +258,8 @@ bool TokenService::HasOAuthLoginToken() const {
   return HasTokenForService(GaiaConstants::kGaiaOAuth2LoginRefreshToken);
 }
 
-bool TokenService::HasOAuthLoginAccessToken() const {
-  return HasTokenForService(GaiaConstants::kGaiaOAuth2LoginAccessToken);
-}
-
 const std::string& TokenService::GetOAuth2LoginRefreshToken() const {
   return GetTokenForService(GaiaConstants::kGaiaOAuth2LoginRefreshToken);
-}
-
-const std::string& TokenService::GetOAuth2LoginAccessToken() const {
-  return GetTokenForService(GaiaConstants::kGaiaOAuth2LoginAccessToken);
 }
 
 // static
@@ -359,15 +347,10 @@ void TokenService::OnClientOAuthSuccess(const ClientOAuthResult& result) {
 void TokenService::SaveOAuth2Credentials(const ClientOAuthResult& result) {
   token_map_[GaiaConstants::kGaiaOAuth2LoginRefreshToken] =
       result.refresh_token;
-  token_map_[GaiaConstants::kGaiaOAuth2LoginAccessToken] = result.access_token;
-  // Save refresh token only since access token is transient anyway.
   SaveAuthTokenToDB(GaiaConstants::kGaiaOAuth2LoginRefreshToken,
       result.refresh_token);
   // We don't save expiration information for now.
 
-  FOR_DIAGNOSTICS_OBSERVERS(
-      NotifyTokenReceivedSuccess(GaiaConstants::kGaiaOAuth2LoginAccessToken,
-                                 result.access_token, true));
   FOR_DIAGNOSTICS_OBSERVERS(
       NotifyTokenReceivedSuccess(GaiaConstants::kGaiaOAuth2LoginRefreshToken,
                                  result.refresh_token, true));
@@ -422,10 +405,8 @@ void TokenService::LoadTokensIntoMemory(
   }
   LoadSingleTokenIntoMemory(db_tokens, in_memory_tokens,
       GaiaConstants::kGaiaOAuth2LoginRefreshToken);
-  LoadSingleTokenIntoMemory(db_tokens, in_memory_tokens,
-      GaiaConstants::kGaiaOAuth2LoginAccessToken);
   // TODO(petewil): Remove next line when we refactor key-value
-  // storage out of token_service.
+  // storage out of token_service - http://crbug.com/177125.
   LoadSingleTokenIntoMemory(db_tokens, in_memory_tokens,
       GaiaConstants::kObfuscatedGaiaId);
 

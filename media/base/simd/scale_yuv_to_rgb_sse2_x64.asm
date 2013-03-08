@@ -2,7 +2,7 @@
 ; Use of this source code is governed by a BSD-style license that can be
 ; found in the LICENSE file.
 
-%include "x86inc.asm"
+%include "third_party/x86inc/x86inc.asm"
 
 ;
 ; This file uses MMX, SSE2 and instructions.
@@ -14,8 +14,8 @@
 ;                                  const uint8* u_buf,
 ;                                  const uint8* v_buf,
 ;                                  uint8* rgb_buf,
-;                                  int width,
-;                                  int source_dx);
+;                                  ptrdiff_t width,
+;                                  ptrdiff_t source_dx);
 %define SYMBOL ScaleYUVToRGB32Row_SSE2_X64
 
   global    mangle(SYMBOL) PRIVATE

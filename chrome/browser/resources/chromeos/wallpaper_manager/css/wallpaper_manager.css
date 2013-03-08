@@ -7,37 +7,58 @@ html {
 }
 
 body {
-  background-color: #f1f1f1;
+  background-color: rgba(20, 20, 20, 0.93);
+  color: #999;
   font-size: 80%;
   height: 100%;
   margin: 0;
   padding: 0;
 }
 
+.dialog-container {
+  -webkit-box-orient: vertical;
+  border: 1px solid black;
+  display: -webkit-box;
+  overflow: hidden;
+}
+
+.dialog-topbar {
+  -webkit-box-align: center;
+  display: -webkit-box;
+  height: 54px;
+  overflow: hidden;
+  padding: 0 15px;
+  position: relative;
+}
+
+.dialog-topbar .spacer {
+  -webkit-box-flex: 1;
+}
+
 #categories-list {
   -webkit-box-orient: horizontal;
   display: -webkit-box;
-  height: 40px;
+  height: 54px;
   outline: none;
   width: 100%;
 }
 
 #categories-list > li {
   -webkit-box-align: center;
+  -webkit-transition: border-top 130ms ease;
   -webkit-user-select: none;
-  border-top: 6px solid transparent;
+  border-top: 4px solid transparent;
   color: #777;
   display: -webkit-box;
-  height: 22px;
+  height: 50px;
 }
 
 #categories-list > li:hover {
-  color: rgb(70, 78, 90);
+  border-top-color: rgba(255, 255, 255, 0.4);
   cursor: pointer;
 }
 
 #categories-list > li[selected] {
-  border-top-color: rgb(78, 87, 100);
   color: rgb(70, 78, 90);
   cursor: default;
 }
@@ -47,17 +68,29 @@ body {
   padding: 0 10px;
 }
 
-.dialog-container {
-  -webkit-box-orient: vertical;
-  display: -webkit-box;
-  height: 100%;
-  overflow: hidden;
+#categories-list > li[selected] > div {
+  color: #eee;
 }
 
-.dialog-topbar {
-  -webkit-padding-start: 15px;
-  display: -webkit-box;
-  overflow: hidden;
+#close {
+  background-image: url('../images/ui/close-white.png');
+  height: 14px;
+  position: absolute;
+  right: 10px;
+  top: 10px;
+  width: 14px
+}
+
+#close:hover {
+  background-image: url('../images/ui/close-white-hover.png');
+}
+
+#bar {
+  -webkit-transition: left 130ms ease-in-out;
+  background-color: #eee;
+  height: 4px;
+  position: absolute;
+  top: 0;
 }
 
 .dialog-main {
@@ -83,15 +116,19 @@ body {
 }
 
 .image-picker {
+  -webkit-padding-end: 5px;
+  -webkit-padding-start: 15px;
   display: block;
   /* Set font size to 0 to remove the extra vertical margin between two rows of
    * thumbnails.
    * TODO(bshe): Find the root cause of the margin.
    */
   font-size: 0;
-  height: 320px;
+  height: 287px;
   outline: none;
   overflow-y: auto;
+  padding-bottom: 15px;
+  padding-top: 5px;
 }
 
 .image-picker .spacer {
@@ -106,9 +143,38 @@ body {
 }
 
 .image-picker [role=listitem] {
+  -webkit-margin-end: 1px;
   height: 68px;
-  margin: 1px;
+  margin-bottom: 1px;
+  position: relative;
   width: 108px;
+}
+
+.image-picker [role=listitem]:hover {
+  outline: 3px solid #f1f1f1;
+  z-index: 1;
+}
+
+.image-picker .check {
+  background-image: url('../images/ui/check.png');
+  height: 32px;
+  left: 38px;
+  position: absolute;
+  top: 18px;
+  width: 32px;
+  z-index: 3;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #aaa;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #888;
 }
 
 /* The width and height of img tag need to be set here. Otherwise, an incorrect
@@ -119,12 +185,6 @@ body {
 .image-picker img {
   height: 68px;
   width: 108px;
-}
-
-.image-picker [selected][lead] img {
-  border: 2px solid rgb(0, 102, 204);
-  height: 64px;
-  width: 104px;
 }
 
 .image-picker-offline img:not([offline]) {
@@ -141,12 +201,25 @@ body {
   -webkit-box-orient: horizontal;
   -webkit-box-pack: end;
   display: -webkit-box;
-  height: 30px;
-  padding: 15px;
+  height: 40px;
+  padding: 11px 15px 8px 15px;
 }
 
 .bottom-bar > .spacer {
   -webkit-box-flex: 1;
+}
+
+#attribute-image {
+  -webkit-margin-end: 10px;
+  height: 34px;
+  width: 54px;
+}
+
+#author-website {
+  color: #999;
+  overflow: hidden;
+  white-space: nowrap;
+  width: 240px;
 }
 
 /* Custom wallpaper thumbnail container. */
@@ -161,108 +234,57 @@ body {
   display: none !important;
 }
 
-/* The butter bar styles are copied from file_manager.css. We will revisit
- * it to see if we can share some code after butter bar is integrated with
- * Photo Editor.
- * See http://codereview.chromium.org/10916149/ for details.
- */
-/* TODO(bshe): Remove these styles if we can share code with file manager. */
-#butter-bar-container {
-  -webkit-box-pack: center;
-  display: -webkit-box;
-  left: 0;
-  pointer-events: none;
-  position: absolute;
-  top: 0;
-  width: 100%;
-  z-index: 3;
-}
-
-#butter-bar {
-  -webkit-box-align: end;
-  -webkit-box-orient: horizontal;
-  -webkit-transition: opacity 300ms;
-  background-color: #e3e3e3;
-  color: #222;
-  display: -webkit-box;
-  max-width: 340px;
-  min-width: 40px;
-  padding: 0 1em;
-  pointer-events: auto;
-  top: 1px;
-  width: 30%;
-  z-index: 2;
-}
-
-#butter-bar:not(.visible) {
-  opacity: 0;
-  pointer-events: none;
-}
-
-#butter-bar .content {
-  -webkit-box-flex: 1;
-  overflow: hidden;
-  padding-bottom: 4px;
-  padding-top: 4px;
-}
-
-#butter-bar .actions {
-  -webkit-box-orient: horizontal;
-  -webkit-box-pack: end;
-  display: -webkit-box;
-  height: 20px;
-}
-
-#butter-bar .actions a {
-  background: center center no-repeat;
-  background-image: -webkit-image-set(
-    url('../images/ui/close_bar.png') 1x,
-    url('../images/ui/2x/close_bar.png') 2x);
-  display: inline-block;
-  height: 12px;
-  padding: 4px 2px;
-  width: 12px;
-}
-
-#butter-bar .actions a:first-child {
-  margin-left: 2px;
-}
-
-#butter-bar .actions a:last-child {
-  margin-right: -2px;  /* Overlap the padding with butter-bar padding. */
-}
-
-#butter-bar.error {
-  background-color: rgb(236, 207, 203);
-  border: 1px solid rgba(221, 75, 57, 0.5);
-  border-radius: 2px;
-  padding: 2px 1em;
-}
-
 .progress-bar {
-  -webkit-box-flex: 1;
-  border: 1px solid #999;
-  margin-bottom: 2px;
-  margin-top: 3px;
-  padding: 1px;
+  background-color: rgba(255, 255, 255, 0.7);
+  height: 6px;
+  position: absolute;
+  top: 62px;
+  width: 100%;
 }
 
 .progress-track {
-  -webkit-animation-duration: 800ms;
-  -webkit-animation-iteration-count: infinite;
-  -webkit-animation-name: bg;
-  -webkit-animation-timing-function: linear;
-  background-color: #ccc;
-  background-image: -webkit-linear-gradient(315deg, transparent,
-      transparent 33%, rgba(0, 0, 0, 0.12) 33%, rgba(0, 0, 0, 0.12) 66%,
-      transparent 66%, transparent);
-  background-position: 0 0;
-  background-repeat: repeat-x;
-  background-size: 16px 8px;
-  height: 5px;
+  -webkit-transition: width 1ms linear;
+  background-color: rgb(66, 129, 244);
+  height: 100%;
+  width: 0;
 }
 
-@-webkit-keyframes bg {
-  0% { background-position: 0 0; }
-  100% { background-position: -16px 0; }
+#error-container {
+  -webkit-box-align: center;
+  -webkit-box-orient: vertical;
+  -webkit-box-pack: center;
+  background-color: rgba(25, 25, 25, 0.25);
+  bottom: 0;
+  display: -webkit-box;
+  left: 0;
+  overflow: auto;
+  position: fixed;
+  right: 0;
+  top: 0;
+  z-index: 4;
+}
+
+#error-container .page {
+  -webkit-border-radius: 3px;
+  -webkit-box-orient: vertical;
+  background: rgb(255, 255, 255);
+  box-shadow: 0 4px 23px 5px rgba(0, 0, 0, 0.2), 0 2px 6px rgba(0, 0, 0, 0.15);
+  color: #333;
+  display: -webkit-box;
+  padding: 20px;
+  position: relative;
+  width: 302px;
+}
+
+#close-error {
+  background-image: url('../images/ui/close-error.png');
+  height: 14px;
+  position: absolute;
+  right: 10px;
+  top: 10px;
+  width: 14px
+}
+
+#close-error:hover {
+  background-image: url('../images/ui/close-error-hover.png');
 }

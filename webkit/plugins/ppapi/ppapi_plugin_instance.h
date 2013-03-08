@@ -247,7 +247,10 @@ class WEBKIT_PLUGINS_EXPORT PluginInstance :
   bool CanRotateView();
   void RotateView(WebKit::WebPlugin::RotationType type);
 
-  void Graphics3DContextLost();
+  // Sets the bound_graphics_2d_platform_ for testing purposes. This is instead
+  // of calling BindGraphics and allows any PlatformGraphics implementation to
+  // be used, not just a resource one.
+  void SetBoundGraphics2DForTest(PluginDelegate::PlatformGraphics2D* graphics);
 
   // There are 2 implementations of the fullscreen interface
   // PPB_FlashFullscreen is used by Pepper Flash.
@@ -667,7 +670,6 @@ class WEBKIT_PLUGINS_EXPORT PluginInstance :
   // variable to hold on to the pixels.
   scoped_refptr<PPB_ImageData_Impl> last_printed_page_;
 #endif  // defined(OS_MACOSX)
-#if defined(USE_SKIA)
   // Always when printing to PDF on Linux and when printing for preview on Mac
   // and Win, the entire document goes into one metafile.  However, when users
   // print only a subset of all the pages, it is impossible to know if a call
@@ -680,7 +682,6 @@ class WEBKIT_PLUGINS_EXPORT PluginInstance :
   SkRefPtr<WebKit::WebCanvas> canvas_;
   // An array of page ranges.
   std::vector<PP_PrintPageNumberRange_Dev> ranges_;
-#endif  // OS_LINUX || OS_WIN
 
   scoped_refptr< ::ppapi::Resource> gamepad_impl_;
 
@@ -775,6 +776,7 @@ class WEBKIT_PLUGINS_EXPORT PluginInstance :
   // calls and handles PPB_ContentDecryptor_Private calls.
   scoped_ptr<ContentDecryptorDelegate> content_decryptor_delegate_;
 
+  friend class PpapiPluginInstanceTest;
   DISALLOW_COPY_AND_ASSIGN(PluginInstance);
 };
 

@@ -10,12 +10,14 @@
 #include "base/path_service.h"
 #include "base/string16.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/extensions/image_loader.h"
 #include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/favicon/favicon_tab_helper.h"
 #include "chrome/browser/favicon/favicon_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/web_applications/web_app.h"
 #include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/extensions/api/icons/icons_handler.h"
 #include "chrome/common/extensions/extension.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_details.h"
@@ -23,7 +25,10 @@
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/web_contents.h"
 #include "googleurl/src/gurl.h"
+#include "grit/theme_resources.h"
+#include "skia/ext/image_operations.h"
 #include "third_party/skia/include/core/SkBitmap.h"
+#include "ui/base/resource/resource_bundle.h"
 
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
 #include "base/environment.h"
@@ -39,6 +44,16 @@ using content::NavigationController;
 using content::WebContents;
 
 namespace {
+
+#if defined(OS_MACOSX)
+const int kDesiredSizes[] = {16, 32, 128, 256, 512};
+#elif defined(OS_LINUX)
+// Linux supports icons of any size. FreeDesktop Icon Theme Specification states
+// that "Minimally you should install a 48x48 icon in the hicolor theme."
+const int kDesiredSizes[] = {16, 32, 48, 128, 256, 512};
+#else
+const int kDesiredSizes[] = {32};
+#endif
 
 #if defined(OS_WIN)
 // UpdateShortcutWorker holds all context data needed for update shortcut.
@@ -94,13 +109,13 @@ class UpdateShortcutWorker : public content::NotificationObserver {
   ShellIntegration::ShortcutInfo shortcut_info_;
 
   // Our copy of profile path.
-  FilePath profile_path_;
+  base::FilePath profile_path_;
 
   // File name of shortcut/ico file based on app title.
-  FilePath file_name_;
+  base::FilePath file_name_;
 
   // Existing shortcuts.
-  std::vector<FilePath> shortcut_files_;
+  std::vector<base::FilePath> shortcut_files_;
 
   DISALLOW_COPY_AND_ASSIGN(UpdateShortcutWorker);
 };
@@ -196,20 +211,16 @@ void UpdateShortcutWorker::CheckExistingShortcuts() {
 
   // Locations to check to shortcut_paths.
   struct {
-    bool& use_this_location;
     int location_id;
     const wchar_t* sub_dir;
   } locations[] = {
     {
-      shortcut_info_.create_on_desktop,
       base::DIR_USER_DESKTOP,
       NULL
     }, {
-      shortcut_info_.create_in_applications_menu,
       base::DIR_START_MENU,
       NULL
     }, {
-      shortcut_info_.create_in_quick_launch_bar,
       // For Win7, create_in_quick_launch_bar means pinning to taskbar.
       base::DIR_APP_DATA,
       (base::win::GetVersion() >= base::win::VERSION_WIN7) ?
@@ -219,9 +230,7 @@ void UpdateShortcutWorker::CheckExistingShortcuts() {
   };
 
   for (int i = 0; i < arraysize(locations); ++i) {
-    locations[i].use_this_location = false;
-
-    FilePath path;
+    base::FilePath path;
     if (!PathService::Get(locations[i].location_id, &path)) {
       NOTREACHED();
       continue;
@@ -230,10 +239,9 @@ void UpdateShortcutWorker::CheckExistingShortcuts() {
     if (locations[i].sub_dir != NULL)
       path = path.Append(locations[i].sub_dir);
 
-    FilePath shortcut_file = path.Append(file_name_).
+    base::FilePath shortcut_file = path.Append(file_name_).
         ReplaceExtension(FILE_PATH_LITERAL(".lnk"));
     if (file_util::PathExists(shortcut_file)) {
-      locations[i].use_this_location = true;
       shortcut_files_.push_back(shortcut_file);
     }
   }
@@ -248,7 +256,7 @@ void UpdateShortcutWorker::UpdateShortcuts() {
 void UpdateShortcutWorker::UpdateShortcutsOnFileThread() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
 
-  FilePath web_app_path = web_app::GetWebAppDataDirectory(
+  base::FilePath web_app_path = web_app::GetWebAppDataDirectory(
       profile_path_, shortcut_info_.extension_id, shortcut_info_.url);
 
   // Ensure web_app_path exists. web_app_path could be missing for a legacy
@@ -259,7 +267,7 @@ void UpdateShortcutWorker::UpdateShortcutsOnFileThread() {
     return;
   }
 
-  FilePath icon_file = web_app_path.Append(file_name_).ReplaceExtension(
+  base::FilePath icon_file = web_app_path.Append(file_name_).ReplaceExtension(
       FILE_PATH_LITERAL(".ico"));
   web_app::internals::CheckAndSaveIcon(icon_file,
                                        *shortcut_info_.favicon.ToSkBitmap());
@@ -311,9 +319,36 @@ void UpdateShortcutWorker::DeleteMeOnUIThread() {
 }
 #endif  // defined(OS_WIN)
 
+void OnImageLoaded(ShellIntegration::ShortcutInfo shortcut_info,
+                   web_app::ShortcutInfoCallback callback,
+                   const gfx::Image& image) {
+  // If the image failed to load (e.g. if the resource being loaded was empty)
+  // use the standard application icon.
+  if (image.IsEmpty()) {
+    gfx::Image default_icon =
+        ResourceBundle::GetSharedInstance().GetImageNamed(IDR_APP_DEFAULT_ICON);
+    int size = kDesiredSizes[arraysize(kDesiredSizes) - 1];
+    SkBitmap bmp = skia::ImageOperations::Resize(
+          *default_icon.ToSkBitmap(), skia::ImageOperations::RESIZE_BEST,
+          size, size);
+    shortcut_info.favicon = gfx::Image::CreateFrom1xBitmap(bmp);
+  } else {
+    shortcut_info.favicon = image;
+  }
+
+  callback.Run(shortcut_info);
+}
+
 }  // namespace
 
 namespace web_app {
+
+ShellIntegration::ShortcutInfo ShortcutInfoForExtensionAndProfile(
+    const extensions::Extension* extension, Profile* profile) {
+  ShellIntegration::ShortcutInfo shortcut_info;
+  web_app::UpdateShortcutInfoForApp(*extension, profile, &shortcut_info);
+  return shortcut_info;
+}
 
 void GetShortcutInfoForTab(WebContents* web_contents,
                            ShellIntegration::ShortcutInfo* info) {
@@ -357,6 +392,54 @@ void UpdateShortcutInfoForApp(const extensions::Extension& app,
   shortcut_info->description = UTF8ToUTF16(app.description());
   shortcut_info->extension_path = app.path();
   shortcut_info->profile_path = profile->GetPath();
+}
+
+void UpdateShortcutInfoAndIconForApp(
+    const extensions::Extension& extension,
+    Profile* profile,
+    const web_app::ShortcutInfoCallback& callback) {
+  ShellIntegration::ShortcutInfo shortcut_info =
+      ShortcutInfoForExtensionAndProfile(&extension, profile);
+
+  std::vector<extensions::ImageLoader::ImageRepresentation> info_list;
+  for (size_t i = 0; i < arraysize(kDesiredSizes); ++i) {
+    int size = kDesiredSizes[i];
+    ExtensionResource resource = extensions::IconsInfo::GetIconResource(
+        &extension, size, ExtensionIconSet::MATCH_EXACTLY);
+    if (!resource.empty()) {
+      info_list.push_back(extensions::ImageLoader::ImageRepresentation(
+          resource,
+          extensions::ImageLoader::ImageRepresentation::RESIZE_WHEN_LARGER,
+          gfx::Size(size, size),
+          ui::SCALE_FACTOR_100P));
+    }
+  }
+
+  if (info_list.empty()) {
+    size_t i = arraysize(kDesiredSizes) - 1;
+    int size = kDesiredSizes[i];
+
+    // If there is no icon at the desired sizes, we will resize what we can get.
+    // Making a large icon smaller is preferred to making a small icon larger,
+    // so look for a larger icon first:
+    ExtensionResource resource = extensions::IconsInfo::GetIconResource(
+        &extension, size, ExtensionIconSet::MATCH_BIGGER);
+    if (resource.empty()) {
+      resource = extensions::IconsInfo::GetIconResource(
+          &extension, size, ExtensionIconSet::MATCH_SMALLER);
+    }
+    info_list.push_back(extensions::ImageLoader::ImageRepresentation(
+        resource,
+        extensions::ImageLoader::ImageRepresentation::RESIZE_WHEN_LARGER,
+        gfx::Size(size, size),
+        ui::SCALE_FACTOR_100P));
+  }
+
+  // |info_list| may still be empty at this point, in which case LoadImage
+  // will call the OnImageLoaded callback with an empty image and exit
+  // immediately.
+  extensions::ImageLoader::Get(profile)->LoadImagesAsync(&extension, info_list,
+      base::Bind(&OnImageLoaded, shortcut_info, callback));
 }
 
 }  // namespace web_app

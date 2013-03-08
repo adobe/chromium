@@ -10,7 +10,7 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/file_util.h"
-#include "base/file_util_proxy.h"
+#include "base/files/file_util_proxy.h"
 #include "base/json/json_string_value_serializer.h"
 #include "base/memory/scoped_handle.h"
 #include "base/message_loop.h"
@@ -23,9 +23,11 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_utility_messages.h"
-#include "chrome/common/extensions/extension_manifest_constants.h"
+#include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_file_util.h"
 #include "chrome/common/extensions/extension_l10n_util.h"
+#include "chrome/common/extensions/extension_manifest_constants.h"
+#include "chrome/common/extensions/extension_manifest_constants.h"
 #include "chrome/common/extensions/unpacker.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/utility_process_host.h"
@@ -55,7 +57,7 @@ using content::UtilityProcessHost;
 namespace {
 
 void RecordSuccessfulUnpackTimeHistograms(
-    const FilePath& crx_path, const base::TimeDelta unpack_time) {
+    const base::FilePath& crx_path, const base::TimeDelta unpack_time) {
 
   const int64 kBytesPerKb = 1024;
   const int64 kBytesPerMb = 1024 * 1024;
@@ -112,11 +114,11 @@ void RecordSuccessfulUnpackTimeHistograms(
 
 // Work horse for FindWritableTempLocation. Creates a temp file in the folder
 // and uses NormalizeFilePath to check if the path is junction free.
-bool VerifyJunctionFreeLocation(FilePath* temp_dir) {
+bool VerifyJunctionFreeLocation(base::FilePath* temp_dir) {
   if (temp_dir->empty())
     return false;
 
-  FilePath temp_file;
+  base::FilePath temp_file;
   if (!file_util::CreateTemporaryFileInDir(*temp_dir, &temp_file)) {
     LOG(ERROR) << temp_dir->value() << " is not writable";
     return false;
@@ -126,7 +128,7 @@ bool VerifyJunctionFreeLocation(FilePath* temp_dir) {
   // exit points delete this temp file!
   file_util::WriteFile(temp_file, ".", 1);
 
-  FilePath normalized_temp_file;
+  base::FilePath normalized_temp_file;
   bool normalized =
       file_util::NormalizeFilePath(temp_file, &normalized_temp_file);
   if (!normalized) {
@@ -148,8 +150,8 @@ bool VerifyJunctionFreeLocation(FilePath* temp_dir) {
 // proceed and should fail.
 // The result will be written to |temp_dir|. The function will write to this
 // parameter even if it returns false.
-bool FindWritableTempLocation(const FilePath& extensions_dir,
-                              FilePath* temp_dir) {
+bool FindWritableTempLocation(const base::FilePath& extensions_dir,
+                              base::FilePath* temp_dir) {
 // On ChromeOS, we will only attempt to unpack extension in cryptohome (profile)
 // directory to provide additional security/privacy and speed up the rest of
 // the extension install process.
@@ -173,11 +175,11 @@ bool FindWritableTempLocation(const FilePath& extensions_dir,
 namespace extensions {
 
 SandboxedUnpacker::SandboxedUnpacker(
-    const FilePath& crx_path,
+    const base::FilePath& crx_path,
     bool run_out_of_process,
-    Extension::Location location,
+    Manifest::Location location,
     int creation_flags,
-    const FilePath& extensions_dir,
+    const base::FilePath& extensions_dir,
     base::SequencedTaskRunner* unpacker_io_task_runner,
     SandboxedUnpackerClient* client)
     : crx_path_(crx_path),
@@ -193,7 +195,7 @@ SandboxedUnpacker::SandboxedUnpacker(
 bool SandboxedUnpacker::CreateTempDirectory() {
   CHECK(unpacker_io_task_runner_->RunsTasksOnCurrentThread());
 
-  FilePath temp_dir;
+  base::FilePath temp_dir;
   if (!FindWritableTempLocation(extensions_dir_, &temp_dir)) {
     ReportFailure(
         COULD_NOT_GET_TEMP_DIRECTORY,
@@ -238,7 +240,7 @@ void SandboxedUnpacker::Start() {
     return;  // ValidateSignature() already reported the error.
 
   // Copy the crx file into our working directory.
-  FilePath temp_crx_path = temp_dir_.path().Append(crx_path_.BaseName());
+  base::FilePath temp_crx_path = temp_dir_.path().Append(crx_path_.BaseName());
   PATH_LENGTH_HISTOGRAM("Extensions.SandboxUnpackTempCrxPathLength",
                         temp_crx_path);
 
@@ -264,7 +266,7 @@ void SandboxedUnpacker::Start() {
     // reparse point.  When the path is used, following the link/reparse point
     // will cause file system access outside the sandbox path, and the sandbox
     // will deny the operation.
-    FilePath link_free_crx_path;
+    base::FilePath link_free_crx_path;
     if (!file_util::NormalizeFilePath(temp_crx_path, &link_free_crx_path)) {
       LOG(ERROR) << "Could not get the normalized path of "
                  << temp_crx_path.value();
@@ -322,7 +324,8 @@ void SandboxedUnpacker::OnProcessCrashed(int exit_code) {
          ASCIIToUTF16("UTILITY_PROCESS_CRASHED_WHILE_TRYING_TO_INSTALL")));
 }
 
-void SandboxedUnpacker::StartProcessOnIOThread(const FilePath& temp_crx_path) {
+void SandboxedUnpacker::StartProcessOnIOThread(
+    const base::FilePath& temp_crx_path) {
   UtilityProcessHost* host = UtilityProcessHost::Create(
       this, unpacker_io_task_runner_);
   // Grant the subprocess access to the entire subdir the extension file is
@@ -606,7 +609,7 @@ DictionaryValue* SandboxedUnpacker::RewriteManifestFile(
     return NULL;
   }
 
-  FilePath manifest_path =
+  base::FilePath manifest_path =
       extension_root_.Append(Extension::kManifestFilename);
   if (!file_util::WriteFile(manifest_path,
                             manifest_json.data(), manifest_json.size())) {
@@ -637,7 +640,7 @@ bool SandboxedUnpacker::RewriteImageFiles() {
   // Delete any images that may be used by the browser.  We're going to write
   // out our own versions of the parsed images, and we want to make sure the
   // originals are gone for good.
-  std::set<FilePath> image_paths = extension_->GetBrowserImages();
+  std::set<base::FilePath> image_paths = extension_->GetBrowserImages();
   if (image_paths.size() != images.size()) {
     // Decoded images don't match what's in the manifest.
     ReportFailure(
@@ -648,9 +651,9 @@ bool SandboxedUnpacker::RewriteImageFiles() {
     return false;
   }
 
-  for (std::set<FilePath>::iterator it = image_paths.begin();
+  for (std::set<base::FilePath>::iterator it = image_paths.begin();
        it != image_paths.end(); ++it) {
-    FilePath path = *it;
+    base::FilePath path = *it;
     if (path.IsAbsolute() || path.ReferencesParent()) {
       // Invalid path for browser image.
       ReportFailure(
@@ -674,7 +677,7 @@ bool SandboxedUnpacker::RewriteImageFiles() {
   // Write our parsed images back to disk as well.
   for (size_t i = 0; i < images.size(); ++i) {
     const SkBitmap& image = images[i].a;
-    FilePath path_suffix = images[i].b;
+    base::FilePath path_suffix = images[i].b;
     if (path_suffix.IsAbsolute() || path_suffix.ReferencesParent()) {
       // Invalid path for bitmap image.
       ReportFailure(
@@ -684,7 +687,7 @@ bool SandboxedUnpacker::RewriteImageFiles() {
               ASCIIToUTF16("INVALID_PATH_FOR_BITMAP_IMAGE")));
       return false;
     }
-    FilePath path = extension_root_.Append(path_suffix);
+    base::FilePath path = extension_root_.Append(path_suffix);
 
     std::vector<unsigned char> image_data;
     // TODO(mpcomplete): It's lame that we're encoding all images as PNG, even
@@ -730,10 +733,9 @@ bool SandboxedUnpacker::RewriteCatalogFiles() {
   }
 
   // Write our parsed catalogs back to disk.
-  for (DictionaryValue::key_iterator key_it = catalogs.begin_keys();
-       key_it != catalogs.end_keys(); ++key_it) {
-    DictionaryValue* catalog;
-    if (!catalogs.GetDictionaryWithoutPathExpansion(*key_it, &catalog)) {
+  for (DictionaryValue::Iterator it(catalogs); !it.IsAtEnd(); it.Advance()) {
+    const DictionaryValue* catalog = NULL;
+    if (!it.value().GetAsDictionary(&catalog)) {
       // Invalid catalog data.
       ReportFailure(
           INVALID_CATALOG_DATA,
@@ -745,7 +747,8 @@ bool SandboxedUnpacker::RewriteCatalogFiles() {
 
     // TODO(viettrungluu): Fix the |FilePath::FromWStringHack(UTF8ToWide())|
     // hack and remove the corresponding #include.
-    FilePath relative_path = FilePath::FromWStringHack(UTF8ToWide(*key_it));
+    base::FilePath relative_path =
+        base::FilePath::FromWStringHack(UTF8ToWide(it.key()));
     relative_path = relative_path.Append(Extension::kMessagesFilename);
     if (relative_path.IsAbsolute() || relative_path.ReferencesParent()) {
       // Invalid path for catalog.
@@ -756,7 +759,7 @@ bool SandboxedUnpacker::RewriteCatalogFiles() {
               ASCIIToUTF16("INVALID_PATH_FOR_CATALOG")));
       return false;
     }
-    FilePath path = extension_root_.Append(relative_path);
+    base::FilePath path = extension_root_.Append(relative_path);
 
     std::string catalog_json;
     JSONStringValueSerializer serializer(&catalog_json);

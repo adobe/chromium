@@ -9,26 +9,29 @@
 #include "base/command_line.h"
 #include "base/file_util.h"
 #include "base/message_loop.h"
-#include "base/string_number_conversions.h"
+#include "base/prefs/pref_service.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/extensions/bundle_installer.h"
 #include "chrome/browser/extensions/extension_install_ui.h"
 #include "chrome/browser/extensions/image_loader.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/token_service.h"
 #include "chrome/browser/signin/token_service_factory.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/extensions/api/icons/icons_handler.h"
+#include "chrome/common/extensions/api/identity/oauth2_manifest_handler.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_icon_set.h"
 #include "chrome/common/extensions/extension_manifest_constants.h"
 #include "chrome/common/extensions/extension_resource.h"
 #include "chrome/common/extensions/feature_switch.h"
+#include "chrome/common/extensions/manifest.h"
 #include "chrome/common/extensions/permissions/permission_set.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/web_contents.h"
@@ -43,6 +46,7 @@
 
 using extensions::BundleInstaller;
 using extensions::Extension;
+using extensions::Manifest;
 using extensions::PermissionSet;
 
 namespace {
@@ -54,6 +58,7 @@ static const int kTitleIds[ExtensionInstallPrompt::NUM_PROMPT_TYPES] = {
   IDS_EXTENSION_RE_ENABLE_PROMPT_TITLE,
   IDS_EXTENSION_PERMISSIONS_PROMPT_TITLE,
   IDS_EXTENSION_EXTERNAL_INSTALL_PROMPT_TITLE,
+  IDS_EXTENSION_POST_INSTALL_PERMISSIONS_PROMPT_TITLE,
 };
 static const int kHeadingIds[ExtensionInstallPrompt::NUM_PROMPT_TYPES] = {
   IDS_EXTENSION_INSTALL_PROMPT_HEADING,
@@ -62,6 +67,16 @@ static const int kHeadingIds[ExtensionInstallPrompt::NUM_PROMPT_TYPES] = {
   IDS_EXTENSION_RE_ENABLE_PROMPT_HEADING,
   IDS_EXTENSION_PERMISSIONS_PROMPT_HEADING,
   0,  // External installs use different strings for extensions/apps.
+  IDS_EXTENSION_POST_INSTALL_PERMISSIONS_PROMPT_HEADING,
+};
+static const int kButtons[ExtensionInstallPrompt::NUM_PROMPT_TYPES] = {
+  ui::DIALOG_BUTTON_OK | ui::DIALOG_BUTTON_CANCEL,
+  ui::DIALOG_BUTTON_OK | ui::DIALOG_BUTTON_CANCEL,
+  ui::DIALOG_BUTTON_OK | ui::DIALOG_BUTTON_CANCEL,
+  ui::DIALOG_BUTTON_OK | ui::DIALOG_BUTTON_CANCEL,
+  ui::DIALOG_BUTTON_OK | ui::DIALOG_BUTTON_CANCEL,
+  ui::DIALOG_BUTTON_OK | ui::DIALOG_BUTTON_CANCEL,
+  ui::DIALOG_BUTTON_CANCEL,
 };
 static const int kAcceptButtonIds[ExtensionInstallPrompt::NUM_PROMPT_TYPES] = {
   IDS_EXTENSION_PROMPT_INSTALL_BUTTON,
@@ -70,6 +85,7 @@ static const int kAcceptButtonIds[ExtensionInstallPrompt::NUM_PROMPT_TYPES] = {
   IDS_EXTENSION_PROMPT_RE_ENABLE_BUTTON,
   IDS_EXTENSION_PROMPT_PERMISSIONS_BUTTON,
   0,  // External installs use different strings for extensions/apps.
+  0,
 };
 static const int kAbortButtonIds[ExtensionInstallPrompt::NUM_PROMPT_TYPES] = {
   0,  // These all use the platform's default cancel label.
@@ -78,6 +94,7 @@ static const int kAbortButtonIds[ExtensionInstallPrompt::NUM_PROMPT_TYPES] = {
   0,
   IDS_EXTENSION_PROMPT_PERMISSIONS_ABORT_BUTTON,
   IDS_EXTENSION_EXTERNAL_INSTALL_PROMPT_ABORT_BUTTON,
+  IDS_CLOSE,
 };
 static const int kPermissionsHeaderIds[
     ExtensionInstallPrompt::NUM_PROMPT_TYPES] = {
@@ -87,6 +104,7 @@ static const int kPermissionsHeaderIds[
   IDS_EXTENSION_PROMPT_WILL_NOW_HAVE_ACCESS_TO,
   IDS_EXTENSION_PROMPT_WANTS_ACCESS_TO,
   IDS_EXTENSION_PROMPT_WILL_HAVE_ACCESS_TO,
+  IDS_EXTENSION_PROMPT_CAN_ACCESS,
 };
 static const int kOAuthHeaderIds[ExtensionInstallPrompt::NUM_PROMPT_TYPES] = {
   IDS_EXTENSION_PROMPT_OAUTH_HEADER,
@@ -96,6 +114,7 @@ static const int kOAuthHeaderIds[ExtensionInstallPrompt::NUM_PROMPT_TYPES] = {
   IDS_EXTENSION_PROMPT_OAUTH_PERMISSIONS_HEADER,
   // TODO(mpcomplete): Do we need this for external install UI? If we do,
   // we need to update FetchOAuthIssueAdviceIfNeeded.
+  0,
   0,
 };
 
@@ -113,8 +132,10 @@ int GetSizeForMaxScaleFactor(int size_in_dip) {
 // Returns bitmap for the default icon with size equal to the default icon's
 // pixel size under maximal supported scale factor.
 SkBitmap GetDefaultIconBitmapForMaxScaleFactor(bool is_app) {
-  return Extension::GetDefaultIcon(is_app).
-      GetRepresentation(ui::GetMaxScaleFactor()).sk_bitmap();
+  const gfx::ImageSkia& image = is_app ?
+      extensions::IconsInfo::GetDefaultAppIcon() :
+      extensions::IconsInfo::GetDefaultExtensionIcon();
+  return image.GetRepresentation(ui::GetMaxScaleFactor()).sk_bitmap();
 }
 
 // If auto confirm is enabled then posts a task to proceed with or cancel the
@@ -242,6 +263,14 @@ string16 ExtensionInstallPrompt::Prompt::GetHeading() const {
     return l10n_util::GetStringFUTF16(
         kHeadingIds[type_], UTF8ToUTF16(extension_->name()));
   }
+}
+
+int ExtensionInstallPrompt::Prompt::GetDialogButtons() const {
+  return kButtons[type_];
+}
+
+bool ExtensionInstallPrompt::Prompt::HasAcceptButtonLabel() const {
+  return kAcceptButtonIds[type_] > 0;
 }
 
 string16 ExtensionInstallPrompt::Prompt::GetAcceptButtonLabel() const {
@@ -374,8 +403,8 @@ scoped_refptr<Extension>
   }
 
   return Extension::Create(
-      FilePath(),
-      Extension::INTERNAL,
+      base::FilePath(),
+      Manifest::INTERNAL,
       localized_manifest.get() ? *localized_manifest.get() : *manifest,
       flags,
       id,
@@ -529,6 +558,17 @@ void ExtensionInstallPrompt::ConfirmIssueAdvice(
   LoadImageIfNeeded();
 }
 
+void ExtensionInstallPrompt::ReviewPermissions(Delegate* delegate,
+                                               const Extension* extension) {
+  DCHECK(ui_loop_ == MessageLoop::current());
+  extension_ = extension;
+  permissions_ = extension->GetActivePermissions();
+  delegate_ = delegate;
+  prompt_.set_type(POST_INSTALL_PERMISSIONS_PROMPT);
+
+  LoadImageIfNeeded();
+}
+
 void ExtensionInstallPrompt::OnInstallSuccess(const Extension* extension,
                                               SkBitmap* icon) {
   extension_ = extension;
@@ -569,9 +609,10 @@ void ExtensionInstallPrompt::LoadImageIfNeeded() {
   }
 
   // Load the image asynchronously. For the response, check OnImageLoaded.
-  ExtensionResource image =
-      extension_->GetIconResource(extension_misc::EXTENSION_ICON_LARGE,
-                                  ExtensionIconSet::MATCH_BIGGER);
+  ExtensionResource image = extensions::IconsInfo::GetIconResource(
+      extension_,
+      extension_misc::EXTENSION_ICON_LARGE,
+      ExtensionIconSet::MATCH_BIGGER);
   // Load the icon whose pixel size is large enough to be displayed under
   // maximal supported scale factor. UI code will scale the icon down if needed.
   // TODO(tbarzic): We should use IconImage here and load the required bitmap
@@ -593,7 +634,8 @@ void ExtensionInstallPrompt::FetchOAuthIssueAdviceIfNeeded() {
     return;
   }
 
-  const Extension::OAuth2Info& oauth2_info = extension_->oauth2_info();
+  const extensions::OAuth2Info& oauth2_info =
+      extensions::OAuth2Info::GetOAuth2Info(extension_);
   if (oauth2_info.client_id.empty() ||
       oauth2_info.scopes.empty()) {
     ShowConfirmation();
@@ -630,8 +672,8 @@ void ExtensionInstallPrompt::OnMintTokenFailure(
 void ExtensionInstallPrompt::ShowConfirmation() {
   if (permissions_ &&
       (!extension_ || !extension_->ShouldSkipPermissionWarnings())) {
-    Extension::Type extension_type = extension_ ? extension_->GetType() :
-                                                  Extension::TYPE_UNKNOWN;
+    Manifest::Type extension_type = extension_ ?
+        extension_->GetType() : Manifest::TYPE_UNKNOWN;
     prompt_.SetPermissions(permissions_->GetWarningMessages(extension_type));
   }
 
@@ -640,7 +682,8 @@ void ExtensionInstallPrompt::ShowConfirmation() {
     case RE_ENABLE_PROMPT:
     case INLINE_INSTALL_PROMPT:
     case EXTERNAL_INSTALL_PROMPT:
-    case INSTALL_PROMPT: {
+    case INSTALL_PROMPT:
+    case POST_INSTALL_PERMISSIONS_PROMPT: {
       prompt_.set_extension(extension_);
       prompt_.set_icon(gfx::Image::CreateFrom1xBitmap(icon_));
       break;

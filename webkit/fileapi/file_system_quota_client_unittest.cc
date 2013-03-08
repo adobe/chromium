@@ -11,6 +11,7 @@
 #include "base/platform_file.h"
 #include "googleurl/src/gurl.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "webkit/fileapi/external_mount_points.h"
 #include "webkit/fileapi/file_system_context.h"
 #include "webkit/fileapi/file_system_operation_context.h"
 #include "webkit/fileapi/file_system_quota_client.h"
@@ -44,11 +45,12 @@ class FileSystemQuotaClientTest : public testing::Test {
         deletion_status_(quota::kQuotaStatusUnknown) {
   }
 
-  void SetUp() {
+  virtual void SetUp() {
     ASSERT_TRUE(data_dir_.CreateUniqueTempDir());
     file_system_context_ =
         new FileSystemContext(
             FileSystemTaskRunners::CreateMockTaskRunners(),
+            ExternalMountPoints::CreateRefCounted().get(),
             NULL, NULL,
             data_dir_.path(),
             CreateDisallowFileAccessOptions());
@@ -127,13 +129,14 @@ class FileSystemQuotaClientTest : public testing::Test {
     return context;
   }
 
-  bool CreateFileSystemDirectory(const FilePath& file_path,
+  bool CreateFileSystemDirectory(const base::FilePath& file_path,
                                  const std::string& origin_url,
                                  quota::StorageType storage_type) {
     FileSystemType type = QuotaStorageTypeToFileSystemType(storage_type);
     FileSystemFileUtil* file_util = file_system_context_->GetFileUtil(type);
 
-    FileSystemURL url(GURL(origin_url), type, file_path);
+    FileSystemURL url = file_system_context_->CreateCrackedFileSystemURL(
+        GURL(origin_url), type, file_path);
     scoped_ptr<FileSystemOperationContext> context(
         CreateFileSystemOperationContext(type));
 
@@ -144,7 +147,7 @@ class FileSystemQuotaClientTest : public testing::Test {
     return true;
   }
 
-  bool CreateFileSystemFile(const FilePath& file_path,
+  bool CreateFileSystemFile(const base::FilePath& file_path,
                             int64 file_size,
                             const std::string& origin_url,
                             quota::StorageType storage_type) {
@@ -155,7 +158,8 @@ class FileSystemQuotaClientTest : public testing::Test {
     FileSystemFileUtil* file_util = file_system_context_->
         sandbox_provider()->GetFileUtil(type);
 
-    FileSystemURL url(GURL(origin_url), type, file_path);
+    FileSystemURL url = file_system_context_->CreateCrackedFileSystemURL(
+        GURL(origin_url), type, file_path);
     scoped_ptr<FileSystemOperationContext> context(
         CreateFileSystemOperationContext(type));
 
@@ -174,7 +178,7 @@ class FileSystemQuotaClientTest : public testing::Test {
                              const TestFile* files,
                              int num_files) {
     for (int i = 0; i < num_files; i++) {
-      FilePath path = FilePath().AppendASCII(files[i].name);
+      base::FilePath path = base::FilePath().AppendASCII(files[i].name);
       if (files[i].isDirectory) {
         ASSERT_TRUE(CreateFileSystemDirectory(
             path, files[i].origin_url, files[i].type));
@@ -206,7 +210,7 @@ class FileSystemQuotaClientTest : public testing::Test {
     for (int i = 0; i < num_files; i++) {
       if (files[i].type == type &&
           GURL(files[i].origin_url) == GURL(origin_url)) {
-        FilePath path = FilePath().AppendASCII(files[i].name);
+        base::FilePath path = base::FilePath().AppendASCII(files[i].name);
         if (!path.empty()) {
           file_paths_cost += ObfuscatedFileUtil::ComputeFilePathCost(path);
         }

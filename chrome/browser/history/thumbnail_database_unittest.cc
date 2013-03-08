@@ -7,8 +7,8 @@
 
 #include "base/basictypes.h"
 #include "base/command_line.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/path_service.h"
@@ -55,7 +55,7 @@ class ThumbnailDatabaseTest : public testing::Test {
  public:
   ThumbnailDatabaseTest() {
   }
-  ~ThumbnailDatabaseTest() {
+  virtual ~ThumbnailDatabaseTest() {
   }
 
  protected:
@@ -80,23 +80,23 @@ class ThumbnailDatabaseTest : public testing::Test {
   scoped_ptr<SkBitmap> google_bitmap_;
 
   base::ScopedTempDir temp_dir_;
-  FilePath file_name_;
-  FilePath new_file_name_;
-  FilePath history_db_name_;
+  base::FilePath file_name_;
+  base::FilePath new_file_name_;
+  base::FilePath history_db_name_;
 };
 
 class IconMappingMigrationTest : public HistoryUnitTestBase {
  public:
   IconMappingMigrationTest() {
   }
-  ~IconMappingMigrationTest() {
+  virtual ~IconMappingMigrationTest() {
   }
 
  protected:
   virtual void SetUp() {
     profile_.reset(new TestingProfile);
 
-    FilePath data_path;
+    base::FilePath data_path;
     ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &data_path));
     data_path = data_path.AppendASCII("History");
 
@@ -113,8 +113,8 @@ class IconMappingMigrationTest : public HistoryUnitTestBase {
   }
 
  protected:
-  FilePath history_db_name_;
-  FilePath thumbnail_db_name_;
+  base::FilePath history_db_name_;
+  base::FilePath thumbnail_db_name_;
 
  private:
   scoped_ptr<TestingProfile> profile_;

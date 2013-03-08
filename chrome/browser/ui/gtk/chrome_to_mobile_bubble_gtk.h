@@ -16,7 +16,7 @@
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/chrome_to_mobile_service.h"
@@ -59,7 +59,8 @@ class ChromeToMobileBubbleGtk : public BubbleDelegateGtk,
                        const content::NotificationDetails& details) OVERRIDE;
 
   // ChromeToMobileService::Observer:
-  virtual void SnapshotGenerated(const FilePath& path, int64 bytes) OVERRIDE;
+  virtual void SnapshotGenerated(const base::FilePath& path,
+                                 int64 bytes) OVERRIDE;
   virtual void OnSendComplete(bool success) OVERRIDE;
 
  private:
@@ -85,7 +86,7 @@ class ChromeToMobileBubbleGtk : public BubbleDelegateGtk,
   content::NotificationRegistrar registrar_;
 
   // The file path for the MHTML page snapshot.
-  FilePath snapshot_path_;
+  base::FilePath snapshot_path_;
 
   // The list of radio buttons corresponding to the list of mobile devices.
   std::vector<GtkWidget*> radio_buttons_;

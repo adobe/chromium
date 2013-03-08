@@ -8,6 +8,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_vector.h"
 #include "base/message_loop.h"
+#include "base/run_loop.h"
 #include "base/stl_util.h"
 #include "base/test/thread_test_helper.h"
 #include "chrome/browser/net/clear_on_exit_policy.h"
@@ -25,14 +26,33 @@ using content::BrowserThread;
 class SQLiteServerBoundCertStoreTest : public testing::Test {
  public:
   SQLiteServerBoundCertStoreTest()
-      : db_thread_(BrowserThread::DB) {
+      : db_thread_(BrowserThread::DB),
+        io_thread_(BrowserThread::IO, &message_loop_) {}
+
+  void Load(
+      ScopedVector<net::DefaultServerBoundCertStore::ServerBoundCert>* certs) {
+    base::RunLoop run_loop;
+    store_->Load(base::Bind(&SQLiteServerBoundCertStoreTest::OnLoaded,
+                            base::Unretained(this),
+                            &run_loop));
+    run_loop.Run();
+    certs->swap(certs_);
+    certs_.clear();
+  }
+
+  void OnLoaded(
+      base::RunLoop* run_loop,
+      scoped_ptr<ScopedVector<
+          net::DefaultServerBoundCertStore::ServerBoundCert> > certs) {
+    certs_.swap(*certs);
+    run_loop->Quit();
   }
 
  protected:
   static void ReadTestKeyAndCert(std::string* key, std::string* cert) {
-    FilePath key_path = net::GetTestCertsDirectory().AppendASCII(
+    base::FilePath key_path = net::GetTestCertsDirectory().AppendASCII(
         "unittest.originbound.key.der");
-    FilePath cert_path = net::GetTestCertsDirectory().AppendASCII(
+    base::FilePath cert_path = net::GetTestCertsDirectory().AppendASCII(
         "unittest.originbound.der");
     ASSERT_TRUE(file_util::ReadFileToString(key_path, key));
     ASSERT_TRUE(file_util::ReadFileToString(cert_path, cert));
@@ -66,7 +86,7 @@ class SQLiteServerBoundCertStoreTest : public testing::Test {
     store_ = new SQLiteServerBoundCertStore(
         temp_dir_.path().Append(chrome::kOBCertFilename), NULL);
     ScopedVector<net::DefaultServerBoundCertStore::ServerBoundCert> certs;
-    ASSERT_TRUE(store_->Load(&certs.get()));
+    Load(&certs);
     ASSERT_EQ(0u, certs.size());
     // Make sure the store gets written at least once.
     store_->AddServerBoundCert(
@@ -78,9 +98,12 @@ class SQLiteServerBoundCertStoreTest : public testing::Test {
             "a", "b"));
   }
 
+  MessageLoopForIO message_loop_;
   content::TestBrowserThread db_thread_;
+  content::TestBrowserThread io_thread_;
   base::ScopedTempDir temp_dir_;
   scoped_refptr<SQLiteServerBoundCertStore> store_;
+  ScopedVector<net::DefaultServerBoundCertStore::ServerBoundCert> certs_;
 };
 
 // Test if data is stored as expected in the SQLite database.
@@ -107,7 +130,7 @@ TEST_F(SQLiteServerBoundCertStoreTest, TestPersistence) {
       temp_dir_.path().Append(chrome::kOBCertFilename), NULL);
 
   // Reload and test for persistence
-  ASSERT_TRUE(store_->Load(&certs.get()));
+  Load(&certs);
   ASSERT_EQ(2U, certs.size());
   net::DefaultServerBoundCertStore::ServerBoundCert* ec_cert;
   net::DefaultServerBoundCertStore::ServerBoundCert* rsa_cert;
@@ -142,7 +165,7 @@ TEST_F(SQLiteServerBoundCertStoreTest, TestPersistence) {
       temp_dir_.path().Append(chrome::kOBCertFilename), NULL);
 
   // Reload and check if the cert has been removed.
-  ASSERT_TRUE(store_->Load(&certs.get()));
+  Load(&certs);
   ASSERT_EQ(0U, certs.size());
 }
 
@@ -150,7 +173,7 @@ TEST_F(SQLiteServerBoundCertStoreTest, TestUpgradeV1) {
   // Reset the store.  We'll be using a different database for this test.
   store_ = NULL;
 
-  FilePath v1_db_path(temp_dir_.path().AppendASCII("v1db"));
+  base::FilePath v1_db_path(temp_dir_.path().AppendASCII("v1db"));
 
   std::string key_data;
   std::string cert_data;
@@ -193,7 +216,7 @@ TEST_F(SQLiteServerBoundCertStoreTest, TestUpgradeV1) {
     store_ = new SQLiteServerBoundCertStore(v1_db_path, NULL);
 
     // Load the database and ensure the certs can be read and are marked as RSA.
-    ASSERT_TRUE(store_->Load(&certs.get()));
+    Load(&certs);
     ASSERT_EQ(2U, certs.size());
 
     ASSERT_STREQ("google.com", certs[0]->server_identifier().c_str());
@@ -234,7 +257,7 @@ TEST_F(SQLiteServerBoundCertStoreTest, TestUpgradeV2) {
   // Reset the store.  We'll be using a different database for this test.
   store_ = NULL;
 
-  FilePath v2_db_path(temp_dir_.path().AppendASCII("v2db"));
+  base::FilePath v2_db_path(temp_dir_.path().AppendASCII("v2db"));
 
   std::string key_data;
   std::string cert_data;
@@ -281,7 +304,7 @@ TEST_F(SQLiteServerBoundCertStoreTest, TestUpgradeV2) {
     store_ = new SQLiteServerBoundCertStore(v2_db_path, NULL);
 
     // Load the database and ensure the certs can be read and are marked as RSA.
-    ASSERT_TRUE(store_->Load(&certs.get()));
+    Load(&certs);
     ASSERT_EQ(2U, certs.size());
 
     ASSERT_STREQ("google.com", certs[0]->server_identifier().c_str());
@@ -322,7 +345,7 @@ TEST_F(SQLiteServerBoundCertStoreTest, TestUpgradeV3) {
   // Reset the store.  We'll be using a different database for this test.
   store_ = NULL;
 
-  FilePath v3_db_path(temp_dir_.path().AppendASCII("v3db"));
+  base::FilePath v3_db_path(temp_dir_.path().AppendASCII("v3db"));
 
   std::string key_data;
   std::string cert_data;
@@ -371,7 +394,7 @@ TEST_F(SQLiteServerBoundCertStoreTest, TestUpgradeV3) {
     store_ = new SQLiteServerBoundCertStore(v3_db_path, NULL);
 
     // Load the database and ensure the certs can be read and are marked as RSA.
-    ASSERT_TRUE(store_->Load(&certs.get()));
+    Load(&certs);
     ASSERT_EQ(2U, certs.size());
 
     ASSERT_STREQ("google.com", certs[0]->server_identifier().c_str());
@@ -414,7 +437,7 @@ TEST_F(SQLiteServerBoundCertStoreTest, TestUpgradeV3) {
 TEST_F(SQLiteServerBoundCertStoreTest, TestFlush) {
   // File timestamps don't work well on all platforms, so we'll determine
   // whether the DB file has been modified by checking its size.
-  FilePath path = temp_dir_.path().Append(chrome::kOBCertFilename);
+  base::FilePath path = temp_dir_.path().Append(chrome::kOBCertFilename);
   base::PlatformFileInfo info;
   ASSERT_TRUE(file_util::GetFileInfo(path, &info));
   int64 base_size = info.size;

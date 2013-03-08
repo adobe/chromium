@@ -8,6 +8,7 @@
 #include <list>
 
 #include "base/memory/ref_counted.h"
+#include "base/memory/scoped_ptr.h"
 #include "media/base/media_export.h"
 
 namespace media {
@@ -31,24 +32,17 @@ class MEDIA_EXPORT FilterCollection {
   FilterCollection();
   ~FilterCollection();
 
-  // Demuxer accessor methods.
   void SetDemuxer(const scoped_refptr<Demuxer>& demuxer);
   const scoped_refptr<Demuxer>& GetDemuxer();
 
-  // Adds a filter to the collection.
-  void AddAudioDecoder(AudioDecoder* audio_decoder);
-  void AddAudioRenderer(AudioRenderer* audio_renderer);
-  void AddVideoRenderer(VideoRenderer* video_renderer);
+  void SetAudioRenderer(scoped_ptr<AudioRenderer> audio_renderer);
+  scoped_ptr<AudioRenderer> GetAudioRenderer();
+
+  void SetVideoRenderer(scoped_ptr<VideoRenderer> video_renderer);
+  scoped_ptr<VideoRenderer> GetVideoRenderer();
 
   // Remove remaining filters.
   void Clear();
-
-  // Selects a filter of the specified type from the collection.
-  // If the required filter cannot be found, NULL is returned.
-  // If a filter is returned it is removed from the collection.
-  // Filters are selected in FIFO order.
-  void SelectAudioRenderer(scoped_refptr<AudioRenderer>* out);
-  void SelectVideoRenderer(scoped_refptr<VideoRenderer>* out);
 
   AudioDecoderList* GetAudioDecoders();
   VideoDecoderList* GetVideoDecoders();
@@ -57,8 +51,8 @@ class MEDIA_EXPORT FilterCollection {
   scoped_refptr<Demuxer> demuxer_;
   AudioDecoderList audio_decoders_;
   VideoDecoderList video_decoders_;
-  std::list<scoped_refptr<AudioRenderer> > audio_renderers_;
-  std::list<scoped_refptr<VideoRenderer> > video_renderers_;
+  scoped_ptr<AudioRenderer> audio_renderer_;
+  scoped_ptr<VideoRenderer> video_renderer_;
 
   DISALLOW_COPY_AND_ASSIGN(FilterCollection);
 };

@@ -209,10 +209,20 @@ class AndroidCommands(object):
     self._device_utc_offset = self.RunShellCommand('date +%z')[0]
     self._md5sum_path = ''
     self._external_storage = ''
+    self._util_wrapper = ''
 
   def Adb(self):
     """Returns our AdbInterface to avoid us wrapping all its methods."""
     return self._adb
+
+  def IsOnline(self):
+    """Checks whether the device is online.
+
+    Returns:
+      True if device is in 'device' mode, False otherwise.
+    """
+    out = self._adb.SendCommand('get-state')
+    return out.strip() == 'device'
 
   def IsRootEnabled(self):
     """Checks if root is enabled on the device."""
@@ -530,25 +540,14 @@ class AndroidCommands(object):
         return 0
     return processes_killed
 
-  def StartActivity(self, package, activity, wait_for_completion=False,
-                    action='android.intent.action.VIEW',
-                    category=None, data=None,
-                    extras=None, trace_file_name=None,
-                    force_stop=False):
-    """Starts |package|'s activity on the device.
+  def _GetActivityCommand(self, package, activity, wait_for_completion, action,
+                          category, data, extras, trace_file_name, force_stop):
+    """Creates command to start |package|'s activity on the device.
 
-    Args:
-      package: Name of package to start (e.g. 'com.google.android.apps.chrome').
-      activity: Name of activity (e.g. '.Main' or
-        'com.google.android.apps.chrome.Main').
-      wait_for_completion: wait for the activity to finish launching (-W flag).
-      action: string (e.g. "android.intent.action.MAIN"). Default is VIEW.
-      category: string (e.g. "android.intent.category.HOME")
-      data: Data string to pass to activity (e.g. 'http://www.example.com/').
-      extras: Dict of extras to pass to activity. Values are significant.
-      trace_file_name: If used, turns on and saves the trace to this file name.
-      force_stop: force stop the target app before starting the activity (-S
-        flag).
+    Args - as for StartActivity
+
+    Returns:
+      the command to run on the target to start the activity
     """
     cmd = 'am start -a %s' % action
     if force_stop:
@@ -576,7 +575,55 @@ class AndroidCommands(object):
         cmd += ' %s %s' % (key, value)
     if trace_file_name:
       cmd += ' --start-profiler ' + trace_file_name
+    return cmd
+
+  def StartActivity(self, package, activity, wait_for_completion=False,
+                    action='android.intent.action.VIEW',
+                    category=None, data=None,
+                    extras=None, trace_file_name=None,
+                    force_stop=False):
+    """Starts |package|'s activity on the device.
+
+    Args:
+      package: Name of package to start (e.g. 'com.google.android.apps.chrome').
+      activity: Name of activity (e.g. '.Main' or
+        'com.google.android.apps.chrome.Main').
+      wait_for_completion: wait for the activity to finish launching (-W flag).
+      action: string (e.g. "android.intent.action.MAIN"). Default is VIEW.
+      category: string (e.g. "android.intent.category.HOME")
+      data: Data string to pass to activity (e.g. 'http://www.example.com/').
+      extras: Dict of extras to pass to activity. Values are significant.
+      trace_file_name: If used, turns on and saves the trace to this file name.
+      force_stop: force stop the target app before starting the activity (-S
+        flag).
+    """
+    cmd = self._GetActivityCommand(package, activity, wait_for_completion,
+                                   action, category, data, extras,
+                                   trace_file_name, force_stop)
     self.RunShellCommand(cmd)
+
+  def StartActivityTimed(self, package, activity, wait_for_completion=False,
+                         action='android.intent.action.VIEW',
+                         category=None, data=None,
+                         extras=None, trace_file_name=None,
+                         force_stop=False):
+    """Starts |package|'s activity on the device, returning the start time
+
+    Args - as for StartActivity
+
+    Returns:
+      a timestamp string for the time at which the activity started
+    """
+    cmd = self._GetActivityCommand(package, activity, wait_for_completion,
+                                   action, category, data, extras,
+                                   trace_file_name, force_stop)
+    self.StartMonitoringLogcat()
+    self.RunShellCommand('log starting activity; ' + cmd)
+    activity_started_re = re.compile('.*starting activity.*')
+    m = self.WaitForLogMatch(activity_started_re, None)
+    assert m
+    start_line = m.group(0)
+    return GetLogTimestamp(start_line, self.GetDeviceYear())
 
   def GoHome(self):
     """Tell the device to return to the home screen. Blocks until completion."""
@@ -594,11 +641,13 @@ class AndroidCommands(object):
 
   def ClearApplicationState(self, package):
     """Closes and clears all state for the given |package|."""
-    self.CloseApplication(package)
-    self.RunShellCommand('rm -r /data/data/%s/app_*' % package)
-    self.RunShellCommand('rm -r /data/data/%s/cache/*' % package)
-    self.RunShellCommand('rm -r /data/data/%s/files/*' % package)
-    self.RunShellCommand('rm -r /data/data/%s/shared_prefs/*' % package)
+    # Check that the package exists before clearing it. Necessary because
+    # calling pm clear on a package that doesn't exist may never return.
+    pm_path_output  = self.RunShellCommand('pm path ' + package)
+    # The path output only contains anything if and only if the package exists.
+    if pm_path_output:
+      self.CloseApplication(package)
+      self.RunShellCommand('pm clear ' + package)
 
   def SendKeyEvent(self, keycode):
     """Sends keycode to the device.
@@ -631,7 +680,8 @@ class AndroidCommands(object):
 
     self._pushed_files.append(device_path)
     hashes_on_device = _ComputeFileListHash(
-        self.RunShellCommand(MD5SUM_DEVICE_PATH + ' ' + device_path))
+        self.RunShellCommand(self._util_wrapper + ' ' + MD5SUM_DEVICE_PATH +
+                             ' ' + device_path))
     assert os.path.exists(local_path), 'Local path not found %s' % local_path
     hashes_on_host = _ComputeFileListHash(
         subprocess.Popen(
@@ -655,8 +705,8 @@ class AndroidCommands(object):
 
   def GetFileContents(self, filename, log_result=False):
     """Gets contents from the file specified by |filename|."""
-    return self.RunShellCommand('if [ -f "' + filename + '" ]; then cat "' +
-                                filename + '"; fi', log_result=log_result)
+    return self.RunShellCommand('cat "%s" 2>/dev/null' % filename,
+                                log_result=log_result)
 
   def SetFileContents(self, filename, contents):
     """Writes |contents| to the file specified by |filename|."""
@@ -674,6 +724,24 @@ class AndroidCommands(object):
         self.GetExternalStorage() + '/' + base_name % i):
       i += 1
     return self.GetExternalStorage() + '/' + base_name % i
+
+  def CanAccessProtectedFileContents(self):
+    """Returns True if Get/SetProtectedFileContents would work via "su".
+
+    Devices running user builds don't have adb root, but may provide "su" which
+    can be used for accessing protected files.
+    """
+    r = self.RunShellCommand('su -c cat /dev/null')
+    return r == [] or r[0].strip() == ''
+
+  def GetProtectedFileContents(self, filename, log_result=False):
+    """Gets contents from the protected file specified by |filename|.
+
+    This is less efficient than GetFileContents, but will work for protected
+    files and device files.
+    """
+    # Run the script as root
+    return self.RunShellCommand('su -c cat "%s" 2> /dev/null' % filename)
 
   def SetProtectedFileContents(self, filename, contents):
     """Writes |contents| to the protected file specified by |filename|.
@@ -771,14 +839,12 @@ class AndroidCommands(object):
     assert build_type
     return build_type
 
-  def StartMonitoringLogcat(self, clear=True, timeout=10, logfile=None,
-                            filters=None):
+  def StartMonitoringLogcat(self, clear=True, logfile=None, filters=None):
     """Starts monitoring the output of logcat, for use with WaitForLogMatch.
 
     Args:
       clear: If True the existing logcat output will be cleared, to avoiding
              matching historical output lurking in the log.
-      timeout: Deprecated, will be removed soon.
       filters: A list of logcat filters to be used.
     """
     if clear:
@@ -797,8 +863,7 @@ class AndroidCommands(object):
 
     # Spawn logcat and syncronize with it.
     for _ in range(4):
-      self._logcat = pexpect.spawn('adb', args, timeout=timeout,
-                                   logfile=logfile)
+      self._logcat = pexpect.spawn('adb', args, timeout=10, logfile=logfile)
       self.RunShellCommand('log startup_sync')
       if self._logcat.expect(['startup_sync', pexpect.EOF,
                               pexpect.TIMEOUT]) == 0:
@@ -837,7 +902,7 @@ class AndroidCommands(object):
     t0 = time.time()
     while True:
       if not self._logcat:
-        self.StartMonitoringLogcat(clear, timeout=timeout)
+        self.StartMonitoringLogcat(clear)
       try:
         while True:
           # Note this will block for upto the timeout _per log line_, so we need
@@ -858,7 +923,7 @@ class AndroidCommands(object):
         raise pexpect.TIMEOUT(
             'Timeout (%ds) exceeded waiting for pattern "%s" (tip: use -vv '
             'to debug)' %
-            (self._logcat.timeout, success_re.pattern))
+            (timeout, success_re.pattern))
       except pexpect.EOF:
         # It seems that sometimes logcat can end unexpectedly. This seems
         # to happen during Chrome startup after a reboot followed by a cache
@@ -1006,7 +1071,8 @@ class AndroidCommands(object):
     usage_dict = collections.defaultdict(int)
     smaps = collections.defaultdict(dict)
     current_smap = ''
-    for line in self.GetFileContents('/proc/%s/smaps' % pid, log_result=False):
+    for line in self.GetProtectedFileContents('/proc/%s/smaps' % pid,
+                                              log_result=False):
       items = line.split()
       # See man 5 proc for more details. The format is:
       # address perms offset dev inode pathname
@@ -1026,8 +1092,8 @@ class AndroidCommands(object):
       # Presumably the process died between ps and calling this method.
       logging.warning('Could not find memory usage for pid ' + str(pid))
 
-    for line in self.GetFileContents('/d/nvmap/generic-0/clients',
-                                     log_result=False):
+    for line in self.GetProtectedFileContents('/d/nvmap/generic-0/clients',
+                                              log_result=False):
       match = re.match(NVIDIA_MEMORY_INFO_RE, line)
       if match and match.group('pid') == pid:
         usage_bytes = int(match.group('usage_bytes'))
@@ -1135,6 +1201,12 @@ class AndroidCommands(object):
     self.RunShellCommand('/system/bin/screencap -p %s' % device_file)
     assert self._adb.Pull(device_file, host_file)
     assert os.path.exists(host_file)
+
+  def SetUtilWrapper(self, util_wrapper):
+    """Sets a wrapper prefix to be used when running a locally-built
+    binary on the device (ex.: md5sum_bin).
+    """
+    self._util_wrapper = util_wrapper
 
 
 class NewLineNormalizer(object):

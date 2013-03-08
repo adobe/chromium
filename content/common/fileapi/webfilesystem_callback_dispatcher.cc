@@ -7,13 +7,13 @@
 #include <string>
 #include <vector>
 
-#include "base/file_util_proxy.h"
+#include "base/files/file_util_proxy.h"
 #include "base/logging.h"
 #include "base/utf_string_conversions.h"
 #include "googleurl/src/gurl.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebFileInfo.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebFileSystem.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebString.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebFileInfo.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFileSystemCallbacks.h"
 #include "webkit/base/file_path_string_conversions.h"
 #include "webkit/fileapi/file_system_util.h"
@@ -38,11 +38,21 @@ void WebFileSystemCallbackDispatcher::DidSucceed() {
 }
 
 void WebFileSystemCallbackDispatcher::DidReadMetadata(
-    const base::PlatformFileInfo& file_info, const FilePath& platform_path) {
+    const base::PlatformFileInfo& file_info,
+    const base::FilePath& platform_path) {
   WebFileInfo web_file_info;
   webkit_glue::PlatformFileInfoToWebFileInfo(file_info, &web_file_info);
   web_file_info.platformPath = webkit_base::FilePathToWebString(platform_path);
   callbacks_->didReadMetadata(web_file_info);
+}
+
+void WebFileSystemCallbackDispatcher::DidCreateSnapshotFile(
+    const base::PlatformFileInfo& file_info,
+    const base::FilePath& platform_path) {
+  WebFileInfo web_file_info;
+  webkit_glue::PlatformFileInfoToWebFileInfo(file_info, &web_file_info);
+  web_file_info.platformPath = webkit_base::FilePathToWebString(platform_path);
+  callbacks_->didCreateSnapshotFile(web_file_info);
 }
 
 void WebFileSystemCallbackDispatcher::DidReadDirectory(

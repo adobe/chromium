@@ -12,6 +12,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/timer.h"
 #include "chrome/browser/ui/panels/native_panel.h"
+#include "chrome/browser/ui/panels/panel_constants.h"
 #include "ui/base/gtk/gtk_signal.h"
 #include "ui/base/x/active_window_watcher_x_observer.h"
 #include "ui/gfx/rect.h"
@@ -55,7 +56,6 @@ class PanelGtk : public NativePanel,
   virtual gfx::NativeWindow GetNativePanelWindow() OVERRIDE;
   virtual void UpdatePanelTitleBar() OVERRIDE;
   virtual void UpdatePanelLoadingAnimations(bool should_animate) OVERRIDE;
-  virtual void NotifyPanelOnUserChangedTheme() OVERRIDE;
   virtual void PanelWebContentsFocused(content::WebContents* contents) OVERRIDE;
   virtual void PanelCut() OVERRIDE;
   virtual void PanelCopy() OVERRIDE;
@@ -80,13 +80,13 @@ class PanelGtk : public NativePanel,
   virtual void SetPanelAlwaysOnTop(bool on_top) OVERRIDE;
   virtual void EnableResizeByMouse(bool enable) OVERRIDE;
   virtual void UpdatePanelMinimizeRestoreButtonVisibility() OVERRIDE;
+  virtual void SetWindowCornerStyle(panel::CornerStyle corner_style) OVERRIDE;
+  virtual void MinimizePanelBySystem() OVERRIDE;
 
   virtual NativePanelTesting* CreateNativePanelTesting() OVERRIDE;
 
   // Overridden from ActiveWindowWatcherXObserver.
   virtual void ActiveWindowChanged(GdkWindow* active_window) OVERRIDE;
-
-  bool UsingDefaultTheme() const;
 
   Panel* panel() const { return panel_.get(); }
   PaintState paint_state() const { return paint_state_; }
@@ -95,8 +95,8 @@ class PanelGtk : public NativePanel,
  private:
   friend class GtkNativePanelTesting;
 
-  // Applies our custom window shape with rounded top corners.
-  void UpdateWindowShape(int width, int height);
+  // Applies our custom window shape with rounded or non-rounded corners.
+  void UpdateWindowShape();
 
   // Checks to see if the mouse pointer at |x|, |y| is over the border of the
   // custom frame (a spot that should trigger a window resize). Returns true if
@@ -109,8 +109,6 @@ class PanelGtk : public NativePanel,
 
   // Returns the image to paint the frame.
   gfx::Image GetFrameBackground() const;
-  gfx::Image GetDefaultFrameBackground() const;
-  gfx::Image GetThemedFrameBackground() const;
 
   // Animation when panel is first shown.
   void RevealPanel();
@@ -206,6 +204,9 @@ class PanelGtk : public NativePanel,
 
   // The container for the titlebar.
   scoped_ptr<PanelTitlebarGtk> titlebar_;
+
+  // Indicates how the window corner should be rendered, rounded or not.
+  panel::CornerStyle corner_style_;
 
   DISALLOW_COPY_AND_ASSIGN(PanelGtk);
 };

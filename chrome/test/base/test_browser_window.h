@@ -59,6 +59,7 @@ class TestBrowserWindow : public BrowserWindow {
   virtual void UpdateFullscreenExitBubbleContent(
       const GURL& url,
       FullscreenExitBubbleType bubble_type) OVERRIDE {}
+  virtual bool ShouldHideUIForFullscreen() const OVERRIDE;
   virtual bool IsFullscreen() const OVERRIDE;
 #if defined(OS_WIN)
   virtual void SetMetroSnapMode(bool enable) OVERRIDE {}
@@ -101,6 +102,7 @@ class TestBrowserWindow : public BrowserWindow {
   virtual void ShowChromeToMobileBubble() OVERRIDE {}
 #if defined(ENABLE_ONE_CLICK_SIGNIN)
   virtual void ShowOneClickSigninBubble(
+      OneClickSigninBubbleType type,
       const StartSyncCallback& start_sync_callback) OVERRIDE {}
 #endif
   virtual bool IsDownloadShelfVisible() const OVERRIDE;
@@ -119,11 +121,9 @@ class TestBrowserWindow : public BrowserWindow {
   virtual void Paste() OVERRIDE {}
 #if defined(OS_MACOSX)
   virtual void OpenTabpose() OVERRIDE {}
-  virtual void EnterPresentationMode(
-      const GURL& url,
-      FullscreenExitBubbleType bubble_type) OVERRIDE {}
-  virtual void ExitPresentationMode() OVERRIDE {}
-  virtual bool InPresentationMode() OVERRIDE;
+  virtual void EnterFullscreenWithChrome() OVERRIDE {}
+  virtual bool IsFullscreenWithChrome() OVERRIDE;
+  virtual bool IsFullscreenWithoutChrome() OVERRIDE;
 #endif
 
   virtual gfx::Rect GetInstantBounds() OVERRIDE;
@@ -151,8 +151,7 @@ class TestBrowserWindow : public BrowserWindow {
 
 namespace chrome {
 
-// Helpers that handle the lifetime of TestBrowserWindow instances.
-Browser* CreateBrowserWithTestWindowForProfile(Profile* profile);
+// Helper that handle the lifetime of TestBrowserWindow instances.
 Browser* CreateBrowserWithTestWindowForParams(Browser::CreateParams* params);
 
 }  // namespace chrome

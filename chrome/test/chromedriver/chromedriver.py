@@ -19,6 +19,8 @@ class UnknownError(ChromeDriverException):
   pass
 class XPathLookupError(ChromeDriverException):
   pass
+class NoSuchWindow(ChromeDriverException):
+  pass
 class InvalidSelector(ChromeDriverException):
   pass
 class SessionNotCreatedException(ChromeDriverException):
@@ -33,6 +35,7 @@ def _ExceptionForResponse(response):
     10: StaleElementReference,
     13: UnknownError,
     19: XPathLookupError,
+    23: NoSuchWindow,
     32: InvalidSelector,
     33: SessionNotCreatedException,
     100: NoSuchSession
@@ -44,18 +47,33 @@ def _ExceptionForResponse(response):
 class ChromeDriver(object):
   """Starts and controls a single Chrome instance on this machine."""
 
-  def __init__(self, lib_path, chrome_binary=None):
+  def __init__(self, lib_path, chrome_binary=None, android_package=None,
+               chrome_switches=None, chrome_extensions=None):
     self._lib = ctypes.CDLL(lib_path)
-    if chrome_binary is None:
-      params = {}
-    else:
+
+    options = {}
+    if android_package:
+      options['android_package'] = android_package
+    elif chrome_binary:
+      options['binary'] = chrome_binary
+
+    if chrome_switches:
+      assert type(chrome_switches) is list
+      options['args'] = chrome_switches
+
+    if chrome_extensions:
+      assert type(chrome_extensions) is list
+      options['extensions'] = chrome_extensions
+
+    if options:
       params = {
         'desiredCapabilities': {
-          'chromeOptions': {
-            'binary': chrome_binary
-          }
+          'chromeOptions': options
         }
       }
+    else:
+      params = {}
+
     self._session_id = self._ExecuteCommand('newSession', params)['sessionId']
 
   def _WrapValue(self, value):
@@ -114,6 +132,18 @@ class ChromeDriver(object):
     return self._UnwrapValue(
         self._ExecuteCommand(name, params, self._session_id)['value'])
 
+  def GetWindowHandles(self):
+    return self.ExecuteSessionCommand('getWindowHandles')
+
+  def SwitchToWindow(self, handle_or_name):
+    self.ExecuteSessionCommand('switchToWindow', {'name': handle_or_name})
+
+  def GetCurrentWindowHandle(self):
+    return self.ExecuteSessionCommand('getCurrentWindowHandle')
+
+  def CloseWindow(self):
+    self.ExecuteSessionCommand('close')
+
   def Load(self, url):
     self.ExecuteSessionCommand('get', {'url': url})
 
@@ -133,6 +163,9 @@ class ChromeDriver(object):
 
   def GetTitle(self):
     return self.ExecuteSessionCommand('getTitle')
+
+  def GetPageSource(self):
+    return self.ExecuteSessionCommand('getPageSource')
 
   def FindElement(self, strategy, target):
     return self.ExecuteSessionCommand(
@@ -157,6 +190,43 @@ class ChromeDriver(object):
 
   def Refresh(self):
     return self.ExecuteSessionCommand('refresh')
+
+  def MouseMoveTo(self, element=None, x_offset=None, y_offset=None):
+    params = {}
+    if element is not None:
+      params['element'] = element._id
+    if x_offset is not None:
+      params['xoffset'] = x_offset
+    if y_offset is not None:
+      params['yoffset'] = y_offset
+    self.ExecuteSessionCommand('mouseMoveTo', params)
+
+  def MouseClick(self, button=0):
+    self.ExecuteSessionCommand('mouseClick', {'button': button})
+
+  def MouseButtonDown(self, button=0):
+    self.ExecuteSessionCommand('mouseButtonDown', {'button': button})
+
+  def MouseButtonUp(self, button=0):
+    self.ExecuteSessionCommand('mouseButtonUp', {'button': button})
+
+  def MouseDoubleClick(self, button=0):
+    self.ExecuteSessionCommand('mouseDoubleClick', {'button': button})
+
+  def IsAlertOpen(self):
+    return self.ExecuteSessionCommand('getAlert')
+
+  def GetAlertMessage(self):
+    return self.ExecuteSessionCommand('getAlertText')
+
+  def HandleAlert(self, accept, prompt_text=''):
+    if prompt_text:
+      self.ExecuteSessionCommand('setAlertValue', {'text': prompt_text})
+    if accept:
+      cmd = 'acceptAlert'
+    else:
+      cmd = 'dismissAlert'
+    self.ExecuteSessionCommand(cmd)
 
   def Quit(self):
     """Quits the browser and ends the session."""

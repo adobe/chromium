@@ -1,0 +1,99 @@
+/* Copyright (c) 2013 The Chromium Authors. All rights reserved.
+ * Use of this source code is governed by a BSD-style license that can be
+ * found in the LICENSE file. */
+
+li {
+  clear: both;
+}
+
+textarea {
+  width: 100%;
+}
+
+.log-container {
+  float: left;
+}
+
+.log-header-event {
+  min-width: 600px;
+}
+
+.stats-table-container {
+  float: left;
+  padding: 0 0 0 0;
+}
+
+body {
+  font-family: 'Lucida Grande', sans-serif;
+  padding: 20px;
+}
+
+button {
+  margin-left: 1em;
+}
+
+h3 + div {
+  font-size: 0.8em;
+  margin: 0 0 1.2em 0;
+}
+
+h2 {
+  border-bottom: 1px solid #eee;
+  color: #666;
+  font-size: 1.1em;
+  margin: 0 0 1.6em 0;
+  padding: 0 0 0.7em 0;
+}
+
+h3 {
+  color: #666;
+  font-size: 0.9em;
+  margin: 0 0 0.5em 0;
+}
+
+li {
+  list-style-type: none;
+  margin: none;
+  padding: none;
+}
+
+span {
+  width: 17em;
+  display: inline-block;
+}
+
+table {
+  border: none;
+  margin: 0 1em 1em 0;
+}
+
+td {
+  border: none;
+  font-size: 0.8em;
+  padding: 0 1em 0.5em 0;
+}
+
+td:first-child {
+  padding-top: 0.3em;
+}
+
+textarea {
+  border: none;
+  outline: none;
+}
+
+table > tr {
+  vertical-align: top;
+}
+
+th {
+  border: none;
+  font-size: 0.8em;
+  padding: 0 0 0.5em 0;
+}
+
+ul {
+  margin: none;
+  padding: none;
+  -webkit-padding-start: 0px;
+}

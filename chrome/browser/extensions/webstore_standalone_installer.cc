@@ -6,32 +6,19 @@
 
 #include <vector>
 
-#include "base/bind.h"
-#include "base/string_util.h"
+#include "base/stringprintf.h"
 #include "base/values.h"
-#include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/crx_installer.h"
 #include "chrome/browser/extensions/extension_install_ui.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/extensions/webstore_data_fetcher.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/common/chrome_utility_messages.h"
 #include "chrome/common/extensions/extension.h"
-#include "chrome/common/extensions/extension_constants.h"
-#include "chrome/common/url_constants.h"
-#include "content/public/browser/utility_process_host.h"
-#include "content/public/browser/utility_process_host_client.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
-#include "extensions/common/url_pattern.h"
-#include "net/base/escape.h"
-#include "net/base/load_flags.h"
-#include "net/url_request/url_fetcher.h"
-#include "net/url_request/url_request_status.h"
 
 using content::BrowserThread;
 using content::OpenURLParams;
-using content::UtilityProcessHost;
-using content::UtilityProcessHostClient;
 using content::WebContents;
 
 namespace extensions {
@@ -63,108 +50,50 @@ const char kInlineInstallSupportedError[] =
     "Inline installation is not supported for this item. The user will be "
     "redirected to the Chrome Web Store.";
 
-class SafeWebstoreResponseParser : public UtilityProcessHostClient {
- public:
-  SafeWebstoreResponseParser(WebstoreStandaloneInstaller *client,
-                             const std::string& webstore_data)
-      : client_(client),
-        webstore_data_(webstore_data) {}
-
-  void Start() {
-    CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-    BrowserThread::PostTask(
-        BrowserThread::IO,
-        FROM_HERE,
-        base::Bind(&SafeWebstoreResponseParser::StartWorkOnIOThread, this));
-  }
-
-  void StartWorkOnIOThread() {
-    CHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-    UtilityProcessHost* host =
-        UtilityProcessHost::Create(
-            this, base::MessageLoopProxy::current());
-    host->EnableZygote();
-    host->Send(new ChromeUtilityMsg_ParseJSON(webstore_data_));
-  }
-
-  // Implementing pieces of the UtilityProcessHostClient interface.
-  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE {
-    bool handled = true;
-    IPC_BEGIN_MESSAGE_MAP(SafeWebstoreResponseParser, message)
-      IPC_MESSAGE_HANDLER(ChromeUtilityHostMsg_ParseJSON_Succeeded,
-                          OnJSONParseSucceeded)
-      IPC_MESSAGE_HANDLER(ChromeUtilityHostMsg_ParseJSON_Failed,
-                          OnJSONParseFailed)
-      IPC_MESSAGE_UNHANDLED(handled = false)
-    IPC_END_MESSAGE_MAP()
-    return handled;
-  }
-
-  void OnJSONParseSucceeded(const ListValue& wrapper) {
-    CHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-    const Value* value = NULL;
-    CHECK(wrapper.Get(0, &value));
-    if (value->IsType(Value::TYPE_DICTIONARY)) {
-      parsed_webstore_data_.reset(
-          static_cast<const DictionaryValue*>(value)->DeepCopy());
-    } else {
-      error_ = kInvalidWebstoreResponseError;
-    }
-
-    ReportResults();
-  }
-
-  virtual void OnJSONParseFailed(const std::string& error_message) {
-    CHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-    error_ = error_message;
-    ReportResults();
-  }
-
-  void ReportResults() {
-    CHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-
-    BrowserThread::PostTask(
-        BrowserThread::UI,
-        FROM_HERE,
-        base::Bind(&SafeWebstoreResponseParser::ReportResultOnUIThread, this));
-  }
-
-  void ReportResultOnUIThread() {
-    CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-    if (error_.empty() && parsed_webstore_data_.get()) {
-      client_->OnWebstoreResponseParseSuccess(parsed_webstore_data_.release());
-    } else {
-      client_->OnWebstoreResponseParseFailure(error_);
-    }
-  }
-
- private:
-  virtual ~SafeWebstoreResponseParser() {}
-
-  WebstoreStandaloneInstaller* client_;
-
-  std::string webstore_data_;
-  std::string error_;
-  scoped_ptr<DictionaryValue> parsed_webstore_data_;
-};
-
 WebstoreStandaloneInstaller::WebstoreStandaloneInstaller(
-    WebContents* web_contents,
     std::string webstore_item_id,
     VerifiedSiteRequired require_verified_site,
     PromptType prompt_type,
     GURL requestor_url,
-    Callback callback)
-    : content::WebContentsObserver(web_contents),
+    Profile* profile,
+    WebContents* web_contents,
+    const Callback& callback)
+    : content::WebContentsObserver(
+          prompt_type == INLINE_PROMPT ?
+              web_contents :
+              content::WebContents::Create(
+                  content::WebContents::CreateParams(profile))),
       id_(webstore_item_id),
       require_verified_site_(require_verified_site == REQUIRE_VERIFIED_SITE),
-      use_inline_prompt_(prompt_type == INLINE_PROMPT),
+      prompt_type_(prompt_type),
       requestor_url_(requestor_url),
+      profile_(profile),
       callback_(callback),
-      skip_post_install_ui_(false),
       average_rating_(0.0),
       rating_count_(0) {
-  CHECK(!callback.is_null());
+  DCHECK((prompt_type == SKIP_PROMPT &&
+          profile != NULL &&
+          web_contents == NULL) ||
+         (prompt_type == STANDARD_PROMPT &&
+          profile != NULL &&
+          web_contents == NULL) ||
+         (prompt_type == INLINE_PROMPT &&
+          profile != NULL &&
+          web_contents != NULL &&
+          profile == Profile::FromBrowserContext(
+              web_contents->GetBrowserContext()))
+  ) << " prompt_type=" << prompt_type
+    << " profile=" << profile
+    << " web_contents=" << web_contents;
+  DCHECK(this->web_contents() != NULL);
+  CHECK(!callback_.is_null());
+}
+
+WebstoreStandaloneInstaller::~WebstoreStandaloneInstaller() {
+  if (prompt_type_ != INLINE_PROMPT) {
+    // We create and own the web_contents in this case.
+    delete web_contents();
+  }
 }
 
 void WebstoreStandaloneInstaller::BeginInstall() {
@@ -175,53 +104,25 @@ void WebstoreStandaloneInstaller::BeginInstall() {
     return;
   }
 
-  GURL webstore_data_url(extension_urls::GetWebstoreItemJsonDataURL(id_));
-
-  webstore_data_url_fetcher_.reset(net::URLFetcher::Create(
-      webstore_data_url, net::URLFetcher::GET, this));
-  Profile* profile = Profile::FromBrowserContext(
-      web_contents()->GetBrowserContext());
-  webstore_data_url_fetcher_->SetRequestContext(
-      profile->GetRequestContext());
   // Use the requesting page as the referrer both since that is more correct
   // (it is the page that caused this request to happen) and so that we can
   // track top sites that trigger inline install requests.
-  webstore_data_url_fetcher_->SetReferrer(requestor_url_.spec());
-  webstore_data_url_fetcher_->SetLoadFlags(net::LOAD_DO_NOT_SAVE_COOKIES |
-                                           net::LOAD_DISABLE_CACHE);
-  webstore_data_url_fetcher_->Start();
+  webstore_data_fetcher_.reset(new WebstoreDataFetcher(
+      this,
+      profile_->GetRequestContext(),
+      requestor_url_,
+      id_));
+  webstore_data_fetcher_->Start();
 }
 
-WebstoreStandaloneInstaller::~WebstoreStandaloneInstaller() {}
-
-void WebstoreStandaloneInstaller::OnURLFetchComplete(
-    const net::URLFetcher* source) {
-  CHECK_EQ(webstore_data_url_fetcher_.get(), source);
-  // We shouldn't be getting UrlFetcher callbacks if the WebContents has gone
-  // away; we stop any in in-progress fetches in WebContentsDestroyed.
-  CHECK(web_contents());
-
-  if (!webstore_data_url_fetcher_->GetStatus().is_success() ||
-      webstore_data_url_fetcher_->GetResponseCode() != 200) {
-    CompleteInstall(kWebstoreRequestError);
-    return;
-  }
-
-  std::string webstore_json_data;
-  webstore_data_url_fetcher_->GetResponseAsString(&webstore_json_data);
-  webstore_data_url_fetcher_.reset();
-
-  scoped_refptr<SafeWebstoreResponseParser> parser =
-      new SafeWebstoreResponseParser(this, webstore_json_data);
-  // The parser will call us back via OnWebstoreResponseParseSucces or
-  // OnWebstoreResponseParseFailure.
-  parser->Start();
+void WebstoreStandaloneInstaller::OnWebstoreRequestFailure() {
+  CompleteInstall(kWebstoreRequestError);
 }
 
 void WebstoreStandaloneInstaller::OnWebstoreResponseParseSuccess(
     DictionaryValue* webstore_data) {
   // Check if the tab has gone away in the meantime.
-  if (!web_contents()) {
+  if (prompt_type_ == INLINE_PROMPT && !web_contents()) {
     CompleteInstall("");
     return;
   }
@@ -245,13 +146,15 @@ void WebstoreStandaloneInstaller::OnWebstoreResponseParseSuccess(
       return;
     }
 
-    web_contents()->OpenURL(OpenURLParams(
-        GURL(redirect_url),
-        content::Referrer(web_contents()->GetURL(),
-                          WebKit::WebReferrerPolicyDefault),
-        NEW_FOREGROUND_TAB,
-        content::PAGE_TRANSITION_AUTO_BOOKMARK,
-        false));
+    if (prompt_type_ == INLINE_PROMPT) {
+      web_contents()->OpenURL(OpenURLParams(
+          GURL(redirect_url),
+          content::Referrer(web_contents()->GetURL(),
+                            WebKit::WebReferrerPolicyDefault),
+          NEW_FOREGROUND_TAB,
+          content::PAGE_TRANSITION_AUTO_BOOKMARK,
+          false));
+    }
     CompleteInstall(kInlineInstallSupportedError);
     return;
   }
@@ -321,8 +224,7 @@ void WebstoreStandaloneInstaller::OnWebstoreResponseParseSuccess(
       manifest,
       "",  // We don't have any icon data.
       icon_url,
-      Profile::FromBrowserContext(web_contents()->GetBrowserContext())->
-          GetRequestContext());
+      profile_->GetRequestContext());
   // The helper will call us back via OnWebstoreParseSucces or
   // OnWebstoreParseFailure.
   helper->Start();
@@ -338,7 +240,7 @@ void WebstoreStandaloneInstaller::OnWebstoreParseSuccess(
     const SkBitmap& icon,
     base::DictionaryValue* manifest) {
   // Check if the tab has gone away in the meantime.
-  if (!web_contents()) {
+  if (prompt_type_ == INLINE_PROMPT && !web_contents()) {
     CompleteInstall("");
     return;
   }
@@ -347,11 +249,17 @@ void WebstoreStandaloneInstaller::OnWebstoreParseSuccess(
   manifest_.reset(manifest);
   icon_ = icon;
 
-  ExtensionInstallPrompt::PromptType prompt_type = use_inline_prompt_ ?
-      ExtensionInstallPrompt::INLINE_INSTALL_PROMPT :
-      ExtensionInstallPrompt::INSTALL_PROMPT;
+  if (prompt_type_ == SKIP_PROMPT) {
+    InstallUIProceed();
+    return;
+  }
+
+  ExtensionInstallPrompt::PromptType prompt_type =
+      prompt_type_ == INLINE_PROMPT ?
+          ExtensionInstallPrompt::INLINE_INSTALL_PROMPT :
+          ExtensionInstallPrompt::INSTALL_PROMPT;
   ExtensionInstallPrompt::Prompt prompt(prompt_type);
-  if (use_inline_prompt_) {
+  if (prompt_type_ == INLINE_PROMPT) {
     prompt.SetInlineInstallWebstoreData(localized_user_count_,
                                         average_rating_,
                                         rating_count_);
@@ -371,7 +279,10 @@ void WebstoreStandaloneInstaller::OnWebstoreParseSuccess(
   }
 
   install_ui_.reset(new ExtensionInstallPrompt(web_contents()));
-  install_ui_->ConfirmStandaloneInstall(this, dummy_extension_, &icon_, prompt);
+  install_ui_->ConfirmStandaloneInstall(this,
+                                        dummy_extension_,
+                                        &icon_,
+                                        prompt);
   // Control flow finishes up in InstallUIProceed or InstallUIAbort.
 }
 
@@ -384,26 +295,21 @@ void WebstoreStandaloneInstaller::OnWebstoreParseFailure(
 
 void WebstoreStandaloneInstaller::InstallUIProceed() {
   // Check if the tab has gone away in the meantime.
-  if (!web_contents()) {
+  if (prompt_type_ == INLINE_PROMPT && !web_contents()) {
     CompleteInstall("");
     return;
   }
 
-  Profile* profile = Profile::FromBrowserContext(
-      web_contents()->GetBrowserContext());
-
   scoped_ptr<WebstoreInstaller::Approval> approval(
       WebstoreInstaller::Approval::CreateWithNoInstallPrompt(
-          profile,
+          profile_,
           id_,
           scoped_ptr<base::DictionaryValue>(manifest_.get()->DeepCopy())));
-  if (skip_post_install_ui_)
-    approval->skip_post_install_ui = true;
-  else
-    approval->use_app_installed_bubble = true;
+  approval->skip_post_install_ui = (prompt_type_ != INLINE_PROMPT);
+  approval->use_app_installed_bubble = (prompt_type_ == INLINE_PROMPT);
 
   scoped_refptr<WebstoreInstaller> installer = new WebstoreInstaller(
-      profile, this, &(web_contents()->GetController()), id_, approval.Pass(),
+      profile_, this, &(web_contents()->GetController()), id_, approval.Pass(),
       WebstoreInstaller::FLAG_INLINE_INSTALL);
   installer->Start();
 }
@@ -416,8 +322,8 @@ void WebstoreStandaloneInstaller::WebContentsDestroyed(
     WebContents* web_contents) {
   callback_.Reset();
   // Abort any in-progress fetches.
-  if (webstore_data_url_fetcher_.get()) {
-    webstore_data_url_fetcher_.reset();
+  if (webstore_data_fetcher_.get()) {
+    webstore_data_fetcher_.reset();
     Release();  // Matches the AddRef in BeginInstall.
   }
 }
@@ -437,6 +343,10 @@ void WebstoreStandaloneInstaller::OnExtensionInstallFailure(
 }
 
 void WebstoreStandaloneInstaller::CompleteInstall(const std::string& error) {
+  // Clear webstore_data_fetcher_ so that WebContentsDestroyed will no longer
+  // call Release in case the WebContents is destroyed before this object.
+  scoped_ptr<WebstoreDataFetcher> webstore_data_fetcher(
+      webstore_data_fetcher_.Pass());
   if (!callback_.is_null())
     callback_.Run(error.empty(), error);
 

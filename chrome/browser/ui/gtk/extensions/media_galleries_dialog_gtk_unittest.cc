@@ -2,9 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/string_number_conversions.h"
-#include "chrome/browser/system_monitor/media_storage_util.h"
-#include "chrome/browser/media_gallery/media_galleries_dialog_controller_mock.h"
+#include "base/strings/string_number_conversions.h"
+#include "chrome/browser/media_galleries/media_galleries_dialog_controller_mock.h"
+#include "chrome/browser/storage_monitor/media_storage_util.h"
 #include "chrome/browser/ui/gtk/extensions/media_galleries_dialog_gtk.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -109,6 +109,29 @@ TEST_F(MediaGalleriesDialogTest, UpdateAdds) {
 
   dialog.UpdateGallery(&gallery2, false);
   EXPECT_EQ(2U, dialog.checkbox_map_.size());
+}
+
+TEST_F(MediaGalleriesDialogTest, ForgetDeletes) {
+  NiceMock<MediaGalleriesDialogControllerMock> controller;
+
+  MediaGalleriesDialogController::KnownGalleryPermissions permissions;
+  EXPECT_CALL(controller, permissions()).
+      WillRepeatedly(ReturnRef(permissions));
+
+  MediaGalleriesDialogGtk dialog(&controller);
+
+  EXPECT_TRUE(dialog.checkbox_map_.empty());
+
+  MediaGalleryPrefInfo gallery1 = MakePrefInfoForTesting(1);
+  dialog.UpdateGallery(&gallery1, true);
+  EXPECT_EQ(1U, dialog.checkbox_map_.size());
+
+  MediaGalleryPrefInfo gallery2 = MakePrefInfoForTesting(2);
+  dialog.UpdateGallery(&gallery2, true);
+  EXPECT_EQ(2U, dialog.checkbox_map_.size());
+
+  dialog.ForgetGallery(&gallery2);
+  EXPECT_EQ(1U, dialog.checkbox_map_.size());
 }
 
 }  // namespace chrome

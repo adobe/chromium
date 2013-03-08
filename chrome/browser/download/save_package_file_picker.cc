@@ -6,12 +6,12 @@
 
 #include "base/command_line.h"
 #include "base/metrics/histogram.h"
+#include "base/prefs/pref_service.h"
 #include "base/prefs/public/pref_member.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/download/chrome_download_manager_delegate.h"
 #include "chrome/browser/download/download_prefs.h"
 #include "chrome/browser/platform_util.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/chrome_select_file_policy.h"
 #include "chrome/common/chrome_switches.h"
@@ -20,6 +20,7 @@
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/save_page_type.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_view.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -74,16 +75,16 @@ bool SavePackageFilePicker::ShouldSaveAsMHTML() const {
 
 SavePackageFilePicker::SavePackageFilePicker(
     content::WebContents* web_contents,
-    const FilePath& suggested_path_const,
-    const FilePath::StringType& default_extension_const,
+    const base::FilePath& suggested_path_const,
+    const base::FilePath::StringType& default_extension_const,
     bool can_save_as_complete,
     DownloadPrefs* download_prefs,
     const content::SavePackagePathPickedCallback& callback)
     : render_process_id_(web_contents->GetRenderProcessHost()->GetID()),
       can_save_as_complete_(can_save_as_complete),
       callback_(callback) {
-  FilePath suggested_path = suggested_path_const;
-  FilePath::StringType default_extension = default_extension_const;
+  base::FilePath suggested_path = suggested_path_const;
+  base::FilePath::StringType default_extension = default_extension_const;
   int file_type_index = SavePackageTypeToIndex(
       static_cast<SavePageType>(download_prefs->save_file_type()));
   DCHECK_NE(-1, file_type_index);
@@ -98,7 +99,7 @@ SavePackageFilePicker::SavePackageFilePicker(
     suggested_path = suggested_path.ReplaceExtension(default_extension);
   } else if (can_save_as_complete) {
     bool add_extra_extension = false;
-    FilePath::StringType extra_extension;
+    base::FilePath::StringType extra_extension;
     if (!suggested_path.Extension().empty() &&
         suggested_path.Extension().compare(FILE_PATH_LITERAL("htm")) &&
         suggested_path.Extension().compare(FILE_PATH_LITERAL("html"))) {
@@ -159,15 +160,15 @@ SavePackageFilePicker::SavePackageFilePicker(
   if (g_should_prompt_for_filename) {
     select_file_dialog_ = ui::SelectFileDialog::Create(
         this, new ChromeSelectFilePolicy(web_contents));
-    select_file_dialog_->SelectFile(ui::SelectFileDialog::SELECT_SAVEAS_FILE,
-                                    string16(),
-                                    suggested_path,
-                                    &file_type_info,
-                                    file_type_index,
-                                    default_extension,
-                                    platform_util::GetTopLevel(
-                                        web_contents->GetNativeView()),
-                                    NULL);
+    select_file_dialog_->SelectFile(
+        ui::SelectFileDialog::SELECT_SAVEAS_FILE,
+        string16(),
+        suggested_path,
+        &file_type_info,
+        file_type_index,
+        default_extension,
+        platform_util::GetTopLevel(web_contents->GetView()->GetNativeView()),
+        NULL);
   } else {
     // Just use 'suggested_path' instead of opening the dialog prompt.
     // Go through FileSelected() for consistency.
@@ -182,7 +183,7 @@ void SavePackageFilePicker::SetShouldPromptUser(bool should_prompt) {
   g_should_prompt_for_filename = should_prompt;
 }
 
-void SavePackageFilePicker::FileSelected(const FilePath& path,
+void SavePackageFilePicker::FileSelected(const base::FilePath& path,
                                          int index,
                                          void* unused_params) {
   RenderProcessHost* process = RenderProcessHost::FromID(render_process_id_);

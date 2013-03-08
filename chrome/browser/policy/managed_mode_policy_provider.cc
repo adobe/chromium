@@ -23,7 +23,8 @@ scoped_ptr<ManagedModePolicyProvider> ManagedModePolicyProvider::Create(
     Profile* profile,
     base::SequencedTaskRunner* sequenced_task_runner,
     bool force_load) {
-  FilePath path = profile->GetPath().Append(chrome::kManagedModePolicyFilename);
+  base::FilePath path =
+      profile->GetPath().Append(chrome::kManagedModePolicyFilename);
   JsonPrefStore* pref_store = new JsonPrefStore(path, sequenced_task_runner);
   // Load the data synchronously if needed (when creating profiles on startup).
   if (force_load)
@@ -71,8 +72,11 @@ void ManagedModePolicyProvider::RefreshPolicies() {
   UpdatePolicyFromCache();
 }
 
-bool ManagedModePolicyProvider::IsInitializationComplete() const {
-  return store_->IsInitializationComplete();
+bool ManagedModePolicyProvider::IsInitializationComplete(
+    PolicyDomain domain) const {
+  if (domain == POLICY_DOMAIN_CHROME)
+    return store_->IsInitializationComplete();
+  return true;
 }
 
 void ManagedModePolicyProvider::OnPrefValueChanged(const std::string& key) {}
@@ -99,7 +103,7 @@ base::DictionaryValue* ManagedModePolicyProvider::GetCachedPolicy() const {
 void ManagedModePolicyProvider::UpdatePolicyFromCache() {
   scoped_ptr<PolicyBundle> policy_bundle(new PolicyBundle);
   PolicyMap* policy_map =
-      &policy_bundle->Get(POLICY_DOMAIN_CHROME, std::string());
+      &policy_bundle->Get(PolicyNamespace(POLICY_DOMAIN_CHROME, std::string()));
   policy_map->LoadFrom(GetCachedPolicy(),
                        POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER);
   UpdatePolicy(policy_bundle.Pass());

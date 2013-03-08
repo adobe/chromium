@@ -4,7 +4,7 @@
 
 #import <Cocoa/Cocoa.h>
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/mac/scoped_cftyperef.h"
 #include "base/memory/scoped_nsobject.h"
 #include "base/memory/scoped_ptr.h"
@@ -41,7 +41,7 @@ class WebContentsImpl;
   NSDragOperation dragOperationMask_;
 
   // The file name to be saved to for a drag-out download.
-  FilePath downloadFileName_;
+  base::FilePath downloadFileName_;
 
   // The URL to download from for a drag-out download.
   GURL downloadURL_;

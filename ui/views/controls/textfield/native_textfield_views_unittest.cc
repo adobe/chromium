@@ -87,6 +87,18 @@ class GetTextHelper {
   DISALLOW_COPY_AND_ASSIGN(GetTextHelper);
 };
 
+// Convenience to make constructing a GestureEvent simpler.
+class GestureEventForTest : public ui::GestureEvent {
+ public:
+  GestureEventForTest(ui::EventType type, int x, int y, int flags)
+      : GestureEvent(type, x, y, flags, base::TimeDelta(),
+                     ui::GestureEventDetails(type, 0.0f, 0.0f), 0) {
+  }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(GestureEventForTest);
+};
+
 const char16 kHebrewLetterSamekh = 0x05E1;
 
 }  // namespace
@@ -129,22 +141,22 @@ class NativeTextfieldViewsTest : public ViewsTestBase,
 
   // TextfieldController:
   virtual void ContentsChanged(Textfield* sender,
-                               const string16& new_contents) {
+                               const string16& new_contents) OVERRIDE {
     ASSERT_NE(last_contents_, new_contents);
     last_contents_ = new_contents;
   }
 
   virtual bool HandleKeyEvent(Textfield* sender,
-                              const ui::KeyEvent& key_event) {
+                              const ui::KeyEvent& key_event) OVERRIDE {
     // TODO(oshima): figure out how to test the keystroke.
     return false;
   }
 
-  virtual void OnBeforeUserAction(Textfield* sender) {
+  virtual void OnBeforeUserAction(Textfield* sender) OVERRIDE {
     ++on_before_user_action_;
   }
 
-  virtual void OnAfterUserAction(Textfield* sender) {
+  virtual void OnAfterUserAction(Textfield* sender) OVERRIDE {
     ++on_after_user_action_;
   }
 
@@ -197,6 +209,10 @@ class NativeTextfieldViewsTest : public ViewsTestBase,
   ui::MenuModel* GetContextMenuModel() {
     textfield_view_->UpdateContextMenu();
     return textfield_view_->context_menu_contents_.get();
+  }
+
+  ui::TouchSelectionController* GetTouchSelectionController() {
+    return textfield_view_->touch_selection_controller_.get();
   }
 
  protected:
@@ -871,13 +887,13 @@ TEST_F(NativeTextfieldViewsTest, DragAndDrop_AcceptDrop) {
 
   // Ensure that textfields do not accept non-OSExchangeData::STRING types.
   ui::OSExchangeData bad_data;
-  bad_data.SetFilename(FilePath(FILE_PATH_LITERAL("x")));
+  bad_data.SetFilename(base::FilePath(FILE_PATH_LITERAL("x")));
 #if defined(OS_WIN)
   ui::OSExchangeData::CustomFormat fmt = CF_BITMAP;
   bad_data.SetPickledData(fmt, Pickle());
-  bad_data.SetFileContents(FilePath(L"x"), "x");
+  bad_data.SetFileContents(base::FilePath(L"x"), "x");
   bad_data.SetHtml(string16(ASCIIToUTF16("x")), GURL("x.org"));
-  ui::OSExchangeData::DownloadFileInfo download(FilePath(), NULL);
+  ui::OSExchangeData::DownloadFileInfo download(base::FilePath(), NULL);
   bad_data.SetDownloadFileInfo(download);
 #endif
   EXPECT_FALSE(textfield_view_->CanDrop(bad_data));
@@ -1306,19 +1322,42 @@ TEST_F(NativeTextfieldViewsTest, UndoRedoTest) {
   EXPECT_STR_EQ("", textfield_->text());
   SendKeyEvent(ui::VKEY_Y, false, true);
   EXPECT_STR_EQ("", textfield_->text());
+}
 
-  // Insert
+TEST_F(NativeTextfieldViewsTest, CopyPasteShortcuts) {
+  InitTextfield(Textfield::STYLE_DEFAULT);
+  // Ensure [Ctrl]+[c] copies and [Ctrl]+[v] pastes.
+  textfield_->SetText(ASCIIToUTF16("abc"));
+  textfield_->SelectAll(false);
+  SendKeyEvent(ui::VKEY_C, false, true);
+  EXPECT_STR_EQ("abc", string16(GetClipboardText()));
+  SendKeyEvent(ui::VKEY_HOME);
+  SendKeyEvent(ui::VKEY_V, false, true);
+  EXPECT_STR_EQ("abcabc", textfield_->text());
+
+  // Ensure [Ctrl]+[Insert] copies and [Shift]+[Insert] pastes.
   textfield_->SetText(ASCIIToUTF16("123"));
+  textfield_->SelectAll(false);
+  SendKeyEvent(ui::VKEY_INSERT, false, true);
+  EXPECT_STR_EQ("123", string16(GetClipboardText()));
+  SendKeyEvent(ui::VKEY_HOME);
+  SendKeyEvent(ui::VKEY_INSERT, true, false);
+  EXPECT_STR_EQ("123123", textfield_->text());
+  // Ensure [Ctrl]+[Shift]+[Insert] is a no-op.
+  textfield_->SelectAll(false);
+  SendKeyEvent(ui::VKEY_INSERT, true, true);
+  EXPECT_STR_EQ("123", string16(GetClipboardText()));
+  EXPECT_STR_EQ("123123", textfield_->text());
+}
+
+TEST_F(NativeTextfieldViewsTest, OvertypeMode) {
+  InitTextfield(Textfield::STYLE_DEFAULT);
+  // Overtype mode should be disabled (no-op [Insert]).
+  textfield_->SetText(ASCIIToUTF16("2"));
   SendKeyEvent(ui::VKEY_HOME);
   SendKeyEvent(ui::VKEY_INSERT);
-  SendKeyEvent(ui::VKEY_A);
-  EXPECT_STR_EQ("a23", textfield_->text());
-  SendKeyEvent(ui::VKEY_B);
-  EXPECT_STR_EQ("ab3", textfield_->text());
-  SendKeyEvent(ui::VKEY_Z, false, true);
-  EXPECT_STR_EQ("123", textfield_->text());
-  SendKeyEvent(ui::VKEY_Y, false, true);
-  EXPECT_STR_EQ("ab3", textfield_->text());
+  SendKeyEvent(ui::VKEY_1, false, false);
+  EXPECT_STR_EQ("12", textfield_->text());
 }
 
 TEST_F(NativeTextfieldViewsTest, TextCursorDisplayTest) {
@@ -1678,5 +1717,54 @@ TEST_F(NativeTextfieldViewsTest, GetCompositionCharacterBoundsTest) {
   EXPECT_FALSE(client->GetCompositionCharacterBounds(char_count + 1, &rect));
   EXPECT_FALSE(client->GetCompositionCharacterBounds(char_count + 100, &rect));
 }
+
+// Touch selection and draggin currently only works for chromeos.
+#if defined(OS_CHROMEOS)
+TEST_F(NativeTextfieldViewsTest, TouchSelectionAndDraggingTest) {
+  InitTextfield(Textfield::STYLE_DEFAULT);
+  textfield_->SetText(ASCIIToUTF16("hello world"));
+  EXPECT_FALSE(GetTouchSelectionController());
+  const int eventX = GetCursorPositionX(2);
+  const int eventY = 0;
+  CommandLine::ForCurrentProcess()->AppendSwitch(switches::kEnableTouchEditing);
+
+  // Tapping on the textfield should turn on the TouchSelectionController.
+  GestureEventForTest tap(ui::ET_GESTURE_TAP, eventX, eventY, 0);
+  textfield_view_->OnGestureEvent(&tap);
+  EXPECT_TRUE(GetTouchSelectionController());
+
+  // Un-focusing the textfield should reset the TouchSelectionController
+  textfield_view_->GetFocusManager()->ClearFocus();
+  EXPECT_FALSE(GetTouchSelectionController());
+
+  // With touch editing enabled, long press should not show context menu.
+  // Instead, select word and invoke TouchSelectionController.
+  GestureEventForTest tap_down(ui::ET_GESTURE_TAP_DOWN, eventX, eventY, 0);
+  textfield_view_->OnGestureEvent(&tap_down);
+  GestureEventForTest long_press(ui::ET_GESTURE_LONG_PRESS, eventX, eventY, 0);
+  textfield_view_->OnGestureEvent(&long_press);
+  EXPECT_STR_EQ("hello", textfield_->GetSelectedText());
+  EXPECT_TRUE(GetTouchSelectionController());
+
+  // Long pressing again in the selecting region should not do anything since
+  // touch drag drop is not yet enabled.
+  textfield_view_->OnGestureEvent(&tap_down);
+  textfield_view_->OnGestureEvent(&long_press);
+  EXPECT_STR_EQ("hello", textfield_->GetSelectedText());
+  EXPECT_TRUE(GetTouchSelectionController());
+  EXPECT_TRUE(long_press.handled());
+
+  // After enabling touch drag drop, long pressing in the selected region should
+  // start a drag and remove TouchSelectionController.
+  CommandLine::ForCurrentProcess()->AppendSwitch(
+      switches::kEnableTouchDragDrop);
+  textfield_view_->OnGestureEvent(&tap_down);
+  // Create a new long press event since the previous one is not marked handled.
+  GestureEventForTest long_press2(ui::ET_GESTURE_LONG_PRESS, eventX, eventY, 0);
+  textfield_view_->OnGestureEvent(&long_press2);
+  EXPECT_STR_EQ("hello", textfield_->GetSelectedText());
+  EXPECT_FALSE(GetTouchSelectionController());
+}
+#endif
 
 }  // namespace views

@@ -12,9 +12,25 @@
 // This class manages the Autocomplete field trials.
 class AutocompleteFieldTrial {
  public:
-  // Creates the field trial groups.
+  // Creates the static field trial groups.
   // *** MUST NOT BE CALLED MORE THAN ONCE. ***
-  static void Activate();
+  static void ActivateStaticTrials();
+
+  // Activates all dynamic field trials.  The main difference between
+  // the autocomplete dynamic and static field trials is that the former
+  // don't require any code changes on the Chrome side as they are controlled
+  // on the server side.  Chrome binary simply propagates all necessary
+  // information through the X-Chrome-Variations header.
+  // This method, unlike ActivateStaticTrials(), may be called multiple times.
+  static void ActivateDynamicTrials();
+
+  // Returns a bitmap containing AutocompleteProvider::Type values
+  // that should be disabled in AutocompleteController.
+  // This method simply goes over all autocomplete dynamic field trial groups
+  // and looks for group names like "ProvidersDisabled_NNN" where NNN is
+  // an integer corresponding to a bitmap mask.  All extracted bitmaps
+  // are OR-ed together and returned as the final result.
+  static int GetDisabledProviderTypes();
 
   // ---------------------------------------------------------
   // For the inline History Quick Provider field trial.
@@ -92,16 +108,15 @@ class AutocompleteFieldTrial {
   static bool InHQPReplaceHUPScoringFieldTrialExperimentGroup();
 
   // ---------------------------------------------------------
-  // For the HistoryQuick provider only count matches at word boundaries
-  // field trial.
+  // For the HistoryQuick provider use cursor position field trial.
 
   // Returns whether the user is in any group for this field trial.
   // (Should always be true unless initialization went wrong.)
-  static bool InHQPOnlyCountMatchesAtWordBoundariesFieldTrial();
+  static bool InHQPUseCursorPositionFieldTrial();
 
-  // Returns whether we should ignore all mid-word matches in
-  // HistoryQuick provider.
-  static bool InHQPOnlyCountMatchesAtWordBoundariesFieldTrialExperimentGroup();
+  // Returns whether HistoryQuick provider should allow breaking the
+  // omnibox input string at cursor position.
+  static bool InHQPUseCursorPositionFieldTrialExperimentGroup();
 
  private:
   DISALLOW_IMPLICIT_CONSTRUCTORS(AutocompleteFieldTrial);

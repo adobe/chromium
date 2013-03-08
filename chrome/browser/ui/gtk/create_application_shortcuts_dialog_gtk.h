@@ -58,7 +58,8 @@ class CreateApplicationShortcutsDialogGtk
   virtual void OnCreatedShortcut(void) {}
 
   virtual void CreateDesktopShortcut(
-      const ShellIntegration::ShortcutInfo& shortcut_info);
+      const ShellIntegration::ShortcutInfo& shortcut_info,
+      const ShellIntegration::ShortcutLocations& creation_locations);
   virtual void ShowErrorDialog();
 
   GtkWindow* parent_;
@@ -70,7 +71,8 @@ class CreateApplicationShortcutsDialogGtk
   // ShortcutInfo for the new shortcut.
   ShellIntegration::ShortcutInfo shortcut_info_;
 
-  // Image associated with the site.
+  // Image associated with the site or app, scaled to the appropriate size to
+  // display in the dialog box.
   GdkPixbuf* favicon_pixbuf_;
 
   // Dialog box that allows the user to create an application shortcut.
@@ -122,14 +124,16 @@ class CreateChromeApplicationShortcutsDialogGtk
   virtual ~CreateChromeApplicationShortcutsDialogGtk() {}
 
   virtual void CreateDesktopShortcut(
-      const ShellIntegration::ShortcutInfo& shortcut_info) OVERRIDE;
+      const ShellIntegration::ShortcutInfo& shortcut_info,
+      const ShellIntegration::ShortcutLocations& creation_locations) OVERRIDE;
 
  private:
-  void OnImageLoaded(const gfx::Image& image);
+  void OnShortcutInfoLoaded(
+      const ShellIntegration::ShortcutInfo& shortcut_info);
 
  private:
   const extensions::Extension* app_;
-  FilePath profile_path_;
+  base::FilePath profile_path_;
   DISALLOW_COPY_AND_ASSIGN(CreateChromeApplicationShortcutsDialogGtk);
 };
 

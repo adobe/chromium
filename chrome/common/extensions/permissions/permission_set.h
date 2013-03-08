@@ -14,13 +14,14 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/singleton.h"
 #include "base/string16.h"
-#include "chrome/common/extensions/extension.h"
+#include "chrome/common/extensions/manifest.h"
 #include "chrome/common/extensions/permissions/api_permission.h"
 #include "chrome/common/extensions/permissions/api_permission_set.h"
 #include "chrome/common/extensions/permissions/permission_message.h"
 #include "extensions/common/url_pattern_set.h"
 
 namespace extensions {
+class Extension;
 
 // The PermissionSet is an immutable class that encapsulates an
 // extension's permissions. The class exposes set operations for combining and
@@ -66,7 +67,9 @@ class PermissionSet
 
   bool operator==(const PermissionSet& rhs) const;
 
-  // Returns true if |set| is a subset of this.
+  // Returns true if every API or host permission available to |set| is also
+  // available to this. In other words, if the API permissions of |set| are a
+  // subset of this, and the host permissions in this encompass those in |set|.
   bool Contains(const PermissionSet& set) const;
 
   // Gets the API permissions in this set as a set of strings.
@@ -80,12 +83,12 @@ class PermissionSet
 
   // Gets the localized permission messages that represent this set.
   // The set of permission messages shown varies by extension type.
-  PermissionMessages GetPermissionMessages(Extension::Type extension_type)
+  PermissionMessages GetPermissionMessages(Manifest::Type extension_type)
       const;
 
   // Gets the localized permission messages that represent this set (represented
   // as strings). The set of permission messages shown varies by extension type.
-  std::vector<string16> GetWarningMessages(Extension::Type extension_type)
+  std::vector<string16> GetWarningMessages(Manifest::Type extension_type)
       const;
 
   // Returns true if this is an empty set (e.g., the default permission set).
@@ -103,8 +106,11 @@ class PermissionSet
       const APIPermission::CheckParam* param) const;
 
   // Returns true if the permissions in this set grant access to the specified
-  // |function_name|.
-  bool HasAccessToFunction(const std::string& function_name) const;
+  // |function_name|. The |allow_implicit| flag controls whether we
+  // want to strictly check against just the explicit permissions, or also
+  // include implicit "no permission needed" namespaces/functions.
+  bool HasAccessToFunction(const std::string& function_name,
+                           bool allow_implicit) const;
 
   // Returns true if this includes permission to access |origin|.
   bool HasExplicitAccessToOrigin(const GURL& origin) const;

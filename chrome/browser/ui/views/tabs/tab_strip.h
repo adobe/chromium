@@ -27,6 +27,7 @@ class StackedTabStripLayout;
 class Tab;
 class TabDragController;
 class TabStripController;
+class TabStripObserver;
 
 namespace ui {
 class ListSelectionModel;
@@ -58,6 +59,10 @@ class TabStrip : public views::View,
 
   explicit TabStrip(TabStripController* controller);
   virtual ~TabStrip();
+
+  // Add and remove observers to changes within this TabStrip.
+  void AddObserver(TabStripObserver* observer);
+  void RemoveObserver(TabStripObserver* observer);
 
   // Sets the layout type. If |adjust_layout| is true the layout type changes
   // based on whether the user uses a mouse or touch device with the tabstrip.
@@ -165,6 +170,14 @@ class TabStrip : public views::View,
   // Sets a painting style with miniature "tab indicator" rectangles at the top.
   void SetImmersiveStyle(bool enable);
 
+  // Returns true if Tabs in this TabStrip are currently changing size or
+  // position.
+  bool IsAnimating() const;
+
+  // Stops any ongoing animations. If |layout| is true and an animation is
+  // ongoing this does a layout.
+  void StopAnimating(bool layout);
+
   // TabController overrides:
   virtual const ui::ListSelectionModel& GetSelectionModel() OVERRIDE;
   virtual bool SupportsMultipleSelection() OVERRIDE;
@@ -183,7 +196,7 @@ class TabStrip : public views::View,
       const ui::LocatedEvent& event,
       const ui::ListSelectionModel& original_selection) OVERRIDE;
   virtual void ContinueDrag(views::View* view,
-                            const gfx::Point& location) OVERRIDE;
+                            const ui::LocatedEvent& event) OVERRIDE;
   virtual bool EndDrag(EndDragReason reason) OVERRIDE;
   virtual Tab* GetTabAt(Tab* tab,
                             const gfx::Point& tab_in_tab_coordinates) OVERRIDE;
@@ -251,7 +264,10 @@ class TabStrip : public views::View,
   // Used during a drop session of a url. Tracks the position of the drop as
   // well as a window used to highlight where the drop occurs.
   struct DropInfo {
-    DropInfo(int index, bool drop_before, bool paint_down);
+    DropInfo(int drop_index,
+             bool drop_before,
+             bool point_down,
+             views::Widget* context);
     ~DropInfo();
 
     // Index of the tab to drop on. If drop_before is true, the drop should
@@ -292,10 +308,6 @@ class TabStrip : public views::View,
   // Schedules the animations and bounds changes necessary for a remove tab
   // animation.
   void ScheduleRemoveTabAnimation(Tab* tab);
-
-  // Stops any ongoing animations. If |layout| is true and an animation is
-  // ongoing this does a layout.
-  void StopAnimating(bool layout);
 
   // Animates all the views to their ideal bounds.
   // NOTE: this does *not* invoke GenerateIdealBounds, it uses the bounds
@@ -447,10 +459,6 @@ class TabStrip : public views::View,
 
   // -- Animations ------------------------------------------------------------
 
-  // Returns true if Tabs in this TabStrip are currently changing size or
-  // position.
-  bool IsAnimating() const;
-
   // Invoked prior to starting a new animation.
   void PrepareForAnimation();
 
@@ -594,6 +602,10 @@ class TabStrip : public views::View,
 
   // True if tabs are painted as rectangular light-bars.
   bool immersive_style_;
+
+  // Our observers.
+  typedef ObserverList<TabStripObserver> TabStripObservers;
+  TabStripObservers observers_;
 
   DISALLOW_COPY_AND_ASSIGN(TabStrip);
 };

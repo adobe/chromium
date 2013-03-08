@@ -5,8 +5,8 @@
 #include "webkit/glue/webkit_glue.h"
 
 #if defined(OS_WIN)
-#include <objidl.h>
 #include <mlang.h>
+#include <objidl.h>
 #elif defined(OS_POSIX) && !defined(OS_MACOSX)
 #include <sys/utsname.h>
 #endif
@@ -22,9 +22,9 @@
 #include "base/path_service.h"
 #include "base/process_util.h"
 #include "base/string_piece.h"
-#include "base/string_tokenizer.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
+#include "base/strings/string_tokenizer.h"
 #include "base/sys_info.h"
 #include "base/utf_string_conversions.h"
 #include "net/base/escape.h"
@@ -34,6 +34,7 @@
 #include "skia/ext/skia_utils_mac.h"
 #endif
 #include "third_party/WebKit/Source/Platform/chromium/public/WebData.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebFileInfo.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebImage.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebRect.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebSize.h"
@@ -42,7 +43,6 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDevToolsAgent.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebElement.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebFileInfo.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebGlyphCache.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebHistoryItem.h"
@@ -97,7 +97,7 @@ void SetJavaScriptFlags(const std::string& str) {
 void EnableWebCoreLogChannels(const std::string& channels) {
   if (channels.empty())
     return;
-  StringTokenizer t(channels, ", ");
+  base::StringTokenizer t(channels, ", ");
   while (t.GetNext()) {
     WebKit::enableLogChannel(t.token().c_str());
   }
@@ -351,7 +351,9 @@ size_t MemoryUsageKB() {
       >> 10;
 
   v8::HeapStatistics stat;
-  v8::V8::GetHeapStatistics(&stat);
+  // TODO(svenpanne) The call below doesn't take web workers into account, this
+  // has to be done manually by iterating over all Isolates involved.
+  v8::Isolate::GetCurrent()->GetHeapStatistics(&stat);
   return mem_usage + (static_cast<uint64_t>(stat.total_heap_size()) >> 10);
 }
 #elif defined(OS_MACOSX)
@@ -371,5 +373,9 @@ size_t MemoryUsageKB() {
   return process_metrics->GetPagefileUsage() >> 10;
 }
 #endif
+
+double ZoomFactorToZoomLevel(double factor) {
+  return WebView::zoomFactorToZoomLevel(factor);
+}
 
 } // namespace webkit_glue

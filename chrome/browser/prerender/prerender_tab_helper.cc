@@ -5,7 +5,7 @@
 #include "chrome/browser/prerender/prerender_tab_helper.h"
 
 #include "base/metrics/histogram.h"
-#include "base/string_number_conversions.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/time.h"
 #include "chrome/browser/prerender/prerender_histograms.h"
 #include "chrome/browser/prerender/prerender_manager.h"
@@ -30,6 +30,7 @@ namespace prerender {
 class PrerenderTabHelper::PixelStats {
  public:
   explicit PixelStats(PrerenderTabHelper* tab_helper) :
+      bitmap_web_contents_(NULL),
       weak_factory_(this),
       tab_helper_(tab_helper) {
   }
@@ -55,26 +56,23 @@ class PrerenderTabHelper::PixelStats {
       return;
     }
 
-    skia::PlatformBitmap* temp_bitmap = new skia::PlatformBitmap;
     web_contents->GetRenderViewHost()->CopyFromBackingStore(
         gfx::Rect(),
         gfx::Size(),
         base::Bind(&PrerenderTabHelper::PixelStats::HandleBitmapResult,
                    weak_factory_.GetWeakPtr(),
                    bitmap_type,
-                   web_contents,
-                   base::Owned(temp_bitmap)),
-        temp_bitmap);
+                   web_contents));
   }
 
  private:
   void HandleBitmapResult(BitmapType bitmap_type,
                           WebContents* web_contents,
-                          skia::PlatformBitmap* temp_bitmap,
-                          bool succeeded) {
+                          bool succeeded,
+                          const SkBitmap& canvas_bitmap) {
     scoped_ptr<SkBitmap> bitmap;
     if (succeeded) {
-        const SkBitmap& canvas_bitmap = temp_bitmap->GetBitmap();
+      // TODO(nick): This copy may now be unnecessary.
       bitmap.reset(new SkBitmap());
       canvas_bitmap.copyTo(bitmap.get(), SkBitmap::kARGB_8888_Config);
     }

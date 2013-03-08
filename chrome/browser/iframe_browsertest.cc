@@ -2,10 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_tabstrip.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/web_contents.h"
@@ -15,11 +15,11 @@ class IFrameTest : public InProcessBrowserTest {
  protected:
   void NavigateAndVerifyTitle(const char* file, const char* page_title) {
     GURL url = ui_test_utils::GetTestUrl(
-        FilePath(), FilePath().AppendASCII(file));
+        base::FilePath(), base::FilePath().AppendASCII(file));
 
     ui_test_utils::NavigateToURL(browser(), url);
     EXPECT_EQ(ASCIIToUTF16(page_title),
-              chrome::GetActiveWebContents(browser())->GetTitle());
+              browser()->tab_strip_model()->GetActiveWebContents()->GetTitle());
   }
 };
 

@@ -34,6 +34,10 @@
 #include "ui/aura/window.h"
 #endif
 
+#if defined(USE_X11)
+#include <X11/Xlib.h>
+#endif
+
 using base::Time;
 using base::TimeDelta;
 using ui::OSExchangeData;
@@ -51,6 +55,9 @@ static const int kCenteredContextMenuYOffset = -15;
 namespace views {
 
 namespace {
+
+// The spacing offset for the bubble tip.
+const int kBubbleTipSize = 10;
 
 // Returns true if the mnemonic of |menu| matches key.
 bool MatchesMnemonic(MenuItemView* menu, char16 key) {
@@ -708,7 +715,7 @@ void MenuController::UpdateSubmenuSelection(SubmenuView* submenu) {
   }
 }
 
-void MenuController::OnWidgetClosing(Widget* widget) {
+void MenuController::OnWidgetDestroying(Widget* widget) {
   DCHECK_EQ(owner_, widget);
   owner_->RemoveObserver(this);
   owner_ = NULL;
@@ -803,9 +810,8 @@ void MenuController::SetSelectionOnPointerDown(SubmenuView* source,
     // We're going to close and we own the mouse capture. We need to repost the
     // mouse down, otherwise the window the user clicked on won't get the
     // event.
-#if defined(OS_WIN) && !defined(USE_AURA)
+#if (defined(OS_WIN) && !defined(USE_AURA)) || defined(USE_X11)
     RepostEvent(source, event);
-    // NOTE: not reposting on linux seems fine.
 #endif
 
     // And close.
@@ -1101,7 +1107,9 @@ void MenuController::UpdateInitialLocation(
   }
 
   // Reverse anchor position for RTL languages.
-  if (base::i18n::IsRTL()) {
+  if (base::i18n::IsRTL() &&
+      (position == MenuItemView::TOPRIGHT ||
+       position == MenuItemView::TOPLEFT)) {
     pending_state_.anchor = position == MenuItemView::TOPRIGHT ?
         MenuItemView::TOPLEFT : MenuItemView::TOPRIGHT;
   } else {
@@ -1190,6 +1198,9 @@ bool MenuController::ShowSiblingMenu(SubmenuView* source,
   did_capture_ = false;
   gfx::Point screen_menu_loc;
   View::ConvertPointToScreen(button, &screen_menu_loc);
+
+  // It is currently not possible to show a submenu recursively in a bubble.
+  DCHECK(!MenuItemView::IsBubble(anchor));
   // Subtract 1 from the height to make the popup flush with the button border.
   UpdateInitialLocation(gfx::Rect(screen_menu_loc.x(), screen_menu_loc.y(),
                                   button->width(), button->height() - 1),
@@ -1453,7 +1464,8 @@ void MenuController::OpenMenuImpl(MenuItemView* item, bool show) {
   bool prefer_leading =
       state_.open_leading.empty() ? true : state_.open_leading.back();
   bool resulting_direction;
-  gfx::Rect bounds =
+  gfx::Rect bounds = MenuItemView::IsBubble(state_.anchor) ?
+      CalculateBubbleMenuBounds(item, prefer_leading, &resulting_direction) :
       CalculateMenuBounds(item, prefer_leading, &resulting_direction);
   state_.open_leading.push_back(resulting_direction);
   bool do_capture = (!did_capture_ && blocking_run_);
@@ -1717,6 +1729,86 @@ gfx::Rect MenuController::CalculateMenuBounds(MenuItemView* item,
   return gfx::Rect(x, y, pref.width(), pref.height());
 }
 
+gfx::Rect MenuController::CalculateBubbleMenuBounds(MenuItemView* item,
+                                                    bool prefer_leading,
+                                                    bool* is_leading) {
+  DCHECK(item);
+  DCHECK(!item->GetParentMenuItem());
+
+  // Assume we can honor prefer_leading.
+  *is_leading = prefer_leading;
+
+  SubmenuView* submenu = item->GetSubmenu();
+  DCHECK(submenu);
+
+  gfx::Size pref = submenu->GetScrollViewContainer()->GetPreferredSize();
+  const gfx::Rect& owner_bounds = pending_state_.initial_bounds;
+
+  // First the size gets reduced to the possible space.
+  if (!state_.monitor_bounds.IsEmpty()) {
+    int max_width = state_.monitor_bounds.width();
+    int max_height = state_.monitor_bounds.height();
+    // In case of bubbles, the maximum width is limited by the space
+    // between the display corner and the target area + the tip size.
+    if (state_.anchor == MenuItemView::BUBBLE_LEFT) {
+      max_width = owner_bounds.x() - state_.monitor_bounds.x() +
+                  kBubbleTipSize;
+    } else if (state_.anchor == MenuItemView::BUBBLE_RIGHT) {
+      max_width = state_.monitor_bounds.right() - owner_bounds.right() +
+                  kBubbleTipSize;
+    } else if (state_.anchor == MenuItemView::BUBBLE_ABOVE) {
+      max_height = owner_bounds.y() - state_.monitor_bounds.y() +
+                   kBubbleTipSize;
+    } else if (state_.anchor == MenuItemView::BUBBLE_BELOW) {
+      max_height = state_.monitor_bounds.bottom() - owner_bounds.bottom() +
+                   kBubbleTipSize;
+    }
+    // The space for the menu to cover should never get empty.
+    DCHECK_GE(max_width, kBubbleTipSize);
+    DCHECK_GE(max_height, kBubbleTipSize);
+    pref.set_width(std::min(pref.width(), max_width));
+    pref.set_height(std::min(pref.height(), max_height));
+  }
+  // Also make sure that the menu does not go too wide.
+  pref.set_width(std::min(pref.width(),
+                          item->GetDelegate()->GetMaxWidthForMenu(item)));
+
+  int x, y;
+  if (state_.anchor == MenuItemView::BUBBLE_ABOVE ||
+      state_.anchor == MenuItemView::BUBBLE_BELOW) {
+    if (state_.anchor == MenuItemView::BUBBLE_ABOVE)
+      y = owner_bounds.y() - pref.height() + kBubbleTipSize;
+    else
+      y = owner_bounds.bottom() - kBubbleTipSize;
+
+    x = owner_bounds.CenterPoint().x() - pref.width() / 2;
+    int x_old = x;
+    if (x < state_.monitor_bounds.x()) {
+      x = state_.monitor_bounds.x();
+    } else if (x + pref.width() > state_.monitor_bounds.right()) {
+      x = state_.monitor_bounds.right() - pref.width();
+    }
+    submenu->GetScrollViewContainer()->SetBubbleArrowOffset(
+        pref.width() / 2 - x + x_old);
+  } else {
+    if (state_.anchor == MenuItemView::BUBBLE_RIGHT)
+      x = owner_bounds.right() - kBubbleTipSize;
+    else
+      x = owner_bounds.x() - pref.width() + kBubbleTipSize;
+
+    y = owner_bounds.CenterPoint().y() - pref.height() / 2;
+    int y_old = y;
+    if (y < state_.monitor_bounds.y()) {
+      y = state_.monitor_bounds.y();
+    } else if (y + pref.height() > state_.monitor_bounds.bottom()) {
+      y = state_.monitor_bounds.bottom() - pref.height();
+    }
+    submenu->GetScrollViewContainer()->SetBubbleArrowOffset(
+        pref.height() / 2 - y + y_old);
+  }
+  return gfx::Rect(x, y, pref.width(), pref.height());
+}
+
 // static
 int MenuController::MenuDepth(MenuItemView* item) {
   return item ? (MenuDepth(item->GetParentMenuItem()) + 1) : 0;
@@ -1974,7 +2066,27 @@ void MenuController::RepostEvent(SubmenuView* source,
     }
   }
 }
-#endif  // defined(OS_WIN)
+#elif defined(USE_X11)
+void MenuController::RepostEvent(SubmenuView* source,
+                                 const ui::LocatedEvent& event) {
+  if (!state_.item) {
+    // We some times get an event after closing all the menus. Ignore it.
+    // Make sure the menu is in fact not visible. If the menu is visible, then
+    // we're in a bad state where we think the menu isn't visibile but it is.
+    DCHECK(!source->GetWidget()->IsVisible());
+    return;
+  }
+  if (!event.native_event())
+    return;
+  // We putback the X11 event. We set the "send_event" field in the
+  // XEvent. Otherwise a mouse click would generate a double click
+  // event. The field "send_event" is in the same place for all event
+  // types so we can use "xany" regardless of type.
+  XEvent xevent = *event.native_event();
+  xevent.xany.send_event = True;
+  XPutBackEvent(xevent.xany.display, &xevent);
+}
+#endif
 
 void MenuController::SetDropMenuItem(
     MenuItemView* new_target,

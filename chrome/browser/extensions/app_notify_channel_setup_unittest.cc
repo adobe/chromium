@@ -7,6 +7,7 @@
 #include "base/compiler_specific.h"
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop.h"
+#include "base/prefs/testing_pref_service.h"
 #include "base/synchronization/waitable_event.h"
 #include "chrome/browser/extensions/app_notify_channel_setup.h"
 #include "chrome/browser/extensions/app_notify_channel_ui.h"
@@ -14,7 +15,6 @@
 #include "chrome/browser/signin/token_service_unittest.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/test/base/testing_pref_service.h"
 #include "chrome/test/base/testing_profile.h"
 #include "content/public/test/test_browser_thread.h"
 #include "google_apis/gaia/gaia_urls.h"
@@ -133,7 +133,7 @@ class TestDelegate : public AppNotifyChannelSetup::Delegate,
 class TestUI : public AppNotifyChannelUI {
  public:
   TestUI() : delegate_(NULL) {}
-  ~TestUI() {}
+  virtual ~TestUI() {}
 
   // AppNotifyChannelUI.
   virtual void PromptSyncSetup(Delegate* delegate) OVERRIDE {
@@ -176,7 +176,8 @@ class AppNotifyChannelSetupTest : public testing::Test {
  public:
   AppNotifyChannelSetupTest() : ui_thread_(BrowserThread::UI, &message_loop_),
                                 db_thread_(BrowserThread::DB),
-                                ui_(new TestUI()) {
+                                ui_(new TestUI()),
+                                factory_(NULL) {
   }
 
   virtual ~AppNotifyChannelSetupTest() {}

@@ -17,6 +17,7 @@
 #include "third_party/WebKit/Source/Platform/chromium/public/WebVector.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebHistoryItem.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSerializedScriptValue.h"
+#include "ui/gfx/screen.h"
 #include "webkit/base/file_path_string_conversions.h"
 
 using WebKit::WebData;
@@ -456,11 +457,23 @@ WebHistoryItem ReadHistoryItem(
   }
 
 #if defined(OS_ANDROID)
-  // Now-unused values that shipped in this version of Chrome for Android when
-  // it was on a private branch.
   if (obj->version == 11) {
+    // Now-unused values that shipped in this version of Chrome for Android when
+    // it was on a private branch.
     ReadReal(obj);
     ReadBoolean(obj);
+
+    // In this version, pageScaleFactor included deviceScaleFactor and scroll
+    // offsets were premultiplied by pageScaleFactor.
+    if (item.pageScaleFactor()) {
+      if (include_scroll_offset)
+        item.setScrollOffset(
+            WebPoint(item.scrollOffset().x / item.pageScaleFactor(),
+                     item.scrollOffset().y / item.pageScaleFactor()));
+      item.setPageScaleFactor(item.pageScaleFactor() /
+          gfx::Screen::GetNativeScreen()->GetPrimaryDisplay()
+              .device_scale_factor());
+    }
   }
 #endif
 
@@ -509,9 +522,9 @@ WebHistoryItem HistoryItemFromString(const std::string& serialized_item) {
   return HistoryItemFromString(serialized_item, ALWAYS_INCLUDE_FORM_DATA, true);
 }
 
-std::vector<FilePath> FilePathsFromHistoryState(
+std::vector<base::FilePath> FilePathsFromHistoryState(
     const std::string& content_state) {
-  std::vector<FilePath> to_return;
+  std::vector<base::FilePath> to_return;
   // TODO(darin): We should avoid using the WebKit API here, so that we do not
   // need to have WebKit initialized before calling this method.
   const WebHistoryItem& item =

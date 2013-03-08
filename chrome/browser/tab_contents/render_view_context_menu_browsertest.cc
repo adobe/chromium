@@ -12,7 +12,8 @@
 #include "chrome/browser/tab_contents/render_view_context_menu_browsertest_util.h"
 #include "chrome/browser/tab_contents/render_view_context_menu_test_util.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_tabstrip.h"
+#include "chrome/browser/ui/browser_commands.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
@@ -25,6 +26,11 @@
 #include "content/public/test/browser_test_utils.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebContextMenuData.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
+#include "ui/base/clipboard/clipboard.h"
+
+#if defined(OS_MACOSX)
+#include "base/mac/scoped_nsautorelease_pool.h"
+#endif
 
 using content::WebContents;
 
@@ -39,7 +45,8 @@ class ContextMenuBrowserTest : public InProcessBrowserTest {
     params.media_type = WebKit::WebContextMenuData::MediaTypeNone;
     params.unfiltered_link_url = unfiltered_url;
     params.link_url = url;
-    WebContents* web_contents = chrome::GetActiveWebContents(browser());
+    WebContents* web_contents =
+        browser()->tab_strip_model()->GetActiveWebContents();
     params.page_url = web_contents->GetController().GetActiveEntry()->GetURL();
 #if defined(OS_MACOSX)
     params.writing_direction_default = 0;
@@ -47,7 +54,7 @@ class ContextMenuBrowserTest : public InProcessBrowserTest {
     params.writing_direction_right_to_left = 0;
 #endif  // OS_MACOSX
     TestRenderViewContextMenu* menu = new TestRenderViewContextMenu(
-        chrome::GetActiveWebContents(browser()), params);
+        browser()->tab_strip_model()->GetActiveWebContents(), params);
     menu->Init();
     return menu;
   }
@@ -100,7 +107,8 @@ IN_PROC_BROWSER_TEST_F(ContextMenuBrowserTest,
   mouse_event.x = 15;
   mouse_event.y = 15;
   gfx::Rect offset;
-  content::WebContents* tab = chrome::GetActiveWebContents(browser());
+  content::WebContents* tab =
+      browser()->tab_strip_model()->GetActiveWebContents();
   tab->GetView()->GetContainerBounds(&offset);
   mouse_event.globalX = 15 + offset.x();
   mouse_event.globalY = 15 + offset.y();
@@ -117,6 +125,45 @@ IN_PROC_BROWSER_TEST_F(ContextMenuBrowserTest,
 
   // Verify that it's the correct tab.
   EXPECT_EQ(GURL("about:blank"), tab->GetURL());
+}
+
+// Copy link from Incognito window, close window, check the clipboard.
+IN_PROC_BROWSER_TEST_F(ContextMenuBrowserTest, CopyLinkFromIncognito) {
+  EXPECT_FALSE(browser()->profile()->IsOffTheRecord());
+  Browser* browser_incognito = CreateIncognitoBrowser();
+
+  // Copy link URL.
+  string16 url(ASCIIToUTF16("http://google.com/"));
+  content::ContextMenuParams context_menu_params;
+  context_menu_params.unfiltered_link_url = GURL(url);
+  TestRenderViewContextMenu menu(
+      browser_incognito->tab_strip_model()->GetActiveWebContents(),
+      context_menu_params);
+  menu.Init();
+  menu.ExecuteCommand(IDC_CONTENT_CONTEXT_COPYLINKLOCATION);
+
+  // Check the clipboard.
+  string16 content;
+  ui::Clipboard* clipboard = ui::Clipboard::GetForCurrentThread();
+  clipboard->ReadText(ui::Clipboard::BUFFER_STANDARD, &content);
+  EXPECT_EQ(url, content);
+
+  // Close incognito window. No more text in the clipboard.
+  content::WindowedNotificationObserver signal(
+      chrome::NOTIFICATION_BROWSER_CLOSED,
+      content::Source<Browser>(browser_incognito));
+  chrome::CloseWindow(browser_incognito);
+
+#if defined(OS_MACOSX)
+  // BrowserWindowController depends on the auto release pool being recycled
+  // in the message loop to delete itself, which frees the Browser object
+  // which fires this event.
+  AutoreleasePool()->Recycle();
+#endif
+
+  signal.Wait();
+  EXPECT_FALSE(clipboard->IsFormatAvailable(
+      ui::Clipboard::GetPlainTextFormatType(), ui::Clipboard::BUFFER_STANDARD));
 }
 
 }  // namespace

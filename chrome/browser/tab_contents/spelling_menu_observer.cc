@@ -7,14 +7,14 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/i18n/case_conversion.h"
+#include "base/prefs/pref_service.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/spellchecker/spellcheck_factory.h"
-#include "chrome/browser/spellchecker/spellcheck_service.h"
 #include "chrome/browser/spellchecker/spellcheck_host_metrics.h"
 #include "chrome/browser/spellchecker/spellcheck_platform_mac.h"
+#include "chrome/browser/spellchecker/spellcheck_service.h"
 #include "chrome/browser/spellchecker/spelling_service_client.h"
 #include "chrome/browser/tab_contents/render_view_context_menu.h"
 #include "chrome/browser/tab_contents/spelling_bubble_model.h"
@@ -24,6 +24,8 @@
 #include "chrome/common/spellcheck_result.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host_view.h"
+#include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_view.h"
 #include "content/public/common/context_menu_params.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -34,7 +36,8 @@ using content::BrowserThread;
 SpellingMenuObserver::SpellingMenuObserver(RenderViewContextMenuProxy* proxy)
     : proxy_(proxy),
       loading_frame_(0),
-      succeeded_(false) {
+      succeeded_(false),
+      client_(new SpellingServiceClient) {
   if (proxy && proxy->GetProfile()) {
     integrate_spelling_service_.Init(prefs::kSpellCheckUseSpellingService,
                                      proxy->GetProfile()->GetPrefs());
@@ -101,7 +104,6 @@ void SpellingMenuObserver::InitMenu(const content::ContextMenuParams& params) {
     SpellingServiceClient::ServiceType type = SpellingServiceClient::SUGGEST;
     if (useSpellingService)
       type = SpellingServiceClient::SPELLCHECK;
-    client_.reset(new SpellingServiceClient);
     bool result = client_->RequestTextCheck(
         profile, type, params.misspelled_word,
         base::Bind(&SpellingMenuObserver::OnTextCheckComplete,
@@ -172,9 +174,11 @@ bool SpellingMenuObserver::IsCommandIdChecked(int command_id) {
   DCHECK(IsCommandIdSupported(command_id));
 
   if (command_id == IDC_CONTENT_CONTEXT_SPELLING_TOGGLE)
-    return integrate_spelling_service_.GetValue();
+    return integrate_spelling_service_.GetValue() &&
+        !proxy_->GetProfile()->IsOffTheRecord();
   else if (command_id == IDC_CONTENT_CONTEXT_AUTOCORRECT_SPELLING_TOGGLE)
-    return autocorrect_spelling_.GetValue();
+    return autocorrect_spelling_.GetValue() &&
+        !proxy_->GetProfile()->IsOffTheRecord();
   return false;
 }
 
@@ -196,10 +200,12 @@ bool SpellingMenuObserver::IsCommandIdEnabled(int command_id) {
       return succeeded_;
 
     case IDC_CONTENT_CONTEXT_SPELLING_TOGGLE:
-      return integrate_spelling_service_.IsUserModifiable();
+      return integrate_spelling_service_.IsUserModifiable() &&
+          !proxy_->GetProfile()->IsOffTheRecord();
 
     case IDC_CONTENT_CONTEXT_AUTOCORRECT_SPELLING_TOGGLE:
-      return integrate_spelling_service_.IsUserModifiable();
+      return integrate_spelling_service_.IsUserModifiable() &&
+          !proxy_->GetProfile()->IsOffTheRecord();
 
     default:
       return false;
@@ -212,7 +218,7 @@ void SpellingMenuObserver::ExecuteCommand(int command_id) {
 
   if (command_id >= IDC_SPELLCHECK_SUGGESTION_0 &&
       command_id <= IDC_SPELLCHECK_SUGGESTION_LAST) {
-    proxy_->GetRenderViewHost()->Replace(
+    proxy_->GetRenderViewHost()->ReplaceMisspelling(
         suggestions_[command_id - IDC_SPELLCHECK_SUGGESTION_0]);
     // GetSpellCheckHost() can return null when the suggested word is
     // provided by Web SpellCheck API.
@@ -230,7 +236,7 @@ void SpellingMenuObserver::ExecuteCommand(int command_id) {
   // the misspelled word with the suggestion and add it to our custom-word
   // dictionary so this word is not marked as misspelled any longer.
   if (command_id == IDC_CONTENT_CONTEXT_SPELLING_SUGGESTION) {
-    proxy_->GetRenderViewHost()->Replace(result_);
+    proxy_->GetRenderViewHost()->ReplaceMisspelling(result_);
     misspelled_word_ = result_;
   }
 
@@ -261,12 +267,16 @@ void SpellingMenuObserver::ExecuteCommand(int command_id) {
     if (!integrate_spelling_service_.GetValue()) {
       content::RenderViewHost* rvh = proxy_->GetRenderViewHost();
       gfx::Rect rect = rvh->GetView()->GetViewBounds();
-      chrome::ShowConfirmBubble(rvh->GetView()->GetNativeView(),
-                                gfx::Point(rect.CenterPoint().x(), rect.y()),
-                                new SpellingBubbleModel(
-                                    proxy_->GetProfile(),
-                                    proxy_->GetWebContents(),
-                                    false));
+      chrome::ShowConfirmBubble(
+#if defined(TOOLKIT_VIEWS)
+          proxy_->GetWebContents()->GetView()->GetTopLevelNativeWindow(),
+#else
+          rvh->GetView()->GetNativeView(),
+#endif
+          gfx::Point(rect.CenterPoint().x(), rect.y()),
+          new SpellingBubbleModel(proxy_->GetProfile(),
+                                  proxy_->GetWebContents(),
+                                  false));
     } else {
       Profile* profile = proxy_->GetProfile();
       if (profile)

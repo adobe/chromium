@@ -11,7 +11,7 @@
 #include "ash/ash_export.h"
 #include "ash/system/power/power_supply_status.h"
 #include "ash/system/user/login_status.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/i18n/time_formatting.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/string16.h"
@@ -70,7 +70,7 @@ struct ASH_EXPORT DriveOperationStatus {
   ~DriveOperationStatus();
 
   // File path.
-  FilePath file_path;
+  base::FilePath file_path;
   // Current operation completion progress [0.0 - 1.0].
   double progress;
   OperationType type;
@@ -122,6 +122,9 @@ class SystemTrayDelegate {
   virtual const std::string GetUserEmail() const = 0;
   virtual const gfx::ImageSkia& GetUserImage() const = 0;
   virtual user::LoginStatus GetUserLoginStatus() const = 0;
+
+  // Shows UI for changing user's profile picture.
+  virtual void ChangeProfilePicture() = 0;
 
   // Returns the domain that manages the device, if it is enterprise-enrolled.
   virtual const std::string GetEnterpriseDomain() const = 0;
@@ -189,8 +192,11 @@ class SystemTrayDelegate {
   // Returns a list of available bluetooth devices.
   virtual void GetAvailableBluetoothDevices(BluetoothDeviceList* devices) = 0;
 
-  // Requests bluetooth start or stop discovering devices.
-  virtual void BluetoothSetDiscovering(bool value) = 0;
+  // Requests bluetooth start discovering devices.
+  virtual void BluetoothStartDiscovering() = 0;
+
+  // Requests bluetooth stop discovering devices.
+  virtual void BluetoothStopDiscovering() = 0;
 
   // Toggles connection to a specific bluetooth device.
   virtual void ToggleBluetoothConnection(const std::string& address) = 0;
@@ -214,7 +220,7 @@ class SystemTrayDelegate {
   virtual void ActivateIMEProperty(const std::string& key) = 0;
 
   // Cancels ongoing drive operation.
-  virtual void CancelDriveOperation(const FilePath& file_path) = 0;
+  virtual void CancelDriveOperation(const base::FilePath& file_path) = 0;
 
   // Returns information about the ongoing drive operations.
   virtual void GetDriveOperationStatusList(

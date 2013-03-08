@@ -8,7 +8,6 @@
 #include <iostream>
 
 #include "base/logging.h"
-#include "base/string16.h"
 #include "skia/ext/refptr.h"
 #include "cc/custom_filter_renderer.h"
 #include "cc/transform_operations.h"
@@ -31,15 +30,19 @@ namespace {
 
 void getBrightnessMatrix(float amount, SkScalar matrix[20])
 {
+    // Spec implementation
+    // (http://dvcs.w3.org/hg/FXTF/raw-file/tip/filters/index.html#brightnessEquivalent)
+    // <feFunc[R|G|B] type="linear" slope="[amount]">
     memset(matrix, 0, 20 * sizeof(SkScalar));
-    //    Old implementation, a la the draft spec, a straight-up scale,
-    //    representing <feFunc[R|G|B] type="linear" slope="[amount]">
-    //    (See http://dvcs.w3.org/hg/FXTF/raw-file/tip/filters/index.html#brightnessEquivalent)
-    // matrix[0] = matrix[6] = matrix[12] = amount;
-    // matrix[18] = 1;
-    //    New implementation, a translation in color space, representing
-    //    <feFunc[R|G|B] type="linear" intercept="[amount]"/>
-    //    (See https://www.w3.org/Bugs/Public/show_bug.cgi?id=15647)
+    matrix[0] = matrix[6] = matrix[12] = amount;
+    matrix[18] = 1;
+}
+
+void getSaturatingBrightnessMatrix(float amount, SkScalar matrix[20])
+{
+    // Legacy implementation used by internal clients.
+    // <feFunc[R|G|B] type="linear" intercept="[amount]"/>
+    memset(matrix, 0, 20 * sizeof(SkScalar));
     matrix[0] = matrix[6] = matrix[12] = matrix[18] = 1;
     matrix[4] = matrix[9] = matrix[14] = amount * 255;
 }
@@ -206,6 +209,10 @@ bool getColorMatrix(const WebKit::WebFilterOperation& op, SkScalar matrix[20])
         getBrightnessMatrix(op.amount(), matrix);
         return true;
     }
+    case WebKit::WebFilterOperation::FilterTypeSaturatingBrightness: {
+        getSaturatingBrightnessMatrix(op.amount(), matrix);
+        return true;
+    }
     case WebKit::WebFilterOperation::FilterTypeContrast: {
         getContrastMatrix(op.amount(), matrix);
         return true;
@@ -250,12 +257,12 @@ public:
         , m_currentTexture(0)
     {
         // Wrap the source texture in a Ganesh platform texture.
-        GrPlatformTextureDesc platformTextureDescription;
-        platformTextureDescription.fWidth = size.width();
-        platformTextureDescription.fHeight = size.height();
-        platformTextureDescription.fConfig = kSkia8888_GrPixelConfig;
-        platformTextureDescription.fTextureHandle = textureId;
-        skia::RefPtr<GrTexture> texture = skia::AdoptRef(grContext->createPlatformTexture(platformTextureDescription));
+        GrBackendTextureDesc backendTextureDescription;
+        backendTextureDescription.fWidth = size.width();
+        backendTextureDescription.fHeight = size.height();
+        backendTextureDescription.fConfig = kSkia8888_GrPixelConfig;
+        backendTextureDescription.fTextureHandle = textureId;
+        skia::RefPtr<GrTexture> texture = skia::AdoptRef(grContext->wrapBackendTexture(backendTextureDescription));
         // Place the platform texture inside an SkBitmap.
         m_source.setConfig(SkBitmap::kARGB_8888_Config, size.width(), size.height());
         skia::RefPtr<SkGrPixelRef> pixelRef = skia::AdoptRef(new SkGrPixelRef(texture.get()));
@@ -373,6 +380,7 @@ WebKit::WebFilterOperations RenderSurfaceFilters::optimize(const WebKit::WebFilt
             newList.append(op);
             break;
         case WebKit::WebFilterOperation::FilterTypeBrightness:
+        case WebKit::WebFilterOperation::FilterTypeSaturatingBrightness:
         case WebKit::WebFilterOperation::FilterTypeContrast:
         case WebKit::WebFilterOperation::FilterTypeGrayscale:
         case WebKit::WebFilterOperation::FilterTypeSepia:
@@ -389,10 +397,10 @@ WebKit::WebFilterOperations RenderSurfaceFilters::optimize(const WebKit::WebFilt
     return newList;
 }
 
-SkBitmap RenderSurfaceFilters::apply(const WebKit::WebFilterOperations& filters, unsigned textureId, const gfx::SizeF& size, WebKit::WebGraphicsContext3D* context3D, GrContext* grContext, WebKit::WebGraphicsContext3D* customFilterContext3D)
+SkBitmap RenderSurfaceFilters::apply(const WebKit::WebFilterOperations& filters, unsigned textureId, const gfx::SizeF& size, WebKit::WebGraphicsContext3D* context3D, GrContext* grContext, 
+    WebKit::WebGraphicsContext3D* customFilterContext3D)
 {
-    if (!context3D || !grContext)
-        return SkBitmap();
+    DCHECK(grContext);
 
     WebKit::WebFilterOperations optimizedFilters = optimize(filters);
     FilterBufferState state(grContext, size, textureId);
@@ -451,6 +459,7 @@ SkBitmap RenderSurfaceFilters::apply(const WebKit::WebFilterOperations& filters,
             break;
         }
         case WebKit::WebFilterOperation::FilterTypeBrightness:
+        case WebKit::WebFilterOperation::FilterTypeSaturatingBrightness:
         case WebKit::WebFilterOperation::FilterTypeContrast:
         case WebKit::WebFilterOperation::FilterTypeGrayscale:
         case WebKit::WebFilterOperation::FilterTypeSepia:
@@ -467,70 +476,12 @@ SkBitmap RenderSurfaceFilters::apply(const WebKit::WebFilterOperations& filters,
             WebKit::WebGLId sourceTextureId = reinterpret_cast<GrTexture*>(state.source().getTexture())->getTextureHandle();
             scoped_ptr<CustomFilterRenderer> customFilterRenderer = CustomFilterRenderer::create(customFilterContext3D);
             customFilterRenderer->render(op, sourceTextureId, size.width(), size.height(), destinationTextureId);
-
-            /*
-            WebKit::WebCustomFilterProgram* program = op.customFilterProgram();
-            assert(program);
-            std::cerr << "custom filter render -> " 
-                    << program 
-                    << "\n----vertex---\n"
-                    << string16(program->vertexShader())
-                    << "\n----fragment----\n" 
-                    << string16(program->fragmentShader())
-                    << "\n----\n";
-            WebKit::WebVector<WebKit::WebCustomFilterParameter> parameters;
-            op.customFilterParameters(parameters);
-            for (size_t i = 0; i < parameters.size(); ++i) {
-                const WebKit::WebCustomFilterParameter& parameter = parameters[i];
-                std::cerr << "----> parameter: " << string16(parameter.name) << "\n";
-                switch (parameter.type) {
-                case WebKit::WebCustomFilterParameter::ParameterTypeNumber:
-                    std::cerr << "----+++ of type: number\n";
-                    break;
-                case WebKit::WebCustomFilterParameter::ParameterTypeArray:
-                    std::cerr << "----+++ of type: array\n";
-                    break;
-                case WebKit::WebCustomFilterParameter::ParameterTypeTransform:
-                    std::cerr << "----+++ of type: transform\n";
-                    break;
-                }
-                switch (parameter.type) {
-                case WebKit::WebCustomFilterParameter::ParameterTypeNumber:
-                case WebKit::WebCustomFilterParameter::ParameterTypeArray:
-                    std::cerr << "----+++ of values (" << parameter.values.size() << "):";
-                    for (size_t i = 0; i < parameter.values.size(); ++i)
-                        std::cerr << parameter.values[i] << ", ";
-                    std::cerr << "\n";
-                    break;
-                case WebKit::WebCustomFilterParameter::ParameterTypeTransform: {
-                    const WebKit::WebTransformationMatrix& matrix = parameter.matrix;
-                    std::cerr << "-----+++ Matrix: ("
-                            << matrix.m11() << ", "
-                            << matrix.m12() << ", "
-                            << matrix.m13() << ", "
-                            << matrix.m14() << ",\n                  "
-                            << matrix.m21() << ", "
-                            << matrix.m22() << ", "
-                            << matrix.m23() << ", "
-                            << matrix.m24() << ",\n                  "
-                            << matrix.m31() << ", "
-                            << matrix.m32() << ", "
-                            << matrix.m33() << ", "
-                            << matrix.m34() << ",\n                  "
-                            << matrix.m41() << ", "
-                            << matrix.m42() << ", "
-                            << matrix.m43() << ", "
-                            << matrix.m44() << ")\n";
-                    break;
-                }
-                }
-            }
-            */
             break;
         }
         }
         state.swap();
     }
+    grContext->flush();
     context3D->flush();
     return state.source();
 }

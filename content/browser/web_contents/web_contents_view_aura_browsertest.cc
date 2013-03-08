@@ -13,6 +13,7 @@
 #include "content/browser/web_contents/navigation_controller_impl.h"
 #include "content/browser/web_contents/navigation_entry_impl.h"
 #include "content/browser/web_contents/web_contents_impl.h"
+#include "content/public/browser/web_contents_view.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_utils.h"
@@ -66,10 +67,6 @@ class WebContentsViewAuraTest : public ContentBrowserTest {
  public:
   WebContentsViewAuraTest() {}
 
-  virtual void SetUpCommandLine(CommandLine* command_line) {
-    command_line->AppendSwitch(switches::kEnableOverscrollHistoryNavigation);
-  }
-
   // Executes the javascript synchronously and makes sure the returned value is
   // freed properly.
   void ExecuteSyncJSFunction(RenderViewHost* rvh, const std::string& jscript) {
@@ -84,7 +81,8 @@ class WebContentsViewAuraTest : public ContentBrowserTest {
     ASSERT_TRUE(test_server()->Start());
     GURL test_url(test_server()->GetURL(url));
     NavigateToURL(shell(), test_url);
-    aura::Window* content = shell()->web_contents()->GetContentNativeView();
+    aura::Window* content =
+        shell()->web_contents()->GetView()->GetContentNativeView();
     content->GetRootWindow()->SetHostSize(gfx::Size(800, 600));
   }
 
@@ -96,6 +94,9 @@ class WebContentsViewAuraTest : public ContentBrowserTest {
     NavigationController& controller = web_contents->GetController();
     RenderViewHostImpl* view_host = static_cast<RenderViewHostImpl*>(
         web_contents->GetRenderViewHost());
+    WebContentsViewAura* view_aura = static_cast<WebContentsViewAura*>(
+        web_contents->GetView());
+    view_aura->SetupOverlayWindowForTesting();
 
     EXPECT_FALSE(controller.CanGoBack());
     EXPECT_FALSE(controller.CanGoForward());
@@ -116,7 +117,7 @@ class WebContentsViewAuraTest : public ContentBrowserTest {
     EXPECT_TRUE(controller.CanGoBack());
     EXPECT_FALSE(controller.CanGoForward());
 
-    aura::Window* content = web_contents->GetContentNativeView();
+    aura::Window* content = web_contents->GetView()->GetContentNativeView();
     gfx::Rect bounds = content->GetBoundsInRootWindow();
     aura::test::EventGenerator generator(content->GetRootWindow(), content);
 
@@ -192,40 +193,23 @@ class WebContentsViewAuraTest : public ContentBrowserTest {
   DISALLOW_COPY_AND_ASSIGN(WebContentsViewAuraTest);
 };
 
-// The tests are disabled on windows since the gesture support in win-aura isn't
-// complete yet. See http://crbug.com/157268
-#if defined(OS_WIN)
-#define MAYBE_OverscrollNavigation DISABLED_OverscrollNavigation
-#else
-#define MAYBE_OverscrollNavigation OverscrollNavigation
-#endif
 IN_PROC_BROWSER_TEST_F(WebContentsViewAuraTest,
-                       MAYBE_OverscrollNavigation) {
+                       OverscrollNavigation) {
   TestOverscrollNavigation(false);
 }
 
-// The tests are disabled on windows since the gesture support in win-aura isn't
-// complete yet. See http://crbug.com/157268
-#if defined(OS_WIN)
-#define MAYBE_OverscrollNavigationWithTouchHandler \
-    DISABLED_OverscrollNavigationWithTouchHandler
-#else
-#define MAYBE_OverscrollNavigationWithTouchHandler \
-    OverscrollNavigationWithTouchHandler
-#endif
 IN_PROC_BROWSER_TEST_F(WebContentsViewAuraTest,
-                       MAYBE_OverscrollNavigationWithTouchHandler) {
+                       OverscrollNavigationWithTouchHandler) {
   TestOverscrollNavigation(true);
 }
 
-// The tests are disabled on windows since the gesture support in win-aura isn't
-// complete yet. See http://crbug.com/157268
+// Disabled because the test always fails the first time it runs on the Win Aura
+// bots, and usually but not always passes second-try (See crbug.com/179532).
 #if defined(OS_WIN)
 #define MAYBE_QuickOverscrollDirectionChange \
-    DISABLED_QuickOverscrollDirectionChange
+        DISABLED_QuickOverscrollDirectionChange
 #else
-#define MAYBE_QuickOverscrollDirectionChange \
-    QuickOverscrollDirectionChange
+#define MAYBE_QuickOverscrollDirectionChange QuickOverscrollDirectionChange
 #endif
 IN_PROC_BROWSER_TEST_F(WebContentsViewAuraTest,
                        MAYBE_QuickOverscrollDirectionChange) {
@@ -244,7 +228,7 @@ IN_PROC_BROWSER_TEST_F(WebContentsViewAuraTest,
   web_contents->GetController().GoBack();
   EXPECT_EQ(1, GetCurrentIndex());
 
-  aura::Window* content = web_contents->GetContentNativeView();
+  aura::Window* content = web_contents->GetView()->GetContentNativeView();
   aura::RootWindow* root_window = content->GetRootWindow();
   gfx::Rect bounds = content->GetBoundsInRootWindow();
 
@@ -295,15 +279,6 @@ IN_PROC_BROWSER_TEST_F(WebContentsViewAuraTest,
   // Do not end the overscroll sequence.
 }
 
-// The test is disabled on windows since the gesture support in win-aura isn't
-// complete yet. See http://crbug.com/157268
-#if defined(OS_WIN)
-#define MAYBE_OverscrollScreenshot \
-    DISABLED_OverscrollScreenshot
-#else
-#define MAYBE_OverscrollScreenshot \
-    OverscrollScreenshot
-#endif
 // Tests that the page has has a screenshot when navigation happens:
 //  - from within the page (from a JS function)
 //  - interactively, when user does an overscroll gesture
@@ -355,7 +330,7 @@ IN_PROC_BROWSER_TEST_F(WebContentsViewAuraTest,
     // index 3 to index 2, and index 3 should have a screenshot.
     string16 expected_title = ASCIIToUTF16("Title: #2");
     content::TitleWatcher title_watcher(web_contents, expected_title);
-    aura::Window* content = web_contents->GetContentNativeView();
+    aura::Window* content = web_contents->GetView()->GetContentNativeView();
     gfx::Rect bounds = content->GetBoundsInRootWindow();
     aura::test::EventGenerator generator(content->GetRootWindow(), content);
     generator.GestureScrollSequence(
@@ -404,7 +379,7 @@ IN_PROC_BROWSER_TEST_F(WebContentsViewAuraTest,
   net::TestServer https_server(
       net::TestServer::TYPE_HTTPS,
       net::TestServer::kLocalhost,
-      FilePath(FILE_PATH_LITERAL("content/test/data")));
+      base::FilePath(FILE_PATH_LITERAL("content/test/data")));
   ASSERT_TRUE(https_server.Start());
 
   WebContentsImpl* web_contents =

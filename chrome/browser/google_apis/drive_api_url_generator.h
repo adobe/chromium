@@ -45,8 +45,38 @@ class DriveApiUrlGenerator {
   GURL GetFilelistUrl(
       const GURL& override_url, const std::string& search_string) const;
 
-  // Returns a URL to fecth a file content.
+  // Returns a URL to fetch a file content.
   GURL GetFileUrl(const std::string& file_id) const;
+
+  // Returns a URL to copy a file specified by |resource_id|.
+  GURL GetFileCopyUrl(const std::string& resource_id) const;
+
+  // Returns a URL to trash a resource with the given |resource_id|.
+  // Note that the |resource_id| is corresponding to the "file id" in the
+  // document: https://developers.google.com/drive/v2/reference/files/trash
+  // but we use the term "resource" for consistency in our code.
+  GURL GetFileTrashUrl(const std::string& resource_id) const;
+
+  // Returns a URL to add a resource to a directory with |resource_id|.
+  // Note that the |resource_id| is corresponding to the "folder id" in the
+  // document: https://developers.google.com/drive/v2/reference/children/insert
+  // but we use the term "resource" for consistency in our code.
+  GURL GetChildrenUrl(const std::string& resource_id) const;
+
+  // Returns a URL to remove a resource with |child_id| from a directory
+  // with |folder_id|.
+  // Note that we use the name "folder" for the parameter, in order to be
+  // consistent with the drive API document:
+  // https://developers.google.com/drive/v2/reference/children/delete
+  GURL GetChildrenUrlForRemoval(const std::string& folder_id,
+                                const std::string& child_id) const;
+
+  // Returns a URL to initiate uploading a new file.
+  GURL GetInitiateUploadNewFileUrl() const;
+
+  // Returns a URL to initiate uploading an existing file specified by
+  // |resource_id|.
+  GURL GetInitiateUploadExistingFileUrl(const std::string& resource_id) const;
 
  private:
   const GURL base_url_;

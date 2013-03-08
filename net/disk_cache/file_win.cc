@@ -4,7 +4,7 @@
 
 #include "net/disk_cache/file.h"
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/lazy_instance.h"
 #include "base/message_loop.h"
 #include "net/base/net_errors.h"
@@ -71,7 +71,7 @@ File::File(base::PlatformFile file)
       sync_platform_file_(file) {
 }
 
-bool File::Init(const FilePath& name) {
+bool File::Init(const base::FilePath& name) {
   DCHECK(!init_);
   if (init_)
     return false;

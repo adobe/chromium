@@ -61,7 +61,7 @@ void StateStore::DelayedTaskQueue::SetReady() {
 }
 
 StateStore::StateStore(Profile* profile,
-                       const FilePath& db_path,
+                       const base::FilePath& db_path,
                        bool deferred_load)
     : db_path_(db_path), task_queue_(new DelayedTaskQueue()) {
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_INSTALLED,
@@ -111,7 +111,7 @@ void StateStore::SetExtensionValue(
     scoped_ptr<base::Value> value) {
   task_queue_->InvokeWhenReady(
       base::Bind(&ValueStoreFrontend::Set, base::Unretained(&store_),
-                 GetFullKey(extension_id, key), base::Passed(value.Pass())));
+                 GetFullKey(extension_id, key), base::Passed(&value)));
 }
 
 void StateStore::RemoveExtensionValue(const std::string& extension_id,

@@ -5,16 +5,18 @@
 #ifndef CONTENT_SHELL_WEBKIT_TEST_RUNNER_H_
 #define CONTENT_SHELL_WEBKIT_TEST_RUNNER_H_
 
-#include "base/file_path.h"
+#include <vector>
+
+#include "base/files/file_path.h"
 #include "base/memory/scoped_ptr.h"
 #include "content/public/renderer/render_view_observer.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebIntentRequest.h"
+#include "content/public/renderer/render_view_observer_tracker.h"
 #include "third_party/WebKit/Tools/DumpRenderTree/chromium/TestRunner/public/WebPreferences.h"
 #include "third_party/WebKit/Tools/DumpRenderTree/chromium/TestRunner/public/WebTestDelegate.h"
-#include "third_party/WebKit/Tools/DumpRenderTree/chromium/TestRunner/public/WebTestRunner.h"
 #include "v8/include/v8.h"
 
 class SkCanvas;
+struct ShellViewMsg_SetTestConfiguration_Params;
 
 namespace WebKit {
 struct WebRect;
@@ -28,8 +30,8 @@ namespace content {
 
 // This is the renderer side of the webkit test runner.
 class WebKitTestRunner : public RenderViewObserver,
-                         public WebTestRunner::WebTestDelegate,
-                         public WebTestRunner::WebTestRunner {
+                         public RenderViewObserverTracker<WebKitTestRunner>,
+                         public WebTestRunner::WebTestDelegate {
  public:
   explicit WebKitTestRunner(RenderView* render_view);
   virtual ~WebKitTestRunner();
@@ -37,20 +39,11 @@ class WebKitTestRunner : public RenderViewObserver,
   // RenderViewObserver implementation.
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
   virtual void DidClearWindowObject(WebKit::WebFrame* frame) OVERRIDE;
-  virtual void DidFinishLoad(WebKit::WebFrame* frame) OVERRIDE;
-  virtual void DidRequestShowContextMenu(
-      WebKit::WebFrame* frame,
-      const WebKit::WebContextMenuData& data) OVERRIDE;
 
   // WebTestDelegate implementation.
-  virtual void clearContextMenuData();
   virtual void clearEditCommand();
-  virtual void fillSpellingSuggestionList(
-      const WebKit::WebString& word,
-      WebKit::WebVector<WebKit::WebString>* suggestions);
   virtual void setEditCommand(const std::string& name,
                               const std::string& value);
-  virtual WebKit::WebContextMenuData* lastContextMenuData() const;
   virtual void setGamepadData(const WebKit::WebGamepads& gamepads);
   virtual void printMessage(const std::string& message);
   virtual void postTask(::WebTestRunner::WebTask* task);
@@ -65,86 +58,72 @@ class WebKitTestRunner : public RenderViewObserver,
   virtual WebKit::WebURL rewriteLayoutTestsURL(const std::string& utf8_url);
   virtual ::WebTestRunner::WebPreferences* preferences();
   virtual void applyPreferences();
-  virtual void setCurrentWebIntentRequest(const WebKit::WebIntentRequest&);
-  virtual WebKit::WebIntentRequest* currentWebIntentRequest();
   virtual std::string makeURLErrorDescription(const WebKit::WebURLError& error);
-
-  // WebTestRunner implementation.
-  virtual bool shouldDumpEditingCallbacks() const;
-  virtual bool shouldDumpFrameLoadCallbacks() const;
-  virtual bool shouldDumpUserGestureInFrameLoadCallbacks() const;
-  virtual bool stopProvisionalFrameLoads() const;
-  virtual bool shouldDumpTitleChanges() const;
-  virtual bool shouldDumpResourceLoadCallbacks() const;
-  virtual bool shouldDumpResourceRequestCallbacks() const;
-  virtual bool shouldDumpResourceResponseMIMETypes() const;
-  virtual bool shouldDumpCreateView() const;
-  virtual bool canOpenWindows() const;
+  virtual void setClientWindowRect(const WebKit::WebRect& rect);
+  virtual void showDevTools();
+  virtual void closeDevTools();
+  virtual void evaluateInWebInspector(long call_id, const std::string& script);
+  virtual void clearAllDatabases();
+  virtual void setDatabaseQuota(int quota);
+  virtual void setDeviceScaleFactor(float factor);
+  virtual void setFocus(WebTestRunner::WebTestProxyBase* proxy, bool focus);
+  virtual void setFocus(bool focus);
+  virtual void setAcceptAllCookies(bool accept);
+  virtual std::string pathToLocalResource(const std::string& resource);
+  virtual void setLocale(const std::string& locale);
+  virtual void testFinished();
+  virtual void testTimedOut();
+  virtual bool isBeingDebugged();
+  virtual int layoutTestTimeout();
+  virtual void closeRemainingWindows();
+  virtual int navigationEntryCount();
+  virtual void goToOffset(int offset);
+  virtual void reload();
+  virtual void loadURLForFrame(const WebKit::WebURL& url,
+                               const std::string& frame_name);
+  virtual bool allowExternalPages();
+  virtual void captureHistoryForWindow(
+      WebTestRunner::WebTestProxyBase* proxy,
+      WebKit::WebVector<WebKit::WebHistoryItem>* history,
+      size_t* currentEntryIndex);
 
   void Reset();
-  void Display();
-  void SetXSSAuditorEnabled(bool enabled);
-  void NotifyDone();
-  void DumpAsText();
-  void DumpChildFramesAsText();
-  void SetPrinting();
-  void SetShouldStayOnPageAfterHandlingBeforeUnload(bool should_stay_on_page);
-  void WaitUntilDone();
-  void CanOpenWindows();
-  void ShowWebInspector();
-  void CloseWebInspector();
-  void EvaluateInWebInspector(int32_t call_id, const std::string& script);
-  void ExecCommand(const std::string& command, const std::string& value);
-  void OverridePreference(const std::string& key, v8::Local<v8::Value> value);
-  void DumpEditingCallbacks();
-  void DumpFrameLoadCallbacks();
-  void DumpUserGestureInFrameLoadCallbacks();
-  void StopProvisionalFrameLoads();
-  void DumpTitleChanges();
-  void DumpResourceLoadCallbacks();
-  void DumpResourceRequestCallbacks();
-  void DumpResourceResponseMIMETypes();
-  void DumpCreateView();
-
-  void NotImplemented(const std::string& object, const std::string& method);
 
   void set_proxy(::WebTestRunner::WebTestProxyBase* proxy) { proxy_ = proxy; }
+  ::WebTestRunner::WebTestProxyBase* proxy() const { return proxy_; }
 
  private:
   // Message handlers.
-  void OnCaptureTextDump(bool as_text, bool printing, bool recursive);
-  void OnCaptureImageDump(const std::string& expected_pixel_hash);
-  void OnSetCurrentWorkingDirectory(const FilePath& current_working_directory);
+  void OnSetTestConfiguration(
+      const ShellViewMsg_SetTestConfiguration_Params& params);
+  void OnSessionHistory(
+      const std::vector<int>& routing_ids,
+      const std::vector<std::vector<std::string> >& session_histories,
+      const std::vector<unsigned>& current_entry_indexes);
 
-  SkCanvas* GetCanvas();
-  void PaintRect(const WebKit::WebRect& rect);
-  void PaintInvalidatedRegion();
-  void DisplayRepaintMask();
+  // After finishing the test, retrieves the audio, text, and pixel dumps from
+  // the TestRunner library and sends them to the browser process.
+  void CaptureDump();
 
-  scoped_ptr<SkCanvas> canvas_;
-  scoped_ptr<WebKit::WebContextMenuData> last_context_menu_data_;
-  FilePath current_working_directory_;
+  base::FilePath current_working_directory_;
+  base::FilePath temp_path_;
 
   ::WebTestRunner::WebTestProxyBase* proxy_;
 
+  RenderView* focused_view_;
+
   ::WebTestRunner::WebPreferences prefs_;
 
-  WebKit::WebIntentRequest intent_request_;
+  bool enable_pixel_dumping_;
+  int layout_test_timeout_;
+  bool allow_external_pages_;
+  std::string expected_pixel_hash_;
 
-  bool dump_editing_callbacks_;
-  bool dump_frame_load_callbacks_;
-  bool dump_user_gesture_in_frame_load_callbacks_;
-  bool stop_provisional_frame_loads_;
-  bool dump_title_changes_;
-  bool dump_resource_load_callbacks_;
-  bool dump_resource_request_callbacks_;
-  bool dump_resource_response_mime_types_;
-  bool dump_create_view_;
-  bool can_open_windows_;
+  std::vector<int> routing_ids_;
+  std::vector<std::vector<std::string> > session_histories_;
+  std::vector<unsigned> current_entry_indexes_;
 
-  bool test_is_running_;
-  bool wait_until_done_;
-  bool load_finished_;
+  bool is_main_window_;
 
   DISALLOW_COPY_AND_ASSIGN(WebKitTestRunner);
 };

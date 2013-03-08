@@ -21,7 +21,7 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/debug/debugger.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
@@ -31,9 +31,9 @@
 #include "base/threading/platform_thread.h"
 #include "base/threading/thread.h"
 #include "base/utf_string_conversions.h"
+#include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
 #include "net/base/test_completion_callback.h"
-#include "net/base/io_buffer.h"
 #include "net/disk_cache/backend_impl.h"
 #include "net/disk_cache/disk_cache.h"
 #include "net/disk_cache/disk_cache_test_util.h"
@@ -51,7 +51,7 @@ const int kExpectedCrash = 100;
 
 // Starts a new process.
 int RunSlave(int iteration) {
-  FilePath exe;
+  base::FilePath exe;
   PathService::Get(base::FILE_EXE, &exe);
 
   CommandLine cmdline(exe);
@@ -102,7 +102,7 @@ void StressTheCache(int iteration) {
   int cache_size = 0x2000000;  // 32MB.
   uint32 mask = 0xfff;  // 4096 entries.
 
-  FilePath path;
+  base::FilePath path;
   PathService::Get(base::DIR_TEMP, &path);
   path = path.AppendASCII("cache_test_stress");
 

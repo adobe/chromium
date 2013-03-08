@@ -3,20 +3,20 @@
 // found in the LICENSE file.
 
 #include "base/command_line.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/json/json_reader.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
-#include "base/string_number_conversions.h"
 #include "base/stringprintf.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/test/trace_event_analyzer.h"
 #include "base/values.h"
 #include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/window_snapshot/window_snapshot.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
@@ -26,6 +26,7 @@
 #include "chrome/test/perf/browser_perf_test.h"
 #include "chrome/test/perf/perf_test.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_view.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_utils.h"
@@ -76,7 +77,7 @@ class ThroughputTest : public BrowserPerfTest {
   }
 
   // Parse flags from JSON to control the test behavior.
-  bool ParseFlagsFromJSON(const FilePath& json_dir,
+  bool ParseFlagsFromJSON(const base::FilePath& json_dir,
                           const std::string& json,
                           int index) {
     scoped_ptr<base::Value> root;
@@ -98,7 +99,7 @@ class ThroughputTest : public BrowserPerfTest {
     if (item->GetStringASCII("url", &str)) {
       gurl_ = GURL(str);
     } else if (item->GetStringASCII("file", &str)) {
-      FilePath empty;
+      base::FilePath empty;
       gurl_ = URLFixerUpper::FixupRelativeFile(empty, empty.AppendASCII(str));
     } else {
       LOG(ERROR) << "missing url or file";
@@ -110,7 +111,7 @@ class ThroughputTest : public BrowserPerfTest {
       return false;
     }
 
-    FilePath::StringType cache_dir;
+    base::FilePath::StringType cache_dir;
     if (item->GetString("local_path", &cache_dir))
       local_cache_path_ = json_dir.Append(cache_dir);
 
@@ -154,7 +155,7 @@ class ThroughputTest : public BrowserPerfTest {
       int index;
       ASSERT_TRUE(base::StringToInt(
           flags.substr(num_pos, flags.size() - num_pos), &index));
-      FilePath filepath(flags.substr(0, colon_pos));
+      base::FilePath filepath(flags.substr(0, colon_pos));
       std::string json;
       ASSERT_TRUE(file_util::ReadFileToString(filepath, &json));
       ASSERT_TRUE(ParseFlagsFromJSON(filepath.DirName(), json, index));
@@ -220,8 +221,8 @@ class ThroughputTest : public BrowserPerfTest {
 
     gfx::Rect root_bounds = browser()->window()->GetBounds();
     gfx::Rect tab_contents_bounds;
-    chrome::GetActiveWebContents(browser())->GetContainerBounds(
-        &tab_contents_bounds);
+    browser()->tab_strip_model()->GetActiveWebContents()->GetView()->
+        GetContainerBounds(&tab_contents_bounds);
 
     gfx::Rect snapshot_bounds(tab_contents_bounds.x() - root_bounds.x(),
                               tab_contents_bounds.y() - root_bounds.y(),
@@ -260,7 +261,7 @@ class ThroughputTest : public BrowserPerfTest {
   // flags is one or more of RunTestFlags OR'd together.
   void RunTest(const std::string& test_name, int flags) {
     // Set path to test html.
-    FilePath test_path;
+    base::FilePath test_path;
     ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &test_path));
     test_path = test_path.Append(FILE_PATH_LITERAL("perf"));
     if (flags & kInternal)
@@ -279,7 +280,7 @@ class ThroughputTest : public BrowserPerfTest {
   // flags is one or more of RunTestFlags OR'd together.
   void RunCanvasBenchTest(const std::string& test_name, int flags) {
     // Set path to test html.
-    FilePath test_path;
+    base::FilePath test_path;
     ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &test_path));
     test_path = test_path.Append(FILE_PATH_LITERAL("perf"));
     test_path = test_path.Append(FILE_PATH_LITERAL("canvas_bench"));
@@ -327,7 +328,8 @@ class ThroughputTest : public BrowserPerfTest {
     LOG(INFO) << gurl_.possibly_invalid_spec();
     ui_test_utils::NavigateToURLWithDisposition(
         browser(), gurl_, CURRENT_TAB, ui_test_utils::BROWSER_TEST_NONE);
-    content::WaitForLoadStop(chrome::GetActiveWebContents(browser()));
+    content::WaitForLoadStop(
+        browser()->tab_strip_model()->GetActiveWebContents());
 
     // Let the test spin up.
     LOG(INFO) << "Spinning up test...";
@@ -389,7 +391,7 @@ class ThroughputTest : public BrowserPerfTest {
 
     // Close the tab so that we can quit without timing out during the
     // wait-for-idle stage in browser_test framework.
-    chrome::GetActiveWebContents(browser())->Close();
+    browser()->tab_strip_model()->GetActiveWebContents()->Close();
   }
 
  private:
@@ -439,7 +441,7 @@ class ThroughputTest : public BrowserPerfTest {
   bool use_compositor_thread_;
   int spinup_time_ms_;
   int run_time_ms_;
-  FilePath local_cache_path_;
+  base::FilePath local_cache_path_;
   GURL gurl_;
   scoped_ptr<net::ScopedDefaultHostResolverProc> host_resolver_override_;
   scoped_ptr<WaitPixel> wait_for_pixel_;

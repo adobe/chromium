@@ -8,21 +8,20 @@
 #include "base/bind_helpers.h"
 #include "base/metrics/histogram.h"
 #include "base/path_service.h"
+#include "base/prefs/pref_service.h"
 #include "base/win/win_util.h"
 #include "chrome/browser/first_run/first_run.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/shell_integration.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_list.h"
-#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/browser/ui/singleton_tabs.h"
-#include "chrome/browser/ui/webui/chrome_web_ui_data_source.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/webui/sync_promo/sync_promo_ui.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
@@ -32,6 +31,7 @@
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/browser/web_contents_view.h"
 #include "content/public/browser/web_ui.h"
+#include "content/public/browser/web_ui_data_source.h"
 #include "content/public/browser/web_ui_message_handler.h"
 #include "grit/browser_resources.h"
 #include "grit/generated_resources.h"
@@ -64,7 +64,7 @@ enum MakeChromeDefaultResult {
 };
 
 content::WebUIDataSource* CreateSetAsDefaultBrowserUIHTMLSource() {
-  content::WebUIDataSource* data_source = ChromeWebUIDataSource::Create(
+  content::WebUIDataSource* data_source = content::WebUIDataSource::Create(
       chrome::kChromeUIMetroFlowHost);
   data_source->AddLocalizedString("page-title", IDS_METRO_FLOW_TAB_TITLE);
   data_source->AddLocalizedString("flowTitle", IDS_METRO_FLOW_TITLE_SHORT);
@@ -337,7 +337,7 @@ void SetAsDefaultBrowserDialogImpl::OnDialogClosed(
     // dialog the actual browser window had to remain hidden. Now it's time to
     // show it.
     BrowserWindow* window = browser_->window();
-    WebContents* contents = chrome::GetActiveWebContents(browser_);
+    WebContents* contents = browser_->tab_strip_model()->GetActiveWebContents();
     window->Show();
     if (contents)
       contents->GetView()->SetInitialFocus();
@@ -379,16 +379,15 @@ void SetAsDefaultBrowserDialogImpl::
   // delegate_execute.exe will choose an immersive launch on the basis of the
   // same IsMachineATablet check, but will not store this as the user's
   // choice.
-  BrowserThread::PostTask(
-      BrowserThread::UI, FROM_HERE,
-      base::Bind(&browser::AttemptRestart));
+  BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
+                          base::Bind(&chrome::AttemptRestart));
 }
 
 }  // namespace
 
 SetAsDefaultBrowserUI::SetAsDefaultBrowserUI(content::WebUI* web_ui)
     : ui::WebDialogUI(web_ui) {
-  ChromeURLDataManager::AddWebUIDataSource(
+  content::WebUIDataSource::Add(
       Profile::FromWebUI(web_ui), CreateSetAsDefaultBrowserUIHTMLSource());
 }
 

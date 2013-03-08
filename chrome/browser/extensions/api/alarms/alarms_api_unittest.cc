@@ -4,14 +4,16 @@
 
 // This file tests the chrome.alarms extension API.
 
-#include "base/test/mock_time_provider.h"
+#include "base/test/simple_test_clock.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/api/alarms/alarm_manager.h"
 #include "chrome/browser/extensions/api/alarms/alarms_api.h"
 #include "chrome/browser/extensions/extension_function_test_utils.h"
 #include "chrome/browser/extensions/test_extension_system.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/ui/browser_tabstrip.h"
+#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/common/extensions/background_info.h"
 #include "chrome/common/extensions/extension_messages.h"
 #include "chrome/test/base/browser_with_test_window_test.h"
 #include "content/public/browser/web_contents.h"
@@ -33,7 +35,7 @@ class AlarmDelegate : public AlarmManager::Delegate {
  public:
   virtual ~AlarmDelegate() {}
   virtual void OnAlarm(const std::string& extension_id,
-                       const Alarm& alarm) {
+                       const Alarm& alarm) OVERRIDE {
     alarms_seen.push_back(alarm.js_alarm->name);
     MessageLoop::current()->Quit();
   }
@@ -50,22 +52,20 @@ class ExtensionAlarmsTest : public BrowserWithTestWindowTest {
 
     TestExtensionSystem* system = static_cast<TestExtensionSystem*>(
         ExtensionSystem::Get(browser()->profile()));
-    system->CreateAlarmManager(&base::MockTimeProvider::StaticNow);
+    system->CreateAlarmManager(&test_clock_);
     alarm_manager_ = system->alarm_manager();
 
     alarm_delegate_ = new AlarmDelegate();
     alarm_manager_->set_delegate(alarm_delegate_);
 
     extension_ = utils::CreateEmptyExtensionWithLocation(
-        extensions::Extension::LOAD);
+        extensions::Manifest::UNPACKED);
 
     // Make sure there's a RenderViewHost for alarms to warn into.
-    AddTab(browser(), extension_->GetBackgroundURL());
-    contents_ = chrome::GetActiveWebContents(browser());
+    AddTab(browser(), BackgroundInfo::GetBackgroundURL(extension_));
+    contents_ = browser()->tab_strip_model()->GetActiveWebContents();
 
-    current_time_ = base::Time::FromDoubleT(10);
-    ON_CALL(mock_time_, Now())
-        .WillByDefault(testing::ReturnPointee(&current_time_));
+    test_clock_.SetNow(base::Time::FromDoubleT(10));
   }
 
   base::Value* RunFunctionWithExtension(
@@ -101,8 +101,7 @@ class ExtensionAlarmsTest : public BrowserWithTestWindowTest {
   }
 
   void CreateAlarm(const std::string& args) {
-    RunFunction(new AlarmsCreateFunction(&base::MockTimeProvider::StaticNow),
-                args);
+    RunFunction(new AlarmsCreateFunction(&test_clock_), args);
   }
 
   // Takes a JSON result from a function and converts it to a vector of
@@ -133,15 +132,13 @@ class ExtensionAlarmsTest : public BrowserWithTestWindowTest {
     };
     for (size_t i = 0; i < num_alarms; ++i) {
       scoped_ptr<base::DictionaryValue> result(RunFunctionAndReturnDict(
-          new AlarmsCreateFunction(&base::MockTimeProvider::StaticNow),
-          kCreateArgs[i]));
+          new AlarmsCreateFunction(&test_clock_), kCreateArgs[i]));
       EXPECT_FALSE(result.get());
     }
   }
 
  protected:
-  base::Time current_time_;
-  testing::NiceMock<base::MockTimeProvider> mock_time_;
+  base::SimpleTestClock test_clock_;
   AlarmManager* alarm_manager_;
   AlarmDelegate* alarm_delegate_;
   scoped_refptr<extensions::Extension> extension_;
@@ -149,7 +146,7 @@ class ExtensionAlarmsTest : public BrowserWithTestWindowTest {
 };
 
 TEST_F(ExtensionAlarmsTest, Create) {
-  current_time_ = base::Time::FromDoubleT(10);
+  test_clock_.SetNow(base::Time::FromDoubleT(10));
   // Create 1 non-repeating alarm.
   CreateAlarm("[null, {\"delayInMinutes\": 0}]");
 
@@ -176,7 +173,7 @@ TEST_F(ExtensionAlarmsTest, Create) {
 }
 
 TEST_F(ExtensionAlarmsTest, CreateRepeating) {
-  current_time_ = base::Time::FromDoubleT(10);
+  test_clock_.SetNow(base::Time::FromDoubleT(10));
 
   // Create 1 repeating alarm.
   CreateAlarm("[null, {\"periodInMinutes\": 0.001}]");
@@ -189,12 +186,12 @@ TEST_F(ExtensionAlarmsTest, CreateRepeating) {
   EXPECT_THAT(alarm->js_alarm->period_in_minutes,
               testing::Pointee(testing::DoubleEq(0.001)));
 
-  current_time_ += base::TimeDelta::FromSeconds(1);
+  test_clock_.Advance(base::TimeDelta::FromSeconds(1));
   // Now wait for the alarm to fire. Our test delegate will quit the
   // MessageLoop when that happens.
   MessageLoop::current()->Run();
 
-  current_time_ += base::TimeDelta::FromSeconds(1);
+  test_clock_.Advance(base::TimeDelta::FromSeconds(1));
   // Wait again, and ensure the alarm fires again.
   alarm_manager_->ScheduleNextPoll();
   MessageLoop::current()->Run();
@@ -204,7 +201,7 @@ TEST_F(ExtensionAlarmsTest, CreateRepeating) {
 }
 
 TEST_F(ExtensionAlarmsTest, CreateAbsolute) {
-  current_time_ = base::Time::FromDoubleT(9.99);
+  test_clock_.SetNow(base::Time::FromDoubleT(9.99));
   CreateAlarm("[null, {\"when\": 10001}]");
 
   const Alarm* alarm =
@@ -215,7 +212,7 @@ TEST_F(ExtensionAlarmsTest, CreateAbsolute) {
   EXPECT_THAT(alarm->js_alarm->period_in_minutes,
               testing::IsNull());
 
-  current_time_ = base::Time::FromDoubleT(10.1);
+  test_clock_.SetNow(base::Time::FromDoubleT(10.1));
   // Now wait for the alarm to fire. Our test delegate will quit the
   // MessageLoop when that happens.
   MessageLoop::current()->Run();
@@ -227,7 +224,7 @@ TEST_F(ExtensionAlarmsTest, CreateAbsolute) {
 }
 
 TEST_F(ExtensionAlarmsTest, CreateRepeatingWithQuickFirstCall) {
-  current_time_ = base::Time::FromDoubleT(9.99);
+  test_clock_.SetNow(base::Time::FromDoubleT(9.99));
   CreateAlarm("[null, {\"when\": 10001, \"periodInMinutes\": 0.001}]");
 
   const Alarm* alarm =
@@ -238,7 +235,7 @@ TEST_F(ExtensionAlarmsTest, CreateRepeatingWithQuickFirstCall) {
   EXPECT_THAT(alarm->js_alarm->period_in_minutes,
               testing::Pointee(testing::DoubleEq(0.001)));
 
-  current_time_ = base::Time::FromDoubleT(10.1);
+  test_clock_.SetNow(base::Time::FromDoubleT(10.1));
   // Now wait for the alarm to fire. Our test delegate will quit the
   // MessageLoop when that happens.
   MessageLoop::current()->Run();
@@ -246,7 +243,7 @@ TEST_F(ExtensionAlarmsTest, CreateRepeatingWithQuickFirstCall) {
   ASSERT_TRUE(alarm_manager_->GetAlarm(extension_->id(), ""));
   EXPECT_THAT(alarm_delegate_->alarms_seen, testing::ElementsAre(""));
 
-  current_time_ = base::Time::FromDoubleT(10.7);
+  test_clock_.SetNow(base::Time::FromDoubleT(10.7));
   MessageLoop::current()->Run();
 
   ASSERT_TRUE(alarm_manager_->GetAlarm(extension_->id(), ""));
@@ -254,7 +251,7 @@ TEST_F(ExtensionAlarmsTest, CreateRepeatingWithQuickFirstCall) {
 }
 
 TEST_F(ExtensionAlarmsTest, CreateDupe) {
-  current_time_ = base::Time::FromDoubleT(10);
+  test_clock_.SetNow(base::Time::FromDoubleT(10));
 
   // Create 2 duplicate alarms. The first should be overridden.
   CreateAlarm("[\"dup\", {\"delayInMinutes\": 1}]");
@@ -277,7 +274,7 @@ TEST_F(ExtensionAlarmsTest, CreateDelayBelowMinimum) {
   const IPC::Message* warning = sink.GetUniqueMessageMatching(
       ExtensionMsg_AddMessageToConsole::ID);
   ASSERT_TRUE(warning);
-  content::ConsoleMessageLevel level = content::CONSOLE_MESSAGE_LEVEL_TIP;
+  content::ConsoleMessageLevel level = content::CONSOLE_MESSAGE_LEVEL_DEBUG;
   std::string message;
   ExtensionMsg_AddMessageToConsole::Read(warning, &level, &message);
   EXPECT_EQ(content::CONSOLE_MESSAGE_LEVEL_WARNING, level);
@@ -285,7 +282,7 @@ TEST_F(ExtensionAlarmsTest, CreateDelayBelowMinimum) {
 }
 
 TEST_F(ExtensionAlarmsTest, Get) {
-  current_time_ = base::Time::FromDoubleT(4);
+  test_clock_.SetNow(base::Time::FromDoubleT(4));
 
   // Create 2 alarms, and make sure we can query them.
   CreateAlarms(2);
@@ -444,7 +441,7 @@ TEST_F(ExtensionAlarmsSchedulingTest, PollScheduling) {
     alarm_manager_->RemoveAllAlarms(extension_->id());
   }
   {
-    current_time_ = base::Time::FromDoubleT(10);
+    test_clock_.SetNow(base::Time::FromDoubleT(10));
     CreateAlarm("[\"a\", {\"periodInMinutes\": 10}]");
     Alarm alarm;
     alarm.js_alarm->name = "bb";
@@ -456,7 +453,7 @@ TEST_F(ExtensionAlarmsSchedulingTest, PollScheduling) {
     alarm_manager_->RemoveAllAlarms(extension_->id());
   }
   {
-    current_time_ = base::Time::FromDoubleT(3 * 60 + 1);
+    test_clock_.SetNow(base::Time::FromDoubleT(3 * 60 + 1));
     Alarm alarm;
     alarm.js_alarm->name = "bb";
     alarm.js_alarm->scheduled_time = 3 * 60000;
@@ -468,7 +465,7 @@ TEST_F(ExtensionAlarmsSchedulingTest, PollScheduling) {
     alarm_manager_->RemoveAllAlarms(extension_->id());
   }
   {
-    current_time_ = base::Time::FromDoubleT(4 * 60 + 1);
+    test_clock_.SetNow(base::Time::FromDoubleT(4 * 60 + 1));
     CreateAlarm("[\"a\", {\"periodInMinutes\": 2}]");
     alarm_manager_->RemoveAlarm(extension_->id(), "a");
     Alarm alarm2;
@@ -490,8 +487,8 @@ TEST_F(ExtensionAlarmsSchedulingTest, PollScheduling) {
 
 TEST_F(ExtensionAlarmsSchedulingTest, ReleasedExtensionPollsInfrequently) {
   extension_ = utils::CreateEmptyExtensionWithLocation(
-      extensions::Extension::INTERNAL);
-  current_time_ = base::Time::FromJsTime(300000);
+      extensions::Manifest::INTERNAL);
+  test_clock_.SetNow(base::Time::FromJsTime(300000));
   CreateAlarm("[\"a\", {\"when\": 300010}]");
   CreateAlarm("[\"b\", {\"when\": 340000}]");
 

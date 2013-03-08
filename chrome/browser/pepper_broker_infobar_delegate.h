@@ -6,12 +6,13 @@
 #define CHROME_BROWSER_PEPPER_BROKER_INFOBAR_DELEGATE_H_
 
 #include "base/callback.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "chrome/browser/api/infobars/confirm_infobar_delegate.h"
 #include "googleurl/src/gurl.h"
 
 class HostContentSettingsMap;
 class InfoBarService;
+class TabSpecificContentSettings;
 
 namespace content {
 class WebContents;
@@ -28,7 +29,7 @@ class PepperBrokerInfoBarDelegate : public ConfirmInfoBarDelegate {
   // |web_contents|.
   static void Create(content::WebContents* web_contents,
                      const GURL& url,
-                     const FilePath& plugin_path,
+                     const base::FilePath& plugin_path,
                      const base::Callback<void(bool)>& callback);
 
   // ConfirmInfoBarDelegate:
@@ -45,18 +46,20 @@ class PepperBrokerInfoBarDelegate : public ConfirmInfoBarDelegate {
   PepperBrokerInfoBarDelegate(
       InfoBarService* infobar_service,
       const GURL& url,
-      const FilePath& plugin_path,
+      const base::FilePath& plugin_path,
       const std::string& languages,
       HostContentSettingsMap* content_settings,
+      TabSpecificContentSettings* tab_content_settings,
       const base::Callback<void(bool)>& callback);
   virtual ~PepperBrokerInfoBarDelegate();
 
   void DispatchCallback(bool result);
 
   const GURL url_;
-  const FilePath plugin_path_;
+  const base::FilePath plugin_path_;
   const std::string languages_;
   HostContentSettingsMap* content_settings_;
+  TabSpecificContentSettings* tab_content_settings_;
   base::Callback<void(bool)> callback_;
 
   DISALLOW_COPY_AND_ASSIGN(PepperBrokerInfoBarDelegate);

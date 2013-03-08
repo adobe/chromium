@@ -25,6 +25,18 @@ name=Sophos LEAK
 ...
 sophos*.dll!*
 
+# Reports from Micorosft RDP ActiveX control (mstscax.dll)
+
+GDI USAGE ERROR
+name=crbug.com/177832: mstscax.dll causes "GDI USAGE ERROR" errors.
+...
+mstscax.dll!*
+
+UNADDRESSABLE ACCESS
+name=crbug.com/177832: mstscax.dll causes "UNADDRESSABLE ACCESS" errors.
+...
+mstscax.dll!*
+
 ############################
 # Suppress some false reports due to bugs in Dr.Memory like wrong analysis
 # assumptions or unhandled syscalls
@@ -307,13 +319,6 @@ system call NtGdiDeleteObjectApp
 ...
 *!skia::BitmapPlatformDevice::BitmapPlatformDeviceData::ReleaseBitmapDC
 
-GDI USAGE ERROR
-name=http://crbug.com/109963 c
-system call NtGdiDeleteObjectApp
-...
-skia.dll!skia::PlatformBitmap::~PlatformBitmap
-*!skia::PlatformBitmap*
-
 # GDI usage errors in 3rd-party components
 GDI USAGE ERROR
 name=http://crbug.com/119552 a
@@ -390,3 +395,28 @@ content.dll!*
 KERNEL32.dll!*
 ntdll.dll!*
 ntdll.dll!*
+
+WARNING
+name=Security test (new oveflow)
+MSVCR100D.dll!operator new
+*!operator new
+*!operator new[]
+*!`anonymous namespace'::SecurityTest_NewOverflow_Test::TestBody
+*!testing::internal::HandleExceptionsInMethodIfSupported<testing::Test,void>
+
+WARNING
+name=Security test (calloc overflow)
+*!`anonymous namespace'::CallocReturnsNull
+*!`anonymous namespace'::SecurityTest_CallocOverflow_Test::TestBody
+*!testing::internal::HandleExceptionsInMethodIfSupported<testing::Test,void>
+
+GDI USAGE ERROR
+name=crbug.com/175512
+...
+USER32.dll!UnregisterClassA
+USER32.dll!UnregisterClassA
+USER32.dll!UnregisterClassA
+USER32.dll!LoadBitmapW
+media.dll!media::*::ScreenCapturerWin::CaptureCursor
+media.dll!media::*::ScreenCapturerWin::CaptureFrame
+media.dll!media::ScreenCaptureDevice::Core::DoCapture

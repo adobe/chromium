@@ -11,20 +11,36 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/synchronization/lock.h"
+#include "chrome/test/chromedriver/basic_types.h"
+
+namespace base {
+class DictionaryValue;
+}
 
 class Chrome;
+class Status;
+class WebView;
 
 struct Session {
   explicit Session(const std::string& id);
   Session(const std::string& id, scoped_ptr<Chrome> chrome);
   ~Session();
 
+  Status GetTargetWindow(WebView** web_view);
+
   const std::string id;
   scoped_ptr<Chrome> chrome;
+  std::string window;
   std::string frame;
+  WebPoint mouse_position;
   int implicit_wait;
   int page_load_timeout;
   int script_timeout;
+  std::string prompt_text;
+  const scoped_ptr<base::DictionaryValue> capabilities;
+
+ private:
+  scoped_ptr<base::DictionaryValue> CreateCapabilities();
 };
 
 class SessionAccessor : public base::RefCountedThreadSafe<SessionAccessor> {

@@ -14,6 +14,7 @@
 #include "ui/aura/root_window.h"
 #include "ui/aura/window.h"
 #include "ui/gfx/screen.h"
+#include "ui/views/win/hwnd_util.h"
 
 #if defined(USE_AURA)
 #include "ui/views/widget/desktop_aura/desktop_root_window_host_win.h"
@@ -219,13 +220,7 @@ class DockToWindowFinder : public BaseWindowFinder {
   static DockInfo GetDockInfoAtPoint(const gfx::Point& screen_loc,
                                      const std::set<HWND>& ignore) {
     DockToWindowFinder finder(screen_loc, ignore);
-#if defined(USE_AURA)
-    HWND hwnd = finder.result_.window() ?
-        finder.result_.window()->GetRootWindow()->GetAcceleratedWidget() :
-        NULL;
-#else
-    HWND hwnd = finder.result_.window();
-#endif
+    HWND hwnd = views::HWNDForNativeWindow(finder.result_.window());
     if (!finder.result_.window() ||
         !TopMostFinder::IsTopMostWindowAtPoint(hwnd,
                                                finder.result_.hot_spot(),

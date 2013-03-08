@@ -8,6 +8,7 @@
 #include <deque>
 
 #include "base/memory/ref_counted.h"
+#include "base/memory/weak_ptr.h"
 #include "base/synchronization/condition_variable.h"
 #include "base/synchronization/lock.h"
 #include "base/threading/platform_thread.h"
@@ -35,13 +36,14 @@ class MEDIA_EXPORT VideoRendererBase
     : public VideoRenderer,
       public base::PlatformThread::Delegate {
  public:
+  typedef base::Callback<void(const scoped_refptr<VideoFrame>&)> PaintCB;
   typedef base::Callback<void(bool)> SetOpaqueCB;
 
   // Maximum duration of the last frame.
   static base::TimeDelta kMaxLastFrameDuration();
 
   // |paint_cb| is executed on the video frame timing thread whenever a new
-  // frame is available for painting via GetCurrentFrame().
+  // frame is available for painting.
   //
   // |set_opaque_cb| is executed when the renderer is initialized to inform
   // the player whether the decoder's output will be opaque or not.
@@ -56,9 +58,10 @@ class MEDIA_EXPORT VideoRendererBase
   // Get/PutCurrentFrame() http://crbug.com/108435
   VideoRendererBase(const scoped_refptr<base::MessageLoopProxy>& message_loop,
                     const SetDecryptorReadyCB& set_decryptor_ready_cb,
-                    const base::Closure& paint_cb,
+                    const PaintCB& paint_cb,
                     const SetOpaqueCB& set_opaque_cb,
                     bool drop_frames);
+  virtual ~VideoRendererBase();
 
   // VideoRenderer implementation.
   virtual void Initialize(const scoped_refptr<DemuxerStream>& stream,
@@ -82,18 +85,6 @@ class MEDIA_EXPORT VideoRendererBase
   // PlatformThread::Delegate implementation.
   virtual void ThreadMain() OVERRIDE;
 
-  // Clients of this class (painter/compositor) should use GetCurrentFrame()
-  // obtain ownership of VideoFrame, it should always relinquish the ownership
-  // by use PutCurrentFrame(). Current frame is not guaranteed to be non-NULL.
-  // It expects clients to use color-fill the background if current frame
-  // is NULL. This could happen before pipeline is pre-rolled or during
-  // pause/flush/preroll.
-  void GetCurrentFrame(scoped_refptr<VideoFrame>* frame_out);
-  void PutCurrentFrame(scoped_refptr<VideoFrame> frame);
-
- protected:
-  virtual ~VideoRendererBase();
-
  private:
   // Called when |decoder_selector_| selected the |selected_decoder|.
   // |decrypting_demuxer_stream| was also populated if a DecryptingDemuxerStream
@@ -110,8 +101,8 @@ class MEDIA_EXPORT VideoRendererBase
   void FrameReady(VideoDecoder::Status status,
                   const scoped_refptr<VideoFrame>& frame);
 
-  // Helper method for adding a frame to |ready_frames_|
-  void AddReadyFrame(const scoped_refptr<VideoFrame>& frame);
+  // Helper method for adding a frame to |ready_frames_|.
+  void AddReadyFrame_Locked(const scoped_refptr<VideoFrame>& frame);
 
   // Helper method that schedules an asynchronous read from the decoder as long
   // as there isn't a pending read and we have capacity.
@@ -124,7 +115,7 @@ class MEDIA_EXPORT VideoRendererBase
   // Attempts to complete flushing and transition into the flushed state.
   void AttemptFlush_Locked();
 
-  // Calculates the duration to sleep for based on |current_frame_|'s timestamp,
+  // Calculates the duration to sleep for based on |last_timestamp_|,
   // the next frame timestamp (may be NULL), and the provided playback rate.
   //
   // We don't use |playback_rate_| to avoid locking.
@@ -135,12 +126,17 @@ class MEDIA_EXPORT VideoRendererBase
   // Helper function that flushes the buffers when a Stop() or error occurs.
   void DoStopOrError_Locked();
 
-  // Return the number of frames currently held by this class.
-  int NumFrames_Locked() const;
+  // Runs |paint_cb_| with the next frame from |ready_frames_|, updating
+  // |last_natural_size_| and running |size_changed_cb_| if the natural size
+  // changes.
+  //
+  // A read is scheduled to replace the frame.
+  void PaintNextReadyFrame_Locked();
 
-  // Updates |current_frame_| to the next frame on |ready_frames_| and calls
-  // |size_changed_cb_| if the natural size changes.
-  void SetCurrentFrameToNextReadyFrame();
+  // Drops the next frame from |ready_frames_| and runs |statistics_cb_|.
+  //
+  // A read is scheduled to replace the frame.
+  void DropNextReadyFrame_Locked();
 
   void ResetDecoder();
   void StopDecoder(const base::Closure& callback);
@@ -158,6 +154,8 @@ class MEDIA_EXPORT VideoRendererBase
                          PipelineStatus status);
 
   scoped_refptr<base::MessageLoopProxy> message_loop_;
+  base::WeakPtrFactory<VideoRendererBase> weak_factory_;
+  base::WeakPtr<VideoRendererBase> weak_this_;
 
   // Used for accessing data members.
   base::Lock lock_;
@@ -168,23 +166,12 @@ class MEDIA_EXPORT VideoRendererBase
   scoped_refptr<VideoDecoder> decoder_;
   scoped_refptr<DecryptingDemuxerStream> decrypting_demuxer_stream_;
 
-  // Queue of incoming frames as well as the current frame since the last time
-  // OnFrameAvailable() was called.
+  // Queue of incoming frames yet to be painted.
   typedef std::deque<scoped_refptr<VideoFrame> > VideoFrameQueue;
   VideoFrameQueue ready_frames_;
 
-  // The current frame available to subclasses for rendering via
-  // GetCurrentFrame().  |current_frame_| can only be altered when
-  // |pending_paint_| is false.
-  scoped_refptr<VideoFrame> current_frame_;
-
-  // The previous |current_frame_| and is returned via GetCurrentFrame() in the
-  // situation where all frames were deallocated (i.e., during a flush).
-  //
-  // TODO(scherkus): remove this after getting rid of Get/PutCurrentFrame() in
-  // favour of passing ownership of the current frame to the renderer via
-  // callback.
-  scoped_refptr<VideoFrame> last_available_frame_;
+  // Keeps track of whether we received the end of stream buffer.
+  bool received_end_of_stream_;
 
   // Used to signal |thread_| as frames are added to |frames_|.  Rule of thumb:
   // always check |state_| to see if it was set to STOPPED after waking up!
@@ -194,6 +181,8 @@ class MEDIA_EXPORT VideoRendererBase
   //       [kUninitialized] -------> [kError]
   //              |
   //              | Initialize()
+  //        [kInitializing]
+  //              |
   //              V        All frames returned
   //   +------[kFlushed]<-----[kFlushing]<--- OnDecoderResetDone()
   //   |          | Preroll() or upon                  ^
@@ -216,6 +205,7 @@ class MEDIA_EXPORT VideoRendererBase
   // Simple state tracking variable.
   enum State {
     kUninitialized,
+    kInitializing,
     kPrerolled,
     kPaused,
     kFlushingDecoder,
@@ -232,18 +222,9 @@ class MEDIA_EXPORT VideoRendererBase
   // Video thread handle.
   base::PlatformThreadHandle thread_;
 
-  // Keep track of various pending operations:
-  //   - |pending_read_| is true when there's an active video decoding request.
-  //   - |pending_paint_| is true when |current_frame_| is currently being
-  //     accessed by the subclass.
-  //   - |pending_paint_with_last_available_| is true when
-  //     |last_available_frame_| is currently being accessed by the subclass.
-  //
-  // Flushing cannot complete until both |pending_read_| and |pending_paint_|
-  // are false.
+  // Keep track of outstanding reads on the video decoder. Flushing can only
+  // complete once reads have completed.
   bool pending_read_;
-  bool pending_paint_;
-  bool pending_paint_with_last_available_;
 
   bool drop_frames_;
 
@@ -265,19 +246,24 @@ class MEDIA_EXPORT VideoRendererBase
 
   base::TimeDelta preroll_timestamp_;
 
-  // Delayed frame used during kPrerolling to determine whether
-  // |preroll_timestamp_| is between this frame and the next one.
-  scoped_refptr<VideoFrame> prerolling_delayed_frame_;
-
   // Embedder callback for notifying a new frame is available for painting.
-  base::Closure paint_cb_;
+  PaintCB paint_cb_;
 
   // Callback to execute to inform the player if the video decoder's output is
   // opaque.
   SetOpaqueCB set_opaque_cb_;
 
   // The last natural size |size_changed_cb_| was called with.
+  //
+  // TODO(scherkus): WebMediaPlayerImpl should track this instead of plumbing
+  // this through Pipeline. The one tricky bit might be guaranteeing we deliver
+  // the size information before we reach HAVE_METADATA.
   gfx::Size last_natural_size_;
+
+  // The timestamp of the last frame removed from the |ready_frames_| queue,
+  // either for calling |paint_cb_| or for dropping. Set to kNoTimestamp()
+  // during flushing.
+  base::TimeDelta last_timestamp_;
 
   DISALLOW_COPY_AND_ASSIGN(VideoRendererBase);
 };

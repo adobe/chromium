@@ -61,10 +61,6 @@ ui::AccessibilityTypes::Role WidgetDelegate::GetAccessibleWindowRole() const {
   return ui::AccessibilityTypes::ROLE_WINDOW;
 }
 
-ui::AccessibilityTypes::State WidgetDelegate::GetAccessibleWindowState() const {
-  return 0;
-}
-
 string16 WidgetDelegate::GetAccessibleWindowTitle() const {
   return GetWindowTitle();
 }
@@ -160,9 +156,15 @@ bool WidgetDelegate::ShouldDescendIntoChildForEventHandling(
 // WidgetDelegateView:
 
 WidgetDelegateView::WidgetDelegateView() {
+  // A WidgetDelegate should be deleted on DeleteDelegate.
+  set_owned_by_client();
 }
 
 WidgetDelegateView::~WidgetDelegateView() {
+}
+
+void WidgetDelegateView::DeleteDelegate() {
+  delete this;
 }
 
 Widget* WidgetDelegateView::GetWidget() {

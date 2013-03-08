@@ -12,8 +12,8 @@
 #include <set>
 
 #include "base/bind.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/i18n/case_conversion.h"
 #include "base/message_loop.h"
 #include "base/message_loop_proxy.h"
@@ -29,10 +29,11 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/shell_dialogs/base_shell_dialog_win.h"
+#include "ui/shell_dialogs/shell_dialogs_delegate.h"
 
 #if defined(USE_AURA)
+#include "ui/aura/remote_root_window_host_win.h"
 #include "ui/aura/root_window.h"
-#include "ui/aura/window.h"
 #endif
 
 namespace {
@@ -82,7 +83,7 @@ bool CallGetSaveFileName(OPENFILENAME* ofn) {
 }
 
 // Distinguish directories from regular files.
-bool IsDirectory(const FilePath& path) {
+bool IsDirectory(const base::FilePath& path) {
   base::PlatformFileInfo file_info;
   return file_util::GetFileInfo(path, &file_info) ?
       file_info.is_directory : file_util::EndsWithSeparator(path);
@@ -265,7 +266,7 @@ bool SaveFileAsWithFilter(HWND owner,
   // Having an empty filter makes for a bad user experience. We should always
   // specify a filter when saving.
   DCHECK(!filter.empty());
-  const FilePath suggested_path(suggested_name);
+  const base::FilePath suggested_path(suggested_name);
   std::wstring file_part = suggested_path.BaseName().value();
   // If the suggested_name is a root directory, file_part will be '\', and the
   // call to GetSaveFileName below will fail.
@@ -388,7 +389,8 @@ bool SaveFileAsWithFilter(HWND owner,
 bool SaveFileAs(HWND owner,
                 const std::wstring& suggested_name,
                 std::wstring* final_name) {
-  std::wstring file_ext = FilePath(suggested_name).Extension().insert(0, L"*");
+  std::wstring file_ext =
+      base::FilePath(suggested_name).Extension().insert(0, L"*");
   std::wstring filter = FormatFilterForExtensions(
       std::vector<std::wstring>(1, file_ext),
       std::vector<std::wstring>(),
@@ -417,14 +419,15 @@ class SelectFileDialogImpl : public ui::SelectFileDialog,
 
  protected:
   // SelectFileDialog implementation:
-  virtual void SelectFileImpl(Type type,
-                              const string16& title,
-                              const FilePath& default_path,
-                              const FileTypeInfo* file_types,
-                              int file_type_index,
-                              const FilePath::StringType& default_extension,
-                              gfx::NativeWindow owning_window,
-                              void* params) OVERRIDE;
+  virtual void SelectFileImpl(
+      Type type,
+      const string16& title,
+      const base::FilePath& default_path,
+      const FileTypeInfo* file_types,
+      int file_type_index,
+      const base::FilePath::StringType& default_extension,
+      gfx::NativeWindow owning_window,
+      void* params) OVERRIDE;
 
  private:
   virtual ~SelectFileDialogImpl();
@@ -433,7 +436,7 @@ class SelectFileDialogImpl : public ui::SelectFileDialog,
   struct ExecuteSelectParams {
     ExecuteSelectParams(Type type,
                         const std::wstring& title,
-                        const FilePath& default_path,
+                        const base::FilePath& default_path,
                         const FileTypeInfo* file_types,
                         int file_type_index,
                         const std::wstring& default_extension,
@@ -454,7 +457,7 @@ class SelectFileDialogImpl : public ui::SelectFileDialog,
     }
     SelectFileDialog::Type type;
     std::wstring title;
-    FilePath default_path;
+    base::FilePath default_path;
     FileTypeInfo file_types;
     int file_type_index;
     std::wstring default_extension;
@@ -469,11 +472,12 @@ class SelectFileDialogImpl : public ui::SelectFileDialog,
   void ExecuteSelectFile(const ExecuteSelectParams& params);
 
   // Notifies the listener that a folder was chosen. Run on the ui thread.
-  void FileSelected(const FilePath& path, int index,
+  void FileSelected(const base::FilePath& path, int index,
                     void* params, RunState run_state);
 
   // Notifies listener that multiple files were chosen. Run on the ui thread.
-  void MultiFilesSelected(const std::vector<FilePath>& paths, void* params,
+  void MultiFilesSelected(const std::vector<base::FilePath>& paths,
+                         void* params,
                          RunState run_state);
 
   // Notifies the listener that no file was chosen (the action was canceled).
@@ -487,21 +491,21 @@ class SelectFileDialogImpl : public ui::SelectFileDialog,
   // dialog thread.
   bool RunSelectFolderDialog(const std::wstring& title,
                              HWND owner,
-                             FilePath* path);
+                             base::FilePath* path);
 
   // Runs an Open file dialog box, with similar semantics for input paramaters
   // as RunSelectFolderDialog.
   bool RunOpenFileDialog(const std::wstring& title,
                          const std::wstring& filters,
                          HWND owner,
-                         FilePath* path);
+                         base::FilePath* path);
 
   // Runs an Open file dialog box that supports multi-select, with similar
   // semantics for input paramaters as RunOpenFileDialog.
   bool RunOpenMultiFileDialog(const std::wstring& title,
                               const std::wstring& filter,
                               HWND owner,
-                              std::vector<FilePath>* paths);
+                              std::vector<base::FilePath>* paths);
 
   // The callback function for when the select folder dialog is opened.
   static int CALLBACK BrowseCallbackProc(HWND window, UINT message,
@@ -510,8 +514,11 @@ class SelectFileDialogImpl : public ui::SelectFileDialog,
 
   virtual bool HasMultipleFileTypeChoicesImpl() OVERRIDE;
 
-  bool has_multiple_file_type_choices_;
+  // Returns the filter to be used while displaying the open/save file dialog.
+  // This is computed from the extensions for the file types being opened.
+  string16 GetFilterForFileTypes(const FileTypeInfo& file_types);
 
+  bool has_multiple_file_type_choices_;
 
   DISALLOW_COPY_AND_ASSIGN(SelectFileDialogImpl);
 };
@@ -529,16 +536,49 @@ SelectFileDialogImpl::~SelectFileDialogImpl() {
 void SelectFileDialogImpl::SelectFileImpl(
     Type type,
     const string16& title,
-    const FilePath& default_path,
+    const base::FilePath& default_path,
     const FileTypeInfo* file_types,
     int file_type_index,
-    const FilePath::StringType& default_extension,
+    const base::FilePath::StringType& default_extension,
     gfx::NativeWindow owning_window,
     void* params) {
   has_multiple_file_type_choices_ =
       file_types ? file_types->extensions.size() > 1 : true;
 #if defined(USE_AURA)
-  HWND owner = owning_window->GetRootWindow()->GetAcceleratedWidget();
+  // If the owning_window passed in is in metro then we need to forward the
+  // file open/save operations to metro.
+  if (GetShellDialogsDelegate() &&
+      GetShellDialogsDelegate()->IsWindowInMetro(owning_window)) {
+    if (type == SELECT_SAVEAS_FILE) {
+      aura::HandleSaveFile(
+          UTF16ToWide(title),
+          default_path,
+          GetFilterForFileTypes(*file_types),
+          file_type_index,
+          default_extension,
+          base::Bind(&ui::SelectFileDialog::Listener::FileSelected,
+                     base::Unretained(listener_)));
+      return;
+    } else if (type == SELECT_OPEN_FILE) {
+      aura::HandleOpenFile(
+          UTF16ToWide(title),
+          default_path,
+          GetFilterForFileTypes(*file_types),
+          base::Bind(&ui::SelectFileDialog::Listener::FileSelected,
+                     base::Unretained(listener_)));
+      return;
+    } else if (type == SELECT_OPEN_MULTI_FILE) {
+      aura::HandleOpenMultipleFiles(
+          UTF16ToWide(title),
+          default_path,
+          GetFilterForFileTypes(*file_types),
+          base::Bind(&ui::SelectFileDialog::Listener::MultiFilesSelected,
+                     base::Unretained(listener_)));
+      return;
+    }
+  }
+  HWND owner = owning_window
+               ? owning_window->GetRootWindow()->GetAcceleratedWidget() : NULL;
 #else
   HWND owner = owning_window;
 #endif
@@ -573,25 +613,9 @@ void SelectFileDialogImpl::ListenerDestroyed() {
 
 void SelectFileDialogImpl::ExecuteSelectFile(
     const ExecuteSelectParams& params) {
-  std::vector<std::wstring> exts;
-  for (size_t i = 0; i < params.file_types.extensions.size(); ++i) {
-    const std::vector<std::wstring>& inner_exts =
-        params.file_types.extensions[i];
-    std::wstring ext_string;
-    for (size_t j = 0; j < inner_exts.size(); ++j) {
-      if (!ext_string.empty())
-        ext_string.push_back(L';');
-      ext_string.append(L"*.");
-      ext_string.append(inner_exts[j]);
-    }
-    exts.push_back(ext_string);
-  }
-  std::wstring filter = FormatFilterForExtensions(
-      exts,
-      params.file_types.extension_description_overrides,
-      params.file_types.include_all_files);
+  string16 filter = GetFilterForFileTypes(params.file_types);
 
-  FilePath path = params.default_path;
+  base::FilePath path = params.default_path;
   bool success = false;
   unsigned filter_index = params.file_type_index;
   if (params.type == SELECT_FOLDER) {
@@ -604,13 +628,13 @@ void SelectFileDialogImpl::ExecuteSelectFile(
         params.default_path.value(), filter,
         params.default_extension, false, &filter_index, &path_as_wstring);
     if (success)
-      path = FilePath(path_as_wstring);
+      path = base::FilePath(path_as_wstring);
     DisableOwner(params.run_state.owner);
   } else if (params.type == SELECT_OPEN_FILE) {
     success = RunOpenFileDialog(params.title, filter,
                                 params.run_state.owner, &path);
   } else if (params.type == SELECT_OPEN_MULTI_FILE) {
-    std::vector<FilePath> paths;
+    std::vector<base::FilePath> paths;
     if (RunOpenMultiFileDialog(params.title, filter,
                                params.run_state.owner, &paths)) {
       params.ui_proxy->PostTask(
@@ -634,7 +658,7 @@ void SelectFileDialogImpl::ExecuteSelectFile(
   }
 }
 
-void SelectFileDialogImpl::FileSelected(const FilePath& selected_folder,
+void SelectFileDialogImpl::FileSelected(const base::FilePath& selected_folder,
                                         int index,
                                         void* params,
                                         RunState run_state) {
@@ -644,7 +668,7 @@ void SelectFileDialogImpl::FileSelected(const FilePath& selected_folder,
 }
 
 void SelectFileDialogImpl::MultiFilesSelected(
-    const std::vector<FilePath>& selected_files,
+    const std::vector<base::FilePath>& selected_files,
     void* params,
     RunState run_state) {
   if (listener_)
@@ -672,7 +696,7 @@ int CALLBACK SelectFileDialogImpl::BrowseCallbackProc(HWND window,
 
 bool SelectFileDialogImpl::RunSelectFolderDialog(const std::wstring& title,
                                                  HWND owner,
-                                                 FilePath* path) {
+                                                 base::FilePath* path) {
   DCHECK(path);
 
   wchar_t dir_buffer[MAX_PATH + 1];
@@ -701,14 +725,14 @@ bool SelectFileDialogImpl::RunSelectFolderDialog(const std::wstring& title,
       HRESULT hr = shell_folder->GetDisplayNameOf(list, SHGDN_FORPARSING,
                                                   &out_dir_buffer);
       if (SUCCEEDED(hr) && out_dir_buffer.uType == STRRET_WSTR) {
-        *path = FilePath(out_dir_buffer.pOleStr);
+        *path = base::FilePath(out_dir_buffer.pOleStr);
         CoTaskMemFree(out_dir_buffer.pOleStr);
         result = true;
       } else {
         // Use old way if we don't get what we want.
         wchar_t old_out_dir_buffer[MAX_PATH + 1];
         if (SHGetPathFromIDList(list, old_out_dir_buffer)) {
-          *path = FilePath(old_out_dir_buffer);
+          *path = base::FilePath(old_out_dir_buffer);
           result = true;
         }
       }
@@ -726,7 +750,7 @@ bool SelectFileDialogImpl::RunOpenFileDialog(
     const std::wstring& title,
     const std::wstring& filter,
     HWND owner,
-    FilePath* path) {
+    base::FilePath* path) {
   OPENFILENAME ofn;
   // We must do this otherwise the ofn's FlagsEx may be initialized to random
   // junk in release builds which can cause the Places Bar not to show up!
@@ -741,7 +765,7 @@ bool SelectFileDialogImpl::RunOpenFileDialog(
   // Define the dir in here to keep the string buffer pointer pointed to
   // ofn.lpstrInitialDir available during the period of running the
   // GetOpenFileName.
-  FilePath dir;
+  base::FilePath dir;
   // Use lpstrInitialDir to specify the initial directory
   if (!path->empty()) {
     if (IsDirectory(*path)) {
@@ -767,7 +791,7 @@ bool SelectFileDialogImpl::RunOpenFileDialog(
   bool success = CallGetOpenFileName(&ofn);
   DisableOwner(owner);
   if (success)
-    *path = FilePath(filename);
+    *path = base::FilePath(filename);
   return success;
 }
 
@@ -775,7 +799,7 @@ bool SelectFileDialogImpl::RunOpenMultiFileDialog(
     const std::wstring& title,
     const std::wstring& filter,
     HWND owner,
-    std::vector<FilePath>* paths) {
+    std::vector<base::FilePath>* paths) {
   OPENFILENAME ofn;
   // We must do this otherwise the ofn's FlagsEx may be initialized to random
   // junk in release builds which can cause the Places Bar not to show up!
@@ -800,10 +824,10 @@ bool SelectFileDialogImpl::RunOpenMultiFileDialog(
   bool success = CallGetOpenFileName(&ofn);
   DisableOwner(owner);
   if (success) {
-    std::vector<FilePath> files;
+    std::vector<base::FilePath> files;
     const wchar_t* selection = ofn.lpstrFile;
     while (*selection) {  // Empty string indicates end of list.
-      files.push_back(FilePath(selection));
+      files.push_back(base::FilePath(selection));
       // Skip over filename and null-terminator.
       selection += files.back().value().length() + 1;
     }
@@ -815,14 +839,34 @@ bool SelectFileDialogImpl::RunOpenMultiFileDialog(
     } else {
       // Otherwise, the first string is the path, and the remainder are
       // filenames.
-      std::vector<FilePath>::iterator path = files.begin();
-      for (std::vector<FilePath>::iterator file = path + 1;
+      std::vector<base::FilePath>::iterator path = files.begin();
+      for (std::vector<base::FilePath>::iterator file = path + 1;
            file != files.end(); ++file) {
         paths->push_back(path->Append(*file));
       }
     }
   }
   return success;
+}
+
+string16 SelectFileDialogImpl::GetFilterForFileTypes(
+    const FileTypeInfo& file_types) {
+  std::vector<string16> exts;
+  for (size_t i = 0; i < file_types.extensions.size(); ++i) {
+    const std::vector<string16>& inner_exts = file_types.extensions[i];
+    string16 ext_string;
+    for (size_t j = 0; j < inner_exts.size(); ++j) {
+      if (!ext_string.empty())
+        ext_string.push_back(L';');
+      ext_string.append(L"*.");
+      ext_string.append(inner_exts[j]);
+    }
+    exts.push_back(ext_string);
+  }
+  return FormatFilterForExtensions(
+      exts,
+      file_types.extension_description_overrides,
+      file_types.include_all_files);
 }
 
 }  // namespace
@@ -852,7 +896,7 @@ std::wstring AppendExtensionIfNeeded(
   // extensions with a known MIME type, which many "known" extensions on Windows
   // don't have.  So we check directly for the "known extension" registry key.
   std::wstring file_extension(
-      GetExtensionWithoutLeadingDot(FilePath(filename).Extension()));
+      GetExtensionWithoutLeadingDot(base::FilePath(filename).Extension()));
   std::wstring key(L"." + file_extension);
   if (!(filter_selected.empty() || filter_selected == L"*.*") &&
       !base::win::RegKey(HKEY_CLASSES_ROOT, key.c_str(), KEY_READ).Valid() &&

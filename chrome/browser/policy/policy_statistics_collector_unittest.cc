@@ -8,6 +8,7 @@
 #include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/prefs/testing_pref_service.h"
 #include "base/test/test_simple_task_runner.h"
 #include "base/time.h"
 #include "base/values.h"
@@ -17,7 +18,6 @@
 #include "chrome/browser/policy/policy_types.h"
 #include "chrome/browser/prefs/browser_prefs.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/test/base/testing_pref_service.h"
 #include "policy/policy_constants.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -60,7 +60,7 @@ class PolicyStatisticsCollectorTest : public testing::Test {
   }
 
   virtual void SetUp() OVERRIDE {
-    chrome::RegisterLocalState(&prefs_);
+    chrome::RegisterLocalState(prefs_.registry());
 
     // Find ids for kTestPolicy1 and kTestPolicy2.
     const policy::PolicyDefinitionList* policy_list =
@@ -76,9 +76,10 @@ class PolicyStatisticsCollectorTest : public testing::Test {
     ASSERT_TRUE(test_policy_id2_ != -1);
 
     // Set up default function behaviour.
-    EXPECT_CALL(policy_service_, GetPolicies(POLICY_DOMAIN_CHROME,
-                                             std::string())).
-        WillRepeatedly(ReturnRef(policy_map_));
+    EXPECT_CALL(policy_service_,
+                GetPolicies(PolicyNamespace(POLICY_DOMAIN_CHROME,
+                                            std::string())))
+        .WillRepeatedly(ReturnRef(policy_map_));
 
     // Arbitrary negative value (so it'll be different from |update_delay_|).
     last_delay_ = base::TimeDelta::FromDays(-1);

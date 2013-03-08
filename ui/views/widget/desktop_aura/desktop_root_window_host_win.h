@@ -25,6 +25,10 @@ class DesktopDispatcherClient;
 class DesktopDragDropClientWin;
 class HWNDMessageHandler;
 
+namespace corewm {
+class CursorManager;
+}
+
 class VIEWS_EXPORT DesktopRootWindowHostWin
     : public DesktopRootWindowHost,
       public aura::RootWindowHost,
@@ -73,7 +77,8 @@ class VIEWS_EXPORT DesktopRootWindowHostWin
   virtual void SetWindowTitle(const string16& title) OVERRIDE;
   virtual void ClearNativeFocus() OVERRIDE;
   virtual Widget::MoveLoopResult RunMoveLoop(
-      const gfx::Vector2d& drag_offset) OVERRIDE;
+      const gfx::Vector2d& drag_offset,
+      Widget::MoveLoopSource source) OVERRIDE;
   virtual void EndMoveLoop() OVERRIDE;
   virtual void SetVisibilityChangedAnimationsEnabled(bool value) OVERRIDE;
   virtual bool ShouldUseNativeFrame() OVERRIDE;
@@ -84,9 +89,6 @@ class VIEWS_EXPORT DesktopRootWindowHostWin
   virtual void SetOpacity(unsigned char opacity) OVERRIDE;
   virtual void SetWindowIcons(const gfx::ImageSkia& window_icon,
                               const gfx::ImageSkia& app_icon) OVERRIDE;
-  virtual void SetAccessibleName(const string16& name) OVERRIDE;
-  virtual void SetAccessibleRole(ui::AccessibilityTypes::Role role) OVERRIDE;
-  virtual void SetAccessibleState(ui::AccessibilityTypes::State state) OVERRIDE;
   virtual void InitModalType(ui::ModalType modal_type) OVERRIDE;
   virtual void FlashFrame(bool flash_frame) OVERRIDE;
   virtual void OnNativeWidgetFocus() OVERRIDE;
@@ -151,6 +153,7 @@ class VIEWS_EXPORT DesktopRootWindowHostWin
   virtual void HandleAppDeactivated() OVERRIDE;
   virtual void HandleActivationChanged(bool active) OVERRIDE;
   virtual bool HandleAppCommand(short command) OVERRIDE;
+  virtual void HandleCancelMode() OVERRIDE;
   virtual void HandleCaptureLost() OVERRIDE;
   virtual void HandleClose() OVERRIDE;
   virtual bool HandleCommand(int command) OVERRIDE;
@@ -181,7 +184,6 @@ class VIEWS_EXPORT DesktopRootWindowHostWin
                                          HKL input_language_id) OVERRIDE;
   virtual bool HandlePaintAccelerated(const gfx::Rect& invalid_rect) OVERRIDE;
   virtual void HandlePaint(gfx::Canvas* canvas) OVERRIDE;
-  virtual void HandleScreenReaderDetected() OVERRIDE;
   virtual bool HandleTooltipNotify(int w_param,
                                    NMHDR* l_param,
                                    LRESULT* l_result) OVERRIDE;
@@ -224,8 +226,8 @@ class VIEWS_EXPORT DesktopRootWindowHostWin
   // do, we're responsible for the lifetime.
   scoped_ptr<aura::client::ScreenPositionClient> position_client_;
 
-  // A simple cursor client which just forwards events to the RootWindow.
-  scoped_ptr<DesktopCursorClient> cursor_client_;
+  // Controls visibility of the cursor.
+  scoped_ptr<views::corewm::CursorManager> cursor_client_;
 
   scoped_ptr<DesktopDragDropClientWin> drag_drop_client_;
 

@@ -197,8 +197,10 @@ TEST_F(ProfileMenuControllerTest, SetActiveAndRemove) {
   ASSERT_EQ(7, [menu numberOfItems]);
 
   // Create a browser and "show" it.
+  Browser::CreateParams profile2_params(profile2,
+                                        chrome::HOST_DESKTOP_TYPE_NATIVE);
   scoped_ptr<Browser> p2_browser(
-      chrome::CreateBrowserWithTestWindowForProfile(profile2));
+      chrome::CreateBrowserWithTestWindowForParams(&profile2_params));
   BrowserList::SetLastActive(p2_browser.get());
   VerifyProfileNamedIsActive(@"Profile 2", __LINE__);
 
@@ -207,8 +209,10 @@ TEST_F(ProfileMenuControllerTest, SetActiveAndRemove) {
   VerifyProfileNamedIsActive(@"Profile 2", __LINE__);
 
   // Open a new browser and make sure it takes effect.
+  Browser::CreateParams profile3_params(profile3,
+                                        chrome::HOST_DESKTOP_TYPE_NATIVE);
   scoped_ptr<Browser> p3_browser(
-      chrome::CreateBrowserWithTestWindowForProfile(profile3));
+      chrome::CreateBrowserWithTestWindowForParams(&profile3_params));
   BrowserList::SetLastActive(p3_browser.get());
   VerifyProfileNamedIsActive(@"Profile 3", __LINE__);
 
@@ -223,7 +227,7 @@ TEST_F(ProfileMenuControllerTest, DeleteActiveProfile) {
   TestingProfile* profile3 = manager->CreateTestingProfile("Profile 3");
   ASSERT_EQ(3U, manager->profile_manager()->GetNumberOfProfiles());
 
-  const FilePath profile3_path = profile3->GetPath();
+  const base::FilePath profile3_path = profile3->GetPath();
   manager->DeleteTestingProfile("Profile 3");
 
   // Simulate an unloaded profile by setting the "last used" local state pref

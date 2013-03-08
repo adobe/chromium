@@ -225,12 +225,12 @@ void CustomFilterRenderer::render(const WebKit::WebFilterOperation& op, WebKit::
     // Set up vertex buffer.
     WebKit::WebGLId vertexBuffer = GLC(m_context, m_context->createBuffer());
     GLC(m_context, m_context->bindBuffer(GL_ARRAY_BUFFER, vertexBuffer));
-    m_context->bufferData(GL_ARRAY_BUFFER, mesh.vertices().size() * sizeof(float), mesh.vertices().data(), GL_STATIC_DRAW);
+    m_context->bufferData(GL_ARRAY_BUFFER, mesh.vertices().size() * sizeof(float), &mesh.vertices().at(0), GL_STATIC_DRAW);
 
     // Set up index buffer.
     WebKit::WebGLId indexBuffer = GLC(m_context, m_context->createBuffer());
     m_context->bindBuffer(GL_ELEMENT_ARRAY_BUFFER, indexBuffer);
-    m_context->bufferData(GL_ELEMENT_ARRAY_BUFFER, mesh.indices().size() * sizeof(uint16_t), mesh.indices().data(), GL_STATIC_DRAW);
+    m_context->bufferData(GL_ELEMENT_ARRAY_BUFFER, mesh.indices().size() * sizeof(uint16_t), &mesh.indices().at(0), GL_STATIC_DRAW);
 
     // Bind all vertex attributes.
     bindVertexAttribute(compiledProgram->positionAttribLocation(), PositionAttribSize, mesh.bytesPerVertex(), PositionAttribOffset);

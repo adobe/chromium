@@ -19,7 +19,7 @@
 #include "base/time.h"
 #include "base/timer.h"
 #include "chrome/browser/common/cancelable_request.h"
-#include "chrome/browser/history/history.h"
+#include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_types.h"
 #include "chrome/browser/history/page_usage_data.h"
 #include "chrome/browser/history/top_sites_backend.h"
@@ -29,10 +29,10 @@
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/gfx/image/image.h"
 
-class FilePath;
 class Profile;
 
 namespace base {
+class FilePath;
 class RefCountedBytes;
 class RefCountedMemory;
 }
@@ -57,7 +57,7 @@ class TopSites
   explicit TopSites(Profile* profile);
 
   // Initializes TopSites.
-  void Init(const FilePath& db_name);
+  void Init(const base::FilePath& db_name);
 
   // Sets the given thumbnail for the given URL. Returns true if the thumbnail
   // was updated. False means either the URL wasn't known to us, or we felt

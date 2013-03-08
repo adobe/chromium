@@ -3,19 +3,17 @@
 // found in the LICENSE file.
 
 /**
- * The minimum about of time to display the butter bar for, in ms.
- * Justification is 1000ms for minimum display time plus 300ms for transition
- * duration.
+ * The amount of time, before a butter bar will hide after the last update.
  */
-var MINIMUM_BUTTER_DISPLAY_TIME_MS = 1300;
+var HIDE_DELAY_TIME_MS = 2000;
 
 /**
  * Butter bar is shown on top of the file list and is used to show the copy
  * progress and other messages.
- * @constructor
  * @param {HTMLElement} dialogDom FileManager top-level div.
  * @param {FileCopyManagerWrapper} copyManager The copy manager.
  * @param {MetadataCache} metadataCache The metadata cache.
+ * @constructor
  */
 function ButterBar(dialogDom, copyManager, metadataCache) {
   this.dialogDom_ = dialogDom;
@@ -27,6 +25,9 @@ function ButterBar(dialogDom, copyManager, metadataCache) {
   this.showTimeout_ = null;
   this.lastShowTime_ = 0;
   this.deleteTaskId_ = null;
+  this.currentMode_ = null;
+  this.totalDeleted_ = 0;
+  this.lastProgressValue_ = 0;
 
   this.copyManager_.addEventListener('copy-progress',
                                      this.onCopyProgress_.bind(this));
@@ -37,8 +38,19 @@ function ButterBar(dialogDom, copyManager, metadataCache) {
 /**
  * Name of action which should be displayed as an 'x' button instead of
  * link with text.
+ * @const
  */
 ButterBar.ACTION_X = '--action--x--';
+
+/**
+ * Butter bar mode.
+ * @const
+ */
+ButterBar.Mode = {
+  COPY: 1,
+  DELETE: 2,
+  ERROR: 3
+};
 
 /**
  * @return {boolean} True if visible.
@@ -56,12 +68,15 @@ ButterBar.prototype.isError_ = function() {
   return this.butter_.classList.contains('error');
 };
 
-  /**
+/**
  * Show butter bar.
+ * @param {ButterBar.Mode} mode Butter bar mode.
  * @param {string} message The message to be shown.
- * @param {object} opt_options Options: 'actions', 'progress', 'timeout'.
+ * @param {Object=} opt_options Options: 'actions', 'progress', 'timeout'.
  */
-ButterBar.prototype.show = function(message, opt_options) {
+ButterBar.prototype.show = function(mode, message, opt_options) {
+  this.currentMode_ = mode;
+
   this.clearShowTimeout_();
   this.clearHideTimeout_();
 
@@ -96,20 +111,20 @@ ButterBar.prototype.show = function(message, opt_options) {
 
 /**
  * Show error message in butter bar.
- * @private
  * @param {string} message Message.
- * @param {object} opt_options Same as in show().
+ * @param {Object=} opt_options Same as in show().
+ * @private
  */
 ButterBar.prototype.showError_ = function(message, opt_options) {
-  this.show(message, opt_options);
+  this.show(ButterBar.Mode.ERROR, message, opt_options);
   this.butter_.classList.add('error');
 };
 
 /**
  * Set message and/or progress.
- * @private
  * @param {string} message Message.
- * @param {object} opt_options Same as in show().
+ * @param {Object=} opt_options Same as in show().
+ * @private
  */
 ButterBar.prototype.update_ = function(message, opt_options) {
   if (!opt_options)
@@ -130,12 +145,18 @@ ButterBar.prototype.update_ = function(message, opt_options) {
   if (message && !this.isVisible_()) {
     // The butter bar is made visible on the first non-empty message.
     this.butter_.classList.add('visible');
-    this.lastShowTime_ = Date.now();
   }
   if (opt_options && 'progress' in opt_options) {
     butterMessage.classList.add('single-line');
-    this.butter_.querySelector('.progress-track').style.width =
-        (opt_options.progress * 100) + '%';
+    var progressTrack = this.butter_.querySelector('.progress-track');
+    // Smoothen the progress only when it goes forward. Especially do not
+    // do the transition effect if resetting to 0.
+    if (opt_options.progress > this.lastProgressValue_)
+      progressTrack.classList.add('smoothed');
+    else
+      progressTrack.classList.remove('smoothed');
+    progressTrack.style.width = (opt_options.progress * 100) + '%';
+    this.lastProgressValue_ = opt_options.progress;
   } else {
     butterMessage.classList.remove('single-line');
   }
@@ -144,7 +165,7 @@ ButterBar.prototype.update_ = function(message, opt_options) {
 /**
  * Hide butter bar. There might be some delay before hiding so that butter bar
  * would be shown for no less than the minimal time.
- * @param {boolean} opt_force If true hide immediately.
+ * @param {boolean=} opt_force If true hide immediately, default false.
  * @private
  */
 ButterBar.prototype.hide_ = function(opt_force) {
@@ -153,10 +174,9 @@ ButterBar.prototype.hide_ = function(opt_force) {
   if (!this.isVisible_())
     return;
 
-  var delay =
-      MINIMUM_BUTTER_DISPLAY_TIME_MS - (Date.now() - this.lastShowTime_);
-
+  var delay = HIDE_DELAY_TIME_MS;
   if (opt_force || delay <= 0) {
+    this.currentMode_ = null;
     this.butter_.classList.remove('visible');
     this.butter_.querySelector('.progress-bar').hidden = true;
   } else {
@@ -204,8 +224,8 @@ ButterBar.prototype.clearHideTimeout_ = function() {
 };
 
 /**
- * @private
  * @return {string?} The type of operation.
+ * @private
  */
 ButterBar.prototype.transferType_ = function() {
   var progress = this.progress_;
@@ -240,23 +260,24 @@ ButterBar.prototype.showProgress_ = function() {
           strf(type + '_FILE_NAME', this.progress_.filename) :
           strf(type + '_ITEMS_REMAINING', this.progress_.pendingItems);
 
-  if (this.isVisible_()) {
+  if (this.currentMode_ == ButterBar.Mode.COPY) {
     this.update_(progressString, options);
   } else {
     options.actions[ButterBar.ACTION_X] =
         this.copyManager_.requestCancel.bind(this.copyManager_);
-    this.show(progressString, options);
+    this.show(ButterBar.Mode.COPY, progressString, options);
   }
 };
 
 /**
  * 'copy-progress' event handler. Show progress or an appropriate message.
- * @private
  * @param {cr.Event} event A 'copy-progress' event from FileCopyManager.
+ * @private
  */
 ButterBar.prototype.onCopyProgress_ = function(event) {
   // Delete operation has higher priority.
-  if (this.deleteTaskId_) return;
+  if (this.currentMode_ == ButterBar.Mode.DELETE)
+    return;
 
   if (event.reason != 'PROGRESS')
     this.clearShowTimeout_();
@@ -278,7 +299,8 @@ ButterBar.prototype.onCopyProgress_ = function(event) {
       break;
 
     case 'CANCELLED':
-      this.show(str(this.transferType_() + '_CANCELLED'), {timeout: 1000});
+      this.show(ButterBar.Mode.DELETE,
+                str(this.transferType_() + '_CANCELLED'), { timeout: 1000 });
       break;
 
     case 'ERROR':
@@ -290,7 +312,7 @@ ButterBar.prototype.onCopyProgress_ = function(event) {
         this.showError_(strf(this.transferType_() +
                              '_TARGET_EXISTS_ERROR', name));
       } else if (event.error.reason === 'FILESYSTEM_ERROR') {
-        if (event.error.data.toGDrive &&
+        if (event.error.data.toDrive &&
             event.error.data.code === FileError.QUOTA_EXCEEDED_ERR) {
           // The alert will be shown in FileManager.onCopyProgress_.
           this.hide_();
@@ -310,96 +332,47 @@ ButterBar.prototype.onCopyProgress_ = function(event) {
 };
 
 /**
- * Forces the delete task, if any.
- * @return {boolean} Whether the delete task was scheduled.
- * @private
- */
-ButterBar.prototype.forceDelete_ = function() {
-  if (this.deleteTaskId_) {
-    this.copyManager_.forceDeleteTask(this.deleteTaskId_);
-    this.deleteTaskId_ = null;
-    return true;
-  }
-  return false;
-};
-
-/**
- * Informs user that files were deleted with an undo option.
- * In fact, files will be really deleted after timeout.
- * @param {Array.<Entry>} entries The entries to delete.
- */
-ButterBar.prototype.initiateDelete = function(entries) {
-  this.forceDelete_();
-
-  var callback = function(id) {
-    if (this.deleteTaskId_)
-      console.error('Already got a deleteTaskId');
-    this.deleteTaskId_ = id;
-  }.bind(this);
-
-  this.copyManager_.deleteEntries(entries, callback);
-};
-
-/**
- * Hides the delete butter bar, and so forces the delete operation.
- * We can safely force delete, since user has no access to undo button anymore.
- * @return {boolean} Whether there was a delete task.
- */
-ButterBar.prototype.forceDeleteAndHide = function() {
-  var result = this.forceDelete_();
-  if (result) this.hide_();
-  return result;
-};
-
-/**
  * 'delete' event handler. Shows information about deleting files.
- * @private
  * @param {cr.Event} event A 'delete' event from FileCopyManager.
+ * @private
  */
 ButterBar.prototype.onDelete_ = function(event) {
-  if (event.id != this.deleteTaskId_) return;
-
   switch (event.reason) {
-    case 'SCHEDULED':
+    case 'BEGIN':
+      if (this.currentMode_ != ButterBar.Mode.DELETE)
+        this.totalDeleted_ = 0;
+    case 'PROGRESS':
       var props = [];
       for (var i = 0; i < event.urls.length; i++) {
-        props[i] = {deleted: true};
+        props[i] = { deleted: true };
       }
       this.metadataCache_.set(event.urls, 'internal', props);
 
-      var title = strf('DELETED_MESSAGE_PLURAL', event.urls.length);
-      if (event.urls.length == 1) {
+      this.totalDeleted_ += event.urls.length;
+      var title = strf('DELETED_MESSAGE_PLURAL', this.totalDeleted_);
+      if (this.totalDeleted_ == 1) {
         var fullPath = util.extractFilePath(event.urls[0]);
         var fileName = PathUtil.split(fullPath).pop();
         title = strf('DELETED_MESSAGE', fileName);
       }
 
-      var actions = {};
-      actions[str('UNDO_DELETE')] = this.undoDelete_.bind(this);
-      this.show(title, { actions: actions, timeout: 0 });
+      if (this.currentMode_ == ButterBar.Mode.DELETE)
+        this.update_(title);
+      else
+        this.show(ButterBar.Mode.DELETE, title, { timeout: 0 });
       break;
 
-    case 'CANCELLED':
     case 'SUCCESS':
       var props = [];
       for (var i = 0; i < event.urls.length; i++) {
-        props[i] = {deleted: false};
+        props[i] = { deleted: false };
       }
       this.metadataCache_.set(event.urls, 'internal', props);
 
-      this.deleteTaskId_ = null;
       this.hide_();
       break;
 
     default:
       console.log('Unknown "delete" event reason: ' + event.reason);
   }
-};
-
-/**
- * Undo the delete operation.
- * @private
- */
-ButterBar.prototype.undoDelete_ = function() {
-  this.copyManager_.cancelDeleteTask(this.deleteTaskId_);
 };

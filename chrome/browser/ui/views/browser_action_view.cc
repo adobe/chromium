@@ -9,6 +9,7 @@
 #include "chrome/browser/extensions/extension_action.h"
 #include "chrome/browser/extensions/extension_action_manager.h"
 #include "chrome/browser/extensions/extension_context_menu_model.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/views/browser_actions_container.h"
 #include "chrome/browser/ui/views/toolbar_view.h"
@@ -117,7 +118,7 @@ BrowserActionButton::BrowserActionButton(const Extension* extension,
           GetBrowserAction(*extension)),
       extension_(extension),
       ALLOW_THIS_IN_INITIALIZER_LIST(
-          icon_factory_(extension, browser_action_, this)),
+          icon_factory_(browser->profile(), extension, browser_action_, this)),
       delegate_(delegate),
       context_menu_(NULL),
       called_registered_extension_command_(false) {

@@ -4,6 +4,7 @@
 
 #include "ui/views/widget/widget.h"
 
+#include "base/debug/trace_event.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/utf_string_conversions.h"
@@ -107,14 +108,14 @@ class DefaultWidgetDelegate : public WidgetDelegate {
   virtual void DeleteDelegate() OVERRIDE {
     delete this;
   }
-  virtual Widget* GetWidget() {
+  virtual Widget* GetWidget() OVERRIDE {
     return widget_;
   }
-  virtual const Widget* GetWidget() const {
+  virtual const Widget* GetWidget() const OVERRIDE {
     return widget_;
   }
 
-  virtual bool CanActivate() const {
+  virtual bool CanActivate() const OVERRIDE {
     return can_activate_;
   }
 
@@ -200,7 +201,8 @@ Widget::Widget()
       is_mouse_button_pressed_(false),
       is_touch_down_(false),
       last_mouse_event_was_move_(false),
-      root_layers_dirty_(false) {
+      root_layers_dirty_(false),
+      movement_disabled_(false) {
 }
 
 Widget::~Widget() {
@@ -336,20 +338,24 @@ bool Widget::RequiresNonClientView(InitParams::Type type) {
 }
 
 void Widget::Init(const InitParams& in_params) {
+  TRACE_EVENT0("views", "Widget::Init");
   InitParams params = in_params;
-  if (ViewsDelegate::views_delegate)
-    ViewsDelegate::views_delegate->OnBeforeWidgetInit(&params, this);
 
   is_top_level_ = params.top_level ||
       (!params.child &&
        params.type != InitParams::TYPE_CONTROL &&
        params.type != InitParams::TYPE_TOOLTIP);
+  params.top_level = is_top_level_;
+
+  if (ViewsDelegate::views_delegate)
+    ViewsDelegate::views_delegate->OnBeforeWidgetInit(&params, this);
+
   widget_delegate_ = params.delegate ?
       params.delegate : new DefaultWidgetDelegate(this, params);
   ownership_ = params.ownership;
   native_widget_ = CreateNativeWidget(params.native_widget, this)->
                    AsNativeWidgetPrivate();
-  GetRootView();
+  root_view_.reset(CreateRootView());
   default_theme_provider_.reset(new DefaultThemeProvider);
   if (params.type == InitParams::TYPE_MENU) {
     is_mouse_button_pressed_ =
@@ -496,8 +502,9 @@ void Widget::SetVisibilityChangedAnimationsEnabled(bool value) {
   native_widget_->SetVisibilityChangedAnimationsEnabled(value);
 }
 
-Widget::MoveLoopResult Widget::RunMoveLoop(const gfx::Vector2d& drag_offset) {
-  return native_widget_->RunMoveLoop(drag_offset);
+Widget::MoveLoopResult Widget::RunMoveLoop(const gfx::Vector2d& drag_offset,
+                                           MoveLoopSource source) {
+  return native_widget_->RunMoveLoop(drag_offset, source);
 }
 
 void Widget::EndMoveLoop() {
@@ -546,16 +553,19 @@ void Widget::Close() {
     if (is_top_level() && focus_manager_.get())
       focus_manager_->SetFocusedView(NULL);
 
+    FOR_EACH_OBSERVER(WidgetObserver, observers_, OnWidgetClosing(this));
     native_widget_->Close();
     widget_closed_ = true;
   }
 }
 
 void Widget::CloseNow() {
+  FOR_EACH_OBSERVER(WidgetObserver, observers_, OnWidgetClosing(this));
   native_widget_->CloseNow();
 }
 
 void Widget::Show() {
+  TRACE_EVENT0("views", "Widget::Show");
   if (non_client_view_) {
 #if defined(OS_MACOSX)
     // On the Mac the FullScreenBookmarkBar test is different then for any other
@@ -667,10 +677,6 @@ void Widget::FlashFrame(bool flash) {
 }
 
 View* Widget::GetRootView() {
-  if (!root_view_.get()) {
-    // First time the root view is being asked for, create it now.
-    root_view_.reset(CreateRootView());
-  }
   return root_view_.get();
 }
 
@@ -680,10 +686,6 @@ const View* Widget::GetRootView() const {
 
 bool Widget::IsVisible() const {
   return native_widget_->IsVisible();
-}
-
-bool Widget::IsAccessibleWidget() const {
-  return native_widget_->IsAccessibleWidget();
 }
 
 ui::ThemeProvider* Widget::GetThemeProvider() const {
@@ -776,12 +778,7 @@ void Widget::UpdateWindowTitle() {
 
   // Update the native frame's text. We do this regardless of whether or not
   // the native frame is being used, since this also updates the taskbar, etc.
-  string16 window_title;
-  if (native_widget_->IsScreenReaderActive()) {
-    window_title = widget_delegate_->GetAccessibleWindowTitle();
-  } else {
-    window_title = widget_delegate_->GetWindowTitle();
-  }
+  string16 window_title = widget_delegate_->GetWindowTitle();
   base::i18n::AdjustStringForLocaleDirection(&window_title);
   native_widget_->SetWindowTitle(window_title);
   non_client_view_->UpdateWindowTitle();
@@ -891,12 +888,9 @@ void Widget::NotifyAccessibilityEvent(
     View* view,
     ui::AccessibilityTypes::Event event_type,
     bool send_native_event) {
-  // Send the notification to the delegate.
-  if (ViewsDelegate::views_delegate)
-    ViewsDelegate::views_delegate->NotifyAccessibilityEvent(view, event_type);
-
-  if (send_native_event)
-    native_widget_->SendNativeAccessibilityEvent(view, event_type);
+  // TODO(dmazzoni): get rid of this method and have clients just use
+  // View::NotifyAccessibilityEvent directly.
+  view->NotifyAccessibilityEvent(event_type, send_native_event);
 }
 
 const NativeWidget* Widget::native_widget() const {
@@ -999,10 +993,11 @@ void Widget::OnNativeBlur(gfx::NativeView new_focused_view) {
 
 void Widget::OnNativeWidgetVisibilityChanged(bool visible) {
   View* root = GetRootView();
-  root->PropagateVisibilityNotifications(root, visible);
+  if (root)
+    root->PropagateVisibilityNotifications(root, visible);
   FOR_EACH_OBSERVER(WidgetObserver, observers_,
                     OnWidgetVisibilityChanged(this, visible));
-  if (GetCompositor() && root->layer())
+  if (GetCompositor() && root && root->layer())
     root->layer()->SetVisible(visible);
 }
 
@@ -1010,12 +1005,9 @@ void Widget::OnNativeWidgetCreated() {
   if (is_top_level())
     focus_manager_.reset(FocusManagerFactory::Create(this));
 
-  native_widget_->SetAccessibleRole(
-      widget_delegate_->GetAccessibleWindowRole());
-  native_widget_->SetAccessibleState(
-      widget_delegate_->GetAccessibleWindowState());
-
   native_widget_->InitModalType(widget_delegate_->GetModalType());
+
+  FOR_EACH_OBSERVER(WidgetObserver, observers_, OnWidgetCreated(this));
 }
 
 void Widget::OnNativeWidgetDestroying() {
@@ -1023,13 +1015,14 @@ void Widget::OnNativeWidgetDestroying() {
   // in case that the focused view is under this root view.
   if (GetFocusManager())
     GetFocusManager()->ViewRemoved(root_view_.get());
-  FOR_EACH_OBSERVER(WidgetObserver, observers_, OnWidgetClosing(this));
+  FOR_EACH_OBSERVER(WidgetObserver, observers_, OnWidgetDestroying(this));
   if (non_client_view_)
     non_client_view_->WindowClosing();
   widget_delegate_->WindowClosing();
 }
 
 void Widget::OnNativeWidgetDestroyed() {
+  FOR_EACH_OBSERVER(WidgetObserver, observers_, OnWidgetDestroyed(this));
   widget_delegate_->DeleteDelegate();
   widget_delegate_ = NULL;
   native_widget_destroyed_ = true;
@@ -1122,9 +1115,14 @@ void Widget::OnNativeWidgetPaint(gfx::Canvas* canvas) {
 }
 
 int Widget::GetNonClientComponent(const gfx::Point& point) {
-  return non_client_view_ ?
+  int component = non_client_view_ ?
       non_client_view_->NonClientHitTest(point) :
       HTNOWHERE;
+
+  if (movement_disabled_ && (component == HTCAPTION || component == HTSYSMENU))
+    return HTNOWHERE;
+
+  return component;
 }
 
 void Widget::OnKeyEvent(ui::KeyEvent* event) {
@@ -1135,12 +1133,13 @@ void Widget::OnKeyEvent(ui::KeyEvent* event) {
 
 void Widget::OnMouseEvent(ui::MouseEvent* event) {
   ScopedEvent scoped(this, *event);
+  View* root_view = GetRootView();
   switch (event->type()) {
     case ui::ET_MOUSE_PRESSED:
       last_mouse_event_was_move_ = false;
       // Make sure we're still visible before we attempt capture as the mouse
       // press processing may have made the window hide (as happens with menus).
-      if (GetRootView()->OnMousePressed(*event) && IsVisible()) {
+      if (root_view && root_view->OnMousePressed(*event) && IsVisible()) {
         is_mouse_button_pressed_ = true;
         if (!native_widget_->HasCapture())
           native_widget_->SetCapture();
@@ -1155,7 +1154,8 @@ void Widget::OnMouseEvent(ui::MouseEvent* event) {
           ShouldReleaseCaptureOnMouseReleased()) {
         native_widget_->ReleaseCapture();
       }
-      GetRootView()->OnMouseReleased(*event);
+      if (root_view)
+        root_view->OnMouseReleased(*event);
       if ((event->flags() & ui::EF_IS_NON_CLIENT) == 0)
         event->SetHandled();
       return;
@@ -1163,21 +1163,24 @@ void Widget::OnMouseEvent(ui::MouseEvent* event) {
     case ui::ET_MOUSE_DRAGGED:
       if (native_widget_->HasCapture() && is_mouse_button_pressed_) {
         last_mouse_event_was_move_ = false;
-        GetRootView()->OnMouseDragged(*event);
+        if (root_view)
+          root_view->OnMouseDragged(*event);
       } else if (!last_mouse_event_was_move_ ||
                  last_mouse_event_position_ != event->location()) {
         last_mouse_event_position_ = event->location();
         last_mouse_event_was_move_ = true;
-        GetRootView()->OnMouseMoved(*event);
+        if (root_view)
+          root_view->OnMouseMoved(*event);
       }
       return;
     case ui::ET_MOUSE_EXITED:
       last_mouse_event_was_move_ = false;
-      GetRootView()->OnMouseExited(*event);
+      if (root_view)
+        root_view->OnMouseExited(*event);
       return;
     case ui::ET_MOUSEWHEEL:
-      if (GetRootView()->OnMouseWheel(
-          reinterpret_cast<const ui::MouseWheelEvent&>(*event)))
+      if (root_view && root_view->OnMouseWheel(
+          static_cast<const ui::MouseWheelEvent&>(*event)))
         event->SetHandled();
       return;
     default:
@@ -1187,8 +1190,11 @@ void Widget::OnMouseEvent(ui::MouseEvent* event) {
 }
 
 void Widget::OnMouseCaptureLost() {
-  if (is_mouse_button_pressed_ || is_touch_down_)
-    GetRootView()->OnMouseCaptureLost();
+  if (is_mouse_button_pressed_ || is_touch_down_) {
+    View* root_view = GetRootView();
+    if (root_view)
+      root_view->OnMouseCaptureLost();
+  }
   is_touch_down_ = false;
   is_mouse_button_pressed_ = false;
 }
@@ -1339,7 +1345,8 @@ void Widget::SetInitialBounds(const gfx::Rect& bounds) {
       // If we're going to maximize, wait until Show is invoked to set the
       // bounds. That way we avoid a noticeable resize.
       initial_restored_bounds_ = saved_bounds;
-    } else {
+    } else if (!saved_bounds.IsEmpty()) {
+      // If the saved bounds are valid, use them.
       SetBounds(saved_bounds);
     }
   } else {

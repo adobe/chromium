@@ -311,7 +311,7 @@ function painterTestURLRequest() {
       'params': {
         'source_dependency': {
           'id': 149,
-          'type': 11
+          'type': EventSourceType.HTTP_STREAM_JOB
         }
       },
       'phase': EventPhase.PHASE_NONE,
@@ -1077,7 +1077,7 @@ function painterTestHexEncodedBytes() {
       'params': {
         'source_dependency': {
           'id': 634,
-          'type': 4
+          'type': EventSourceType.CONNECT_JOB
         }
       },
       'phase': EventPhase.PHASE_BEGIN,
@@ -1139,7 +1139,7 @@ function painterTestHexEncodedBytes() {
       'params': {
         'source_dependency': {
           'id': 628,
-          'type': 11
+          'type': EventSourceType.HTTP_STREAM_JOB
         }
       },
       'phase': EventPhase.PHASE_BEGIN,
@@ -1762,7 +1762,8 @@ function painterTestInProgressURLRequest() {
 '                          --> load_flags = 68223104 ' +
     '(ENABLE_LOAD_TIMING | MAIN_FRAME | MAYBE_USER_GESTURE ' +
     '| VERIFY_EV_CERT)\n' +
-'                          --> load_state = 12 (READING_RESPONSE)\n' +
+'                          --> load_state = ' + LoadState.READING_RESPONSE +
+    ' (READING_RESPONSE)\n' +
 '                          --> method = "GET"\n' +
 '                          --> url = "http://www.MagicPonyShopper.com"\n' +
 't=1338864774145 [st=151]   -HTTP_STREAM_REQUEST\n' +

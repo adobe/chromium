@@ -288,7 +288,7 @@ TEST_F(CoreAudioUtilWinTest, SharedModeInitialize) {
                                                               &format)));
 
   // Perform a shared-mode initialization without event-driven buffer handling.
-  size_t endpoint_buffer_size = 0;
+  uint32 endpoint_buffer_size = 0;
   HRESULT hr = CoreAudioUtil::SharedModeInitialize(client, &format, NULL,
                                                    &endpoint_buffer_size);
   EXPECT_TRUE(SUCCEEDED(hr));
@@ -345,7 +345,7 @@ TEST_F(CoreAudioUtilWinTest, CreateRenderAndCaptureClients) {
   EDataFlow data[] = {eRender, eCapture};
 
   WAVEFORMATPCMEX format;
-  size_t endpoint_buffer_size = 0;
+  uint32 endpoint_buffer_size = 0;
 
   for (int i = 0; i < arraysize(data); ++i) {
     ScopedComPtr<IAudioClient> client;
@@ -382,6 +382,43 @@ TEST_F(CoreAudioUtilWinTest, CreateRenderAndCaptureClients) {
       EXPECT_GT(endpoint_buffer_size, 0u);
     }
   }
+}
+
+TEST_F(CoreAudioUtilWinTest, FillRenderEndpointBufferWithSilence) {
+  if (!CanRunAudioTest())
+    return;
+
+  // Create default clients using the default mixing format for shared mode.
+  ScopedComPtr<IAudioClient> client(
+      CoreAudioUtil::CreateDefaultClient(eRender, eConsole));
+  EXPECT_TRUE(client);
+
+  WAVEFORMATPCMEX format;
+  uint32 endpoint_buffer_size = 0;
+  EXPECT_TRUE(SUCCEEDED(CoreAudioUtil::GetSharedModeMixFormat(client,
+                                                              &format)));
+  CoreAudioUtil::SharedModeInitialize(client, &format, NULL,
+                                      &endpoint_buffer_size);
+  EXPECT_GT(endpoint_buffer_size, 0u);
+
+  ScopedComPtr<IAudioRenderClient> render_client(
+      CoreAudioUtil::CreateRenderClient(client));
+  EXPECT_TRUE(render_client);
+
+  // The endpoint audio buffer should not be filled up by default after being
+  // created.
+  UINT32 num_queued_frames = 0;
+  client->GetCurrentPadding(&num_queued_frames);
+  EXPECT_EQ(num_queued_frames, 0u);
+
+  // Fill it up with zeros and verify that the buffer is full.
+  // It is not possible to verify that the actual data consists of zeros
+  // since we can't access data that has already been sent to the endpoint
+  // buffer.
+  EXPECT_TRUE(CoreAudioUtil::FillRenderEndpointBufferWithSilence(
+                  client, render_client));
+  client->GetCurrentPadding(&num_queued_frames);
+  EXPECT_EQ(num_queued_frames, endpoint_buffer_size);
 }
 
 //

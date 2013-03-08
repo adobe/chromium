@@ -4,7 +4,7 @@
 
 #include "android_webview/browser/aw_download_manager_delegate.h"
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "content/public/browser/download_danger_type.h"
 #include "content/public/browser/download_item.h"
 
@@ -19,10 +19,10 @@ bool AwDownloadManagerDelegate::DetermineDownloadTarget(
   // Note this cancel is independent of the URLRequest cancel in
   // AwResourceDispatcherHostDelegate::DownloadStarting. The request
   // could have already finished by the time DownloadStarting is called.
-  callback.Run(FilePath() /* Empty file path for cancel */,
+  callback.Run(base::FilePath() /* Empty file path for cancel */,
                content::DownloadItem::TARGET_DISPOSITION_OVERWRITE,
                content::DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS,
-               FilePath());
+               base::FilePath());
   return true;
 }
 

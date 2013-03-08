@@ -7,10 +7,10 @@
 #include "base/basictypes.h"
 #include "base/command_line.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/prefs/pref_service.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/background/background_contents_service.h"
 #include "chrome/browser/background/background_contents_service_factory.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/tab_contents/background_contents.h"
 #include "chrome/browser/ui/browser_list.h"
@@ -26,8 +26,8 @@
 class BackgroundContentsServiceTest : public testing::Test {
  public:
   BackgroundContentsServiceTest() {}
-  ~BackgroundContentsServiceTest() {}
-  void SetUp() {
+  virtual ~BackgroundContentsServiceTest() {}
+  virtual void SetUp() {
     command_line_.reset(new CommandLine(CommandLine::NO_PROGRAM));
   }
 
@@ -75,7 +75,7 @@ class MockBackgroundContents : public BackgroundContents {
         content::Source<Profile>(profile_),
         content::Details<BackgroundContents>(this));
   }
-  virtual const GURL& GetURL() const { return url_; }
+  virtual const GURL& GetURL() const OVERRIDE { return url_; }
 
   void MockClose(Profile* profile) {
     content::NotificationService::current()->Notify(
@@ -85,7 +85,7 @@ class MockBackgroundContents : public BackgroundContents {
     delete this;
   }
 
-  ~MockBackgroundContents() {
+  virtual ~MockBackgroundContents() {
     content::NotificationService::current()->Notify(
         chrome::NOTIFICATION_BACKGROUND_CONTENTS_DELETED,
         content::Source<Profile>(profile_),

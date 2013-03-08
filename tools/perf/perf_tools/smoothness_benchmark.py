@@ -2,10 +2,10 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 from perf_tools import smoothness_measurement
-from telemetry import multi_page_benchmark
-from telemetry import util
+from telemetry.core import util
+from telemetry.page import page_benchmark
 
-class DidNotScrollException(multi_page_benchmark.MeasurementFailure):
+class DidNotScrollException(page_benchmark.MeasurementFailure):
   def __init__(self):
     super(DidNotScrollException, self).__init__('Page did not scroll')
 
@@ -142,7 +142,7 @@ def CalcImageDecodingResults(rendering_stats_deltas, results):
               totalDeferredImageDecodeTimeInSeconds,
               data_type='unimportant')
 
-class SmoothnessBenchmark(multi_page_benchmark.MultiPageBenchmark):
+class SmoothnessBenchmark(page_benchmark.PageBenchmark):
   def __init__(self):
     super(SmoothnessBenchmark, self).__init__('smoothness')
     self.force_enable_threaded_compositing = False
@@ -163,9 +163,16 @@ class SmoothnessBenchmark(multi_page_benchmark.MultiPageBenchmark):
   def CanRunForPage(self, page):
     return hasattr(page, 'smoothness')
 
-  def WillRunInteraction(self, page, tab):
+  def WillRunAction(self, page, tab, action):
     self._measurement = smoothness_measurement.SmoothnessMeasurement(tab)
-    self._measurement.bindToScrollInteraction()
+    if action.CanBeBound():
+      self._measurement.BindToAction(action)
+    else:
+      self._measurement.Start()
+
+  def DidRunAction(self, page, tab, action):
+    if not action.CanBeBound():
+      self._measurement.Stop()
 
   def MeasurePage(self, page, tab, results):
     rendering_stats_deltas = self._measurement.deltas
@@ -183,7 +190,6 @@ class SmoothnessBenchmark(multi_page_benchmark.MultiPageBenchmark):
     results.Add('load_time', 'seconds', load_time_seconds)
     results.Add('dom_content_loaded_time', 'seconds',
                 dom_content_loaded_time_seconds)
-
 
     CalcFirstPaintTimeResults(results, tab)
     CalcScrollResults(rendering_stats_deltas, results)

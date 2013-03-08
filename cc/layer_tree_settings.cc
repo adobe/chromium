@@ -20,69 +20,34 @@ LayerTreeSettings::LayerTreeSettings()
     , renderVSyncEnabled(true)
     , perTilePaintingEnabled(false)
     , partialSwapEnabled(false)
+    , cacheRenderPassContents(true)
     , rightAlignedSchedulingEnabled(false)
     , acceleratedAnimationEnabled(true)
-    , pageScalePinchZoomEnabled(false)
     , backgroundColorInsteadOfCheckerboard(false)
     , showOverdrawInTracing(false)
     , canUseLCDText(true)
     , shouldClearRootRenderPass(true)
     , useLinearFadeScrollbarAnimator(false)
+    , solidColorScrollbars(false)
+    , solidColorScrollbarColor(SK_ColorWHITE)
+    , solidColorScrollbarThicknessDIP(-1)
     , calculateTopControlsPosition(false)
+    , useCheapnessEstimator(false)
+    , useMemoryManagement(true)
     , minimumContentsScale(0.0625f)
     , lowResContentsScaleFactor(0.125f)
+    , topControlsHeight(0.f)
+    , topControlsShowThreshold(0.5f)
+    , topControlsHideThreshold(0.5f)
     , refreshRate(0)
     , maxPartialTextureUpdates(std::numeric_limits<size_t>::max())
     , numRasterThreads(1)
-    , topControlsHeightPx(0)
     , defaultTileSize(gfx::Size(256, 256))
     , maxUntiledLayerSize(gfx::Size(512, 512))
     , minimumOcclusionTrackingSize(gfx::Size(160, 160))
 {
-    // TODO(danakj): Move this to chromium when we don't go through the WebKit API anymore.
-    compositorFrameMessage = CommandLine::ForCurrentProcess()->HasSwitch(cc::switches::kEnableCompositorFrameMessage);
-    partialSwapEnabled = CommandLine::ForCurrentProcess()->HasSwitch(switches::kEnablePartialSwap);
-    backgroundColorInsteadOfCheckerboard = CommandLine::ForCurrentProcess()->HasSwitch(switches::kBackgroundColorInsteadOfCheckerboard);
-    showOverdrawInTracing = CommandLine::ForCurrentProcess()->HasSwitch(switches::kTraceOverdraw);
-
-// TODO(alokp): Remove this hard-coded setting.
-// Platforms that need to disable LCD text must explicitly set this value.
-#if defined(OS_ANDROID)
-    canUseLCDText = false;
-#endif
-
-#if defined(OS_ANDROID)
-    // TODO(danakj): Move this out to the android code.
-    maxPartialTextureUpdates = 0;
-#endif
-
-#if defined(OS_ANDROID)
-    // TODO(danakj): Move this out to the android code.
-    useLinearFadeScrollbarAnimator = true;
-#endif
-
-    initialDebugState.showPropertyChangedRects = CommandLine::ForCurrentProcess()->HasSwitch(cc::switches::kShowPropertyChangedRects);
-    initialDebugState.showSurfaceDamageRects = CommandLine::ForCurrentProcess()->HasSwitch(cc::switches::kShowSurfaceDamageRects);
-    initialDebugState.showScreenSpaceRects = CommandLine::ForCurrentProcess()->HasSwitch(cc::switches::kShowScreenSpaceRects);
-    initialDebugState.showReplicaScreenSpaceRects = CommandLine::ForCurrentProcess()->HasSwitch(cc::switches::kShowReplicaScreenSpaceRects);
-    initialDebugState.showOccludingRects = CommandLine::ForCurrentProcess()->HasSwitch(cc::switches::kShowOccludingRects);
-    initialDebugState.showNonOccludingRects = CommandLine::ForCurrentProcess()->HasSwitch(cc::switches::kShowNonOccludingRects);
-
-    if (CommandLine::ForCurrentProcess()->HasSwitch(
-            switches::kNumRasterThreads)) {
-        const size_t kMaxRasterThreads = 64;
-        std::string num_raster_threads =
-            CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
-                switches::kNumRasterThreads);
-        int num_threads;
-        if (base::StringToInt(num_raster_threads, &num_threads) &&
-            num_threads > 0 && num_threads <= kMaxRasterThreads) {
-            numRasterThreads = num_threads;
-        } else {
-            LOG(WARNING) << "Bad number of raster threads: " <<
-                num_raster_threads;
-        }
-    }
+    // TODO(danakj): Renable surface caching when we can do it more realiably. crbug.com/170713
+    cacheRenderPassContents = false;
 }
 
 LayerTreeSettings::~LayerTreeSettings()

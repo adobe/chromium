@@ -7,10 +7,11 @@
 #include <utility>
 
 #include "base/basictypes.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/i18n/case_conversion.h"
 #include "base/i18n/string_search.h"
 #include "base/metrics/histogram.h"
+#include "base/prefs/pref_service.h"
 #include "base/string16.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
@@ -18,9 +19,10 @@
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/bookmarks/bookmark_node_data.h"
 #include "chrome/browser/history/query_parser.h"
-#include "chrome/browser/prefs/pref_service_syncable.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/pref_names.h"
+#include "components/user_prefs/pref_registry_syncable.h"
+#include "components/user_prefs/user_prefs.h"
 #include "content/public/browser/user_metrics.h"
 #include "net/base/net_util.h"
 #include "ui/base/dragdrop/drag_drop_types.h"
@@ -28,6 +30,7 @@
 #include "ui/base/models/tree_node_iterator.h"
 
 using base::Time;
+using content::UserMetricsAction;
 
 namespace {
 
@@ -132,7 +135,7 @@ int PreferredDropOperation(int source_operations, int operations) {
 
 int BookmarkDragOperation(content::BrowserContext* browser_context,
                           const BookmarkNode* node) {
-  PrefServiceBase* prefs = PrefServiceBase::FromBrowserContext(browser_context);
+  PrefService* prefs = components::UserPrefs::Get(browser_context);
 
   int move = ui::DragDropTypes::DRAG_MOVE;
   if (!prefs->GetBoolean(prefs::kEditBookmarksEnabled))
@@ -431,13 +434,16 @@ const BookmarkNode* ApplyEditsWithPossibleFolderChange(
   return node;
 }
 
-void RegisterUserPrefs(PrefServiceSyncable* prefs) {
-  prefs->RegisterBooleanPref(prefs::kShowBookmarkBar,
-                             false,
-                             PrefServiceSyncable::SYNCABLE_PREF);
-  prefs->RegisterBooleanPref(prefs::kEditBookmarksEnabled,
-                             true,
-                             PrefServiceSyncable::UNSYNCABLE_PREF);
+void RegisterUserPrefs(PrefRegistrySyncable* registry) {
+  registry->RegisterBooleanPref(prefs::kShowBookmarkBar,
+                                false,
+                                PrefRegistrySyncable::SYNCABLE_PREF);
+  registry->RegisterBooleanPref(prefs::kEditBookmarksEnabled,
+                                true,
+                                PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterBooleanPref(prefs::kShowAppsShortcutInBookmarkBar,
+                                true,
+                                PrefRegistrySyncable::SYNCABLE_PREF);
 }
 
 const BookmarkNode* GetParentForNewNodes(
@@ -506,13 +512,23 @@ void RemoveAllBookmarks(BookmarkModel* model, const GURL& url) {
   }
 }
 
+void RecordBookmarkFolderOpen(BookmarkLaunchLocation location) {
+  if (location == LAUNCH_DETACHED_BAR || location == LAUNCH_ATTACHED_BAR)
+    content::RecordAction(UserMetricsAction("ClickedBookmarkBarFolder"));
+}
+
 void RecordBookmarkLaunch(BookmarkLaunchLocation location) {
-#if defined(OS_WIN)
-  // TODO(estade): do this on other platforms too. For now it's compiled out
-  // so that stats from platforms for which this is incompletely implemented
-  // don't mix in with Windows, where it should be implemented exhaustively.
+  if (location == LAUNCH_DETACHED_BAR || location == LAUNCH_ATTACHED_BAR)
+    content::RecordAction(UserMetricsAction("ClickedBookmarkBarURLButton"));
+
   UMA_HISTOGRAM_ENUMERATION("Bookmarks.LaunchLocation", location, LAUNCH_LIMIT);
-#endif
+}
+
+void RecordAppsPageOpen(BookmarkLaunchLocation location) {
+  if (location == LAUNCH_DETACHED_BAR || location == LAUNCH_ATTACHED_BAR) {
+    content::RecordAction(
+        UserMetricsAction("ClickedBookmarkBarAppsShortcutButton"));
+  }
 }
 
 #if defined(OS_WIN) || defined(OS_CHROMEOS) || defined(USE_AURA)

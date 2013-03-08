@@ -12,9 +12,9 @@
 
 #include <sddl.h>
 #define STRSAFE_NO_DEPRECATE
+#include <windows.h>
 #include <strsafe.h>
 #include <tlhelp32.h>
-#include <windows.h>
 
 #include <cstdlib>
 #include <iterator>
@@ -24,12 +24,12 @@
 
 #include "base/basictypes.h"
 #include "base/command_line.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/process_util.h"
 #include "base/string16.h"
-#include "base/string_number_conversions.h"
 #include "base/string_util.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/time.h"
 #include "base/win/registry.h"
 #include "base/win/scoped_com_initializer.h"
@@ -358,7 +358,7 @@ BOOL CALLBACK ChromeWindowEnumProc(HWND hwnd, LPARAM lparam) {
 
 // Returns true and populates |chrome_exe_path| with the path to chrome.exe if
 // a valid installation can be found.
-bool GetGoogleChromePath(FilePath* chrome_exe_path) {
+bool GetGoogleChromePath(base::FilePath* chrome_exe_path) {
   HKEY install_key = HKEY_LOCAL_MACHINE;
   if (!IsChromeInstalled(install_key)) {
     install_key = HKEY_CURRENT_USER;
@@ -420,7 +420,7 @@ BOOL __stdcall GoogleChromeCompatibilityCheck(BOOL set_flag,
 }
 
 BOOL __stdcall LaunchGoogleChrome() {
-  FilePath chrome_exe_path;
+  base::FilePath chrome_exe_path;
   if (!GetGoogleChromePath(&chrome_exe_path))
     return false;
 
@@ -508,7 +508,7 @@ BOOL __stdcall LaunchGoogleChromeWithDimensions(int x,
                                                 int height,
                                                 bool in_background) {
   if (in_background) {
-    FilePath chrome_exe_path;
+    base::FilePath chrome_exe_path;
     if (!GetGoogleChromePath(&chrome_exe_path))
       return false;
 

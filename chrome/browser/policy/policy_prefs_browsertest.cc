@@ -9,11 +9,12 @@
 #include <vector>
 
 #include "base/basictypes.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/json/json_reader.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
+#include "base/prefs/pref_service.h"
 #include "base/run_loop.h"
 #include "base/stl_util.h"
 #include "base/string_util.h"
@@ -23,11 +24,10 @@
 #include "chrome/browser/policy/browser_policy_connector.h"
 #include "chrome/browser/policy/mock_configuration_policy_provider.h"
 #include "chrome/browser/policy/policy_map.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_tabstrip.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/web_contents.h"
@@ -37,7 +37,9 @@
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
+using testing::AnyNumber;
 using testing::Return;
+using testing::_;
 
 namespace policy {
 
@@ -191,9 +193,9 @@ class PolicyTestCases {
   PolicyTestCases() {
     policy_test_cases_ = new std::map<std::string, PolicyTestCase*>();
 
-    FilePath path = ui_test_utils::GetTestFilePath(
-        FilePath(FILE_PATH_LITERAL("policy")),
-        FilePath(FILE_PATH_LITERAL("policy_test_cases.json")));
+    base::FilePath path = ui_test_utils::GetTestFilePath(
+        base::FilePath(FILE_PATH_LITERAL("policy")),
+        base::FilePath(FILE_PATH_LITERAL("policy_test_cases.json")));
     std::string json;
     if (!file_util::ReadFileToString(path, &json)) {
       ADD_FAILURE();
@@ -328,7 +330,8 @@ void VerifyControlledSettingIndicators(Browser* browser,
              << "  indicators.push(indicator)"
              << "}"
              << "domAutomationController.send(JSON.stringify(indicators));";
-  content::WebContents* contents = chrome::GetActiveWebContents(browser);
+  content::WebContents* contents =
+      browser->tab_strip_model()->GetActiveWebContents();
   std::string json;
   // Retrieve the state of all controlled setting indicators matching the
   // |selector| as JSON.
@@ -384,8 +387,9 @@ class PolicyPrefsTest
       public testing::WithParamInterface<PolicyDefinitionList::Entry> {
  protected:
   virtual void SetUpInProcessBrowserTestFixture() OVERRIDE {
-    EXPECT_CALL(provider_, IsInitializationComplete())
+    EXPECT_CALL(provider_, IsInitializationComplete(_))
         .WillRepeatedly(Return(true));
+    EXPECT_CALL(provider_, RegisterPolicyDomain(_, _)).Times(AnyNumber());
     BrowserPolicyConnector::SetPolicyProviderForTesting(&provider_);
   }
 
@@ -422,7 +426,7 @@ IN_PROC_BROWSER_TEST_P(PolicyPrefsTest, PolicyToPrefsMapping) {
   // Verifies that policies make their corresponding preferences become managed,
   // and that the user can't override that setting.
   const PolicyTestCase* test_case = policy_test_cases_.Get(GetParam().name);
-  ASSERT_TRUE(test_case);
+  ASSERT_TRUE(test_case) << "PolicyTestCase not found for " << GetParam().name;
   const ScopedVector<PrefMapping>& pref_mappings = test_case->pref_mappings();
   if (!test_case->IsSupported() || pref_mappings.empty())
     return;
@@ -468,7 +472,8 @@ IN_PROC_BROWSER_TEST_P(PolicyPrefsTest, CheckPolicyIndicators) {
   // value is recommended or enforced by a corresponding policy.
   const PolicyTestCase* policy_test_case =
       policy_test_cases_.Get(GetParam().name);
-  ASSERT_TRUE(policy_test_case);
+  ASSERT_TRUE(policy_test_case) << "PolicyTestCase not found for "
+      << GetParam().name;
   const ScopedVector<PrefMapping>& pref_mappings =
       policy_test_case->pref_mappings();
   if (!policy_test_case->IsSupported() || pref_mappings.empty())
@@ -499,7 +504,7 @@ IN_PROC_BROWSER_TEST_P(PolicyPrefsTest, CheckPolicyIndicators) {
     ui_test_utils::NavigateToURL(browser(), GURL(kMainSettingsPage));
     if (!(*pref_mapping)->indicator_test_setup_js().empty()) {
       ASSERT_TRUE(content::ExecuteScript(
-          chrome::GetActiveWebContents(browser()),
+          browser()->tab_strip_model()->GetActiveWebContents(),
           (*pref_mapping)->indicator_test_setup_js()));
     }
 

@@ -6,10 +6,10 @@
 #define WEBKIT_CHROMEOS_FILEAPI_REMOTE_FILE_STREAM_WRITER_H_
 
 #include "base/basictypes.h"
-#include "base/file_path.h"
-#include "base/platform_file.h"
+#include "base/files/file_path.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
+#include "base/platform_file.h"
 #include "webkit/fileapi/file_stream_writer.h"
 #include "webkit/fileapi/file_system_url.h"
 
@@ -52,7 +52,7 @@ class RemoteFileStreamWriter : public fileapi::FileStreamWriter {
       int buf_len,
       const net::CompletionCallback& callback,
       base::PlatformFileError open_result,
-      const FilePath& local_path,
+      const base::FilePath& local_path,
       const scoped_refptr<webkit_blob::ShareableFileReference>& file_ref);
   // Calls |pending_cancel_callback_|, assuming it is non-null.
   void InvokePendingCancelCallback(int result);

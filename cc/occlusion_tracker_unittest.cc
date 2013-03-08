@@ -189,7 +189,6 @@ protected:
         m_renderSurfaceLayerListImpl.clear();
         m_replicaLayers.clear();
         m_maskLayers.clear();
-        LayerTreeHost::setNeedsFilterContext(false);
     }
 
     typename Types::HostType* getHost();
@@ -277,7 +276,7 @@ protected:
 
         DCHECK(!root->renderSurface());
 
-        LayerTreeHostCommon::calculateDrawProperties(root, root->bounds(), 1, 1, dummyMaxTextureSize, false, m_renderSurfaceLayerListImpl);
+        LayerTreeHostCommon::calculateDrawProperties(root, root->bounds(), 1, 1, dummyMaxTextureSize, false, m_renderSurfaceLayerListImpl, false);
 
         m_layerIterator = m_layerIteratorBegin = Types::TestLayerIterator::begin(&m_renderSurfaceLayerListImpl);
     }

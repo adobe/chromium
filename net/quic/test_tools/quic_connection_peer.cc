@@ -4,9 +4,10 @@
 
 #include "net/quic/test_tools/quic_connection_peer.h"
 
+#include "base/stl_util.h"
 #include "net/quic/congestion_control/quic_congestion_manager.h"
-#include "net/quic/congestion_control/quic_receipt_metrics_collector.h"
-#include "net/quic/congestion_control/quic_send_scheduler.h"
+#include "net/quic/congestion_control/receive_algorithm_interface.h"
+#include "net/quic/congestion_control/send_algorithm_interface.h"
 #include "net/quic/quic_connection.h"
 
 namespace net {
@@ -18,19 +19,23 @@ void QuicConnectionPeer::SendAck(QuicConnection* connection) {
 }
 
 // static
-void QuicConnectionPeer::SetCollector(QuicConnection* connection,
-                                      QuicReceiptMetricsCollector* collector) {
-  connection->congestion_manager_.collector_.reset(collector);
+void QuicConnectionPeer::SetReceiveAlgorithm(
+    QuicConnection* connection,
+    ReceiveAlgorithmInterface* receive_algorithm) {
+  connection->congestion_manager_.receive_algorithm_.reset(receive_algorithm);
 }
 
 // static
-void QuicConnectionPeer::SetScheduler(QuicConnection* connection,
-                                      QuicSendScheduler* scheduler) {
-  connection->congestion_manager_.scheduler_.reset(scheduler);
+void QuicConnectionPeer::SetSendAlgorithm(
+    QuicConnection* connection,
+    SendAlgorithmInterface* send_algorithm) {
+  connection->congestion_manager_.send_algorithm_.reset(send_algorithm);
 }
 
 // static
-QuicAckFrame* QuicConnectionPeer::GetOutgoingAck(QuicConnection* connection) {
+QuicAckFrame* QuicConnectionPeer::GetOutgoingAck(
+    QuicConnection* connection) {
+  connection->UpdateOutgoingAck();
   return &connection->outgoing_ack_;
 }
 
@@ -48,6 +53,53 @@ QuicPacketCreator* QuicConnectionPeer::GetPacketCreator(
 
 bool QuicConnectionPeer::GetReceivedTruncatedAck(QuicConnection* connection) {
     return connection->received_truncated_ack_;
+}
+
+// static
+size_t QuicConnectionPeer::GetNumRetransmissionTimeouts(
+    QuicConnection* connection) {
+  return connection->retransmission_timeouts_.size();
+}
+
+// static
+bool QuicConnectionPeer::IsSavedForRetransmission(
+    QuicConnection* connection,
+    QuicPacketSequenceNumber sequence_number) {
+  return ContainsKey(connection->retransmission_map_, sequence_number);
+}
+
+// static
+size_t QuicConnectionPeer::GetRetransmissionCount(
+    QuicConnection* connection,
+    QuicPacketSequenceNumber sequence_number) {
+  QuicConnection::RetransmissionMap::iterator it =
+      connection->retransmission_map_.find(sequence_number);
+  DCHECK(connection->retransmission_map_.end() != it);
+  return it->second.number_retransmissions;
+}
+
+// static
+QuicPacketEntropyHash QuicConnectionPeer::GetSentEntropyHash(
+    QuicConnection* connection,
+    QuicPacketSequenceNumber sequence_number) {
+  return connection->entropy_manager_.SentEntropyHash(sequence_number);
+}
+
+// static
+bool QuicConnectionPeer::IsValidEntropy(
+    QuicConnection* connection,
+    QuicPacketSequenceNumber largest_observed,
+    const SequenceNumberSet& missing_packets,
+    QuicPacketEntropyHash entropy_hash) {
+  return connection->entropy_manager_.IsValidEntropy(
+      largest_observed, missing_packets, entropy_hash);
+}
+
+// static
+QuicPacketEntropyHash QuicConnectionPeer::ReceivedEntropyHash(
+    QuicConnection* connection,
+    QuicPacketSequenceNumber sequence_number) {
+  return connection->entropy_manager_.ReceivedEntropyHash(sequence_number);
 }
 
 }  // namespace test

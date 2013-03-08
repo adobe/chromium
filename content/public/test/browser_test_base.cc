@@ -16,6 +16,12 @@
 #include "base/system_monitor/system_monitor.h"
 #endif
 
+#if defined(OS_ANDROID)
+#include "base/threading/thread_restrictions.h"
+#include "content/public/browser/browser_main_runner.h"
+#include "content/public/browser/browser_thread.h"
+#endif
+
 namespace {
 
 #if defined(OS_POSIX)
@@ -27,8 +33,12 @@ namespace {
 // OS. See http://crbug.com/141302.
 static int g_browser_process_pid;
 static void DumpStackTraceSignalHandler(int signal) {
-  if (g_browser_process_pid == base::GetCurrentProcId())
+  if (g_browser_process_pid == base::GetCurrentProcId()) {
+    logging::RawLog(logging::LOG_ERROR,
+                    "BrowserTestBase signal handler received SIGTERM. "
+                    "Backtrace:\n");
     base::debug::StackTrace().PrintBacktrace();
+  }
   _exit(128 + signal);
 }
 #endif  // defined(OS_POSIX)
@@ -51,6 +61,11 @@ BrowserTestBase::BrowserTestBase() {
 }
 
 BrowserTestBase::~BrowserTestBase() {
+#if defined(OS_ANDROID)
+  // RemoteTestServer can cause wait on the UI thread.
+  base::ThreadRestrictions::ScopedAllowWait allow_wait;
+  test_server_.reset(NULL);
+#endif
 }
 
 void BrowserTestBase::SetUp() {
@@ -69,7 +84,18 @@ void BrowserTestBase::SetUp() {
           base::Bind(&BrowserTestBase::ProxyRunTestOnMainThreadLoop, this));
 
   SetUpInProcessBrowserTestFixture();
+#if defined(OS_ANDROID)
+  BrowserMainRunner::Create()->Initialize(params);
+  // We are done running the test by now. During teardown we
+  // need to be able to perform IO.
+  base::ThreadRestrictions::SetIOAllowed(true);
+  BrowserThread::PostTask(
+      BrowserThread::IO, FROM_HERE,
+      base::Bind(base::IgnoreResult(&base::ThreadRestrictions::SetIOAllowed),
+                 true));
+#else
   BrowserMain(params);
+#endif
   TearDownInProcessBrowserTestFixture();
 }
 
@@ -86,7 +112,7 @@ void BrowserTestBase::ProxyRunTestOnMainThreadLoop() {
   RunTestOnMainThreadLoop();
 }
 
-void BrowserTestBase::CreateTestServer(const FilePath& test_server_base) {
+void BrowserTestBase::CreateTestServer(const base::FilePath& test_server_base) {
   CHECK(!test_server_.get());
   test_server_.reset(new net::TestServer(
       net::TestServer::TYPE_HTTP,

@@ -70,7 +70,7 @@ MediaControls.prototype.createControl = function(className, opt_parent) {
  * @param {string} className Class name.
  * @param {function(Event)} handler Click handler.
  * @param {HTMLElement=} opt_parent Parent element or container if undefined.
- * @param {boolean} opt_toggle True if the button has toggle state.
+ * @param {boolean=} opt_toggle True if the button has toggle state.
  * @return {HTMLElement} The new button element.
  */
 MediaControls.prototype.createButton = function(
@@ -147,7 +147,7 @@ MediaControls.prototype.togglePlayState = function() {
 };
 
 /**
- * @param {HTMLElement} opt_parent Parent container.
+ * @param {HTMLElement=} opt_parent Parent container.
  */
 MediaControls.prototype.initPlayButton = function(opt_parent) {
   this.playButton_ = this.createButton('play media-control',
@@ -164,9 +164,9 @@ MediaControls.prototype.initPlayButton = function(opt_parent) {
 MediaControls.PROGRESS_RANGE = 5000;
 
 /**
- * @param {boolean} opt_seekMark True if the progress slider should have
- *   a seek mark.
- * @param {HTMLElement} opt_parent Parent container.
+ * @param {boolean=} opt_seekMark True if the progress slider should have
+ *     a seek mark.
+ * @param {HTMLElement=} opt_parent Parent container.
  */
 MediaControls.prototype.initTimeControls = function(opt_seekMark, opt_parent) {
   var timeControls = this.createControl('time-controls', opt_parent);
@@ -202,7 +202,7 @@ MediaControls.prototype.displayProgress_ = function(current, duration) {
 };
 
 /**
- * @param {number} value Progress [0..1]
+ * @param {number} value Progress [0..1].
  * @private
  */
 MediaControls.prototype.onProgressChange_ = function(value) {
@@ -239,7 +239,7 @@ MediaControls.prototype.onProgressDrag_ = function(on) {
  */
 
 /**
- * @param {HTMLElement} opt_parent Parent element for the controls.
+ * @param {HTMLElement=} opt_parent Parent element for the controls.
  */
 MediaControls.prototype.initVolumeControls = function(opt_parent) {
   var volumeControls = this.createControl('volume-controls', opt_parent);
@@ -271,7 +271,7 @@ MediaControls.prototype.onSoundButtonClick_ = function() {
 };
 
 /**
- * @param {number} value Volume [0..1]
+ * @param {number} value Volume [0..1].
  * @return {number} The rough level [0..3] used to pick an icon.
  * @private
  */
@@ -502,6 +502,23 @@ MediaControls.prototype.decodeState = function() {
 };
 
 /**
+ * Remove current state from the page URL or the app state.
+ */
+MediaControls.prototype.clearState = function() {
+  if (window.appState) {
+    if ('time' in window.appState)
+      delete window.appState.time;
+    util.saveAppState();
+    return;
+  }
+
+  var newLocation = document.location.origin + document.location.pathname +
+      document.location.search + '#';
+
+  document.location.href = newLocation;
+};
+
+/**
  * Create a customized slider control.
  *
  * @param {HTMLElement} container The containing div element.
@@ -585,7 +602,7 @@ MediaControls.Slider.prototype.getValue = function() {
 };
 
 /**
- * @param {number} value [0..1]
+ * @param {number} value [0..1].
  */
 MediaControls.Slider.prototype.setValue = function(value) {
   this.value_ = value;
@@ -595,7 +612,7 @@ MediaControls.Slider.prototype.setValue = function(value) {
 /**
  * Fill the given proportion the slider bar (from the left).
  *
- * @param {number} proportion [0..1]
+ * @param {number} proportion [0..1].
  * @private
  */
 MediaControls.Slider.prototype.setFilled_ = function(proportion) {
@@ -605,7 +622,7 @@ MediaControls.Slider.prototype.setFilled_ = function(proportion) {
 /**
  * Get the value from the input element.
  *
- * @return {number} Value [0..1]
+ * @return {number} Value [0..1].
  * @private
  */
 MediaControls.Slider.prototype.getValueFromUI_ = function() {
@@ -615,7 +632,7 @@ MediaControls.Slider.prototype.getValueFromUI_ = function() {
 /**
  * Update the UI with the current value.
  *
- * @param {number} value [0..1]
+ * @param {number} value [0..1].
  * @private
  */
 MediaControls.Slider.prototype.setValueToUI_ = function(value) {
@@ -670,6 +687,7 @@ MediaControls.Slider.prototype.onInputDrag_ = function(on) {
  * @param {function(number)} onChange Value change handler.
  * @param {function(boolean)} onDrag Drag begin/end handler.
  * @param {function(number):string} formatFunction Value formatting function.
+ * @constructor
  */
 MediaControls.AnimatedSlider = function(
     container, value, range, onChange, onDrag, formatFunction) {
@@ -691,7 +709,7 @@ MediaControls.AnimatedSlider.STEPS = 10;
 MediaControls.AnimatedSlider.DURATION = 100;
 
 /**
- * @param {number} value [0..1]
+ * @param {number} value [0..1].
  * @private
  */
 MediaControls.AnimatedSlider.prototype.setValueToUI_ = function(value) {
@@ -723,6 +741,7 @@ MediaControls.AnimatedSlider.prototype.setValueToUI_ = function(value) {
  * @param {function(number)} onChange Value change handler.
  * @param {function(boolean)} onDrag Drag begin/end handler.
  * @param {function(number):string} formatFunction Value formatting function.
+ * @constructor
  */
 MediaControls.PreciseSlider = function(
     container, value, range, onChange, onDrag, formatFunction) {
@@ -732,6 +751,7 @@ MediaControls.PreciseSlider = function(
 
   /**
    * @type {function(number):string}
+   * @private
    */
   this.valueToString_ = null;
 
@@ -792,7 +812,7 @@ MediaControls.PreciseSlider.prototype.setValueToStringFunction =
  *
  * @param {number} ratio [0..1] The proportion of the duration.
  * @param {number} timeout Timeout in ms after which the label should be hidden.
- *   MediaControls.PreciseSlider.NO_AUTO_HIDE means show until the next call.
+ *     MediaControls.PreciseSlider.NO_AUTO_HIDE means show until the next call.
  * @private
  */
 MediaControls.PreciseSlider.prototype.showSeekMark_ =
@@ -908,9 +928,9 @@ MediaControls.PreciseSlider.prototype.onInputDrag_ = function(on) {
  *
  * @param {HTMLElement} containerElement The container for the controls.
  * @param {function} onMediaError Function to display an error message.
- * @param {function} opt_fullScreenToggle Function to toggle fullscreen mode.
- * @param {HTMLElement} opt_stateIconParent The parent for the icon that
- *                      gives visual feedback when the playback state changes.
+ * @param {function=} opt_fullScreenToggle Function to toggle fullscreen mode.
+ * @param {HTMLElement=} opt_stateIconParent The parent for the icon that
+ *     gives visual feedback when the playback state changes.
  * @constructor
  */
 function VideoControls(containerElement, onMediaError,
@@ -993,8 +1013,8 @@ VideoControls.prototype.togglePlayState = function() {
 
 /**
  * Save the playback position to the persistent storage.
- * @param {boolean} opt_sync True if the position must be saved synchronously
- *   (required when closing app windows).
+ * @param {boolean=} opt_sync True if the position must be saved synchronously
+ *     (required when closing app windows).
  */
 VideoControls.prototype.savePosition = function(opt_sync) {
   if (!this.media_.duration ||

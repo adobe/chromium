@@ -5,6 +5,7 @@
 #include "content/browser/web_contents/web_contents_view_guest.h"
 
 #include "build/build_config.h"
+#include "content/browser/browser_plugin/browser_plugin_guest.h"
 #include "content/browser/renderer_host/render_view_host_factory.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/renderer_host/render_widget_host_view_guest.h"
@@ -24,41 +25,14 @@ namespace content {
 
 WebContentsViewGuest::WebContentsViewGuest(
     WebContentsImpl* web_contents,
-    BrowserPluginGuest* guest)
+    BrowserPluginGuest* guest,
+    WebContentsViewPort* platform_view)
     : web_contents_(web_contents),
-      guest_(guest) {
+      guest_(guest),
+      platform_view_(platform_view) {
 }
 
 WebContentsViewGuest::~WebContentsViewGuest() {
-}
-
-void WebContentsViewGuest::CreateView(const gfx::Size& initial_size,
-                                      gfx::NativeView context) {
-  requested_size_ = initial_size;
-}
-
-RenderWidgetHostView* WebContentsViewGuest::CreateViewForWidget(
-    RenderWidgetHost* render_widget_host) {
-  if (render_widget_host->GetView()) {
-    // During testing, the view will already be set up in most cases to the
-    // test view, so we don't want to clobber it with a real one. To verify that
-    // this actually is happening (and somebody isn't accidentally creating the
-    // view twice), we check for the RVH Factory, which will be set when we're
-    // making special ones (which go along with the special views).
-    DCHECK(RenderViewHostFactory::has_factory());
-    return render_widget_host->GetView();
-  }
-
-  RenderWidgetHostView* view = new RenderWidgetHostViewGuest(
-      render_widget_host,
-      guest_);
-
-  return view;
-}
-
-RenderWidgetHostView* WebContentsViewGuest::CreateViewForPopupWidget(
-    RenderWidgetHost* render_widget_host) {
-  return RenderWidgetHostViewPort::CreateViewForWidget(render_widget_host);
 }
 
 gfx::NativeView WebContentsViewGuest::GetNativeView() const {
@@ -73,35 +47,81 @@ gfx::NativeView WebContentsViewGuest::GetContentNativeView() const {
 }
 
 gfx::NativeWindow WebContentsViewGuest::GetTopLevelNativeWindow() const {
-  return NULL;
+  return guest_->embedder_web_contents()->GetView()->GetTopLevelNativeWindow();
 }
 
 void WebContentsViewGuest::GetContainerBounds(gfx::Rect* out) const {
-  out->SetRect(0, 0, requested_size_.width(), requested_size_.height());
+  platform_view_->GetContainerBounds(out);
 }
 
 void WebContentsViewGuest::SizeContents(const gfx::Size& size) {
-  requested_size_ = size;
-  RenderWidgetHostView* rwhv = web_contents_->GetRenderWidgetHostView();
-  if (rwhv)
-    rwhv->SetSize(size);
+  platform_view_->SizeContents(size);
 }
 
 void WebContentsViewGuest::SetInitialFocus() {
-  if (web_contents_->FocusLocationBarByDefault())
-    web_contents_->SetFocusToLocationBar(false);
-  else
-    Focus();
+  platform_view_->SetInitialFocus();
 }
 
 gfx::Rect WebContentsViewGuest::GetViewBounds() const {
-  gfx::Rect rect(0, 0, requested_size_.width(), requested_size_.height());
-  return rect;
+  return platform_view_->GetViewBounds();
 }
 
 #if defined(OS_MACOSX)
 void WebContentsViewGuest::SetAllowOverlappingViews(bool overlapping) {
-  NOTIMPLEMENTED();
+  platform_view_->SetAllowOverlappingViews(overlapping);
+}
+#endif
+
+void WebContentsViewGuest::CreateView(const gfx::Size& initial_size,
+                                      gfx::NativeView context) {
+  platform_view_->CreateView(initial_size, context);
+}
+
+RenderWidgetHostView* WebContentsViewGuest::CreateViewForWidget(
+    RenderWidgetHost* render_widget_host) {
+  if (render_widget_host->GetView()) {
+    // During testing, the view will already be set up in most cases to the
+    // test view, so we don't want to clobber it with a real one. To verify that
+    // this actually is happening (and somebody isn't accidentally creating the
+    // view twice), we check for the RVH Factory, which will be set when we're
+    // making special ones (which go along with the special views).
+    DCHECK(RenderViewHostFactory::has_factory());
+    return render_widget_host->GetView();
+  }
+
+  RenderWidgetHostView* platform_widget = NULL;
+  platform_widget = platform_view_->CreateViewForWidget(render_widget_host);
+
+  RenderWidgetHostView* view = new RenderWidgetHostViewGuest(
+      render_widget_host,
+      guest_,
+      platform_widget);
+
+  return view;
+}
+
+RenderWidgetHostView* WebContentsViewGuest::CreateViewForPopupWidget(
+    RenderWidgetHost* render_widget_host) {
+  return RenderWidgetHostViewPort::CreateViewForWidget(render_widget_host);
+}
+
+void WebContentsViewGuest::SetPageTitle(const string16& title) {
+}
+
+void WebContentsViewGuest::RenderViewCreated(RenderViewHost* host) {
+  platform_view_->RenderViewCreated(host);
+}
+
+void WebContentsViewGuest::RenderViewSwappedIn(RenderViewHost* host) {
+  platform_view_->RenderViewSwappedIn(host);
+}
+
+#if defined(OS_MACOSX)
+bool WebContentsViewGuest::IsEventTracking() const {
+  return false;
+}
+
+void WebContentsViewGuest::CloseTabAfterEventTracking() {
 }
 #endif
 
@@ -109,32 +129,20 @@ WebContents* WebContentsViewGuest::web_contents() {
   return web_contents_;
 }
 
-void WebContentsViewGuest::RenderViewCreated(RenderViewHost* host) {
-}
-
-bool WebContentsViewGuest::IsEventTracking() const {
-  return false;
-}
-
 void WebContentsViewGuest::RestoreFocus() {
-  SetInitialFocus();
-}
-
-void WebContentsViewGuest::SetPageTitle(const string16& title) {
-  NOTIMPLEMENTED();
+  platform_view_->RestoreFocus();
 }
 
 void WebContentsViewGuest::OnTabCrashed(base::TerminationStatus status,
                                         int error_code) {
-  NOTIMPLEMENTED();
 }
 
 void WebContentsViewGuest::Focus() {
-  NOTIMPLEMENTED();
+  platform_view_->Focus();
 }
 
 void WebContentsViewGuest::StoreFocus() {
-  NOTIMPLEMENTED();
+  platform_view_->StoreFocus();
 }
 
 WebDropData* WebContentsViewGuest::GetDropData() const {
@@ -142,20 +150,14 @@ WebDropData* WebContentsViewGuest::GetDropData() const {
   return NULL;
 }
 
-void WebContentsViewGuest::CloseTabAfterEventTracking() {
-  NOTIMPLEMENTED();
-}
-
 void WebContentsViewGuest::UpdateDragCursor(WebDragOperation operation) {
   NOTIMPLEMENTED();
 }
 
 void WebContentsViewGuest::GotFocus() {
-  NOTIMPLEMENTED();
 }
 
 void WebContentsViewGuest::TakeFocus(bool reverse) {
-  NOTIMPLEMENTED();
 }
 
 void WebContentsViewGuest::ShowContextMenu(

@@ -64,6 +64,8 @@ class APP_LIST_EXPORT AppListItemView : public views::CustomButton,
   virtual void ItemIconChanged() OVERRIDE;
   virtual void ItemTitleChanged() OVERRIDE;
   virtual void ItemHighlightedChanged() OVERRIDE;
+  virtual void ItemIsInstallingChanged() OVERRIDE;
+  virtual void ItemPercentDownloadedChanged() OVERRIDE;
 
   // views::View overrides:
   virtual std::string GetClassName() const OVERRIDE;
@@ -80,6 +82,7 @@ class APP_LIST_EXPORT AppListItemView : public views::CustomButton,
   virtual bool ShouldEnterPushedState(const ui::Event& event) OVERRIDE;
 
   // views::View overrides:
+  virtual bool OnKeyPressed(const ui::KeyEvent& event) OVERRIDE;
   virtual bool OnMousePressed(const ui::MouseEvent& event) OVERRIDE;
   virtual void OnMouseReleased(const ui::MouseEvent& event) OVERRIDE;
   virtual void OnMouseCaptureLost() OVERRIDE;

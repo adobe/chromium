@@ -82,7 +82,7 @@ void ChromeMockRenderThread::OnAllocateTempFileForPrinting(
   renderer_fd->fd = *browser_fd = -1;
   renderer_fd->auto_close = false;
 
-  FilePath path;
+  base::FilePath path;
   if (file_util::CreateTemporaryFile(&path)) {
     int fd = open(path.value().c_str(), O_WRONLY);
     DCHECK_GE(fd, 0);
@@ -184,6 +184,11 @@ void ChromeMockRenderThread::OnUpdatePrintSettings(
   }
   std::vector<int> pages(printing::PageRange::GetPages(new_ranges));
   printer_->UpdateSettings(document_cookie, params, pages, margins_type);
+
+  job_settings.GetBoolean(printing::kSettingShouldPrintSelectionOnly,
+                          &params->params.selection_only);
+  job_settings.GetBoolean(printing::kSettingShouldPrintBackgrounds,
+                          &params->params.should_print_backgrounds);
 }
 
 MockPrinter* ChromeMockRenderThread::printer() {

@@ -144,7 +144,7 @@ class IBusEngineServiceImpl : public IBusEngineService {
 
   // IBusEngineService override.
   virtual void RegisterProperties(
-      const ibus::IBusPropertyList& property_list) OVERRIDE {
+      const IBusPropertyList& property_list) OVERRIDE {
     dbus::Signal signal(ibus::engine::kServiceInterface,
                         ibus::engine::kRegisterPropertiesSignal);
     dbus::MessageWriter writer(&signal);
@@ -153,7 +153,7 @@ class IBusEngineServiceImpl : public IBusEngineService {
   }
 
   // IBusEngineService override.
-  virtual void UpdatePreedit(const ibus::IBusText& ibus_text,
+  virtual void UpdatePreedit(const IBusText& ibus_text,
                              uint32 cursor_pos,
                              bool is_visible,
                              IBusEnginePreeditFocusOutMode mode) OVERRIDE {
@@ -168,7 +168,7 @@ class IBusEngineServiceImpl : public IBusEngineService {
   }
 
   // IBusEngineService override.
-  virtual void UpdateAuxiliaryText(const ibus::IBusText& ibus_text,
+  virtual void UpdateAuxiliaryText(const IBusText& ibus_text,
                                    bool is_visible) OVERRIDE {
     dbus::Signal signal(ibus::engine::kServiceInterface,
                         ibus::engine::kUpdateAuxiliaryTextSignal);
@@ -179,7 +179,7 @@ class IBusEngineServiceImpl : public IBusEngineService {
   }
 
   // IBusEngineService override.
-  virtual void UpdateLookupTable(const ibus::IBusLookupTable& lookup_table,
+  virtual void UpdateLookupTable(const IBusLookupTable& lookup_table,
                                  bool is_visible) OVERRIDE {
     dbus::Signal signal(ibus::engine::kServiceInterface,
                         ibus::engine::kUpdateLookupTableSignal);
@@ -190,7 +190,7 @@ class IBusEngineServiceImpl : public IBusEngineService {
   }
 
   // IBusEngineService override.
-  virtual void UpdateProperty(const ibus::IBusProperty& property) OVERRIDE {
+  virtual void UpdateProperty(const IBusProperty& property) OVERRIDE {
     dbus::Signal signal(ibus::engine::kServiceInterface,
                         ibus::engine::kUpdatePropertySignal);
     dbus::MessageWriter writer(&signal);
@@ -221,7 +221,7 @@ class IBusEngineServiceImpl : public IBusEngineService {
     dbus::Signal signal(ibus::engine::kServiceInterface,
                         ibus::engine::kCommitTextSignal);
     dbus::MessageWriter writer(&signal);
-    ibus::AppendStringAsIBusText(text, &writer);
+    AppendStringAsIBusText(text, &writer);
     exported_object_->SendSignal(&signal);
   }
 
@@ -232,8 +232,7 @@ class IBusEngineServiceImpl : public IBusEngineService {
     if (engine_handler_ == NULL)
       return;
     engine_handler_->FocusIn();
-    dbus::Response* response = dbus::Response::FromMethodCall(method_call);
-    response_sender.Run(response);
+    response_sender.Run(dbus::Response::FromMethodCall(method_call));
   }
 
   // Handles FocusOut method call from ibus-daemon.
@@ -242,8 +241,7 @@ class IBusEngineServiceImpl : public IBusEngineService {
     if (engine_handler_ == NULL)
       return;
     engine_handler_->FocusOut();
-    dbus::Response* response = dbus::Response::FromMethodCall(method_call);
-    response_sender.Run(response);
+    response_sender.Run(dbus::Response::FromMethodCall(method_call));
   }
 
   // Handles Enable method call from ibus-daemon.
@@ -252,8 +250,7 @@ class IBusEngineServiceImpl : public IBusEngineService {
     if (engine_handler_ == NULL)
       return;
     engine_handler_->Enable();
-    dbus::Response* response = dbus::Response::FromMethodCall(method_call);
-    response_sender.Run(response);
+    response_sender.Run(dbus::Response::FromMethodCall(method_call));
   }
 
   // Handles Disable method call from ibus-daemon.
@@ -262,8 +259,7 @@ class IBusEngineServiceImpl : public IBusEngineService {
     if (engine_handler_ == NULL)
       return;
     engine_handler_->Disable();
-    dbus::Response* response = dbus::Response::FromMethodCall(method_call);
-    response_sender.Run(response);
+    response_sender.Run(dbus::Response::FromMethodCall(method_call));
   }
 
   // Handles PropertyActivate method call from ibus-daemon.
@@ -286,10 +282,8 @@ class IBusEngineServiceImpl : public IBusEngineService {
     }
     engine_handler_->PropertyActivate(
         property_name,
-        static_cast<IBusEngineHandlerInterface::IBusPropertyState>(
-            property_state));
-    dbus::Response* response = dbus::Response::FromMethodCall(method_call);
-    response_sender.Run(response);
+        static_cast<ibus::IBusPropertyState>(property_state));
+    response_sender.Run(dbus::Response::FromMethodCall(method_call));
   }
 
   // Handles PropertyShow method call from ibus-daemon.
@@ -305,8 +299,7 @@ class IBusEngineServiceImpl : public IBusEngineService {
       return;
     }
     engine_handler_->PropertyShow(property_name);
-    dbus::Response* response = dbus::Response::FromMethodCall(method_call);
-    response_sender.Run(response);
+    response_sender.Run(dbus::Response::FromMethodCall(method_call));
   }
 
   // Handles PropertyHide method call from ibus-daemon.
@@ -322,8 +315,7 @@ class IBusEngineServiceImpl : public IBusEngineService {
       return;
     }
     engine_handler_->PropertyHide(property_name);
-    dbus::Response* response = dbus::Response::FromMethodCall(method_call);
-    response_sender.Run(response);
+    response_sender.Run(dbus::Response::FromMethodCall(method_call));
   }
 
   // Handles SetCapability method call from ibus-daemon.
@@ -340,8 +332,7 @@ class IBusEngineServiceImpl : public IBusEngineService {
     }
     engine_handler_->SetCapability(
         static_cast<IBusEngineHandlerInterface::IBusCapability>(capability));
-    dbus::Response* response = dbus::Response::FromMethodCall(method_call);
-    response_sender.Run(response);
+    response_sender.Run(dbus::Response::FromMethodCall(method_call));
   }
 
   void Reset(dbus::MethodCall* method_call,
@@ -349,8 +340,7 @@ class IBusEngineServiceImpl : public IBusEngineService {
     if (engine_handler_ == NULL)
       return;
     engine_handler_->Reset();
-    dbus::Response* response = dbus::Response::FromMethodCall(method_call);
-    response_sender.Run(response);
+    response_sender.Run(dbus::Response::FromMethodCall(method_call));
   }
 
   // Handles ProcessKeyEvent method call from ibus-daemon.
@@ -381,19 +371,18 @@ class IBusEngineServiceImpl : public IBusEngineService {
         keysym, keycode, state,
         base::Bind(&IBusEngineServiceImpl::KeyEventDone,
                    weak_ptr_factory_.GetWeakPtr(),
-                   base::Unretained(
-                       dbus::Response::FromMethodCall(method_call)),
+                   base::Passed(dbus::Response::FromMethodCall(method_call)),
                    response_sender));
   }
 
-  void KeyEventDone(dbus::Response* response,
+  void KeyEventDone(scoped_ptr<dbus::Response> response,
                     const dbus::ExportedObject::ResponseSender& response_sender,
                     bool consume) {
     if (engine_handler_ == NULL)
       return;
-    dbus::MessageWriter writer(response);
+    dbus::MessageWriter writer(response.get());
     writer.AppendBool(consume);
-    response_sender.Run(response);
+    response_sender.Run(response.Pass());
   }
 
   // Handles CandidateClicked method call from ibus-daemon.
@@ -424,8 +413,7 @@ class IBusEngineServiceImpl : public IBusEngineService {
         index,
         static_cast<ibus::IBusMouseButton>(button),
         state);
-    dbus::Response* response = dbus::Response::FromMethodCall(method_call);
-    response_sender.Run(response);
+    response_sender.Run(dbus::Response::FromMethodCall(method_call));
   }
 
   // Handles SetSurroundingText method call from ibus-daemon.
@@ -436,7 +424,7 @@ class IBusEngineServiceImpl : public IBusEngineService {
       return;
     dbus::MessageReader reader(method_call);
     std::string text;
-    if (!reader.PopString(&text)) {
+    if (!PopStringFromIBusText(&reader, &text)) {
       LOG(WARNING) << "SetSurroundingText called with incorrect parameters: "
                    << method_call->ToString();
       return;
@@ -455,8 +443,7 @@ class IBusEngineServiceImpl : public IBusEngineService {
     }
 
     engine_handler_->SetSurroundingText(text, cursor_pos, anchor_pos);
-    dbus::Response* response = dbus::Response::FromMethodCall(method_call);
-    response_sender.Run(response);
+    response_sender.Run(dbus::Response::FromMethodCall(method_call));
   }
 
   // Called when the method call is exported.
@@ -500,12 +487,12 @@ class IBusEngineServiceDaemonlessImpl : public IBusEngineService {
 
   // IBusEngineService override.
   virtual void RegisterProperties(
-      const ibus::IBusPropertyList& property_list) OVERRIDE {
+      const IBusPropertyList& property_list) OVERRIDE {
     // TODO(nona): Implement this.
   }
 
   // IBusEngineService override.
-  virtual void UpdatePreedit(const ibus::IBusText& ibus_text,
+  virtual void UpdatePreedit(const IBusText& ibus_text,
                              uint32 cursor_pos,
                              bool is_visible,
                              IBusEnginePreeditFocusOutMode mode) OVERRIDE {
@@ -513,19 +500,19 @@ class IBusEngineServiceDaemonlessImpl : public IBusEngineService {
   }
 
   // IBusEngineService override.
-  virtual void UpdateAuxiliaryText(const ibus::IBusText& ibus_text,
+  virtual void UpdateAuxiliaryText(const IBusText& ibus_text,
                                    bool is_visible) OVERRIDE {
     // TODO(nona): Implement this.
   }
 
   // IBusEngineService override.
-  virtual void UpdateLookupTable(const ibus::IBusLookupTable& lookup_table,
+  virtual void UpdateLookupTable(const IBusLookupTable& lookup_table,
                                  bool is_visible) OVERRIDE {
     // TODO(nona): Implement this.
   }
 
   // IBusEngineService override.
-  virtual void UpdateProperty(const ibus::IBusProperty& property) OVERRIDE {
+  virtual void UpdateProperty(const IBusProperty& property) OVERRIDE {
     // TODO(nona): Implement this.
   }
 

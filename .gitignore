@@ -135,6 +135,8 @@ v8.log
 /remoting/remoting_host_event_logger.xml
 /remoting/remoting_host_installation.xml
 /remoting/remoting_host_installation_unittest.xml
+/remoting/remoting_lib_idl.xml
+/remoting/remoting_lib_rc.xml
 /remoting/remoting_me2me_host.xml
 /remoting/remoting_version_resources.xml
 /remoting/tools/internal/
@@ -172,6 +174,7 @@ v8.log
 /third_party/ffmpeg
 /third_party/flac
 /third_party/freetype
+/third_party/freetype2/src
 /third_party/gles2_conform
 /third_party/gnu_binutils/
 /third_party/gold
@@ -284,3 +287,5 @@ v8.log
 /webpagereplay_logs/
 /x86-generic_out/
 /xcodebuild
+cscope.*
+Session.vim

@@ -12,6 +12,10 @@
 #include "content/test/content_browser_test_utils.h"
 #include "net/test/test_server.h"
 
+#if defined(OS_WIN)
+#include "base/win/windows_version.h"
+#endif
+
 namespace content {
 
 class WebrtcBrowserTest: public ContentBrowserTest {
@@ -79,6 +83,28 @@ IN_PROC_BROWSER_TEST_F(WebrtcBrowserTest, CanSetupAudioAndVideoCall) {
   ExpectTitle("OK");
 }
 
+IN_PROC_BROWSER_TEST_F(WebrtcBrowserTest, MANUAL_CanSetupCallAndSendDtmf) {
+  GURL url(test_server()->GetURL("files/media/peerconnection-call.html"));
+  NavigateToURL(shell(), url);
+
+  EXPECT_TRUE(
+      ExecuteJavascript("callAndSendDtmf('123,abc');"));
+}
+
+// This test is flaky on Win XP, Win7 and Linux Precise. Disabling on all just
+// in case.
+IN_PROC_BROWSER_TEST_F(WebrtcBrowserTest,
+                       DISABLED_CanMakeEmptyCallThenAddStreamsAndRenegotiate) {
+  GURL url(test_server()->GetURL("files/media/peerconnection-call.html"));
+  NavigateToURL(shell(), url);
+
+  const char* kJavascript =
+      "makeEmptyCallThenAddOneStreamAndRenegotiate("
+      "{video: true, audio: true});";
+  EXPECT_TRUE(ExecuteJavascript(kJavascript));
+  ExpectTitle("OK");
+}
+
 // This test will make a complete PeerConnection-based call but remove the
 // MSID and bundle attribute from the initial offer to verify that
 // video is playing for the call even if the initiating client don't support
@@ -95,8 +121,6 @@ IN_PROC_BROWSER_TEST_F(WebrtcBrowserTest,
 // This test will make a PeerConnection-based call and test an unreliable text
 // dataChannel.
 IN_PROC_BROWSER_TEST_F(WebrtcBrowserTest, CallWithDataOnly) {
-  CommandLine::ForCurrentProcess()->AppendSwitch(switches::kEnableDataChannels);
-
   GURL url(test_server()->GetURL("files/media/peerconnection-call.html"));
   NavigateToURL(shell(), url);
 
@@ -107,8 +131,6 @@ IN_PROC_BROWSER_TEST_F(WebrtcBrowserTest, CallWithDataOnly) {
 // This test will make a PeerConnection-based call and test an unreliable text
 // dataChannel and audio and video tracks.
 IN_PROC_BROWSER_TEST_F(WebrtcBrowserTest, CallWithDataAndMedia) {
-  CommandLine::ForCurrentProcess()->AppendSwitch(switches::kEnableDataChannels);
-
   GURL url(test_server()->GetURL("files/media/peerconnection-call.html"));
   NavigateToURL(shell(), url);
 
@@ -118,9 +140,9 @@ IN_PROC_BROWSER_TEST_F(WebrtcBrowserTest, CallWithDataAndMedia) {
 
 // This test will make a PeerConnection-based call and test an unreliable text
 // dataChannel and later add an audio and video track.
-IN_PROC_BROWSER_TEST_F(WebrtcBrowserTest, CallWithDataAndLaterAddMedia) {
-  CommandLine::ForCurrentProcess()->AppendSwitch(switches::kEnableDataChannels);
-
+// Flaky. http://crbug.com/175683
+IN_PROC_BROWSER_TEST_F(WebrtcBrowserTest,
+                       DISABLED_CallWithDataAndLaterAddMedia) {
   GURL url(test_server()->GetURL("files/media/peerconnection-call.html"));
   NavigateToURL(shell(), url);
 

@@ -5,18 +5,18 @@
 #include "chrome/browser/page_cycler/page_cycler.h"
 
 #include "base/bind.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/message_loop.h"
 #include "base/process_util.h"
-#include "base/string_number_conversions.h"
-#include "base/string_split.h"
+#include "base/strings/string_number_conversions.h"
+#include "base/strings/string_split.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_list.h"
-#include "chrome/browser/ui/browser_tabstrip.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/test/base/chrome_process_util.h"
 #include "chrome/test/perf/perf_test.h"
@@ -32,8 +32,9 @@ using content::Referrer;
 using content::WebContents;
 
 PageCycler::PageCycler(Browser* browser,
-                       const FilePath& urls_file)
-    : content::WebContentsObserver(chrome::GetActiveWebContents(browser)),
+                       const base::FilePath& urls_file)
+    : content::WebContentsObserver(
+          browser->tab_strip_model()->GetActiveWebContents()),
       browser_(browser),
       urls_file_(urls_file),
       url_index_(0),
@@ -134,7 +135,7 @@ void PageCycler::BeginCycle() {
   // result in the browser being in a state of loading when PageCycler is ready
   // to start. Instead of interrupting the load, we wait for it to finish, and
   // will call LoadNextURL() from DidFinishLoad() or DidFailProvisionalLoad().
-  if (chrome::GetActiveWebContents(browser_)->IsLoading())
+  if (browser_->tab_strip_model()->GetActiveWebContents()->IsLoading())
     return;
   LoadNextURL();
 }

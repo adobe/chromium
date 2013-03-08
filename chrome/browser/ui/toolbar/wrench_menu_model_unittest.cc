@@ -6,10 +6,10 @@
 
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/global_error/global_error.h"
 #include "chrome/browser/ui/global_error/global_error_service.h"
 #include "chrome/browser/ui/global_error/global_error_service_factory.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/test/base/browser_with_test_window_test.h"
 #include "chrome/test/base/menu_model_test.h"
 #include "chrome/test/base/testing_profile.h"
@@ -28,7 +28,7 @@ class MenuError : public GlobalError {
 
   int execute_count() { return execute_count_; }
 
-  bool HasBadge() OVERRIDE { return false; }
+  virtual bool HasBadge() OVERRIDE { return false; }
   virtual int GetBadgeResourceID() OVERRIDE {
     ADD_FAILURE();
     return 0;
@@ -85,7 +85,7 @@ class WrenchMenuModelTest : public BrowserWithTestWindowTest,
   // Don't handle accelerators.
   virtual bool GetAcceleratorForCommandId(
       int command_id,
-      ui::Accelerator* accelerator) { return false; }
+      ui::Accelerator* accelerator) OVERRIDE { return false; }
 };
 
 // Copies parts of MenuModelTest::Delegate and combines them with the
@@ -102,19 +102,19 @@ class TestWrenchMenuModel : public WrenchMenuModel {
   }
 
   // Testing overrides to ui::SimpleMenuModel::Delegate:
-  virtual bool IsCommandIdChecked(int command_id) const {
+  virtual bool IsCommandIdChecked(int command_id) const OVERRIDE {
     bool val = WrenchMenuModel::IsCommandIdChecked(command_id);
     if (val)
       checked_count_++;
     return val;
   }
 
-  virtual bool IsCommandIdEnabled(int command_id) const {
+  virtual bool IsCommandIdEnabled(int command_id) const OVERRIDE {
     ++enable_count_;
     return true;
   }
 
-  virtual void ExecuteCommand(int command_id) { ++execute_count_; }
+  virtual void ExecuteCommand(int command_id) OVERRIDE { ++execute_count_; }
 
   int execute_count_;
   mutable int checked_count_;
@@ -201,6 +201,6 @@ class EncodingMenuModelTest : public BrowserWithTestWindowTest,
 
 TEST_F(EncodingMenuModelTest, IsCommandIdCheckedWithNoTabs) {
   EncodingMenuModel model(browser());
-  ASSERT_EQ(NULL, chrome::GetActiveWebContents(browser()));
+  ASSERT_EQ(NULL, browser()->tab_strip_model()->GetActiveWebContents());
   EXPECT_FALSE(model.IsCommandIdChecked(IDC_ENCODING_ISO88591));
 }

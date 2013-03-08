@@ -29,6 +29,10 @@ namespace base {
 class SharedMemory;
 }
 
+namespace gpu {
+struct Mailbox;
+}
+
 namespace content {
 class GpuChannelHost;
 
@@ -70,6 +74,7 @@ class CommandBufferProxyImpl
   virtual bool Initialize() OVERRIDE;
   virtual State GetState() OVERRIDE;
   virtual State GetLastState() OVERRIDE;
+  virtual int32 GetLastToken() OVERRIDE;
   virtual void Flush(int32 put_offset) OVERRIDE;
   virtual State FlushSync(int32 put_offset, int32 last_known_get) OVERRIDE;
   virtual void SetGetBuffer(int32 shm_id) OVERRIDE;
@@ -96,11 +101,6 @@ class CommandBufferProxyImpl
   // global and can be used for cross-channel synchronization.
   uint32 InsertSyncPoint();
 
-  // Makes this command buffer wait on a sync point. This command buffer will be
-  // unscheduled until the command buffer that inserted that sync point reaches
-  // it, or gets destroyed.
-  void WaitSyncPoint(uint32);
-
   // Makes this command buffer invoke a task when a sync point is reached, or
   // the command buffer that inserted that sync point is destroyed.
   bool SignalSyncPoint(uint32 sync_point,
@@ -110,7 +110,7 @@ class CommandBufferProxyImpl
   // GL_texture_mailbox_CHROMIUM. Unlike genMailboxCHROMIUM, this IPC is
   // handled only on the GPU process' IO thread, and so is not effectively
   // a finish.
-  bool GenerateMailboxNames(unsigned num, std::vector<std::string>* names);
+  bool GenerateMailboxNames(unsigned num, std::vector<gpu::Mailbox>* names);
 
   // Sends an IPC message with the new state of surface visibility.
   bool SetSurfaceVisible(bool visible);

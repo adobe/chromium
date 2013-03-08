@@ -11,19 +11,20 @@
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/callback_forward.h"
 #include "base/compiler_specific.h"
 #include "base/gtest_prod_util.h"
-#include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
 #include "base/memory/weak_ptr.h"
 #include "base/prefs/public/pref_change_registrar.h"
 #include "base/string16.h"
+#include "base/supports_user_data.h"
 #include "base/time.h"
-#include "chrome/browser/api/sync/profile_sync_service_observer.h"
 #include "chrome/browser/autofill/autocheckout_manager.h"
 #include "chrome/browser/autofill/autocomplete_history_manager.h"
 #include "chrome/browser/autofill/autofill_download.h"
+#include "chrome/browser/autofill/autofill_manager_delegate.h"
 #include "chrome/browser/autofill/field_types.h"
 #include "chrome/browser/autofill/form_structure.h"
 #include "chrome/browser/autofill/personal_data_manager.h"
@@ -40,7 +41,7 @@ class AutofillMetrics;
 class CreditCard;
 class FormGroup;
 class GURL;
-class PrefServiceSyncable;
+class PrefRegistrySyncable;
 class ProfileSyncService;
 
 struct FormData;
@@ -62,6 +63,7 @@ struct PasswordForm;
 
 namespace gfx {
 class Rect;
+class RectF;
 }
 
 namespace IPC {
@@ -72,8 +74,7 @@ class Message;
 // forms.
 class AutofillManager : public content::WebContentsObserver,
                         public AutofillDownloadManager::Observer,
-                        public ProfileSyncServiceObserver,
-                        public base::RefCounted<AutofillManager> {
+                        public base::SupportsUserData::Data {
  public:
   static void CreateForWebContentsAndDelegate(
       content::WebContents* contents,
@@ -81,13 +82,13 @@ class AutofillManager : public content::WebContentsObserver,
   static AutofillManager* FromWebContents(content::WebContents* contents);
 
   // Registers our Enable/Disable Autofill pref.
-  static void RegisterUserPrefs(PrefServiceSyncable* prefs);
+  static void RegisterUserPrefs(PrefRegistrySyncable* registry);
 
   // Set an external delegate.
   void SetExternalDelegate(AutofillExternalDelegate* delegate);
 
-  // Used to say if this class has an external delegate that it is using.
-  bool HasExternalDelegate();
+  // Whether browser process will create and own the Autofill popup UI.
+  bool IsNativeUiEnabled();
 
   // Called from our external delegate so they cannot be private.
   virtual void OnFillAutofillFormData(int query_id,
@@ -110,12 +111,28 @@ class AutofillManager : public content::WebContentsObserver,
   void RemoveAutocompleteEntry(const string16& name, const string16& value);
 
   // Returns the present web_contents state.
-  content::WebContents* GetWebContents();
+  content::WebContents* GetWebContents() const;
+
+  // Returns the present form structures seen by Autofill manager.
+  const std::vector<FormStructure*>& GetFormStructures();
+
+  // Causes the dialog for request autocomplete feature to be shown.
+  virtual void ShowRequestAutocompleteDialog(
+      const FormData& form,
+      const GURL& source_url,
+      const content::SSLStatus& ssl_status,
+      autofill::DialogType dialog_type,
+      const base::Callback<void(const FormStructure*)>& callback);
+
+  // Happens when the autocomplete dialog runs its callback when being closed.
+  void RequestAutocompleteDialogClosed();
+
+  autofill::AutofillManagerDelegate* delegate() const {
+    return manager_delegate_;
+  }
 
  protected:
   // Only test code should subclass AutofillManager.
-  friend class base::RefCounted<AutofillManager>;
-
   AutofillManager(content::WebContents* web_contents,
                   autofill::AutofillManagerDelegate* delegate);
   virtual ~AutofillManager();
@@ -171,6 +188,11 @@ class AutofillManager : public content::WebContentsObserver,
     return external_delegate_;
   }
 
+  // Exposed for testing.
+  autofill::AutocheckoutManager* autocheckout_manager() {
+    return &autocheckout_manager_;
+  }
+
   // Processes the submitted |form|, saving any new Autofill data and uploading
   // the possible field types for the submitted fields to the crowdsouring
   // server.  Returns false if this form is not relevant for Autofill.
@@ -196,8 +218,7 @@ class AutofillManager : public content::WebContentsObserver,
   virtual void OnLoadedServerPredictions(
       const std::string& response_xml) OVERRIDE;
 
-  // ProfileSyncServiceObserver:
-  virtual void OnStateChanged() OVERRIDE;
+  void OnSyncStateChanged();
 
   // Register as an observer with the sync service.
   void RegisterWithSyncService();
@@ -222,7 +243,7 @@ class AutofillManager : public content::WebContentsObserver,
   void OnQueryFormFieldAutofill(int query_id,
                                 const FormData& form,
                                 const FormFieldData& field,
-                                const gfx::Rect& bounding_box,
+                                const gfx::RectF& bounding_box,
                                 bool display_warning);
   void OnDidEndTextFieldEditing();
   void OnHideAutofillPopup();
@@ -230,7 +251,7 @@ class AutofillManager : public content::WebContentsObserver,
       const FormFieldData& form,
       const PasswordFormFillData& fill_data);
   void OnShowPasswordSuggestions(const FormFieldData& field,
-                                 const gfx::Rect& bounds,
+                                 const gfx::RectF& bounds,
                                  const std::vector<string16>& suggestions);
   void OnSetDataList(const std::vector<string16>& values,
                      const std::vector<string16>& labels,
@@ -248,6 +269,9 @@ class AutofillManager : public content::WebContentsObserver,
   // Called to signal clicking an element failed in some way during an
   // Autocheckout flow.
   void OnClickFailed(autofill::AutocheckoutStatus status);
+
+  // Returns the matched whitelist URL prefix for the current tab's url.
+  std::string GetAutocheckoutURLPrefix() const;
 
   // Fills |host| with the RenderViewHost for this tab.
   // Returns false if Autofill is disabled or if the host is unavailable.
@@ -342,7 +366,7 @@ class AutofillManager : public content::WebContentsObserver,
   AutocompleteHistoryManager autocomplete_history_manager_;
 
   // Handles autocheckout flows.
-  AutocheckoutManager autocheckout_manager_;
+  autofill::AutocheckoutManager autocheckout_manager_;
 
   // For logging UMA metrics. Overridden by metrics tests.
   scoped_ptr<const AutofillMetrics> metric_logger_;
@@ -384,6 +408,8 @@ class AutofillManager : public content::WebContentsObserver,
   // Delegate to perform external processing (display, selection) on
   // our behalf.  Weak.
   AutofillExternalDelegate* external_delegate_;
+
+  base::WeakPtrFactory<AutofillManager> weak_ptr_factory_;
 
   friend class AutofillManagerTest;
   friend class FormStructureBrowserTest;

@@ -54,6 +54,10 @@ CommandBufferService::State CommandBufferService::GetLastState() {
   return GetState();
 }
 
+int32 CommandBufferService::GetLastToken() {
+  return GetState().token;
+}
+
 void CommandBufferService::UpdateState() {
   if (shared_state_) {
     CommandBufferService::State state = GetState();
@@ -165,6 +169,7 @@ bool CommandBufferService::RegisterTransferBuffer(
 
 void CommandBufferService::SetToken(int32 token) {
   token_ = token;
+  UpdateState();
 }
 
 void CommandBufferService::SetParseError(error::Error error) {

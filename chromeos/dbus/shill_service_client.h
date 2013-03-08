@@ -47,11 +47,14 @@ class CHROMEOS_EXPORT ShillServiceClient {
     virtual void AddService(const std::string& service_path,
                             const std::string& name,
                             const std::string& type,
-                            const std::string& state) = 0;
+                            const std::string& state,
+                            bool add_to_watch_list) = 0;
     virtual void RemoveService(const std::string& service_path) = 0;
     virtual void SetServiceProperty(const std::string& service_path,
                                     const std::string& property,
                                     const base::Value& value) = 0;
+    virtual const base::DictionaryValue* GetServiceProperties(
+        const std::string& service_path) const = 0;
     virtual void ClearServices() = 0;
 
    protected:
@@ -124,6 +127,13 @@ class CHROMEOS_EXPORT ShillServiceClient {
   virtual void ActivateCellularModem(
       const dbus::ObjectPath& service_path,
       const std::string& carrier,
+      const base::Closure& callback,
+      const ErrorCallback& error_callback) = 0;
+
+  // Calls the CompleteCellularActivation method.
+  // |callback| is called after the method call succeeds.
+  virtual void CompleteCellularActivation(
+      const dbus::ObjectPath& service_path,
       const base::Closure& callback,
       const ErrorCallback& error_callback) = 0;
 

@@ -15,6 +15,7 @@
 #include "content/browser/accessibility/browser_accessibility_manager.h"
 #include "content/browser/renderer_host/render_widget_host_view_base.h"
 #include "content/common/content_export.h"
+#include "ipc/ipc_sender.h"
 #include "ui/base/animation/animation_delegate.h"
 #include "ui/base/animation/slide_animation.h"
 #include "ui/base/gtk/gtk_signal.h"
@@ -43,11 +44,13 @@ struct NativeWebKeyboardEvent;
 class CONTENT_EXPORT RenderWidgetHostViewGtk
     : public RenderWidgetHostViewBase,
       public BrowserAccessibilityDelegate,
-      public ui::ActiveWindowWatcherXObserver {
+      public ui::ActiveWindowWatcherXObserver,
+      public IPC::Sender {
  public:
   virtual ~RenderWidgetHostViewGtk();
 
   // RenderWidgetHostView implementation.
+  virtual bool OnMessageReceived(const IPC::Message& msg) OVERRIDE;
   virtual void InitAsChild(gfx::NativeView parent_view) OVERRIDE;
   virtual RenderWidgetHost* GetRenderWidgetHost() const OVERRIDE;
   virtual void SetSize(const gfx::Size& size) OVERRIDE;
@@ -82,6 +85,9 @@ class CONTENT_EXPORT RenderWidgetHostViewGtk
   virtual void TextInputStateChanged(
       const ViewHostMsg_TextInputState_Params& params) OVERRIDE;
   virtual void ImeCancelComposition() OVERRIDE;
+  virtual void ImeCompositionRangeChanged(
+      const ui::Range& range,
+      const std::vector<gfx::Rect>& character_bounds) OVERRIDE;
   virtual void DidUpdateBackingStore(
       const gfx::Rect& scroll_rect,
       const gfx::Vector2d& scroll_delta,
@@ -95,16 +101,18 @@ class CONTENT_EXPORT RenderWidgetHostViewGtk
                                 size_t offset,
                                 const ui::Range& range) OVERRIDE;
   virtual void SelectionBoundsChanged(
-      const gfx::Rect& start_rect,
-      WebKit::WebTextDirection start_direction,
-      const gfx::Rect& end_rect,
-      WebKit::WebTextDirection end_direction) OVERRIDE;
+      const ViewHostMsg_SelectionBounds_Params& params) OVERRIDE;
+  virtual void ScrollOffsetChanged() OVERRIDE;
   virtual BackingStore* AllocBackingStore(const gfx::Size& size) OVERRIDE;
   virtual void CopyFromCompositingSurface(
       const gfx::Rect& src_subrect,
       const gfx::Size& dst_size,
-      const base::Callback<void(bool)>& callback,
-      skia::PlatformBitmap* output) OVERRIDE;
+      const base::Callback<void(bool, const SkBitmap&)>& callback) OVERRIDE;
+  virtual void CopyFromCompositingSurfaceToVideoFrame(
+      const gfx::Rect& src_subrect,
+      const scoped_refptr<media::VideoFrame>& target,
+      const base::Callback<void(bool)>& callback) OVERRIDE;
+  virtual bool CanCopyToVideoFrame() const OVERRIDE;
   virtual void OnAcceleratedCompositingStateChange() OVERRIDE;
   virtual void AcceleratedSurfaceBuffersSwapped(
       const GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params& params,
@@ -113,9 +121,8 @@ class CONTENT_EXPORT RenderWidgetHostViewGtk
       const GpuHostMsg_AcceleratedSurfacePostSubBuffer_Params& params,
       int gpu_host_id) OVERRIDE;
   virtual void AcceleratedSurfaceSuspend() OVERRIDE;
+  virtual void AcceleratedSurfaceRelease() OVERRIDE;
   virtual bool HasAcceleratedSurface(const gfx::Size& desired_size) OVERRIDE;
-  virtual void CreatePluginContainer(gfx::PluginWindowHandle id) OVERRIDE;
-  virtual void DestroyPluginContainer(gfx::PluginWindowHandle id) OVERRIDE;
   virtual void SetHasHorizontalScrollbar(
       bool has_horizontal_scrollbar) OVERRIDE;
   virtual void SetScrollOffsetPinning(
@@ -131,6 +138,9 @@ class CONTENT_EXPORT RenderWidgetHostViewGtk
 
   // ActiveWindowWatcherXObserver implementation.
   virtual void ActiveWindowChanged(GdkWindow* active_window) OVERRIDE;
+
+  // IPC::Sender implementation:
+  virtual bool Send(IPC::Message* message) OVERRIDE;
 
   // If the widget is aligned with an edge of the monitor its on and the user
   // attempts to drag past that edge we track the number of times it has
@@ -204,6 +214,9 @@ class CONTENT_EXPORT RenderWidgetHostViewGtk
 
   // Cause the next query for the widget center to recompute the cached value.
   void MarkCachedWidgetCenterStale();
+
+  void OnCreatePluginContainer(gfx::PluginWindowHandle id);
+  void OnDestroyPluginContainer(gfx::PluginWindowHandle id);
 
   gfx::Point GetWidgetCenter();
 

@@ -4,31 +4,31 @@
 
 #include "chrome/browser/enumerate_modules_model_win.h"
 
-#include <algorithm>
 #include <Tlhelp32.h>
 #include <wintrust.h>
+#include <algorithm>
 
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/environment.h"
-#include "base/file_path.h"
 #include "base/file_version_info_win.h"
+#include "base/files/file_path.h"
 #include "base/i18n/case_conversion.h"
 #include "base/metrics/histogram.h"
-#include "base/string_number_conversions.h"
 #include "base/string_util.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "base/version.h"
 #include "base/win/registry.h"
 #include "base/win/scoped_handle.h"
-#include "crypto/sha2.h"
 #include "chrome/browser/net/service_providers_win.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "content/public/browser/notification_service.h"
+#include "crypto/sha2.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -246,6 +246,9 @@ const ModuleEnumerator::BlacklistEntry ModuleEnumerator::kModuleBlacklist[] = {
 
   // sgprxy.dll, "%commonprogramfiles%\\is3\\anti-spyware\\".
   { "005965ea", "bc5673f2", "", "", "", INVESTIGATING },
+
+  // sprotector.dll, "". Different location each report.
+  { "24555d74", "", "", "", "", kUninstallLink },
 
   // swi_filter_0001.dll (Sophos Web Intelligence),
   // "%programfiles%\\sophos\\sophos anti-virus\\web intelligence\\".
@@ -537,7 +540,7 @@ void ModuleEnumerator::EnumerateWinsockModules() {
         entry.location.c_str(), expanded, MAX_PATH);
     if (size != 0 && size <= MAX_PATH) {
       entry.digital_signer =
-          GetSubjectNameFromDigitalSignature(FilePath(expanded));
+          GetSubjectNameFromDigitalSignature(base::FilePath(expanded));
     }
     entry.version = base::IntToString16(layered_providers[i].version);
 
@@ -552,10 +555,10 @@ void ModuleEnumerator::PopulateModuleInformation(Module* module) {
   module->duplicate_count = 0;
   module->normalized = false;
   module->digital_signer =
-      GetSubjectNameFromDigitalSignature(FilePath(module->location));
+      GetSubjectNameFromDigitalSignature(base::FilePath(module->location));
   module->recommended_action = NONE;
   scoped_ptr<FileVersionInfo> version_info(
-      FileVersionInfo::CreateFileVersionInfo(FilePath(module->location)));
+      FileVersionInfo::CreateFileVersionInfo(base::FilePath(module->location)));
   if (version_info.get()) {
     FileVersionInfoWin* version_info_win =
         static_cast<FileVersionInfoWin*>(version_info.get());
@@ -680,7 +683,7 @@ void ModuleEnumerator::ReportBack() {
 }
 
 string16 ModuleEnumerator::GetSubjectNameFromDigitalSignature(
-    const FilePath& filename) {
+    const base::FilePath& filename) {
   HCERTSTORE store = NULL;
   HCRYPTMSG message = NULL;
 

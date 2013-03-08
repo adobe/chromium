@@ -12,8 +12,8 @@
 #include "base/message_loop.h"
 #include "base/stl_util.h"
 #include "base/stringprintf.h"
+#include "base/strings/utf_offset_string_conversions.h"
 #include "base/time.h"
-#include "base/utf_offset_string_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "cc/texture_layer.h"
 #include "ppapi/c/dev/ppb_find_dev.h"
@@ -43,7 +43,10 @@
 #include "ppapi/shared_impl/var.h"
 #include "ppapi/thunk/enter.h"
 #include "ppapi/thunk/ppb_buffer_api.h"
+#include "printing/metafile.h"
+#include "printing/metafile_skia_wrapper.h"
 #include "printing/units.h"
+#include "skia/ext/platform_device.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebGamepads.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebString.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebURL.h"
@@ -88,17 +91,7 @@
 
 #if defined(OS_MACOSX)
 #include "printing/metafile_impl.h"
-#if !defined(USE_SKIA)
-#include "base/mac/mac_util.h"
-#include "base/mac/scoped_cftyperef.h"
-#endif  // !defined(USE_SKIA)
 #endif  // defined(OS_MACOSX)
-
-#if defined(USE_SKIA)
-#include "printing/metafile.h"
-#include "printing/metafile_skia_wrapper.h"
-#include "skia/ext/platform_device.h"
-#endif
 
 #if defined(OS_WIN)
 #include "base/metrics/histogram.h"
@@ -645,7 +638,7 @@ bool PluginInstance::SendCompositionEventWithUnderlineInformationToPlugin(
     utf16_offsets.push_back(underlines[i].endOffset);
   }
   std::vector<size_t> utf8_offsets(utf16_offsets);
-  event.character_text = UTF16ToUTF8AndAdjustOffsets(text, &utf8_offsets);
+  event.character_text = base::UTF16ToUTF8AndAdjustOffsets(text, &utf8_offsets);
 
   // Set the converted selection range.
   event.composition_selection_start = (utf8_offsets[0] == std::string::npos ?
@@ -727,7 +720,7 @@ void PluginInstance::GetSurroundingText(string16* text,
   std::vector<size_t> offsets;
   offsets.push_back(selection_anchor_);
   offsets.push_back(selection_caret_);
-  *text = UTF8ToUTF16AndAdjustOffsets(surrounding_text_, &offsets);
+  *text = base::UTF8ToUTF16AndAdjustOffsets(surrounding_text_, &offsets);
   range->set_start(offsets[0] == string16::npos ? text->size() : offsets[0]);
   range->set_end(offsets[1] == string16::npos ? text->size() : offsets[1]);
 }
@@ -1320,10 +1313,8 @@ int PluginInstance::PrintBegin(const WebPrintParams& print_params) {
   if (!num_pages)
     return 0;
   current_print_settings_ = print_settings;
-#if defined(USE_SKIA)
   canvas_ = NULL;
   ranges_.clear();
-#endif  // USE_SKIA
   return num_pages;
 }
 
@@ -1332,7 +1323,6 @@ bool PluginInstance::PrintPage(int page_number, WebKit::WebCanvas* canvas) {
   DCHECK(plugin_print_interface_);
   PP_PrintPageNumberRange_Dev page_range;
   page_range.first_page_number = page_range.last_page_number = page_number;
-#if defined(USE_SKIA)
   // The canvas only has a metafile on it for print preview.
   bool save_for_later =
       (printing::MetafileSkiaWrapper::GetMetafileFromCanvas(*canvas) != NULL);
@@ -1343,9 +1333,7 @@ bool PluginInstance::PrintPage(int page_number, WebKit::WebCanvas* canvas) {
     ranges_.push_back(page_range);
     canvas_ = canvas;
     return true;
-  } else
-#endif  // USE_SKIA
-  {
+  } else {
     return PrintPageHelper(&page_range, 1, canvas);
   }
 #else  // defined(ENABLED_PRINTING)
@@ -1380,12 +1368,10 @@ bool PluginInstance::PrintPageHelper(PP_PrintPageNumberRange_Dev* page_ranges,
 void PluginInstance::PrintEnd() {
   // Keep a reference on the stack. See NOTE above.
   scoped_refptr<PluginInstance> ref(this);
-#if defined(USE_SKIA)
   if (!ranges_.empty())
     PrintPageHelper(&(ranges_.front()), ranges_.size(), canvas_.get());
   canvas_ = NULL;
   ranges_.clear();
-#endif  // USE_SKIA
 
   DCHECK(plugin_print_interface_);
   if (plugin_print_interface_)
@@ -1402,6 +1388,15 @@ bool PluginInstance::CanRotateView() {
     return false;
 
   return true;
+}
+
+void PluginInstance::SetBoundGraphics2DForTest(
+    PluginDelegate::PlatformGraphics2D* graphics) {
+  BindGraphics(pp_instance(), 0);  // Unbind any old stuff.
+  if (graphics) {
+    bound_graphics_2d_platform_ = graphics;
+    bound_graphics_2d_platform_->BindToInstance(this);
+  }
 }
 
 void PluginInstance::RotateView(WebPlugin::RotationType type) {
@@ -1628,7 +1623,7 @@ bool PluginInstance::PrintPDFOutput(PP_Resource print_output,
 #endif  // defined(OS_WIN)
 
   bool ret = false;
-#if defined(OS_LINUX) || (defined(OS_MACOSX) && defined(USE_SKIA))
+#if defined(OS_LINUX) || defined(OS_MACOSX)
   // On Linux we just set the final bits in the native metafile
   // (NativeMetafile and PreviewMetafile must have compatible formats,
   // i.e. both PDF for this to work).
@@ -1637,24 +1632,6 @@ bool PluginInstance::PrintPDFOutput(PP_Resource print_output,
   DCHECK(metafile != NULL);
   if (metafile)
     ret = metafile->InitFromData(mapper.data(), mapper.size());
-#elif defined(OS_MACOSX)
-  printing::NativeMetafile metafile;
-  // Create a PDF metafile and render from there into the passed in context.
-  if (metafile.InitFromData(mapper.data(), mapper.size())) {
-    // Flip the transform.
-    CGContextRef cgContext = canvas;
-    gfx::ScopedCGContextSaveGState save_gstate(cgContext)
-    CGContextTranslateCTM(cgContext, 0,
-                          current_print_settings_.printable_area.size.height);
-    CGContextScaleCTM(cgContext, 1.0, -1.0);
-    CGRect page_rect;
-    page_rect.origin.x = current_print_settings_.printable_area.point.x;
-    page_rect.origin.y = current_print_settings_.printable_area.point.y;
-    page_rect.size.width = current_print_settings_.printable_area.size.width;
-    page_rect.size.height = current_print_settings_.printable_area.size.height;
-
-    ret = metafile.RenderPage(1, cgContext, page_rect, true, false, true, true);
-  }
 #elif defined(OS_WIN)
   printing::Metafile* metafile =
     printing::MetafileSkiaWrapper::GetMetafileFromCanvas(*canvas);
@@ -1838,7 +1815,7 @@ void PluginInstance::SimulateImeSetCompositionEvent(
                  input_event.composition_segment_offsets.end());
 
   string16 utf16_text =
-      UTF8ToUTF16AndAdjustOffsets(input_event.character_text, &offsets);
+      base::UTF8ToUTF16AndAdjustOffsets(input_event.character_text, &offsets);
 
   std::vector<WebKit::WebCompositionUnderline> underlines;
   for (size_t i = 2; i + 1 < offsets.size(); ++i) {

@@ -7,9 +7,9 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
-#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/fullscreen/fullscreen_controller_test.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/test/base/interactive_test_utils.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/render_view_host.h"
@@ -27,7 +27,7 @@ using content::PAGE_TRANSITION_TYPED;
 
 namespace {
 
-const FilePath::CharType* kSimpleFile = FILE_PATH_LITERAL("simple.html");
+const base::FilePath::CharType* kSimpleFile = FILE_PATH_LITERAL("simple.html");
 
 }  // namespace
 
@@ -50,7 +50,7 @@ class FullscreenControllerInteractiveTest
     // Verify that IsMouseLocked is consistent between the
     // Fullscreen Controller and the Render View Host View.
     EXPECT_TRUE(browser()->IsMouseLocked() ==
-                chrome::GetActiveWebContents(browser())->
+                browser()->tab_strip_model()->GetActiveWebContents()->
                     GetRenderViewHost()->GetView()->IsMouseLocked());
     return browser()->IsMouseLocked();
   }
@@ -156,7 +156,7 @@ FullscreenControllerInteractiveTest::TestFullscreenMouseLockContentSettings() {
 
 void FullscreenControllerInteractiveTest::ToggleTabFullscreen_Internal(
     bool enter_fullscreen, bool retry_until_success) {
-  WebContents* tab = chrome::GetActiveWebContents(browser());
+  WebContents* tab = browser()->tab_strip_model()->GetActiveWebContents();
   do {
     FullscreenNotificationObserver fullscreen_observer;
     browser()->ToggleFullscreenModeForTab(tab, enter_fullscreen);
@@ -279,9 +279,10 @@ IN_PROC_BROWSER_TEST_F(FullscreenControllerInteractiveTest,
 // Test is flaky: http://crbug.com/146006
 IN_PROC_BROWSER_TEST_F(FullscreenControllerInteractiveTest,
                        DISABLED_FullscreenFileURL) {
-  ui_test_utils::NavigateToURL(browser(),
-      ui_test_utils::GetTestUrl(FilePath(FilePath::kCurrentDirectory),
-                                FilePath(kSimpleFile)));
+  ui_test_utils::NavigateToURL(
+      browser(), ui_test_utils::GetTestUrl(
+                     base::FilePath(base::FilePath::kCurrentDirectory),
+                     base::FilePath(kSimpleFile)));
 
   // Validate that going fullscreen for a file does not ask permision.
   ASSERT_FALSE(IsFullscreenPermissionRequested());
@@ -326,8 +327,8 @@ IN_PROC_BROWSER_TEST_F(
     DISABLED_TestTabDoesntExitFullscreenOnSubFrameNavigation) {
   ASSERT_TRUE(test_server()->Start());
 
-  GURL url(ui_test_utils::GetTestUrl(FilePath(FilePath::kCurrentDirectory),
-                                     FilePath(kSimpleFile)));
+  GURL url(ui_test_utils::GetTestUrl(base::FilePath(
+      base::FilePath::kCurrentDirectory), base::FilePath(kSimpleFile)));
   GURL url_with_fragment(url.spec() + "#fragment");
 
   ui_test_utils::NavigateToURL(browser(), url);
@@ -363,24 +364,27 @@ IN_PROC_BROWSER_TEST_F(
 
   AddTabAtIndex(0, GURL(kAboutBlankURL), PAGE_TRANSITION_TYPED);
 
-  WebContents* tab = chrome::GetActiveWebContents(browser());
+  WebContents* tab = browser()->tab_strip_model()->GetActiveWebContents();
 
   {
     FullscreenNotificationObserver fullscreen_observer;
     EXPECT_FALSE(browser()->window()->IsFullscreen());
-    EXPECT_FALSE(browser()->window()->InPresentationMode());
+    EXPECT_FALSE(browser()->window()->IsFullscreenWithChrome());
+    EXPECT_FALSE(browser()->window()->IsFullscreenWithoutChrome());
     browser()->ToggleFullscreenModeForTab(tab, true);
     fullscreen_observer.Wait();
-    ASSERT_TRUE(browser()->window()->IsFullscreen());
-    ASSERT_TRUE(browser()->window()->InPresentationMode());
+    EXPECT_TRUE(browser()->window()->IsFullscreen());
+    EXPECT_FALSE(browser()->window()->IsFullscreenWithChrome());
+    EXPECT_TRUE(browser()->window()->IsFullscreenWithoutChrome());
   }
 
   {
     FullscreenNotificationObserver fullscreen_observer;
-    browser()->TogglePresentationMode();
+    chrome::ToggleFullscreenMode(browser());
     fullscreen_observer.Wait();
-    ASSERT_FALSE(browser()->window()->IsFullscreen());
-    ASSERT_FALSE(browser()->window()->InPresentationMode());
+    EXPECT_FALSE(browser()->window()->IsFullscreen());
+    EXPECT_FALSE(browser()->window()->IsFullscreenWithChrome());
+    EXPECT_FALSE(browser()->window()->IsFullscreenWithoutChrome());
   }
 
   if (base::mac::IsOSLionOrLater()) {
@@ -389,8 +393,9 @@ IN_PROC_BROWSER_TEST_F(
     FullscreenNotificationObserver fullscreen_observer;
     chrome::ToggleFullscreenMode(browser());
     fullscreen_observer.Wait();
-    ASSERT_TRUE(browser()->window()->IsFullscreen());
-    ASSERT_FALSE(browser()->window()->InPresentationMode());
+    EXPECT_TRUE(browser()->window()->IsFullscreen());
+    EXPECT_TRUE(browser()->window()->IsFullscreenWithChrome());
+    EXPECT_FALSE(browser()->window()->IsFullscreenWithoutChrome());
   }
 }
 #endif

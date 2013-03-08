@@ -13,7 +13,6 @@
 #include <math.h>
 
 #include "base/command_line.h"
-#include "base/i18n/case_conversion.h"
 #include "base/metrics/histogram.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
@@ -41,7 +40,6 @@ const int kScoreRank[] = { 1450, 1200, 900, 400 };
 
 bool ScoredHistoryMatch::initialized_ = false;
 bool ScoredHistoryMatch::use_new_scoring = false;
-bool ScoredHistoryMatch::only_count_matches_at_word_boundaries = false;
 bool ScoredHistoryMatch::also_do_hup_like_scoring = false;
 
 ScoredHistoryMatch::ScoredHistoryMatch()
@@ -49,13 +47,13 @@ ScoredHistoryMatch::ScoredHistoryMatch()
       can_inline(false) {
   if (!initialized_) {
     InitializeNewScoringField();
-    InitializeOnlyCountMatchesAtWordBoundariesField();
     InitializeAlsoDoHUPLikeScoringField();
     initialized_ = true;
   }
 }
 
 ScoredHistoryMatch::ScoredHistoryMatch(const URLRow& row,
+                                       const std::string& languages,
                                        const string16& lower_string,
                                        const String16Vector& terms,
                                        const RowWordStarts& word_starts,
@@ -66,7 +64,6 @@ ScoredHistoryMatch::ScoredHistoryMatch(const URLRow& row,
       can_inline(false) {
   if (!initialized_) {
     InitializeNewScoringField();
-    InitializeOnlyCountMatchesAtWordBoundariesField();
     InitializeAlsoDoHUPLikeScoringField();
     initialized_ = true;
   }
@@ -77,8 +74,8 @@ ScoredHistoryMatch::ScoredHistoryMatch(const URLRow& row,
 
   // Figure out where each search term appears in the URL and/or page title
   // so that we can score as well as provide autocomplete highlighting.
-  string16 url = base::i18n::ToLower(UTF8ToUTF16(gurl.spec()));
-  string16 title = base::i18n::ToLower(row.title());
+  string16 url = CleanUpUrlForMatching(gurl, languages);
+  string16 title = CleanUpTitleForMatching(row.title());
   int term_num = 0;
   for (String16Vector::const_iterator iter = terms.begin(); iter != terms.end();
        ++iter, ++term_num) {
@@ -236,6 +233,14 @@ ScoredHistoryMatch::ScoredHistoryMatch(const URLRow& row,
         HistoryURLProvider::kScoreForBestInlineableResult :
         HistoryURLProvider::kBaseScoreForNonInlineableResult;
 
+    // Also, if the user types the hostname of a host with a typed
+    // visit, then everything from that host get given inlineable scores
+    // (because the URL-that-you-typed will go first and everything
+    // else will be assigned one minus the previous score, as coded
+    // at the end of HistoryURLProvider::DoAutocomplete().
+    if (UTF8ToUTF16(gurl.host()) == terms[0])
+      hup_like_score = HistoryURLProvider::kScoreForBestInlineableResult;
+
     // HistoryURLProvider has the function PromoteOrCreateShorterSuggestion()
     // that's meant to promote prefixes of the best match (if they've
     // been visited enough related to the best match) or
@@ -277,15 +282,11 @@ int ScoredHistoryMatch::ScoreComponentForMatches(
   if (provided_matches.empty())
     return 0;
 
-  TermMatches matches_at_word_boundaries;
-  if (only_count_matches_at_word_boundaries) {
-    MakeTermMatchesOnlyAtWordBoundaries(provided_matches, word_starts,
-                                        &matches_at_word_boundaries);
-  }
   // The actual matches we'll use for matching.  This is |provided_matches|
-  // with all the matches not at a word boundary removed (if told to do so).
-  const TermMatches& matches = only_count_matches_at_word_boundaries ?
-      matches_at_word_boundaries : provided_matches;
+  // with all the matches not at a word boundary removed.
+  TermMatches matches;
+  MakeTermMatchesOnlyAtWordBoundaries(provided_matches, word_starts,
+                                      &matches);
 
   if (matches.empty())
     return 0;
@@ -713,14 +714,6 @@ void ScoredHistoryMatch::InitializeNewScoringField() {
   UMA_HISTOGRAM_ENUMERATION(
       "Omnibox.HistoryQuickProviderNewScoringFieldTrialBeacon",
       new_scoring_option, NUM_OPTIONS);
-}
-
-void ScoredHistoryMatch::InitializeOnlyCountMatchesAtWordBoundariesField() {
-  only_count_matches_at_word_boundaries =
-      AutocompleteFieldTrial::
-          InHQPOnlyCountMatchesAtWordBoundariesFieldTrial() &&
-      AutocompleteFieldTrial::
-          InHQPOnlyCountMatchesAtWordBoundariesFieldTrialExperimentGroup();
 }
 
 void ScoredHistoryMatch::InitializeAlsoDoHUPLikeScoringField() {

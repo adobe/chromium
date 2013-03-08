@@ -4,11 +4,12 @@
 
 #include "chrome/browser/net/net_pref_observer.h"
 
+#include "base/prefs/pref_service.h"
 #include "chrome/browser/net/predictor.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prerender/prerender_manager.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/browser_thread.h"
 #include "net/http/http_stream_factory.h"
 
@@ -47,11 +48,11 @@ void NetPrefObserver::ApplySettings() {
 }
 
 // static
-void NetPrefObserver::RegisterUserPrefs(PrefServiceSyncable* prefs) {
-  prefs->RegisterBooleanPref(prefs::kNetworkPredictionEnabled,
-                             true,
-                             PrefServiceSyncable::SYNCABLE_PREF);
-  prefs->RegisterBooleanPref(prefs::kDisableSpdy,
-                             false,
-                             PrefServiceSyncable::UNSYNCABLE_PREF);
+void NetPrefObserver::RegisterUserPrefs(PrefRegistrySyncable* registry) {
+  registry->RegisterBooleanPref(prefs::kNetworkPredictionEnabled,
+                                true,
+                                PrefRegistrySyncable::SYNCABLE_PREF);
+  registry->RegisterBooleanPref(prefs::kDisableSpdy,
+                                false,
+                                PrefRegistrySyncable::UNSYNCABLE_PREF);
 }

@@ -3,8 +3,6 @@
 // found in the LICENSE file.
 
 #include "chrome/browser/download/download_crx_util.h"
-#include "chrome/browser/download/download_service.h"
-#include "chrome/browser/download/download_service_factory.h"
 #include "chrome/browser/extensions/crx_installer.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/extensions/extension_install_prompt.h"
@@ -20,6 +18,7 @@
 #include "chrome/common/extensions/feature_switch.h"
 #include "chrome/common/extensions/permissions/permission_set.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "content/public/browser/download_manager.h"
 #include "content/public/test/download_test_observer.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -46,18 +45,19 @@ class MockInstallPrompt : public ExtensionInstallPrompt {
   void set_record_oauth2_grant(bool record) { record_oauth2_grant_ = record; }
 
   // Overriding some of the ExtensionInstallUI API.
-  void ConfirmInstall(Delegate* delegate,
-                      const Extension* extension,
-                      const ShowDialogCallback& show_dialog_callback) {
+  virtual void ConfirmInstall(
+      Delegate* delegate,
+      const Extension* extension,
+      const ShowDialogCallback& show_dialog_callback) OVERRIDE {
     confirmation_requested_ = true;
     delegate->InstallUIProceed();
   }
-  void OnInstallSuccess(const Extension* extension,
-                        SkBitmap* icon) {
+  virtual void OnInstallSuccess(const Extension* extension,
+                                SkBitmap* icon) OVERRIDE {
     extension_ = extension;
     MessageLoopForUI::current()->Quit();
   }
-  void OnInstallFailure(const CrxInstallerError& error) {
+  virtual void OnInstallFailure(const CrxInstallerError& error) OVERRIDE {
     error_ = error.message();
     MessageLoopForUI::current()->Quit();
   }
@@ -85,7 +85,7 @@ class ExtensionCrxInstallerTest : public ExtensionBrowserTest {
       MockInstallPrompt* mock_install_prompt) {
     ExtensionService* service = extensions::ExtensionSystem::Get(
         browser()->profile())->extension_service();
-    FilePath ext_path = test_data_dir_.AppendASCII(ext_relpath);
+    base::FilePath ext_path = test_data_dir_.AppendASCII(ext_relpath);
 
     std::string error;
     base::DictionaryValue* parsed_manifest =
@@ -107,6 +107,7 @@ class ExtensionCrxInstallerTest : public ExtensionBrowserTest {
                              approval.get()       /* keep ownership */));
     installer->set_allow_silent_install(true);
     installer->set_is_gallery_install(true);
+    installer->set_bypass_blacklist_for_test(true);
     installer->InstallCrx(PackExtension(ext_path));
     content::RunMessageLoop();
 
@@ -164,7 +165,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionCrxInstallerTest,
   CommandLine* command_line = CommandLine::ForCurrentProcess();
   CommandLine old_command_line = *command_line;
   command_line->AppendSwitch(switches::kEnableExperimentalExtensionApis);
-  FilePath crx_path = PackExtension(
+  base::FilePath crx_path = PackExtension(
       test_data_dir_.AppendASCII("experimental"));
   ASSERT_FALSE(crx_path.empty());
 
@@ -197,7 +198,7 @@ IN_PROC_BROWSER_TEST_F(
   const int kNumDownloadsExpected = 1;
 
   LOG(ERROR) << "PackAndInstallExtension: Packing extension";
-  FilePath crx_path = PackExtension(
+  base::FilePath crx_path = PackExtension(
       test_data_dir_.AppendASCII("common/background_page"));
   ASSERT_FALSE(crx_path.empty());
   std::string crx_path_string(crx_path.value().begin(), crx_path.value().end());

@@ -6,11 +6,12 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/json/json_reader.h"
 #include "base/logging.h"
-#include "base/string_tokenizer.h"
+#include "base/prefs/pref_registry_simple.h"
+#include "base/prefs/pref_service.h"
 #include "base/string_util.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
@@ -19,7 +20,6 @@
 #include "chrome/browser/chromeos/cros/network_library.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/chromeos/system/statistics_provider.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "content/public/browser/browser_thread.h"
 #include "net/url_request/url_fetcher.h"
@@ -80,7 +80,7 @@ CustomizationDocument::CustomizationDocument(
 CustomizationDocument::~CustomizationDocument() {}
 
 bool CustomizationDocument::LoadManifestFromFile(
-    const FilePath& manifest_path) {
+    const base::FilePath& manifest_path) {
   std::string manifest;
   if (!file_util::ReadFileToString(manifest_path, &manifest))
     return false;
@@ -146,7 +146,7 @@ StartupCustomizationDocument::StartupCustomizationDocument()
     // Loading manifest causes us to do blocking IO on UI thread.
     // Temporarily allow it until we fix http://crosbug.com/11103
     base::ThreadRestrictions::ScopedAllowIO allow_io;
-    LoadManifestFromFile(FilePath(kStartupCustomizationManifestPath));
+    LoadManifestFromFile(base::FilePath(kStartupCustomizationManifestPath));
   }
   Init(chromeos::system::StatisticsProvider::GetInstance());
 }
@@ -249,8 +249,8 @@ ServicesCustomizationDocument* ServicesCustomizationDocument::GetInstance() {
 
 // static
 void ServicesCustomizationDocument::RegisterPrefs(
-    PrefServiceSimple* local_state) {
-  local_state->RegisterBooleanPref(kServicesCustomizationAppliedPref, false);
+    PrefRegistrySimple* registry) {
+  registry->RegisterBooleanPref(kServicesCustomizationAppliedPref, false);
 }
 
 // static
@@ -270,13 +270,14 @@ void ServicesCustomizationDocument::StartFetching() {
     BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
         base::Bind(&ServicesCustomizationDocument::ReadFileInBackground,
                    base::Unretained(this),  // this class is a singleton.
-                   FilePath(url_.path())));
+                   base::FilePath(url_.path())));
   } else {
     StartFileFetch();
   }
 }
 
-void ServicesCustomizationDocument::ReadFileInBackground(const FilePath& file) {
+void ServicesCustomizationDocument::ReadFileInBackground(
+    const base::FilePath& file) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
 
   std::string manifest;

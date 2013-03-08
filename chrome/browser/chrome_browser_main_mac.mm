@@ -9,7 +9,7 @@
 
 #include "base/command_line.h"
 #include "base/debug/debugger.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/mac/bundle_locations.h"
 #include "base/mac/mac_util.h"
 #include "base/memory/scoped_nsobject.h"
@@ -22,8 +22,8 @@
 #include "chrome/browser/mac/keychain_reauthorize.h"
 #import "chrome/browser/mac/keystone_glue.h"
 #include "chrome/browser/metrics/metrics_service.h"
-#include "chrome/browser/system_monitor/image_capture_device_manager.h"
-#include "chrome/browser/system_monitor/removable_device_notifications_mac.h"
+#include "chrome/browser/storage_monitor/image_capture_device_manager.h"
+#include "chrome/browser/storage_monitor/storage_monitor_mac.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "content/public/common/main_function_params.h"
@@ -209,7 +209,7 @@ void ChromeBrowserMainPartsMac::PreEarlyInitialization() {
 void ChromeBrowserMainPartsMac::PreMainMessageLoopStart() {
   ChromeBrowserMainPartsPosix::PreMainMessageLoopStart();
 
-  // Tell Cooca to finish its initialization, which we want to do manually
+  // Tell Cocoa to finish its initialization, which we want to do manually
   // instead of calling NSApplicationMain(). The primary reason is that NSAM()
   // never returns, which would leave all the objects currently on the stack
   // in scoped_ptrs hanging and never cleaned up. We then load the main nib
@@ -235,7 +235,7 @@ void ChromeBrowserMainPartsMac::PreMainMessageLoopStart() {
         ResourceBundle::InitSharedInstanceWithLocale(std::string(), NULL);
     CHECK(!loaded_locale.empty()) << "Default locale could not be found";
 
-    FilePath resources_pack_path;
+    base::FilePath resources_pack_path;
     PathService::Get(chrome::FILE_RESOURCES_PACK, &resources_pack_path);
     ResourceBundle::GetSharedInstance().AddDataPackFromPath(
         resources_pack_path, ui::SCALE_FACTOR_NONE);
@@ -282,10 +282,13 @@ void ChromeBrowserMainPartsMac::PreMainMessageLoopStart() {
 }
 
 void ChromeBrowserMainPartsMac::PreProfileInit() {
-  removable_device_notifications_mac_ =
-      new chrome::RemovableDeviceNotificationsMac();
-  if (base::mac::IsOSLionOrLater())
+  storage_monitor_ = new chrome::StorageMonitorMac();
+  // TODO(gbillock): Make the ImageCapture manager owned by StorageMonitorMac.
+  if (base::mac::IsOSLionOrLater()) {
     image_capture_device_manager_.reset(new chrome::ImageCaptureDeviceManager);
+    image_capture_device_manager_->SetNotifications(
+        storage_monitor_->receiver());
+  }
 
   ChromeBrowserMainPartsPosix::PreProfileInit();
 }

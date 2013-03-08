@@ -6,6 +6,7 @@
 
 #include <algorithm>
 
+#include "ash/ash_switches.h"
 #include "ash/shell.h"
 #include "ash/shell_delegate.h"
 #include "ash/shell_window_ids.h"
@@ -33,7 +34,7 @@
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/memory/weak_ptr.h"
-#include "base/prefs/public/pref_service_base.h"
+#include "base/prefs/pref_service.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
@@ -52,7 +53,6 @@
 #include "chrome/browser/chromeos/login/base_login_display_host.h"
 #include "chrome/browser/chromeos/login/help_app_launcher.h"
 #include "chrome/browser/chromeos/login/login_display_host.h"
-#include "chrome/browser/chromeos/login/message_bubble.h"
 #include "chrome/browser/chromeos/login/user.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/mobile_config.h"
@@ -67,7 +67,6 @@
 #include "chrome/browser/policy/browser_policy_connector.h"
 #include "chrome/browser/policy/cloud_policy_store.h"
 #include "chrome/browser/policy/device_cloud_policy_manager_chromeos.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/ash/volume_controller_chromeos.h"
 #include "chrome/browser/ui/browser.h"
@@ -90,6 +89,7 @@
 #include "device/bluetooth/bluetooth_adapter.h"
 #include "device/bluetooth/bluetooth_adapter_factory.h"
 #include "device/bluetooth/bluetooth_device.h"
+#include "grit/ash_strings.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -209,11 +209,14 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
                       new NetworkMenuIcon(this, NetworkMenuIcon::MENU_MODE))),
         network_icon_dark_(ALLOW_THIS_IN_INITIALIZER_LIST(
                       new NetworkMenuIcon(this, NetworkMenuIcon::MENU_MODE))),
+        network_icon_vpn_(ALLOW_THIS_IN_INITIALIZER_LIST(
+                      new NetworkMenuIcon(this, NetworkMenuIcon::MENU_MODE))),
         network_menu_(ALLOW_THIS_IN_INITIALIZER_LIST(new NetworkMenu(this))),
         clock_type_(base::k24HourClock),
         search_key_mapped_to_(input_method::kSearchKey),
         screen_locked_(false),
         data_promo_notification_(new DataPromoNotification()),
+        cellular_activating_(false),
         volume_control_delegate_(new VolumeController()) {
     // Register notifications on construction so that events such as
     // PROFILE_CREATED do not get missed if they happen before Initialize().
@@ -268,8 +271,9 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
 
     network_icon_->SetResourceColorTheme(NetworkMenuIcon::COLOR_LIGHT);
     network_icon_dark_->SetResourceColorTheme(NetworkMenuIcon::COLOR_DARK);
+    network_icon_vpn_->SetResourceColorTheme(NetworkMenuIcon::COLOR_DARK);
 
-    device::BluetoothAdapterFactory::RunCallbackOnAdapterReady(
+    device::BluetoothAdapterFactory::GetAdapter(
         base::Bind(&SystemTrayDelegate::InitializeOnAdapterReady,
                    ui_weak_ptr_factory_->GetWeakPtr()));
   }
@@ -366,6 +370,13 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
     if (manager->IsLoggedInAsPublicAccount())
       return ash::user::LOGGED_IN_PUBLIC;
     return ash::user::LOGGED_IN_USER;
+  }
+
+  virtual void ChangeProfilePicture() OVERRIDE {
+    content::RecordAction(
+        content::UserMetricsAction("OpenChangeProfilePictureDialog"));
+    chrome::ShowSettingsSubPage(GetAppropriateBrowser(),
+                                chrome::kChangeProfilePictureSubPage);
   }
 
   virtual const std::string GetEnterpriseDomain() const OVERRIDE {
@@ -470,10 +481,12 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
   }
 
   virtual void SignOut() OVERRIDE {
-    browser::AttemptUserExit();
+    chrome::AttemptUserExit();
   }
 
   virtual void RequestLockScreen() OVERRIDE {
+    // TODO(antrim) : additional logging for crbug/173178
+    LOG(WARNING) << "Requesting screen lock from AshSystemTrayDelegate";
     DBusThreadManager::Get()->GetSessionManagerClient()->RequestLockScreen();
   }
 
@@ -497,8 +510,14 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
     }
   }
 
-  virtual void BluetoothSetDiscovering(bool value) OVERRIDE {
-    bluetooth_adapter_->SetDiscovering(value,
+  virtual void BluetoothStartDiscovering() OVERRIDE {
+    bluetooth_adapter_->StartDiscovering(
+        base::Bind(&base::DoNothing),
+        base::Bind(&BluetoothSetDiscoveringError));
+  }
+
+  virtual void BluetoothStopDiscovering() OVERRIDE {
+    bluetooth_adapter_->StopDiscovering(
         base::Bind(&base::DoNothing),
         base::Bind(&BluetoothSetDiscoveringError));
   }
@@ -578,7 +597,7 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
         ActivateInputMethodProperty(key);
   }
 
-  virtual void CancelDriveOperation(const FilePath& file_path) OVERRIDE {
+  virtual void CancelDriveOperation(const base::FilePath& file_path) OVERRIDE {
     DriveSystemService* system_service = FindDriveSystemService();
     if (!system_service)
       return;
@@ -608,7 +627,7 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
   virtual void GetVirtualNetworkIcon(ash::NetworkIconInfo* info) OVERRIDE{
     NetworkLibrary* crosnet = CrosLibrary::Get()->GetNetworkLibrary();
     if (crosnet->virtual_network_connected()) {
-      NetworkMenuIcon* icon = network_icon_dark_.get();
+      NetworkMenuIcon* icon = network_icon_vpn_.get();
       info->image = icon->GetVpnIconAndText(&info->description);
       info->tray_icon_visible = false;
     } else {
@@ -725,7 +744,9 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
     NetworkLibrary* crosnet = CrosLibrary::Get()->GetNetworkLibrary();
     Network* network = crosnet->FindNetworkByPath(network_id);
     if (CommandLine::ForCurrentProcess()->HasSwitch(
-            chromeos::switches::kEnableNewNetworkHandlers)) {
+            ash::switches::kAshEnableNewNetworkStatusArea) &&
+        CommandLine::ForCurrentProcess()->HasSwitch(
+            chromeos::switches::kEnableNewNetworkConfigurationHandlers)) {
       // If the new network handlers are enabled, this should always trigger
       // displaying the network settings UI.
       if (network)
@@ -956,7 +977,7 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
   }
 
   void UpdateSessionLengthLimit() {
-    const PrefServiceBase::Preference* session_length_limit_pref =
+    const PrefService::Preference* session_length_limit_pref =
         local_state_registrar_.prefs()->
             FindPreference(prefs::kSessionLengthLimit);
     int limit;
@@ -1130,6 +1151,7 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
     RefreshNetworkDeviceObserver(crosnet);
     data_promo_notification_->ShowOptionalMobileDataPromoNotification(
         crosnet, GetPrimarySystemTray(), this);
+    UpdateCellularActivation();
 
     NotifyRefreshNetwork();
   }
@@ -1382,9 +1404,45 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
     UpdateEnterpriseDomain();
   }
 
+  void UpdateCellularActivation() {
+    const CellularNetworkVector& cellular_networks =
+        CrosLibrary::Get()->GetNetworkLibrary()->cellular_networks();
+    if (cellular_networks.empty())
+      return;
+    // We only care about the first cellular network (in practice there will
+    // only ever be one)
+    const CellularNetwork* cellular = cellular_networks[0];
+    if (cellular->activation_state() == ACTIVATION_STATE_ACTIVATING) {
+      cellular_activating_ = true;
+    } else if (cellular->activated() && cellular_activating_) {
+      cellular_activating_ = false;
+
+      // Detect which icon to show, 3G or LTE.
+      ash::NetworkObserver::NetworkType type =
+          (cellular->network_technology() == NETWORK_TECHNOLOGY_LTE ||
+           cellular->network_technology() == NETWORK_TECHNOLOGY_LTE_ADVANCED)
+          ? ash::NetworkObserver::NETWORK_CELLULAR_LTE
+          : ash::NetworkObserver::NETWORK_CELLULAR;
+
+      // Show the notification.
+      ash::Shell::GetInstance()->system_tray_notifier()->
+          NotifySetNetworkMessage(
+              NULL,
+              ash::NetworkObserver::MESSAGE_DATA_PROMO,
+              type,
+              l10n_util::GetStringUTF16(
+                  IDS_NETWORK_CELLULAR_ACTIVATED_TITLE),
+              l10n_util::GetStringFUTF16(
+                  IDS_NETWORK_CELLULAR_ACTIVATED,
+                  UTF8ToUTF16((cellular->name()))),
+                  std::vector<string16>());
+    }
+  }
+
   scoped_ptr<base::WeakPtrFactory<SystemTrayDelegate> > ui_weak_ptr_factory_;
   scoped_ptr<NetworkMenuIcon> network_icon_;
   scoped_ptr<NetworkMenuIcon> network_icon_dark_;
+  scoped_ptr<NetworkMenuIcon> network_icon_vpn_;
   scoped_ptr<NetworkMenu> network_menu_;
   content::NotificationRegistrar registrar_;
   PrefChangeRegistrar local_state_registrar_;
@@ -1402,6 +1460,7 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
   scoped_refptr<device::BluetoothAdapter> bluetooth_adapter_;
 
   scoped_ptr<DataPromoNotification> data_promo_notification_;
+  bool cellular_activating_;
 
   scoped_ptr<ash::VolumeControlDelegate> volume_control_delegate_;
 

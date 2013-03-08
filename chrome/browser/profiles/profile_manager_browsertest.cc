@@ -3,8 +3,11 @@
 // found in the LICENSE file.
 
 #include "base/bind.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/ui/browser_finder.h"
+#include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/host_desktop.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/testing_browser_process.h"
@@ -20,6 +23,15 @@ void OnUnblockOnProfileCreation(Profile* profile,
     MessageLoop::current()->Quit();
 }
 
+void ProfileCreationComplete(Profile* profile, Profile::CreateStatus status) {
+  ASSERT_NE(status, Profile::CREATE_STATUS_FAIL);
+  // No browser should have been created for this profile yet.
+  EXPECT_EQ(chrome::GetTotalBrowserCountForProfile(profile), 0U);
+  EXPECT_EQ(chrome::GetTotalBrowserCount(), 1U);
+  if (status == Profile::CREATE_STATUS_INITIALIZED)
+    MessageLoop::current()->Quit();
+}
+
 } // namespace
 
 // This file contains tests for the ProfileManager that require a heavyweight
@@ -27,10 +39,10 @@ void OnUnblockOnProfileCreation(Profile* profile,
 
 // TODO(jeremy): crbug.com/103355 - These tests should be enabled on all
 // platforms.
-#if defined(OS_MACOSX)
 class ProfileManagerBrowserTest : public InProcessBrowserTest {
 };
 
+#if defined(OS_MACOSX)
 // Delete single profile and make sure a new one is created.
 IN_PROC_BROWSER_TEST_F(ProfileManagerBrowserTest, DeleteSingletonProfile) {
   ProfileManager* profile_manager = g_browser_process->profile_manager();
@@ -40,7 +52,7 @@ IN_PROC_BROWSER_TEST_F(ProfileManagerBrowserTest, DeleteSingletonProfile) {
   ASSERT_EQ(cache.GetNumberOfProfiles(), 1U);
 
   // Delete singleton profile.
-  FilePath singleton_profile_path = cache.GetPathOfProfileAtIndex(0);
+  base::FilePath singleton_profile_path = cache.GetPathOfProfileAtIndex(0);
   EXPECT_FALSE(singleton_profile_path.empty());
   profile_manager->ScheduleProfileForDeletion(singleton_profile_path,
                                               chrome::HOST_DESKTOP_TYPE_NATIVE);
@@ -50,7 +62,7 @@ IN_PROC_BROWSER_TEST_F(ProfileManagerBrowserTest, DeleteSingletonProfile) {
 
   // Make sure a new profile was created automatically.
   EXPECT_EQ(cache.GetNumberOfProfiles(), 1U);
-  FilePath new_profile_path = cache.GetPathOfProfileAtIndex(0);
+  base::FilePath new_profile_path = cache.GetPathOfProfileAtIndex(0);
   EXPECT_NE(new_profile_path, singleton_profile_path);
 
   // Make sure that last used profile preference is set correctly.
@@ -73,7 +85,7 @@ IN_PROC_BROWSER_TEST_F(ProfileManagerBrowserTest, MAYBE_DeleteAllProfiles) {
   ProfileInfoCache& cache = profile_manager->GetProfileInfoCache();
 
   // Create an additional profile.
-  FilePath new_path = profile_manager->GenerateNextProfileDirectoryPath();
+  base::FilePath new_path = profile_manager->GenerateNextProfileDirectoryPath();
   profile_manager->CreateProfileAsync(new_path,
                                       base::Bind(&OnUnblockOnProfileCreation),
                                       string16(), string16(), false);
@@ -85,8 +97,8 @@ IN_PROC_BROWSER_TEST_F(ProfileManagerBrowserTest, MAYBE_DeleteAllProfiles) {
   ASSERT_EQ(cache.GetNumberOfProfiles(), 2U);
 
   // Delete all profiles.
-  FilePath profile_path1 = cache.GetPathOfProfileAtIndex(0);
-  FilePath profile_path2 = cache.GetPathOfProfileAtIndex(1);
+  base::FilePath profile_path1 = cache.GetPathOfProfileAtIndex(0);
+  base::FilePath profile_path2 = cache.GetPathOfProfileAtIndex(1);
   EXPECT_FALSE(profile_path1.empty());
   EXPECT_FALSE(profile_path2.empty());
   profile_manager->ScheduleProfileForDeletion(profile_path1,
@@ -99,7 +111,7 @@ IN_PROC_BROWSER_TEST_F(ProfileManagerBrowserTest, MAYBE_DeleteAllProfiles) {
 
   // Make sure a new profile was created automatically.
   EXPECT_EQ(cache.GetNumberOfProfiles(), 1U);
-  FilePath new_profile_path = cache.GetPathOfProfileAtIndex(0);
+  base::FilePath new_profile_path = cache.GetPathOfProfileAtIndex(0);
   EXPECT_NE(new_profile_path, profile_path1);
   EXPECT_NE(new_profile_path, profile_path2);
 
@@ -108,3 +120,32 @@ IN_PROC_BROWSER_TEST_F(ProfileManagerBrowserTest, MAYBE_DeleteAllProfiles) {
   EXPECT_EQ(new_profile_path, last_used->GetPath());
 }
 #endif // OS_MACOSX
+
+// Times out (http://crbug.com/159002)
+IN_PROC_BROWSER_TEST_F(ProfileManagerBrowserTest,
+                       DISABLED_CreateProfileWithCallback) {
+  ProfileManager* profile_manager = g_browser_process->profile_manager();
+
+  ASSERT_EQ(profile_manager->GetNumberOfProfiles(), 1U);
+  EXPECT_EQ(chrome::GetTotalBrowserCount(), 1U);
+
+  // Create a profile, make sure callback is invoked before any callbacks are
+  // invoked (so they can do things like sign in the profile, etc).
+  ProfileManager::CreateMultiProfileAsync(
+      string16(), // name
+      string16(), // icon url
+      base::Bind(ProfileCreationComplete),
+      chrome::GetActiveDesktop(),
+      false);
+  // Wait for profile to finish loading.
+  content::RunMessageLoop();
+  EXPECT_EQ(profile_manager->GetNumberOfProfiles(), 2U);
+  EXPECT_EQ(chrome::GetTotalBrowserCount(), 2U);
+
+  // Now close all browser windows.
+  std::vector<Profile*> profiles = profile_manager->GetLoadedProfiles();
+  for (std::vector<Profile*>::const_iterator it = profiles.begin();
+       it != profiles.end(); ++it) {
+    BrowserList::CloseAllBrowsersWithProfile(*it);
+  }
+}

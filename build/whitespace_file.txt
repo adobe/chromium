@@ -21,7 +21,7 @@ It was a Domo-Kun.
 "What took you so long?", inquired his wife.
 
 Silence. Oblivious to his silence, she continued, "Did Mr. Usagi enjoy the
-waffles you brought him?" "You know him, he's not one to forego a waffle,
+waffles you brought him?""You know him, he's not one to forego a waffle,
 no matter how burnt", he snickered.
 
 The pause was filled with the sound of thunder.
@@ -57,8 +57,7 @@ wondered where the sushi came from. He tries to recall the cook's face.  Purple?
 
 CHAPTER 5:
 Many years later, Mr. Usagi would laugh at the memory of the earnest,
-well-intentioned Domo-Kun.
-Another day in the life...
+well-intentioned Domo-Kun. Another day in the life...
 
 TRUISMS (1978-1983)
 JENNY HOLZER
@@ -68,8 +67,13 @@ A MAN CAN'T KNOW WHAT IT IS TO BE A MOTHER
 A NAME MEANS A LOT JUST BY ITSELF
 A POSITIVE ATTITUDE MEANS ALL THE DIFFERENCE IN THE WORLD
 A RELAXED MAN IS NOT NECESSARILY A BETTER MAN
-
----------
+NO ONE SHOULD EVER HAVE TO USE SVN
 AN INFLEXIBLE POSITION SOMETIMES IS A SIGN OF PARALYSIS
 
+fold ALL the things!
+
 This commit will change the world as we know it. For the better.
+So in a way, this changes everything. Again.
+
+
+Chrome F0R4V3R!

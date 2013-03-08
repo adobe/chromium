@@ -10,12 +10,13 @@
 
 #include "base/bind.h"
 #include "base/compiler_specific.h"
+#include "base/prefs/pref_service.h"
 #include "base/sequenced_task_runner_helpers.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/plugins/plugin_prefs.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/pref_names.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/pepper_flash_settings_helper.h"
@@ -177,7 +178,7 @@ class PepperFlashSettingsManager::Core
   base::WeakPtr<PepperFlashSettingsManager> manager_;
 
   // Used only on the I/O thread.
-  FilePath plugin_data_path_;
+  base::FilePath plugin_data_path_;
 
   // The channel is NULL until we have opened a connection to the broker
   // process. Used only on the I/O thread.
@@ -198,7 +199,7 @@ class PepperFlashSettingsManager::Core
 
   // Path for the current profile. Must be retrieved on the UI thread from the
   // browser context when we start so we can use it later on the I/O thread.
-  FilePath browser_context_path_;
+  base::FilePath browser_context_path_;
 
   scoped_refptr<PluginPrefs> plugin_prefs_;
 };
@@ -401,7 +402,7 @@ void PepperFlashSettingsManager::Core::InitializeOnIOThread() {
     return;
   }
 
-  FilePath profile_path =
+  base::FilePath profile_path =
       browser_context_path_.Append(content::kPepperDataDirname);
 #if defined(OS_WIN)
   plugin_data_path_ = profile_path.Append(plugin_info.name);
@@ -927,14 +928,15 @@ bool PepperFlashSettingsManager::IsPepperFlashInUse(
 }
 
 // static
-void PepperFlashSettingsManager::RegisterUserPrefs(PrefServiceSyncable* prefs) {
-  prefs->RegisterBooleanPref(prefs::kDeauthorizeContentLicenses,
-                             false,
-                             PrefServiceSyncable::UNSYNCABLE_PREF);
+void PepperFlashSettingsManager::RegisterUserPrefs(
+    PrefRegistrySyncable* registry) {
+  registry->RegisterBooleanPref(prefs::kDeauthorizeContentLicenses,
+                                false,
+                                PrefRegistrySyncable::UNSYNCABLE_PREF);
 
-  prefs->RegisterBooleanPref(prefs::kPepperFlashSettingsEnabled,
-                             true,
-                             PrefServiceSyncable::UNSYNCABLE_PREF);
+  registry->RegisterBooleanPref(prefs::kPepperFlashSettingsEnabled,
+                                true,
+                                PrefRegistrySyncable::UNSYNCABLE_PREF);
 }
 
 uint32 PepperFlashSettingsManager::DeauthorizeContentLicenses() {

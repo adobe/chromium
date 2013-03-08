@@ -24,6 +24,7 @@
 #include "chrome/browser/ui/gtk/location_bar_view_gtk.h"
 #include "chrome/browser/ui/singleton_tabs.h"
 #include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/extensions/api/extension_action/action_info.h"
 #include "chrome/common/extensions/api/omnibox/omnibox_handler.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/url_constants.h"
@@ -77,7 +78,8 @@ ExtensionInstalledBubbleGtk::ExtensionInstalledBubbleGtk(
     : extension_(extension),
       browser_(browser),
       icon_(icon),
-      animation_wait_retries_(kAnimationWaitRetries) {
+      animation_wait_retries_(kAnimationWaitRetries),
+      bubble_(NULL) {
   AddRef();  // Balanced in Close().
 
   extensions::ExtensionActionManager* extension_action_manager =
@@ -88,7 +90,7 @@ ExtensionInstalledBubbleGtk::ExtensionInstalledBubbleGtk(
   else if (extension_action_manager->GetBrowserAction(*extension_))
     type_ = BROWSER_ACTION;
   else if (extension_action_manager->GetPageAction(*extension) &&
-           extensions::OmniboxInfo::IsVerboseInstallMessage(extension))
+           extensions::ActionInfo::IsVerboseInstallMessage(extension))
     type_ = PAGE_ACTION;
   else
     type_ = GENERIC;

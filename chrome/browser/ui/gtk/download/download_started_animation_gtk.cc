@@ -15,6 +15,7 @@
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_view.h"
 #include "grit/theme_resources.h"
 #include "ui/base/animation/linear_animation.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -53,12 +54,12 @@ class DownloadStartedAnimationGtk : public ui::LinearAnimation,
   void Close();
 
   // Animation implementation.
-  virtual void AnimateToState(double state);
+  virtual void AnimateToState(double state) OVERRIDE;
 
   // NotificationObserver
   virtual void Observe(int type,
                        const content::NotificationSource& source,
-                       const content::NotificationDetails& details);
+                       const content::NotificationDetails& details) OVERRIDE;
 
   // The top level window that floats over the browser and displays the
   // image.
@@ -101,7 +102,7 @@ DownloadStartedAnimationGtk::DownloadStartedAnimationGtk(
 
   // If we're too small to show the download image, then don't bother -
   // the shelf will be enough.
-  web_contents_->GetContainerBounds(&web_contents_bounds_);
+  web_contents_->GetView()->GetContainerBounds(&web_contents_bounds_);
   if (web_contents_bounds_.height() < height_)
     return;
 

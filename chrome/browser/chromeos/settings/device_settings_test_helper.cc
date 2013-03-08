@@ -5,6 +5,7 @@
 #include "chrome/browser/chromeos/settings/device_settings_test_helper.h"
 
 #include "base/message_loop.h"
+#include "base/run_loop.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "chrome/browser/chromeos/settings/device_settings_service.h"
 #include "chrome/browser/chromeos/settings/mock_owner_key_util.h"
@@ -124,10 +125,6 @@ void DeviceSettingsTestHelper::RequestUnlockScreen() {}
 
 void DeviceSettingsTestHelper::NotifyLockScreenDismissed() {}
 
-bool DeviceSettingsTestHelper::GetIsScreenLocked() {
-  return false;
-}
-
 void DeviceSettingsTestHelper::RetrieveDevicePolicy(
     const RetrievePolicyCallback& callback) {
   device_policy_.retrieve_callbacks_.push_back(callback);
@@ -186,7 +183,9 @@ DeviceSettingsTestBase::DeviceSettingsTestBase()
       file_thread_(content::BrowserThread::FILE, &loop_),
       owner_key_util_(new MockOwnerKeyUtil()) {}
 
-DeviceSettingsTestBase::~DeviceSettingsTestBase() {}
+DeviceSettingsTestBase::~DeviceSettingsTestBase() {
+  base::RunLoop().RunUntilIdle();
+}
 
 void DeviceSettingsTestBase::SetUp() {
   device_policy_.payload().mutable_metrics_enabled()->set_metrics_enabled(

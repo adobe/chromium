@@ -172,7 +172,7 @@ class JniParams(object):
       return prefix + pod_param_map[param]
     if '/' in param:
       # Coming from javap, use the fully qualified param directly.
-      return 'L' + param + ';'
+      return prefix + 'L' + param + ';'
     for qualified_name in (object_param_list +
                            [JniParams._fully_qualified_class] +
                            JniParams._inner_classes):
@@ -423,8 +423,9 @@ class JNIFromJavaP(object):
   def __init__(self, contents, namespace):
     self.contents = contents
     self.namespace = namespace
-    self.fully_qualified_class = re.match('.*?class (?P<class_name>.*?) ',
-                                          contents[1]).group('class_name')
+    self.fully_qualified_class = re.match(
+        '.*?(class|interface) (?P<class_name>.*?)( |{)',
+        contents[1]).group('class_name')
     self.fully_qualified_class = self.fully_qualified_class.replace('.', '/')
     JniParams.SetFullyQualifiedClass(self.fully_qualified_class)
     self.java_class_name = self.fully_qualified_class.split('/')[-1]
@@ -957,7 +958,7 @@ def ExtractJarInputFile(jar_file, input_file, out_dir):
   return extracted_file_name
 
 
-def GenerateJNIHeader(input_file, output_file, namespace):
+def GenerateJNIHeader(input_file, output_file, namespace, skip_if_same):
   try:
     if os.path.splitext(input_file)[1] == '.class':
       jni_from_javap = JNIFromJavaP.CreateFromClass(input_file, namespace)
@@ -971,6 +972,11 @@ def GenerateJNIHeader(input_file, output_file, namespace):
   if output_file:
     if not os.path.exists(os.path.dirname(os.path.abspath(output_file))):
       os.makedirs(os.path.dirname(os.path.abspath(output_file)))
+    if skip_if_same and os.path.exists(output_file):
+      with file(output_file, 'r') as f:
+        existing_content = f.read()
+        if existing_content == content:
+          return
     with file(output_file, 'w') as f:
       f.write(content)
   else:
@@ -1000,6 +1006,10 @@ See SampleForTests.java for more details.
   option_parser.add_option('--output_dir',
                            help='The output directory. Must be used with '
                            '--input')
+  option_parser.add_option('--optimize_generation', type="int",
+                           default=0, help='Whether we should optimize JNI '
+                           'generation by not regenerating files if they have '
+                           'not changed.')
   options, args = option_parser.parse_args(argv)
   if options.jar_file:
     input_file = ExtractJarInputFile(options.jar_file, options.input_file,
@@ -1010,7 +1020,8 @@ See SampleForTests.java for more details.
   if options.output_dir:
     root_name = os.path.splitext(os.path.basename(input_file))[0]
     output_file = os.path.join(options.output_dir, root_name) + '_jni.h'
-  GenerateJNIHeader(input_file, output_file, options.namespace)
+  GenerateJNIHeader(input_file, output_file, options.namespace,
+                    options.optimize_generation)
 
 
 if __name__ == '__main__':

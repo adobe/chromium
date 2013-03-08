@@ -136,6 +136,9 @@ void ToplevelWindowEventHandler::OnMouseEvent(
       (ui::EF_MIDDLE_MOUSE_BUTTON | ui::EF_RIGHT_MOUSE_BUTTON)) != 0)
     return;
 
+  if (in_gesture_drag_)
+    return;
+
   aura::Window* target = static_cast<aura::Window*>(event->target());
   switch (event->type()) {
     case ui::ET_MOUSE_PRESSED:
@@ -164,8 +167,13 @@ void ToplevelWindowEventHandler::OnGestureEvent(ui::GestureEvent* event) {
   if (!target->delegate())
     return;
 
+  if (in_move_loop_ && !in_gesture_drag_)
+    return;
+
   switch (event->type()) {
     case ui::ET_GESTURE_SCROLL_BEGIN: {
+      if (in_gesture_drag_)
+        return;
       int component =
           target->delegate()->GetNonClientComponent(event->location());
       if (WindowResizer::GetBoundsChangeForWindowComponent(component) == 0) {
@@ -182,6 +190,10 @@ void ToplevelWindowEventHandler::OnGestureEvent(ui::GestureEvent* event) {
     case ui::ET_GESTURE_SCROLL_UPDATE: {
       if (!in_gesture_drag_)
         return;
+      if (window_resizer_.get() &&
+          window_resizer_->resizer()->GetTarget() != target) {
+        return;
+      }
       HandleDrag(target, event);
       break;
     }
@@ -189,6 +201,10 @@ void ToplevelWindowEventHandler::OnGestureEvent(ui::GestureEvent* event) {
     case ui::ET_SCROLL_FLING_START: {
       if (!in_gesture_drag_)
         return;
+      if (window_resizer_.get() &&
+          window_resizer_->resizer()->GetTarget() != target) {
+        return;
+      }
 
       CompleteDrag(DRAG_COMPLETE, event->flags());
       if (in_move_loop_) {
@@ -212,7 +228,8 @@ void ToplevelWindowEventHandler::OnGestureEvent(ui::GestureEvent* event) {
       if (fabs(event->details().velocity_y()) >
           kMinVertVelocityForWindowMinimize) {
         // Minimize/maximize.
-        if (event->details().velocity_y() > 0) {
+        if (event->details().velocity_y() > 0 &&
+            wm::CanMinimizeWindow(target)) {
           wm::MinimizeWindow(target);
           SetWindowAlwaysRestoresToRestoreBounds(target, true);
           SetRestoreBoundsInParent(target, pre_drag_window_bounds_);
@@ -220,7 +237,8 @@ void ToplevelWindowEventHandler::OnGestureEvent(ui::GestureEvent* event) {
           SetRestoreBoundsInParent(target, pre_drag_window_bounds_);
           wm::MaximizeWindow(target);
         }
-      } else if (fabs(event->details().velocity_x()) >
+      } else if (wm::CanSnapWindow(target) &&
+                 fabs(event->details().velocity_x()) >
                  kMinHorizVelocityForWindowSwipe) {
         // Snap left/right.
         ui::ScopedLayerAnimationSettings scoped_setter(
@@ -242,14 +260,16 @@ void ToplevelWindowEventHandler::OnGestureEvent(ui::GestureEvent* event) {
 
 aura::client::WindowMoveResult ToplevelWindowEventHandler::RunMoveLoop(
     aura::Window* source,
-    const gfx::Vector2d& drag_offset) {
+    const gfx::Vector2d& drag_offset,
+    aura::client::WindowMoveSource move_source) {
   DCHECK(!in_move_loop_);  // Can only handle one nested loop at a time.
   in_move_loop_ = true;
   move_cancelled_ = false;
   aura::RootWindow* root_window = source->GetRootWindow();
   DCHECK(root_window);
   gfx::Point drag_location;
-  if (aura::Env::GetInstance()->is_touch_down()) {
+  if (move_source == aura::client::WINDOW_MOVE_SOURCE_TOUCH &&
+      aura::Env::GetInstance()->is_touch_down()) {
     in_gesture_drag_ = true;
     bool has_point = root_window->gesture_recognizer()->
         GetLastTouchPointForTarget(source, &drag_location);

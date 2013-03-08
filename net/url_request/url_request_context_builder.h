@@ -17,7 +17,7 @@
 #include <string>
 
 #include "base/basictypes.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "build/build_config.h"
@@ -49,7 +49,7 @@ class NET_EXPORT URLRequestContextBuilder {
     int max_size;
 
     // The cache path (when type is DISK).
-    FilePath path;
+    base::FilePath path;
   };
 
   struct NET_EXPORT HttpNetworkSessionParams {

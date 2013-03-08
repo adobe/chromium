@@ -123,7 +123,7 @@ class MockSocketStreamDelegate : public net::SocketStream::Delegate {
     if (!on_received_data_.is_null())
       on_received_data_.Run();
   }
-  virtual void OnClose(net::SocketStream* socket) {
+  virtual void OnClose(net::SocketStream* socket) OVERRIDE {
     if (!on_close_.is_null())
       on_close_.Run();
   }
@@ -207,13 +207,6 @@ class MockCookieStore : public net::CookieStore {
       callback.Run(GetCookiesWithOptions(url, options));
   }
 
-  virtual void GetCookiesWithInfoAsync(
-      const GURL& url,
-      const net::CookieOptions& options,
-      const GetCookieInfoCallback& callback) OVERRIDE {
-    ADD_FAILURE();
-  }
-
   virtual void DeleteCookieAsync(const GURL& url,
                                  const std::string& cookie_name,
                                  const base::Closure& callback) OVERRIDE {
@@ -256,10 +249,10 @@ class MockURLRequestContext : public net::URLRequestContext {
       : transport_security_state_() {
     set_cookie_store(cookie_store);
     set_transport_security_state(&transport_security_state_);
-    net::TransportSecurityState::DomainState state;
-    state.upgrade_expiry = base::Time::Now() +
-        base::TimeDelta::FromSeconds(1000);
-    transport_security_state_.EnableHost("upgrademe.com", state);
+    base::Time expiry = base::Time::Now() + base::TimeDelta::FromDays(1000);
+    bool include_subdomains = false;
+    transport_security_state_.AddHSTS("upgrademe.com", expiry,
+                                      include_subdomains);
   }
 
   virtual ~MockURLRequestContext() {}
@@ -306,16 +299,17 @@ class MockHttpTransactionFactory : public net::HttpTransactionFactory {
     EXPECT_EQ(net::OK,
               session_->InitializeWithSocket(connection, false, net::OK));
   }
-  virtual int CreateTransaction(scoped_ptr<net::HttpTransaction>* trans,
-                                net::HttpTransactionDelegate* delegate) {
+  virtual int CreateTransaction(
+      scoped_ptr<net::HttpTransaction>* trans,
+      net::HttpTransactionDelegate* delegate) OVERRIDE {
     NOTREACHED();
     return net::ERR_UNEXPECTED;
   }
-  virtual net::HttpCache* GetCache() {
+  virtual net::HttpCache* GetCache() OVERRIDE {
     NOTREACHED();
     return NULL;
   }
-  virtual net::HttpNetworkSession* GetSession() {
+  virtual net::HttpNetworkSession* GetSession() OVERRIDE {
     return http_session_.get();
   }
  private:
@@ -405,9 +399,13 @@ class WebSocketJobSpdy3Test : public PlatformTest {
 
     websocket_->InitSocketStream(socket_.get());
     websocket_->set_context(context_.get());
+    // MockHostResolver resolves all hosts to 127.0.0.1; however, when we create
+    // a WebSocketJob purely to block another one in a throttling test, we don't
+    // perform a real connect. In that case, the following address is used
+    // instead.
     IPAddressNumber ip;
     ParseIPLiteralToNumber("127.0.0.1", &ip);
-    websocket_->addresses_ = AddressList::CreateFromIPAddress(ip, 0);
+    websocket_->addresses_ = AddressList::CreateFromIPAddress(ip, 80);
   }
   void SkipToConnecting() {
     websocket_->state_ = WebSocketJob::CONNECTING;

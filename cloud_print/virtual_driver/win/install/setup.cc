@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <comdef.h>
 #include <iomanip>
 #include <windows.h>
 #include <winspool.h>
@@ -11,11 +12,13 @@
 #include "base/command_line.h"
 #include "base/file_util.h"
 #include "base/file_version_info_win.h"
+#include "base/files/scoped_temp_dir.h"
 #include "base/logging.h"
 #include "base/path_service.h"
 #include "base/process.h"
 #include "base/process_util.h"
 #include "base/string16.h"
+#include "base/string_util.h"
 #include "base/win/registry.h"
 #include "base/win/scoped_handle.h"
 #include "base/win/windows_version.h"
@@ -27,29 +30,48 @@
                       // warnings.
 
 namespace {
-const wchar_t kVersionKey[] = L"pv";
-const wchar_t kNameKey[] = L"name";
+
 const wchar_t kNameValue[] = L"GCP Virtual Driver";
-const wchar_t kPpdName[] = L"gcp-driver.ppd";
-const wchar_t kDriverName[] = L"MXDWDRV.DLL";
-const wchar_t kUiDriverName[] = L"PS5UI.DLL";
-const wchar_t kHelpName[] = L"PSCRIPT.HLP";
-const wchar_t* kDependencyList[] = {kDriverName, kUiDriverName, kHelpName};
 const wchar_t kUninstallRegistry[] =
     L"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\"
     L"{74AA24E0-AC50-4B28-BA46-9CF05467C9B7}";
 const wchar_t kInstallerName[] = L"virtual_driver_setup.exe";
 const wchar_t kGcpUrl[] = L"http://www.google.com/cloudprint";
 
-const char kDoUninstallSwitch[] = "douninstall";
+const wchar_t kDataFileName[] = L"gcp_driver.gpd";
+const wchar_t kDriverName[] = L"MXDWDRV.DLL";
+const wchar_t kUiDriverName[] = L"UNIDRVUI.DLL";
+const wchar_t kHelpName[] = L"UNIDRV.HLP";
+const wchar_t* kDependencyList[] = {
+  kDriverName,
+  kHelpName,
+  kUiDriverName,
+  L"STDDTYPE.GDL",
+  L"STDNAMES.GPD",
+  L"STDSCHEM.GDL",
+  L"STDSCHMX.GDL",
+  L"UNIDRV.DLL",
+  L"UNIRES.DLL",
+  L"XPSSVCS.DLL",
+};
+
+const char kDelete[] = "delete";
 const char kInstallSwitch[] = "install";
 const char kRegisterSwitch[] = "register";
 const char kUninstallSwitch[] = "uninstall";
 const char kUnregisterSwitch[] = "unregister";
 
+// Google update related constants.
+const wchar_t kVersionKey[] = L"pv";
+const wchar_t kNameKey[] = L"name";
+const DWORD kInstallerResultFailedCustomError = 1;
+const wchar_t kRegValueLastInstallerResult[] = L"LastInstallerResult";
+const wchar_t kRegValueLastInstallerResultUIString[] =
+    L"LastInstallerResultUIString";
+
 void SetGoogleUpdateKeys() {
   base::win::RegKey key;
-  if (key.Create(HKEY_LOCAL_MACHINE, cloud_print::kKeyLocation,
+  if (key.Create(HKEY_LOCAL_MACHINE, cloud_print::kGoogleUpdateClientsKey,
                  KEY_SET_VALUE) != ERROR_SUCCESS) {
     LOG(ERROR) << "Unable to open key";
   }
@@ -75,9 +97,25 @@ void SetGoogleUpdateKeys() {
   }
 }
 
+void SetGoogleUpdateError(const string16& message) {
+  LOG(ERROR) << message;
+  base::win::RegKey key;
+  if (key.Create(HKEY_LOCAL_MACHINE, cloud_print::kGoogleUpdateClientStateKey,
+                 KEY_SET_VALUE) != ERROR_SUCCESS) {
+    LOG(ERROR) << "Unable to open key";
+  }
+
+  if (key.WriteValue(kRegValueLastInstallerResult,
+                     kInstallerResultFailedCustomError) != ERROR_SUCCESS ||
+      key.WriteValue(kRegValueLastInstallerResultUIString,
+                     message.c_str()) != ERROR_SUCCESS) {
+      LOG(ERROR) << "Unable to set registry keys";
+  }
+}
+
 void DeleteGoogleUpdateKeys() {
   base::win::RegKey key;
-  if (key.Open(HKEY_LOCAL_MACHINE, cloud_print::kKeyLocation,
+  if (key.Open(HKEY_LOCAL_MACHINE, cloud_print::kGoogleUpdateClientsKey,
                DELETE) != ERROR_SUCCESS) {
     LOG(ERROR) << "Unable to open key to delete";
     return;
@@ -87,8 +125,8 @@ void DeleteGoogleUpdateKeys() {
   }
 }
 
-FilePath GetSystemPath(const string16& binary) {
-  FilePath path;
+base::FilePath GetSystemPath(const string16& binary) {
+  base::FilePath path;
   if (!PathService::Get(base::DIR_SYSTEM, &path)) {
     LOG(ERROR) << "Unable to get system path.";
     return path;
@@ -96,10 +134,10 @@ FilePath GetSystemPath(const string16& binary) {
   return path.Append(binary);
 }
 
-FilePath GetNativeSystemPath(const string16& binary) {
+base::FilePath GetNativeSystemPath(const string16& binary) {
   if (!cloud_print::IsSystem64Bit())
     return GetSystemPath(binary);
-  FilePath path;
+  base::FilePath path;
   // Sysnative will bypass filesystem redirection and give us
   // the location of the 64bit system32 from a 32 bit process.
   if (!PathService::Get(base::DIR_WINDOWS, &path)) {
@@ -110,7 +148,7 @@ FilePath GetNativeSystemPath(const string16& binary) {
 }
 
 void SpoolerServiceCommand(const char* command) {
-  FilePath net_path = GetNativeSystemPath(L"net");
+  base::FilePath net_path = GetNativeSystemPath(L"net");
   if (net_path.empty())
     return;
   CommandLine command_line(net_path);
@@ -125,16 +163,16 @@ void SpoolerServiceCommand(const char* command) {
   base::LaunchProcess(command_line, options, NULL);
 }
 
-HRESULT RegisterPortMonitor(bool install, const FilePath& install_path) {
+HRESULT RegisterPortMonitor(bool install, const base::FilePath& install_path) {
   DCHECK(install || install_path.empty());
-  FilePath target_path =
+  base::FilePath target_path =
       GetNativeSystemPath(cloud_print::GetPortMonitorDllName());
   if (target_path.empty()) {
     LOG(ERROR) << "Unable to get port monitor target path.";
     return HRESULT_FROM_WIN32(ERROR_PATH_NOT_FOUND);
   }
   if (install) {
-    FilePath source_path =
+    base::FilePath source_path =
         install_path.Append(cloud_print::GetPortMonitorDllName());
     if (!file_util::CopyFile(source_path, target_path)) {
       LOG(ERROR) << "Unable copy port monitor dll from " <<
@@ -146,7 +184,7 @@ HRESULT RegisterPortMonitor(bool install, const FilePath& install_path) {
     return S_OK;
   }
 
-  FilePath regsvr32_path = GetNativeSystemPath(L"regsvr32.exe");
+  base::FilePath regsvr32_path = GetNativeSystemPath(L"regsvr32.exe");
   if (regsvr32_path.empty()) {
     LOG(ERROR) << "Can't find regsvr32.exe.";
     return HRESULT_FROM_WIN32(ERROR_PATH_NOT_FOUND);
@@ -214,87 +252,107 @@ DWORDLONG GetVersionNumber() {
 UINT CALLBACK CabinetCallback(PVOID data,
                               UINT notification,
                               UINT_PTR param1,
-                              UINT_PTR param2 ) {
-  FilePath* temp_path = reinterpret_cast<FilePath*>(data);
+                              UINT_PTR param2) {
+  const base::FilePath* temp_path(
+      reinterpret_cast<const base::FilePath*>(data));
   if (notification == SPFILENOTIFY_FILEINCABINET) {
     FILE_IN_CABINET_INFO* info =
         reinterpret_cast<FILE_IN_CABINET_INFO*>(param1);
     for (int i = 0; i < arraysize(kDependencyList); i++) {
-      FilePath base_name(info->NameInCabinet);
+      base::FilePath base_name(info->NameInCabinet);
       base_name = base_name.BaseName();
-      if (FilePath::CompareEqualIgnoreCase(base_name.value().c_str(),
-                                           kDependencyList[i])) {
+      if (base::FilePath::CompareEqualIgnoreCase(base_name.value().c_str(),
+                                                 kDependencyList[i])) {
         StringCchCopy(info->FullTargetName, MAX_PATH,
                       temp_path->Append(kDependencyList[i]).value().c_str());
         return FILEOP_DOIT;
       }
     }
-
     return FILEOP_SKIP;
   }
   return NO_ERROR;
 }
 
-void ReadyPpdDependencies(const FilePath& install_path) {
-  base::win::Version version = base::win::GetVersion();
-  if (version >= base::win::VERSION_VISTA) {
+void ReadyDriverDependencies(const base::FilePath& destination) {
+  if (base::win::GetVersion() >= base::win::VERSION_VISTA) {
     // GetCorePrinterDrivers and GetPrinterDriverPackagePath only exist on
     // Vista and later. Winspool.drv must be delayloaded so these calls don't
     // create problems on XP.
     DWORD size = MAX_PATH;
     wchar_t package_path[MAX_PATH] = {0};
     CORE_PRINTER_DRIVER driver;
-    GetCorePrinterDrivers(NULL,
-                          NULL,
-                          L"{D20EA372-DD35-4950-9ED8-A6335AFE79F5}",
-                          1,
-                          &driver);
-    GetPrinterDriverPackagePath(NULL,
-                                NULL,
-                                NULL,
-                                driver.szPackageID,
-                                package_path,
-                                MAX_PATH,
-                                &size);
-    SetupIterateCabinet(package_path,
-                        0,
-                        CabinetCallback,
-                        const_cast<FilePath*>(&install_path));
+    GetCorePrinterDrivers(NULL, NULL, L"{D20EA372-DD35-4950-9ED8-A6335AFE79F5}",
+                          1, &driver);
+    GetPrinterDriverPackagePath(NULL, NULL, NULL, driver.szPackageID,
+                                package_path, MAX_PATH, &size);
+    SetupIterateCabinet(package_path, 0, &CabinetCallback,
+                        &base::FilePath(destination));
   } else {
-    // PS driver files are in the sp3 cab.
-    FilePath package_path;
+    // Driver files are in the sp3 cab.
+    base::FilePath package_path;
     PathService::Get(base::DIR_WINDOWS, &package_path);
     package_path = package_path.Append(L"Driver Cache\\i386\\sp3.cab");
-    SetupIterateCabinet(package_path.value().c_str(),
-                        0,
-                        CabinetCallback,
-                        const_cast<FilePath*>(&install_path));
+    SetupIterateCabinet(package_path.value().c_str(), 0, &CabinetCallback,
+                        &base::FilePath(destination));
 
-    // The XPS driver files are just sitting uncompressed in the driver cache.
-    FilePath xps_path;
-    PathService::Get(base::DIR_WINDOWS, &xps_path);
-    xps_path = xps_path.Append(L"Driver Cache\\i386");
-    xps_path = xps_path.Append(kDriverName);
-    file_util::CopyFile(xps_path, install_path.Append(kDriverName));
+    // Copy the rest from the driver cache or system dir.
+    base::FilePath driver_cache_path;
+    PathService::Get(base::DIR_WINDOWS, &driver_cache_path);
+    driver_cache_path = driver_cache_path.Append(L"Driver Cache\\i386");
+    for (size_t i = 0; i < arraysize(kDependencyList); ++i) {
+      base::FilePath dst_path = destination.Append(kDependencyList[i]);
+      if (!file_util::PathExists(dst_path)) {
+        base::FilePath src_path = driver_cache_path.Append(kDependencyList[i]);
+        if (!file_util::PathExists(src_path))
+          src_path = GetSystemPath(kDependencyList[i]);
+        file_util::CopyFile(src_path, dst_path);
+      }
+    }
   }
 }
 
-HRESULT InstallPpd(const FilePath& install_path) {
-  DRIVER_INFO_6 driver_info = {0};
-  HRESULT result = S_OK;
+HRESULT InstallDriver(const base::FilePath& install_path) {
+  base::ScopedTempDir temp_path;
+  if (!temp_path.CreateUniqueTempDir())
+    return HRESULT_FROM_WIN32(ERROR_CANNOT_MAKE);
+  ReadyDriverDependencies(temp_path.path());
+
+  std::vector<string16> dependent_array;
+  // Add all files. AddPrinterDriverEx will removes unnecessary.
+  for (size_t i = 0; i < arraysize(kDependencyList); ++i) {
+    base::FilePath file_path = temp_path.path().Append(kDependencyList[i]);
+    if (file_util::PathExists(file_path))
+      dependent_array.push_back(file_path.value());
+    else
+      LOG(WARNING) << "File is missing: " << file_path.BaseName().value();
+  }
 
   // Set up paths for the files we depend on.
-  FilePath ppd_path = install_path.Append(kPpdName);
-  FilePath xps_path = install_path.Append(kDriverName);
-  FilePath ui_path = install_path.Append(kUiDriverName);
-  FilePath ui_help_path = install_path.Append(kHelpName);
-  ReadyPpdDependencies(install_path);
+  base::FilePath data_file = install_path.Append(kDataFileName);
+  base::FilePath xps_path = temp_path.path().Append(kDriverName);
+  base::FilePath ui_path = temp_path.path().Append(kUiDriverName);
+  base::FilePath ui_help_path = temp_path.path().Append(kHelpName);
+
+  if (!file_util::PathExists(xps_path)) {
+    SetGoogleUpdateError(cloud_print::LoadLocalString(IDS_ERROR_NO_XPS));
+    return HRESULT_FROM_WIN32(ERROR_BAD_DRIVER);
+  }
+
+  DRIVER_INFO_6 driver_info = {0};
+  // Set up supported print system version.  Must be 3.
+  driver_info.cVersion = 3;
+
   // None of the print API structures likes constant strings even though they
   // don't modify the string.  const_casting is the cleanest option.
-  driver_info.pDataFile = const_cast<LPWSTR>(ppd_path.value().c_str());
+  driver_info.pDataFile = const_cast<LPWSTR>(data_file.value().c_str());
   driver_info.pHelpFile = const_cast<LPWSTR>(ui_help_path.value().c_str());
   driver_info.pDriverPath = const_cast<LPWSTR>(xps_path.value().c_str());
   driver_info.pConfigFile = const_cast<LPWSTR>(ui_path.value().c_str());
+
+  string16 dependent_files(JoinString(dependent_array, L'\n'));
+  dependent_files.push_back(L'\n');
+  std::replace(dependent_files.begin(), dependent_files.end(), L'\n', L'\0');
+  driver_info.pDependentFiles = &dependent_files[0];
 
   // Set up user visible strings.
   string16 manufacturer = cloud_print::LoadLocalString(IDS_GOOGLE);
@@ -305,20 +363,15 @@ HRESULT InstallPpd(const FilePath& install_path) {
   string16 driver_name = cloud_print::LoadLocalString(IDS_DRIVER_NAME);
   driver_info.pName = const_cast<LPWSTR>(driver_name.c_str());
 
-  // Set up supported print system version.  Must be 3.
-  driver_info.cVersion = 3;
-
-  if (!AddPrinterDriverEx(NULL,
-                          6,
-                          reinterpret_cast<BYTE*>(&driver_info),
-                          APD_COPY_NEW_FILES|APD_COPY_FROM_DIRECTORY)) {
-    result = cloud_print::GetLastHResult();
+  if (!::AddPrinterDriverEx(NULL, 6, reinterpret_cast<BYTE*>(&driver_info),
+                            APD_COPY_NEW_FILES | APD_COPY_FROM_DIRECTORY)) {
     LOG(ERROR) << "Unable to add printer driver";
+    return cloud_print::GetLastHResult();
   }
-  return result;
+  return S_OK;
 }
 
-HRESULT UninstallPpd() {
+HRESULT UninstallDriver() {
   int tries = 3;
   string16 driver_name = cloud_print::LoadLocalString(IDS_DRIVER_NAME);
   while (!DeletePrinterDriverEx(NULL,
@@ -390,7 +443,7 @@ HRESULT UninstallPrinter(void) {
   return S_OK;
 }
 
-void SetupUninstall(const FilePath& install_path) {
+void SetupUninstall(const base::FilePath& install_path) {
   // Now write the Windows Uninstall entries
   // Minimal error checking here since the install can contiunue
   // if this fails.
@@ -438,7 +491,7 @@ bool IsOSSupported() {
        (base::win::OSInfo::GetInstance()->service_pack().major >= 3));
 }
 
-HRESULT RegisterVirtualDriver(const FilePath& install_path) {
+HRESULT RegisterVirtualDriver(const base::FilePath& install_path) {
   HRESULT result = S_OK;
 
   DCHECK(file_util::DirectoryExists(install_path));
@@ -447,15 +500,15 @@ HRESULT RegisterVirtualDriver(const FilePath& install_path) {
     return HRESULT_FROM_WIN32(ERROR_OLD_WIN_VERSION);
   }
 
-  result = RegisterPortMonitor(true, install_path);
+  result = InstallDriver(install_path);
   if (FAILED(result)) {
-    LOG(ERROR) << "Unable to register port monitor.";
+    LOG(ERROR) << "Unable to install driver.";
     return result;
   }
 
-  result = InstallPpd(install_path);
+  result = RegisterPortMonitor(true, install_path);
   if (FAILED(result)) {
-    LOG(ERROR) << "Unable to install Ppd.";
+    LOG(ERROR) << "Unable to register port monitor.";
     return result;
   }
 
@@ -468,17 +521,17 @@ HRESULT RegisterVirtualDriver(const FilePath& install_path) {
   return S_OK;
 }
 
-void GetCurrentInstallPath(FilePath* install_path) {
+void GetCurrentInstallPath(base::FilePath* install_path) {
   base::win::RegKey key;
   if (key.Open(HKEY_LOCAL_MACHINE, kUninstallRegistry,
                KEY_QUERY_VALUE) != ERROR_SUCCESS) {
     // Not installed.
-    *install_path = FilePath();
+    *install_path = base::FilePath();
     return;
   }
   string16 install_path_value;
   key.ReadValue(L"InstallLocation", &install_path_value);
-  *install_path = FilePath(install_path_value);
+  *install_path = base::FilePath(install_path_value);
 }
 
 HRESULT TryUnregisterVirtualDriver() {
@@ -488,13 +541,13 @@ HRESULT TryUnregisterVirtualDriver() {
     LOG(ERROR) << "Unable to delete printer.";
     return result;
   }
-  result = UninstallPpd();
+  result = UninstallDriver();
   if (FAILED(result)) {
-    LOG(ERROR) << "Unable to remove PPD.";
+    LOG(ERROR) << "Unable to remove driver.";
     return result;
   }
   // The second argument is ignored if the first is false.
-  result = RegisterPortMonitor(false, FilePath());
+  result = RegisterPortMonitor(false, base::FilePath());
   if (FAILED(result)) {
     LOG(ERROR) << "Unable to remove port monitor.";
     return result;
@@ -516,13 +569,13 @@ HRESULT UnregisterVirtualDriver() {
   return hr;
 }
 
-HRESULT DoLaunchUninstall(const FilePath& installer_source, bool wait) {
-  FilePath temp_path;
+HRESULT DeleteProgramDir(const base::FilePath& installer_source, bool wait) {
+  base::FilePath temp_path;
   if (file_util::CreateTemporaryFile(&temp_path)) {
     file_util::CopyFile(installer_source, temp_path);
     file_util::DeleteAfterReboot(temp_path);
     CommandLine command_line(temp_path);
-    command_line.AppendArg(kDoUninstallSwitch);
+    command_line.AppendSwitchPath(kDelete, installer_source.DirName());
     base::LaunchOptions options;
     options.wait = wait;
     base::ProcessHandle process_handle;
@@ -545,11 +598,15 @@ HRESULT DoLaunchUninstall(const FilePath& installer_source, bool wait) {
   return S_OK;
 }
 
-HRESULT LaunchChildForUninstall() {
-  FilePath installer_source;
-  if (PathService::Get(base::FILE_EXE, &installer_source)) {
-    return DoLaunchUninstall(installer_source, false);
-  }
+HRESULT DoUninstall() {
+  DeleteGoogleUpdateKeys();
+  HRESULT result = UnregisterVirtualDriver();
+  if (FAILED(result))
+    return result;
+  CleanupUninstall();
+  base::FilePath installer_source;
+  if (PathService::Get(base::FILE_EXE, &installer_source))
+    return DeleteProgramDir(installer_source, false);
   return S_OK;
 }
 
@@ -557,36 +614,29 @@ HRESULT DoUnregister() {
   return UnregisterVirtualDriver();
 }
 
-HRESULT DoRegister(const FilePath& install_path) {
+HRESULT DoRegister(const base::FilePath& install_path) {
   HRESULT result = UnregisterVirtualDriver();
   if (FAILED(result))
     return result;
   return RegisterVirtualDriver(install_path);
 }
 
-HRESULT DoUninstall() {
-  FilePath install_path;
-  GetCurrentInstallPath(&install_path);
-  if (install_path.value().empty()) {
+HRESULT DoDelete(const base::FilePath& install_path) {
+  if (install_path.value().empty())
+    return E_INVALIDARG;
+  if (!file_util::DirectoryExists(install_path))
     return S_FALSE;
-  }
-  HRESULT result = UnregisterVirtualDriver();
-  if (FAILED(result))
-    return result;
-  DeleteGoogleUpdateKeys();
-  if (file_util::DirectoryExists(install_path))
-    file_util::Delete(install_path, true);
-  CleanupUninstall();
-  return result;
+  Sleep(5000);  // Give parent some time to exit.
+  return file_util::Delete(install_path, true) ? S_OK : E_FAIL;
 }
 
-HRESULT DoInstall(const FilePath& install_path) {
+HRESULT DoInstall(const base::FilePath& install_path) {
   HRESULT result = UnregisterVirtualDriver();
   if (FAILED(result)) {
     LOG(ERROR) << "Unable to unregister.";
     return result;
   }
-  FilePath old_install_path;
+  base::FilePath old_install_path;
   GetCurrentInstallPath(&old_install_path);
   if (!old_install_path.value().empty() &&
       install_path != old_install_path) {
@@ -604,16 +654,16 @@ HRESULT DoInstall(const FilePath& install_path) {
 HRESULT ExecuteCommands() {
   const CommandLine& command_line = *CommandLine::ForCurrentProcess();
 
-  FilePath exe_path;
+  base::FilePath exe_path;
   if (FAILED(PathService::Get(base::DIR_EXE, &exe_path)) ||
       !file_util::DirectoryExists(exe_path)) {
     return HRESULT_FROM_WIN32(ERROR_PATH_NOT_FOUND);
   }
 
-  if (command_line.HasSwitch(kDoUninstallSwitch)) {
-    return DoUninstall();
+  if (command_line.HasSwitch(kDelete)) {
+    return DoDelete(command_line.GetSwitchValuePath(kDelete));
   } else if (command_line.HasSwitch(kUninstallSwitch)) {
-    return LaunchChildForUninstall();
+    return DoUninstall();
   } else if (command_line.HasSwitch(kInstallSwitch)) {
     return DoInstall(exe_path);
   } else if (command_line.HasSwitch(kUnregisterSwitch)) {
@@ -635,7 +685,8 @@ int WINAPI WinMain(__in  HINSTANCE hInstance,
   CommandLine::Init(0, NULL);
   HRESULT retval = ExecuteCommands();
 
-  LOG(INFO) << "HRESULT=0x" << std::setbase(16) << retval;
+  LOG(INFO) << _com_error(retval).ErrorMessage() << " HRESULT=0x" <<
+               std::setbase(16) << retval;
 
   // Installer is silent by default as required by Google Update.
   if (CommandLine::ForCurrentProcess()->HasSwitch("verbose")) {

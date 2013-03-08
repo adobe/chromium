@@ -6,7 +6,7 @@
 
 #include "base/callback.h"
 #include "base/logging.h"
-#include "base/string_tokenizer.h"
+#include "base/strings/string_tokenizer.h"
 #include "base/time.h"
 #include "net/proxy/proxy_server.h"
 
@@ -23,7 +23,7 @@ ProxyList::~ProxyList() {
 
 void ProxyList::Set(const std::string& proxy_uri_list) {
   proxies_.clear();
-  StringTokenizer str_tok(proxy_uri_list, ";");
+  base::StringTokenizer str_tok(proxy_uri_list, ";");
   while (str_tok.GetNext()) {
     ProxyServer uri = ProxyServer::FromURI(
         str_tok.token_begin(), str_tok.token_end(), ProxyServer::SCHEME_HTTP);
@@ -116,7 +116,7 @@ const ProxyServer& ProxyList::Get() const {
 }
 
 void ProxyList::SetFromPacString(const std::string& pac_string) {
-  StringTokenizer entry_tok(pac_string, ";");
+  base::StringTokenizer entry_tok(pac_string, ";");
   proxies_.clear();
   while (entry_tok.GetNext()) {
     ProxyServer uri = ProxyServer::FromPacString(
@@ -175,7 +175,11 @@ bool ProxyList::Fallback(ProxyRetryInfoMap* proxy_retry_info,
 void ProxyList::UpdateRetryInfoOnFallback(
     ProxyRetryInfoMap* proxy_retry_info, const BoundNetLog& net_log) const {
   // Number of minutes to wait before retrying a bad proxy server.
+#if defined(OS_ANDROID)
+  const TimeDelta kProxyRetryDelay = TimeDelta::FromMinutes(1);
+#else
   const TimeDelta kProxyRetryDelay = TimeDelta::FromMinutes(5);
+#endif
 
   if (proxies_.empty()) {
     NOTREACHED();

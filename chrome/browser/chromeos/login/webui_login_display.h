@@ -8,7 +8,9 @@
 #include <string>
 #include <vector>
 
+#include "ash/wm/user_activity_observer.h"
 #include "base/compiler_specific.h"
+#include "base/timer.h"
 #include "chrome/browser/chromeos/login/login_display.h"
 #include "chrome/browser/chromeos/login/user.h"
 #include "chrome/browser/ui/webui/chromeos/login/native_window_delegate.h"
@@ -19,7 +21,8 @@ namespace chromeos {
 // WebUI-based login UI implementation.
 class WebUILoginDisplay : public LoginDisplay,
                           public NativeWindowDelegate,
-                          public SigninScreenHandlerDelegate {
+                          public SigninScreenHandlerDelegate,
+                          public ash::UserActivityObserver {
  public:
   explicit WebUILoginDisplay(LoginDisplay::Delegate* delegate);
   virtual ~WebUILoginDisplay();
@@ -43,6 +46,7 @@ class WebUILoginDisplay : public LoginDisplay,
   virtual void ShowErrorScreen(LoginDisplay::SigninError error_id) OVERRIDE;
   virtual void ShowGaiaPasswordChanged(const std::string& username) OVERRIDE;
   virtual void ShowPasswordChangedDialog(bool show_password_error) OVERRIDE;
+  virtual void ShowSigninUI(const std::string& email) OVERRIDE;
 
   // NativeWindowDelegate implementation:
   virtual gfx::NativeWindow GetNativeWindow() const OVERRIDE;
@@ -66,6 +70,7 @@ class WebUILoginDisplay : public LoginDisplay,
   virtual void ResyncUserData() OVERRIDE;
   virtual void ShowEnterpriseEnrollmentScreen() OVERRIDE;
   virtual void ShowResetScreen() OVERRIDE;
+  virtual void ShowWrongHWIDScreen() OVERRIDE;
   virtual void SetWebUIHandler(
       LoginDisplayWebUIHandler* webui_handler) OVERRIDE;
   virtual void ShowSigninScreenForCreds(const std::string& username,
@@ -77,7 +82,13 @@ class WebUILoginDisplay : public LoginDisplay,
   virtual void SetDisplayEmail(const std::string& email) OVERRIDE;
   virtual void Signout() OVERRIDE;
 
+  // UserActivityDetector implementation:
+  virtual void OnUserActivity() OVERRIDE;
+
  private:
+  void StartPasswordClearTimer();
+  void OnPasswordClearTimerExpired();
+
   // Set of Users that are visible.
   UserList users_;
 
@@ -89,6 +100,9 @@ class WebUILoginDisplay : public LoginDisplay,
 
   // Whether to show add new user.
   bool show_new_user_;
+
+  // Timer for measuring idle state duration before password clear.
+  base::OneShotTimer<WebUILoginDisplay> password_clear_timer_;
 
   // Reference to the WebUI handling layer for the login screen
   LoginDisplayWebUIHandler* webui_handler_;

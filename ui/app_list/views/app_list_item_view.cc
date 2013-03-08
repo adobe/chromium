@@ -7,6 +7,7 @@
 #include <algorithm>
 
 #include "base/utf_string_conversions.h"
+#include "grit/ui_resources.h"
 #include "ui/app_list/app_list_item_model.h"
 #include "ui/app_list/views/apps_grid_view.h"
 #include "ui/base/accessibility/accessible_view_state.h"
@@ -31,6 +32,9 @@ namespace {
 const int kTopBottomPadding = 10;
 const int kTopPadding = 20;
 const int kIconTitleSpacing = 7;
+const int kProgressBarHorizontalPadding = 12;
+const int kProgressBarVerticalPadding = 4;
+const int kProgressBarHeight = 4;
 
 const SkColor kTitleColor = SkColorSetRGB(0x5A, 0x5A, 0x5A);
 const SkColor kTitleHoverColor = SkColorSetRGB(0x3C, 0x3C, 0x3C);
@@ -38,6 +42,9 @@ const SkColor kTitleHoverColor = SkColorSetRGB(0x3C, 0x3C, 0x3C);
 const SkColor kHoverAndPushedColor = SkColorSetARGB(0x19, 0, 0, 0);
 const SkColor kSelectedColor = SkColorSetARGB(0x0D, 0, 0, 0);
 const SkColor kHighlightedColor = kHoverAndPushedColor;
+const SkColor kDownloadProgressBackgroundColor =
+    SkColorSetRGB(0x90, 0x90, 0x90);
+const SkColor kDownloadProgressColor = SkColorSetRGB(0x20, 0xAA, 0x20);
 
 const int kLeftRightPaddingChars = 1;
 
@@ -69,6 +76,7 @@ AppListItemView::AppListItemView(AppsGridView* apps_grid_view,
   title_->SetEnabledColor(kTitleColor);
   title_->SetFont(rb.GetFont(ui::ResourceBundle::SmallBoldFont));
   title_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
+  title_->SetVisible(!model_->is_installing());
 
   const gfx::ShadowValue kIconShadows[] = {
     gfx::ShadowValue(gfx::Point(0, 2), 2, SkColorSetARGB(0x24, 0, 0, 0)),
@@ -84,6 +92,8 @@ AppListItemView::AppListItemView(AppsGridView* apps_grid_view,
 
   set_context_menu_controller(this);
   set_request_focus_on_press(false);
+
+  SetAnimationDuration(0);
 }
 
 AppListItemView::~AppListItemView() {
@@ -112,10 +122,15 @@ void AppListItemView::UpdateIcon() {
 
   gfx::ImageSkia resized(gfx::ImageSkiaOperations::CreateResizedImage(icon,
       skia::ImageOperations::RESIZE_BEST, icon_size_));
-  gfx::ImageSkia shadow(
-      gfx::ImageSkiaOperations::CreateImageWithDropShadow(resized,
-                                                          icon_shadows_));
-  icon_->SetImage(shadow);
+  if (model_->has_shadow()) {
+    gfx::ImageSkia shadow(
+        gfx::ImageSkiaOperations::CreateImageWithDropShadow(resized,
+                                                            icon_shadows_));
+    icon_->SetImage(shadow);
+    return;
+  };
+
+  icon_->SetImage(resized);
 }
 
 void AppListItemView::SetUIState(UIState state) {
@@ -168,6 +183,17 @@ void AppListItemView::ItemHighlightedChanged() {
   SchedulePaint();
 }
 
+void AppListItemView::ItemIsInstallingChanged() {
+  if (model_->is_installing())
+    apps_grid_view_->EnsureViewVisible(this);
+  title_->SetVisible(!model_->is_installing());
+  SchedulePaint();
+}
+
+void AppListItemView::ItemPercentDownloadedChanged() {
+  SchedulePaint();
+}
+
 std::string AppListItemView::GetClassName() const {
   return kViewClassName;
 }
@@ -199,7 +225,7 @@ void AppListItemView::OnPaint(gfx::Canvas* canvas) {
 
   gfx::Rect rect(GetContentsBounds());
 
-  if (model_->highlighted()) {
+  if (model_->highlighted() && !model_->is_installing()) {
     canvas->FillRect(rect, kHighlightedColor);
   } else if (hover_animation_->is_animating()) {
     int alpha = SkColorGetA(kHoverAndPushedColor) *
@@ -209,6 +235,33 @@ void AppListItemView::OnPaint(gfx::Canvas* canvas) {
     canvas->FillRect(rect, kHoverAndPushedColor);
   } else if (apps_grid_view_->IsSelectedView(this)) {
     canvas->FillRect(rect, kSelectedColor);
+  }
+
+  if (model_->is_installing()) {
+    gfx::ImageSkia background = *ResourceBundle::GetSharedInstance().
+        GetImageSkiaNamed(IDR_APP_LIST_ITEM_PROGRESS_BACKGROUND);
+    gfx::ImageSkia left = *ResourceBundle::GetSharedInstance().
+        GetImageSkiaNamed(IDR_APP_LIST_ITEM_PROGRESS_LEFT);
+    gfx::ImageSkia center = *ResourceBundle::GetSharedInstance().
+        GetImageSkiaNamed(IDR_APP_LIST_ITEM_PROGRESS_CENTER);
+    gfx::ImageSkia right = *ResourceBundle::GetSharedInstance().
+        GetImageSkiaNamed(IDR_APP_LIST_ITEM_PROGRESS_RIGHT);
+
+    int bar_x = rect.x() + kProgressBarHorizontalPadding;
+    int bar_y = icon_->bounds().bottom() + kIconTitleSpacing;
+
+    canvas->DrawImageInt(background, bar_x, bar_y);
+    if (model_->percent_downloaded() != -1) {
+      float percent = model_->percent_downloaded() / 100.0;
+      int bar_width = percent *
+          (background.width() - (left.width() + right.width()));
+
+      canvas->DrawImageInt(left, bar_x, bar_y);
+      int x = bar_x + left.width();
+      canvas->TileImageInt(center, x, bar_y, bar_width, center.height());
+      x += bar_width;
+      canvas->DrawImageInt(right, x, bar_y);
+    }
   }
 }
 
@@ -270,6 +323,17 @@ bool AppListItemView::OnMousePressed(const ui::MouseEvent& event) {
   return true;
 }
 
+bool AppListItemView::OnKeyPressed(const ui::KeyEvent& event) {
+  // Disable space key to press the button. The keyboard events received
+  // by this view are forwarded from a Textfield (SearchBoxView) and key
+  // released events are not forwarded. This leaves the button in pressed
+  // state.
+  if (event.key_code() == ui::VKEY_SPACE)
+    return false;
+
+  return CustomButton::OnKeyPressed(event);
+}
+
 void AppListItemView::OnMouseReleased(const ui::MouseEvent& event) {
   CustomButton::OnMouseReleased(event);
   apps_grid_view_->EndDrag(false);
@@ -325,14 +389,10 @@ void AppListItemView::OnGestureEvent(ui::GestureEvent* event) {
         SetTouchDragging(true);
       event->SetHandled();
       break;
+    case ui::ET_GESTURE_LONG_TAP:
     case ui::ET_GESTURE_END:
-      if (touch_dragging_) {
+      if (touch_dragging_)
         SetTouchDragging(false);
-
-        gfx::Point location(event->location());
-        ConvertPointToScreen(this, &location);
-        ShowContextMenu(location, true);
-      }
       break;
     default:
       break;

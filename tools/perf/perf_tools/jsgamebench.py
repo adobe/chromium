@@ -2,10 +2,10 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-from telemetry import multi_page_benchmark
-from telemetry import util
+from telemetry.core import util
+from telemetry.page import page_benchmark
 
-class JsGameBench(multi_page_benchmark.MultiPageBenchmark):
+class JsGameBench(page_benchmark.PageBenchmark):
   def MeasurePage(self, _, tab, results):
     tab.ExecuteJavaScript('UI.call({}, "perftest")')
 

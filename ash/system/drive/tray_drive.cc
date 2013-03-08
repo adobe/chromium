@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "ash/shell.h"
+#include "ash/system/tray/hover_highlight_view.h"
 #include "ash/system/tray/system_tray.h"
 #include "ash/system/tray/system_tray_delegate.h"
 #include "ash/system/tray/system_tray_notifier.h"
@@ -14,11 +15,10 @@
 #include "ash/system/tray/tray_details_view.h"
 #include "ash/system/tray/tray_item_more.h"
 #include "ash/system/tray/tray_item_view.h"
-#include "ash/system/tray/tray_views.h"
 #include "base/logging.h"
+#include "base/stl_util.h"
 #include "base/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
-#include "base/stl_util.h"
 #include "grit/ash_resources.h"
 #include "grit/ash_strings.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -141,7 +141,7 @@ class DriveDetailedView : public TrayDetailsView,
     RowView(DriveDetailedView* parent,
             ash::DriveOperationStatus::OperationState state,
             double progress,
-            const FilePath& file_path)
+            const base::FilePath& file_path)
         : HoverHighlightView(parent),
           container_(parent),
           status_img_(NULL),
@@ -259,7 +259,7 @@ class DriveDetailedView : public TrayDetailsView,
     views::View* label_container_;
     views::ProgressBar* progress_bar_;
     views::ImageButton* cancel_button_;
-    FilePath file_path_;
+    base::FilePath file_path_;
 
     DISALLOW_COPY_AND_ASSIGN(RowView);
   };
@@ -286,7 +286,7 @@ class DriveDetailedView : public TrayDetailsView,
     return failed_img_;
   }
 
-  virtual void OnCancelOperation(const FilePath& file_path) {
+  virtual void OnCancelOperation(const base::FilePath& file_path) {
     SystemTrayDelegate* delegate = Shell::GetInstance()->system_tray_delegate();
     delegate->CancelDriveOperation(file_path);
   }
@@ -296,14 +296,14 @@ class DriveDetailedView : public TrayDetailsView,
       CreateScrollableList();
 
     // Apply the update.
-    std::set<FilePath> new_set;
+    std::set<base::FilePath> new_set;
     bool item_list_changed = false;
     for (DriveOperationStatusList::const_iterator it = list->begin();
          it != list->end(); ++it) {
       const DriveOperationStatus& operation = *it;
 
       new_set.insert(operation.file_path);
-      std::map<FilePath, RowView*>::iterator existing_item =
+      std::map<base::FilePath, RowView*>::iterator existing_item =
           update_map_.find(operation.file_path);
 
       if (existing_item != update_map_.end()) {
@@ -323,8 +323,8 @@ class DriveDetailedView : public TrayDetailsView,
 
     // Remove items from the list that haven't been added or modified with this
     // update batch.
-    std::set<FilePath> remove_set;
-    for (std::map<FilePath, RowView*>::iterator update_iter =
+    std::set<base::FilePath> remove_set;
+    for (std::map<base::FilePath, RowView*>::iterator update_iter =
              update_map_.begin();
          update_iter != update_map_.end(); ++update_iter) {
       if (new_set.find(update_iter->first) == new_set.end()) {
@@ -332,7 +332,7 @@ class DriveDetailedView : public TrayDetailsView,
       }
     }
 
-    for (std::set<FilePath>::iterator removed_iter = remove_set.begin();
+    for (std::set<base::FilePath>::iterator removed_iter = remove_set.begin();
         removed_iter != remove_set.end(); ++removed_iter)  {
       delete update_map_[*removed_iter];
       update_map_.erase(*removed_iter);
@@ -360,7 +360,7 @@ class DriveDetailedView : public TrayDetailsView,
   }
 
   // Overridden from ViewClickListener.
-  virtual void ClickedOn(views::View* sender) OVERRIDE {
+  virtual void OnViewClicked(views::View* sender) OVERRIDE {
     SystemTrayDelegate* delegate = Shell::GetInstance()->system_tray_delegate();
     if (sender == footer()->content()) {
       owner()->system_tray()->ShowDefaultView(BUBBLE_USE_EXISTING);
@@ -370,7 +370,7 @@ class DriveDetailedView : public TrayDetailsView,
   }
 
   // Maps operation entries to their file paths.
-  std::map<FilePath, RowView*> update_map_;
+  std::map<base::FilePath, RowView*> update_map_;
   views::View* settings_;
   gfx::ImageSkia* in_progress_img_;
   gfx::ImageSkia* done_img_;

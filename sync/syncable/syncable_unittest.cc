@@ -6,8 +6,8 @@
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/location.h"
 #include "base/logging.h"
@@ -103,7 +103,7 @@ class SyncableGeneralTest : public testing::Test {
   NullDirectoryChangeDelegate delegate_;
   FakeEncryptor encryptor_;
   TestUnrecoverableErrorHandler handler_;
-  FilePath db_path_;
+  base::FilePath db_path_;
 };
 
 const char SyncableGeneralTest::kIndexTestName[] = "IndexTest";
@@ -561,7 +561,7 @@ TEST_F(SyncableDirectoryTest, TakeSnapshotGetsMetahandlesToPurge) {
   }
 
   ModelTypeSet to_purge(BOOKMARKS);
-  dir_->PurgeEntriesWithTypeIn(to_purge);
+  dir_->PurgeEntriesWithTypeIn(to_purge, ModelTypeSet());
 
   Directory::SaveChangesSnapshot snapshot1;
   base::AutoLock scoped_lock(dir_->kernel_->save_changes_mutex);
@@ -570,7 +570,7 @@ TEST_F(SyncableDirectoryTest, TakeSnapshotGetsMetahandlesToPurge) {
 
   to_purge.Clear();
   to_purge.Put(PREFERENCES);
-  dir_->PurgeEntriesWithTypeIn(to_purge);
+  dir_->PurgeEntriesWithTypeIn(to_purge, ModelTypeSet());
 
   dir_->HandleSaveChangesFailure(snapshot1);
 
@@ -1225,8 +1225,10 @@ TEST_F(SyncableDirectoryTest, TestCaseChangeRename) {
 // GetServerModelType return the right value.
 TEST_F(SyncableDirectoryTest, GetModelType) {
   TestIdFactory id_factory;
-  for (int i = 0; i < MODEL_TYPE_COUNT; ++i) {
-    ModelType datatype = ModelTypeFromInt(i);
+  ModelTypeSet protocol_types = ProtocolTypes();
+  for (ModelTypeSet::Iterator iter = protocol_types.First(); iter.Good();
+       iter.Inc()) {
+    ModelType datatype = iter.Get();
     SCOPED_TRACE(testing::Message("Testing model type ") << datatype);
     switch (datatype) {
       case UNSPECIFIED:
@@ -1531,7 +1533,7 @@ TEST_F(SyncableDirectoryTest, OrdinalWithNullSurvivesSaveAndReload) {
 class TestBackingStore : public OnDiskDirectoryBackingStore {
  public:
   TestBackingStore(const std::string& dir_name,
-                   const FilePath& backing_filepath);
+                   const base::FilePath& backing_filepath);
 
   virtual ~TestBackingStore();
 
@@ -1547,7 +1549,7 @@ class TestBackingStore : public OnDiskDirectoryBackingStore {
 };
 
 TestBackingStore::TestBackingStore(const std::string& dir_name,
-                                   const FilePath& backing_filepath)
+                                   const base::FilePath& backing_filepath)
   : OnDiskDirectoryBackingStore(dir_name, backing_filepath),
     fail_save_changes_(false) {
 }
@@ -1571,7 +1573,7 @@ class TestDirectory : public Directory {
       Encryptor *encryptor,
       UnrecoverableErrorHandler *handler,
       const std::string& dir_name,
-      const FilePath& backing_filepath);
+      const base::FilePath& backing_filepath);
 
   virtual ~TestDirectory();
 
@@ -1591,7 +1593,7 @@ TestDirectory* TestDirectory::Create(
     Encryptor *encryptor,
     UnrecoverableErrorHandler *handler,
     const std::string& dir_name,
-    const FilePath& backing_filepath) {
+    const base::FilePath& backing_filepath) {
   TestBackingStore* backing_store =
       new TestBackingStore(dir_name, backing_filepath);
   return new TestDirectory(encryptor, handler, backing_store);
@@ -1611,7 +1613,7 @@ TEST(OnDiskSyncableDirectory, FailInitialWrite) {
   TestUnrecoverableErrorHandler handler;
   base::ScopedTempDir temp_dir;
   ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
-  FilePath file_path = temp_dir.path().Append(
+  base::FilePath file_path = temp_dir.path().Append(
       FILE_PATH_LITERAL("Test.sqlite3"));
   std::string name = "user@x.com";
   NullDirectoryChangeDelegate delegate;
@@ -1666,7 +1668,7 @@ class OnDiskSyncableDirectoryTest : public SyncableDirectoryTest {
 
   TestDirectory *test_directory_;  // mirrors scoped_ptr<Directory> dir_
   base::ScopedTempDir temp_dir_;
-  FilePath file_path_;
+  base::FilePath file_path_;
 };
 
 TEST_F(OnDiskSyncableDirectoryTest, TestPurgeEntriesWithTypeIn) {
@@ -1738,7 +1740,7 @@ TEST_F(OnDiskSyncableDirectoryTest, TestPurgeEntriesWithTypeIn) {
     ASSERT_EQ(10U, all_set.size());
   }
 
-  dir_->PurgeEntriesWithTypeIn(types_to_purge);
+  dir_->PurgeEntriesWithTypeIn(types_to_purge, ModelTypeSet());
 
   // We first query the in-memory data, and then reload the directory (without
   // saving) to verify that disk does not still have the data.
@@ -1749,7 +1751,6 @@ TEST_F(OnDiskSyncableDirectoryTest, TestPurgeEntriesWithTypeIn) {
 
 TEST_F(OnDiskSyncableDirectoryTest, TestShareInfo) {
   dir_->set_store_birthday("Jan 31st");
-  dir_->SetNotificationState("notification_state");
   const char* const bag_of_chips_array = "\0bag of chips";
   const std::string bag_of_chips_string =
       std::string(bag_of_chips_array, sizeof(bag_of_chips_array));
@@ -1757,11 +1758,9 @@ TEST_F(OnDiskSyncableDirectoryTest, TestShareInfo) {
   {
     ReadTransaction trans(FROM_HERE, dir_.get());
     EXPECT_EQ("Jan 31st", dir_->store_birthday());
-    EXPECT_EQ("notification_state", dir_->GetNotificationState());
     EXPECT_EQ(bag_of_chips_string, dir_->bag_of_chips());
   }
   dir_->set_store_birthday("April 10th");
-  dir_->SetNotificationState("notification_state2");
   const char* const bag_of_chips2_array = "\0bag of chips2";
   const std::string bag_of_chips2_string =
       std::string(bag_of_chips2_array, sizeof(bag_of_chips2_array));
@@ -1770,17 +1769,18 @@ TEST_F(OnDiskSyncableDirectoryTest, TestShareInfo) {
   {
     ReadTransaction trans(FROM_HERE, dir_.get());
     EXPECT_EQ("April 10th", dir_->store_birthday());
-    EXPECT_EQ("notification_state2", dir_->GetNotificationState());
     EXPECT_EQ(bag_of_chips2_string, dir_->bag_of_chips());
   }
-  dir_->SetNotificationState("notification_state2");
+  const char* const bag_of_chips3_array = "\0bag of chips3";
+  const std::string bag_of_chips3_string =
+      std::string(bag_of_chips3_array, sizeof(bag_of_chips3_array));
+  dir_->set_bag_of_chips(bag_of_chips3_string);
   // Restore the directory from disk.  Make sure that nothing's changed.
   SaveAndReloadDir();
   {
     ReadTransaction trans(FROM_HERE, dir_.get());
     EXPECT_EQ("April 10th", dir_->store_birthday());
-    EXPECT_EQ("notification_state2", dir_->GetNotificationState());
-    EXPECT_EQ(bag_of_chips2_string, dir_->bag_of_chips());
+    EXPECT_EQ(bag_of_chips3_string, dir_->bag_of_chips());
   }
 }
 
@@ -1999,7 +1999,7 @@ TEST_F(OnDiskSyncableDirectoryTest, TestSaveChangesFailureWithPurge) {
   ASSERT_TRUE(dir_->good());
 
   ModelTypeSet set(BOOKMARKS);
-  dir_->PurgeEntriesWithTypeIn(set);
+  dir_->PurgeEntriesWithTypeIn(set, ModelTypeSet());
   EXPECT_TRUE(IsInMetahandlesToPurge(handle1));
   ASSERT_FALSE(dir_->SaveChanges());
   EXPECT_TRUE(IsInMetahandlesToPurge(handle1));
@@ -2077,7 +2077,7 @@ class SyncableDirectoryManagement : public testing::Test {
 };
 
 TEST_F(SyncableDirectoryManagement, TestFileRelease) {
-  FilePath path = temp_dir_.path().Append(
+  base::FilePath path = temp_dir_.path().Append(
       Directory::kSyncDatabaseFilename);
 
   syncable::Directory dir(new OnDiskDirectoryBackingStore("ScopeTest", path),
@@ -2105,7 +2105,7 @@ class StressTransactionsDelegate : public base::PlatformThread::Delegate {
   const int thread_number_;
 
   // PlatformThread::Delegate methods:
-  virtual void ThreadMain() {
+  virtual void ThreadMain() OVERRIDE {
     int entry_count = 0;
     std::string path_name;
 

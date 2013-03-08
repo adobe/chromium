@@ -4,6 +4,7 @@
 
 #include "chrome/browser/chromeos/login/webui_login_display.h"
 
+#include "ash/wm/user_activity_detector.h"
 #include "chrome/browser/chromeos/accessibility/accessibility_util.h"
 #include "chrome/browser/chromeos/input_method/input_method_configuration.h"
 #include "chrome/browser/chromeos/input_method/input_method_manager.h"
@@ -21,11 +22,21 @@
 
 namespace chromeos {
 
+namespace {
+
+const int kPasswordClearTimeoutSec = 60;
+
+}
+
 // WebUILoginDisplay, public: --------------------------------------------------
 
 WebUILoginDisplay::~WebUILoginDisplay() {
   if (webui_handler_)
     webui_handler_->ResetSigninScreenHandlerDelegate();
+  ash::UserActivityDetector* activity_detector = ash::Shell::GetInstance()->
+      user_activity_detector();
+  if (activity_detector->HasObserver(this))
+    activity_detector->RemoveObserver(this);
 }
 
 // LoginDisplay implementation: ------------------------------------------------
@@ -48,6 +59,11 @@ void WebUILoginDisplay::Init(const UserList& users,
   show_guest_ = show_guest;
   show_users_ = show_users;
   show_new_user_ = show_new_user;
+
+  ash::UserActivityDetector* activity_detector = ash::Shell::GetInstance()->
+      user_activity_detector();
+  if (!activity_detector->HasObserver(this))
+    activity_detector->AddObserver(this);
 }
 
 void WebUILoginDisplay::OnPreferencesChanged() {
@@ -186,6 +202,11 @@ void WebUILoginDisplay::ShowPasswordChangedDialog(bool show_password_error) {
     webui_handler_->ShowPasswordChangedDialog(show_password_error);
 }
 
+void WebUILoginDisplay::ShowSigninUI(const std::string& email) {
+  if (webui_handler_)
+    webui_handler_->ShowSigninUI(email);
+}
+
 // WebUILoginDisplay, NativeWindowDelegate implementation: ---------------------
 gfx::NativeWindow WebUILoginDisplay::GetNativeWindow() const {
   return parent_window();
@@ -277,6 +298,11 @@ void WebUILoginDisplay::ShowResetScreen() {
     delegate_->OnStartDeviceReset();
 }
 
+void WebUILoginDisplay::ShowWrongHWIDScreen() {
+  if (delegate_)
+    delegate_->ShowWrongHWIDScreen();
+}
+
 void WebUILoginDisplay::SetWebUIHandler(
     LoginDisplayWebUIHandler* webui_handler) {
   webui_handler_ = webui_handler;
@@ -312,6 +338,24 @@ void WebUILoginDisplay::SetDisplayEmail(const std::string& email) {
 
 void WebUILoginDisplay::Signout() {
   delegate_->Signout();
+}
+
+void WebUILoginDisplay::OnUserActivity() {
+  if (!password_clear_timer_.IsRunning())
+    StartPasswordClearTimer();
+  password_clear_timer_.Reset();
+}
+
+void WebUILoginDisplay::StartPasswordClearTimer() {
+  DCHECK(!password_clear_timer_.IsRunning());
+  password_clear_timer_.Start(FROM_HERE,
+      base::TimeDelta::FromSeconds(kPasswordClearTimeoutSec), this,
+      &WebUILoginDisplay::OnPasswordClearTimerExpired);
+}
+
+void WebUILoginDisplay::OnPasswordClearTimerExpired() {
+  if (webui_handler_)
+    webui_handler_->ClearUserPodPassword();
 }
 
 }  // namespace chromeos

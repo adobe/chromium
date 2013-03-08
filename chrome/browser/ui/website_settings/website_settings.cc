@@ -9,9 +9,9 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
-#include "base/metrics/histogram.h"
 #include "base/i18n/time_formatting.h"
-#include "base/string_number_conversions.h"
+#include "base/metrics/histogram.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/api/infobars/infobar_service.h"
@@ -411,20 +411,6 @@ void WebsiteSettings::Init(Profile* profile,
     site_connection_details_ += l10n_util::GetStringFUTF16(
         IDS_PAGE_INFO_SECURITY_TAB_ENCRYPTION_DETAILS,
         ASCIIToUTF16(cipher), ASCIIToUTF16(mac), ASCIIToUTF16(key_exchange));
-
-    site_connection_details_ += ASCIIToUTF16("\n\n");
-    uint8 compression_id =
-        net::SSLConnectionStatusToCompression(ssl.connection_status);
-    if (compression_id) {
-      const char* compression;
-      net::SSLCompressionToString(&compression, compression_id);
-      site_connection_details_ += l10n_util::GetStringFUTF16(
-          IDS_PAGE_INFO_SECURITY_TAB_COMPRESSION_DETAILS,
-          ASCIIToUTF16(compression));
-    } else {
-      site_connection_details_ += l10n_util::GetStringUTF16(
-          IDS_PAGE_INFO_SECURITY_TAB_NO_COMPRESSION);
-    }
 
     if (did_fallback) {
       // For now, only SSLv3 fallback will trigger a warning icon.

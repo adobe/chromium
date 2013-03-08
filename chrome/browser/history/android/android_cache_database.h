@@ -5,7 +5,7 @@
 #ifndef CHROME_BROWSER_HISTORY_ANDROID_ANDROID_CACHE_DATABASE_H_
 #define CHROME_BROWSER_HISTORY_ANDROID_ANDROID_CACHE_DATABASE_H_
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/gtest_prod_util.h"
 #include "base/time.h"
 #include "chrome/browser/history/android/android_history_types.h"
@@ -25,7 +25,7 @@ class AndroidCacheDatabase {
   // Creates the database, deletes existing one if any; also attach it to the
   // database returned by GetDB(). Returns sql::INIT_OK on success, otherwise
   // sql::INIT_FAILURE returned.
-  sql::InitStatus InitAndroidCacheDatabase(const FilePath& db_name);
+  sql::InitStatus InitAndroidCacheDatabase(const base::FilePath& db_name);
 
   // The bookmark_cache table ------------------------------------------------
   //
@@ -73,7 +73,7 @@ class AndroidCacheDatabase {
 
   // Creates the database and make it ready for attaching; returns true on
   // success.
-  bool CreateDatabase(const FilePath& db_name);
+  bool CreateDatabase(const base::FilePath& db_name);
 
   // Creates the bookmark_cache table in attached DB; returns true on success.
   // The created_time, last_visit_time, favicon_id and bookmark are stored.
@@ -110,7 +110,7 @@ class AndroidCacheDatabase {
   // Does the real attach. Returns true on success.
   bool DoAttach();
 
-  FilePath db_name_;
+  base::FilePath db_name_;
 
   DISALLOW_COPY_AND_ASSIGN(AndroidCacheDatabase);
 };

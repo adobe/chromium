@@ -11,8 +11,8 @@
 #include <ios>
 
 #include "base/debug/trace_event_win.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
-#include "base/file_path.h"
 #include "base/logging_win.h"
 #include "base/string16.h"
 #include "base/utf_string_conversions.h"
@@ -146,7 +146,7 @@ void FileLogger::Initialize(uint32 event_provider_mask) {
   is_initialized_ = true;
 }
 
-bool FileLogger::StartLogging(const FilePath& log_file) {
+bool FileLogger::StartLogging(const base::FilePath& log_file) {
   HRESULT hr =
       controller_.StartFileSession(kChromeTestSession,
                                    log_file.value().c_str(), false);

@@ -5,6 +5,8 @@
 #ifndef CONTENT_COMMON_GPU_TEXTURE_IMAGE_TRANSPORT_SURFACE_H_
 #define CONTENT_COMMON_GPU_TEXTURE_IMAGE_TRANSPORT_SURFACE_H_
 
+#include <string>
+
 #include "base/basictypes.h"
 #include "content/common/gpu/gpu_command_buffer_stub.h"
 #include "content/common/gpu/image_transport_surface.h"
@@ -16,10 +18,10 @@
 namespace content {
 class GpuChannelManager;
 
-class TextureImageTransportSurface :
-    public ImageTransportSurface,
-    public GpuCommandBufferStub::DestructionObserver,
-    public gfx::GLSurface {
+class TextureImageTransportSurface
+    : public ImageTransportSurface,
+      public GpuCommandBufferStub::DestructionObserver,
+      public gfx::GLSurface {
  public:
   TextureImageTransportSurface(GpuChannelManager* manager,
                                GpuCommandBufferStub* stub,
@@ -39,7 +41,7 @@ class TextureImageTransportSurface :
   virtual unsigned int GetBackingFrameBufferObject() OVERRIDE;
   virtual bool PostSubBuffer(int x, int y, int width, int height) OVERRIDE;
   virtual bool OnMakeCurrent(gfx::GLContext* context) OVERRIDE;
-  virtual void SetBackbufferAllocation(bool allocated) OVERRIDE;
+  virtual bool SetBackbufferAllocation(bool allocated) OVERRIDE;
   virtual void SetFrontbufferAllocation(bool allocated) OVERRIDE;
   virtual void* GetShareHandle() OVERRIDE;
   virtual void* GetDisplay() OVERRIDE;
@@ -77,8 +79,8 @@ class TextureImageTransportSurface :
   void AttachBackTextureToFBO();
   void ReleaseBackTexture();
   void BufferPresentedImpl(const std::string& mailbox_name);
-  void ProduceTexture(Texture& texture);
-  void ConsumeTexture(Texture& texture);
+  void ProduceTexture(Texture* texture);
+  void ConsumeTexture(Texture* texture);
 
   // The framebuffer that represents this surface (service id). Allocated lazily
   // in OnMakeCurrent.

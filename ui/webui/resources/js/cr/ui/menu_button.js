@@ -9,21 +9,15 @@ cr.define('cr.ui', function() {
   /** @const */
   var positionPopupAroundElement = cr.ui.positionPopupAroundElement;
 
-  /**
-   * Timeout for hiding the menu for the HideType.DELAYED hide mode in ms.
-   * @type {number}
-   */
-  var DEFAULT_HIDE_DELAY_MS = 120;
-
-  /**
-   * Enum for type of hide. Delayed is used when called by clicking on a
-   * checkable menu item.
-   * @enum {number}
-   */
-  var HideType = {
-    INSTANT: 0,
-    DELAYED: 1
-  };
+   /**
+    * Enum for type of hide. Delayed is used when called by clicking on a
+    * checkable menu item.
+    * @enum {number}
+    */
+   var HideType = {
+     INSTANT: 0,
+     DELAYED: 1
+   };
 
   /**
    * Creates a new menu button element.
@@ -101,10 +95,15 @@ cr.define('cr.ui', function() {
             } else if (e.button == 0) {  // Only show the menu when using left
                                          // mouse button.
               this.showMenu(false);
+
               // Prevent the button from stealing focus on mousedown.
               e.preventDefault();
             }
           }
+
+          // Hide the focus ring on mouse click.
+          this.classList.add('using-mouse');
+
           break;
         case 'keydown':
           this.handleKeyDown(e);
@@ -115,16 +114,23 @@ cr.define('cr.ui', function() {
               e.stopPropagation();
             }
           }
+
+          // Show the focus ring on keypress.
+          this.classList.remove('using-mouse');
           break;
         case 'focus':
-          if (!this.contains(e.target) && !this.menu.contains(e.target))
+          if (!this.contains(e.target) && !this.menu.contains(e.target)) {
             this.hideMenu();
+            // Show the focus ring on focus - if it's come from a mouse event,
+            // the focus ring will be hidden in the mousedown event handler,
+            // executed after this.
+            this.classList.remove('using-mouse');
+          }
           break;
         case 'activate':
-          if (e.target instanceof cr.ui.MenuItem && e.target.checkable)
-            this.hideMenu(HideType.DELAYED);
-          else
-            this.hideMenu();
+          var hideDelayed = e.target instanceof cr.ui.MenuItem &&
+              e.target.checkable;
+          this.hideMenu(hideDelayed ? HideType.DELAYED : HideType.INSTANT);
           break;
         case 'resize':
           this.hideMenu();
@@ -140,52 +146,48 @@ cr.define('cr.ui', function() {
     showMenu: function(shouldSetFocus) {
       this.hideMenu();
 
+      this.menu.updateCommands(this);
+
       var event = document.createEvent('UIEvents');
       event.initUIEvent('menushow', true, true, window, null);
 
-      if (this.dispatchEvent(event)) {
-        this.menu.hidden = false;
+      if (!this.dispatchEvent(event))
+        return;
 
-        this.setAttribute('menu-shown', '');
-        if (shouldSetFocus)
-          this.menu.focusSelectedItem();
+      this.menu.hidden = false;
 
-        // when the menu is shown we steal all keyboard events.
-        var doc = this.ownerDocument;
-        var win = doc.defaultView;
-        this.showingEvents_.add(doc, 'keydown', this, true);
-        this.showingEvents_.add(doc, 'mousedown', this, true);
-        this.showingEvents_.add(doc, 'focus', this, true);
-        this.showingEvents_.add(win, 'resize', this);
-        this.showingEvents_.add(this.menu, 'activate', this);
-        this.positionMenu_();
-      }
+      this.setAttribute('menu-shown', '');
+
+      // When the menu is shown we steal all keyboard events.
+      var doc = this.ownerDocument;
+      var win = doc.defaultView;
+      this.showingEvents_.add(doc, 'keydown', this, true);
+      this.showingEvents_.add(doc, 'mousedown', this, true);
+      this.showingEvents_.add(doc, 'focus', this, true);
+      this.showingEvents_.add(win, 'resize', this);
+      this.showingEvents_.add(this.menu, 'activate', this);
+      this.positionMenu_();
+
+      if (shouldSetFocus)
+        this.menu.focusSelectedItem();
     },
 
     /**
      * Hides the menu. If your menu can go out of scope, make sure to call this
      * first.
-     * @param {HideType=} opt_hideType Type of hide - instant or delayed,
-     *     default: INSTANT.
+     * @param {HideType=} opt_hideType Type of hide.
+     *     default: HideType.INSTANT.
      */
     hideMenu: function(opt_hideType) {
-      opt_hideType = opt_hideType || HideType.INSTANT;
-
       if (!this.isMenuShown())
         return;
 
-      switch (opt_hideType) {
-        case HideType.INSTANT:
-          this.removeAttribute('menu-shown');
-          this.menu.hidden = true;
-          break;
-        case HideType.DELAYED:
-          setTimeout(function() {
-            this.removeAttribute('menu-shown');
-            this.menu.hidden = true;
-          }.bind(this), DEFAULT_HIDE_DELAY_MS);
-          break;
-      }
+      this.removeAttribute('menu-shown');
+      if (opt_hideType == HideType.DELAYED)
+        this.menu.classList.add('hide-delayed');
+      else
+        this.menu.classList.remove('hide-delayed');
+      this.menu.hidden = true;
 
       this.showingEvents_.removeAll();
       this.focus();
@@ -278,6 +280,7 @@ cr.define('cr.ui', function() {
 
   // Export
   return {
-    MenuButton: MenuButton
+    MenuButton: MenuButton,
+    HideType: HideType
   };
 });

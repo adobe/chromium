@@ -8,9 +8,9 @@
 #include "base/logging.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram.h"
+#include "base/prefs/pref_service.h"
 #include "chrome/browser/metrics/metrics_service.h"
 #include "chrome/browser/predictors/autocomplete_action_predictor.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prerender/prerender_manager.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_switches.h"
@@ -41,7 +41,7 @@ void SetupPrefetchFieldTrial() {
   scoped_refptr<FieldTrial> trial(
       FieldTrialList::FactoryGetFieldTrial(
           "Prefetch", divisor, "ContentPrefetchPrefetchOff",
-          2013, 6, 30, NULL));
+          2013, 12, 31, NULL));
   const int kPrefetchOnGroup = trial->AppendGroup("ContentPrefetchPrefetchOn",
                                                   prefetch_probability);
   PrerenderManager::SetIsPrefetchEnabled(trial->group() == kPrefetchOnGroup);
@@ -103,7 +103,7 @@ void SetupPrerenderFieldTrial() {
   scoped_refptr<FieldTrial> trial(
       FieldTrialList::FactoryGetFieldTrial(
           "Prerender", divisor, "PrerenderEnabled",
-          2013, 6, 30, &prerender_enabled_group));
+          2013, 12, 31, &prerender_enabled_group));
   const int control_group =
       trial->AppendGroup("PrerenderControl",
                          control_probability);
@@ -212,7 +212,7 @@ void ConfigureOmniboxPrerender() {
   scoped_refptr<FieldTrial> omnibox_prerender_trial(
       FieldTrialList::FactoryGetFieldTrial(
           kOmniboxTrialName, kDivisor, "OmniboxPrerenderEnabled",
-          2012, 12, 30, &g_omnibox_trial_default_group_number));
+          2013, 12, 31, &g_omnibox_trial_default_group_number));
   omnibox_prerender_trial->AppendGroup("OmniboxPrerenderDisabled",
                                        kDisabledProbability);
 }

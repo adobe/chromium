@@ -24,7 +24,7 @@ class ChromeNetLog;
 class CommandLine;
 class PrefProxyConfigTrackerImpl;
 class PrefService;
-class PrefServiceSimple;
+class PrefRegistrySimple;
 class SystemURLRequestContextGetter;
 
 namespace chrome_browser_net {
@@ -160,7 +160,9 @@ class IOThread : public content::BrowserThreadDelegate {
     Optional<bool> enable_spdy_compression;
     Optional<bool> enable_spdy_ping_based_connection_checking;
     Optional<net::NextProto> spdy_default_protocol;
+    Optional<bool> enable_quic;
     Optional<uint16> origin_port_to_force_quic_on;
+    bool enable_user_alternate_protocol_ports;
     // NetErrorTabHelper uses |dns_probe_service| to send DNS probes when a
     // main frame load fails with a DNS error in order to provide more useful
     // information to the renderer so it can show a more specific error page.
@@ -168,12 +170,14 @@ class IOThread : public content::BrowserThreadDelegate {
   };
 
   // |net_log| must either outlive the IOThread or be NULL.
-  IOThread(PrefServiceSimple* local_state,
+  IOThread(PrefService* local_state,
            policy::PolicyService* policy_service,
            ChromeNetLog* net_log,
            extensions::EventRouterForwarder* extension_event_router_forwarder);
 
   virtual ~IOThread();
+
+  static void RegisterPrefs(PrefRegistrySimple* registry);
 
   // Can only be called on the IO thread.
   Globals* globals();
@@ -233,8 +237,6 @@ class IOThread : public content::BrowserThreadDelegate {
   // SystemRequestContext state has been initialized on the UI thread.
   void InitSystemRequestContextOnIOThread();
 
-  static void RegisterPrefs(PrefServiceSimple* local_state);
-
   net::HttpAuthHandlerFactory* CreateDefaultAuthHandlerFactory(
       net::HostResolver* resolver);
 
@@ -278,7 +280,7 @@ class IOThread : public content::BrowserThreadDelegate {
   std::string auth_server_whitelist_;
   std::string auth_delegate_whitelist_;
   std::string gssapi_library_name_;
-  std::string spdyproxy_origin_;
+  std::string spdyproxy_auth_origin_;
 
   // This is an instance of the default SSLConfigServiceManager for the current
   // platform and it gets SSL preferences from local_state object.

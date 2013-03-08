@@ -7,6 +7,7 @@
 #include "base/auto_reset.h"
 #include "base/bind.h"
 #include "base/debug/trace_event.h"
+#include "cc/context_provider.h"
 #include "cc/delay_based_time_source.h"
 #include "cc/draw_quad.h"
 #include "cc/frame_rate_controller.h"
@@ -17,9 +18,6 @@
 #include "cc/prioritized_resource_manager.h"
 #include "cc/scheduler.h"
 #include "cc/thread.h"
-#include "third_party/WebKit/Source/Platform/chromium/public/WebSharedGraphicsContext3D.h"
-
-using WebKit::WebSharedGraphicsContext3D;
 
 namespace {
 
@@ -43,6 +41,8 @@ ThreadProxy::ThreadProxy(LayerTreeHost* layerTreeHost, scoped_ptr<Thread> implTh
     , m_animateRequested(false)
     , m_commitRequested(false)
     , m_commitRequestSentToImplThread(false)
+    , m_createdOffscreenContextProvider(false)
+    , m_createdCustomFilterContextProvider(false)
     , m_layerTreeHost(layerTreeHost)
     , m_rendererInitialized(false)
     , m_started(false)
@@ -228,10 +228,18 @@ bool ThreadProxy::recreateOutputSurface()
     scoped_ptr<OutputSurface> outputSurface = m_layerTreeHost->createOutputSurface();
     if (!outputSurface.get())
         return false;
-    if (m_layerTreeHost->needsSharedContext())
-        if (!WebSharedGraphicsContext3D::createCompositorThreadContext() ||
-            !WebSharedGraphicsContext3D::createCompositorThreadCustomFilterContext()) // FIXME: We really shouldn't create this unless we see a custom filter.
+    scoped_refptr<cc::ContextProvider> offscreenContextProvider;
+    if (m_createdOffscreenContextProvider) {
+        offscreenContextProvider = m_layerTreeHost->client()->OffscreenContextProviderForCompositorThread();
+        if (!offscreenContextProvider->InitializeOnMainThread())
             return false;
+    }
+    scoped_refptr<cc::ContextProvider> customFilterContextProvider;
+    if (m_createdCustomFilterContextProvider) {
+        customFilterContextProvider = m_layerTreeHost->client()->CustomFilterContextProviderForCompositorThread();
+        if (!customFilterContextProvider->InitializeOnMainThread())
+            return false;
+    }
 
     // Make a blocking call to recreateOutputSurfaceOnImplThread. The results of that
     // call are pushed into the recreateSucceeded and capabilities local
@@ -244,6 +252,8 @@ bool ThreadProxy::recreateOutputSurface()
                                              m_implThreadWeakPtr,
                                              &completion,
                                              base::Passed(&outputSurface),
+                                             offscreenContextProvider,
+                                             customFilterContextProvider,
                                              &recreateSucceeded,
                                              &capabilities));
     completion.wait();
@@ -315,6 +325,10 @@ void ThreadProxy::checkOutputSurfaceStatusOnImplThread()
     TRACE_EVENT0("cc", "ThreadProxy::checkOutputSurfaceStatusOnImplThread");
     if (!m_layerTreeHostImpl->isContextLost())
         return;
+    if (cc::ContextProvider* offscreenContexts = m_layerTreeHostImpl->resourceProvider()->offscreenContextProvider())
+        offscreenContexts->VerifyContexts();
+    if (cc::ContextProvider* customFilterContexts = m_layerTreeHostImpl->resourceProvider()->customFilterContextProvider())
+        customFilterContexts->VerifyContexts();
     m_schedulerOnImplThread->didLoseOutputSurface();
 }
 
@@ -400,6 +414,16 @@ bool ThreadProxy::reduceContentsTextureMemoryOnImplThread(size_t limitBytes, int
     if (m_currentResourceUpdateControllerOnImplThread.get())
         m_currentResourceUpdateControllerOnImplThread->discardUploadsToEvictedResources();
     return true;
+}
+
+void ThreadProxy::reduceWastedContentsTextureMemoryOnImplThread()
+{
+    DCHECK(isImplThread());
+
+    if (!m_layerTreeHost->contentsTextureManager())
+        return;
+
+    m_layerTreeHost->contentsTextureManager()->reduceWastedMemoryOnImplThread(m_layerTreeHostImpl->resourceProvider());
 }
 
 void ThreadProxy::sendManagedMemoryStats()
@@ -565,7 +589,7 @@ void ThreadProxy::scheduledActionBeginFrame()
     scoped_ptr<BeginFrameAndCommitState> beginFrameState(new BeginFrameAndCommitState);
     beginFrameState->monotonicFrameBeginTime = base::TimeTicks::Now();
     beginFrameState->scrollInfo = m_layerTreeHostImpl->processScrollDeltas();
-    beginFrameState->implTransform = m_layerTreeHostImpl->implTransform();
+    beginFrameState->implTransform = m_layerTreeHostImpl->activeTree()->ImplTransform();
     DCHECK_GT(m_layerTreeHostImpl->memoryAllocationLimitBytes(), 0u);
     beginFrameState->memoryAllocationLimitBytes = m_layerTreeHostImpl->memoryAllocationLimitBytes();
     Proxy::mainThread()->postTask(base::Bind(&ThreadProxy::beginFrame, m_mainThreadWeakPtr, base::Passed(&beginFrameState)));
@@ -588,11 +612,6 @@ void ThreadProxy::beginFrame(scoped_ptr<BeginFrameAndCommitState> beginFrameStat
         m_layerTreeHost->didDeferCommit();
         TRACE_EVENT0("cc", "EarlyOut_DeferCommits");
         return;
-    }
-
-    if (m_layerTreeHost->needsSharedContext() && !WebSharedGraphicsContext3D::haveCompositorThreadContext()) {
-        WebSharedGraphicsContext3D::createCompositorThreadContext();
-        WebSharedGraphicsContext3D::createCompositorThreadCustomFilterContext(); // FIXME: We really shouldn't create this unless we see a custom filter.
     }
 
     // Do not notify the impl thread of commit requests that occur during
@@ -664,6 +683,21 @@ void ThreadProxy::beginFrame(scoped_ptr<BeginFrameAndCommitState> beginFrameStat
         setNeedsAnimate();
     }
 
+    scoped_refptr<cc::ContextProvider> offscreenContextProvider;
+    scoped_refptr<cc::ContextProvider> customFilterContextProvider;
+    if (m_RendererCapabilitiesMainThreadCopy.usingOffscreenContext3d && m_layerTreeHost->needsOffscreenContext()) {
+        offscreenContextProvider = m_layerTreeHost->client()->OffscreenContextProviderForCompositorThread();
+        if (offscreenContextProvider->InitializeOnMainThread())
+            m_createdOffscreenContextProvider = true;
+        else
+            offscreenContextProvider = NULL;
+        customFilterContextProvider = m_layerTreeHost->client()->CustomFilterContextProviderForCompositorThread();
+        if (customFilterContextProvider->InitializeOnMainThread())
+            m_createdCustomFilterContextProvider = true;
+        else
+            customFilterContextProvider = NULL;
+    }
+
     // Notify the impl thread that the beginFrame has completed. This will
     // begin the commit process, which is blocking from the main thread's
     // point of view, but asynchronously performed on the impl thread,
@@ -675,7 +709,7 @@ void ThreadProxy::beginFrame(scoped_ptr<BeginFrameAndCommitState> beginFrameStat
 
         base::TimeTicks startTime = base::TimeTicks::HighResNow();
         CompletionEvent completion;
-        Proxy::implThread()->postTask(base::Bind(&ThreadProxy::beginFrameCompleteOnImplThread, m_implThreadWeakPtr, &completion, queue.release()));
+        Proxy::implThread()->postTask(base::Bind(&ThreadProxy::beginFrameCompleteOnImplThread, m_implThreadWeakPtr, &completion, queue.release(), offscreenContextProvider, customFilterContextProvider));
         completion.wait();
         base::TimeTicks endTime = base::TimeTicks::HighResNow();
 
@@ -687,7 +721,8 @@ void ThreadProxy::beginFrame(scoped_ptr<BeginFrameAndCommitState> beginFrameStat
     m_layerTreeHost->didBeginFrame();
 }
 
-void ThreadProxy::beginFrameCompleteOnImplThread(CompletionEvent* completion, ResourceUpdateQueue* rawQueue)
+void ThreadProxy::beginFrameCompleteOnImplThread(CompletionEvent* completion, ResourceUpdateQueue* rawQueue, scoped_refptr<cc::ContextProvider> offscreenContextProvider,
+    scoped_refptr<cc::ContextProvider> customFilterContextProvider)
 {
     scoped_ptr<ResourceUpdateQueue> queue(rawQueue);
 
@@ -703,6 +738,9 @@ void ThreadProxy::beginFrameCompleteOnImplThread(CompletionEvent* completion, Re
         return;
     }
 
+    m_layerTreeHostImpl->resourceProvider()->setOffscreenContextProvider(offscreenContextProvider);
+    m_layerTreeHostImpl->resourceProvider()->setCustomFilterContextProvider(customFilterContextProvider);
+
     if (m_layerTreeHost->contentsTextureManager()->linkedEvictedBackingsExist()) {
         // Clear any uploads we were making to textures linked to evicted
         // resources
@@ -714,7 +752,7 @@ void ThreadProxy::beginFrameCompleteOnImplThread(CompletionEvent* completion, Re
 
     m_layerTreeHost->contentsTextureManager()->pushTexturePrioritiesToBackings();
 
-    m_currentResourceUpdateControllerOnImplThread = ResourceUpdateController::create(this, Proxy::implThread(), queue.Pass(), m_layerTreeHostImpl->resourceProvider(), hasImplThread());
+    m_currentResourceUpdateControllerOnImplThread = ResourceUpdateController::create(this, Proxy::implThread(), queue.Pass(), m_layerTreeHostImpl->resourceProvider());
     m_currentResourceUpdateControllerOnImplThread->performMoreUpdates(
         m_schedulerOnImplThread->anticipatedDrawTime());
 
@@ -850,8 +888,12 @@ ScheduledActionDrawAndSwapResult ThreadProxy::scheduledActionDrawAndSwapInternal
         }
         m_readbackRequestOnImplThread->completion.signal();
         m_readbackRequestOnImplThread = 0;
-    } else if (drawFrame)
+    } else if (drawFrame) {
         result.didSwap = m_layerTreeHostImpl->swapBuffers();
+
+        if (frame.containsIncompleteTile)
+          didSwapUseIncompleteTileOnImplThread();
+    }
 
     // Tell the main thread that the the newly-commited frame was drawn.
     if (m_nextFrameIsNewlyCommittedFrameOnImplThread) {
@@ -861,6 +903,8 @@ ScheduledActionDrawAndSwapResult ThreadProxy::scheduledActionDrawAndSwapInternal
 
     if (drawFrame)
         checkOutputSurfaceStatusOnImplThread();
+
+    m_layerTreeHostImpl->beginNextFrame();
 
     return result;
 }
@@ -1015,7 +1059,7 @@ void ThreadProxy::initializeRendererOnImplThread(CompletionEvent* completion, bo
                 capabilities->usingSwapCompleteCallback);
 
         int maxFramesPending = FrameRateController::kDefaultMaxFramesPending;
-        if (m_layerTreeHostImpl->outputSurface()->Capabilities().has_parent_compositor)
+        if (m_layerTreeHostImpl->outputSurface()->capabilities().has_parent_compositor)
             maxFramesPending = 1;
         m_schedulerOnImplThread->setMaxFramesPending(maxFramesPending);
     }
@@ -1046,7 +1090,8 @@ size_t ThreadProxy::maxPartialTextureUpdates() const
     return ResourceUpdateController::maxPartialTextureUpdates();
 }
 
-void ThreadProxy::recreateOutputSurfaceOnImplThread(CompletionEvent* completion, scoped_ptr<OutputSurface> outputSurface, bool* recreateSucceeded, RendererCapabilities* capabilities)
+void ThreadProxy::recreateOutputSurfaceOnImplThread(CompletionEvent* completion, scoped_ptr<OutputSurface> outputSurface, scoped_refptr<cc::ContextProvider> offscreenContextProvider, 
+    scoped_refptr<cc::ContextProvider> customFilterContextProvider, bool* recreateSucceeded, RendererCapabilities* capabilities)
 {
     TRACE_EVENT0("cc", "ThreadProxy::recreateOutputSurfaceOnImplThread");
     DCHECK(isImplThread());
@@ -1054,7 +1099,14 @@ void ThreadProxy::recreateOutputSurfaceOnImplThread(CompletionEvent* completion,
     *recreateSucceeded = m_layerTreeHostImpl->initializeRenderer(outputSurface.Pass());
     if (*recreateSucceeded) {
         *capabilities = m_layerTreeHostImpl->rendererCapabilities();
+        m_layerTreeHostImpl->resourceProvider()->setOffscreenContextProvider(offscreenContextProvider);
+        m_layerTreeHostImpl->resourceProvider()->setCustomFilterContextProvider(customFilterContextProvider);
         m_schedulerOnImplThread->didRecreateOutputSurface();
+    } else {
+        if (offscreenContextProvider)
+            offscreenContextProvider->VerifyContexts();
+        if (customFilterContextProvider)
+            customFilterContextProvider->VerifyContexts();
     }
     completion->signal();
 }
@@ -1073,6 +1125,29 @@ ThreadProxy::BeginFrameAndCommitState::BeginFrameAndCommitState()
 
 ThreadProxy::BeginFrameAndCommitState::~BeginFrameAndCommitState()
 {
+}
+
+scoped_ptr<base::Value> ThreadProxy::asValue() const
+{
+    scoped_ptr<base::DictionaryValue> state(new base::DictionaryValue());
+
+    CompletionEvent completion;
+    {
+        DebugScopedSetMainThreadBlocked mainThreadBlocked(
+            const_cast<ThreadProxy*>(this));
+        Proxy::implThread()->postTask(base::Bind(&ThreadProxy::asValueOnImplThread,
+                                                 m_implThreadWeakPtr,
+                                                 &completion,
+                                                 state.get()));
+        completion.wait();
+    }
+    return state.PassAs<base::Value>();
+}
+
+void ThreadProxy::asValueOnImplThread(CompletionEvent* completion, base::DictionaryValue* state) const
+{
+    state->Set("layer_tree_host_impl", m_layerTreeHostImpl->asValue().release());
+    completion->signal();
 }
 
 bool ThreadProxy::commitPendingForTesting()
@@ -1124,7 +1199,8 @@ void ThreadProxy::renewTreePriority()
 {
     bool smoothnessTakesPriority =
         m_layerTreeHostImpl->pinchGestureActive() ||
-        m_layerTreeHostImpl->currentlyScrollingLayer();
+        m_layerTreeHostImpl->currentlyScrollingLayer() ||
+        m_layerTreeHostImpl->pageScaleAnimationActive();
 
     // Update expiration time if smoothness currently takes priority.
     if (smoothnessTakesPriority) {
@@ -1140,9 +1216,10 @@ void ThreadProxy::renewTreePriority()
     if (m_smoothnessTakesPriorityExpirationTime > base::TimeTicks::Now())
         priority = SMOOTHNESS_TAKES_PRIORITY;
 
-    // New content always takes priority when we have an active tree with
-    // evicted resources.
-    if (m_layerTreeHostImpl->activeTree()->ContentsTexturesPurged())
+    // New content always takes priority when the active tree has
+    // evicted resources or there is an invalid viewport size.
+    if (m_layerTreeHostImpl->activeTree()->ContentsTexturesPurged() ||
+        m_layerTreeHostImpl->activeTree()->ViewportSizeInvalid())
         priority = NEW_CONTENT_TAKES_PRIORITY;
 
     m_layerTreeHostImpl->setTreePriority(priority);
@@ -1155,15 +1232,15 @@ void ThreadProxy::renewTreePriority()
             priority == SMOOTHNESS_TAKES_PRIORITY);
     }
 
+    base::TimeDelta delay = m_smoothnessTakesPriorityExpirationTime -
+        base::TimeTicks::Now();
+
     // Need to make sure a delayed task is posted when we have smoothness
     // takes priority expiration time in the future.
-    if (m_smoothnessTakesPriorityExpirationTime <= base::TimeTicks::Now())
+    if (delay <= base::TimeDelta())
         return;
     if (m_renewTreePriorityOnImplThreadPending)
         return;
-
-    base::TimeDelta delay = m_smoothnessTakesPriorityExpirationTime -
-        base::TimeTicks::Now();
 
     Proxy::implThread()->postDelayedTask(
         base::Bind(&ThreadProxy::renewTreePriorityOnImplThread,

@@ -4,7 +4,7 @@
 
 #include "ash/test/test_shell_delegate.h"
 
-#include <algorithm>
+#include <limits>
 
 #include "ash/caps_lock_delegate_stub.h"
 #include "ash/host/root_window_host_factory.h"
@@ -45,6 +45,10 @@ bool TestShellDelegate::IsFirstRunAfterBoot() const {
   return false;
 }
 
+bool TestShellDelegate::IsRunningInForcedAppMode() const {
+  return false;
+}
+
 bool TestShellDelegate::CanLockScreen() const {
   return user_logged_in_ && can_lock_screen_;
 }
@@ -80,7 +84,7 @@ void TestShellDelegate::ToggleMaximized() {
     ash::wm::ToggleMaximizedWindow(window);
 }
 
-void TestShellDelegate::OpenFileManager() {
+void TestShellDelegate::OpenFileManager(bool as_dialog) {
 }
 
 void TestShellDelegate::OpenCrosh() {
@@ -222,6 +226,11 @@ void TestShellDelegate::SetUserLoggedIn(bool user_logged_in) {
 void TestShellDelegate::SetCanLockScreen(bool can_lock_screen) {
   can_lock_screen_ = can_lock_screen;
 }
+
+string16 TestShellDelegate::GetProductName() const {
+  return string16();
+}
+
 
 }  // namespace test
 }  // namespace ash

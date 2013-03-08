@@ -55,6 +55,31 @@ IPC_MESSAGE_ROUTED2(AwViewMsg_DoHitTest,
 IPC_MESSAGE_ROUTED1(AwViewMsg_EnableCapturePictureCallback,
                     bool /* enable */)
 
+// Requests a new picture with the latest renderer contents synchronously.
+// This message blocks the browser process on the renderer until complete.
+IPC_SYNC_MESSAGE_ROUTED0_0(AwViewMsg_CapturePictureSync)
+
+// Sets the zoom level for text only. Used in layout modes other than
+// Text Autosizing.
+IPC_MESSAGE_ROUTED1(AwViewMsg_SetTextZoomLevel,
+                    double /* zoom_level */)
+
+// Resets WebKit WebView scrolling and scale state. We need to send this
+// message whenever we want to guarantee that page's scale will be
+// recalculated by WebKit.
+IPC_MESSAGE_ROUTED0(AwViewMsg_ResetScrollAndScaleState)
+
+// Set whether fixed layout mode is enabled. Must be updated together
+// with WebSettings.viewport_enabled. Only WebView switches this mode
+// dynamically, thus there is no support for this in the common code.
+IPC_MESSAGE_ROUTED1(AwViewMsg_SetEnableFixedLayoutMode,
+                    bool /* enabled */)
+
+// Sets the initial page scale. This overrides initial scale set by
+// the meta viewport tag.
+IPC_MESSAGE_ROUTED1(AwViewMsg_SetInitialPageScale,
+                    double /* page_scale_factor */)
+
 //-----------------------------------------------------------------------------
 // RenderView messages
 // These are messages sent from the renderer to the browser process.

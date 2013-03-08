@@ -81,8 +81,8 @@ class Forwarder(object):
       raise Exception('Error while running adb forward.')
 
     (exit_code, output) = self._adb.GetShellCommandStatusAndOutput(
-        '%s %s' % (Forwarder._DEVICE_FORWARDER_PATH,
-                   Forwarder._DEVICE_ADB_CONTROL_PORT))
+        '%s %s %s' % (tool.GetUtilWrapper(), Forwarder._DEVICE_FORWARDER_PATH,
+                      Forwarder._DEVICE_ADB_CONTROL_PORT))
     if exit_code != 0:
       raise Exception(
           'Failed to start device forwarder:\n%s' % '\n'.join(output))
@@ -107,6 +107,7 @@ class Forwarder(object):
   def KillHost(build_type):
     logging.info('Killing host_forwarder.')
     host_forwarder_path = _MakeBinaryPath(build_type, 'host_forwarder')
+    assert os.path.exists(host_forwarder_path), 'Please build forwarder2'
     (exit_code, output) = cmd_helper.GetCmdStatusAndOutput(
         [host_forwarder_path, 'kill-server'])
     if exit_code != 0:
@@ -117,12 +118,13 @@ class Forwarder(object):
               host_forwarder_path, exit_code, '\n'.join(output)))
 
   @staticmethod
-  def KillDevice(adb):
+  def KillDevice(adb, tool):
     logging.info('Killing device_forwarder.')
     if not adb.FileExistsOnDevice(Forwarder._DEVICE_FORWARDER_PATH):
       return
     (exit_code, output) = adb.GetShellCommandStatusAndOutput(
-        '%s kill-server' % Forwarder._DEVICE_FORWARDER_PATH)
+        '%s %s kill-server' % (tool.GetUtilWrapper(),
+                               Forwarder._DEVICE_FORWARDER_PATH))
     # TODO(pliard): Remove the following call to KillAllBlocking() when we are
     # sure that the old version of device_forwarder (not supporting
     # 'kill-server') is not running on the bots anymore.

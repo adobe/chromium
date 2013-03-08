@@ -14,9 +14,9 @@
 #include "chrome/browser/extensions/extension_tab_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/omnibox/location_bar.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/test/base/ui_test_utils.h"
@@ -33,7 +33,7 @@ class PageAsBrowserActionApiTest : public ExtensionApiTest {
   PageAsBrowserActionApiTest() {}
   virtual ~PageAsBrowserActionApiTest() {}
 
-  void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
     ExtensionApiTest::SetUpCommandLine(command_line);
     command_line->AppendSwitchASCII(switches::kScriptBadges, "1");
   }
@@ -77,7 +77,7 @@ IN_PROC_BROWSER_TEST_F(PageAsBrowserActionApiTest, Basic) {
 
   // Test that we received the changes.
   int tab_id = ExtensionTabUtil::GetTabId(
-      chrome::GetActiveWebContents(browser()));
+      browser()->tab_strip_model()->GetActiveWebContents());
   ExtensionAction* action =
       extension_action_manager()->GetBrowserAction(*extension);
   ASSERT_TRUE(action);
@@ -102,7 +102,8 @@ IN_PROC_BROWSER_TEST_F(PageAsBrowserActionApiTest, Basic) {
 
   // We should not be creating icons asynchronously, so we don't need an
   // observer.
-  ExtensionActionIconFactory icon_factory(extension, action, NULL);
+  ExtensionActionIconFactory icon_factory(
+      profile(), extension, action, NULL);
 
   // Test that we received the changes.
   EXPECT_FALSE(icon_factory.GetIcon(tab_id).IsEmpty());
@@ -116,7 +117,7 @@ IN_PROC_BROWSER_TEST_F(PageAsBrowserActionApiTest, AddPopup) {
   ASSERT_TRUE(extension) << message_;
 
   int tab_id = ExtensionTabUtil::GetTabId(
-      chrome::GetActiveWebContents(browser()));
+      browser()->tab_strip_model()->GetActiveWebContents());
 
   ExtensionAction* page_action =
       extension_action_manager()->GetBrowserAction(*extension);
@@ -164,7 +165,7 @@ IN_PROC_BROWSER_TEST_F(PageAsBrowserActionApiTest, RemovePopup) {
   ASSERT_TRUE(extension) << message_;
 
   int tab_id = ExtensionTabUtil::GetTabId(
-      chrome::GetActiveWebContents(browser()));
+      browser()->tab_strip_model()->GetActiveWebContents());
 
   ExtensionAction* page_action =
       extension_action_manager()->GetBrowserAction(*extension);

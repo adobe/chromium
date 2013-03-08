@@ -12,9 +12,11 @@
 #include "base/stringprintf.h"
 #include "base/time.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "webkit/fileapi/external_mount_points.h"
 #include "webkit/fileapi/file_system_context.h"
 #include "webkit/fileapi/file_system_operation.h"
 #include "webkit/fileapi/file_system_task_runners.h"
+#include "webkit/fileapi/file_system_url.h"
 #include "webkit/fileapi/isolated_context.h"
 #include "webkit/fileapi/media/native_media_file_util.h"
 #include "webkit/fileapi/mock_file_system_options.h"
@@ -30,7 +32,7 @@ namespace {
 typedef FileSystemOperation::FileEntryList FileEntryList;
 
 struct FilteringTestCase {
-  const FilePath::CharType* path;
+  const base::FilePath::CharType* path;
   bool is_directory;
   bool visible;
 };
@@ -60,13 +62,13 @@ void ExpectMetadataEqHelper(const std::string& test_name,
                             bool expected_is_directory,
                             base::PlatformFileError actual,
                             const base::PlatformFileInfo& file_info,
-                            const FilePath& /*platform_path*/) {
+                            const base::FilePath& /*platform_path*/) {
   EXPECT_EQ(expected, actual) << test_name;
   if (actual == base::PLATFORM_FILE_OK)
     EXPECT_EQ(expected_is_directory, file_info.is_directory) << test_name;
 }
 
-void DidReadDirectory(std::set<FilePath::StringType>* content,
+void DidReadDirectory(std::set<base::FilePath::StringType>* content,
                       bool* completed,
                       base::PlatformFileError error,
                       const FileEntryList& file_list,
@@ -78,11 +80,11 @@ void DidReadDirectory(std::set<FilePath::StringType>* content,
     EXPECT_TRUE(content->insert(itr->name).second);
 }
 
-void PopulateDirectoryWithTestCases(const FilePath& dir,
+void PopulateDirectoryWithTestCases(const base::FilePath& dir,
                                     const FilteringTestCase* test_cases,
                                     size_t n) {
   for (size_t i = 0; i < n; ++i) {
-    FilePath path = dir.Append(test_cases[i].path);
+    base::FilePath path = dir.Append(test_cases[i].path);
     if (test_cases[i].is_directory) {
       ASSERT_TRUE(file_util::CreateDirectory(path));
     } else {
@@ -102,7 +104,7 @@ class NativeMediaFileUtilTest : public testing::Test {
       : file_util_(NULL) {
   }
 
-  void SetUp() {
+  virtual void SetUp() {
     ASSERT_TRUE(data_dir_.CreateUniqueTempDir());
     ASSERT_TRUE(file_util::CreateDirectory(root_path()));
 
@@ -112,6 +114,7 @@ class NativeMediaFileUtilTest : public testing::Test {
     file_system_context_ =
         new FileSystemContext(
             FileSystemTaskRunners::CreateMockTaskRunners(),
+            ExternalMountPoints::CreateRefCounted().get(),
             storage_policy,
             NULL,
             data_dir_.path(),
@@ -125,7 +128,7 @@ class NativeMediaFileUtilTest : public testing::Test {
     isolated_context()->AddReference(filesystem_id_);
   }
 
-  void TearDown() {
+  virtual void TearDown() {
     isolated_context()->RemoveReference(filesystem_id_);
     file_system_context_ = NULL;
   }
@@ -135,12 +138,25 @@ class NativeMediaFileUtilTest : public testing::Test {
     return file_system_context_.get();
   }
 
+  FileSystemURL CreateURL(const base::FilePath::CharType* test_case_path) {
+    return file_system_context_->CreateCrackedFileSystemURL(
+        origin(),
+        fileapi::kFileSystemTypeIsolated,
+        GetVirtualPath(test_case_path));
+  }
+
   IsolatedContext* isolated_context() {
     return IsolatedContext::GetInstance();
   }
 
-  FilePath root_path() {
+  base::FilePath root_path() {
     return data_dir_.path().Append(FPL("Media Directory"));
+  }
+
+  base::FilePath GetVirtualPath(const base::FilePath::CharType* test_case_path) {
+    return base::FilePath::FromUTF8Unsafe(filesystem_id_).
+               Append(FPL("Media Directory")).
+               Append(base::FilePath(test_case_path));
   }
 
   FileSystemFileUtil* file_util() {
@@ -177,8 +193,7 @@ TEST_F(NativeMediaFileUtilTest, DirectoryExistsAndFileExistsFiltering) {
                                  arraysize(kFilteringTestCases));
 
   for (size_t i = 0; i < arraysize(kFilteringTestCases); ++i) {
-    FilePath path = root_path().Append(kFilteringTestCases[i].path);
-    FileSystemURL url(origin(), type(), path);
+    FileSystemURL url = CreateURL(kFilteringTestCases[i].path);
     FileSystemOperation* operation = NewOperation(url);
 
     base::PlatformFileError expectation =
@@ -204,8 +219,8 @@ TEST_F(NativeMediaFileUtilTest, ReadDirectoryFiltering) {
                                  kFilteringTestCases,
                                  arraysize(kFilteringTestCases));
 
-  std::set<FilePath::StringType> content;
-  FileSystemURL url(origin(), type(), root_path());
+  std::set<base::FilePath::StringType> content;
+  FileSystemURL url = CreateURL(FPL(""));
   bool completed = false;
   NewOperation(url)->ReadDirectory(
       url, base::Bind(&DidReadDirectory, &content, &completed));
@@ -214,9 +229,9 @@ TEST_F(NativeMediaFileUtilTest, ReadDirectoryFiltering) {
   EXPECT_EQ(5u, content.size());
 
   for (size_t i = 0; i < arraysize(kFilteringTestCases); ++i) {
-    FilePath::StringType name =
-        FilePath(kFilteringTestCases[i].path).BaseName().value();
-    std::set<FilePath::StringType>::const_iterator found = content.find(name);
+    base::FilePath::StringType name =
+        base::FilePath(kFilteringTestCases[i].path).BaseName().value();
+    std::set<base::FilePath::StringType>::const_iterator found = content.find(name);
     EXPECT_EQ(kFilteringTestCases[i].visible, found != content.end());
   }
 }
@@ -226,11 +241,10 @@ TEST_F(NativeMediaFileUtilTest, CreateFileAndCreateDirectoryFiltering) {
   // pre-existing. Though the result should be the same.
   for (int loop_count = 0; loop_count < 2; ++loop_count) {
     for (size_t i = 0; i < arraysize(kFilteringTestCases); ++i) {
-      FileSystemURL root_url(origin(), type(), root_path());
+      FileSystemURL root_url = CreateURL(FPL(""));
       FileSystemOperation* operation = NewOperation(root_url);
 
-      FilePath path = root_path().Append(kFilteringTestCases[i].path);
-      FileSystemURL url(origin(), type(), path);
+      FileSystemURL url = CreateURL(kFilteringTestCases[i].path);
 
       std::string test_name = base::StringPrintf(
           "CreateFileAndCreateDirectoryFiltering run %d, test %" PRIuS,
@@ -253,8 +267,8 @@ TEST_F(NativeMediaFileUtilTest, CreateFileAndCreateDirectoryFiltering) {
 }
 
 TEST_F(NativeMediaFileUtilTest, CopySourceFiltering) {
-  FilePath dest_path = root_path().AppendASCII("dest");
-  FileSystemURL dest_url(origin(), type(), dest_path);
+  base::FilePath dest_path = root_path().AppendASCII("dest");
+  FileSystemURL dest_url = CreateURL(FPL("dest"));
 
   // Run the loop twice. The first run has no source files. The second run does.
   for (int loop_count = 0; loop_count < 2; ++loop_count) {
@@ -269,11 +283,10 @@ TEST_F(NativeMediaFileUtilTest, CopySourceFiltering) {
       ASSERT_TRUE(file_util::Delete(dest_path, true));
       ASSERT_TRUE(file_util::CreateDirectory(dest_path));
 
-      FileSystemURL root_url(origin(), type(), root_path());
+      FileSystemURL root_url = CreateURL(FPL(""));
       FileSystemOperation* operation = NewOperation(root_url);
 
-      FilePath path = root_path().Append(kFilteringTestCases[i].path);
-      FileSystemURL url(origin(), type(), path);
+      FileSystemURL url = CreateURL(kFilteringTestCases[i].path);
 
       std::string test_name = base::StringPrintf(
           "CopySourceFiltering run %d test %" PRIuS, loop_count, i);
@@ -307,8 +320,8 @@ TEST_F(NativeMediaFileUtilTest, CopyDestFiltering) {
     }
 
     // Always create a dummy source data file.
-    FilePath src_path = root_path().AppendASCII("foo.jpg");
-    FileSystemURL src_url(origin(), type(), src_path);
+    base::FilePath src_path = root_path().AppendASCII("foo.jpg");
+    FileSystemURL src_url = CreateURL(FPL("foo.jpg"));
     static const char kDummyData[] = "dummy";
     ASSERT_TRUE(file_util::WriteFile(src_path, kDummyData, strlen(kDummyData)));
 
@@ -320,11 +333,10 @@ TEST_F(NativeMediaFileUtilTest, CopyDestFiltering) {
         // unused.
         continue;
       }
-      FileSystemURL root_url(origin(), type(), root_path());
+      FileSystemURL root_url = CreateURL(FPL(""));
       FileSystemOperation* operation = NewOperation(root_url);
 
-      FilePath path = root_path().Append(kFilteringTestCases[i].path);
-      FileSystemURL url(origin(), type(), path);
+      FileSystemURL url = CreateURL(kFilteringTestCases[i].path);
 
       std::string test_name = base::StringPrintf(
           "CopyDestFiltering run %d test %" PRIuS, loop_count, i);
@@ -360,8 +372,8 @@ TEST_F(NativeMediaFileUtilTest, CopyDestFiltering) {
 }
 
 TEST_F(NativeMediaFileUtilTest, MoveSourceFiltering) {
-  FilePath dest_path = root_path().AppendASCII("dest");
-  FileSystemURL dest_url(origin(), type(), dest_path);
+  base::FilePath dest_path = root_path().AppendASCII("dest");
+  FileSystemURL dest_url = CreateURL(FPL("dest"));
 
   // Run the loop twice. The first run has no source files. The second run does.
   for (int loop_count = 0; loop_count < 2; ++loop_count) {
@@ -376,11 +388,10 @@ TEST_F(NativeMediaFileUtilTest, MoveSourceFiltering) {
       ASSERT_TRUE(file_util::Delete(dest_path, true));
       ASSERT_TRUE(file_util::CreateDirectory(dest_path));
 
-      FileSystemURL root_url(origin(), type(), root_path());
+      FileSystemURL root_url = CreateURL(FPL(""));
       FileSystemOperation* operation = NewOperation(root_url);
 
-      FilePath path = root_path().Append(kFilteringTestCases[i].path);
-      FileSystemURL url(origin(), type(), path);
+      FileSystemURL url = CreateURL(kFilteringTestCases[i].path);
 
       std::string test_name = base::StringPrintf(
           "MoveSourceFiltering run %d test %" PRIuS, loop_count, i);
@@ -423,17 +434,16 @@ TEST_F(NativeMediaFileUtilTest, MoveDestFiltering) {
       }
 
       // Create the source file for every test case because it might get moved.
-      FilePath src_path = root_path().AppendASCII("foo.jpg");
-      FileSystemURL src_url(origin(), type(), src_path);
+      base::FilePath src_path = root_path().AppendASCII("foo.jpg");
+      FileSystemURL src_url = CreateURL(FPL("foo.jpg"));
       static const char kDummyData[] = "dummy";
       ASSERT_TRUE(
           file_util::WriteFile(src_path, kDummyData, strlen(kDummyData)));
 
-      FileSystemURL root_url(origin(), type(), root_path());
+      FileSystemURL root_url = CreateURL(FPL(""));
       FileSystemOperation* operation = NewOperation(root_url);
 
-      FilePath path = root_path().Append(kFilteringTestCases[i].path);
-      FileSystemURL url(origin(), type(), path);
+      FileSystemURL url = CreateURL(kFilteringTestCases[i].path);
 
       std::string test_name = base::StringPrintf(
           "MoveDestFiltering run %d test %" PRIuS, loop_count, i);
@@ -477,11 +487,10 @@ TEST_F(NativeMediaFileUtilTest, GetMetadataFiltering) {
                                      arraysize(kFilteringTestCases));
     }
     for (size_t i = 0; i < arraysize(kFilteringTestCases); ++i) {
-      FileSystemURL root_url(origin(), type(), root_path());
+      FileSystemURL root_url = CreateURL(FPL(""));
       FileSystemOperation* operation = NewOperation(root_url);
 
-      FilePath path = root_path().Append(kFilteringTestCases[i].path);
-      FileSystemURL url(origin(), type(), path);
+      FileSystemURL url = CreateURL(kFilteringTestCases[i].path);
 
       std::string test_name = base::StringPrintf(
           "GetMetadataFiltering run %d test %" PRIuS, loop_count, i);
@@ -509,11 +518,10 @@ TEST_F(NativeMediaFileUtilTest, RemoveFiltering) {
                                      arraysize(kFilteringTestCases));
     }
     for (size_t i = 0; i < arraysize(kFilteringTestCases); ++i) {
-      FileSystemURL root_url(origin(), type(), root_path());
+      FileSystemURL root_url = CreateURL(FPL(""));
       FileSystemOperation* operation = NewOperation(root_url);
 
-      FilePath path = root_path().Append(kFilteringTestCases[i].path);
-      FileSystemURL url(origin(), type(), path);
+      FileSystemURL url = CreateURL(kFilteringTestCases[i].path);
 
       std::string test_name = base::StringPrintf(
           "RemoveFiltering run %d test %" PRIuS, loop_count, i);
@@ -538,11 +546,10 @@ TEST_F(NativeMediaFileUtilTest, TruncateFiltering) {
                                      arraysize(kFilteringTestCases));
     }
     for (size_t i = 0; i < arraysize(kFilteringTestCases); ++i) {
-      FileSystemURL root_url(origin(), type(), root_path());
+      FileSystemURL root_url = CreateURL(FPL(""));
       FileSystemOperation* operation = NewOperation(root_url);
 
-      FilePath path = root_path().Append(kFilteringTestCases[i].path);
-      FileSystemURL url(origin(), type(), path);
+      FileSystemURL url = CreateURL(kFilteringTestCases[i].path);
 
       std::string test_name = base::StringPrintf(
           "TruncateFiltering run %d test %" PRIuS, loop_count, i);
@@ -572,11 +579,10 @@ TEST_F(NativeMediaFileUtilTest, TouchFileFiltering) {
                                      arraysize(kFilteringTestCases));
     }
     for (size_t i = 0; i < arraysize(kFilteringTestCases); ++i) {
-      FileSystemURL root_url(origin(), type(), root_path());
+      FileSystemURL root_url = CreateURL(FPL(""));
       FileSystemOperation* operation = NewOperation(root_url);
 
-      FilePath path = root_path().Append(kFilteringTestCases[i].path);
-      FileSystemURL url(origin(), type(), path);
+      FileSystemURL url = CreateURL(kFilteringTestCases[i].path);
 
       std::string test_name = base::StringPrintf(
           "TouchFileFiltering run %d test %" PRIuS, loop_count, i);

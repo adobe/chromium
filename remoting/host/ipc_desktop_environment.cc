@@ -9,9 +9,10 @@
 #include "base/callback.h"
 #include "base/compiler_specific.h"
 #include "base/logging.h"
+#include "base/process_util.h"
 #include "base/single_thread_task_runner.h"
-#include "ipc/ipc_channel_proxy.h"
-#include "remoting/capturer/video_frame_capturer.h"
+#include "ipc/ipc_sender.h"
+#include "media/video/capture/screen/screen_capturer.h"
 #include "remoting/host/audio_capturer.h"
 #include "remoting/host/chromoting_messages.h"
 #include "remoting/host/desktop_session_proxy.h"
@@ -21,13 +22,16 @@ namespace remoting {
 
 IpcDesktopEnvironment::IpcDesktopEnvironment(
     scoped_refptr<base::SingleThreadTaskRunner> caller_task_runner,
+    scoped_refptr<base::SingleThreadTaskRunner> io_task_runner,
     const std::string& client_jid,
     const base::Closure& disconnect_callback,
-    base::WeakPtr<DesktopSessionConnector> desktop_session_connector)
+    base::WeakPtr<DesktopSessionConnector> desktop_session_connector,
+    bool curtain_required)
     : caller_task_runner_(caller_task_runner),
       connected_(false),
       desktop_session_connector_(desktop_session_connector),
       desktop_session_proxy_(new DesktopSessionProxy(caller_task_runner,
+                                                     io_task_runner,
                                                      client_jid,
                                                      disconnect_callback)) {
   DCHECK(caller_task_runner_->BelongsToCurrentThread());
@@ -58,7 +62,7 @@ scoped_ptr<EventExecutor> IpcDesktopEnvironment::CreateEventExecutor(
                                                      ui_task_runner);
 }
 
-scoped_ptr<VideoFrameCapturer> IpcDesktopEnvironment::CreateVideoCapturer(
+scoped_ptr<media::ScreenCapturer> IpcDesktopEnvironment::CreateVideoCapturer(
     scoped_refptr<base::SingleThreadTaskRunner> capture_task_runner,
     scoped_refptr<base::SingleThreadTaskRunner> encode_task_runner) {
   DCHECK(caller_task_runner_->BelongsToCurrentThread());
@@ -79,15 +83,23 @@ void IpcDesktopEnvironment::ConnectToDesktopSession() {
 
 IpcDesktopEnvironmentFactory::IpcDesktopEnvironmentFactory(
     scoped_refptr<base::SingleThreadTaskRunner> caller_task_runner,
-    IPC::ChannelProxy* daemon_channel)
+    scoped_refptr<base::SingleThreadTaskRunner> io_task_runner,
+    IPC::Sender* daemon_channel)
     : caller_task_runner_(caller_task_runner),
+      io_task_runner_(io_task_runner),
+      curtain_activated_(false),
       daemon_channel_(daemon_channel),
       connector_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)),
       next_id_(0) {
 }
 
 IpcDesktopEnvironmentFactory::~IpcDesktopEnvironmentFactory() {
+}
+
+void IpcDesktopEnvironmentFactory::SetActivated(bool activated) {
   DCHECK(caller_task_runner_->BelongsToCurrentThread());
+
+  curtain_activated_ = activated;
 }
 
 scoped_ptr<DesktopEnvironment> IpcDesktopEnvironmentFactory::Create(
@@ -96,8 +108,8 @@ scoped_ptr<DesktopEnvironment> IpcDesktopEnvironmentFactory::Create(
   DCHECK(caller_task_runner_->BelongsToCurrentThread());
 
   return scoped_ptr<DesktopEnvironment>(new IpcDesktopEnvironment(
-      caller_task_runner_, client_jid, disconnect_callback,
-      connector_factory_.GetWeakPtr()));
+      caller_task_runner_, io_task_runner_, client_jid, disconnect_callback,
+      connector_factory_.GetWeakPtr(), curtain_activated_));
 }
 
 bool IpcDesktopEnvironmentFactory::SupportsAudioCapture() const {
@@ -140,7 +152,7 @@ void IpcDesktopEnvironmentFactory::DisconnectTerminal(
 
 void IpcDesktopEnvironmentFactory::OnDesktopSessionAgentAttached(
     int terminal_id,
-    IPC::PlatformFileForTransit desktop_process,
+    base::ProcessHandle desktop_process,
     IPC::PlatformFileForTransit desktop_pipe) {
   if (!caller_task_runner_->BelongsToCurrentThread()) {
     caller_task_runner_->PostTask(FROM_HERE, base::Bind(
@@ -154,15 +166,13 @@ void IpcDesktopEnvironmentFactory::OnDesktopSessionAgentAttached(
     i->second->DetachFromDesktop();
     i->second->AttachToDesktop(desktop_process, desktop_pipe);
   } else {
+    base::CloseProcessHandle(desktop_process);
+
 #if defined(OS_POSIX)
-    DCHECK(desktop_process.auto_close);
     DCHECK(desktop_pipe.auto_close);
 
-    base::ClosePlatformFile(desktop_process.fd);
     base::ClosePlatformFile(desktop_pipe.fd);
-#elif defined(OS_WIN)
-    base::ClosePlatformFile(desktop_process);
-#endif  // defined(OS_WIN)
+#endif  // defined(OS_POSIX)
   }
 }
 

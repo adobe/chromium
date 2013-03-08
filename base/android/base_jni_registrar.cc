@@ -7,11 +7,13 @@
 #include "base/basictypes.h"
 #include "base/android/build_info.h"
 #include "base/android/cpu_features.h"
+#include "base/android/important_file_writer_android.h"
 #include "base/android/jni_android.h"
 #include "base/android/jni_registrar.h"
 #include "base/android/locale_utils.h"
 #include "base/android/path_service_android.h"
 #include "base/android/path_utils.h"
+#include "base/android/thread_utils.h"
 #include "base/message_pump_android.h"
 #include "base/system_monitor/system_monitor_android.h"
 
@@ -21,11 +23,14 @@ namespace android {
 static RegistrationMethod kBaseRegisteredMethods[] = {
   { "BuildInfo", base::android::BuildInfo::RegisterBindings },
   { "CpuFeatures", base::android::RegisterCpuFeatures },
+  { "ImportantFileWriterAndroid",
+    base::android::RegisterImportantFileWriterAndroid },
   { "LocaleUtils", base::android::RegisterLocaleUtils },
   { "PathService", base::android::RegisterPathService },
   { "PathUtils", base::android::RegisterPathUtils },
   { "SystemMessageHandler", base::MessagePumpForUI::RegisterBindings },
   { "SystemMonitor", base::RegisterSystemMonitor },
+  { "ThreadUtils", base::RegisterThreadUtils },
 };
 
 bool RegisterJni(JNIEnv* env) {

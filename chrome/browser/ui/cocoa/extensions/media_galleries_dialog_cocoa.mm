@@ -50,6 +50,14 @@ const CGFloat kCheckboxMaxWidth = 350;
 
 namespace chrome {
 
+namespace {
+
+NSString* GetUniqueIDForGallery(const MediaGalleryPrefInfo* gallery) {
+  return base::SysUTF8ToNSString(gallery->device_id + gallery->path.value());
+}
+
+}  // namespace
+
 MediaGalleriesDialogCocoa::MediaGalleriesDialogCocoa(
     MediaGalleriesDialogController* controller,
     MediaGalleriesCocoaController* cocoa_controller)
@@ -137,12 +145,22 @@ void MediaGalleriesDialogCocoa::OnCheckboxToggled(NSButton* checkbox) {
        const_reverse_iterator iter = permissions.rbegin();
        iter != permissions.rend(); iter++) {
     const MediaGalleryPrefInfo* gallery = &iter->second.pref_info;
-    NSString* device_id = base::SysUTF8ToNSString(gallery->device_id);
-    if ([[[checkbox cell] representedObject] isEqual:device_id]) {
+    NSString* unique_id = GetUniqueIDForGallery(gallery);
+    if ([[[checkbox cell] representedObject] isEqual:unique_id]) {
       controller_->DidToggleGallery(gallery, [checkbox state] == NSOnState);
       break;
     }
   }
+}
+
+NSButton* MediaGalleriesDialogCocoa::CheckboxForGallery(
+    const MediaGalleryPrefInfo* gallery) {
+  NSString* unique_id = GetUniqueIDForGallery(gallery);
+  for (NSButton* button in checkboxes_.get()) {
+    if ([[[button cell] representedObject] isEqual:unique_id])
+      return button;
+  }
+  return nil;
 }
 
 void MediaGalleriesDialogCocoa::UpdateGalleryCheckbox(
@@ -158,8 +176,8 @@ void MediaGalleriesDialogCocoa::UpdateGalleryCheckbox(
 
     scoped_nsobject<NSButton> new_checkbox(
         [[NSButton alloc] initWithFrame:NSZeroRect]);
-    NSString* device_id = base::SysUTF8ToNSString(gallery->device_id);
-    [[new_checkbox cell] setRepresentedObject:device_id];
+    NSString* unique_id = GetUniqueIDForGallery(gallery);
+    [[new_checkbox cell] setRepresentedObject:unique_id];
     [[new_checkbox cell] setLineBreakMode:NSLineBreakByTruncatingMiddle];
     [new_checkbox setButtonType:NSSwitchButton];
     [new_checkbox setTarget:cocoa_controller_];
@@ -192,17 +210,32 @@ void MediaGalleriesDialogCocoa::UpdateCheckboxContainerFrame() {
 void MediaGalleriesDialogCocoa::UpdateGallery(
     const MediaGalleryPrefInfo* gallery,
     bool permitted) {
-  NSButton* checkbox = nil;
-  NSString* device_id = base::SysUTF8ToNSString(gallery->device_id);
-
-  for (NSButton* button in checkboxes_.get()) {
-    if ([[[button cell] representedObject] isEqual:device_id]) {
-      checkbox = button;
-      break;
-    }
-  }
-
+  NSButton* checkbox = CheckboxForGallery(gallery);
   UpdateGalleryCheckbox(checkbox, gallery, permitted);
+  UpdateCheckboxContainerFrame();
+  [alert_ layout];
+}
+
+void MediaGalleriesDialogCocoa::ForgetGallery(
+    const MediaGalleryPrefInfo* gallery) {
+  NSButton* checkbox = CheckboxForGallery(gallery);
+  if (!checkbox)
+    return;
+
+  // Remove checkbox and reposition the entries below it.
+  NSUInteger i = [checkboxes_ indexOfObject:checkbox];
+  [checkboxes_ removeObjectAtIndex:i];
+  for (; i < [checkboxes_ count]; ++i) {
+    CGFloat y_pos = 0;
+    if (i > 0) {
+      y_pos = NSMaxY([[checkboxes_ objectAtIndex:i - 1] frame]) +
+          kCheckboxMargin;
+    }
+    checkbox = [checkboxes_ objectAtIndex:i];
+    NSRect rect = [checkbox bounds];
+    rect.origin.y = y_pos;
+    [checkbox setFrame:rect];
+  }
   UpdateCheckboxContainerFrame();
   [alert_ layout];
 }

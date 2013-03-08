@@ -46,6 +46,11 @@ AutofillPopupViewGtk::AutofillPopupViewGtk(
                                  GDK_BUTTON_RELEASE_MASK |
                                  GDK_EXPOSURE_MASK |
                                  GDK_POINTER_MOTION_MASK);
+
+  GtkWidget* toplevel_window = gtk_widget_get_toplevel(
+      controller->container_view());
+  signals_.Connect(toplevel_window, "configure-event",
+                   G_CALLBACK(HandleConfigureThunk), this);
   g_signal_connect(window_, "expose-event",
                    G_CALLBACK(HandleExposeThunk), this);
   g_signal_connect(window_, "leave-notify-event",
@@ -97,6 +102,12 @@ void AutofillPopupViewGtk::UpdateBoundsAndRedrawPopup() {
   GdkRectangle popup_rect = controller_->popup_bounds().ToGdkRectangle();
   if (gdk_window != NULL)
     gdk_window_invalidate_rect(gdk_window, &popup_rect, FALSE);
+}
+
+gboolean AutofillPopupViewGtk::HandleConfigure(GtkWidget* widget,
+                                               GdkEventConfigure* event) {
+  Hide();
+  return FALSE;
 }
 
 gboolean AutofillPopupViewGtk::HandleButtonRelease(GtkWidget* widget,
@@ -211,17 +222,17 @@ void AutofillPopupViewGtk::DrawAutofillEntry(cairo_t* cairo_context,
 
   // Draw the value.
   SetLayoutText(controller_->names()[index],
-                controller_->name_font(),
+                controller_->GetNameFontForRow(index),
                 kNameColor);
-  int value_text_width =
-      controller_->name_font().GetStringWidth(controller_->names()[index]);
+  int value_text_width = controller_->GetNameFontForRow(index).GetStringWidth(
+      controller_->names()[index]);
 
   // Center the text within the line.
   int row_height = entry_rect.height();
   int value_content_y = std::max(
       entry_rect.y(),
       entry_rect.y() +
-          (row_height - controller_->name_font().GetHeight()) / 2);
+          (row_height - controller_->GetNameFontForRow(index).GetHeight()) / 2);
 
   bool is_rtl = base::i18n::IsRTL();
   int value_content_x = is_rtl ?
@@ -235,36 +246,6 @@ void AutofillPopupViewGtk::DrawAutofillEntry(cairo_t* cairo_context,
   // Use this to figure out where all the other Autofill items should be placed.
   int x_align_left = is_rtl ? kEndPadding : entry_rect.width() - kEndPadding;
 
-  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
-
-  // Draw the delete icon, if one is needed.
-  if (controller_->CanDelete(index)) {
-    x_align_left += is_rtl ? 0 : -kDeleteIconWidth;
-
-    gfx::Image delete_icon;
-    if (static_cast<int>(index) == controller_->selected_line() &&
-        controller_->delete_icon_hovered()) {
-      delete_icon = rb.GetImageNamed(IDR_CLOSE_BAR_H);
-    } else {
-      delete_icon = rb.GetImageNamed(IDR_CLOSE_BAR);
-    }
-
-    // TODO(csharp): Create a custom resource for the delete icon.
-    // http://crbug.com/131801
-    cairo_save(cairo_context);
-    gtk_util::DrawFullImage(
-        cairo_context,
-        window_,
-        delete_icon,
-        x_align_left,
-        entry_rect.y() +
-            ((row_height - kDeleteIconHeight) / 2));
-    cairo_restore(cairo_context);
-    cairo_save(cairo_context);
-
-    x_align_left += is_rtl ? kDeleteIconWidth + kIconPadding : -kIconPadding;
-  }
-
   // Draw the Autofill icon, if one exists
   if (!controller_->icons()[index].empty()) {
     int icon = controller_->GetIconResourceID(controller_->icons()[index]);
@@ -274,6 +255,7 @@ void AutofillPopupViewGtk::DrawAutofillEntry(cairo_t* cairo_context,
     x_align_left += is_rtl ? 0 : -kAutofillIconWidth;
 
     cairo_save(cairo_context);
+    ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
     gtk_util::DrawFullImage(cairo_context,
                             window_,
                             rb.GetImageNamed(icon),

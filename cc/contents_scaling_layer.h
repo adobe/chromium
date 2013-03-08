@@ -16,15 +16,15 @@ class CC_EXPORT ContentsScalingLayer : public Layer {
  public:
   virtual void calculateContentsScale(
       float ideal_contents_scale,
+      bool animating_transform_to_screen,
       float* contents_scale_x,
       float* contents_scale_y,
       gfx::Size* content_bounds) OVERRIDE;
-  virtual void didUpdateBounds() OVERRIDE;
 
   virtual void update(
     ResourceUpdateQueue& queue,
     const OcclusionTracker* occlusion,
-    RenderingStats& stats) OVERRIDE;
+    RenderingStats* stats) OVERRIDE;
 
  protected:
   ContentsScalingLayer();

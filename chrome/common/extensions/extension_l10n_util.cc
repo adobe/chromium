@@ -130,25 +130,27 @@ bool LocalizeManifest(const extensions::MessageBundle& messages,
   // Initialize all intents.
   DictionaryValue* intents = NULL;
   if (manifest->GetDictionary(keys::kIntents, &intents)) {
-    DictionaryValue::key_iterator it = intents->begin_keys();
-    for ( ; it != intents->end_keys(); ++it) {
+    for (DictionaryValue::Iterator it(*intents); !it.IsAtEnd(); it.Advance()) {
+      Value* value = NULL;
+      intents->GetWithoutPathExpansion(it.key(), &value);
       ListValue* actions = NULL;
       DictionaryValue* action = NULL;
 
       // Actions have either a dict or a list of dicts - handle both cases.
-      if (intents->GetListWithoutPathExpansion(*it, &actions)) {
+      if (value->GetAsList(&actions)) {
         for (size_t i = 0; i < actions->GetSize(); ++i) {
           action = NULL;
-          if (actions->GetDictionary(i, &action)) {
-            if (!LocalizeManifestValue(keys::kIntentTitle, messages,
-                                       action, error))
-              return false;
+          if (actions->GetDictionary(i, &action) &&
+              !LocalizeManifestValue(keys::kIntentTitle, messages,
+                                     action, error)) {
+            return false;
           }
         }
-      } else if (intents->GetDictionaryWithoutPathExpansion(*it, &action)) {
+      } else if (value->GetAsDictionary(&action)) {
         if (!LocalizeManifestValue(keys::kIntentTitle, messages,
-                                   action, error))
+                                   action, error)) {
           return false;
+        }
       }
     }
   }
@@ -167,7 +169,7 @@ bool LocalizeManifest(const extensions::MessageBundle& messages,
   return true;
 }
 
-bool LocalizeExtension(const FilePath& extension_path,
+bool LocalizeExtension(const base::FilePath& extension_path,
                        DictionaryValue* manifest,
                        std::string* error) {
   DCHECK(manifest);
@@ -189,7 +191,7 @@ bool LocalizeExtension(const FilePath& extension_path,
 }
 
 bool AddLocale(const std::set<std::string>& chrome_locales,
-               const FilePath& locale_folder,
+               const base::FilePath& locale_folder,
                const std::string& locale_name,
                std::set<std::string>* valid_locales,
                std::string* error) {
@@ -246,7 +248,7 @@ void GetAllFallbackLocales(const std::string& application_locale,
   all_fallback_locales->push_back(default_locale);
 }
 
-bool GetValidLocales(const FilePath& locale_path,
+bool GetValidLocales(const base::FilePath& locale_path,
                      std::set<std::string>* valid_locales,
                      std::string* error) {
   std::set<std::string> chrome_locales;
@@ -256,7 +258,7 @@ bool GetValidLocales(const FilePath& locale_path,
   file_util::FileEnumerator locales(locale_path,
                                     false,
                                     file_util::FileEnumerator::DIRECTORIES);
-  FilePath locale_folder;
+  base::FilePath locale_folder;
   while (!(locale_folder = locales.Next()).empty()) {
     std::string locale_name = locale_folder.BaseName().MaybeAsASCII();
     if (locale_name.empty()) {
@@ -283,11 +285,11 @@ bool GetValidLocales(const FilePath& locale_path,
 // Loads contents of the messages file for given locale. If file is not found,
 // or there was parsing error we return NULL and set |error|.
 // Caller owns the returned object.
-static DictionaryValue* LoadMessageFile(const FilePath& locale_path,
+static DictionaryValue* LoadMessageFile(const base::FilePath& locale_path,
                                         const std::string& locale,
                                         std::string* error) {
   std::string extension_locale = locale;
-  FilePath file = locale_path.AppendASCII(extension_locale)
+  base::FilePath file = locale_path.AppendASCII(extension_locale)
       .Append(extensions::Extension::kMessagesFilename);
   JSONFileValueSerializer messages_serializer(file);
   Value *dictionary = messages_serializer.Deserialize(NULL, error);
@@ -302,7 +304,7 @@ static DictionaryValue* LoadMessageFile(const FilePath& locale_path,
 }
 
 extensions::MessageBundle* LoadMessageCatalogs(
-    const FilePath& locale_path,
+    const base::FilePath& locale_path,
     const std::string& default_locale,
     const std::string& application_locale,
     const std::set<std::string>& valid_locales,
@@ -330,13 +332,13 @@ extensions::MessageBundle* LoadMessageCatalogs(
   return extensions::MessageBundle::Create(catalogs, error);
 }
 
-bool ShouldSkipValidation(const FilePath& locales_path,
-                          const FilePath& locale_path,
+bool ShouldSkipValidation(const base::FilePath& locales_path,
+                          const base::FilePath& locale_path,
                           const std::set<std::string>& all_locales) {
   // Since we use this string as a key in a DictionaryValue, be paranoid about
   // skipping any strings with '.'. This happens sometimes, for example with
   // '.svn' directories.
-  FilePath relative_path;
+  base::FilePath relative_path;
   if (!locales_path.AppendRelativePath(locale_path, &relative_path)) {
     NOTREACHED();
     return true;

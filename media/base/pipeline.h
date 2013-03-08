@@ -11,6 +11,7 @@
 #include "base/synchronization/condition_variable.h"
 #include "base/synchronization/lock.h"
 #include "base/threading/thread_checker.h"
+#include "base/time/default_clock.h"
 #include "media/base/audio_renderer.h"
 #include "media/base/demuxer.h"
 #include "media/base/media_export.h"
@@ -128,12 +129,15 @@ class MEDIA_EXPORT Pipeline
   //              been reported already through another callback.
   //   |buffering_state_cb| Optional callback that will be executed whenever the
   //                    pipeline's buffering state changes.
+  //   |duration_change_cb| Optional callback that will be executed whenever the
+  //                        presentation duration changes.
   // It is an error to call this method after the pipeline has already started.
   void Start(scoped_ptr<FilterCollection> filter_collection,
              const base::Closure& ended_cb,
              const PipelineStatusCB& error_cb,
              const PipelineStatusCB& seek_cb,
-             const BufferingStateCB& buffering_state_cb);
+             const BufferingStateCB& buffering_state_cb,
+             const base::Closure& duration_change_cb);
 
   // Asynchronously stops the pipeline, executing |stop_cb| when the pipeline
   // teardown has completed.
@@ -292,7 +296,8 @@ class MEDIA_EXPORT Pipeline
                  const base::Closure& ended_cb,
                  const PipelineStatusCB& error_cb,
                  const PipelineStatusCB& seek_cb,
-                 const BufferingStateCB& buffering_state_cb);
+                 const BufferingStateCB& buffering_state_cb,
+                 const base::Closure& duration_change_cb);
 
   // Stops and destroys all filters, placing the pipeline in the kStopped state.
   void StopTask(const base::Closure& stop_cb);
@@ -400,6 +405,9 @@ class MEDIA_EXPORT Pipeline
   // the filters.
   float playback_rate_;
 
+  // base::Clock used by |clock_|.
+  base::DefaultClock default_clock_;
+
   // Reference clock.  Keeps track of current playback time.  Uses system
   // clock and linear interpolation, but can have its time manually set
   // by filters.
@@ -448,11 +456,12 @@ class MEDIA_EXPORT Pipeline
   base::Closure ended_cb_;
   PipelineStatusCB error_cb_;
   BufferingStateCB buffering_state_cb_;
+  base::Closure duration_change_cb_;
 
   // Renderer references used for setting the volume, playback rate, and
   // determining when playback has finished.
-  scoped_refptr<AudioRenderer> audio_renderer_;
-  scoped_refptr<VideoRenderer> video_renderer_;
+  scoped_ptr<AudioRenderer> audio_renderer_;
+  scoped_ptr<VideoRenderer> video_renderer_;
 
   // Demuxer reference used for setting the preload value.
   scoped_refptr<Demuxer> demuxer_;

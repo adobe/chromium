@@ -10,94 +10,12 @@
 #include "media/audio/audio_manager_base.h"
 #include "media/audio/audio_parameters.h"
 #include "media/audio/audio_util.h"
+#include "media/audio/pulse/pulse_util.h"
 
 namespace media {
 
-// A helper class that acquires pa_threaded_mainloop_lock() while in scope.
-class AutoPulseLock {
- public:
-  explicit AutoPulseLock(pa_threaded_mainloop* pa_mainloop)
-      : pa_mainloop_(pa_mainloop) {
-    pa_threaded_mainloop_lock(pa_mainloop_);
-  }
-
-  ~AutoPulseLock() {
-    pa_threaded_mainloop_unlock(pa_mainloop_);
-  }
-
- private:
-  pa_threaded_mainloop* pa_mainloop_;
-
-  DISALLOW_COPY_AND_ASSIGN(AutoPulseLock);
-};
-
-static pa_sample_format_t BitsToPASampleFormat(int bits_per_sample) {
-  switch (bits_per_sample) {
-    case 8:
-      return PA_SAMPLE_U8;
-    case 16:
-      return PA_SAMPLE_S16LE;
-    case 24:
-      return PA_SAMPLE_S24LE;
-    case 32:
-      return PA_SAMPLE_S32LE;
-    default:
-      NOTREACHED() << "Invalid bits per sample: " << bits_per_sample;
-      return PA_SAMPLE_INVALID;
-  }
-}
-
-static pa_channel_position ChromiumToPAChannelPosition(Channels channel) {
-  switch (channel) {
-    // PulseAudio does not differentiate between left/right and
-    // stereo-left/stereo-right, both translate to front-left/front-right.
-    case LEFT:
-      return PA_CHANNEL_POSITION_FRONT_LEFT;
-    case RIGHT:
-      return PA_CHANNEL_POSITION_FRONT_RIGHT;
-    case CENTER:
-      return PA_CHANNEL_POSITION_FRONT_CENTER;
-    case LFE:
-      return PA_CHANNEL_POSITION_LFE;
-    case BACK_LEFT:
-      return PA_CHANNEL_POSITION_REAR_LEFT;
-    case BACK_RIGHT:
-      return PA_CHANNEL_POSITION_REAR_RIGHT;
-    case LEFT_OF_CENTER:
-      return PA_CHANNEL_POSITION_FRONT_LEFT_OF_CENTER;
-    case RIGHT_OF_CENTER:
-      return PA_CHANNEL_POSITION_FRONT_RIGHT_OF_CENTER;
-    case BACK_CENTER:
-      return PA_CHANNEL_POSITION_REAR_CENTER;
-    case SIDE_LEFT:
-      return PA_CHANNEL_POSITION_SIDE_LEFT;
-    case SIDE_RIGHT:
-      return PA_CHANNEL_POSITION_SIDE_RIGHT;
-    case CHANNELS_MAX:
-      return PA_CHANNEL_POSITION_INVALID;
-    default:
-      NOTREACHED() << "Invalid channel: " << channel;
-      return PA_CHANNEL_POSITION_INVALID;
-  }
-}
-
-static pa_channel_map ChannelLayoutToPAChannelMap(
-    ChannelLayout channel_layout) {
-  pa_channel_map channel_map;
-  pa_channel_map_init(&channel_map);
-
-  channel_map.channels = ChannelLayoutToChannelCount(channel_layout);
-  for (Channels ch = LEFT; ch < CHANNELS_MAX;
-       ch = static_cast<Channels>(ch + 1)) {
-    int channel_index = ChannelOrder(channel_layout, ch);
-    if (channel_index < 0)
-      continue;
-
-    channel_map.map[channel_index] = ChromiumToPAChannelPosition(ch);
-  }
-
-  return channel_map;
-}
+using pulse::AutoPulseLock;
+using pulse::WaitForOperationCompletion;
 
 // static, pa_context_notify_cb
 void PulseAudioOutputStream::ContextNotifyCallback(pa_context* c,
@@ -128,13 +46,6 @@ void PulseAudioOutputStream::StreamNotifyCallback(pa_stream* s, void* p_this) {
         stream, pa_context_errno(stream->pa_context_));
   }
 
-  pa_threaded_mainloop_signal(stream->pa_mainloop_, 0);
-}
-
-// static, pa_stream_success_cb_t
-void PulseAudioOutputStream::StreamSuccessCallback(pa_stream* s, int success,
-                                                   void* p_this) {
-  PulseAudioOutputStream* stream = static_cast<PulseAudioOutputStream*>(p_this);
   pa_threaded_mainloop_signal(stream->pa_mainloop_, 0);
 }
 
@@ -199,9 +110,8 @@ bool PulseAudioOutputStream::Open() {
   // to crashes as the PulseAudio thread tries to run before things are ready.
   AutoPulseLock auto_lock(pa_mainloop_);
 
-  RETURN_ON_FAILURE(
-      pa_threaded_mainloop_start(pa_mainloop_) == 0,
-      "Failed to start PulseAudio main loop.");
+  RETURN_ON_FAILURE(pa_threaded_mainloop_start(pa_mainloop_) == 0,
+                    "Failed to start PulseAudio main loop.");
   RETURN_ON_FAILURE(
       pa_context_connect(pa_context_, NULL, PA_CONTEXT_NOAUTOSPAWN, NULL) == 0,
       "Failed to connect PulseAudio context.");
@@ -220,14 +130,14 @@ bool PulseAudioOutputStream::Open() {
 
   // Set sample specifications.
   pa_sample_spec pa_sample_specifications;
-  pa_sample_specifications.format = BitsToPASampleFormat(
+  pa_sample_specifications.format = pulse::BitsToPASampleFormat(
       params_.bits_per_sample());
   pa_sample_specifications.rate = params_.sample_rate();
   pa_sample_specifications.channels = params_.channels();
 
   // Get channel mapping and open playback stream.
   pa_channel_map* map = NULL;
-  pa_channel_map source_channel_map = ChannelLayoutToPAChannelMap(
+  pa_channel_map source_channel_map = pulse::ChannelLayoutToPAChannelMap(
       params_.channel_layout());
   if (source_channel_map.channels != 0) {
     // The source data uses a supported channel map so we will use it rather
@@ -243,22 +153,27 @@ bool PulseAudioOutputStream::Open() {
   // stream request after setup.  FulfillWriteRequest() must fulfill the write.
   pa_stream_set_write_callback(pa_stream_, &StreamRequestCallback, this);
 
-  // Tell pulse audio we only want callbacks of a certain size.
+  // Pulse is very finicky with the small buffer sizes used by Chrome.  The
+  // settings below are mostly found through trial and error.  Essentially we
+  // want Pulse to auto size its internal buffers, but call us back nearly every
+  // |minreq| bytes.  |tlength| should be a multiple of |minreq|; too low and
+  // Pulse will issue callbacks way too fast, too high and we don't get
+  // callbacks frequently enough.
   pa_buffer_attr pa_buffer_attributes;
-  pa_buffer_attributes.maxlength = params_.GetBytesPerBuffer();
+  pa_buffer_attributes.maxlength = static_cast<uint32_t>(-1);
   pa_buffer_attributes.minreq = params_.GetBytesPerBuffer();
-  pa_buffer_attributes.prebuf = params_.GetBytesPerBuffer();
-  pa_buffer_attributes.tlength = params_.GetBytesPerBuffer();
+  pa_buffer_attributes.prebuf = static_cast<uint32_t>(-1);
+  pa_buffer_attributes.tlength = params_.GetBytesPerBuffer() * 3;
   pa_buffer_attributes.fragsize = static_cast<uint32_t>(-1);
 
-  // Connect playback stream.
-  // TODO(dalecurtis): Pulse tends to want really large buffer sizes if we are
-  // not using the native sample rate.  We should always open the stream with
-  // PA_STREAM_FIX_RATE and ensure this is true.
+  // Connect playback stream.  Like pa_buffer_attr, the pa_stream_flags have a
+  // huge impact on the performance of the stream and were chosen through trial
+  // and error.
   RETURN_ON_FAILURE(
       pa_stream_connect_playback(
           pa_stream_, NULL, &pa_buffer_attributes,
           static_cast<pa_stream_flags_t>(
+              PA_STREAM_FIX_RATE | PA_STREAM_INTERPOLATE_TIMING |
               PA_STREAM_ADJUST_LATENCY | PA_STREAM_AUTO_TIMING_UPDATE |
               PA_STREAM_NOT_MONOTONIC | PA_STREAM_START_CORKED),
           NULL, NULL) == 0,
@@ -292,8 +207,9 @@ void PulseAudioOutputStream::Reset() {
     // Close the stream.
     if (pa_stream_) {
       // Ensure all samples are played out before shutdown.
-      WaitForPulseOperation(pa_stream_flush(
-          pa_stream_, &StreamSuccessCallback, this));
+      pa_operation* operation = pa_stream_flush(
+          pa_stream_, &pulse::StreamSuccessCallback, pa_mainloop_);
+      WaitForOperationCompletion(pa_mainloop_, operation);
 
       // Release PulseAudio structures.
       pa_stream_disconnect(pa_stream_);
@@ -326,54 +242,34 @@ void PulseAudioOutputStream::Close() {
   manager_->ReleaseOutputStream(this);
 }
 
-int PulseAudioOutputStream::GetHardwareLatencyInBytes() {
-  int negative = 0;
-  pa_usec_t pa_latency_micros = 0;
-  if (pa_stream_get_latency(pa_stream_, &pa_latency_micros, &negative) != 0)
-    return 0;
-
-  if (negative)
-    return 0;
-
-  return (pa_latency_micros * params_.sample_rate() *
-          params_.GetBytesPerFrame()) / base::Time::kMicrosecondsPerSecond;
-}
-
 void PulseAudioOutputStream::FulfillWriteRequest(size_t requested_bytes) {
-  CHECK_EQ(requested_bytes, static_cast<size_t>(params_.GetBytesPerBuffer()));
-
-  int frames_filled = 0;
-  if (source_callback_) {
-    frames_filled = source_callback_->OnMoreData(
-        audio_bus_.get(), AudioBuffersState(0, GetHardwareLatencyInBytes()));
-  }
-
-  // Zero any unfilled data so it plays back as silence.
-  if (frames_filled < audio_bus_->frames()) {
-    audio_bus_->ZeroFramesPartial(
-        frames_filled, audio_bus_->frames() - frames_filled);
-  }
-
-  // PulseAudio won't always be able to provide a buffer large enough, so we may
-  // need to request multiple buffers and fill them individually.
-  int current_frame = 0;
-  size_t bytes_remaining = requested_bytes;
+  int bytes_remaining = requested_bytes;
   while (bytes_remaining > 0) {
     void* buffer = NULL;
-    size_t bytes_to_fill = bytes_remaining;
+    size_t bytes_to_fill = params_.GetBytesPerBuffer();
     CHECK_GE(pa_stream_begin_write(pa_stream_, &buffer, &bytes_to_fill), 0);
+    CHECK_EQ(bytes_to_fill, static_cast<size_t>(params_.GetBytesPerBuffer()));
 
-    // In case PulseAudio gives us a bigger buffer than we want, cap our size.
-    bytes_to_fill = std::min(
-        std::min(bytes_remaining, bytes_to_fill),
-        static_cast<size_t>(params_.GetBytesPerBuffer()));
+    int frames_filled = 0;
+    if (source_callback_) {
+      uint32 hardware_delay = pulse::GetHardwareLatencyInBytes(
+          pa_stream_, params_.sample_rate(),
+          params_.GetBytesPerFrame());
+      source_callback_->WaitTillDataReady();
+      frames_filled = source_callback_->OnMoreData(
+          audio_bus_.get(), AudioBuffersState(0, hardware_delay));
+    }
 
-    int frames_to_fill = bytes_to_fill / params_.GetBytesPerFrame();;
+    // Zero any unfilled data so it plays back as silence.
+    if (frames_filled < audio_bus_->frames()) {
+      audio_bus_->ZeroFramesPartial(
+          frames_filled, audio_bus_->frames() - frames_filled);
+    }
 
     // Note: If this ever changes to output raw float the data must be clipped
     // and sanitized since it may come from an untrusted source such as NaCl.
-    audio_bus_->ToInterleavedPartial(
-        current_frame, frames_to_fill, params_.bits_per_sample() / 8, buffer);
+    audio_bus_->ToInterleaved(
+        audio_bus_->frames(), params_.bits_per_sample() / 8, buffer);
     media::AdjustVolume(buffer, bytes_to_fill, params_.channels(),
                         params_.bits_per_sample() / 8, volume_);
 
@@ -385,7 +281,6 @@ void PulseAudioOutputStream::FulfillWriteRequest(size_t requested_bytes) {
     }
 
     bytes_remaining -= bytes_to_fill;
-    current_frame = frames_to_fill;
   }
 }
 
@@ -406,8 +301,9 @@ void PulseAudioOutputStream::Start(AudioSourceCallback* callback) {
   source_callback_ = callback;
 
   // Uncork (resume) the stream.
-  WaitForPulseOperation(pa_stream_cork(
-      pa_stream_, 0, &StreamSuccessCallback, this));
+  pa_operation* operation = pa_stream_cork(
+      pa_stream_, 0, &pulse::StreamSuccessCallback, pa_mainloop_);
+  WaitForOperationCompletion(pa_mainloop_, operation);
 }
 
 void PulseAudioOutputStream::Stop() {
@@ -417,16 +313,20 @@ void PulseAudioOutputStream::Stop() {
   // outstanding callbacks have completed.
   AutoPulseLock auto_lock(pa_mainloop_);
 
+  // Set |source_callback_| to NULL so all FulfillWriteRequest() calls which may
+  // occur while waiting on the flush and cork exit immediately.
+  source_callback_ = NULL;
+
   // Flush the stream prior to cork, doing so after will cause hangs.  Write
   // callbacks are suspended while inside pa_threaded_mainloop_lock() so this
   // is all thread safe.
-  WaitForPulseOperation(pa_stream_flush(
-      pa_stream_, &StreamSuccessCallback, this));
+  pa_operation* operation = pa_stream_flush(
+      pa_stream_, &pulse::StreamSuccessCallback, pa_mainloop_);
+  WaitForOperationCompletion(pa_mainloop_, operation);
 
-  WaitForPulseOperation(pa_stream_cork(
-      pa_stream_, 1, &StreamSuccessCallback, this));
-
-  source_callback_ = NULL;
+  operation = pa_stream_cork(pa_stream_, 1, &pulse::StreamSuccessCallback,
+                             pa_mainloop_);
+  WaitForOperationCompletion(pa_mainloop_, operation);
 }
 
 void PulseAudioOutputStream::SetVolume(double volume) {
@@ -439,14 +339,6 @@ void PulseAudioOutputStream::GetVolume(double* volume) {
   DCHECK(manager_->GetMessageLoop()->BelongsToCurrentThread());
 
   *volume = volume_;
-}
-
-void PulseAudioOutputStream::WaitForPulseOperation(pa_operation* op) {
-  CHECK(op);
-  while (pa_operation_get_state(op) == PA_OPERATION_RUNNING) {
-    pa_threaded_mainloop_wait(pa_mainloop_);
-  }
-  pa_operation_unref(op);
 }
 
 }  // namespace media

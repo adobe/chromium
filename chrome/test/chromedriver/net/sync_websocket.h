@@ -14,6 +14,9 @@ class SyncWebSocket {
  public:
   virtual ~SyncWebSocket() {}
 
+  // Return true if connected, otherwise return false.
+  virtual bool IsConnected() = 0;
+
   // Connects to the WebSocket server. Returns true on success.
   virtual bool Connect(const GURL& url) = 0;
 
@@ -23,6 +26,10 @@ class SyncWebSocket {
   // Receives next message. Blocks until at least one message is received or
   // the socket is closed. Returns true on success and modifies |message|.
   virtual bool ReceiveNextMessage(std::string* message) = 0;
+
+  // Returns whether there are any messages that have been received and not yet
+  // handled by ReceiveNextMessage.
+  virtual bool HasNextMessage() = 0;
 };
 
 #endif  // CHROME_TEST_CHROMEDRIVER_NET_SYNC_WEBSOCKET_H_

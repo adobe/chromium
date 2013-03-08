@@ -7,7 +7,7 @@
 #import <Cocoa/Cocoa.h>
 
 #include "base/basictypes.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/mac/mac_util.h"
 #include "base/mac/scoped_cftyperef.h"
@@ -25,6 +25,9 @@
 namespace ui {
 
 namespace {
+
+// Source tag format type.
+NSString* const kSourceTagPboardType = @"org.chromium.source-tag-data";
 
 // Would be nice if this were in UTCoreTypes.h, but it isn't
 NSString* const kUTTypeURLName = @"public.url-name";
@@ -44,6 +47,15 @@ NSPasteboard* GetPasteboard() {
   NSPasteboard* pasteboard = [NSPasteboard generalPasteboard];
   DCHECK(pasteboard);
   return pasteboard;
+}
+
+void WriteDataImpl(NSPasteboard* pb,
+                   NSString* format,
+                   const char* data_data,
+                   size_t data_len) {
+  [pb addTypes:[NSArray arrayWithObject:format] owner:nil];
+  [pb setData:[NSData dataWithBytes:data_data length:data_len]
+      forType:format];
 }
 
 }  // namespace
@@ -90,7 +102,9 @@ Clipboard::~Clipboard() {
   DCHECK(CalledOnValidThread());
 }
 
-void Clipboard::WriteObjects(Buffer buffer, const ObjectMap& objects) {
+void Clipboard::WriteObjectsImpl(Buffer buffer,
+                                 const ObjectMap& objects,
+                                 SourceTag tag) {
   DCHECK(CalledOnValidThread());
   DCHECK_EQ(buffer, BUFFER_STANDARD);
 
@@ -101,6 +115,7 @@ void Clipboard::WriteObjects(Buffer buffer, const ObjectMap& objects) {
        iter != objects.end(); ++iter) {
     DispatchObject(static_cast<ObjectType>(iter->first), iter->second);
   }
+  WriteSourceTag(tag);
 }
 
 void Clipboard::WriteText(const char* text_data, size_t text_len) {
@@ -206,10 +221,23 @@ void Clipboard::WriteBitmap(const char* pixel_data, const char* size_data) {
 void Clipboard::WriteData(const FormatType& format,
                           const char* data_data,
                           size_t data_len) {
-  NSPasteboard* pb = GetPasteboard();
-  [pb addTypes:[NSArray arrayWithObject:format.ToNSString()] owner:nil];
-  [pb setData:[NSData dataWithBytes:data_data length:data_len]
-      forType:format.ToNSString()];
+  WriteDataImpl(GetPasteboard(), format.ToNSString(), data_data, data_len);
+}
+
+void Clipboard::WriteSourceTag(SourceTag tag) {
+  if (tag != SourceTag())
+    WriteSourceTag(GetPasteboard(), tag);
+}
+
+// static
+void Clipboard::WriteSourceTag(NSPasteboard* pb, SourceTag tag) {
+  if (tag != SourceTag()) {
+    ObjectMapParam binary = SourceTag2Binary(tag);
+    WriteDataImpl(pb,
+                  GetSourceTagFormatType().ToNSString(),
+                  &binary[0],
+                  binary.size());
+  }
 }
 
 // Write an extra flavor that signifies WebKit was the last to modify the
@@ -280,6 +308,7 @@ void Clipboard::ReadAvailableTypes(Clipboard::Buffer buffer,
 void Clipboard::ReadText(Clipboard::Buffer buffer, string16* result) const {
   DCHECK(CalledOnValidThread());
   DCHECK_EQ(buffer, BUFFER_STANDARD);
+  ReportAction(buffer, READ_TEXT);
   NSPasteboard* pb = GetPasteboard();
   NSString* contents = [pb stringForType:NSStringPboardType];
 
@@ -292,6 +321,7 @@ void Clipboard::ReadAsciiText(Clipboard::Buffer buffer,
                               std::string* result) const {
   DCHECK(CalledOnValidThread());
   DCHECK_EQ(buffer, BUFFER_STANDARD);
+  ReportAction(buffer, READ_TEXT);
   NSPasteboard* pb = GetPasteboard();
   NSString* contents = [pb stringForType:NSStringPboardType];
 
@@ -335,6 +365,7 @@ void Clipboard::ReadHTML(Clipboard::Buffer buffer, string16* markup,
 void Clipboard::ReadRTF(Buffer buffer, std::string* result) const {
   DCHECK(CalledOnValidThread());
   DCHECK_EQ(buffer, BUFFER_STANDARD);
+  ReportAction(buffer, READ_TEXT);
 
   return ReadData(GetRtfFormatType(), result);
 }
@@ -410,6 +441,13 @@ void Clipboard::ReadData(const FormatType& format, std::string* result) const {
     result->assign(static_cast<const char*>([data bytes]), [data length]);
 }
 
+Clipboard::SourceTag Clipboard::ReadSourceTag(Buffer buffer) const {
+  DCHECK_EQ(buffer, BUFFER_STANDARD);
+  std::string result;
+  ReadData(GetSourceTagFormatType(), &result);
+  return Binary2SourceTag(result);
+}
+
 // static
 Clipboard::FormatType Clipboard::GetFormatType(
     const std::string& format_string) {
@@ -482,6 +520,12 @@ const Clipboard::FormatType& Clipboard::GetWebCustomDataFormatType() {
 // static
 const Clipboard::FormatType& Clipboard::GetPepperCustomDataFormatType() {
   CR_DEFINE_STATIC_LOCAL(FormatType, type, (kPepperCustomDataPboardType));
+  return type;
+}
+
+// static
+const Clipboard::FormatType& Clipboard::GetSourceTagFormatType() {
+  CR_DEFINE_STATIC_LOCAL(FormatType, type, (kSourceTagPboardType));
   return type;
 }
 

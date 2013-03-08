@@ -6,8 +6,8 @@
 
 #include "base/basictypes.h"
 #include "base/command_line.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
 #include "base/values.h"
@@ -57,12 +57,12 @@ class ExtensionInstalledBubbleControllerTest : public CocoaProfileTest {
     CommandLine command_line(CommandLine::NO_PROGRAM);
     extension_service_ = static_cast<extensions::TestExtensionSystem*>(
         extensions::ExtensionSystem::Get(profile()))->CreateExtensionService(
-            &command_line, FilePath(), false);
+            &command_line, base::FilePath(), false);
   }
 
   // Load test icon from extension test directory.
   SkBitmap LoadTestIcon() {
-    FilePath path;
+    base::FilePath path;
     PathService::Get(chrome::DIR_TEST_DATA, &path);
     path = path.AppendASCII("extensions").AppendASCII("icon1.png");
 
@@ -83,7 +83,7 @@ class ExtensionInstalledBubbleControllerTest : public CocoaProfileTest {
   // the ExtensionInstalledBubble for unit testing.
   scoped_refptr<Extension> CreateExtension(
         extension_installed_bubble::ExtensionType type) {
-    FilePath path;
+    base::FilePath path;
     PathService::Get(chrome::DIR_TEST_DATA, &path);
     path = path.AppendASCII("extensions").AppendASCII("dummy");
 
@@ -98,17 +98,21 @@ class ExtensionInstalledBubbleControllerTest : public CocoaProfileTest {
       ListValue* action_list = new ListValue;
       action_list->Append(action);
       extension_input_value.Set(keys::kPageActions, action_list);
-    } else {
+    } else if (type == extension_installed_bubble::kBrowserAction) {
       extension_input_value.SetString(keys::kName, "browser action extension");
       DictionaryValue* browser_action = new DictionaryValue;
       // An empty dictionary is enough to create a Browser Action.
       extension_input_value.Set(keys::kBrowserAction, browser_action);
+    } else if (type == extension_installed_bubble::kApp) {
+      extension_input_value.SetString(keys::kName, "test app");
+      extension_input_value.SetString(keys::kLaunchWebURL,
+                                      "http://www.example.com");
     }
 
     std::string error;
     scoped_refptr<Extension> extension =
-        Extension::Create(path, Extension::INVALID, extension_input_value,
-                          Extension::NO_FLAGS, &error);
+        Extension::Create(path, extensions::Manifest::INVALID_LOCATION,
+                          extension_input_value, Extension::NO_FLAGS, &error);
     extension_service_->AddExtension(extension);
     return extension;
   }
@@ -145,26 +149,42 @@ TEST_F(ExtensionInstalledBubbleControllerTest, PageActionTest) {
   // Height should equal the vertical padding + height of all messages.
   int correctHeight = 2 * extension_installed_bubble::kOuterVerticalMargin +
       2 * extension_installed_bubble::kInnerVerticalMargin +
-      [controller getExtensionInstalledMsgFrame].size.height +
-      [controller getExtensionInstalledInfoMsgFrame].size.height +
-      [controller getExtraInfoMsgFrame].size.height;
+      NSHeight([controller headingFrame]) +
+      NSHeight([controller frameOfHowToUse]) +
+      NSHeight([controller frameOfHowToManage]);
+  if ([controller showSyncPromo]) {
+    correctHeight += NSHeight([controller frameOfSigninPromo]) +
+                     extension_installed_bubble::kInnerVerticalMargin;
+  }
   EXPECT_EQ(height, correctHeight);
-
   [controller setMessageFrames:height];
-  NSRect msg3Frame = [controller getExtensionInstalledInfoMsgFrame];
-  // Bottom message should be kOuterVerticalMargin pixels above window edge.
-  EXPECT_EQ(msg3Frame.origin.y,
-      extension_installed_bubble::kOuterVerticalMargin);
-  NSRect msg2Frame = [controller getExtraInfoMsgFrame];
-  // Pageaction message should be kInnerVerticalMargin pixels above bottom msg.
-  EXPECT_EQ(msg2Frame.origin.y,
-            msg3Frame.origin.y + msg3Frame.size.height +
-            extension_installed_bubble::kInnerVerticalMargin);
-  NSRect msg1Frame = [controller getExtensionInstalledMsgFrame];
-  // Top message should be kInnerVerticalMargin pixels above Pageaction msg.
-  EXPECT_EQ(msg1Frame.origin.y,
-            msg2Frame.origin.y + msg2Frame.size.height +
-            extension_installed_bubble::kInnerVerticalMargin);
+
+  NSRect msg1Frame = [controller headingFrame];
+  NSRect msg2Frame = [controller frameOfHowToUse];
+  NSRect msg3Frame = [controller frameOfHowToManage];
+  NSRect msg4Frame = [controller frameOfSigninPromo];
+
+  int next_y = extension_installed_bubble::kOuterVerticalMargin;
+  if ([controller showSyncPromo]) {
+    // Bottom message should be kOuterVerticalMargin pixels above window edge.
+    EXPECT_EQ(next_y, NSMinY(msg4Frame));
+    next_y = NSMinY(msg4Frame) + NSHeight(msg4Frame) +
+            extension_installed_bubble::kInnerVerticalMargin;
+  }
+
+  // HowToManage frame should be kInnerVerticalMargin pixels above sync promo,
+  // unless sync promo is hidden, then kOuterVerticalMargin pixels above.
+  EXPECT_EQ(next_y, NSMinY(msg3Frame));
+
+  // Page action message should be kInnerVerticalMargin pixels above bottom msg.
+  EXPECT_EQ(NSMinY(msg3Frame) + NSHeight(msg3Frame) +
+                extension_installed_bubble::kInnerVerticalMargin,
+            NSMinY(msg2Frame));
+
+  // Top message should be kInnerVerticalMargin pixels above Page action msg.
+  EXPECT_EQ(NSMinY(msg2Frame) + NSHeight(msg2Frame) +
+                extension_installed_bubble::kInnerVerticalMargin,
+            NSMinY(msg1Frame));
 
   [controller setPageActionPreviewShowing:NO];
   [controller close];
@@ -189,26 +209,43 @@ TEST_F(ExtensionInstalledBubbleControllerTest, BrowserActionTest) {
   // Height should equal the vertical padding + height of all messages.
   int correctHeight = 2 * extension_installed_bubble::kOuterVerticalMargin +
       2 * extension_installed_bubble::kInnerVerticalMargin +
-      [controller getExtensionInstalledMsgFrame].size.height +
-      [controller getExtensionInstalledInfoMsgFrame].size.height +
-      [controller getExtraInfoMsgFrame].size.height;
+      NSHeight([controller headingFrame]) +
+      NSHeight([controller frameOfHowToUse]) +
+      NSHeight([controller frameOfHowToManage]);
+  if ([controller showSyncPromo]) {
+    correctHeight += NSHeight([controller frameOfSigninPromo]) +
+                     extension_installed_bubble::kInnerVerticalMargin;
+  }
   EXPECT_EQ(height, correctHeight);
-
   [controller setMessageFrames:height];
-  NSRect msg3Frame = [controller getExtensionInstalledInfoMsgFrame];
-  // Bottom message should start kOuterVerticalMargin pixels above window edge.
-  EXPECT_EQ(msg3Frame.origin.y,
-      extension_installed_bubble::kOuterVerticalMargin);
-  NSRect msg2Frame = [controller getExtraInfoMsgFrame];
-  // Pageaction message should be kInnerVerticalMargin pixels above bottom msg.
-  EXPECT_EQ(NSMinY(msg2Frame),
-            NSMaxY(msg3Frame) +
-                extension_installed_bubble::kInnerVerticalMargin);
-  NSRect msg1Frame = [controller getExtensionInstalledMsgFrame];
-  // Top message should be kInnerVerticalMargin pixels above BrowserAction msg.
-  EXPECT_EQ(NSMinY(msg1Frame),
-            NSMaxY(msg2Frame) +
-                extension_installed_bubble::kInnerVerticalMargin);
+
+  NSRect msg1Frame = [controller headingFrame];
+  NSRect msg2Frame = [controller frameOfHowToUse];
+  NSRect msg3Frame = [controller frameOfHowToManage];
+  NSRect msg4Frame = [controller frameOfSigninPromo];
+
+  int next_y = extension_installed_bubble::kOuterVerticalMargin;
+  if ([controller showSyncPromo]) {
+    // Bottom message should be kOuterVerticalMargin pixels above window edge.
+    EXPECT_EQ(next_y, NSMinY(msg4Frame));
+    next_y = NSMinY(msg4Frame) + NSHeight(msg4Frame) +
+            extension_installed_bubble::kInnerVerticalMargin;
+  }
+
+  // HowToManage frame should be kInnerVerticalMargin pixels above sync promo,
+  // unless sync promo is hidden, then kOuterVerticalMargin pixels above.
+  EXPECT_EQ(next_y, NSMinY(msg3Frame));
+
+  // Browser action message should be kInnerVerticalMargin pixels above bottom
+  // msg.
+  EXPECT_EQ(NSMinY(msg3Frame) + NSHeight(msg3Frame) +
+                extension_installed_bubble::kInnerVerticalMargin,
+            NSMinY(msg2Frame));
+
+  // Top message should be kInnerVerticalMargin pixels above Browser action msg.
+  EXPECT_EQ(NSMinY(msg2Frame) + NSHeight(msg2Frame) +
+                extension_installed_bubble::kInnerVerticalMargin,
+            NSMinY(msg1Frame));
 
   [controller close];
 }
@@ -228,7 +265,8 @@ TEST_F(ExtensionInstalledBubbleControllerTest, ParentClose) {
   [controller showWindow:nil];
   NSWindow* bubbleWindow = [controller window];
   ASSERT_TRUE([bubbleWindow isKindOfClass:[InfoBubbleWindow class]]);
-  [static_cast<InfoBubbleWindow*>(bubbleWindow) setDelayOnClose:NO];
+  [static_cast<InfoBubbleWindow*>(bubbleWindow)
+      setAllowedAnimations:info_bubble::kAnimateNone];
 
   // Observe whether the bubble window closes.
   NSString* notification = NSWindowWillCloseNotification;
@@ -247,3 +285,30 @@ TEST_F(ExtensionInstalledBubbleControllerTest, ParentClose) {
   // Check that the appropriate notification was received.
   EXPECT_OCMOCK_VERIFY(observer);
 }
+
+TEST_F(ExtensionInstalledBubbleControllerTest, AppTest) {
+  extension_ = CreateExtension(extension_installed_bubble::kApp);
+  ExtensionInstalledBubbleControllerForTest* controller =
+      [[ExtensionInstalledBubbleControllerForTest alloc]
+          initWithParentWindow:window_
+                     extension:extension_.get()
+                        bundle:NULL
+                       browser:browser()
+                          icon:icon_];
+  EXPECT_TRUE(controller);
+  [controller initializeWindow];
+  EXPECT_TRUE([controller window]);
+
+  int height = [controller calculateWindowHeight];
+
+  // Make sure there is always enough room for the icon and margin.
+  int minHeight = extension_installed_bubble::kIconSize +
+    (2 * extension_installed_bubble::kOuterVerticalMargin);
+  EXPECT_GT(height, minHeight);
+
+  // Make sure the "show me" link is visible.
+  EXPECT_FALSE([[controller appInstalledShortcutLink] isHidden]);
+
+  [controller close];
+}
+

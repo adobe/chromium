@@ -10,7 +10,7 @@
 #include "base/bind_helpers.h"
 #include "base/i18n/rtl.h"
 #include "chrome/browser/platform_util.h"
-#include "chrome/browser/ui/app_modal_dialogs/javascript_dialog_creator.h"
+#include "chrome/browser/ui/app_modal_dialogs/javascript_dialog_manager.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/gtk/browser_window_gtk.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
@@ -21,6 +21,7 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_view.h"
 #include "ui/base/gtk/gtk_screen_util.h"
 #include "ui/gfx/screen.h"
 
@@ -213,9 +214,9 @@ void DraggedTabControllerGtk::LoadingStateChanged(WebContents* source) {
     dragged_view_->Update();
 }
 
-content::JavaScriptDialogCreator*
-DraggedTabControllerGtk::GetJavaScriptDialogCreator() {
-  return GetJavaScriptDialogCreatorInstance();
+content::JavaScriptDialogManager*
+DraggedTabControllerGtk::GetJavaScriptDialogManager() {
+  return GetJavaScriptDialogManagerInstance();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -434,9 +435,6 @@ void DraggedTabControllerGtk::Attach(TabStripGtk* attached_tabstrip,
       drag_data_->get(i)->contents_->SetDelegate(NULL);
       drag_data_->get(i)->original_delegate_ = NULL;
     }
-
-    // Return the WebContents to normalcy.
-    drag_data_->GetSourceWebContents()->SetCapturingContents(false);
 
     // We need to ask the tabstrip we're attached to ensure that the ideal
     // bounds for all its tabs are correctly generated, because the calculation
@@ -789,7 +787,7 @@ void DraggedTabControllerGtk::ResetDelegates() {
 void DraggedTabControllerGtk::EnsureDraggedView() {
   if (!dragged_view_.get()) {
     gfx::Rect rect;
-    drag_data_->GetSourceWebContents()->GetContainerBounds(&rect);
+    drag_data_->GetSourceWebContents()->GetView()->GetContainerBounds(&rect);
     dragged_view_.reset(new DraggedViewGtk(drag_data_.get(), mouse_offset_,
                                            rect.size()));
   }

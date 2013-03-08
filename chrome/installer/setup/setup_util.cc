@@ -9,8 +9,8 @@
 #include <windows.h>
 
 #include "base/command_line.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/process_util.h"
 #include "base/string_util.h"
@@ -33,7 +33,7 @@ namespace {
 // waits indefinitely for it to exit and populates |exit_code| as expected. On
 // the off chance that waiting itself fails, |exit_code| is set to
 // WAIT_FOR_EXISTING_FAILED.
-bool LaunchAndWaitForExistingInstall(const FilePath& setup_exe,
+bool LaunchAndWaitForExistingInstall(const base::FilePath& setup_exe,
                                      const CommandLine& command_line,
                                      int* exit_code) {
   DCHECK(exit_code);
@@ -75,11 +75,18 @@ bool LaunchAndWaitForExistingInstall(const FilePath& setup_exe,
   return true;
 }
 
+// Returns true if product |type| cam be meaningfully installed without the
+// --multi-install flag.
+bool SupportsSingleInstall(BrowserDistribution::Type type) {
+  return (type == BrowserDistribution::CHROME_BROWSER ||
+          type == BrowserDistribution::CHROME_FRAME);
+}
+
 }  // namespace
 
-int ApplyDiffPatch(const FilePath& src,
-                   const FilePath& patch,
-                   const FilePath& dest,
+int ApplyDiffPatch(const base::FilePath& src,
+                   const base::FilePath& patch,
+                   const base::FilePath& dest,
                    const InstallerState* installer_state) {
   VLOG(1) << "Applying patch " << patch.value() << " to file " << src.value()
           << " and generating file " << dest.value();
@@ -114,7 +121,7 @@ int ApplyDiffPatch(const FilePath& src,
                           dest.value().c_str());
 }
 
-Version* GetMaxVersionFromArchiveDir(const FilePath& chrome_path) {
+Version* GetMaxVersionFromArchiveDir(const base::FilePath& chrome_path) {
   VLOG(1) << "Looking for Chrome version folder under " << chrome_path.value();
   Version* version = NULL;
   file_util::FileEnumerator version_enum(chrome_path, false,
@@ -142,7 +149,7 @@ Version* GetMaxVersionFromArchiveDir(const FilePath& chrome_path) {
   return (version_found ? max_version.release() : NULL);
 }
 
-bool DeleteFileFromTempProcess(const FilePath& path,
+bool DeleteFileFromTempProcess(const base::FilePath& path,
                                uint32 delay_before_delete_ms) {
   static const wchar_t kRunDll32Path[] =
       L"%SystemRoot%\\System32\\rundll32.exe";
@@ -204,7 +211,7 @@ bool GetExistingHigherInstaller(
     const InstallationState& original_state,
     bool system_install,
     const Version& installer_version,
-    FilePath* setup_exe) {
+    base::FilePath* setup_exe) {
   DCHECK(setup_exe);
   bool trying_single_browser = false;
   const ProductState* existing_state =
@@ -232,19 +239,19 @@ bool GetExistingHigherInstaller(
   return !setup_exe->empty();
 }
 
-bool DeferToExistingInstall(const FilePath& setup_exe,
+bool DeferToExistingInstall(const base::FilePath& setup_exe,
                             const CommandLine& command_line,
                             const InstallerState& installer_state,
-                            const FilePath& temp_path,
+                            const base::FilePath& temp_path,
                             InstallStatus* install_status) {
   // Copy a master_preferences file if there is one.
-  FilePath prefs_source_path(command_line.GetSwitchValueNative(
+  base::FilePath prefs_source_path(command_line.GetSwitchValueNative(
       switches::kInstallerData));
-  FilePath prefs_dest_path(installer_state.target_path().AppendASCII(
+  base::FilePath prefs_dest_path(installer_state.target_path().AppendASCII(
       kDefaultMasterPrefs));
   scoped_ptr<WorkItem> copy_prefs(WorkItem::CreateCopyTreeWorkItem(
       prefs_source_path, prefs_dest_path, temp_path, WorkItem::ALWAYS,
-      FilePath()));
+      base::FilePath()));
   // There's nothing to rollback if the copy fails, so punt if so.
   if (!copy_prefs->Do())
     copy_prefs.reset();
@@ -257,6 +264,53 @@ bool DeferToExistingInstall(const FilePath& setup_exe,
   }
   *install_status = static_cast<InstallStatus>(exit_code);
   return true;
+}
+
+// There are 4 disjoint cases => return values {false,true}:
+// (1) Product is being uninstalled => false.
+// (2) Product is being installed => true.
+// (3) Current operation ignores product, product is absent => false.
+// (4) Current operation ignores product, product is present => true.
+bool WillProductBePresentAfterSetup(
+    const installer::InstallerState& installer_state,
+    const installer::InstallationState& machine_state,
+    BrowserDistribution::Type type) {
+  DCHECK(SupportsSingleInstall(type) || installer_state.is_multi_install());
+
+  const ProductState* product_state =
+      machine_state.GetProductState(installer_state.system_install(), type);
+
+  // Determine if the product is present prior to the current operation.
+  bool is_present = false;
+  if (product_state != NULL) {
+    if (type == BrowserDistribution::CHROME_FRAME) {
+      is_present = !product_state->uninstall_command().HasSwitch(
+                        switches::kChromeFrameReadyMode);
+    } else {
+      is_present = true;
+    }
+  }
+
+  bool is_uninstall = installer_state.operation() == InstallerState::UNINSTALL;
+
+  // Determine if current operation affects the product.
+  bool is_affected = false;
+  const Product* product = installer_state.FindProduct(type);
+  if (product != NULL) {
+    if (type == BrowserDistribution::CHROME_FRAME) {
+      // If Chrome Frame is being uninstalled, we don't bother to check
+      // !HasOption(kOptionReadyMode) since CF would not have been installed
+      // in the first place. If for some odd reason it weren't, we would be
+      // conservative, and cause false to be retruned since CF should not be
+      // installed then (so is_uninstall = true and is_affected = true).
+      is_affected = is_uninstall || !product->HasOption(kOptionReadyMode);
+    } else {
+      is_affected = true;
+    }
+  }
+
+  // Decide among {(1),(2),(3),(4)}.
+  return is_affected ? !is_uninstall : is_present;
 }
 
 ScopedTokenPrivilege::ScopedTokenPrivilege(const wchar_t* privilege_name)

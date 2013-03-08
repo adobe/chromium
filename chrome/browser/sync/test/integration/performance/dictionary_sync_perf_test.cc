@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/string_number_conversions.h"
+#include "base/strings/string_number_conversions.h"
 #include "chrome/browser/sync/profile_sync_service_harness.h"
 #include "chrome/browser/sync/test/integration/dictionary_helper.h"
 #include "chrome/browser/sync/test/integration/performance/sync_timing_helper.h"
@@ -13,10 +13,6 @@ class DictionarySyncPerfTest : public SyncTest {
  public:
   DictionarySyncPerfTest() : SyncTest(TWO_CLIENT) {}
   virtual ~DictionarySyncPerfTest() {}
-
-  virtual void AddOptionalTypesToCommandLine(CommandLine* cl) OVERRIDE {
-    dictionary_helper::EnableDictionarySync(cl);
-  }
 
  private:
   DISALLOW_COPY_AND_ASSIGN(DictionarySyncPerfTest);
@@ -48,6 +44,4 @@ IN_PROC_BROWSER_TEST_F(DictionarySyncPerfTest, P0) {
   dt = SyncTimingHelper::TimeMutualSyncCycle(GetClient(0), GetClient(1));
   ASSERT_EQ(0UL, dictionary_helper::GetDictionarySize(1));
   SyncTimingHelper::PrintResult("dictionary", "remove_words", dt);
-
-  MessageLoop::current()->RunUntilIdle();
 }

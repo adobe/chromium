@@ -9,7 +9,7 @@
 
 #include "base/logging.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/ui/autofill/autofill_popup_delegate.h"
+#include "chrome/browser/autofill/autofill_popup_delegate.h"
 #include "chrome/browser/ui/autofill/autofill_popup_view.h"
 #include "content/public/browser/native_web_keyboard_event.h"
 #include "grit/webkit_resources.h"
@@ -17,9 +17,11 @@
 #include "ui/base/events/event.h"
 #include "ui/base/text/text_elider.h"
 #include "ui/gfx/display.h"
+#include "ui/gfx/rect_conversions.h"
 #include "ui/gfx/screen.h"
 #include "ui/gfx/vector2d.h"
 
+using base::WeakPtr;
 using WebKit::WebAutofillClient;
 
 namespace {
@@ -46,8 +48,6 @@ const size_t kMaxTextLength = 15;
 #if !defined(OS_ANDROID)
 const size_t kIconPadding = AutofillPopupView::kIconPadding;
 const size_t kEndPadding = AutofillPopupView::kEndPadding;
-const size_t kDeleteIconHeight = AutofillPopupView::kDeleteIconHeight;
-const size_t kDeleteIconWidth = AutofillPopupView::kDeleteIconWidth;
 const size_t kAutofillIconWidth = AutofillPopupView::kAutofillIconWidth;
 #endif
 
@@ -70,11 +70,11 @@ const DataResource kDataResources[] = {
 }  // end namespace
 
 // static
-AutofillPopupControllerImpl* AutofillPopupControllerImpl::GetOrCreate(
-    AutofillPopupControllerImpl* previous,
+WeakPtr<AutofillPopupControllerImpl> AutofillPopupControllerImpl::GetOrCreate(
+    WeakPtr<AutofillPopupControllerImpl> previous,
     AutofillPopupDelegate* delegate,
     gfx::NativeView container_view,
-    const gfx::Rect& element_bounds) {
+    const gfx::RectF& element_bounds) {
   DCHECK(!previous || previous->delegate_ == delegate);
 
   if (previous &&
@@ -86,31 +86,29 @@ AutofillPopupControllerImpl* AutofillPopupControllerImpl::GetOrCreate(
   if (previous)
     previous->Hide();
 
-  return new AutofillPopupControllerImpl(
-      delegate, container_view, element_bounds);
+  AutofillPopupControllerImpl* controller =
+      new AutofillPopupControllerImpl(delegate, container_view, element_bounds);
+  return controller->GetWeakPtr();
 }
 
 AutofillPopupControllerImpl::AutofillPopupControllerImpl(
     AutofillPopupDelegate* delegate,
     gfx::NativeView container_view,
-    const gfx::Rect& element_bounds)
+    const gfx::RectF& element_bounds)
     : view_(NULL),
       delegate_(delegate),
       container_view_(container_view),
       element_bounds_(element_bounds),
       selected_line_(kNoSelection),
-      delete_icon_hovered_(false),
       is_hiding_(false),
-      inform_delegate_of_destruction_(true) {
+      weak_ptr_factory_(this) {
 #if !defined(OS_ANDROID)
   subtext_font_ = name_font_.DeriveFont(kLabelFontSizeDelta);
+  warning_font_ = name_font_.DeriveFont(0, gfx::Font::ITALIC);
 #endif
 }
 
-AutofillPopupControllerImpl::~AutofillPopupControllerImpl() {
-  if (inform_delegate_of_destruction_)
-    delegate_->ControllerDestroyed();
-}
+AutofillPopupControllerImpl::~AutofillPopupControllerImpl() {}
 
 void AutofillPopupControllerImpl::Show(
     const std::vector<string16>& names,
@@ -132,7 +130,7 @@ void AutofillPopupControllerImpl::Show(
   // Elide the name and subtext strings so that the popup fits in the available
   // space.
   for (size_t i = 0; i < names_.size(); ++i) {
-    int name_width = name_font().GetStringWidth(names_[i]);
+    int name_width = GetNameFontForRow(i).GetStringWidth(names_[i]);
     int subtext_width = subtext_font().GetStringWidth(subtexts_[i]);
     int total_text_length = name_width + subtext_width;
 
@@ -146,7 +144,7 @@ void AutofillPopupControllerImpl::Show(
     // Each field recieves space in proportion to its length.
     int name_size = available_width * name_width / total_text_length;
     names_[i] = ui::ElideText(names_[i],
-                              name_font(),
+                              GetNameFontForRow(i),
                               name_size,
                               ui::ELIDE_AT_END);
 
@@ -164,11 +162,23 @@ void AutofillPopupControllerImpl::Show(
   } else {
     UpdateBoundsAndRedrawPopup();
   }
+
+  delegate_->OnPopupShown(this);
 }
 
 void AutofillPopupControllerImpl::Hide() {
-  inform_delegate_of_destruction_ = false;
-  HideInternal();
+  if (is_hiding_)
+    return;
+  is_hiding_ = true;
+
+  SetSelectedLine(kNoSelection);
+
+  delegate_->OnPopupHidden(this);
+
+  if (view_)
+    view_->Hide();
+  else
+    delete this;
 }
 
 bool AutofillPopupControllerImpl::HandleKeyPressEvent(
@@ -187,7 +197,7 @@ bool AutofillPopupControllerImpl::HandleKeyPressEvent(
       SetSelectedLine(names().size() - 1);
       return true;
     case ui::VKEY_ESCAPE:
-      HideInternal();
+      Hide();
       return true;
     case ui::VKEY_DELETE:
       return (event.modifiers & content::NativeWebKeyboardEvent::ShiftKey) &&
@@ -217,21 +227,11 @@ void AutofillPopupControllerImpl::UpdateBoundsAndRedrawPopup() {
 
 void AutofillPopupControllerImpl::MouseHovered(int x, int y) {
   SetSelectedLine(LineFromY(y));
-
-  bool delete_icon_hovered = DeleteIconIsUnder(x, y);
-  if (delete_icon_hovered != delete_icon_hovered_) {
-    delete_icon_hovered_ = delete_icon_hovered;
-    InvalidateRow(selected_line());
-  }
 }
 
 void AutofillPopupControllerImpl::MouseClicked(int x, int y) {
   MouseHovered(x, y);
-
-  if (delete_icon_hovered_)
-    RemoveSelectedLine();
-  else
-    AcceptSelectedLine();
+  RemoveSelectedLine();
 }
 
 void AutofillPopupControllerImpl::MouseExitedPopup() {
@@ -253,8 +253,8 @@ int AutofillPopupControllerImpl::GetIconResourceID(
 }
 
 bool AutofillPopupControllerImpl::CanDelete(size_t index) const {
-  // TODO(isherman): AddressBook suggestions on Mac should not be drawn as
-  // deleteable.
+  // TODO(isherman): Native AddressBook suggestions on Mac and Android should
+  // not be considered to be deleteable.
   int id = identifiers_[index];
   return id > 0 ||
       id == WebAutofillClient::MenuItemIDAutocompleteEntry ||
@@ -287,7 +287,7 @@ gfx::NativeView AutofillPopupControllerImpl::container_view() const {
   return container_view_;
 }
 
-const gfx::Rect& AutofillPopupControllerImpl::element_bounds() const {
+const gfx::RectF& AutofillPopupControllerImpl::element_bounds() const {
   return element_bounds_;
 }
 
@@ -308,7 +308,11 @@ const std::vector<int>& AutofillPopupControllerImpl::identifiers() const {
 }
 
 #if !defined(OS_ANDROID)
-const gfx::Font& AutofillPopupControllerImpl::name_font() const {
+const gfx::Font& AutofillPopupControllerImpl::GetNameFontForRow(size_t index)
+    const {
+  if (identifiers_[index] == WebAutofillClient::MenuItemIDWarningMessage)
+    return warning_font_;
+
   return name_font_;
 }
 
@@ -319,23 +323,6 @@ const gfx::Font& AutofillPopupControllerImpl::subtext_font() const {
 
 int AutofillPopupControllerImpl::selected_line() const {
   return selected_line_;
-}
-
-bool AutofillPopupControllerImpl::delete_icon_hovered() const {
-  return delete_icon_hovered_;
-}
-
-void AutofillPopupControllerImpl::HideInternal() {
-  if (is_hiding_)
-    return;
-  is_hiding_ = true;
-
-  SetSelectedLine(kNoSelection);
-
-  if (view_)
-    view_->Hide();
-  else
-    delete this;
 }
 
 void AutofillPopupControllerImpl::SetSelectedLine(int selected_line) {
@@ -426,7 +413,7 @@ bool AutofillPopupControllerImpl::RemoveSelectedLine() {
     delegate_->ClearPreviewedForm();
     UpdateBoundsAndRedrawPopup();
   } else {
-    HideInternal();
+    Hide();
   }
 
   return true;
@@ -451,28 +438,6 @@ int AutofillPopupControllerImpl::GetRowHeightFromId(int identifier) const {
     return kSeparatorHeight;
 
   return kRowHeight;
-}
-
-bool AutofillPopupControllerImpl::DeleteIconIsUnder(int x, int y) {
-#if defined(OS_ANDROID)
-  return false;
-#else
-  if (!CanDelete(selected_line()))
-    return false;
-
-  int row_start_y = 0;
-  for (int i = 0; i < selected_line(); ++i) {
-    row_start_y += GetRowHeightFromId(identifiers()[i]);
-  }
-
-  gfx::Rect delete_icon_bounds = gfx::Rect(
-      popup_bounds().width() - kDeleteIconWidth - kIconPadding,
-      row_start_y + ((kRowHeight - kDeleteIconHeight) / 2),
-      kDeleteIconWidth,
-      kDeleteIconHeight);
-
-  return delete_icon_bounds.Contains(x, y);
-#endif
 }
 
 bool AutofillPopupControllerImpl::CanAccept(int id) {
@@ -505,7 +470,7 @@ int AutofillPopupControllerImpl::GetDesiredPopupWidth() const {
     return 0;
   }
 
-  int popup_width = element_bounds().width();
+  int popup_width = RoundedElementBounds().width();
   DCHECK_EQ(names().size(), subtexts().size());
   for (size_t i = 0; i < names().size(); ++i) {
     int row_size = name_font_.GetStringWidth(names()[i]) +
@@ -535,10 +500,6 @@ int AutofillPopupControllerImpl::RowWidthWithoutText(int row) const {
   if (!icons_[row].empty())
     row_size += kAutofillIconWidth + kIconPadding;
 
-  // Add the delete icon size, if required.
-  if (CanDelete(row))
-    row_size += kDeleteIconWidth + kIconPadding;
-
   // Add the padding at the end
   row_size += kEndPadding;
 
@@ -551,16 +512,16 @@ void AutofillPopupControllerImpl::UpdatePopupBounds() {
   // This is the top left point of the popup if the popup is above the element
   // and grows to the left (since that is the highest and furthest left the
   // popup go could).
-  gfx::Point top_left_corner_of_popup = element_bounds().origin() +
-      gfx::Vector2d(element_bounds().width() - popup_required_width,
+  gfx::Point top_left_corner_of_popup = RoundedElementBounds().origin() +
+      gfx::Vector2d(RoundedElementBounds().width() - popup_required_width,
                     -popup_height);
 
   // This is the bottom right point of the popup if the popup is below the
   // element and grows to the right (since the is the lowest and furthest right
   // the popup could go).
-  gfx::Point bottom_right_corner_of_popup = element_bounds().origin() +
+  gfx::Point bottom_right_corner_of_popup = RoundedElementBounds().origin() +
       gfx::Vector2d(popup_required_width,
-                    element_bounds().height() + popup_height);
+                    RoundedElementBounds().height() + popup_height);
 
   gfx::Display top_left_display = GetDisplayNearestPoint(
       top_left_corner_of_popup);
@@ -578,6 +539,14 @@ void AutofillPopupControllerImpl::UpdatePopupBounds() {
                             popup_y_and_height.second);
 }
 #endif  // !defined(OS_ANDROID)
+
+WeakPtr<AutofillPopupControllerImpl> AutofillPopupControllerImpl::GetWeakPtr() {
+  return weak_ptr_factory_.GetWeakPtr();
+}
+
+const gfx::Rect AutofillPopupControllerImpl::RoundedElementBounds() const {
+  return gfx::ToEnclosingRect(element_bounds_);
+}
 
 gfx::Display AutofillPopupControllerImpl::GetDisplayNearestPoint(
     const gfx::Point& point) const {
@@ -598,10 +567,10 @@ std::pair<int, int> AutofillPopupControllerImpl::CalculatePopupXAndWidth(
   // the end position if it is growing to the left, capped to screen space.
   int right_growth_start = std::max(leftmost_display_x,
                                     std::min(rightmost_display_x,
-                                             element_bounds().x()));
+                                             RoundedElementBounds().x()));
   int left_growth_end = std::max(leftmost_display_x,
                                    std::min(rightmost_display_x,
-                                            element_bounds().right()));
+                                            RoundedElementBounds().right()));
 
   int right_available = rightmost_display_x - right_growth_start;
   int left_available = left_growth_end - leftmost_display_x;
@@ -631,10 +600,9 @@ std::pair<int,int> AutofillPopupControllerImpl::CalculatePopupYAndHeight(
   // the end position if it is growing up, capped to screen space.
   int top_growth_end = std::max(topmost_display_y,
                                 std::min(bottommost_display_y,
-                                         element_bounds().y()));
+                                         RoundedElementBounds().y()));
   int bottom_growth_start = std::max(topmost_display_y,
-                                     std::min(bottommost_display_y,
-                                              element_bounds().bottom()));
+      std::min(bottommost_display_y, RoundedElementBounds().bottom()));
 
   int top_available = bottom_growth_start - topmost_display_y;
   int bottom_available = bottommost_display_y - top_growth_end;

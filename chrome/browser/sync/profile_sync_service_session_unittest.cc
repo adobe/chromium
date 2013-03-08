@@ -208,9 +208,9 @@ class ProfileSyncServiceSessionTest
         content::NotificationService::AllSources());
   }
 
-  void Observe(int type,
+  virtual void Observe(int type,
       const content::NotificationSource& source,
-      const content::NotificationDetails& details) {
+      const content::NotificationDetails& details) OVERRIDE {
     switch (type) {
       case chrome::NOTIFICATION_FOREIGN_SESSION_UPDATED:
         notified_of_update_ = true;
@@ -274,7 +274,7 @@ class ProfileSyncServiceSessionTest
     EXPECT_CALL(*factory, CreateSessionSyncComponents(_, _)).
         WillOnce(Return(ProfileSyncComponentsFactory::SyncComponents(
             model_associator_, change_processor_)));
-    EXPECT_CALL(*factory, CreateDataTypeManager(_, _, _, _)).
+    EXPECT_CALL(*factory, CreateDataTypeManager(_, _, _, _, _)).
         WillOnce(ReturnNewDataTypeManager());
 
     TokenServiceFactory::GetForProfile(profile())->IssueAuthTokenForTest(
@@ -349,9 +349,17 @@ TEST_F(ProfileSyncServiceSessionTest, WriteSessionToNode) {
   ASSERT_EQ(0, header_s.window_size());
 }
 
+// Crashes sometimes on Windows, particularly XP.
+// See http://crbug.com/174951
+#if defined(OS_WIN)
+#define MAYBE_WriteFilledSessionToNode DISABLED_WriteFilledSessionToNode
+#else
+#define MAYBE_WriteFilledSessionToNode WriteFilledSessionToNode
+#endif  // defined(OS_WIN)
+
 // Test that we can fill this machine's session, write it to a node,
 // and then retrieve it.
-TEST_F(ProfileSyncServiceSessionTest, WriteFilledSessionToNode) {
+TEST_F(ProfileSyncServiceSessionTest, MAYBE_WriteFilledSessionToNode) {
   CreateRootHelper create_root(this);
   ASSERT_TRUE(StartSyncService(create_root.callback(), false));
   ASSERT_TRUE(create_root.success());
@@ -941,9 +949,17 @@ TEST_F(ProfileSyncServiceSessionTest, StaleSessionRefresh) {
   VerifySyncedSession(tag, session_reference, *(foreign_sessions[0]));
 }
 
+// Crashes sometimes on Windows, particularly XP.
+// See http://crbug.com/174951
+#if defined(OS_WIN)
+#define MAYBE_ValidTabs DISABLED_ValidTabs
+#else
+#define MAYBE_ValidTabs ValidTabs
+#endif  // defined(OS_WIN)
+
 // Test that tabs with nothing but "chrome://*" and "file://*" navigations are
 // not be synced.
-TEST_F(ProfileSyncServiceSessionTest, ValidTabs) {
+TEST_F(ProfileSyncServiceSessionTest, MAYBE_ValidTabs) {
   CreateRootHelper create_root(this);
   ASSERT_TRUE(StartSyncService(create_root.callback(), false));
   ASSERT_TRUE(create_root.success());
@@ -1141,7 +1157,7 @@ TEST_F(ProfileSyncServiceSessionTest, MissingLocalTabNode) {
     syncer::WriteNode tab_node(&trans);
     ASSERT_EQ(syncer::BaseNode::INIT_OK,
               tab_node.InitByClientTagLookup(syncer::SESSIONS, tab_tag));
-    tab_node.Remove();
+    tab_node.Tombstone();
   }
   error = model_associator_->AssociateModels(NULL, NULL);
   ASSERT_FALSE(error.IsSet());

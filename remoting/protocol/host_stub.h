@@ -14,18 +14,17 @@
 namespace remoting {
 namespace protocol {
 
-class ClientDimensions;
+class ClientResolution;
 class VideoControl;
 class AudioControl;
 
 class HostStub {
  public:
   HostStub() {}
-  virtual ~HostStub() {}
 
-  // Notification of the available client display dimensions.
+  // Notification of the client dimensions and pixel density.
   // This may be used to resize the host display to match the client area.
-  virtual void NotifyClientDimensions(const ClientDimensions& dimensions) = 0;
+  virtual void NotifyClientResolution(const ClientResolution& resolution) = 0;
 
   // Configures video update properties. Currently only pausing & resuming the
   // video channel is supported.
@@ -34,6 +33,9 @@ class HostStub {
   // Configures audio properties. Currently only pausing & resuming the audio
   // channel is supported.
   virtual void ControlAudio(const AudioControl& audio_control) = 0;
+
+ protected:
+  virtual ~HostStub() {}
 
  private:
   DISALLOW_COPY_AND_ASSIGN(HostStub);

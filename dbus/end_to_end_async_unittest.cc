@@ -32,8 +32,7 @@ const int kHugePayloadSize = 64 << 20;  // 64 MB
 // ExportedObject.
 class EndToEndAsyncTest : public testing::Test {
  public:
-  EndToEndAsyncTest() {
-  }
+  EndToEndAsyncTest() : on_disconnected_call_count_(0) {}
 
   virtual void SetUp() {
     // Make the main thread not to allow IO.
@@ -47,7 +46,7 @@ class EndToEndAsyncTest : public testing::Test {
 
     // Start the test service, using the D-Bus thread.
     dbus::TestService::Options options;
-    options.dbus_thread_message_loop_proxy = dbus_thread_->message_loop_proxy();
+    options.dbus_task_runner = dbus_thread_->message_loop_proxy();
     test_service_.reset(new dbus::TestService(options));
     ASSERT_TRUE(test_service_->StartService());
     ASSERT_TRUE(test_service_->WaitUntilServiceIsStarted());
@@ -57,8 +56,9 @@ class EndToEndAsyncTest : public testing::Test {
     dbus::Bus::Options bus_options;
     bus_options.bus_type = dbus::Bus::SESSION;
     bus_options.connection_type = dbus::Bus::PRIVATE;
-    bus_options.dbus_thread_message_loop_proxy =
-        dbus_thread_->message_loop_proxy();
+    bus_options.dbus_task_runner = dbus_thread_->message_loop_proxy();
+    bus_options.disconnected_callback =
+        base::Bind(&EndToEndAsyncTest::OnDisconnected, base::Unretained(this));
     bus_ = new dbus::Bus(bus_options);
     object_proxy_ = bus_->GetObjectProxy(
         "org.chromium.TestService",
@@ -137,8 +137,7 @@ class EndToEndAsyncTest : public testing::Test {
     bus_options.bus_type = dbus::Bus::CUSTOM_ADDRESS;
     bus_options.address = kInvalidAddress;
     bus_options.connection_type = dbus::Bus::PRIVATE;
-    bus_options.dbus_thread_message_loop_proxy =
-        dbus_thread_->message_loop_proxy();
+    bus_options.dbus_task_runner = dbus_thread_->message_loop_proxy();
     bus_ = new dbus::Bus(bus_options);
     ASSERT_TRUE(bus_->HasDBusThread());
 
@@ -242,6 +241,12 @@ class EndToEndAsyncTest : public testing::Test {
     message_loop_.Quit();
   }
 
+  // Called when the connection with dbus-daemon is disconnected.
+  void OnDisconnected() {
+    message_loop_.Quit();
+    ++on_disconnected_call_count_;
+  }
+
   // Wait for the hey signal to be received.
   void WaitForTestSignal() {
     // OnTestSignal() will quit the message loop.
@@ -260,6 +265,7 @@ class EndToEndAsyncTest : public testing::Test {
   std::string test_signal_string_;
   // Text message from "Test" signal delivered to root.
   std::string root_test_signal_string_;
+  int on_disconnected_call_count_;
 };
 
 TEST_F(EndToEndAsyncTest, Echo) {
@@ -570,6 +576,15 @@ TEST_F(EndToEndAsyncTest, TestHugeSignal) {
   // This caused a DCHECK failure before. Ensure that the issue is fixed.
   WaitForTestSignal();
   ASSERT_EQ(kHugeMessage, test_signal_string_);
+}
+
+TEST_F(EndToEndAsyncTest, DisconnectedSignal) {
+  bus_->PostTaskToDBusThread(FROM_HERE,
+                             base::Bind(&dbus::Bus::ClosePrivateConnection,
+                                        base::Unretained(bus_.get())));
+  // OnDisconnected callback quits message loop.
+  message_loop_.Run();
+  EXPECT_EQ(1, on_disconnected_call_count_);
 }
 
 class SignalReplacementTest : public EndToEndAsyncTest {

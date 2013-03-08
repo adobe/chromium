@@ -22,6 +22,9 @@ class RootWindow;
 }
 
 namespace ash {
+namespace internal {
+class DesktopBackgroundControllerTest;
+}  // namespace internal
 
 enum WallpaperLayout {
   WALLPAPER_LAYOUT_CENTER,
@@ -57,13 +60,19 @@ ASH_EXPORT extern const int kSmallWallpaperMaxHeight;
 ASH_EXPORT extern const int kLargeWallpaperMaxWidth;
 ASH_EXPORT extern const int kLargeWallpaperMaxHeight;
 
+// The width and heigh of wallpaper thumbnails.
+ASH_EXPORT extern const int kWallpaperThumbnailWidth;
+ASH_EXPORT extern const int kWallpaperThumbnailHeight;
+
 class DesktopBackgroundControllerObserver;
+class WallpaperResizer;
 
 // Loads selected desktop wallpaper from file system asynchronously and updates
 // background layer if loaded successfully.
 class ASH_EXPORT DesktopBackgroundController : public aura::WindowObserver {
  public:
   enum BackgroundMode {
+    BACKGROUND_NONE,
     BACKGROUND_IMAGE,
     BACKGROUND_SOLID_COLOR
   };
@@ -134,10 +143,10 @@ class ASH_EXPORT DesktopBackgroundController : public aura::WindowObserver {
   virtual void OnWindowDestroying(aura::Window* window) OVERRIDE;
 
  private:
+  friend class internal::DesktopBackgroundControllerTest;
+
   // An operation to asynchronously loads wallpaper.
   class WallpaperLoader;
-
-  struct WallpaperData;
 
   // Creates view for all root windows, or notifies them to repaint if they
   // already exist.
@@ -180,7 +189,7 @@ class ASH_EXPORT DesktopBackgroundController : public aura::WindowObserver {
   ObserverList<DesktopBackgroundControllerObserver> observers_;
 
   // The current wallpaper.
-  scoped_ptr<WallpaperData> current_wallpaper_;
+  scoped_ptr<WallpaperResizer> current_wallpaper_;
 
   scoped_refptr<WallpaperLoader> wallpaper_loader_;
 

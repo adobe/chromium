@@ -24,6 +24,7 @@ PnaclTranslateThread::PnaclTranslateThread() : llc_subprocess_active_(false),
                                                nexe_file_(NULL),
                                                coordinator_error_info_(NULL),
                                                resources_(NULL),
+                                               coordinator_(NULL),
                                                plugin_(NULL) {
   NaClXMutexCtor(&subprocess_mu_);
   NaClXMutexCtor(&cond_mu_);
@@ -38,6 +39,7 @@ void PnaclTranslateThread::RunTranslate(
     TempFile* nexe_file,
     ErrorInfo* error_info,
     PnaclResources* resources,
+    PnaclCoordinator* coordinator,
     Plugin* plugin) {
   PLUGIN_PRINTF(("PnaclStreamingTranslateThread::RunTranslate)\n"));
   manifest_ = manifest;
@@ -46,6 +48,7 @@ void PnaclTranslateThread::RunTranslate(
   nexe_file_ = nexe_file;
   coordinator_error_info_ = error_info;
   resources_ = resources;
+  coordinator_ = coordinator;
   plugin_ = plugin;
 
   // Invoke llc followed by ld off the main thread.  This allows use of
@@ -71,8 +74,8 @@ void PnaclTranslateThread::RunTranslate(
 // Called from main thread to send bytes to the translator.
 void PnaclTranslateThread::PutBytes(std::vector<char>* bytes,
                                              int count) {
-  PLUGIN_PRINTF(("PutBytes, this %p bytes %p, size %d, count %d\n", this, bytes,
-                 bytes ? bytes->size(): 0, count));
+  PLUGIN_PRINTF(("PutBytes (this=%p, bytes=%p, size=%"NACL_PRIuS", count=%d)\n",
+                 this, bytes, bytes ? bytes->size() : 0, count));
   size_t buffer_size = 0;
   // If we are done (error or not), Signal the translation thread to stop.
   if (count <= PP_OK) {
@@ -168,6 +171,7 @@ void PnaclTranslateThread::DoTranslate() {
   }
 
   PLUGIN_PRINTF(("PnaclCoordinator: StreamInit successful\n"));
+  pp::Core* core = pp::Module::Get()->core();
 
   // llc process is started.
   while(!done_ || data_buffers_.size() > 0) {
@@ -175,7 +179,7 @@ void PnaclTranslateThread::DoTranslate() {
     while(!done_ && data_buffers_.size() == 0) {
       NaClXCondVarWait(&buffer_cond_, &cond_mu_);
     }
-    PLUGIN_PRINTF(("PnaclTranslateThread awake, done %d, size %d\n",
+    PLUGIN_PRINTF(("PnaclTranslateThread awake (done=%d, size=%"NACL_PRIuS")\n",
                    done_, data_buffers_.size()));
     if (data_buffers_.size() > 0) {
       std::vector<char> data;
@@ -193,6 +197,10 @@ void PnaclTranslateThread::DoTranslate() {
         return;
       }
       PLUGIN_PRINTF(("StreamChunk Successful\n"));
+      core->CallOnMainThread(
+          0,
+          coordinator_->GetCompileProgressCallback(data.size()),
+          PP_OK);
     } else {
       NaClXMutexUnlock(&cond_mu_);
     }
@@ -235,7 +243,6 @@ void PnaclTranslateThread::DoTranslate() {
   if(!RunLdSubprocess(is_shared_library, soname, lib_dependencies)) {
     return;
   }
-  pp::Core* core = pp::Module::Get()->core();
   core->CallOnMainThread(0, report_translate_finished_, PP_OK);
 }
 

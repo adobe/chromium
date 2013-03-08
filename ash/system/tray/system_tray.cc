@@ -78,6 +78,7 @@ class SystemBubbleWrapper {
   void InitView(TrayBackgroundView* tray,
                 views::View* anchor,
                 TrayBubbleView::InitParams* init_params) {
+    DCHECK(anchor);
     user::LoginStatus login_status =
         Shell::GetInstance()->system_tray_delegate()->GetUserLoginStatus();
     bubble_->InitView(anchor, login_status, init_params);
@@ -363,15 +364,21 @@ void SystemTray::ShowItems(const std::vector<SystemTrayItem*>& items,
                                            kTrayPopupMinWidth,
                                            kTrayPopupMaxWidth);
     init_params.can_activate = can_activate;
+    init_params.close_on_deactivate = false;
     if (detailed) {
       // This is the case where a volume control or brightness control bubble
       // is created.
       init_params.max_height = default_bubble_height_;
       init_params.arrow_color = kBackgroundColor;
     } else {
-      init_params.arrow_color = kHeaderBackgroundColorDark;
+      init_params.arrow_color = kHeaderBackgroundColor;
     }
     init_params.arrow_offset = arrow_offset;
+    // For Volume and Brightness we don't want to show an arrow when
+    // they are shown in a bubble by themselves.
+    init_params.arrow_paint_type = views::BubbleBorder::PAINT_NORMAL;
+    if (items.size() == 1 && items[0]->ShouldHideArrow())
+      init_params.arrow_paint_type = views::BubbleBorder::PAINT_TRANSPARENT;
     SystemTrayBubble* bubble = new SystemTrayBubble(this, items, bubble_type);
     system_bubble_.reset(new internal::SystemBubbleWrapper(bubble));
     system_bubble_->InitView(this, tray_container(), &init_params);
@@ -391,39 +398,19 @@ void SystemTray::ShowItems(const std::vector<SystemTrayItem*>& items,
 }
 
 void SystemTray::UpdateNotificationBubble() {
-  // Only show the notification buble if we have notifications and we are not
-  // showing the default bubble.
-  if (notification_items_.empty() ||
-      HasSystemBubbleType(SystemTrayBubble::BUBBLE_TYPE_DEFAULT)) {
+  // Only show the notification buble if we have notifications.
+  if (notification_items_.empty()) {
     DestroyNotificationBubble();
     return;
   }
   // Destroy the existing bubble before constructing a new one.
   notification_bubble_.reset();
   SystemTrayBubble* notification_bubble;
-  if (HasSystemBubbleType(SystemTrayBubble::BUBBLE_TYPE_DETAILED)) {
-    // Skip notifications for any currently displayed detailed item.
-    std::vector<SystemTrayItem*> items;
-    for (std::vector<SystemTrayItem*>::iterator iter =
-             notification_items_.begin();
-         iter != notification_items_.end(); ++ iter) {
-      if (*iter != detailed_item_)
-        items.push_back(*iter);
-    }
-    if (items.empty()) {
-      DestroyNotificationBubble();
-      return;
-    }
-    notification_bubble = new SystemTrayBubble(
-        this, items, SystemTrayBubble::BUBBLE_TYPE_NOTIFICATION);
-  } else {
-    // Show all notifications.
-    notification_bubble = new SystemTrayBubble(
-        this, notification_items_, SystemTrayBubble::BUBBLE_TYPE_NOTIFICATION);
-  }
+  notification_bubble = new SystemTrayBubble(
+      this, notification_items_, SystemTrayBubble::BUBBLE_TYPE_NOTIFICATION);
   views::View* anchor;
   TrayBubbleView::AnchorType anchor_type;
-  if (system_bubble_.get()) {
+  if (system_bubble_.get() && system_bubble_->bubble_view()) {
     anchor = system_bubble_->bubble_view();
     anchor_type = TrayBubbleView::ANCHOR_TYPE_BUBBLE;
   } else {

@@ -14,9 +14,9 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "base/string_piece.h"
-#include "base/string_split.h"
-#include "base/string_tokenizer.h"
 #include "base/string_util.h"
+#include "base/strings/string_split.h"
+#include "base/strings/string_tokenizer.h"
 #include "library_loaders/libpci.h"
 #include "third_party/libXNVCtrl/NVCtrl.h"
 #include "third_party/libXNVCtrl/NVCtrlLib.h"
@@ -31,8 +31,8 @@ namespace {
 // This checks if a system supports PCI bus.
 // We check the existence of /sys/bus/pci or /sys/bug/pci_express.
 bool IsPciSupported() {
-  const FilePath pci_path("/sys/bus/pci/");
-  const FilePath pcie_path("/sys/bus/pci_express/");
+  const base::FilePath pci_path("/sys/bus/pci/");
+  const base::FilePath pcie_path("/sys/bus/pci_express/");
   return (file_util::PathExists(pci_path) ||
           file_util::PathExists(pcie_path));
 }
@@ -40,15 +40,15 @@ bool IsPciSupported() {
 // Scan /etc/ati/amdpcsdb.default for "ReleaseVersion".
 // Return empty string on failing.
 std::string CollectDriverVersionATI() {
-  const FilePath::CharType kATIFileName[] =
+  const base::FilePath::CharType kATIFileName[] =
       FILE_PATH_LITERAL("/etc/ati/amdpcsdb.default");
-  FilePath ati_file_path(kATIFileName);
+  base::FilePath ati_file_path(kATIFileName);
   if (!file_util::PathExists(ati_file_path))
     return std::string();
   std::string contents;
   if (!file_util::ReadFileToString(ati_file_path, &contents))
     return std::string();
-  StringTokenizer t(contents, "\r\n");
+  base::StringTokenizer t(contents, "\r\n");
   while (t.GetNext()) {
     std::string line = t.token();
     if (StartsWithASCII(line, "ReleaseVersion=", true)) {
@@ -215,6 +215,20 @@ bool CollectContextGraphicsInfo(content::GPUInfo* gpu_info) {
   bool rt = CollectGraphicsInfoGL(gpu_info);
 
   return rt;
+}
+
+bool CollectGpuID(uint32* vendor_id, uint32* device_id) {
+  DCHECK(vendor_id && device_id);
+  *vendor_id = 0;
+  *device_id = 0;
+
+  content::GPUInfo gpu_info;
+  if (CollectPCIVideoCardInfo(&gpu_info)) {
+    *vendor_id = gpu_info.gpu.vendor_id;
+    *device_id = gpu_info.gpu.device_id;
+    return true;
+  }
+  return false;
 }
 
 bool CollectBasicGraphicsInfo(content::GPUInfo* gpu_info) {

@@ -4,10 +4,10 @@
 
 #include "chrome/browser/profiles/gaia_info_update_service_factory.h"
 
-#include "chrome/browser/prefs/pref_service_syncable.h"
 #include "chrome/browser/profiles/gaia_info_update_service.h"
 #include "chrome/browser/profiles/profile_dependency_manager.h"
 #include "chrome/common/pref_names.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 
 GAIAInfoUpdateServiceFactory::GAIAInfoUpdateServiceFactory()
     : ProfileKeyedServiceFactory("GAIAInfoUpdateService",
@@ -36,11 +36,11 @@ ProfileKeyedService* GAIAInfoUpdateServiceFactory::BuildServiceInstanceFor(
 }
 
 void GAIAInfoUpdateServiceFactory::RegisterUserPrefs(
-    PrefServiceSyncable* prefs) {
+    PrefRegistrySyncable* prefs) {
   prefs->RegisterInt64Pref(prefs::kProfileGAIAInfoUpdateTime, 0,
-                           PrefServiceSyncable::UNSYNCABLE_PREF);
+                           PrefRegistrySyncable::UNSYNCABLE_PREF);
   prefs->RegisterStringPref(prefs::kProfileGAIAInfoPictureURL, "",
-                            PrefServiceSyncable::UNSYNCABLE_PREF);
+                            PrefRegistrySyncable::UNSYNCABLE_PREF);
 }
 
 bool GAIAInfoUpdateServiceFactory::ServiceIsNULLWhileTesting() const {

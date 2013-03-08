@@ -6,7 +6,7 @@
 
 #include "base/bind.h"
 #include "base/file_util.h"
-#include "base/file_util_proxy.h"
+#include "base/files/file_util_proxy.h"
 #include "base/logging.h"
 #include "base/message_loop_proxy.h"
 #include "base/platform_file.h"
@@ -164,7 +164,7 @@ bool RedirectToFileResourceHandler::OnResponseCompleted(
 void RedirectToFileResourceHandler::DidCreateTemporaryFile(
     base::PlatformFileError /*error_code*/,
     base::PassPlatformFile file_handle,
-    const FilePath& file_path) {
+    const base::FilePath& file_path) {
   deletable_file_ = ShareableFileReference::GetOrCreate(
       file_path, ShareableFileReference::DELETE_ON_FINAL_RELEASE,
       BrowserThread::GetMessageLoopProxyForThread(BrowserThread::FILE));

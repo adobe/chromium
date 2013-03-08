@@ -9,8 +9,8 @@
 #include "chrome/browser/extensions/user_script_master.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/web_contents.h"
@@ -32,7 +32,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, IncognitoNoScript) {
       browser()->profile(),
       test_server()->GetURL("files/extensions/test_file.html"));
 
-  WebContents* tab = chrome::GetActiveWebContents(otr_browser);
+  WebContents* tab = otr_browser->tab_strip_model()->GetActiveWebContents();
 
   // Verify the script didn't run.
   bool result = false;
@@ -67,7 +67,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, IncognitoYesScript) {
       browser()->profile(),
       test_server()->GetURL("files/extensions/test_file.html"));
 
-  WebContents* tab = chrome::GetActiveWebContents(otr_browser);
+  WebContents* tab = otr_browser->tab_strip_model()->GetActiveWebContents();
 
   // Verify the script ran.
   bool result = false;
@@ -174,7 +174,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, IncognitoDisabled) {
   EXPECT_TRUE(catcher.GetNextResult()) << catcher.message();
 }
 
-#if defined(OS_WIN)
+#if defined(OS_WIN) || defined(OS_MACOSX)
 // http://crbug.com/104438.
 #define MAYBE_IncognitoPopup DISABLED_IncognitoPopup
 #else

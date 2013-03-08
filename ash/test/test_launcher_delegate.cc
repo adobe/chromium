@@ -5,6 +5,7 @@
 #include "ash/test/test_launcher_delegate.h"
 
 #include "ash/launcher/launcher_model.h"
+#include "ash/launcher/launcher_util.h"
 #include "ash/wm/window_util.h"
 #include "base/utf_string_conversions.h"
 #include "grit/ash_resources.h"
@@ -63,8 +64,9 @@ void TestLauncherDelegate::OnBrowserShortcutClicked(int event_flags) {
 }
 
 void TestLauncherDelegate::ItemClicked(const ash::LauncherItem& item,
-                                       int event_flags) {
+                                       const ui::Event& event) {
   aura::Window* window = GetWindowByID(item.id);
+  launcher::MoveToEventRootIfPanel(window, event);
   window->Show();
   ash::wm::ActivateWindow(window);
 }
@@ -84,7 +86,7 @@ ui::MenuModel* TestLauncherDelegate::CreateContextMenu(
   return NULL;
 }
 
-ui::MenuModel* TestLauncherDelegate::CreateApplicationMenu(
+ash::LauncherMenuModel* TestLauncherDelegate::CreateApplicationMenu(
     const ash::LauncherItem& item) {
   return NULL;
 }

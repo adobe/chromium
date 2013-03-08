@@ -11,6 +11,9 @@
       -- path. Until then, use an invisible non-whitespace character.
       -->
     <title>&#xFEFF;</title>
+
+    <meta name="google" value="notranslate">
+
     <link rel="stylesheet" href="../../../../ui/webui/resources/css/dialogs.css"></link>
     <link rel="stylesheet" href="../../../../ui/webui/resources/css/list.css"></link>
     <link rel="stylesheet" href="../../../../ui/webui/resources/css/table.css"></link>
@@ -31,11 +34,13 @@
            so we want to parse it as early as possible -->
       <script src="js/metrics.js"></script>
 
+      <script src="../image_loader/client.js"></script>
+
       <script src="../../../../ui/webui/resources/js/load_time_data.js"></script>
+      <script src="../../../../ui/webui/resources/js/cr.js"></script>
       <script src="../../../../ui/webui/resources/js/util.js"></script>
       <script src="../../../../ui/webui/resources/js/i18n_template_no_process.js"></script>
 
-      <script src="../../../../ui/webui/resources/js/cr.js"></script>
       <script src="../../../../ui/webui/resources/js/event_tracker.js"></script>
       <script src="../../../../ui/webui/resources/js/cr/ui.js"></script>
       <script src="../../../../ui/webui/resources/js/cr/event_target.js"></script>
@@ -47,6 +52,7 @@
       <script src="../../../../ui/webui/resources/js/cr/ui/list_single_selection_model.js"></script>
       <script src="../../../../ui/webui/resources/js/cr/ui/list_selection_controller.js"></script>
       <script src="../../../../ui/webui/resources/js/cr/ui/list.js"></script>
+      <script src="../../../../ui/webui/resources/js/cr/ui/autocomplete_list.js"></script>
 
       <script src="../../../../ui/webui/resources/js/cr/ui/splitter.js"></script>
       <script src="../../../../ui/webui/resources/js/cr/ui/table/table_splitter.js"></script>
@@ -113,6 +119,8 @@
                shortcut="U+007F"></command>
       <command id="newfolder" i18n-values="label:NEW_FOLDER_BUTTON_LABEL"
                shortcut="U+0045-Ctrl"></command>
+      <command id="newwindow" i18n-values="label:NEW_WINDOW_BUTTON_LABEL"
+          ></command>
 
       <command id="search" shortcut="U+0046-Ctrl"></command>
 
@@ -121,18 +129,18 @@
       <command id="format" i18n-values="label:FORMAT_DEVICE_BUTTON_LABEL"
           ></command>
       <command id="import-photos" i18n-values="label:PHOTO_IMPORT_TITLE"
-          hidden></command>
+          ></command>
 
-      <command id="gdata-buy-more-space"
+      <command id="volume-help" i18n-values="label:DRIVE_MENU_HELP"
+          ></command>
+      <command id="drive-buy-more-space"
           i18n-values="label:DRIVE_BUY_MORE_SPACE"
           ></command>
-      <command id="gdata-help" i18n-values="label:DRIVE_MENU_HELP"
-          ></command>
-      <command id="gdata-clear-local-cache"
+      <command id="drive-clear-local-cache"
           i18n-values="label:DRIVE_CLEAR_LOCAL_CACHE"></command>
-      <command id="gdata-reload"
+      <command id="drive-reload"
           i18n-values="label:DRIVE_RELOAD"></command>
-      <command id="gdata-go-to-drive"
+      <command id="drive-go-to-drive"
           i18n-values="label:DRIVE_VISIT_DRIVE_GOOGLE_COM"></command>
 
       <command id="toggle-pinned"
@@ -142,9 +150,6 @@
           i18n-values="label:OPEN_WITH_BUTTON_LABEL"></command>
       <command id="zip-selection"
           i18n-values="label:ZIP_SELECTION_BUTTON_LABEL"></command>
-
-      <command id="files-app-help" i18n-values="label:HELP_LINK_LABEL">
-      </command>
     </commands>
 
     <menu id="file-context-menu" class="chrome-menu" showShortcuts>
@@ -153,7 +158,7 @@
       <menuitem command="#open-with"
           visibleif="full-page" hidden></menuitem>
       <hr id="default-action-separator" visibleif="full-page" hidden>
-      <menuitem command="#toggle-pinned"></menuitem>
+      <menuitem command="#toggle-pinned" checkable></menuitem>
       <hr command="#toggle-pinned">
       <menuitem command="#cut" visibleif="full-page"></menuitem>
       <menuitem command="#copy" visibleif="full-page"></menuitem>
@@ -170,31 +175,29 @@
       <menuitem command="#import-photos"></menuitem>
       <menuitem command="#unmount"></menuitem>
       <menuitem command="#format"></menuitem>
-      <hr>
-      <menuitem command="#files-app-help"></menuitem>
     </menu>
 
-    <menu id="docs-settings" class="chrome-menu">
-      <menuitem id="gdata-sync-settings"
-          i18n-content=DRIVE_MOBILE_CONNECTION_OPTION></menuitem>
-      <menuitem id="gdata-hosted-settings"
-          i18n-content=DRIVE_SHOW_HOSTED_FILES_OPTION></menuitem>
-      <hr required_attr="ctrl-pressing">
-      <menuitem required_attr="ctrl-pressing"
-          command="#gdata-clear-local-cache"></menuitem>
-      <menuitem required_attr="ctrl-pressing"
-          command="#gdata-reload"></menuitem>
+    <menu id="gear-menu" class="chrome-menu" showShortcuts>
+      <menuitem command="#newwindow"></menuitem>
+      <menuitem command="#newfolder"></menuitem>
       <hr>
-      <div id="gdata-space-info" disabled>
-        <span id="gdata-space-info-label"
-            i18n-content=WAITING_FOR_SPACE_INFO
-            ></span>
-        <div><div id="gdata-space-info-bar" style="width:100%" pending></div
-            ></div>
+      <menuitem id="drive-sync-settings"
+          i18n-content=DRIVE_MOBILE_CONNECTION_OPTION></menuitem>
+      <menuitem id="drive-hosted-settings"
+          i18n-content=DRIVE_SHOW_HOSTED_FILES_OPTION></menuitem>
+      <hr required_attr="ctrl-pressing" required_drive>
+      <menuitem required_attr="ctrl-pressing" required_drive
+          command="#drive-clear-local-cache"></menuitem>
+      <menuitem required_attr="ctrl-pressing" required_drive
+          command="#drive-reload"></menuitem>
+      <hr required_drive>
+      <div id="volume-space-info" disabled>
+        <span id="volume-space-info-label"></span>
+        <div><div id="volume-space-info-bar"></div></div>
       </div>
-      <menuitem command="#gdata-buy-more-space"></menuitem>
-      <menuitem command="#gdata-go-to-drive"></menuitem>
-      <menuitem command="#gdata-help"></menuitem>
+      <menuitem command="#drive-buy-more-space"></menuitem>
+      <menuitem command="#drive-go-to-drive"></menuitem>
+      <menuitem command="#volume-help"></menuitem>
     </menu>
 
     <menu id="tasks-menu" class="chrome-menu">
@@ -205,18 +208,6 @@
         <menuitem command="#copy"></menuitem>
         <menuitem command="#paste"></menuitem>
         <menuitem command="#delete"></menuitem>
-    </menu>
-
-    <menu id="downloads-root-context-menu" class="chrome-menu">
-      <div id="downloads-space-info" disabled>
-        <span id="downloads-space-info-label"
-            i18n-content=WAITING_FOR_SPACE_INFO
-            ></span>
-        <div>
-          <div id="downloads-space-info-bar" style="width:100%" pending></div>
-        </div>
-      </div>
-      <menuitem command="#files-app-help"></menuitem>
     </menu>
 
     <div class=dialog-title invisibleif="full-page">[TITLE]</div>
@@ -230,7 +221,6 @@
           <div id="dir-breadcrumbs" class="breadcrumbs"></div>
           <input id="search-box" type="search" tabindex="9"
               i18n-values="aria-label:SEARCH_TEXT_LABEL">
-
           <div class="right buttonbar">
             <div>
               <button class="left small" id="detail-view" tabindex="10"
@@ -246,15 +236,19 @@
               <div class="tooltip" i18n-content=THUMBNAIL_VIEW_TOOLTIP
                    >[THUMBNAIL VIEW]</div>
             </div>
-            <button class="menubutton" id="gdata-settings" tabindex="12"
-                    menu="#docs-settings" visibleif="full-page">
+            <button class="menubutton" id="gear-button" tabindex="12"
+                    menu="#gear-menu" visibleif="full-page">
               <span class="disclosureindicator"></span>
             </button>
           </div>
 
         </div>
-        <div class="gdrive-welcome header"></div>
-        <div class="gdrive-space-warning" hidden></div>
+        <div class="drive-welcome header"></div>
+        <div class="volume-warning" id="volume-space-warning" hidden></div>
+        <div class="volume-warning" id="drive-auth-failed-warning" hidden>
+          <div class="drive-icon"></div>
+          <div class="drive-text" id="drive-auth-failed-warning-text"></div>
+        </div>
         <div class=dialog-body>
           <div class=filelist-panel>
             <div id="list-container">
@@ -263,7 +257,7 @@
               <div id="spinner-container">
                 <div id="spinner-with-text"></div>
               </div>
-              <div class="gdrive-welcome page"></div>
+              <div class="drive-welcome page"></div>
               <div id="no-search-results"></div>
             </div>
             <div class=downloads-warning hidden></div>
@@ -272,7 +266,7 @@
             <div>
               <div class="preview-thumbnails"></div>
             </div>
-            <div id="preview-lines"> 
+            <div id="preview-lines">
               <div class="preview-summary">
                 <span class="preview-text"></span>
                 <span class="calculating-size" hidden></span>

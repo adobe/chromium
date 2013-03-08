@@ -7,9 +7,10 @@
 #include "chrome/browser/favicon/favicon_handler.h"
 #include "chrome/browser/favicon/favicon_service_factory.h"
 #include "chrome/browser/favicon/favicon_util.h"
-#include "chrome/browser/history/history.h"
+#include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/search/search.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/favicon_status.h"
@@ -36,7 +37,8 @@ DEFINE_WEB_CONTENTS_USER_DATA_KEY(FaviconTabHelper);
 
 FaviconTabHelper::FaviconTabHelper(WebContents* web_contents)
     : content::WebContentsObserver(web_contents),
-      profile_(Profile::FromBrowserContext(web_contents->GetBrowserContext())) {
+      profile_(Profile::FromBrowserContext(web_contents->GetBrowserContext())),
+      should_fetch_icons_(true) {
   favicon_handler_.reset(new FaviconHandler(profile_, this,
                                             FaviconHandler::FAVICON));
   if (chrome::kEnableTouchIcon)
@@ -48,6 +50,9 @@ FaviconTabHelper::~FaviconTabHelper() {
 }
 
 void FaviconTabHelper::FetchFavicon(const GURL& url) {
+  if (!should_fetch_icons_)
+    return;
+
   favicon_handler_->FetchFavicon(url);
   if (touch_icon_handler_.get())
     touch_icon_handler_->FetchFavicon(url);
@@ -85,6 +90,10 @@ bool FaviconTabHelper::ShouldDisplayFavicon() {
   const NavigationController& controller = web_contents()->GetController();
   if (controller.GetLastCommittedEntry() && controller.GetPendingEntry())
     return true;
+
+  // No favicon on Instant New Tab Pages.
+  if (chrome::search::IsInstantNTP(web_contents()))
+    return false;
 
   content::WebUI* web_ui = web_contents()->GetWebUIForCurrentState();
   if (web_ui)

@@ -6,7 +6,6 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/url_constants.h"
@@ -26,7 +25,8 @@ static const char kScriptClickOptionButton[] =
 // Test that an extension with an options page makes an 'Options' button appear
 // on chrome://extensions, and that clicking the button opens a new tab with the
 // extension's options page.
-IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, OptionsPage) {
+// Disabled because of flakiness. See http://crbug.com/174934.
+IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, DISABLED_OptionsPage) {
   ExtensionService* service = extensions::ExtensionSystem::Get(
       browser()->profile())->extension_service();
   size_t installed_extensions = service->extensions()->size();

@@ -9,7 +9,6 @@
 #include "base/bind.h"
 #include "base/environment.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/extensions/image_loader.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/shell_integration.h"
 #include "chrome/browser/shell_integration_linux.h"
@@ -21,6 +20,7 @@
 #include "chrome/browser/ui/web_applications/web_app_ui.h"
 #include "chrome/browser/ui/webui/extensions/extension_icon_source.h"
 #include "chrome/browser/web_applications/web_app.h"
+#include "chrome/common/extensions/api/icons/icons_handler.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_resource.h"
 #include "content/public/browser/browser_thread.h"
@@ -32,8 +32,9 @@
 #include "grit/theme_resources.h"
 #include "ui/base/gtk/gtk_hig_constants.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/gtk_util.h"
+#include "ui/gfx/image/image_skia.h"
+#include "ui/gfx/image/image_skia_rep.h"
 
 using content::BrowserThread;
 using extensions::Extension;
@@ -42,6 +43,9 @@ namespace {
 
 // Size (in pixels) of the icon preview.
 const int kIconPreviewSizePixels = 32;
+
+// Minimum width (in pixels) of the shortcut description label.
+const int kDescriptionLabelMinimumWidthPixels = 200;
 
 // Height (in lines) of the shortcut description label.
 const int kDescriptionLabelHeightLines = 3;
@@ -80,18 +84,43 @@ CreateApplicationShortcutsDialogGtk::CreateApplicationShortcutsDialogGtk(
 
 void CreateApplicationShortcutsDialogGtk::CreateIconPixBuf(
     const gfx::Image& image) {
-  // Prepare the icon. Try to scale it if it's too small, otherwise it would
-  // look weird.
-  GdkPixbuf* pixbuf =
-      static_cast<GdkPixbuf*>(g_object_ref(image.ToGdkPixbuf()));
+  const gfx::ImageSkia& image_skia = *(image.ToImageSkia());
+  std::vector<gfx::ImageSkiaRep> image_reps = image_skia.image_reps();
+  // Find the smallest icon bigger or equal to the desired size. If it cannot be
+  // found, find the biggest icon smaller than the desired size.
+  const gfx::ImageSkiaRep* smallest_larger = NULL;
+  const gfx::ImageSkiaRep* largest_smaller = NULL;
+  for (std::vector<gfx::ImageSkiaRep>::const_iterator it = image_reps.begin();
+       it != image_reps.end(); ++it) {
+    if (it->pixel_width() >= kIconPreviewSizePixels) {
+      if (!smallest_larger ||
+          it->pixel_width() < smallest_larger->pixel_width()) {
+        smallest_larger = &*it;
+      }
+    } else {
+      if (!largest_smaller ||
+          it->pixel_width() > largest_smaller->pixel_width()) {
+        largest_smaller = &*it;
+      }
+    }
+  }
+  GdkPixbuf* pixbuf;
+  if (smallest_larger) {
+    pixbuf = gfx::GdkPixbufFromSkBitmap(smallest_larger->sk_bitmap());
+  } else if (largest_smaller) {
+    pixbuf = gfx::GdkPixbufFromSkBitmap(largest_smaller->sk_bitmap());
+  } else {
+    // Should never happen unless the image has no representations. Call
+    // ToGdkPixbuf which will presumably return a null image representation.
+    pixbuf = static_cast<GdkPixbuf*>(g_object_ref(image.ToGdkPixbuf()));
+  }
+  // Prepare the icon. Scale it to the correct size to display in the dialog.
   int pixbuf_width = gdk_pixbuf_get_width(pixbuf);
   int pixbuf_height = gdk_pixbuf_get_height(pixbuf);
-  if (pixbuf_width == pixbuf_height && pixbuf_width < kIconPreviewSizePixels) {
+  if (pixbuf_width == pixbuf_height) {
     // Only scale the pixbuf if it's a square (for simplicity).
     // Generally it should be square, if it's a favicon or app icon.
-    // Use the highest quality interpolation. The scaling is
-    // going to have low quality anyway, because the initial image
-    // is likely small.
+    // Use the highest quality interpolation.
     favicon_pixbuf_ = gdk_pixbuf_scale_simple(pixbuf,
                                               kIconPreviewSizePixels,
                                               kIconPreviewSizePixels,
@@ -151,6 +180,10 @@ void CreateApplicationShortcutsDialogGtk::CreateDialogBox(GtkWindow* parent) {
       IDS_CREATE_SHORTCUTS_DIALOG_WIDTH_CHARS, -1, &label_width, NULL);
   label_width -= ui::kControlSpacing * 3 +
       gdk_pixbuf_get_width(favicon_pixbuf_);
+  // Enforce a minimum width, so that very large icons do not cause the label
+  // width to shrink to unreadable size, or become negative (which would crash).
+  if (label_width < kDescriptionLabelMinimumWidthPixels)
+    label_width = kDescriptionLabelMinimumWidthPixels;
   gtk_util::SetLabelWidth(description_label, label_width);
 
   std::string description(UTF16ToUTF8(shortcut_info_.description));
@@ -201,14 +234,14 @@ void CreateApplicationShortcutsDialogGtk::OnCreateDialogResponse(
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   if (response == GTK_RESPONSE_ACCEPT) {
-    shortcut_info_.create_on_desktop =
+    ShellIntegration::ShortcutLocations creation_locations;
+    creation_locations.on_desktop =
         gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(desktop_checkbox_));
-    shortcut_info_.create_in_applications_menu =
+    creation_locations.in_applications_menu =
         gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(menu_checkbox_));
     BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
         base::Bind(&CreateApplicationShortcutsDialogGtk::CreateDesktopShortcut,
-                   this,
-                   shortcut_info_));
+                   this, shortcut_info_, creation_locations));
 
     OnCreatedShortcut();
   } else {
@@ -222,7 +255,8 @@ void CreateApplicationShortcutsDialogGtk::OnErrorDialogResponse(
 }
 
 void CreateApplicationShortcutsDialogGtk::CreateDesktopShortcut(
-    const ShellIntegration::ShortcutInfo& shortcut_info) {
+    const ShellIntegration::ShortcutInfo& shortcut_info,
+    const ShellIntegration::ShortcutLocations& creation_locations) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
 
   scoped_ptr<base::Environment> env(base::Environment::Create());
@@ -231,6 +265,7 @@ void CreateApplicationShortcutsDialogGtk::CreateDesktopShortcut(
   if (ShellIntegrationLinux::GetDesktopShortcutTemplate(env.get(),
                                                         &shortcut_template)) {
     ShellIntegrationLinux::CreateDesktopShortcut(shortcut_info,
+                                                 creation_locations,
                                                  shortcut_template);
     Release();
   } else {
@@ -319,46 +354,29 @@ CreateChromeApplicationShortcutsDialogGtk::
         app_(app),
         profile_path_(profile->GetPath())  {
 
-  // Get shortcut information now, it's needed for our UI.
-  web_app::UpdateShortcutInfoForApp(*app, profile, &shortcut_info_);
-
-  // Get the icon.
-  const gfx::Size max_size(kIconPreviewSizePixels, kIconPreviewSizePixels);
-  ExtensionResource icon_resource = app_->GetIconResource(
-      kIconPreviewSizePixels, ExtensionIconSet::MATCH_BIGGER);
-
-  // If no icon exists that is the desired size or larger, get the
-  // largest icon available:
-  if (icon_resource.empty())
-    icon_resource = app_->GetIconResource(
-        kIconPreviewSizePixels, ExtensionIconSet::MATCH_SMALLER);
-
-  // Load icon asynchronously
-  extensions::ImageLoader* loader = extensions::ImageLoader::Get(profile);
-  loader->LoadImageAsync(app_, icon_resource, max_size,
-      base::Bind(&CreateChromeApplicationShortcutsDialogGtk::OnImageLoaded,
-                 this));
+  // Get shortcut information and icon now; they are needed for our UI.
+  web_app::UpdateShortcutInfoAndIconForApp(
+      *app, profile,
+      base::Bind(
+          &CreateChromeApplicationShortcutsDialogGtk::OnShortcutInfoLoaded,
+          this));
 }
 
-// Called when the app's icon is loaded.
-void CreateChromeApplicationShortcutsDialogGtk::OnImageLoaded(
-    const gfx::Image& image) {
-  if (image.IsEmpty()) {
-    shortcut_info_.favicon =
-        ResourceBundle::GetSharedInstance().GetImageNamed(IDR_APP_DEFAULT_ICON);
-  } else {
-    shortcut_info_.favicon = image;
-  }
+// Called when the app's ShortcutInfo (with icon) is loaded.
+void CreateChromeApplicationShortcutsDialogGtk::OnShortcutInfoLoaded(
+  const ShellIntegration::ShortcutInfo& shortcut_info) {
+  shortcut_info_ = shortcut_info;
 
   CreateIconPixBuf(shortcut_info_.favicon);
   CreateDialogBox(parent_);
 }
 
 void CreateChromeApplicationShortcutsDialogGtk::CreateDesktopShortcut(
-    const ShellIntegration::ShortcutInfo& shortcut_info) {
+    const ShellIntegration::ShortcutInfo& shortcut_info,
+    const ShellIntegration::ShortcutLocations& creation_locations) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
 
-  if (web_app::CreateShortcutsOnFileThread(shortcut_info)) {
+  if (web_app::CreateShortcutsOnFileThread(shortcut_info, creation_locations)) {
     Release();
   } else {
     BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,

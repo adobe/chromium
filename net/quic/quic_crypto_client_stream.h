@@ -7,6 +7,7 @@
 
 #include <string>
 
+#include "net/quic/crypto/crypto_handshake.h"
 #include "net/quic/quic_crypto_stream.h"
 
 namespace net {
@@ -17,7 +18,7 @@ struct CryptoHandshakeMessage;
 class NET_EXPORT_PRIVATE QuicCryptoClientStream : public QuicCryptoStream {
 
  public:
-  explicit QuicCryptoClientStream(QuicSession* session);
+  QuicCryptoClientStream(QuicSession* session, const string& server_hostname);
 
   // CryptoFramerVisitorInterface implementation
   virtual void OnHandshakeMessage(
@@ -28,9 +29,11 @@ class NET_EXPORT_PRIVATE QuicCryptoClientStream : public QuicCryptoStream {
   bool CryptoConnect();
 
  private:
-  QuicClientCryptoConfig client_crypto_config_;
+  QuicCryptoClientConfig crypto_config_;
   // Client's connection nonce (4-byte timestamp + 28 random bytes)
   std::string nonce_;
+  // Server's hostname
+  std::string server_hostname_;
 
   DISALLOW_COPY_AND_ASSIGN(QuicCryptoClientStream);
 };

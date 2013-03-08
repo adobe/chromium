@@ -7,7 +7,7 @@
 #include "chrome/browser/net/url_request_mock_util.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
-#include "chrome/browser/ui/browser_tabstrip.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/web_contents.h"
@@ -29,10 +29,10 @@ class ErrorPageTest : public InProcessBrowserTest {
   };
 
   // Navigates the active tab to a mock url created for the file at |file_path|.
-  void NavigateToFileURL(const FilePath::StringType& file_path) {
+  void NavigateToFileURL(const base::FilePath::StringType& file_path) {
     ui_test_utils::NavigateToURL(
         browser(),
-        content::URLRequestMockHTTPJob::GetMockUrl(FilePath(file_path)));
+        content::URLRequestMockHTTPJob::GetMockUrl(base::FilePath(file_path)));
   }
 
   // Navigates to the given URL and waits for |num_navigations| to occur, and
@@ -41,7 +41,7 @@ class ErrorPageTest : public InProcessBrowserTest {
                                     const std::string& expected_title,
                                     int num_navigations) {
     content::TitleWatcher title_watcher(
-        chrome::GetActiveWebContents(browser()),
+        browser()->tab_strip_model()->GetActiveWebContents(),
         ASCIIToUTF16(expected_title));
 
     ui_test_utils::NavigateToURLBlockUntilNavigationsComplete(
@@ -69,7 +69,7 @@ class ErrorPageTest : public InProcessBrowserTest {
   }
 
  protected:
-  void SetUpOnMainThread() OVERRIDE {
+  virtual void SetUpOnMainThread() OVERRIDE {
     BrowserThread::PostTask(
         BrowserThread::IO, FROM_HERE,
         base::Bind(&chrome_browser_net::SetUrlRequestMocksEnabled, true));
@@ -87,12 +87,13 @@ class ErrorPageTest : public InProcessBrowserTest {
                                       int num_navigations,
                                       HistoryNavigationDirection direction) {
     content::TitleWatcher title_watcher(
-        chrome::GetActiveWebContents(browser()),
+        browser()->tab_strip_model()->GetActiveWebContents(),
         ASCIIToUTF16(expected_title));
 
     content::TestNavigationObserver test_navigation_observer(
         content::Source<NavigationController>(
-              &chrome::GetActiveWebContents(browser())->GetController()),
+              &browser()->tab_strip_model()->GetActiveWebContents()->
+                  GetController()),
         NULL,
         num_navigations);
     if (direction == HISTORY_NAVIGATE_BACK) {
@@ -202,7 +203,7 @@ IN_PROC_BROWSER_TEST_F(ErrorPageTest, DNSError_GoBack2Forward2) {
 IN_PROC_BROWSER_TEST_F(ErrorPageTest, IFrameDNSError_Basic) {
   NavigateToURLAndWaitForTitle(
       content::URLRequestMockHTTPJob::GetMockUrl(
-          FilePath(FILE_PATH_LITERAL("iframe_dns_error.html"))),
+          base::FilePath(FILE_PATH_LITERAL("iframe_dns_error.html"))),
       "Blah",
       1);
 }
@@ -240,7 +241,7 @@ IN_PROC_BROWSER_TEST_F(ErrorPageTest, MAYBE_IFrameDNSError_GoBackAndForward) {
 IN_PROC_BROWSER_TEST_F(ErrorPageTest, Page404) {
   NavigateToURLAndWaitForTitle(
       content::URLRequestMockHTTPJob::GetMockUrl(
-          FilePath(FILE_PATH_LITERAL("page404.html"))),
+          base::FilePath(FILE_PATH_LITERAL("page404.html"))),
       "SUCCESS",
       1);
 }

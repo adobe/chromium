@@ -9,17 +9,17 @@
 #include <vector>
 
 #include "base/compiler_specific.h"
-#include "base/file_path.h"
-#include "base/string_number_conversions.h"
+#include "base/files/file_path.h"
+#include "base/strings/string_number_conversions.h"
 #include "chrome/common/automation_constants.h"
 #include "chrome/common/automation_id.h"
 #include "ui/base/keycodes/keyboard_codes.h"
 
 class AutomationMessageSender;
-class FilePath;
 
 namespace base {
 class DictionaryValue;
+class FilePath;
 class ListValue;
 class Value;
 }
@@ -244,7 +244,7 @@ bool SendReloadJSONRequest(
 bool SendCaptureEntirePageJSONRequest(
     AutomationMessageSender* sender,
     const WebViewLocator& locator,
-    const FilePath& path,
+    const base::FilePath& path,
     automation::Error* error) WARN_UNUSED_RESULT;
 
 #if !defined(NO_TCMALLOC) && (defined(OS_LINUX) || defined(OS_CHROMEOS))
@@ -410,7 +410,7 @@ bool SendDragAndDropFilePathsJSONRequest(
     const WebViewLocator& locator,
     int x,
     int y,
-    const std::vector<FilePath::StringType>& paths,
+    const std::vector<base::FilePath::StringType>& paths,
     automation::Error* error) WARN_UNUSED_RESULT;
 
 // Requests to set the given view's bounds. Returns true on success.
@@ -466,7 +466,7 @@ bool SendGetChromeDriverAutomationVersion(
 // the extension will be installed silently. Returns true on success.
 bool SendInstallExtensionJSONRequest(
     AutomationMessageSender* sender,
-    const FilePath& path,
+    const base::FilePath& path,
     bool with_ui,
     std::string* extension_id,
     automation::Error* error) WARN_UNUSED_RESULT;

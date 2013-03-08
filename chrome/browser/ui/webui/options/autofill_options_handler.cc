@@ -11,7 +11,7 @@
 #include "base/guid.h"
 #include "base/logging.h"
 #include "base/string16.h"
-#include "base/string_number_conversions.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/autofill/autofill_country.h"
@@ -21,80 +21,48 @@
 #include "chrome/browser/autofill/personal_data_manager_factory.h"
 #include "chrome/browser/autofill/phone_number_i18n.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/autofill/country_combobox_model.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/web_ui.h"
 #include "grit/generated_resources.h"
-#include "grit/webkit_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/webui/web_ui_util.h"
 
 namespace {
 
-// Converts a credit card type to the appropriate resource ID of the CC icon.
-int CreditCardTypeToResourceID(const std::string& type) {
-  if (type == kAmericanExpressCard)
-    return IDR_AUTOFILL_CC_AMEX;
-  else if (type == kDinersCard)
-    return IDR_AUTOFILL_CC_DINERS;
-  else if (type == kDiscoverCard)
-    return IDR_AUTOFILL_CC_DISCOVER;
-  else if (type == kGenericCard)
-    return IDR_AUTOFILL_CC_GENERIC;
-  else if (type == kJCBCard)
-    return IDR_AUTOFILL_CC_JCB;
-  else if (type == kMasterCard)
-    return IDR_AUTOFILL_CC_MASTERCARD;
-  else if (type == kSoloCard)
-    return IDR_AUTOFILL_CC_SOLO;
-  else if (type == kVisaCard)
-    return IDR_AUTOFILL_CC_VISA;
-
-  NOTREACHED();
-  return 0;
-}
-
-// Converts a credit card type to the appropriate localized card type.
-string16 LocalizedCreditCardType(const std::string& type) {
-  if (type == kAmericanExpressCard)
-    return l10n_util::GetStringUTF16(IDS_AUTOFILL_CC_AMEX);
-  else if (type == kDinersCard)
-    return l10n_util::GetStringUTF16(IDS_AUTOFILL_CC_DINERS);
-  else if (type == kDiscoverCard)
-    return l10n_util::GetStringUTF16(IDS_AUTOFILL_CC_DISCOVER);
-  else if (type == kGenericCard)
-    return l10n_util::GetStringUTF16(IDS_AUTOFILL_CC_GENERIC);
-  else if (type == kJCBCard)
-    return l10n_util::GetStringUTF16(IDS_AUTOFILL_CC_JCB);
-  else if (type == kMasterCard)
-    return l10n_util::GetStringUTF16(IDS_AUTOFILL_CC_MASTERCARD);
-  else if (type == kSoloCard)
-    return l10n_util::GetStringUTF16(IDS_AUTOFILL_CC_SOLO);
-  else if (type == kVisaCard)
-    return l10n_util::GetStringUTF16(IDS_AUTOFILL_CC_VISA);
-
-  NOTREACHED();
-  return string16();
-}
-
-// Returns a dictionary that maps country codes to data for the country.
-DictionaryValue* GetCountryData() {
+// Sets data related to the country <select>.
+void SetCountryData(DictionaryValue* localized_strings) {
   std::string app_locale = AutofillCountry::ApplicationLocale();
-  std::vector<std::string> country_codes;
-  AutofillCountry::GetAvailableCountries(&country_codes);
+  std::string default_country_code =
+      AutofillCountry::CountryCodeForLocale(app_locale);
+  localized_strings->SetString("defaultCountryCode", default_country_code);
 
-  DictionaryValue* country_data = new DictionaryValue();
-  for (size_t i = 0; i < country_codes.size(); ++i) {
-    const AutofillCountry country(country_codes[i], app_locale);
+  autofill::CountryComboboxModel model;
+  const std::vector<AutofillCountry*>& countries = model.countries();
 
-    DictionaryValue* details = new DictionaryValue();
-    details->SetString("name", country.name());
-    details->SetString("postalCodeLabel", country.postal_code_label());
-    details->SetString("stateLabel", country.state_label());
+  // An ordered list of options to show in the <select>.
+  scoped_ptr<ListValue> country_list(new ListValue());
+  // A dictionary of postal code and state info, keyed on country code.
+  scoped_ptr<DictionaryValue> country_data(new DictionaryValue());
+  for (size_t i = 0; i < countries.size(); ++i) {
+    scoped_ptr<DictionaryValue> option_details(new DictionaryValue());
+    option_details->SetString("name", model.GetItemAt(i));
+    option_details->SetString(
+        "value",
+        countries[i] ? countries[i]->country_code() : "separator");
+    country_list->Append(option_details.release());
 
-    country_data->Set(country.country_code(), details);
+    if (!countries[i])
+      continue;
+
+    scoped_ptr<DictionaryValue> details(new DictionaryValue());
+    details->SetString("postalCodeLabel", countries[i]->postal_code_label());
+    details->SetString("stateLabel", countries[i]->state_label());
+    country_data->Set(countries[i]->country_code(), details.release());
+
   }
-
-  return country_data;
+  localized_strings->Set("autofillCountrySelectList", country_list.release());
+  localized_strings->Set("autofillCountryData", country_data.release());
 }
 
 // Get the multi-valued element for |type| and return it in |ListValue| form.
@@ -308,7 +276,7 @@ void AutofillOptionsHandler::InitializeHandler() {
       Profile::FromWebUI(web_ui()));
   // personal_data_ is NULL in guest mode on Chrome OS.
   if (personal_data_)
-    personal_data_->SetObserver(this);
+    personal_data_->AddObserver(this);
 }
 
 void AutofillOptionsHandler::InitializePage() {
@@ -382,12 +350,7 @@ void AutofillOptionsHandler::SetAddressOverlayStrings(
       l10n_util::GetStringUTF16(IDS_AUTOFILL_FIELD_LABEL_ADD_PHONE));
   localized_strings->SetString("autofillAddEmailPlaceholder",
       l10n_util::GetStringUTF16(IDS_AUTOFILL_FIELD_LABEL_ADD_EMAIL));
-
-  std::string app_locale = AutofillCountry::ApplicationLocale();
-  std::string default_country_code =
-      AutofillCountry::CountryCodeForLocale(app_locale);
-  localized_strings->SetString("defaultCountryCode", default_country_code);
-  localized_strings->Set("autofillCountryData", GetCountryData());
+  SetCountryData(localized_strings);
 }
 
 void AutofillOptionsHandler::SetCreditCardOverlayStrings(
@@ -422,13 +385,14 @@ void AutofillOptionsHandler::LoadAutofillData() {
   for (std::vector<CreditCard*>::const_iterator i =
            personal_data_->credit_cards().begin();
        i != personal_data_->credit_cards().end(); ++i) {
+    const CreditCard* card = *i;
+    // TODO(estade): this should be a dictionary.
     ListValue* entry = new ListValue();
-    entry->Append(new StringValue((*i)->guid()));
-    entry->Append(new StringValue((*i)->Label()));
-    int res = CreditCardTypeToResourceID((*i)->type());
-    entry->Append(
-        new StringValue(webui::GetBitmapDataUrlFromResource(res)));
-    entry->Append(new StringValue(LocalizedCreditCardType((*i)->type())));
+    entry->Append(new StringValue(card->guid()));
+    entry->Append(new StringValue(card->Label()));
+    entry->Append(new StringValue(
+        webui::GetBitmapDataUrlFromResource(card->IconResourceId())));
+    entry->Append(new StringValue(card->TypeForDisplay()));
     credit_cards.Append(entry);
   }
 

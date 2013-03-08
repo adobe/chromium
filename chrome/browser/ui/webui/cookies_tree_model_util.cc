@@ -8,9 +8,9 @@
 
 #include "base/i18n/time_formatting.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/string_number_conversions.h"
-#include "base/string_split.h"
 #include "base/string_util.h"
+#include "base/strings/string_number_conversions.h"
+#include "base/strings/string_split.h"
 #include "base/values.h"
 #include "chrome/browser/browsing_data/cookies_tree_model.h"
 #include "grit/generated_resources.h"
@@ -60,6 +60,8 @@ std::string ClientCertTypeToString(net::SSLClientCertType type) {
   switch (type) {
     case net::CLIENT_CERT_RSA_SIGN:
       return l10n_util::GetStringUTF8(IDS_CLIENT_CERT_RSA_SIGN);
+    case net::CLIENT_CERT_DSS_SIGN:
+      return l10n_util::GetStringUTF8(IDS_CLIENT_CERT_DSS_SIGN);
     case net::CLIENT_CERT_ECDSA_SIGN:
       return l10n_util::GetStringUTF8(IDS_CLIENT_CERT_ECDSA_SIGN);
     default:

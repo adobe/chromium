@@ -7,7 +7,7 @@
 #include "base/string_util.h"
 #include "content/shell/resource.h"
 #include "content/shell/shell.h"
-#include "content/shell/shell_javascript_dialog_creator.h"
+#include "content/shell/shell_javascript_dialog_manager.h"
 
 namespace content {
 
@@ -19,7 +19,7 @@ INT_PTR CALLBACK ShellJavaScriptDialog::DialogProc(HWND dialog,
                                                    LPARAM lparam) {
   switch (message) {
     case WM_INITDIALOG: {
-      SetWindowLongPtr(dialog, DWL_USER, static_cast<LONG_PTR>(lparam));
+      SetWindowLongPtr(dialog, DWLP_USER, static_cast<LONG_PTR>(lparam));
       ShellJavaScriptDialog* owner =
           reinterpret_cast<ShellJavaScriptDialog*>(lparam);
       owner->dialog_win_ = dialog;
@@ -31,17 +31,17 @@ INT_PTR CALLBACK ShellJavaScriptDialog::DialogProc(HWND dialog,
     }
     case WM_DESTROY: {
       ShellJavaScriptDialog* owner = reinterpret_cast<ShellJavaScriptDialog*>(
-          GetWindowLongPtr(dialog, DWL_USER));
+          GetWindowLongPtr(dialog, DWLP_USER));
       if (owner->dialog_win_) {
         owner->dialog_win_ = 0;
         owner->callback_.Run(false, string16());
-        owner->creator_->DialogClosed(owner);
+        owner->manager_->DialogClosed(owner);
       }
       break;
     }
     case WM_COMMAND: {
       ShellJavaScriptDialog* owner = reinterpret_cast<ShellJavaScriptDialog*>(
-          GetWindowLongPtr(dialog, DWL_USER));
+          GetWindowLongPtr(dialog, DWLP_USER));
       string16 user_input;
       bool finish = false;
       bool result;
@@ -50,7 +50,7 @@ INT_PTR CALLBACK ShellJavaScriptDialog::DialogProc(HWND dialog,
           finish = true;
           result = true;
           if (owner->message_type_ == JAVASCRIPT_MESSAGE_TYPE_PROMPT) {
-            size_t length =
+            int length =
                 GetWindowTextLength(GetDlgItem(dialog, IDC_PROMPTEDIT)) + 1;
             GetDlgItemText(dialog, IDC_PROMPTEDIT,
                            WriteInto(&user_input, length), length);
@@ -65,7 +65,7 @@ INT_PTR CALLBACK ShellJavaScriptDialog::DialogProc(HWND dialog,
         owner->dialog_win_ = 0;
         owner->callback_.Run(result, user_input);
         DestroyWindow(dialog);
-        owner->creator_->DialogClosed(owner);
+        owner->manager_->DialogClosed(owner);
       }
       break;
     }
@@ -76,13 +76,13 @@ INT_PTR CALLBACK ShellJavaScriptDialog::DialogProc(HWND dialog,
 }
 
 ShellJavaScriptDialog::ShellJavaScriptDialog(
-    ShellJavaScriptDialogCreator* creator,
+    ShellJavaScriptDialogManager* manager,
     gfx::NativeWindow parent_window,
     JavaScriptMessageType message_type,
     const string16& message_text,
     const string16& default_prompt_text,
-    const JavaScriptDialogCreator::DialogClosedCallback& callback)
-    : creator_(creator),
+    const JavaScriptDialogManager::DialogClosedCallback& callback)
+    : manager_(manager),
       callback_(callback),
       message_text_(message_text),
       default_prompt_text_(default_prompt_text),

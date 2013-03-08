@@ -4,14 +4,14 @@
 
 #include "base/file_util.h"
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 
 #include <errno.h>
 #include <sys/vfs.h>
 
 namespace file_util {
 
-bool GetFileSystemType(const FilePath& path, FileSystemType* type) {
+bool GetFileSystemType(const base::FilePath& path, FileSystemType* type) {
   struct statfs statfs_buf;
   if (statfs(path.value().c_str(), &statfs_buf) < 0) {
     if (errno == ENOENT)

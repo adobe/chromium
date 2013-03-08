@@ -45,13 +45,8 @@ class FakeInvalidatorTestDelegate {
   }
 
   void TriggerOnIncomingInvalidation(
-      const ObjectIdInvalidationMap& invalidation_map,
-      IncomingInvalidationSource source) {
-    invalidator_->EmitOnIncomingInvalidation(invalidation_map, source);
-  }
-
-  static bool InvalidatorHandlesDeprecatedState() {
-    return false;
+      const ObjectIdInvalidationMap& invalidation_map) {
+    invalidator_->EmitOnIncomingInvalidation(invalidation_map);
   }
 
  private:

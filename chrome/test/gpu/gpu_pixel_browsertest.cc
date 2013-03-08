@@ -3,17 +3,16 @@
 // found in the LICENSE file.
 
 #include "base/command_line.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/path_service.h"
-#include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
+#include "base/strings/string_number_conversions.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/window_snapshot/window_snapshot.h"
-#include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/test/base/in_process_browser_test.h"
@@ -22,6 +21,8 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_view.h"
+#include "content/public/common/content_paths.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/test/browser_test_utils.h"
 #include "googleurl/src/gurl.h"
@@ -53,16 +54,11 @@ const char kGeneratedDir[] = "generated-dir";
 // Command line flag for overriding the default location for reference images.
 const char kReferenceDir[] = "reference-dir";
 
-// Corner shadow size.
-const int kCornerDecorationSize = 15;
-// Side shadow size.
-const int kSideDecorationSize = 2;
-
 // Reads and decodes a PNG image to a bitmap. Returns true on success. The PNG
 // should have been encoded using |gfx::PNGCodec::Encode|.
-bool ReadPNGFile(const FilePath& file_path, SkBitmap* bitmap) {
+bool ReadPNGFile(const base::FilePath& file_path, SkBitmap* bitmap) {
   DCHECK(bitmap);
-  FilePath abs_path(file_path);
+  base::FilePath abs_path(file_path);
   if (!file_util::AbsolutePath(&abs_path))
     return false;
 
@@ -75,7 +71,7 @@ bool ReadPNGFile(const FilePath& file_path, SkBitmap* bitmap) {
 
 // Encodes a bitmap into a PNG and write to disk. Returns true on success. The
 // parent directory does not have to exist.
-bool WritePNGFile(const SkBitmap& bitmap, const FilePath& file_path) {
+bool WritePNGFile(const SkBitmap& bitmap, const base::FilePath& file_path) {
   std::vector<unsigned char> png_data;
   if (gfx::PNGCodec::EncodeBGRASkBitmap(bitmap, true, &png_data) &&
       file_util::CreateDirectory(file_path.DirName())) {
@@ -89,7 +85,7 @@ bool WritePNGFile(const SkBitmap& bitmap, const FilePath& file_path) {
 
 // Write an empty file, whose name indicates the chrome revision when the ref
 // image was generated.
-bool WriteREVFile(const FilePath& file_path) {
+bool WriteREVFile(const base::FilePath& file_path) {
   if (file_util::CreateDirectory(file_path.DirName())) {
     char one_byte = 0;
     int bytes_written = file_util::WriteFile(file_path, &one_byte, 1);
@@ -111,19 +107,19 @@ class GpuPixelBrowserTest : public InProcessBrowserTest {
         ref_img_option_(kReferenceImageNone) {
   }
 
-  virtual void SetUpCommandLine(CommandLine* command_line) {
+  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
     command_line->AppendSwitchASCII(switches::kTestGLLib,
                                     "libllvmpipe.so");
   }
 
-  virtual void SetUpInProcessBrowserTestFixture() {
+  virtual void SetUpInProcessBrowserTestFixture() OVERRIDE {
     InProcessBrowserTest::SetUpInProcessBrowserTestFixture();
 
     CommandLine* command_line = CommandLine::ForCurrentProcess();
     if (command_line->HasSwitch(switches::kUseGpuInTests))
       ref_img_option_ = kReferenceImageLocal;
 
-    ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &test_data_dir_));
+    ASSERT_TRUE(PathService::Get(content::DIR_TEST_DATA, &test_data_dir_));
     test_data_dir_ = test_data_dir_.AppendASCII("gpu");
 
     if (command_line->HasSwitch(kGeneratedDir))
@@ -158,7 +154,7 @@ class GpuPixelBrowserTest : public InProcessBrowserTest {
   // If the existing ref image was saved from an revision older than the
   // ref_img_update_revision, refresh the ref image.
   void RunPixelTest(const gfx::Size& tab_container_size,
-                    const FilePath& url,
+                    const base::FilePath& url,
                     int64 ref_img_update_revision,
                     const ReferencePixel* ref_pixels,
                     size_t ref_pixel_count) {
@@ -176,36 +172,10 @@ class GpuPixelBrowserTest : public InProcessBrowserTest {
     content::DOMMessageQueue message_queue;
     ui_test_utils::NavigateToURL(browser(), net::FilePathToFileURL(url));
 
-    // Wait for notification that page is loaded.
-    ASSERT_TRUE(message_queue.WaitForMessage(NULL));
-    message_queue.ClearQueue();
-
-    gfx::Rect new_bounds = GetNewTabContainerBounds(tab_container_size);
-
-    std::ostringstream js_call;
-    js_call << "preCallResizeInChromium(";
-    js_call << new_bounds.width() << ", " << new_bounds.height();
-    js_call << ");";
-
-    ASSERT_TRUE(content::ExecuteScript(
-        chrome::GetActiveWebContents(browser()), js_call.str()));
-
     std::string message;
+    // Wait for notification that page is loaded.
     ASSERT_TRUE(message_queue.WaitForMessage(&message));
-    message_queue.ClearQueue();
-    browser()->window()->SetBounds(new_bounds);
-
-    // Wait for message from test page indicating the rendering is done.
-    while (message.compare("\"resized\"")) {
-      ASSERT_TRUE(message_queue.WaitForMessage(&message));
-      message_queue.ClearQueue();
-    }
-
-    bool ignore_bottom_corners = false;
-#if defined(OS_MACOSX)
-    // On Mac Lion, bottom corners have shadows with random pixels.
-    ignore_bottom_corners = true;
-#endif
+    EXPECT_STREQ("\"SUCCESS\"", message.c_str()) << message;
 
     SkBitmap bitmap;
     ASSERT_TRUE(TabSnapShotToImage(&bitmap));
@@ -213,7 +183,7 @@ class GpuPixelBrowserTest : public InProcessBrowserTest {
     if (ref_img_option_ == kReferenceImageNone && ref_pixels && ref_pixel_count)
       same_pixels = ComparePixels(bitmap, ref_pixels, ref_pixel_count);
     else
-      same_pixels = CompareImages(bitmap, ignore_bottom_corners);
+      same_pixels = CompareImages(bitmap);
     EXPECT_TRUE(same_pixels);
 
 #if defined(OS_WIN)
@@ -226,14 +196,14 @@ class GpuPixelBrowserTest : public InProcessBrowserTest {
 #endif
   }
 
-  const FilePath& test_data_dir() const {
+  const base::FilePath& test_data_dir() const {
     return test_data_dir_;
   }
 
  private:
-  FilePath test_data_dir_;
-  FilePath generated_img_dir_;
-  FilePath ref_img_dir_;
+  base::FilePath test_data_dir_;
+  base::FilePath generated_img_dir_;
+  base::FilePath ref_img_dir_;
   int64 ref_img_revision_;
   // The name of the test, with any special prefixes dropped.
   std::string test_name_;
@@ -260,10 +230,10 @@ class GpuPixelBrowserTest : public InProcessBrowserTest {
   //     FAIL_<ref_image_name>, DIFF_<ref_image_name>
   // E.g.,
   //     FAIL_WebGLTeapot_19762.png, DIFF_WebGLTeapot_19762.png
-  bool CompareImages(const SkBitmap& gen_bmp, bool skip_bottom_corners) {
+  bool CompareImages(const SkBitmap& gen_bmp) {
     SkBitmap ref_bmp_on_disk;
 
-    FilePath img_path = ref_img_dir_.AppendASCII(test_name_ + ".png");
+    base::FilePath img_path = ref_img_dir_.AppendASCII(test_name_ + ".png");
     bool found_ref_img = ReadPNGFile(img_path, &ref_bmp_on_disk);
 
     if (!found_ref_img && ref_img_option_ == kReferenceImageCheckedIn) {
@@ -281,7 +251,7 @@ class GpuPixelBrowserTest : public InProcessBrowserTest {
     if ((ref_img_revision_ <= 0 && ref_img_option_ == kReferenceImageLocal) ||
         !found_ref_img) {
       chrome::VersionInfo chrome_version_info;
-      FilePath rev_path = ref_img_dir_.AppendASCII(
+      base::FilePath rev_path = ref_img_dir_.AppendASCII(
           test_name_ + "_" + chrome_version_info.LastChange() + ".rev");
       if (!WritePNGFile(gen_bmp, img_path)) {
         LOG(ERROR) << "Can't save generated image to: "
@@ -344,13 +314,6 @@ class GpuPixelBrowserTest : public InProcessBrowserTest {
       uint32_t kAlphaMask = 0x00FFFFFF;
       for (int x = 0; x < gen_bmp.width(); ++x) {
         for (int y = 0; y < gen_bmp.height(); ++y) {
-          if (skip_bottom_corners &&
-              (((x < kCornerDecorationSize ||
-                 x >= gen_bmp.width() - kCornerDecorationSize) &&
-                y >= gen_bmp.height() - kCornerDecorationSize) ||
-               (x < kSideDecorationSize ||
-                x >= gen_bmp.width() - kSideDecorationSize)))
-            continue;
           if ((*gen_bmp.getAddr32(x, y) & kAlphaMask) !=
               (*ref_bmp->getAddr32(x, y) & kAlphaMask)) {
             ++diff_pixels_count;
@@ -371,7 +334,7 @@ class GpuPixelBrowserTest : public InProcessBrowserTest {
 
     std::string ref_img_filename = img_path.BaseName().MaybeAsASCII();
     if (save_gen) {
-      FilePath img_fail_path = generated_img_dir_.AppendASCII(
+      base::FilePath img_fail_path = generated_img_dir_.AppendASCII(
           "FAIL_" + ref_img_filename);
       if (!WritePNGFile(gen_bmp, img_fail_path)) {
         LOG(ERROR) << "Can't save generated image to: "
@@ -382,7 +345,7 @@ class GpuPixelBrowserTest : public InProcessBrowserTest {
       }
     }
     if (save_diff) {
-      FilePath img_diff_path = generated_img_dir_.AppendASCII(
+      base::FilePath img_diff_path = generated_img_dir_.AppendASCII(
           "DIFF_" + ref_img_filename);
       if (!WritePNGFile(diff_bmp, img_diff_path)) {
         LOG(ERROR) << "Can't save generated diff image to: "
@@ -423,23 +386,6 @@ class GpuPixelBrowserTest : public InProcessBrowserTest {
     return true;
   }
 
-  // Returns a gfx::Rect representing the bounds that the browser window should
-  // have if the tab contents have the desired size.
-  gfx::Rect GetNewTabContainerBounds(const gfx::Size& desired_size) {
-    gfx::Rect container_rect;
-    chrome::GetActiveWebContents(browser())->GetContainerBounds(&container_rect);
-    // Size cannot be negative, so use a point.
-    gfx::Point correction(
-        desired_size.width() - container_rect.size().width(),
-        desired_size.height() - container_rect.size().height());
-
-    gfx::Rect window_rect = browser()->window()->GetRestoredBounds();
-    gfx::Size new_size = window_rect.size();
-    new_size.Enlarge(correction.x(), correction.y());
-    window_rect.set_size(new_size);
-    return window_rect;
-  }
-
   // Take snapshot of the current tab, encode it as PNG, and save to a SkBitmap.
   bool TabSnapShotToImage(SkBitmap* bitmap) {
     CHECK(bitmap);
@@ -447,8 +393,8 @@ class GpuPixelBrowserTest : public InProcessBrowserTest {
 
     gfx::Rect root_bounds = browser()->window()->GetBounds();
     gfx::Rect tab_contents_bounds;
-    chrome::GetActiveWebContents(browser())->GetContainerBounds(
-        &tab_contents_bounds);
+    browser()->tab_strip_model()->GetActiveWebContents()->GetView()->
+        GetContainerBounds(&tab_contents_bounds);
 
     gfx::Rect snapshot_bounds(tab_contents_bounds.x() - root_bounds.x(),
                               tab_contents_bounds.y() - root_bounds.y(),
@@ -472,15 +418,15 @@ class GpuPixelBrowserTest : public InProcessBrowserTest {
 
   // If no valid local revision file is located, the ref_img_revision_ is 0.
   void ObtainLocalRefImageRevision() {
-    FilePath filter;
+    base::FilePath filter;
     filter = filter.AppendASCII(test_name_ + "_*.rev");
     file_util::FileEnumerator locator(ref_img_dir_,
                                       false,  // non recursive
                                       file_util::FileEnumerator::FILES,
                                       filter.value());
     int64 max_revision = 0;
-    std::vector<FilePath> outdated_revs;
-    for (FilePath full_path = locator.Next();
+    std::vector<base::FilePath> outdated_revs;
+    for (base::FilePath full_path = locator.Next();
          !full_path.empty();
          full_path = locator.Next()) {
       std::string filename =
@@ -523,7 +469,7 @@ IN_PROC_BROWSER_TEST_F(GpuPixelBrowserTest, WebGLGreenTriangle) {
   const size_t ref_pixel_count = sizeof(ref_pixels) / sizeof(ReferencePixel);
 
   gfx::Size container_size(400, 300);
-  FilePath url =
+  base::FilePath url =
       test_data_dir().AppendASCII("pixel_webgl.html");
   RunPixelTest(container_size, url, ref_img_revision_update,
                ref_pixels, ref_pixel_count);
@@ -546,7 +492,7 @@ IN_PROC_BROWSER_TEST_F(GpuPixelBrowserTest, CSS3DBlueBox) {
   const size_t ref_pixel_count = sizeof(ref_pixels) / sizeof(ReferencePixel);
 
   gfx::Size container_size(400, 300);
-  FilePath url =
+  base::FilePath url =
       test_data_dir().AppendASCII("pixel_css3d.html");
   RunPixelTest(container_size, url, ref_img_revision_update,
                ref_pixels, ref_pixel_count);
@@ -567,7 +513,7 @@ IN_PROC_BROWSER_TEST_F(GpuPixelBrowserTest, Canvas2DRedBoxHD) {
   const size_t ref_pixel_count = sizeof(ref_pixels) / sizeof(ReferencePixel);
 
   gfx::Size container_size(400, 300);
-  FilePath url =
+  base::FilePath url =
       test_data_dir().AppendASCII("pixel_canvas2d.html");
   RunPixelTest(container_size, url, ref_img_revision_update,
                ref_pixels, ref_pixel_count);
@@ -575,7 +521,7 @@ IN_PROC_BROWSER_TEST_F(GpuPixelBrowserTest, Canvas2DRedBoxHD) {
 
 class Canvas2DPixelTestSD : public GpuPixelBrowserTest {
  public:
-  virtual void SetUpCommandLine(CommandLine* command_line) {
+  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
     GpuPixelBrowserTest::SetUpCommandLine(command_line);
     command_line->AppendSwitch(switches::kDisableAccelerated2dCanvas);
   }
@@ -596,7 +542,7 @@ IN_PROC_BROWSER_TEST_F(Canvas2DPixelTestSD, Canvas2DRedBoxSD) {
   const size_t ref_pixel_count = sizeof(ref_pixels) / sizeof(ReferencePixel);
 
   gfx::Size container_size(400, 300);
-  FilePath url =
+  base::FilePath url =
       test_data_dir().AppendASCII("pixel_canvas2d.html");
   RunPixelTest(container_size, url, ref_img_revision_update,
                ref_pixels, ref_pixel_count);

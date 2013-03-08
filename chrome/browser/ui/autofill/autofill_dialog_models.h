@@ -10,9 +10,12 @@
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
+#include "base/prefs/public/pref_change_registrar.h"
 #include "base/string16.h"
 #include "ui/base/models/combobox_model.h"
 #include "ui/base/models/simple_menu_model.h"
+
+class PrefService;
 
 namespace autofill {
 
@@ -38,8 +41,15 @@ class SuggestionsMenuModel : public ui::SimpleMenuModel,
   // Adds an item and its identifying key to the model. Keys needn't be unique.
   void AddKeyedItem(const std::string& key, const string16& display_label);
 
+  // Resets the model to empty.
+  void Reset();
+
   // Returns the ID key for the item at |index|.
   std::string GetItemKeyAt(int index) const;
+
+  // Returns the ID key for the item at |checked_item_|, or an empty string if
+  // there are no items.
+  std::string GetItemKeyForCheckedItem() const;
 
   int checked_item() { return checked_item_; }
 
@@ -63,6 +73,70 @@ class SuggestionsMenuModel : public ui::SimpleMenuModel,
   int checked_item_;
 
   DISALLOW_COPY_AND_ASSIGN(SuggestionsMenuModel);
+};
+
+// A delegate interface to allow the AccountChooserModel to inform its owner
+// of changes.
+class AccountChooserModelDelegate {
+ public:
+  virtual ~AccountChooserModelDelegate();
+
+  // Called when the active account has changed.
+  virtual void AccountChoiceChanged() = 0;
+};
+
+// A menu model for the account chooser. This allows users to switch between
+// using Wallet and local Autofill. TODO(estade): this should support multiple
+// Wallet accounts.
+class AccountChooserModel : public ui::SimpleMenuModel,
+                            public ui::SimpleMenuModel::Delegate {
+ public:
+  AccountChooserModel(AccountChooserModelDelegate* delegate,
+                      PrefService* prefs);
+  virtual ~AccountChooserModel();
+
+  // ui::SimpleMenuModel::Delegate implementation.
+  virtual bool IsCommandIdChecked(int command_id) const OVERRIDE;
+  virtual bool IsCommandIdEnabled(int command_id) const OVERRIDE;
+  virtual bool GetAcceleratorForCommandId(
+      int command_id,
+      ui::Accelerator* accelerator) OVERRIDE;
+  virtual void ExecuteCommand(int command_id) OVERRIDE;
+
+  // Should be called when the Wallet server returns an error.
+  void SetHadWalletError();
+
+  bool had_wallet_error() const { return had_wallet_error_; }
+
+  bool WalletIsSelected() const;
+
+  int checked_item() const { return checked_item_; }
+
+ private:
+  void PrefChanged(const std::string& pref);
+
+  // Sets |checked_item_| from the relevant pref.
+  void UpdateCheckmarkFromPref();
+
+  // Command IDs of the items in this menu. For now, we only support a single
+  // account, so there's only one wallet item.
+  static const int kWalletItemId;
+  static const int kAutofillItemId;
+
+  AccountChooserModelDelegate* account_delegate_;
+
+  PrefService* prefs_;
+
+  // The command id of the currently active item.
+  int checked_item_;
+
+  // Whether there has been a Wallet error while the owning dialog has been
+  // open.
+  bool had_wallet_error_;
+
+  PrefChangeRegistrar pref_change_registrar_;
+
+  DISALLOW_COPY_AND_ASSIGN(AccountChooserModel);
 };
 
 // A model for possible months in the Gregorian calendar.

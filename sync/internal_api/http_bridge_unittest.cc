@@ -16,7 +16,8 @@ namespace syncer {
 
 namespace {
 // TODO(timsteele): Should use PathService here. See Chromium Issue 3113.
-const FilePath::CharType kDocRoot[] = FILE_PATH_LITERAL("chrome/test/data");
+const base::FilePath::CharType kDocRoot[] =
+    FILE_PATH_LITERAL("chrome/test/data");
 }
 
 class SyncHttpBridgeTest : public testing::Test {
@@ -24,7 +25,7 @@ class SyncHttpBridgeTest : public testing::Test {
   SyncHttpBridgeTest()
       : test_server_(net::TestServer::TYPE_HTTP,
                      net::TestServer::kLocalhost,
-                     FilePath(kDocRoot)),
+                     base::FilePath(kDocRoot)),
         fake_default_request_context_getter_(NULL),
         bridge_for_race_test_(NULL),
         io_thread_("IO thread") {
@@ -123,7 +124,7 @@ class ShuntedHttpBridge : public HttpBridge {
               baseline_context_getter, "user agent")),
         test_(test), never_finishes_(never_finishes) { }
  protected:
-  virtual void MakeAsynchronousPost() {
+  virtual void MakeAsynchronousPost() OVERRIDE {
     ASSERT_TRUE(MessageLoop::current() == test_->GetIOThreadLoop());
     if (never_finishes_)
       return;
@@ -134,7 +135,7 @@ class ShuntedHttpBridge : public HttpBridge {
         base::Bind(&ShuntedHttpBridge::CallOnURLFetchComplete, this));
   }
  private:
-  ~ShuntedHttpBridge() {}
+  virtual ~ShuntedHttpBridge() {}
 
   void CallOnURLFetchComplete() {
     ASSERT_TRUE(MessageLoop::current() == test_->GetIOThreadLoop());

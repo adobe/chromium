@@ -10,9 +10,9 @@
 #include "base/lazy_instance.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/metrics/histogram.h"
-#include "base/string_number_conversions.h"
-#include "base/string_split.h"
 #include "base/string_util.h"
+#include "base/strings/string_number_conversions.h"
+#include "base/strings/string_split.h"
 #include "base/synchronization/lock.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
@@ -20,13 +20,13 @@
 #include "chrome/browser/printing/background_printing_manager.h"
 #include "chrome/browser/printing/print_preview_data_service.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/webui/chrome_url_data_manager.h"
-#include "chrome/browser/ui/webui/chrome_web_ui_data_source.h"
 #include "chrome/browser/ui/webui/print_preview/print_preview_handler.h"
 #include "chrome/browser/ui/webui/theme_source.h"
 #include "chrome/common/print_messages.h"
 #include "chrome/common/url_constants.h"
+#include "content/public/browser/url_data_source.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_ui_data_source.h"
 #include "grit/browser_resources.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
@@ -119,7 +119,7 @@ base::LazyInstance<IDMap<PrintPreviewUI> >
 // to return the markup or other resources for the print preview page itself.
 bool HandleRequestCallback(
     const std::string& path,
-    const ChromeWebUIDataSource::GotDataCallback& callback) {
+    const content::WebUIDataSource::GotDataCallback& callback) {
   // ChromeWebUIDataSource handles most requests except for the print preview
   // data.
   if (!EndsWith(path, "/print.pdf", true))
@@ -150,7 +150,7 @@ bool HandleRequestCallback(
 
 content::WebUIDataSource* CreatePrintPreviewUISource() {
   content::WebUIDataSource* source =
-      ChromeWebUIDataSource::Create(chrome::kChromeUIPrintHost);
+      content::WebUIDataSource::Create(chrome::kChromeUIPrintHost);
 #if defined(OS_CHROMEOS)
   source->AddLocalizedString("title",
                              IDS_PRINT_PREVIEW_GOOGLE_CLOUD_PRINT_TITLE);
@@ -256,6 +256,8 @@ content::WebUIDataSource* CreatePrintPreviewUISource() {
   source->AddLocalizedString(
       "optionBackgroundColorsAndImages",
       IDS_PRINT_PREVIEW_OPTION_BACKGROUND_COLORS_AND_IMAGES);
+  source->AddLocalizedString("optionSelectionOnly",
+                             IDS_PRINT_PREVIEW_OPTION_SELECTION_ONLY);
   source->AddLocalizedString("marginsLabel", IDS_PRINT_PREVIEW_MARGINS_LABEL);
   source->AddLocalizedString("defaultMargins",
                              IDS_PRINT_PREVIEW_DEFAULT_MARGINS);
@@ -344,14 +346,14 @@ PrintPreviewUI::PrintPreviewUI(content::WebUI* web_ui)
       id_(g_print_preview_ui_id_map.Get().Add(this)),
       handler_(NULL),
       source_is_modifiable_(true),
+      source_has_selection_(false),
       dialog_closed_(false) {
   // Set up the chrome://print/ data source.
   Profile* profile = Profile::FromWebUI(web_ui);
-  ChromeURLDataManager::AddWebUIDataSource(profile,
-                                           CreatePrintPreviewUISource());
+  content::WebUIDataSource::Add(profile, CreatePrintPreviewUISource());
 
   // Set up the chrome://theme/ source.
-  ChromeURLDataManager::AddDataSource(profile, new ThemeSource(profile));
+  content::URLDataSource::Add(profile, new ThemeSource(profile));
 
   // WebUI owns |handler_|.
   handler_ = new PrintPreviewHandler();
@@ -386,21 +388,22 @@ int PrintPreviewUI::GetAvailableDraftPageCount() {
   return print_preview_data_service()->GetAvailableDraftPageCount(id_);
 }
 
-void PrintPreviewUI::SetInitiatorTabURLAndTitle(
-    const std::string& initiator_url,
+void PrintPreviewUI::SetInitiatorTabTitle(
     const string16& job_title) {
-  initiator_url_ = initiator_url;
   initiator_tab_title_ = job_title;
 }
 
 // static
-void PrintPreviewUI::SetSourceIsModifiable(WebContents* print_preview_dialog,
-                                           bool source_is_modifiable) {
+void PrintPreviewUI::SetInitialParams(
+    content::WebContents* print_preview_dialog,
+    const PrintHostMsg_RequestPrintPreview_Params& params) {
   if (!print_preview_dialog || !print_preview_dialog->GetWebUI())
     return;
   PrintPreviewUI* print_preview_ui = static_cast<PrintPreviewUI*>(
       print_preview_dialog->GetWebUI()->GetController());
-  print_preview_ui->source_is_modifiable_ = source_is_modifiable;
+  print_preview_ui->source_is_modifiable_ = params.is_modifiable;
+  print_preview_ui->source_has_selection_ = params.has_selection;
+  print_preview_ui->print_selection_only_ = params.selection_only;
 }
 
 // static

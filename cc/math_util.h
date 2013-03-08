@@ -5,11 +5,19 @@
 #ifndef CC_MATH_UTIL_H_
 #define CC_MATH_UTIL_H_
 
+#include <cmath>
+
 #include "base/logging.h"
+#include "base/memory/scoped_ptr.h"
 #include "cc/cc_export.h"
 #include "ui/gfx/point_f.h"
 #include "ui/gfx/point3_f.h"
+#include "ui/gfx/size.h"
 #include "ui/gfx/transform.h"
+
+namespace base {
+class Value;
+}
 
 namespace gfx {
 class QuadF;
@@ -75,6 +83,9 @@ public:
     static float Deg2Rad(float deg)  { return deg * PI_FLOAT / 180; }
     static float Rad2Deg(float rad)  { return rad * 180 / PI_FLOAT; }
 
+    static float Round(float f)  { return (f > 0.f) ? std::floor(f + 0.5f) : std::ceil(f - 0.5f); }
+    static double Round(double d)  { return (d > 0.0) ? std::floor(d + 0.5) : std::ceil(d - 0.5); }
+
     // Background: Existing transform code does not do the right thing in
     // mapRect / mapQuad / projectQuad when there is a perspective projection that causes
     // one of the transformed vertices to go to w < 0. In those cases, it is necessary to
@@ -112,6 +123,17 @@ public:
 
     // Projects the |source| vector onto |destination|. Neither vector is assumed to be normalized.
     static gfx::Vector2dF projectVector(gfx::Vector2dF source, gfx::Vector2dF destination);
+
+    // Conversion to value.
+    static scoped_ptr<base::Value> asValue(gfx::Size s);
+    static scoped_ptr<base::Value> asValue(gfx::PointF q);
+    static scoped_ptr<base::Value> asValue(gfx::QuadF q);
+
+    // Returns a base::Value representation of the floating point value.
+    // If the value is inf, returns max double/float representation.
+    static scoped_ptr<base::Value> asValueSafely(double value);
+    static scoped_ptr<base::Value> asValueSafely(float value);
+
 };
 
 } // namespace cc

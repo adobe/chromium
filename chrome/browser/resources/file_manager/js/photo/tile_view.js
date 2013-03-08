@@ -4,6 +4,7 @@
 
 /**
  * Tile view displays images/videos tiles.
+ *
  * @param {HTMLDocument} document Document.
  * @param {function(TailBox, callback)} prepareBox This function should provide
  *     the passed box with width and height properties of the image.
@@ -383,7 +384,7 @@ TileView.drive.prepareBox = function(box, callback) {
     }
 
     // TODO(dgozman): remove this hack if we ask for larger thumbnails in
-    // gdata code.
+    // drive code.
     var thumbnailUrl = thumbnail.url.replace(/240$/, '512');
 
     box.image = new Image();
@@ -451,6 +452,7 @@ TileBox.decorate = function(self, view, entry) {
  * Sets box position according to the |rect| property and given sizes.
  * @param {number} margin Margin between cells.
  * @param {number} cellSize The size of one cell.
+ * @constructor
  */
 TileBox.setPositionFromRect = function(margin, cellSize) {
   this.style.top = margin + (cellSize + margin) * this.rect.row + 'px';

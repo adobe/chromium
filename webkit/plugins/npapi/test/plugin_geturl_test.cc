@@ -187,10 +187,10 @@ NPError PluginGetURLTest::NewStream(NPMIMEType type, NPStream* stream,
 #if defined(OS_WIN)
         filename = filename.substr(8);  // remove "file:///"
         // Assume an ASCII path on Windows.
-        FilePath path = FilePath(ASCIIToWide(filename));
+        base::FilePath path = base::FilePath(ASCIIToWide(filename));
 #else
         filename = filename.substr(7);  // remove "file://"
-        FilePath path = FilePath(filename);
+        base::FilePath path = base::FilePath(filename);
 #endif
 
         test_file_ = file_util::OpenFile(path, "r");
@@ -266,7 +266,8 @@ int32 PluginGetURLTest::Write(NPStream *stream, int32 offset, int32 len,
     case FETCHED_URL_STREAM_ID:
       {
         char read_buffer[STREAM_CHUNK];
-        int32 bytes = fread(read_buffer, 1, len, test_file_);
+        int32 bytes =
+            static_cast<int32>(fread(read_buffer, 1, len, test_file_));
         // Technically, fread could return fewer than len
         // bytes.  But this is not likely.
         if (bytes != len)

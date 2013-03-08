@@ -17,13 +17,24 @@
 var historyModel;
 var historyView;
 var pageState;
-var deleteQueue = [];
 var selectionAnchor = -1;
 var activeVisit = null;
 
 /** @const */ var Command = cr.ui.Command;
 /** @const */ var Menu = cr.ui.Menu;
 /** @const */ var MenuButton = cr.ui.MenuButton;
+
+/**
+ * Enum that shows whether a manual exception is set in managed mode for a
+ * host or URL.
+ * Must behave like the ManualBehavior enum from managed_user_service.h.
+ * @enum {number}
+ */
+ManagedModeManualBehavior = {
+  NONE: 0,
+  ALLOW: 1,
+  BLOCK: 2
+};
 
 MenuButton.createDropDownArrows();
 
@@ -36,20 +47,23 @@ MenuButton.createDropDownArrows();
  * @param {boolean} continued Whether this visit is on the same day as the
  *     visit before it.
  * @param {HistoryModel} model The model object this entry belongs to.
- * @param {number} id The identifier for the entry.
  * @constructor
  */
-function Visit(result, continued, model, id) {
+function Visit(result, continued, model) {
   this.model_ = model;
   this.title_ = result.title;
   this.url_ = result.url;
   this.starred_ = result.starred;
   this.snippet_ = result.snippet || '';
-  this.id_ = id;
+  // The id will be set according to when the visit was displayed, not
+  // received. Set to -1 to show that it has not been set yet.
+  this.id_ = -1;
 
-  this.changed = false;
+  this.isRendered = false;  // Has the visit already been rendered on the page?
 
-  this.isRendered = false;
+  // Holds the timestamps of duplicates of this visit (visits to the same URL on
+  // the same day).
+  this.duplicateTimestamps_ = [];
 
   // All the date information is public so that owners can compare properties of
   // two items easily.
@@ -62,25 +76,47 @@ function Visit(result, continued, model, id) {
   this.dateTimeOfDay = result.dateTimeOfDay || '';
   this.dateShort = result.dateShort || '';
 
+  // These values represent indicators shown to users in managed mode.
+  // |*manualBehavior| shows whether the user has manually added an exception
+  // for that URL or host while |*inContentPack| shows whether that URL or host
+  // is in a content pack or not.
+  this.urlManualBehavior = result.urlManualBehavior ||
+                           ManagedModeManualBehavior.NONE;
+  this.hostManualBehavior = result.hostManualBehavior ||
+                            ManagedModeManualBehavior.NONE;
+  this.urlInContentPack = result.urlInContentPack || false;
+  this.hostInContentPack = result.hostInContentPack || false;
+
   // Whether this is the continuation of a previous day.
   this.continued = continued;
+
+  this.allTimestamps = result.allTimestamps;
 }
 
 // Visit, public: -------------------------------------------------------------
 
 /**
+ * Records the timestamp of another visit to the same URL as this visit.
+ * @param {Number} timestamp The timestamp to add.
+ */
+Visit.prototype.addDuplicateTimestamp = function(timestamp) {
+  this.duplicateTimestamps_.push(timestamp);
+};
+
+/**
  * Returns a dom structure for a browse page result or a search page result.
  * @param {Object} propertyBag A bag of configuration properties, false by
  * default:
- * <ul>
- * <li>isSearchResult: Whether or not the result is a search result.</li>
- * <li>addTitleFavicon: Whether or not the favicon should be added.</li>
- * </ul>
+ *  - isSearchResult: Whether or not the result is a search result.
+ *  - addTitleFavicon: Whether or not the favicon should be added.
+ *  - useMonthDate: Whether or not the full date should be inserted (used for
+ * monthly view).
  * @return {Node} A DOM node to represent the history entry or search result.
  */
 Visit.prototype.getResultDOM = function(propertyBag) {
   var isSearchResult = propertyBag.isSearchResult || false;
   var addTitleFavicon = propertyBag.addTitleFavicon || false;
+  var useMonthDate = propertyBag.useMonthDate || false;
   var node = createElementWithClassName('li', 'entry');
   var time = createElementWithClassName('div', 'time');
   var entryBox = createElementWithClassName('label', 'entry-box');
@@ -91,6 +127,8 @@ Visit.prototype.getResultDOM = function(propertyBag) {
   dropDown.title = loadTimeData.getString('actionMenuDescription');
   dropDown.setAttribute('menu', '#action-menu');
   cr.ui.decorate(dropDown, MenuButton);
+
+  this.id_ = this.model_.nextVisitId_++;
 
   // Checkbox is always created, but only visible on hover & when checked.
   var checkbox = document.createElement('input');
@@ -134,6 +172,10 @@ Visit.prototype.getResultDOM = function(propertyBag) {
   }, true);
 
   node.appendChild(entryBox);
+  if (this.model_.isManagedProfile && this.model_.getGroupByDomain()) {
+    entryBox.appendChild(
+        getManagedStatusDOM(this.urlManualBehavior, this.urlInContentPack));
+  }
 
   if (isSearchResult) {
     time.appendChild(document.createTextNode(this.dateShort));
@@ -142,13 +184,27 @@ Visit.prototype.getResultDOM = function(propertyBag) {
                              this.snippet_,
                              this.model_.getSearchText());
     node.appendChild(snippet);
+  } else if (useMonthDate) {
+    // Show the day instead of the time.
+    time.appendChild(document.createTextNode(this.dateShort));
   } else {
     time.appendChild(document.createTextNode(this.dateTimeOfDay));
   }
 
   this.domNode_ = node;
+  node.visit = this;
 
   return node;
+};
+
+/**
+ * Remove this visit from the history.
+ */
+Visit.prototype.removeFromHistory = function() {
+  var self = this;
+  this.model_.removeVisitsFromHistory([this], function() {
+    removeEntryFromView(self.domNode_);
+  });
 };
 
 // Visit, private: ------------------------------------------------------------
@@ -161,7 +217,8 @@ Visit.prototype.getResultDOM = function(propertyBag) {
  * @private
  */
 Visit.prototype.getDomainFromURL_ = function(url) {
-  var domain = url.replace(/^.+:\/\//, '').match(/[^/]+/);
+  // TODO(sergiu): Extract the domain from the C++ side and send it here.
+  var domain = url.replace(/^.+?:\/\//, '').match(/[^/]+/);
   return domain ? domain[0] : '';
 };
 
@@ -249,19 +306,6 @@ Visit.prototype.showMoreFromSite_ = function() {
 };
 
 /**
- * Remove a single entry from the history.
- * @private
- */
-Visit.prototype.removeFromHistory_ = function() {
-  var self = this;
-  var onSuccessCallback = function() {
-    removeEntryFromView(self.domNode_);
-  };
-  queueURLsForDeletion(this.date, [this.url_], onSuccessCallback);
-  deleteNextInQueue();
-};
-
-/**
  * Click event handler for the star icon that appears beside bookmarked URLs.
  * When clicked, the bookmark is removed for that URL.
  * @param {Event} event The click event.
@@ -306,6 +350,13 @@ function HistoryModel() {
 
 // HistoryModel, Public: ------------------------------------------------------
 
+/** @enum {number} */
+HistoryModel.Range = {
+  ALL_TIME: 0,
+  WEEK: 1,
+  MONTH: 2
+};
+
 /**
  * Sets our current view that is called when the history model changes.
  * @param {HistoryView} view The view to set our current view to.
@@ -341,11 +392,15 @@ HistoryModel.prototype.reload = function() {
   // Save user-visible state, clear the model, and restore the state.
   var search = this.searchText_;
   var page = this.requestedPage_;
+  var range = this.rangeInDays_;
+  var offset = this.offset_;
   var groupByDomain = this.groupByDomain_;
 
   this.clearModel_();
   this.searchText_ = search;
   this.requestedPage_ = page;
+  this.rangeInDays_ = range;
+  this.offset_ = offset;
   this.groupByDomain_ = groupByDomain;
   this.queryHistory_();
 };
@@ -364,7 +419,6 @@ HistoryModel.prototype.getSearchText = function() {
  */
 HistoryModel.prototype.requestPage = function(page) {
   this.requestedPage_ = page;
-  this.changed = true;
   this.updateSearch_();
 };
 
@@ -377,34 +431,21 @@ HistoryModel.prototype.addResults = function(info, results) {
   $('loading-spinner').hidden = true;
   this.inFlight_ = false;
   this.isQueryFinished_ = info.finished;
-  this.queryCursor_ = info.cursor;
+  this.queryStartTime = info.queryStartTime;
+  this.queryEndTime = info.queryEndTime;
 
-  // If the results are not for the current search term there's nothing more
-  // to do.
+  // If the results are not for the current search term then there is nothing
+  // more to do.
   if (info.term != this.searchText_)
     return;
-
-  // If necessary, sort the results from newest to oldest.
-  if (!results.sorted)
-    results.sort(function(a, b) { return b.time - a.time; });
 
   var lastVisit = this.visits_.slice(-1)[0];
   var lastDay = lastVisit ? lastVisit.dateRelativeDay : null;
 
-  for (var i = 0, thisResult; thisResult = results[i]; i++) {
-    var thisDay = thisResult.dateRelativeDay;
+  for (var i = 0, result; result = results[i]; i++) {
+    var thisDay = result.dateRelativeDay;
     var isSameDay = lastDay == thisDay;
-
-    // Keep track of all URLs seen on a particular day, and only use the
-    // latest visit from that day.
-    if (!isSameDay)
-      this.urlsFromLastSeenDay_ = {};
-    else if (thisResult.url in this.urlsFromLastSeenDay_)
-      continue;
-    this.urlsFromLastSeenDay_[thisResult.url] = thisResult.time;
-
-    this.visits_.push(new Visit(thisResult, isSameDay, this, this.last_id_++));
-    this.changed = true;
+    this.visits_.push(new Visit(result, isSameDay, this));
     lastDay = thisDay;
   }
 
@@ -437,6 +478,66 @@ HistoryModel.prototype.hasMoreResults = function() {
       !this.isQueryFinished_;
 };
 
+/**
+ * Removes a list of visits from the history, and calls |callback| when the
+ * removal has successfully completed.
+ * @param {Array<Visit>} visits The visits to remove.
+ * @param {Function} callback The function to call after removal succeeds.
+ */
+HistoryModel.prototype.removeVisitsFromHistory = function(visits, callback) {
+  var toBeRemoved = [];
+  for (var i = 0; i < visits.length; i++) {
+    toBeRemoved.push({
+      url: visits[i].url_,
+      timestamps: visits[i].allTimestamps
+    });
+  }
+  chrome.send('removeVisits', toBeRemoved);
+  this.deleteCompleteCallback_ = callback;
+};
+
+/**
+ * Called when visits have been succesfully removed from the history.
+ */
+HistoryModel.prototype.deleteComplete = function() {
+  // Call the callback, with 'this' undefined inside the callback.
+  this.deleteCompleteCallback_.call();
+  this.deleteCompleteCallback_ = null;
+};
+
+// Getter and setter for HistoryModel.rangeInDays_.
+Object.defineProperty(HistoryModel.prototype, 'rangeInDays', {
+  get: function() {
+    return this.rangeInDays_;
+  },
+  set: function(range) {
+    this.rangeInDays_ = range;
+  }
+});
+
+/**
+ * Getter and setter for HistoryModel.offset_. The offset moves the current
+ * query 'window' |range| days behind. As such for range set to WEEK an offset
+ * of 0 refers to the last 7 days, an offset of 1 refers to the 7 day period
+ * that ended 7 days ago, etc. For MONTH an offset of 0 refers to the current
+ * calendar month, 1 to the previous one, etc.
+ */
+Object.defineProperty(HistoryModel.prototype, 'offset', {
+  get: function() {
+    return this.offset_;
+  },
+  set: function(offset) {
+    this.offset_ = offset;
+  }
+});
+
+// Setter for HistoryModel.requestedPage_.
+Object.defineProperty(HistoryModel.prototype, 'requestedPage', {
+  set: function(page) {
+    this.requestedPage_ = page;
+  }
+});
+
 // HistoryModel, Private: -----------------------------------------------------
 
 /**
@@ -446,11 +547,17 @@ HistoryModel.prototype.hasMoreResults = function() {
 HistoryModel.prototype.clearModel_ = function() {
   this.inFlight_ = false;  // Whether a query is inflight.
   this.searchText_ = '';
+  // Whether this user is a managed user.
+  this.isManagedProfile = loadTimeData.getBoolean('isManagedProfile');
+
   // Flag to show that the results are grouped by domain or not.
   this.groupByDomain_ = false;
+  // Group domains by default for managed users.
+  if (this.isManagedProfile)
+    this.groupByDomain_ = true;
 
   this.visits_ = [];  // Date-sorted list of visits (most recent first).
-  this.last_id_ = 0;
+  this.nextVisitId_ = 0;
   selectionAnchor = -1;
 
   // The page that the view wants to see - we only fetch slightly past this
@@ -458,18 +565,15 @@ HistoryModel.prototype.clearModel_ = function() {
   // to fetch it and call back when we're done.
   this.requestedPage_ = 0;
 
+  // The range of history to view or search over.
+  this.rangeInDays_ = HistoryModel.Range.ALL_TIME;
+
+  // Skip |offset_| * weeks/months from the begining.
+  this.offset_ = 0;
+
   // Keeps track of whether or not there are more results available than are
   // currently held in |this.visits_|.
   this.isQueryFinished_ = false;
-
-  // An opaque value that is returned with the query results. This is used to
-  // fetch the next page of results for a query.
-  this.queryCursor_ = null;
-
-  // A map of URLs of visits on the same day as the last known visit.
-  // This is used for de-duping URLs, so that we only show the most recent
-  // visit to a URL on any day.
-  this.urlsFromLastSeenDay_ = {};
 
   if (this.view_)
     this.view_.clear_();
@@ -483,16 +587,17 @@ HistoryModel.prototype.clearModel_ = function() {
  * @private
  */
 HistoryModel.prototype.updateSearch_ = function() {
-  var doneLoading = this.isQueryFinished_ ||
+  var doneLoading = this.rangeInDays_ != HistoryModel.Range.ALL_TIME ||
+                    this.isQueryFinished_ ||
                     this.canFillPage_(this.requestedPage_);
 
-  // Try to fetch more results if the results are not grouped by domain and
-  // the current page isn't full.
+  // Try to fetch more results if more results can arrive and the page is not
+  // full.
   if (!doneLoading && !this.inFlight_)
     this.queryHistory_();
 
   // Show the result or a message if no results were returned.
-  this.view_.onModelReady();
+  this.view_.onModelReady(doneLoading);
 };
 
 /**
@@ -500,20 +605,18 @@ HistoryModel.prototype.updateSearch_ = function() {
  * @private
  */
 HistoryModel.prototype.queryHistory_ = function() {
-  var endTime = 0;
-  // Do the time-based search.
+  var maxResults =
+      (this.rangeInDays_ == HistoryModel.Range.ALL_TIME) ? RESULTS_PER_PAGE : 0;
+
   // If there are already some visits, pick up the previous query where it
   // left off.
-  if (this.visits_.length > 0) {
-    var lastVisit = this.visits_.slice(-1)[0];
-    endTime = lastVisit.date.getTime();
-    cursor = this.queryCursor_;
-  }
+  var lastVisit = this.visits_.slice(-1)[0];
+  var endTime = lastVisit ? lastVisit.date.getTime() : 0;
 
   $('loading-spinner').hidden = false;
   this.inFlight_ = true;
   chrome.send('queryHistory',
-      [this.searchText_, endTime, this.queryCursor_, RESULTS_PER_PAGE]);
+      [this.searchText_, this.offset_, this.rangeInDays_, endTime, maxResults]);
 };
 
 /**
@@ -542,6 +645,7 @@ HistoryModel.prototype.canFillPage_ = function(page) {
  */
 HistoryModel.prototype.setGroupByDomain = function(groupByDomain) {
   this.groupByDomain_ = groupByDomain;
+  this.offset_ = 0;
 };
 
 /**
@@ -580,6 +684,14 @@ function HistoryView(model) {
   $('clear-browsing-data').addEventListener('click', openClearBrowsingData);
   $('remove-selected').addEventListener('click', removeItems);
 
+  $('allow-selected').addEventListener('click', function(e) {
+    processManagedList(true);
+  });
+
+  $('block-selected').addEventListener('click', function(e) {
+    processManagedList(false);
+  });
+
   // Add handlers for the page navigation buttons at the bottom.
   $('newest-button').addEventListener('click', function() {
     self.setPage(0);
@@ -591,8 +703,32 @@ function HistoryView(model) {
     self.setPage(self.pageIndex_ + 1);
   });
 
+  // Add handlers for the range options.
+  $('timeframe-filter').addEventListener('change', function(e) {
+    self.setRangeInDays(parseInt(e.target.value, 10));
+  });
+
   $('display-filter-sites').addEventListener('click', function(e) {
     self.setGroupByDomain($('display-filter-sites').checked);
+  });
+
+  $('range-previous').addEventListener('click', function(e) {
+    if (self.getRangeInDays() == HistoryModel.Range.ALL_TIME)
+      self.setPage(self.pageIndex_ + 1);
+    else
+      self.setOffset(self.getOffset() + 1);
+  });
+  $('range-next').addEventListener('click', function(e) {
+    if (self.getRangeInDays() == HistoryModel.Range.ALL_TIME)
+      self.setPage(self.pageIndex_ - 1);
+    else
+      self.setOffset(self.getOffset() - 1);
+  });
+  $('range-today').addEventListener('click', function(e) {
+    if (self.getRangeInDays() == HistoryModel.Range.ALL_TIME)
+      self.setPage(0);
+    else
+      self.setOffset(0);
   });
 }
 
@@ -607,7 +743,8 @@ HistoryView.prototype.setSearch = function(term, opt_page) {
   this.pageIndex_ = parseInt(opt_page || 0, 10);
   window.scrollTo(0, 0);
   this.model_.setSearchText(term, this.pageIndex_);
-  pageState.setUIState(term, this.pageIndex_, this.model_.getGroupByDomain());
+  pageState.setUIState(term, this.pageIndex_, this.model_.getGroupByDomain(),
+                       this.getRangeInDays(), this.getOffset());
 };
 
 /**
@@ -622,7 +759,9 @@ HistoryView.prototype.setGroupByDomain = function(groupedByDomain) {
   this.model_.reload();
   pageState.setUIState(this.model_.getSearchText(),
                        this.pageIndex_,
-                       this.model_.getGroupByDomain());
+                       this.model_.getGroupByDomain(),
+                       this.getRangeInDays(),
+                       this.getOffset());
 };
 
 /**
@@ -630,7 +769,7 @@ HistoryView.prototype.setGroupByDomain = function(groupedByDomain) {
  */
 HistoryView.prototype.reload = function() {
   this.model_.reload();
-  this.updateRemoveButton();
+  this.updateSelectionEditButtons();
 };
 
 /**
@@ -644,7 +783,9 @@ HistoryView.prototype.setPage = function(page) {
   this.model_.requestPage(page);
   pageState.setUIState(this.model_.getSearchText(),
                        this.pageIndex_,
-                       this.model_.getGroupByDomain());
+                       this.model_.getGroupByDomain(),
+                       this.getRangeInDays(),
+                       this.getOffset());
 };
 
 /**
@@ -655,20 +796,109 @@ HistoryView.prototype.getPage = function() {
 };
 
 /**
+ * Set the current range for grouped results.
+ * @param {string} range The number of days to which the range should be set.
+ */
+HistoryView.prototype.setRangeInDays = function(range) {
+  // Set the range, offset and reset the page
+  this.model_.rangeInDays = range;
+  this.model_.offset = 0;
+  this.pageIndex_ = 0;
+  if (range == HistoryModel.Range.ALL_TIME)
+    this.model_.requestedPage = 0;
+  this.model_.reload();
+  pageState.setUIState(this.model_.getSearchText(), this.pageIndex_,
+      this.model_.getGroupByDomain(), range, this.getOffset());
+};
+
+/**
+ * Get the current range in days.
+ * @return {number} Current range in days from the model.
+ */
+HistoryView.prototype.getRangeInDays = function() {
+  return this.model_.rangeInDays;
+};
+
+/**
+ * Set the current offset for grouped results.
+ * @param {number} offset Offset to set.
+ */
+HistoryView.prototype.setOffset = function(offset) {
+  // If there is another query already in flight wait for that to complete.
+  if (this.model_.inFlight_)
+    return;
+  this.model_.offset = offset;
+  this.model_.reload();
+  pageState.setUIState(this.model_.getSearchText(),
+                       this.pageIndex_,
+                       this.model_.getGroupByDomain(),
+                       this.getRangeInDays(),
+                       this.getOffset());
+};
+
+/**
+ * Get the current offset.
+ * @return {number} Current offset from the model.
+ */
+HistoryView.prototype.getOffset = function() {
+  return this.model_.offset;
+};
+
+/**
  * Callback for the history model to let it know that it has data ready for us
  * to view.
+ * @param {boolean} doneLoading Whether the current request is complete.
  */
-HistoryView.prototype.onModelReady = function() {
-  this.displayResults_();
+HistoryView.prototype.onModelReady = function(doneLoading) {
+  this.displayResults_(doneLoading);
   this.updateNavBar_();
 };
 
 /**
- * Enables or disables the 'Remove selected items' button as appropriate.
+ * Enables or disables the buttons that control editing entries depending on
+ * whether there are any checked boxes.
  */
-HistoryView.prototype.updateRemoveButton = function() {
+HistoryView.prototype.updateSelectionEditButtons = function() {
   var anyChecked = document.querySelector('.entry input:checked') != null;
   $('remove-selected').disabled = !anyChecked;
+  $('allow-selected').disabled = !anyChecked;
+  $('block-selected').disabled = !anyChecked;
+};
+
+/**
+ * Callback triggered by the backend after the manual allow or block changes
+ * have been commited. Once the changes are commited the backend builds an
+ * updated set of data which contains the new managed mode status and passes
+ * it through this function to the client. The function takes that data and
+ * updates the individiual host/URL elements with their new managed mode status.
+ * @param {Array} entries List of two dictionaries which contain the updated
+ *     information for both the hosts and the URLs.
+ */
+HistoryView.prototype.updateManagedEntries = function(entries) {
+  // |hostEntries| and |urlEntries| are dictionaries which have hosts and URLs
+  // as keys and dictionaries with two values (|inContentPack| and
+  // |manualBehavior|) as values.
+  var hostEntries = entries[0];
+  var urlEntries = entries[1];
+  var hostElements = document.querySelectorAll('.site-domain');
+  for (var i = 0; i < hostElements.length; i++) {
+    var host = hostElements[i].firstChild.textContent;
+    var siteDomainWrapperDiv = hostElements[i].parentNode;
+    siteDomainWrapperDiv.querySelector('input[type=checkbox]').checked = false;
+    var filterStatusDiv = hostElements[i].nextSibling;
+    if (host in hostEntries)
+      updateHostStatus(filterStatusDiv, hostEntries[host]);
+  }
+
+  var urlElements = document.querySelectorAll('.entry-box .title');
+  for (var i = 0; i < urlElements.length; i++) {
+    var url = urlElements[i].querySelector('a').href;
+    var entry = findAncestorByClass(urlElements[i], 'entry');
+    var filterStatusDiv = entry.querySelector('.filter-status');
+    entry.querySelector('input[type=checkbox]').checked = false;
+    if (url in urlEntries)
+      updateHostStatus(filterStatusDiv, urlEntries[url]);
+  }
 };
 
 // HistoryView, private: ------------------------------------------------------
@@ -698,9 +928,9 @@ HistoryView.prototype.setVisitRendered_ = function(visit) {
 };
 
 /**
- * This function generates and adds the grouped visits DOM for a certain
- * domain. This includes the clickable arrow and domain name and the visit
- * entries for that domain.
+ * Generates and adds the grouped visits DOM for a certain domain. This
+ * includes the clickable arrow and domain name and the visit entries for
+ * that domain.
  * @param {Element} results DOM object to which to add the elements.
  * @param {string} domain Current domain name.
  * @param {Array} domainVisits Array of visits for this domain.
@@ -711,34 +941,86 @@ HistoryView.prototype.getGroupedVisitsDOM_ = function(
   // Add a new domain entry.
   var siteResults = results.appendChild(
       createElementWithClassName('li', 'site-entry'));
+  var siteDomainCheckbox =
+      createElementWithClassName('input', 'domain-checkbox');
+  siteDomainCheckbox.type = 'checkbox';
+  siteDomainCheckbox.addEventListener('click', domainCheckboxClicked);
+  siteDomainCheckbox.domain_ = domain;
   // Make a wrapper that will contain the arrow, the favicon and the domain.
   var siteDomainWrapper = siteResults.appendChild(
       createElementWithClassName('div', 'site-domain-wrapper'));
+  siteDomainWrapper.appendChild(siteDomainCheckbox);
   var siteArrow = siteDomainWrapper.appendChild(
       createElementWithClassName('div', 'site-domain-arrow collapse'));
-  siteArrow.textContent = '►';
   var siteDomain = siteDomainWrapper.appendChild(
       createElementWithClassName('div', 'site-domain'));
+  var siteDomainLink = siteDomain.appendChild(
+      createElementWithClassName('button', 'link-button'));
+  siteDomainLink.addEventListener('click', function(e) { e.preventDefault(); });
+  siteDomainLink.textContent = domain;
   var numberOfVisits = createElementWithClassName('span', 'number-visits');
+  var domainElement = document.createElement('span');
+
   numberOfVisits.textContent = loadTimeData.getStringF('numbervisits',
                                                        domainVisits.length);
-  siteDomain.textContent = domain;
   siteDomain.appendChild(numberOfVisits);
-  siteResults.appendChild(siteDomainWrapper);
-  var resultsList = siteResults.appendChild(
-      createElementWithClassName('ol', 'site-results'));
 
   domainVisits[0].addFaviconToElement_(siteDomain);
 
   siteDomainWrapper.addEventListener('click', toggleHandler);
+
+  if (this.model_.isManagedProfile) {
+    siteDomainWrapper.appendChild(getManagedStatusDOM(
+        domainVisits[0].hostManualBehavior, domainVisits[0].hostInContentPack));
+  }
+
+  siteResults.appendChild(siteDomainWrapper);
+  var resultsList = siteResults.appendChild(
+      createElementWithClassName('ol', 'site-results'));
+
   // Collapse until it gets toggled.
   resultsList.style.height = 0;
 
   // Add the results for each of the domain.
+  var isMonthGroupedResult = this.getRangeInDays() == HistoryModel.Range.MONTH;
   for (var j = 0, visit; visit = domainVisits[j]; j++) {
-    resultsList.appendChild(visit.getResultDOM({}));
+    resultsList.appendChild(visit.getResultDOM({
+      useMonthDate: isMonthGroupedResult
+    }));
     this.setVisitRendered_(visit);
   }
+};
+
+/**
+ * Enables or disables the time range buttons.
+ * @private
+ */
+HistoryView.prototype.updateRangeButtons_ = function() {
+  // The enabled state for the previous, today and next buttons.
+  var previousState = false;
+  var todayState = false;
+  var nextState = false;
+  var usePage = (this.getRangeInDays() == HistoryModel.Range.ALL_TIME);
+
+  // Use pagination for most recent visits, offset otherwise.
+  // TODO(sergiu): Maybe send just one variable in the future.
+  if (usePage) {
+    if (this.getPage() != 0) {
+      nextState = true;
+      todayState = true;
+    }
+    previousState = this.model_.hasMoreResults();
+  } else {
+    if (this.getOffset() != 0) {
+      nextState = true;
+      todayState = true;
+    }
+    previousState = !this.model_.isQueryFinished_;
+  }
+
+  $('range-previous').disabled = !previousState;
+  $('range-today').disabled = !todayState;
+  $('range-next').disabled = !nextState;
 };
 
 /**
@@ -765,13 +1047,28 @@ HistoryView.prototype.groupVisitsByDomain_ = function(visits, results) {
   };
   domains.sort(sortByVisits);
 
-  for (var i = 0, domain; domain = domains[i]; i++) {
+  for (var i = 0, domain; domain = domains[i]; i++)
     this.getGroupedVisitsDOM_(results, domain, visitsByDomain[domain]);
-  }
 };
 
 /**
- * Adds the results grouped by days, grouping them if needed.
+ * Adds the results for a month.
+ * @param {Array} visits Visits returned by the query.
+ * @param {Element} parentElement Element to which to add the results to.
+ * @private
+ */
+HistoryView.prototype.addMonthResults_ = function(visits, parentElement) {
+  if (visits.length == 0)
+    return;
+
+  var monthResults = parentElement.appendChild(
+      createElementWithClassName('ol', 'month-results'));
+  this.groupVisitsByDomain_(visits, monthResults);
+};
+
+/**
+ * Adds the results for a certain day. This includes a title with the day of
+ * the results and the results themselves, grouped or not.
  * @param {Array} visits Visits returned by the query.
  * @param {Element} parentElement Element to which to add the results to.
  * @private
@@ -802,9 +1099,7 @@ HistoryView.prototype.addDayResults_ = function(visits, parentElement) {
         dayResults.appendChild(createElementWithClassName('li', 'gap'));
 
       // Insert the visit into the DOM.
-      dayResults.appendChild(visit.getResultDOM({
-        addTitleFavicon: true
-      }));
+      dayResults.appendChild(visit.getResultDOM({ addTitleFavicon: true }));
       this.setVisitRendered_(visit);
 
       lastTime = thisTime;
@@ -814,13 +1109,18 @@ HistoryView.prototype.addDayResults_ = function(visits, parentElement) {
 
 /**
  * Update the page with results.
+ * @param {boolean} doneLoading Whether the current request is complete.
  * @private
  */
-HistoryView.prototype.displayResults_ = function() {
-  var rangeStart = this.pageIndex_ * RESULTS_PER_PAGE;
-  var rangeEnd = rangeStart + RESULTS_PER_PAGE;
-  var results = this.model_.getNumberedRange(rangeStart, rangeEnd);
-
+HistoryView.prototype.displayResults_ = function(doneLoading) {
+  // Either show a page of results received for the all time results or all the
+  // received results for the weekly and monthly view.
+  var results = this.model_.visits_;
+  if (this.getRangeInDays() == HistoryModel.Range.ALL_TIME) {
+    var rangeStart = this.pageIndex_ * RESULTS_PER_PAGE;
+    var rangeEnd = rangeStart + RESULTS_PER_PAGE;
+    results = this.model_.getNumberedRange(rangeStart, rangeEnd);
+  }
   var searchText = this.model_.getSearchText();
   var groupByDomain = this.model_.getGroupByDomain();
 
@@ -834,7 +1134,7 @@ HistoryView.prototype.displayResults_ = function() {
     }
 
     var searchResults = createElementWithClassName('ol', 'search-results');
-    if (results.length == 0) {
+    if (results.length == 0 && doneLoading) {
       var noSearchResults = document.createElement('div');
       noSearchResults.textContent = loadTimeData.getString('nosearchresults');
       searchResults.appendChild(noSearchResults);
@@ -851,29 +1151,49 @@ HistoryView.prototype.displayResults_ = function() {
     }
     this.resultDiv_.appendChild(searchResults);
   } else {
-    if (results.length == 0) {
-      var noResults = document.createElement('div');
+    var resultsFragment = document.createDocumentFragment();
+
+    if (this.getRangeInDays() != HistoryModel.Range.ALL_TIME) {
+      // If this is a time range result add some text that shows what is the
+      // time range for the results the user is viewing.
+      var timeFrame = resultsFragment.appendChild(
+          createElementWithClassName('h2', 'timeframe'));
+      // TODO(sergiu): Figure the best way to show this for the first day of
+      // the month.
+      timeFrame.appendChild(document.createTextNode(loadTimeData.getStringF(
+          'historyinterval',
+          this.model_.queryStartTime,
+          this.model_.queryEndTime)));
+    }
+
+    if (results.length == 0 && doneLoading) {
+      var noResults = resultsFragment.appendChild(
+          document.createElement('div'));
       noResults.textContent = loadTimeData.getString('noresults');
-      this.resultDiv_.appendChild(noResults);
+      this.resultDiv_.appendChild(resultsFragment);
       this.updateNavBar_();
       return;
     }
 
-    var resultsFragment = document.createDocumentFragment();
+    if (this.getRangeInDays() == HistoryModel.Range.MONTH &&
+        groupByDomain) {
+      // Group everything together in the month view.
+      this.addMonthResults_(results, resultsFragment);
+    } else {
+      var dayStart = 0;
+      var dayEnd = 0;
+      // Go through all of the visits and process them in chunks of one day.
+      while (dayEnd < results.length) {
+        // Skip over the ones that are already rendered.
+        while (dayStart < results.length && results[dayStart].isRendered)
+          ++dayStart;
+        var dayEnd = dayStart + 1;
+        while (dayEnd < results.length && results[dayEnd].continued)
+          ++dayEnd;
 
-    var dayStart = 0;
-    var dayEnd = 0;
-    // Go through all of the visits and process them in chunks of one day.
-    while (dayEnd < results.length) {
-      // Skip over the ones that are already rendered.
-      while (dayStart < results.length && results[dayStart].isRendered)
-        ++dayStart;
-      var dayEnd = dayStart + 1;
-      while (dayEnd < results.length && results[dayEnd].continued)
-        ++dayEnd;
-
-      this.addDayResults_(
-          results.slice(dayStart, dayEnd), resultsFragment, groupByDomain);
+        this.addDayResults_(
+            results.slice(dayStart, dayEnd), resultsFragment, groupByDomain);
+      }
     }
 
     // Add all the days and their visits to the page.
@@ -887,9 +1207,12 @@ HistoryView.prototype.displayResults_ = function() {
  * @private
  */
 HistoryView.prototype.updateNavBar_ = function() {
+  this.updateRangeButtons_();
   $('newest-button').hidden = this.pageIndex_ == 0;
   $('newer-button').hidden = this.pageIndex_ == 0;
-  $('older-button').hidden = !this.model_.hasMoreResults();
+  $('older-button').hidden =
+      this.model_.rangeInDays_ != HistoryModel.Range.ALL_TIME ||
+      !this.model_.hasMoreResults();
 };
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -917,13 +1240,17 @@ function PageState(model, view) {
   //     public model and view.
   this.checker_ = setInterval((function(state_obj) {
     var hashData = state_obj.getHashData();
+    var isGroupedByDomain = (hashData.g == 'true');
     if (hashData.q != state_obj.model.getSearchText()) {
       state_obj.view.setSearch(hashData.q, parseInt(hashData.p, 10));
     } else if (parseInt(hashData.p, 10) != state_obj.view.getPage()) {
       state_obj.view.setPage(hashData.p);
-    } else if ((hashData.g == 'true') !=
-               state_obj.view.model_.getGroupByDomain()) {
-      state_obj.view.setGroupByDomain(hashData.g);
+    } else if (isGroupedByDomain != state_obj.view.model_.getGroupByDomain()) {
+      state_obj.view.setGroupByDomain(isGroupedByDomain);
+    } else if (parseInt(hashData.r, 10) != state_obj.model.rangeInDays) {
+      state_obj.view.setRangeInDays(parseInt(hashData.r, 10));
+    } else if (parseInt(hashData.o, 10) != state_obj.model.offset) {
+      state_obj.view.setOffset(parseInt(hashData.o, 10));
     }
   }), 50, this);
 }
@@ -941,7 +1268,9 @@ PageState.prototype.getHashData = function() {
     e: 0,
     q: '',
     p: 0,
-    g: false
+    g: false,
+    r: 0,
+    o: 0
   };
 
   if (!window.location.hash)
@@ -965,19 +1294,18 @@ PageState.prototype.getHashData = function() {
  * @param {string} term The current search string.
  * @param {number} page The page currently being viewed.
  * @param {boolean} grouped Whether the results are grouped or not.
+ * @param {HistoryModel.Range} range The range to view or search over.
+ * @param {number} offset Set the begining of the query to the specific offset.
  */
-PageState.prototype.setUIState = function(term, page, grouped) {
+PageState.prototype.setUIState = function(term, page, grouped, range, offset) {
   // Make sure the form looks pretty.
   $('search-field').value = term;
-  if (grouped) {
-    $('display-filter-sites').checked = true;
-  } else {
-    $('display-filter-sites').checked = false;
-  }
+  $('display-filter-sites').checked = grouped;
   var hash = this.getHashData();
-  if (hash.q != term || hash.p != page || hash.g != grouped) {
+  if (hash.q != term || hash.p != page || hash.g != grouped ||
+      hash.r != range || hash.o != offset) {
     window.location.hash = PageState.getHashString(
-        term, page, grouped);
+        term, page, grouped, range, offset);
   }
 };
 
@@ -986,9 +1314,11 @@ PageState.prototype.setUIState = function(term, page, grouped) {
  * @param {string} term The current search string.
  * @param {number} page The page currently being viewed.
  * @param {boolean} grouped Whether the results are grouped or not.
+ * @param {HistoryModel.Range} range The range to view or search over.
+ * @param {number} offset Set the begining of the query to the specific offset.
  * @return {string} The string to be used in a hash.
  */
-PageState.getHashString = function(term, page, grouped) {
+PageState.getHashString = function(term, page, grouped, range, offset) {
   // Omit elements that are empty.
   var newHash = [];
 
@@ -1000,6 +1330,12 @@ PageState.getHashString = function(term, page, grouped) {
 
   if (grouped)
     newHash.push('g=' + grouped);
+
+  if (range)
+    newHash.push('r=' + range);
+
+  if (offset)
+    newHash.push('o=' + offset);
 
   return newHash.join('&');
 };
@@ -1029,7 +1365,7 @@ function load() {
   };
 
   $('remove-visit').addEventListener('activate', function(e) {
-    activeVisit.removeFromHistory_();
+    activeVisit.removeFromHistory();
     activeVisit = null;
   });
   $('more-from-site').addEventListener('activate', function(e) {
@@ -1038,8 +1374,21 @@ function load() {
   });
 
   // Only show the controls if the command line switch is activated.
-  if (loadTimeData.getBoolean('groupByDomain')) {
+  if (loadTimeData.getBoolean('groupByDomain') ||
+      loadTimeData.getBoolean('isManagedProfile')) {
     $('filter-controls').hidden = false;
+  }
+  if (loadTimeData.getBoolean('isManagedProfile')) {
+    $('allow-selected').hidden = false;
+    $('block-selected').hidden = false;
+    $('lock-unlock-button').classList.add('profile-is-managed');
+
+    $('lock-unlock-button').addEventListener('click', function(e) {
+      var isLocked = document.body.classList.contains('managed-user-locked');
+      chrome.send('setManagedUserElevated', [isLocked]);
+    });
+
+    chrome.send('getManagedUserElevated');
   }
 
   var title = loadTimeData.getString('title');
@@ -1073,18 +1422,72 @@ function setPage(page) {
   }
 }
 
+
 /**
- * Delete the next item in our deletion queue.
+ * Adds manual rules for allowing or blocking the the selected items.
+ * @param {boolean} allow Whether to allow (for true) or block (for false) the
+ *    selected items.
  */
-function deleteNextInQueue() {
-  if (deleteQueue.length > 0) {
-    // Call the native function to remove history entries.
-    // First arg is a time (in ms since the epoch) identifying the day.
-    // Remaining args are URLs of history entries from that day to delete.
-    chrome.send('removeURLsOnOneDay',
-                [deleteQueue[0].date.getTime()].concat(deleteQueue[0].urls));
+function processManagedList(allow) {
+  var hosts = $('results-display').querySelectorAll(
+      '.site-domain-wrapper input[type=checkbox]');
+  var urls = $('results-display').querySelectorAll(
+      '.site-results input[type=checkbox]');
+  // Get each domain and whether it is checked or not.
+  var hostsToSend = [];
+  for (var i = 0; i < hosts.length; i++) {
+    var hostParent = findAncestorByClass(hosts[i], 'site-domain-wrapper');
+    var host = hostParent.querySelector('button').textContent;
+    hostsToSend.push([hosts[i].checked, host]);
+  }
+  // Get each URL and whether it is checked or not.
+  var urlsToSend = [];
+  for (var i = 0; i < urls.length; i++) {
+    var urlParent = findAncestorByClass(urls[i], 'site-entry');
+    var urlChecked =
+        urlParent.querySelector('.site-domain-wrapper input').checked;
+    urlsToSend.push([urls[i].checked, urlChecked,
+        findAncestorByClass(urls[i], 'entry-box').querySelector('a').href]);
+  }
+  chrome.send('processManagedUrls', [allow, hostsToSend, urlsToSend]);
+}
+
+/**
+ * Updates the whitelist status labels of a host/URL entry to the current
+ * value.
+ * @param {Element} statusElement The div which contains the status labels.
+ * @param {Object} newStatus A dictionary with two entries:
+ *     - |inContentPack|: whether the current domain/URL is allowed by a
+ *     content pack.
+ *     - |manualBehavior|: The manual status of the current domain/URL.
+ */
+function updateHostStatus(statusElement, newStatus) {
+  var inContentPackDiv = statusElement.querySelector('.in-content-pack');
+  inContentPackDiv.className = 'in-content-pack';
+  if (newStatus['inContentPack']) {
+    if (newStatus['manualBehavior'] != ManagedModeManualBehavior.NONE)
+      inContentPackDiv.classList.add('in-content-pack-passive');
+    else
+      inContentPackDiv.classList.add('in-content-pack-active');
+  }
+
+  var manualBehaviorDiv = statusElement.querySelector('.manual-behavior');
+  manualBehaviorDiv.className = 'manual-behavior';
+  switch (newStatus['manualBehavior']) {
+  case ManagedModeManualBehavior.NONE:
+    manualBehaviorDiv.textContent = '';
+    break;
+  case ManagedModeManualBehavior.ALLOW:
+    manualBehaviorDiv.textContent = loadTimeData.getString('filterallowed');
+    manualBehaviorDiv.classList.add('filter-allowed');
+    break;
+  case ManagedModeManualBehavior.BLOCK:
+    manualBehaviorDiv.textContent = loadTimeData.getString('filterblocked');
+    manualBehaviorDiv.classList.add('filter-blocked');
+    break;
   }
 }
+
 
 /**
  * Click handler for the 'Clear browsing data' dialog.
@@ -1095,70 +1498,42 @@ function openClearBrowsingData(e) {
 }
 
 /**
- * Queue a set of URLs from the same day for deletion.
- * @param {Date} date A date indicating the day the URLs were visited.
- * @param {Array} urls Array of URLs from the same day to be deleted.
- * @param {Function} opt_callback An optional callback to be executed when
- *        the deletion is complete.
- */
-function queueURLsForDeletion(date, urls, opt_callback) {
-  deleteQueue.push({ 'date': date, 'urls': urls, 'callback': opt_callback });
-}
-
-function reloadHistory() {
-  historyView.reload();
-}
-
-/**
  * Click handler for the 'Remove selected items' button.
- * Collect IDs from the checked checkboxes and send to Chrome for deletion.
+ * Confirms the deletion with the user, and then deletes the selected visits.
  */
 function removeItems() {
   var checked = $('results-display').querySelectorAll(
-      'input[type=checkbox]:checked:not([disabled])');
-  var urls = [];
+      '.entry-box input[type=checkbox]:checked:not([disabled])');
   var disabledItems = [];
-  var queue = [];
-  var date = new Date();
+  var toBeRemoved = [];
 
   for (var i = 0; i < checked.length; i++) {
     var checkbox = checked[i];
-    var cbDate = new Date(checkbox.time);
-    if (date.getFullYear() != cbDate.getFullYear() ||
-        date.getMonth() != cbDate.getMonth() ||
-        date.getDate() != cbDate.getDate()) {
-      if (urls.length > 0) {
-        queue.push([date, urls]);
-      }
-      urls = [];
-      date = cbDate;
-    }
-    var link = findAncestorByClass(checkbox, 'entry-box').querySelector('a');
+    var entry = findAncestorByClass(checkbox, 'entry');
+    toBeRemoved.push(entry.visit);
+
+    // Disable the checkbox and put a strikethrough style on the link, so the
+    // user can see what will be deleted.
+    var link = entry.querySelector('a');
     checkbox.disabled = true;
     link.classList.add('to-be-removed');
     disabledItems.push(checkbox);
-    urls.push(link.href);
   }
-  if (urls.length > 0) {
-    queue.push([date, urls]);
-  }
-  if (checked.length > 0 && confirm(loadTimeData.getString('deletewarning'))) {
-    for (var i = 0; i < queue.length; i++) {
-      // Reload the page when the final entry has been deleted.
-      var callback = i == 0 ? reloadHistory : null;
 
-      queueURLsForDeletion(queue[i][0], queue[i][1], callback);
-    }
-    deleteNextInQueue();
-  } else {
-    // If the remove is cancelled, return the checkboxes to their
-    // enabled, non-line-through state.
-    for (var i = 0; i < disabledItems.length; i++) {
-      var checkbox = disabledItems[i];
-      var link = findAncestorByClass(checkbox, 'entry-box').querySelector('a');
-      checkbox.disabled = false;
-      link.classList.remove('to-be-removed');
-    }
+  if (checked.length && confirm(loadTimeData.getString('deletewarning'))) {
+    historyModel.removeVisitsFromHistory(toBeRemoved, function() {
+      historyView.reload();
+    });
+    return;
+  }
+
+  // Return everything to its previous state.
+  for (var i = 0; i < disabledItems.length; i++) {
+    var checkbox = disabledItems[i];
+    checkbox.disabled = false;
+
+    var link = findAncestorByClass(checkbox, 'entry-box').querySelector('a');
+    link.classList.remove('to-be-removed');
   }
 }
 
@@ -1168,6 +1543,7 @@ function removeItems() {
  */
 function checkboxClicked(e) {
   var checkbox = e.currentTarget;
+  updateParentCheckbox(checkbox);
   var id = Number(checkbox.id.slice('checkbox-'.length));
   // Handle multi-select if shift was pressed.
   if (event.shiftKey && (selectionAnchor != -1)) {
@@ -1178,13 +1554,50 @@ function checkboxClicked(e) {
     var end = Math.max(id, selectionAnchor);
     for (var i = begin; i <= end; i++) {
       var checkbox = document.querySelector('#checkbox-' + i);
-      if (checkbox)
+      if (checkbox) {
         checkbox.checked = checked;
+        updateParentCheckbox(checkbox);
+      }
     }
   }
   selectionAnchor = id;
 
-  historyView.updateRemoveButton();
+  historyView.updateSelectionEditButtons();
+}
+
+/**
+ * Handler for the 'click' event on a domain checkbox. Checkes or unchecks the
+ * checkboxes of the visits to this domain in the respective group.
+ * @param {Event} e The click event.
+ */
+function domainCheckboxClicked(e) {
+  var siteEntry = findAncestorByClass(e.currentTarget, 'site-entry');
+  var checkboxes =
+      siteEntry.querySelectorAll('.site-results input[type=checkbox]');
+  for (var i = 0; i < checkboxes.length; i++)
+    checkboxes[i].checked = e.currentTarget.checked;
+  historyView.updateSelectionEditButtons();
+  // Stop propagation as clicking the checkbox would otherwise trigger the
+  // group to collapse/expand.
+  e.stopPropagation();
+}
+
+/**
+ * Updates the domain checkbox for this visit checkbox if it has been
+ * unchecked.
+ * @param {Element} checkbox The checkbox that has been clicked.
+ */
+function updateParentCheckbox(checkbox) {
+  if (checkbox.checked)
+    return;
+
+  var entry = findAncestorByClass(checkbox, 'site-entry');
+  if (!entry)
+    return;
+
+  var group_checkbox = entry.querySelector('.site-domain-wrapper input');
+  if (group_checkbox)
+      group_checkbox.checked = false;
 }
 
 function entryBoxMousedown(event) {
@@ -1256,6 +1669,30 @@ function toggleHandler(e) {
   }
 }
 
+/**
+ * Builds the DOM elements to show the managed status of a domain/URL.
+ * @param {ManagedModeManualBehavior} manualBehavior The manual behavior for
+ *     this item.
+ * @param {boolean} inContentPack Whether this element is in a content pack or
+ *     not.
+ * @return {Element} Returns the DOM elements which show the status.
+ */
+function getManagedStatusDOM(manualBehavior, inContentPack) {
+  var filterStatusDiv = createElementWithClassName('div', 'filter-status');
+  var inContentPackDiv = createElementWithClassName('div', 'in-content-pack');
+  inContentPackDiv.textContent = loadTimeData.getString('incontentpack');
+  var manualBehaviorDiv = createElementWithClassName('div', 'manual-behavior');
+  filterStatusDiv.appendChild(inContentPackDiv);
+  filterStatusDiv.appendChild(manualBehaviorDiv);
+
+  updateHostStatus(filterStatusDiv, {
+    'inContentPack' : inContentPack,
+    'manualBehavior' : manualBehavior
+  });
+  return filterStatusDiv;
+}
+
+
 ///////////////////////////////////////////////////////////////////////////////
 // Chrome callbacks:
 
@@ -1269,30 +1706,17 @@ function historyResult(info, results) {
 }
 
 /**
- * Our history system calls this function when a deletion has finished.
+ * Called by the history backend when history removal is successful.
  */
 function deleteComplete() {
-  if (deleteQueue.length > 0) {
-    // Remove the successfully deleted entry from the queue.
-    if (deleteQueue[0].callback)
-      deleteQueue[0].callback.apply();
-    deleteQueue.splice(0, 1);
-    deleteNextInQueue();
-  } else {
-    console.error('Received deleteComplete but queue is empty.');
-  }
+  historyModel.deleteComplete();
 }
 
 /**
- * Our history system calls this function if a delete is not ready (e.g.
- * another delete is in-progress).
+ * Called by the history backend when history removal is unsuccessful.
  */
 function deleteFailed() {
   window.console.log('Delete failed');
-
-  // The deletion failed - try again later.
-  // TODO(dubroy): We should probably give up at some point.
-  setTimeout(deleteNextInQueue, 500);
 }
 
 /**
@@ -1304,6 +1728,32 @@ function historyDeleted() {
   // TODO(dubroy): We should just reload the page & restore the checked items.
   if (!anyChecked)
     historyView.reload();
+}
+
+/**
+ * Called when the allow/block changes have been commited. This leads to the
+ * status of all the elements on the page being updated.
+ * @param {Object} entries The new updated results.
+ */
+function updateEntries(entries) {
+  historyView.updateManagedEntries(entries);
+}
+
+/**
+ * Called when the page is initialized or when the authentication status
+ * of the managed user changes.
+ * @param {Object} isElevated Contains the information if the current profile is
+ * in elevated state.
+ */
+function managedUserElevated(isElevated) {
+  if (isElevated) {
+    document.body.classList.remove('managed-user-locked');
+    $('lock-unlock-button').textContent = loadTimeData.getString('lockButton');
+  } else {
+    document.body.classList.add('managed-user-locked');
+    $('lock-unlock-button').textContent =
+        loadTimeData.getString('unlockButton');
+  }
 }
 
 // Add handlers to HTML elements.

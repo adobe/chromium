@@ -20,7 +20,7 @@ bool DummyDriveService::CanStartOperation() const { return true; }
 
 void DummyDriveService::CancelAll() {}
 
-bool DummyDriveService::CancelForFilePath(const FilePath& file_path) {
+bool DummyDriveService::CancelForFilePath(const base::FilePath& file_path) {
   return true;
 }
 
@@ -31,6 +31,10 @@ OperationProgressStatusList DummyDriveService::GetProgressStatusList() const {
 bool DummyDriveService::HasAccessToken() const { return true; }
 
 bool DummyDriveService::HasRefreshToken() const { return true; }
+
+void DummyDriveService::ClearAccessToken() { }
+
+void DummyDriveService::ClearRefreshToken() { }
 
 std::string DummyDriveService::GetRootResourceId() const {
   return "dummy_root";
@@ -51,22 +55,19 @@ void DummyDriveService::GetResourceEntry(
 void DummyDriveService::GetAccountMetadata(
     const GetAccountMetadataCallback& callback) {}
 
+void DummyDriveService::GetAboutResource(
+    const GetAboutResourceCallback& callback) {}
+
 void DummyDriveService::GetAppList(const GetAppListCallback& callback) {}
 
-void DummyDriveService::DeleteResource(const GURL& edit_url,
+void DummyDriveService::DeleteResource(const std::string& resource_id,
+                                       const std::string& etag,
                                        const EntryActionCallback& callback) {}
 
-void DummyDriveService::DownloadHostedDocument(
-    const FilePath& virtual_path,
-    const FilePath& local_cache_path,
-    const GURL& content_url,
-    DocumentExportFormat format,
-    const DownloadActionCallback& callback) {}
-
 void DummyDriveService::DownloadFile(
-    const FilePath& virtual_path,
-    const FilePath& local_cache_path,
-    const GURL& content_url,
+    const base::FilePath& virtual_path,
+    const base::FilePath& local_cache_path,
+    const GURL& download_url,
     const DownloadActionCallback& download_action_callback,
     const GetContentCallback& get_content_callback) {}
 
@@ -75,31 +76,58 @@ void DummyDriveService::CopyHostedDocument(
     const std::string& new_name,
     const GetResourceEntryCallback& callback) {}
 
-void DummyDriveService::RenameResource(const GURL& edit_url,
+void DummyDriveService::RenameResource(const std::string& resource_id,
                                        const std::string& new_name,
                                        const EntryActionCallback& callback) {}
 
 void DummyDriveService::AddResourceToDirectory(
-    const GURL& parent_content_url,
-    const GURL& edit_url,
+    const std::string& parent_resource_id,
+    const std::string& resource_id,
     const EntryActionCallback& callback) {}
 
 void DummyDriveService::RemoveResourceFromDirectory(
-    const GURL& parent_content_url,
+    const std::string& parent_resource_id,
     const std::string& resource_id,
     const EntryActionCallback& callback) {}
 
 void DummyDriveService::AddNewDirectory(
-    const GURL& parent_content_url,
+    const std::string& parent_resource_id,
     const std::string& directory_name,
     const GetResourceEntryCallback& callback) {}
 
-void DummyDriveService::InitiateUpload(const InitiateUploadParams& params,
-                                       const InitiateUploadCallback& callback) {
-}
+void DummyDriveService::InitiateUploadNewFile(
+    const base::FilePath& drive_file_path,
+    const std::string& content_type,
+    int64 content_length,
+    const std::string& parent_resource_id,
+    const std::string& title,
+    const InitiateUploadCallback& callback) {}
 
-void DummyDriveService::ResumeUpload(const ResumeUploadParams& params,
-                                     const ResumeUploadCallback& callback) {}
+void DummyDriveService::InitiateUploadExistingFile(
+    const base::FilePath& drive_file_path,
+    const std::string& content_type,
+    int64 content_length,
+    const std::string& resource_id,
+    const std::string& etag,
+    const InitiateUploadCallback& callback) {}
+
+void DummyDriveService::ResumeUpload(
+    UploadMode upload_mode,
+    const base::FilePath& drive_file_path,
+    const GURL& upload_url,
+    int64 start_position,
+    int64 end_position,
+    int64 content_length,
+    const std::string& content_type,
+    const scoped_refptr<net::IOBuffer>& buf,
+    const UploadRangeCallback& callback) {}
+
+void DummyDriveService::GetUploadStatus(
+    UploadMode upload_mode,
+    const base::FilePath& drive_file_path,
+    const GURL& upload_url,
+    int64 content_length,
+    const UploadRangeCallback& callback) {}
 
 void DummyDriveService::AuthorizeApp(const GURL& edit_url,
                                      const std::string& app_id,

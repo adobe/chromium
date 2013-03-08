@@ -28,7 +28,7 @@ public:
         Resource(FakeLayerUpdater*, scoped_ptr<cc::PrioritizedResource>);
         virtual ~Resource();
 
-        virtual void update(cc::ResourceUpdateQueue&, const gfx::Rect&, const gfx::Vector2d&, bool, cc::RenderingStats&) OVERRIDE;
+        virtual void update(cc::ResourceUpdateQueue&, const gfx::Rect&, const gfx::Vector2d&, bool, cc::RenderingStats*) OVERRIDE;
 
     private:
         FakeLayerUpdater* m_layer;
@@ -39,7 +39,7 @@ public:
 
     virtual scoped_ptr<cc::LayerUpdater::Resource> createResource(cc::PrioritizedResourceManager*) OVERRIDE;
 
-    virtual void prepareToUpdate(const gfx::Rect& contentRect, const gfx::Size&, float, float, gfx::Rect& resultingOpaqueRect, cc::RenderingStats&) OVERRIDE;
+    virtual void prepareToUpdate(const gfx::Rect& contentRect, const gfx::Size&, float, float, gfx::Rect& resultingOpaqueRect, cc::RenderingStats*) OVERRIDE;
     // Sets the rect to invalidate during the next call to prepareToUpdate(). After the next
     // call to prepareToUpdate() the rect is reset.
     void setRectToInvalidate(const gfx::Rect&, FakeTiledLayer*);
@@ -120,10 +120,10 @@ public:
     void setContentBounds(const gfx::Size& contentBounds);
     virtual void calculateContentsScale(
         float idealContentsScale,
+        bool animatingTransformToScreen,
         float* contentsScaleX,
         float* contentsScaleY,
         gfx::Size* contentBounds) OVERRIDE;
-    virtual void didUpdateBounds() OVERRIDE;
 
 protected:
     virtual ~FakeTiledLayerWithScaledBounds();

@@ -14,9 +14,12 @@ namespace content {
 
 TracingIntentHandler* g_trace_intent_handler = NULL;
 
-TracingIntentHandler::TracingIntentHandler(const FilePath& path)
+TracingIntentHandler::TracingIntentHandler(const base::FilePath& path)
     : TraceSubscriberStdio(path) {
-  TraceController::GetInstance()->BeginTracing(this, std::string("-test*"));
+  TraceController::GetInstance()->BeginTracing(
+      this,
+      std::string("-test*"),
+      base::debug::TraceLog::RECORD_UNTIL_FULL);
 }
 
 TracingIntentHandler::~TracingIntentHandler() {
@@ -37,7 +40,7 @@ static void BeginTracing(JNIEnv* env, jclass clazz, jstring jspath) {
   std::string path(base::android::ConvertJavaStringToUTF8(env, jspath));
   if (g_trace_intent_handler != NULL)
     return;
-  g_trace_intent_handler = new TracingIntentHandler(FilePath(path));
+  g_trace_intent_handler = new TracingIntentHandler(base::FilePath(path));
 }
 
 static void EndTracing(JNIEnv* env, jclass clazz) {

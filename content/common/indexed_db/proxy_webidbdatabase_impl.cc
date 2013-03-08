@@ -9,7 +9,6 @@
 #include "content/common/child_thread.h"
 #include "content/common/indexed_db/indexed_db_messages.h"
 #include "content/common/indexed_db/indexed_db_dispatcher.h"
-#include "content/common/indexed_db/proxy_webidbtransaction_impl.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebString.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebVector.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBKeyPath.h"
@@ -23,7 +22,6 @@ using WebKit::WebIDBCallbacks;
 using WebKit::WebIDBDatabaseCallbacks;
 using WebKit::WebIDBMetadata;
 using WebKit::WebIDBKeyPath;
-using WebKit::WebIDBTransaction;
 using WebKit::WebString;
 using WebKit::WebVector;
 using webkit_glue::WorkerTaskRunner;
@@ -44,51 +42,6 @@ RendererWebIDBDatabaseImpl::~RendererWebIDBDatabaseImpl() {
   IndexedDBDispatcher* dispatcher =
       IndexedDBDispatcher::ThreadSpecificInstance();
   dispatcher->DatabaseDestroyed(ipc_database_id_);
-}
-
-WebIDBMetadata RendererWebIDBDatabaseImpl::metadata() const {
-  IndexedDBDatabaseMetadata idb_metadata;
-  IndexedDBDispatcher::Send(
-      new IndexedDBHostMsg_DatabaseMetadata(ipc_database_id_, &idb_metadata));
-
-  WebIDBMetadata web_metadata;
-  web_metadata.id = idb_metadata.id;
-  web_metadata.name = idb_metadata.name;
-  web_metadata.version = idb_metadata.version;
-  web_metadata.intVersion = idb_metadata.int_version;
-  web_metadata.maxObjectStoreId = idb_metadata.max_object_store_id;
-  web_metadata.objectStores = WebVector<WebIDBMetadata::ObjectStore>(
-      idb_metadata.object_stores.size());
-
-  for (size_t i = 0; i < idb_metadata.object_stores.size(); ++i) {
-    const IndexedDBObjectStoreMetadata& idb_store_metadata =
-        idb_metadata.object_stores[i];
-    WebIDBMetadata::ObjectStore& web_store_metadata =
-        web_metadata.objectStores[i];
-
-    web_store_metadata.id = idb_store_metadata.id;
-    web_store_metadata.name = idb_store_metadata.name;
-    web_store_metadata.keyPath = idb_store_metadata.keyPath;
-    web_store_metadata.autoIncrement = idb_store_metadata.autoIncrement;
-    web_store_metadata.maxIndexId = idb_store_metadata.max_index_id;
-    web_store_metadata.indexes = WebVector<WebIDBMetadata::Index>(
-        idb_store_metadata.indexes.size());
-
-    for (size_t j = 0; j < idb_store_metadata.indexes.size(); ++j) {
-      const IndexedDBIndexMetadata& idb_index_metadata =
-          idb_store_metadata.indexes[j];
-      WebIDBMetadata::Index& web_index_metadata =
-          web_store_metadata.indexes[j];
-
-      web_index_metadata.id = idb_index_metadata.id;
-      web_index_metadata.name = idb_index_metadata.name;
-      web_index_metadata.keyPath = idb_index_metadata.keyPath;
-      web_index_metadata.unique = idb_index_metadata.unique;
-      web_index_metadata.multiEntry = idb_index_metadata.multiEntry;
-    }
-  }
-
-  return web_metadata;
 }
 
 void RendererWebIDBDatabaseImpl::createObjectStore(
@@ -117,25 +70,6 @@ void RendererWebIDBDatabaseImpl::deleteObjectStore(
           ipc_database_id_,
           transaction_id,
           object_store_id));
-}
-
-WebKit::WebIDBTransaction* RendererWebIDBDatabaseImpl::createTransaction(
-    long long transaction_id,
-    const WebVector<long long>& object_store_ids,
-    unsigned short mode) {
-  std::vector<int64> object_stores;
-  object_stores.reserve(object_store_ids.size());
-  for (unsigned int i = 0; i < object_store_ids.size(); ++i)
-      object_stores.push_back(object_store_ids[i]);
-
-  int ipc_transaction_id;
-  IndexedDBDispatcher::Send(new IndexedDBHostMsg_DatabaseCreateTransactionOld(
-      WorkerTaskRunner::Instance()->CurrentWorkerId(),
-      ipc_database_id_, transaction_id, object_stores, mode,
-      &ipc_transaction_id));
-  if (!transaction_id)
-    return NULL;
-  return new RendererWebIDBTransactionImpl(ipc_transaction_id);
 }
 
 void RendererWebIDBDatabaseImpl::createTransaction(
@@ -176,7 +110,7 @@ void RendererWebIDBDatabaseImpl::get(
 void RendererWebIDBDatabaseImpl::put(
     long long transaction_id,
     long long object_store_id,
-    WebVector<unsigned char>* value,
+    const WebKit::WebData& value,
     const WebKit::WebIDBKey& key,
     PutMode put_mode,
     WebIDBCallbacks* callbacks,

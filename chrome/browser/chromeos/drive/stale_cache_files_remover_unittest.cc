@@ -6,8 +6,8 @@
 #include <vector>
 
 #include "base/bind.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "base/stringprintf.h"
@@ -48,7 +48,6 @@ class StaleCacheFilesRemoverTest : public testing::Test {
  protected:
   StaleCacheFilesRemoverTest()
       : ui_thread_(content::BrowserThread::UI, &message_loop_),
-        io_thread_(content::BrowserThread::IO),
         cache_(NULL),
         file_system_(NULL),
         fake_drive_service_(NULL),
@@ -57,8 +56,6 @@ class StaleCacheFilesRemoverTest : public testing::Test {
   }
 
   virtual void SetUp() OVERRIDE {
-    io_thread_.StartIOThread();
-
     profile_.reset(new TestingProfile);
 
     fake_drive_service_.reset(new google_apis::FakeDriveService);
@@ -66,6 +63,7 @@ class StaleCacheFilesRemoverTest : public testing::Test {
         "gdata/root_feed.json");
     fake_drive_service_->LoadAccountMetadataForWapi(
         "gdata/account_metadata.json");
+    fake_drive_service_->LoadAppListForDriveApi("drive/applist.json");
 
     fake_free_disk_space_getter_.reset(new FakeFreeDiskSpaceGetter);
 
@@ -121,7 +119,6 @@ class StaleCacheFilesRemoverTest : public testing::Test {
   // The order of the test threads is important, do not change the order.
   // See also content/browser/browser_thread_impl.cc.
   content::TestBrowserThread ui_thread_;
-  content::TestBrowserThread io_thread_;
   scoped_refptr<base::SequencedTaskRunner> blocking_task_runner_;
   scoped_ptr<TestingProfile> profile_;
   DriveCache* cache_;
@@ -137,7 +134,7 @@ class StaleCacheFilesRemoverTest : public testing::Test {
 };
 
 TEST_F(StaleCacheFilesRemoverTest, RemoveStaleCacheFiles) {
-  FilePath dummy_file =
+  base::FilePath dummy_file =
       google_apis::test_util::GetTestFilePath("gdata/root_feed.json");
   std::string resource_id("pdf:1a2b3c");
   std::string md5("abcdef0123456789");
@@ -152,28 +149,24 @@ TEST_F(StaleCacheFilesRemoverTest, RemoveStaleCacheFiles) {
   google_apis::test_util::RunBlockingPoolTask();
   EXPECT_EQ(DRIVE_FILE_OK, error);
 
-  // Verify that the cache file exists.
-  FilePath path = cache_->GetCacheFilePath(resource_id,
-                                           md5,
-                                           DriveCache::CACHE_TYPE_TMP,
-                                           DriveCache::CACHED_FILE_FROM_SERVER);
-  EXPECT_TRUE(file_util::PathExists(path));
+  // Verify that the cache entry exists.
+  bool success = false;
+  DriveCacheEntry cache_entry;
+  cache_->GetCacheEntry(
+      resource_id, md5,
+      base::Bind(&test_util::CopyResultsFromGetCacheEntryCallback,
+                 &success,
+                 &cache_entry));
+  google_apis::test_util::RunBlockingPoolTask();
+  EXPECT_TRUE(success);
 
-  FilePath unused;
+  base::FilePath unused;
   scoped_ptr<DriveEntryProto> entry_proto;
   file_system_->GetEntryInfoByResourceId(
       resource_id,
       base::Bind(&test_util::CopyResultsFromGetEntryInfoWithFilePathCallback,
                  &error,
                  &unused,
-                 &entry_proto));
-  google_apis::test_util::RunBlockingPoolTask();
-  EXPECT_EQ(DRIVE_FILE_ERROR_NOT_FOUND, error);
-
-  file_system_->GetEntryInfoByPath(
-      path,
-      base::Bind(&test_util::CopyResultsFromGetEntryInfoCallback,
-                 &error,
                  &entry_proto));
   google_apis::test_util::RunBlockingPoolTask();
   EXPECT_EQ(DRIVE_FILE_ERROR_NOT_FOUND, error);
@@ -185,12 +178,14 @@ TEST_F(StaleCacheFilesRemoverTest, RemoveStaleCacheFiles) {
   // Wait for StaleCacheFilesRemover to finish cleaning up the stale file.
   google_apis::test_util::RunBlockingPoolTask();
 
-  // Verify that the cache file is deleted.
-  path = cache_->GetCacheFilePath(resource_id,
-                                  md5,
-                                  DriveCache::CACHE_TYPE_TMP,
-                                  DriveCache::CACHED_FILE_FROM_SERVER);
-  EXPECT_FALSE(file_util::PathExists(path));
+  // Verify that the cache entry is deleted.
+  cache_->GetCacheEntry(
+      resource_id, md5,
+      base::Bind(&test_util::CopyResultsFromGetCacheEntryCallback,
+                 &success,
+                 &cache_entry));
+  google_apis::test_util::RunBlockingPoolTask();
+  EXPECT_FALSE(success);
 }
 
 }   // namespace drive

@@ -6,8 +6,8 @@
 
 #include "base/auto_reset.h"
 #include "googleurl/src/gurl.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebStorageArea.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebURL.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebStorageArea.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebStorageEventDispatcher.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebStorageNamespace.h"
 #include "webkit/database/database_util.h"
@@ -194,7 +194,8 @@ SimpleDomStorageSystem* SimpleDomStorageSystem::g_instance_;
 
 SimpleDomStorageSystem::SimpleDomStorageSystem()
     : weak_factory_(this),
-      context_(new DomStorageContext(FilePath(), FilePath(), NULL, NULL)),
+      context_(new DomStorageContext(base::FilePath(), base::FilePath(),
+                                     NULL, NULL)),
       host_(new DomStorageHost(context_)),
       area_being_processed_(NULL),
       next_connection_id_(1) {

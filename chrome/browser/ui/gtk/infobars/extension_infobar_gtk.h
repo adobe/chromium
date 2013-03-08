@@ -12,12 +12,14 @@
 #include "chrome/browser/ui/gtk/menu_gtk.h"
 #include "ui/gfx/gtk_util.h"
 
+class ExtensionContextMenuModel;
 class ExtensionResource;
 class ExtensionViewGtk;
 class MenuGtk;
 
 class ExtensionInfoBarGtk : public InfoBarGtk,
-                            public MenuGtk::Delegate {
+                            public MenuGtk::Delegate,
+                            public ExtensionInfoBarDelegate::DelegateObserver {
  public:
   ExtensionInfoBarGtk(InfoBarService* owner,
                       ExtensionInfoBarDelegate* delegate);
@@ -35,6 +37,9 @@ class ExtensionInfoBarGtk : public InfoBarGtk,
   // Overridden from MenuGtk::Delegate:
   virtual void StoppedShowing() OVERRIDE;
 
+  // Overridden from ExtensionInfoBarDelegate::DelegateObserver:
+  virtual void OnDelegateDeleted() OVERRIDE;
+
  private:
   // Build the widgets of the Infobar.
   void BuildWidgets();
@@ -47,7 +52,7 @@ class ExtensionInfoBarGtk : public InfoBarGtk,
 
   // Returns the context menu model for this extension. Can be NULL if
   // extension context menus are disabled.
-  ui::MenuModel* BuildMenuModel();
+  ExtensionContextMenuModel* BuildMenuModel();
 
   CHROMEGTK_CALLBACK_1(ExtensionInfoBarGtk, void, OnSizeAllocate,
                        GtkAllocation*);
@@ -62,10 +67,14 @@ class ExtensionInfoBarGtk : public InfoBarGtk,
 
   ExtensionViewGtk* view_;
 
-  // The button that activates the extension popup menu. Parent of |icon_|.
+  // The button that activates the extension popup menu. Non-NULL if the
+  // extension shows configure context menus and a dropdown menu should be used
+  // in place of the icon. If set, parents |icon_|.
   GtkWidget* button_;
 
-  // The GtkImage that is inside of |button_|, composed in OnImageLoaded().
+  // The GtkImage that shows the extension icon. If a dropdown menu should be
+  // used, it's put inside |button_|, otherwise it's put directly in the hbox
+  // containing the infobar element. Composed in OnImageLoaded().
   GtkWidget* icon_;
 
   // An alignment with one pixel of bottom padding. This is set so the |view_|
@@ -73,6 +82,9 @@ class ExtensionInfoBarGtk : public InfoBarGtk,
   // to reattach the view since the alignment_ will have the |hbox_| packing
   // child properties. Reparenting becomes easier too.
   GtkWidget* alignment_;
+
+  // The model for the current menu displayed.
+  scoped_refptr<ExtensionContextMenuModel> context_menu_model_;
 
   base::WeakPtrFactory<ExtensionInfoBarGtk> weak_ptr_factory_;
 

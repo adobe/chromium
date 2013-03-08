@@ -9,7 +9,7 @@
 #include <vector>
 
 #include "base/basictypes.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/gtest_prod_util.h"
 #include "chrome/browser/prefs/session_startup_pref.h"
 #include "chrome/browser/profiles/profile.h"
@@ -38,7 +38,7 @@ class StartupBrowserCreator {
   // This function is equivalent to ProcessCommandLine but should only be
   // called during actual process startup.
   bool Start(const CommandLine& cmd_line,
-             const FilePath& cur_dir,
+             const base::FilePath& cur_dir,
              Profile* last_used_profile,
              const Profiles& last_opened_profiles,
              int* return_code) {
@@ -48,9 +48,15 @@ class StartupBrowserCreator {
 
   // This function performs command-line handling and is invoked only after
   // start up (for example when we get a start request for another process).
-  // |command_line| holds the command line we need to process
-  static void ProcessCommandLineAlreadyRunning(const CommandLine& cmd_line,
-                                               const FilePath& cur_dir);
+  // |command_line| holds the command line we need to process.
+  // |cur_dir| is the current working directory that the original process was
+  // invoked from.
+  // |startup_profile_dir| is the directory that contains the profile that the
+  // command line arguments will be executed under.
+  static void ProcessCommandLineAlreadyRunning(
+      const CommandLine& command_line,
+      const base::FilePath& cur_dir,
+      const base::FilePath& startup_profile_dir);
 
   template <class AutomationProviderClass>
   static bool CreateAutomationProvider(const std::string& channel_id,
@@ -68,7 +74,7 @@ class StartupBrowserCreator {
   // |is_first_run| indicates that this is a new profile.
   bool LaunchBrowser(const CommandLine& command_line,
                      Profile* profile,
-                     const FilePath& cur_dir,
+                     const base::FilePath& cur_dir,
                      chrome::startup::IsProcessStartup is_process_startup,
                      chrome::startup::IsFirstRun is_first_run,
                      int* return_code);
@@ -116,11 +122,11 @@ class StartupBrowserCreator {
   // vector is empty if the user didn't specify any URLs on the command line.
   static std::vector<GURL> GetURLsFromCommandLine(
       const CommandLine& command_line,
-      const FilePath& cur_dir,
+      const base::FilePath& cur_dir,
       Profile* profile);
 
   static bool ProcessCmdLineImpl(const CommandLine& command_line,
-                                 const FilePath& cur_dir,
+                                 const base::FilePath& cur_dir,
                                  bool process_startup,
                                  Profile* last_used_profile,
                                  const Profiles& last_opened_profiles,
@@ -129,8 +135,8 @@ class StartupBrowserCreator {
 
   // Callback after a profile has been created.
   static void ProcessCommandLineOnProfileCreated(
-      const CommandLine& cmd_line,
-      const FilePath& cur_dir,
+      const CommandLine& command_line,
+      const base::FilePath& cur_dir,
       Profile* profile,
       Profile::CreateStatus status);
 

@@ -7,15 +7,15 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/message_loop.h"
+#include "base/prefs/pref_service.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
-#include "chrome/browser/history/history.h"
+#include "chrome/browser/history/history_db_task.h"
+#include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
-#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
@@ -39,16 +39,16 @@ namespace {
 
 // A task to be scheduled on the history backend thread.
 // Notifies the main thread after all history backend thread tasks have run.
-class WaitForHistoryTask : public HistoryDBTask {
+class WaitForHistoryTask : public history::HistoryDBTask {
  public:
   WaitForHistoryTask() {}
 
   virtual bool RunOnDBThread(history::HistoryBackend* backend,
-                             history::HistoryDatabase* db) {
+                             history::HistoryDatabase* db) OVERRIDE {
     return true;
   }
 
-  virtual void DoneRunOnMainThread() {
+  virtual void DoneRunOnMainThread() OVERRIDE {
     MessageLoop::current()->Quit();
   }
 
@@ -81,13 +81,13 @@ class HistoryBrowserTest : public InProcessBrowserTest {
 
   GURL GetTestUrl() {
     return ui_test_utils::GetTestUrl(
-        FilePath(FilePath::kCurrentDirectory),
-        FilePath(FILE_PATH_LITERAL("title2.html")));
+        base::FilePath(base::FilePath::kCurrentDirectory),
+        base::FilePath(FILE_PATH_LITERAL("title2.html")));
   }
 
   void WaitForHistoryBackendToRun() {
     CancelableRequestConsumerTSimple<int> request_consumer;
-    scoped_refptr<HistoryDBTask> task(new WaitForHistoryTask());
+    scoped_refptr<history::HistoryDBTask> task(new WaitForHistoryTask());
     HistoryService* history =
         HistoryServiceFactory::GetForProfile(GetProfile(),
                                              Profile::EXPLICIT_ACCESS);
@@ -103,7 +103,7 @@ class HistoryBrowserTest : public InProcessBrowserTest {
   void LoadAndWaitForURL(const GURL& url) {
     string16 expected_title(ASCIIToUTF16("OK"));
     content::TitleWatcher title_watcher(
-        chrome::GetActiveWebContents(browser()), expected_title);
+        browser()->tab_strip_model()->GetActiveWebContents(), expected_title);
     title_watcher.AlsoWaitForTitle(ASCIIToUTF16("FAIL"));
     ui_test_utils::NavigateToURL(browser(), url);
     EXPECT_EQ(expected_title, title_watcher.WaitAndGetTitle());
@@ -111,8 +111,8 @@ class HistoryBrowserTest : public InProcessBrowserTest {
 
   void LoadAndWaitForFile(const char* filename) {
     GURL url = ui_test_utils::GetTestUrl(
-        FilePath().AppendASCII("History"),
-        FilePath().AppendASCII(filename));
+        base::FilePath().AppendASCII("History"),
+        base::FilePath().AppendASCII(filename));
     LoadAndWaitForURL(url);
   }
 };
@@ -246,7 +246,8 @@ IN_PROC_BROWSER_TEST_F(HistoryBrowserTest,
   // Therefore, Page 11 should be in the history in addition to Page 12.
   LoadAndWaitForFile("history_length_test_page_11.html");
 
-  content::SimulateMouseClick(chrome::GetActiveWebContents(browser()), 0,
+  content::SimulateMouseClick(
+      browser()->tab_strip_model()->GetActiveWebContents(), 0,
       WebKit::WebMouseEvent::ButtonLeft);
   LoadAndWaitForFile("history_length_test_page_11.html");
 }
@@ -263,8 +264,13 @@ IN_PROC_BROWSER_TEST_F(HistoryBrowserTest,
   LoadAndWaitForFile("history_length_test_page_21.html");
 }
 
-// If this test flakes, use bug 22111.
-IN_PROC_BROWSER_TEST_F(HistoryBrowserTest, HistorySearchXSS) {
+// http://crbug.com/22111
+#if defined(OS_LINUX)
+#define MAYBE_HistorySearchXSS DISABLED_HistorySearchXSS
+#else
+#define MAYBE_HistorySearchXSS HistorySearchXSS
+#endif
+IN_PROC_BROWSER_TEST_F(HistoryBrowserTest, MAYBE_HistorySearchXSS) {
   GURL url(std::string(chrome::kChromeUIHistoryURL) +
       "#q=%3Cimg%20src%3Dx%3Ax%20onerror%3D%22document.title%3D'XSS'%22%3E");
   ui_test_utils::NavigateToURL(browser(), url);
@@ -272,11 +278,12 @@ IN_PROC_BROWSER_TEST_F(HistoryBrowserTest, HistorySearchXSS) {
   // so that we're not susceptible (less susceptible?) to a race condition.
   // Should a race condition ever trigger, it won't result in flakiness.
   int num = ui_test_utils::FindInPage(
-      chrome::GetActiveWebContents(browser()), ASCIIToUTF16("<img"), true,
+      browser()->tab_strip_model()->GetActiveWebContents(),
+      ASCIIToUTF16("<img"), true,
       true, NULL, NULL);
   EXPECT_GT(num, 0);
   EXPECT_EQ(ASCIIToUTF16("History"),
-            chrome::GetActiveWebContents(browser())->GetTitle());
+            browser()->tab_strip_model()->GetActiveWebContents()->GetTitle());
 }
 
 // Verify that history persists after session restart.
@@ -296,8 +303,8 @@ IN_PROC_BROWSER_TEST_F(HistoryBrowserTest, HistoryPersists) {
 // Invalid URLs should not go in history.
 IN_PROC_BROWSER_TEST_F(HistoryBrowserTest, InvalidURLNoHistory) {
   GURL non_existant = ui_test_utils::GetTestUrl(
-      FilePath().AppendASCII("History"),
-      FilePath().AppendASCII("non_existant_file.html"));
+      base::FilePath().AppendASCII("History"),
+      base::FilePath().AppendASCII("non_existant_file.html"));
   ui_test_utils::NavigateToURL(browser(), non_existant);
   ExpectEmptyHistory();
 }
@@ -327,11 +334,11 @@ IN_PROC_BROWSER_TEST_F(HistoryBrowserTest, NavigateMultiTimes) {
 IN_PROC_BROWSER_TEST_F(HistoryBrowserTest, MultiTabsWindowsHistory) {
   GURL url1 = GetTestUrl();
   GURL url2  = ui_test_utils::GetTestUrl(
-      FilePath(), FilePath(FILE_PATH_LITERAL("title1.html")));
+      base::FilePath(), base::FilePath(FILE_PATH_LITERAL("title1.html")));
   GURL url3  = ui_test_utils::GetTestUrl(
-      FilePath(), FilePath(FILE_PATH_LITERAL("title3.html")));
+      base::FilePath(), base::FilePath(FILE_PATH_LITERAL("title3.html")));
   GURL url4  = ui_test_utils::GetTestUrl(
-      FilePath(), FilePath(FILE_PATH_LITERAL("simple.html")));
+      base::FilePath(), base::FilePath(FILE_PATH_LITERAL("simple.html")));
 
   ui_test_utils::NavigateToURL(browser(), url1);
   Browser* browser2 = CreateBrowser(browser()->profile());
@@ -354,8 +361,8 @@ IN_PROC_BROWSER_TEST_F(HistoryBrowserTest, MultiTabsWindowsHistory) {
 // Downloaded URLs should not show up in history.
 IN_PROC_BROWSER_TEST_F(HistoryBrowserTest, DownloadNoHistory) {
   GURL download_url = ui_test_utils::GetTestUrl(
-      FilePath().AppendASCII("downloads"),
-      FilePath().AppendASCII("a_zip_file.zip"));
+      base::FilePath().AppendASCII("downloads"),
+      base::FilePath().AppendASCII("a_zip_file.zip"));
   ui_test_utils::DownloadURL(browser(), download_url);
   ExpectEmptyHistory();
 }
@@ -363,14 +370,15 @@ IN_PROC_BROWSER_TEST_F(HistoryBrowserTest, DownloadNoHistory) {
 // HTTP meta-refresh redirects should have separate history entries.
 IN_PROC_BROWSER_TEST_F(HistoryBrowserTest, RedirectHistory) {
   GURL redirector = ui_test_utils::GetTestUrl(
-      FilePath().AppendASCII("History"),
-      FilePath().AppendASCII("redirector.html"));
+      base::FilePath().AppendASCII("History"),
+      base::FilePath().AppendASCII("redirector.html"));
   GURL landing_url = ui_test_utils::GetTestUrl(
-      FilePath().AppendASCII("History"),
-      FilePath().AppendASCII("landing.html"));
+      base::FilePath().AppendASCII("History"),
+      base::FilePath().AppendASCII("landing.html"));
   ui_test_utils::NavigateToURLBlockUntilNavigationsComplete(
       browser(), redirector, 2);
-  ASSERT_EQ(landing_url, chrome::GetActiveWebContents(browser())->GetURL());
+  ASSERT_EQ(landing_url,
+            browser()->tab_strip_model()->GetActiveWebContents()->GetURL());
   std::vector<GURL> urls(GetHistoryContents());
   ASSERT_EQ(2u, urls.size());
   ASSERT_EQ(landing_url, urls[0]);
@@ -381,7 +389,7 @@ IN_PROC_BROWSER_TEST_F(HistoryBrowserTest, RedirectHistory) {
 IN_PROC_BROWSER_TEST_F(HistoryBrowserTest, NavigateBringPageToTop) {
   GURL url1 = GetTestUrl();
   GURL url2  = ui_test_utils::GetTestUrl(
-      FilePath(), FilePath(FILE_PATH_LITERAL("title3.html")));
+      base::FilePath(), base::FilePath(FILE_PATH_LITERAL("title3.html")));
 
   ui_test_utils::NavigateToURL(browser(), url1);
   ui_test_utils::NavigateToURL(browser(), url2);
@@ -396,7 +404,7 @@ IN_PROC_BROWSER_TEST_F(HistoryBrowserTest, NavigateBringPageToTop) {
 IN_PROC_BROWSER_TEST_F(HistoryBrowserTest, ReloadBringPageToTop) {
   GURL url1 = GetTestUrl();
   GURL url2  = ui_test_utils::GetTestUrl(
-      FilePath(), FilePath(FILE_PATH_LITERAL("title3.html")));
+      base::FilePath(), base::FilePath(FILE_PATH_LITERAL("title3.html")));
 
   ui_test_utils::NavigateToURL(browser(), url1);
   ui_test_utils::NavigateToURLWithDisposition(
@@ -408,7 +416,8 @@ IN_PROC_BROWSER_TEST_F(HistoryBrowserTest, ReloadBringPageToTop) {
   ASSERT_EQ(url2, urls[0]);
   ASSERT_EQ(url1, urls[1]);
 
-  content::WebContents* tab = chrome::GetActiveWebContents(browser());
+  content::WebContents* tab =
+      browser()->tab_strip_model()->GetActiveWebContents();
   tab->GetController().Reload(false);
   content::WaitForLoadStop(tab);
 
@@ -422,12 +431,13 @@ IN_PROC_BROWSER_TEST_F(HistoryBrowserTest, ReloadBringPageToTop) {
 IN_PROC_BROWSER_TEST_F(HistoryBrowserTest, BackForwardBringPageToTop) {
   GURL url1 = GetTestUrl();
   GURL url2  = ui_test_utils::GetTestUrl(
-      FilePath(), FilePath(FILE_PATH_LITERAL("title3.html")));
+      base::FilePath(), base::FilePath(FILE_PATH_LITERAL("title3.html")));
 
   ui_test_utils::NavigateToURL(browser(), url1);
   ui_test_utils::NavigateToURL(browser(), url2);
 
-  content::WebContents* tab = chrome::GetActiveWebContents(browser());
+  content::WebContents* tab =
+      browser()->tab_strip_model()->GetActiveWebContents();
   chrome::GoBack(browser(), CURRENT_TAB);
   content::WaitForLoadStop(tab);
 
@@ -447,17 +457,18 @@ IN_PROC_BROWSER_TEST_F(HistoryBrowserTest, BackForwardBringPageToTop) {
 // Verify that submitting form adds target page to history list.
 IN_PROC_BROWSER_TEST_F(HistoryBrowserTest, SubmitFormAddsTargetPage) {
   GURL form = ui_test_utils::GetTestUrl(
-      FilePath().AppendASCII("History"),
-      FilePath().AppendASCII("form.html"));
+      base::FilePath().AppendASCII("History"),
+      base::FilePath().AppendASCII("form.html"));
   GURL target = ui_test_utils::GetTestUrl(
-      FilePath().AppendASCII("History"),
-      FilePath().AppendASCII("target.html"));
+      base::FilePath().AppendASCII("History"),
+      base::FilePath().AppendASCII("target.html"));
   ui_test_utils::NavigateToURL(browser(), form);
 
-  content::WebContents* web_contents = chrome::GetActiveWebContents(browser());
+  content::WebContents* web_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
   string16 expected_title(ASCIIToUTF16("Target Page"));
   content::TitleWatcher title_watcher(
-      chrome::GetActiveWebContents(browser()), expected_title);
+      browser()->tab_strip_model()->GetActiveWebContents(), expected_title);
   ASSERT_TRUE(content::ExecuteScript(
       web_contents, "document.getElementById('form').submit()"));
   EXPECT_EQ(expected_title, title_watcher.WaitAndGetTitle());
@@ -475,7 +486,8 @@ IN_PROC_BROWSER_TEST_F(HistoryBrowserTest, OneHistoryTabPerWindow) {
 
   // Even after navigate completes, the currently-active tab title is
   // 'Loading...' for a brief time while the history page loads.
-  content::WebContents* web_contents = chrome::GetActiveWebContents(browser());
+  content::WebContents* web_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
   string16 expected_title(ASCIIToUTF16("History"));
   content::TitleWatcher title_watcher(web_contents, expected_title);
   chrome::ExecuteCommand(browser(), IDC_SHOW_HISTORY);

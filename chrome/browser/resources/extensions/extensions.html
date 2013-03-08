@@ -38,11 +38,19 @@
 
 <div class="page" id="extension-settings">
   <header id="page-header"><h1 i18n-content="extensionSettings"></h1>
-    <div id="dev-toggle" class="checkbox header-extras"><label>
-      <input id="toggle-dev-on" type="checkbox">
-      <span i18n-content="extensionSettingsDeveloperMode">
-    </label></div>
-    <div class="page-banner managed-mode-banner">
+    <div id="header-controls" class="header-extras">
+      <div id="dev-toggle" class="checkbox">
+        <label>
+          <input id="toggle-dev-on" type="checkbox">
+          <span i18n-content="extensionSettingsDeveloperMode">
+        </label>
+      </div>
+      <div id="managed-user-control-div">
+        <button id="unlock-button" i18n-content="unlockButton"></button>
+        <button id="lock-button" i18n-content="lockButton"></button>
+      </div>
+    </div>
+    <div class="page-banner profile-is-managed-banner">
       <div class="page-banner-gradient">
         <span class="page-banner-text"
             i18n-content="extensionSettingsManagedMode"></span>
@@ -103,6 +111,10 @@
         </div>
         <p class="extension-description">
           <span></span>
+          <a class="permissions-link"
+              i18n-content="extensionSettingsPermissions"
+              href="#">
+          </a>
           <a class="site-link" target="_parent" hidden></a>
         </p>
         <div class="developer-extras">

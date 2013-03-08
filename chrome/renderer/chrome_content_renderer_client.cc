@@ -11,7 +11,6 @@
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
 #include "base/path_service.h"
-#include "base/string_tokenizer.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/common/child_process_logging.h"
@@ -19,6 +18,9 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/content_settings_pattern.h"
+#include "chrome/common/extensions/api/extension_action/page_action_handler.h"
+#include "chrome/common/extensions/background_info.h"
+#include "chrome/common/extensions/csp_handler.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_manifest_constants.h"
@@ -46,7 +48,10 @@
 #include "chrome/renderer/extensions/resource_request_policy.h"
 #include "chrome/renderer/external_extension.h"
 #include "chrome/renderer/loadtimes_extension_bindings.h"
+#include "chrome/renderer/net/net_error_helper.h"
 #include "chrome/renderer/net/renderer_net_predictor.h"
+#include "chrome/renderer/net_benchmarking_extension.h"
+#include "chrome/renderer/one_click_signin_agent.h"
 #include "chrome/renderer/page_click_tracker.h"
 #include "chrome/renderer/page_load_histograms.h"
 #include "chrome/renderer/pepper/chrome_ppapi_interfaces.h"
@@ -82,7 +87,9 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebCache.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDataSource.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebElement.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebPluginContainer.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPluginParams.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSecurityOrigin.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSecurityPolicy.h"
@@ -123,15 +130,17 @@ using WebKit::WebVector;
 
 namespace {
 
+const char kWebViewTagName[] = "WEBVIEW";
+
 // Explicitly register all extension ManifestHandlers needed to parse
 // fields used in the renderer.
 void RegisterExtensionManifestHandlers() {
-  extensions::ManifestHandler::Register(
-      extension_manifest_keys::kDevToolsPage,
-      new extensions::DevToolsPageHandler);
-  extensions::ManifestHandler::Register(
-      extension_manifest_keys::kWebAccessibleResources,
-      new extensions::WebAccessibleResourcesHandler);
+  (new extensions::BackgroundManifestHandler)->Register();
+  (new extensions::DevToolsPageHandler)->Register();
+  (new extensions::WebAccessibleResourcesHandler)->Register();
+  (new extensions::PageActionHandler)->Register();
+  (new extensions::CSPHandler(false))->Register();  // not platform app.
+  (new extensions::CSPHandler(true))->Register();  // platform app.
 }
 
 static void AppendParams(const std::vector<string16>& additional_names,
@@ -218,6 +227,8 @@ void ChromeContentRendererClient::RenderThreadStarted() {
   CommandLine* command_line = CommandLine::ForCurrentProcess();
   if (command_line->HasSwitch(switches::kEnableBenchmarking))
     thread->RegisterExtension(extensions_v8::BenchmarkingExtension::Get());
+  if (command_line->HasSwitch(switches::kEnableNetBenchmarking))
+    thread->RegisterExtension(extensions_v8::NetBenchmarkingExtension::Get());
 
   if (command_line->HasSwitch(switches::kPlaybackMode) ||
       command_line->HasSwitch(switches::kRecordMode) ||
@@ -322,12 +333,18 @@ void ChromeContentRendererClient::RenderViewCreated(
   new PepperHelper(render_view);
 #endif
 
+  new NetErrorHelper(render_view);
+
 #if defined(ENABLE_AUTOMATION)
   // Used only for testing/automation.
   if (CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kDomAutomationController)) {
     new AutomationRendererHelper(render_view);
   }
+#endif
+
+#if defined(ENABLE_ONE_CLICK_SIGNIN)
+  new OneClickSigninAgent(render_view);
 #endif
 }
 
@@ -349,7 +366,7 @@ std::string ChromeContentRendererClient::GetDefaultEncoding() {
   return l10n_util::GetStringUTF8(IDS_DEFAULT_ENCODING);
 }
 
-const extensions::Extension* ChromeContentRendererClient::GetExtension(
+const Extension* ChromeContentRendererClient::GetExtension(
     const WebSecurityOrigin& origin) const {
   if (!EqualsASCII(origin.protocol(), extensions::kExtensionScheme))
     return NULL;
@@ -372,7 +389,7 @@ bool ChromeContentRendererClient::OverrideCreatePlugin(
         switches::kEnableBrowserPluginForAllViewTypes))
       return false;
     WebDocument document = frame->document();
-    const extensions::Extension* extension =
+    const Extension* extension =
         GetExtension(document.securityOrigin());
     if (extension && extension->HasAPIPermission(
         extensions::APIPermission::kWebView))
@@ -393,7 +410,7 @@ bool ChromeContentRendererClient::OverrideCreatePlugin(
 
 WebPlugin* ChromeContentRendererClient::CreatePluginReplacement(
     content::RenderView* render_view,
-    const FilePath& plugin_path) {
+    const base::FilePath& plugin_path) {
   PluginPlaceholder* placeholder =
       PluginPlaceholder::CreateErrorPlugin(render_view, plugin_path);
   return placeholder->plugin();
@@ -520,8 +537,8 @@ WebPlugin* ChromeContentRendererClient::CreatePlugin(
               extension && extension->from_webstore();
           // Allow built-in extensions and extensions under development.
           bool is_extension_unrestricted = extension &&
-              (extension->location() == Extension::COMPONENT ||
-              extension->location() == Extension::LOAD);
+              (extension->location() == extensions::Manifest::COMPONENT ||
+               extensions::Manifest::IsUnpackedLocation(extension->location()));
           GURL top_url = frame->top()->document().url();
           if (!IsNaClAllowed(manifest_url,
                              top_url,
@@ -673,10 +690,10 @@ bool ChromeContentRendererClient::IsNaClAllowed(
   // Temporarily allow these URLs to run NaCl apps. We should remove this
   // code when PNaCl ships.
   bool is_whitelisted_url =
-      ((top_url.SchemeIs("http") || top_url.SchemeIs("https")) &&
+      top_url.SchemeIs("https") &&
       (top_url.host() == "plus.google.com" ||
           top_url.host() == "plus.sandbox.google.com") &&
-      top_url.path().find("/games") == 0);
+      top_url.path().find("/games") == 0;
 
   // Allow Chrome Web Store extensions, built-in extensions, extensions
   // under development, invocations from whitelisted URLs, and all invocations
@@ -802,9 +819,23 @@ bool ChromeContentRendererClient::AllowPopup() {
 
 bool ChromeContentRendererClient::ShouldFork(WebFrame* frame,
                                              const GURL& url,
+                                             const std::string& http_method,
                                              bool is_initial_navigation,
                                              bool* send_referrer) {
   DCHECK(!frame->parent());
+
+  // If this is the Instant process, fork all navigations originating from the
+  // renderer.  The destination page will then be bucketed back to this Instant
+  // process if it is an Instant url, or to another process if not.
+  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kInstantProcess))
+    return true;
+
+  // For now, we skip the rest for POST submissions.  This is because
+  // http://crbug.com/101395 is more likely to cause compatibility issues
+  // with hosted apps and extensions than WebUI pages.  We will remove this
+  // check when cross-process POST submissions are supported.
+  if (http_method != "GET")
+    return false;
 
   // If |url| matches one of the prerendered URLs, stop this navigation and try
   // to swap in the prerendered page on the browser process. If the prerendered
@@ -1045,6 +1076,32 @@ void ChromeContentRendererClient::RegisterPPAPIInterfaceFactories(
 #if defined(ENABLE_PLUGINS)
   factory_manager->RegisterFactory(ChromePPAPIInterfaceFactory);
 #endif
+}
+
+bool ChromeContentRendererClient::AllowBrowserPlugin(
+    WebKit::WebPluginContainer* container) const {
+  // If this |BrowserPlugin| <object> in the |container| is not inside a
+  // <webview> shadowHost, we disable instantiating this plugin. This is to
+  // discourage and prevent developers from accidentally attaching <object>
+  // directly in apps.
+  //
+  // Note that this check below does *not* ensure any security, it is still
+  // possible to bypass this check.
+  // TODO(lazyboy): http://crbug.com/178663, Ensure we properly disallow
+  // instantiating BrowserPlugin outside of the <webview> shim.
+  if (container->element().isNull())
+    return false;
+
+  if (container->element().shadowHost().isNull())
+    return false;
+
+  if (container->element().shadowHost().tagName().equals(
+          WebKit::WebString::fromUTF8(kWebViewTagName))) {
+    return true;
+  } else {
+    return CommandLine::ForCurrentProcess()->HasSwitch(
+        switches::kEnableBrowserPluginForAllViewTypes);
+  }
 }
 
 }  // namespace chrome

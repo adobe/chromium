@@ -7,6 +7,7 @@
 
 #include <list>
 #include <map>
+#include <set>
 #include <string>
 
 #include "base/memory/ref_counted.h"
@@ -89,15 +90,23 @@ class JingleSession : public Session,
                                     scoped_ptr<Authenticator> authenticator);
   void AcceptIncomingConnection(const JingleMessage& initiate_message);
 
-  // Helper to send IqRequests to the peer. It sets up the response
-  // callback to OnMessageResponse() which simply terminates the
-  // session whenever a request fails or times out. This method should
-  // not be used for messages that need to be handled differently.
+  // Sends |message| to the peer. The session is closed if the send fails or no
+  // response is received within a reasonable time. All other responses are
+  // ignored.
   void SendMessage(const JingleMessage& message);
+
+  // Iq response handler.
   void OnMessageResponse(JingleMessage::ActionType request_type,
                          IqRequest* request,
                          const buzz::XmlElement* response);
-  void CleanupPendingRequests(IqRequest* request);
+
+  // Sends transport-info message with candidates from |pending_candidates_|.
+  void SendTransportInfo();
+
+  // Response handler for transport-info responses. Transport-info timeouts are
+  // ignored and don't terminate connection.
+  void OnTransportInfoResponse(IqRequest* request,
+                               const buzz::XmlElement* response);
 
   // Called by JingleSessionManager on incoming |message|. Must call
   // |reply_callback| to send reply message before sending any other
@@ -117,9 +126,10 @@ class JingleSession : public Session,
   // Called from OnAccept() to initialize session config.
   bool InitializeConfigFromDescription(const ContentDescription* description);
 
+  // Called after the initial incoming authenticator message is processed.
+  void ContinueAcceptIncomingConnection();
+  // Called after subsequent authenticator messages are processed.
   void ProcessAuthenticationStep();
-
-  void SendTransportInfo();
 
   // Terminates the session and sends session-terminate if it is
   // necessary. |error| specifies the error code in case when the
@@ -143,10 +153,11 @@ class JingleSession : public Session,
 
   scoped_ptr<Authenticator> authenticator_;
 
-  // Container for pending Iq requests. Requests are removed in
-  // CleanupPendingRequests() which is called when a response is
-  // received or one of the requests times out.
-  std::list<IqRequest*> pending_requests_;
+  // Pending Iq requests. Used for all messages except transport-info.
+  std::set<IqRequest*> pending_requests_;
+
+  // Pending transport-info requests.
+  std::list<IqRequest*> transport_info_requests_;
 
   ChannelsMap channels_;
   scoped_ptr<ChannelMultiplexer> channel_multiplexer_;

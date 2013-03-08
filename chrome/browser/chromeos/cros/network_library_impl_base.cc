@@ -1048,7 +1048,7 @@ class UserStringSubstitution : public onc::StringSubstitution {
  public:
   UserStringSubstitution() {}
   virtual bool GetSubstitute(std::string placeholder,
-                             std::string* substitute) const {
+                             std::string* substitute) const OVERRIDE {
     if (!UserManager::Get()->IsUserLoggedIn())
       return false;
     const User* logged_in_user = UserManager::Get()->GetLoggedInUser();
@@ -1152,7 +1152,12 @@ bool NetworkLibraryImplBase::LoadOncNetworks(const std::string& onc_blob,
   if (has_certificates) {
     VLOG(2) << "ONC file has " << certificates->GetSize() << " certificates";
 
-    onc::CertificateImporter cert_importer(source, allow_web_trust_from_policy);
+    // Web trust is only granted to certificates imported for a managed user
+    // on a managed device and for user imports.
+    bool allow_web_trust =
+        (source == onc::ONC_SOURCE_USER_IMPORT) ||
+        (source == onc::ONC_SOURCE_USER_POLICY && allow_web_trust_from_policy);
+    onc::CertificateImporter cert_importer(allow_web_trust);
     if (cert_importer.ParseAndStoreCertificates(*certificates) !=
         onc::CertificateImporter::IMPORT_OK) {
       LOG(ERROR) << "Cannot parse some of the certificates in the ONC from "

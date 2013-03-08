@@ -81,8 +81,6 @@ public:
     // A layer's bounds are in logical, non-page-scaled pixels (however, the
     // root layer's bounds are in physical pixels).
     void setBounds(const gfx::Size&);
-    // TODO(enne): remove this function: http://crbug.com/166023
-    virtual void didUpdateBounds();
     const gfx::Size& bounds() const { return m_bounds; }
 
     void setMasksToBounds(bool);
@@ -94,7 +92,6 @@ public:
 
     virtual void setNeedsDisplayRect(const gfx::RectF& dirtyRect);
     void setNeedsDisplay() { setNeedsDisplayRect(gfx::RectF(gfx::PointF(), bounds())); }
-    virtual bool needsDisplay() const;
 
     void setOpacity(float);
     float opacity() const;
@@ -210,7 +207,7 @@ public:
 
     // These methods typically need to be overwritten by derived classes.
     virtual bool drawsContent() const;
-    virtual void update(ResourceUpdateQueue&, const OcclusionTracker*, RenderingStats&) { }
+    virtual void update(ResourceUpdateQueue&, const OcclusionTracker*, RenderingStats*) { }
     virtual bool needMoreUpdates();
     virtual void setIsMask(bool) { }
 
@@ -229,6 +226,7 @@ public:
     gfx::Size contentBounds() const { return m_drawProperties.content_bounds; }
     virtual void calculateContentsScale(
         float idealContentsScale,
+        bool animatingTransformToScreen,
         float* contentsScaleX,
         float* contentsScaleY,
         gfx::Size* contentBounds);
@@ -295,6 +293,9 @@ public:
     // Constructs a LayerImpl of the correct runtime type for this Layer type.
     virtual scoped_ptr<LayerImpl> createLayerImpl(LayerTreeImpl* treeImpl);
 
+    bool needsDisplayForTesting() const { return m_needsDisplay; }
+    void resetNeedsDisplayForTesting() { m_needsDisplay = false; }
+
 protected:
     friend class LayerImpl;
     friend class TreeSynchronizer;
@@ -332,13 +333,11 @@ private:
     bool hasAncestor(Layer*) const;
     bool descendantIsFixedToContainerLayer() const;
 
-    size_t numChildren() const { return m_children.size(); }
-
     // Returns the index of the child or -1 if not found.
     int indexOfChild(const Layer*);
 
     // This should only be called from removeFromParent.
-    void removeChild(Layer*);
+    void removeChildOrDependent(Layer*);
 
     // LayerAnimationValueObserver implementation.
     virtual void OnOpacityAnimated(float) OVERRIDE;

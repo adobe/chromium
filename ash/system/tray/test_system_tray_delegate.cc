@@ -94,6 +94,9 @@ user::LoginStatus TestSystemTrayDelegate::GetUserLoginStatus() const {
   return user::LOGGED_IN_USER;
 }
 
+void TestSystemTrayDelegate::ChangeProfilePicture() {
+}
+
 const std::string TestSystemTrayDelegate::GetEnterpriseDomain() const {
   return std::string();
 }
@@ -168,7 +171,10 @@ void TestSystemTrayDelegate::GetAvailableBluetoothDevices(
     BluetoothDeviceList* list) {
 }
 
-void TestSystemTrayDelegate::BluetoothSetDiscovering(bool value) {
+void TestSystemTrayDelegate::BluetoothStartDiscovering() {
+}
+
+void TestSystemTrayDelegate::BluetoothStopDiscovering() {
 }
 
 void TestSystemTrayDelegate::ToggleBluetoothConnection(
@@ -191,7 +197,7 @@ void TestSystemTrayDelegate::SwitchIME(const std::string& ime_id) {
 void TestSystemTrayDelegate::ActivateIMEProperty(const std::string& key) {
 }
 
-void TestSystemTrayDelegate::CancelDriveOperation(const FilePath&) {
+void TestSystemTrayDelegate::CancelDriveOperation(const base::FilePath&) {
 }
 
 void TestSystemTrayDelegate::GetDriveOperationStatusList(

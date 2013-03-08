@@ -6,20 +6,17 @@
 #define CC_TEST_FAKE_LAYER_TREE_HOST_CLIENT_H_
 
 #include "base/memory/scoped_ptr.h"
-#include "cc/font_atlas.h"
 #include "cc/input_handler.h"
 #include "cc/layer_tree_host.h"
+#include "cc/test/fake_context_provider.h"
 #include "cc/test/fake_output_surface.h"
 
 namespace cc {
 
 class FakeLayerImplTreeHostClient : public LayerTreeHostClient {
 public:
-    FakeLayerImplTreeHostClient(bool useSoftwareRendering = false, bool useDelegatingRenderer = false)
-        : m_useSoftwareRendering(useSoftwareRendering)
-        , m_useDelegatingRenderer(useDelegatingRenderer)
-    {
-    }
+    FakeLayerImplTreeHostClient(bool useSoftwareRendering = false, bool useDelegatingRenderer = false);
+    virtual ~FakeLayerImplTreeHostClient();
 
     virtual void willBeginFrame() OVERRIDE { }
     virtual void didBeginFrame() OVERRIDE { }
@@ -38,11 +35,15 @@ public:
     // Used only in the single-threaded path.
     virtual void scheduleComposite() OVERRIDE { }
 
-    virtual scoped_ptr<FontAtlas> createFontAtlas() OVERRIDE;
+    virtual scoped_refptr<cc::ContextProvider> OffscreenContextProviderForMainThread() OVERRIDE;
+    virtual scoped_refptr<cc::ContextProvider> OffscreenContextProviderForCompositorThread() OVERRIDE;
 
 private:
     bool m_useSoftwareRendering;
     bool m_useDelegatingRenderer;
+
+    scoped_refptr<FakeContextProvider> m_mainThreadContexts;
+    scoped_refptr<FakeContextProvider> m_compositorThreadContexts;
 };
 
 }  // namespace cc

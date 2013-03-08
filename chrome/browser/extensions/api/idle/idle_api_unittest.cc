@@ -7,7 +7,7 @@
 #include <limits.h>
 #include <string>
 
-#include "base/string_number_conversions.h"
+#include "base/strings/string_number_conversions.h"
 #include "chrome/browser/extensions/api/idle/idle_api_constants.h"
 #include "chrome/browser/extensions/api/idle/idle_manager.h"
 #include "chrome/browser/extensions/api/idle/idle_manager_factory.h"
@@ -144,7 +144,7 @@ void IdleTest::SetUp() {
   idle_manager_ = IdleManagerFactory::GetForProfile(browser()->profile());
 
   extension_ = utils::CreateEmptyExtensionWithLocation(
-      extensions::Extension::LOAD);
+      extensions::Manifest::UNPACKED);
 
   idle_provider_ = new TestIdleProvider();
   idle_manager_->SetIdleTimeProviderForTest(

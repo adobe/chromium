@@ -39,16 +39,32 @@ class FileBrowserEventRouter
       public drive::DriveFileSystemObserver,
       public google_apis::DriveServiceObserver {
  public:
+  // Interface that should keep track of the system state in regards to system
+  // suspend and resume events.
+  // When the |IsResuming()| returns true, it should be able to check if a
+  // removable device was present before the was system suspended.
+  class SuspendStateDelegate {
+   public:
+    virtual ~SuspendStateDelegate() {}
+
+    // Returns true if the system has recently woken up.
+    virtual bool SystemIsResuming() const = 0;
+    // If system is resuming, returns true if the disk was present before the
+    // system suspend. Should return false if the system is not resuming.
+    virtual bool DiskWasPresentBeforeSuspend(
+        const chromeos::disks::DiskMountManager::Disk& disk) const = 0;
+  };
+
   void Shutdown();
 
   // Starts observing file system change events.
   void ObserveFileSystemEvents();
 
   // File watch setup routines.
-  bool AddFileWatch(const FilePath& file_path,
-                    const FilePath& virtual_path,
+  bool AddFileWatch(const base::FilePath& file_path,
+                    const base::FilePath& virtual_path,
                     const std::string& extension_id);
-  void RemoveFileWatch(const FilePath& file_path,
+  void RemoveFileWatch(const base::FilePath& file_path,
                        const std::string& extension_id);
 
   // Mounts Drive on File browser. |callback| will be called after raising a
@@ -79,11 +95,11 @@ class FileBrowserEventRouter
   // drive::DriveServiceObserver overrides.
   virtual void OnProgressUpdate(
       const google_apis::OperationProgressStatusList& list) OVERRIDE;
-  virtual void OnAuthenticationFailed(
-      google_apis::GDataErrorCode error) OVERRIDE;
+  virtual void OnRefreshTokenInvalid() OVERRIDE;
 
   // drive::DriveFileSystemInterface::Observer overrides.
-  virtual void OnDirectoryChanged(const FilePath& directory_path) OVERRIDE;
+  virtual void OnDirectoryChanged(
+      const base::FilePath& directory_path) OVERRIDE;
   virtual void OnResourceListFetched(int num_accumulated_entries) OVERRIDE;
   virtual void OnFileSystemMounted() OVERRIDE;
   virtual void OnFileSystemBeingUnmounted() OVERRIDE;
@@ -96,7 +112,7 @@ class FileBrowserEventRouter
 
   class FileWatcherExtensions {
    public:
-    FileWatcherExtensions(const FilePath& path,
+    FileWatcherExtensions(const base::FilePath& path,
         const std::string& extension_id,
         bool is_remote_file_system);
 
@@ -110,21 +126,21 @@ class FileBrowserEventRouter
 
     unsigned int GetRefCount() const;
 
-    const FilePath& GetVirtualPath() const;
+    const base::FilePath& GetVirtualPath() const;
 
-    bool Watch(const FilePath& path,
+    bool Watch(const base::FilePath& path,
                const base::FilePathWatcher::Callback& callback);
 
    private:
     linked_ptr<base::FilePathWatcher> file_watcher_;
-    FilePath local_path_;
-    FilePath virtual_path_;
+    base::FilePath local_path_;
+    base::FilePath virtual_path_;
     ExtensionUsageRegistry extensions_;
     unsigned int ref_count_;
     bool is_remote_file_system_;
   };
 
-  typedef std::map<FilePath, FileWatcherExtensions*> WatcherMap;
+  typedef std::map<base::FilePath, FileWatcherExtensions*> WatcherMap;
 
   explicit FileBrowserEventRouter(Profile* profile);
   virtual ~FileBrowserEventRouter();
@@ -147,29 +163,24 @@ class FileBrowserEventRouter
   void OnFileBrowserPrefsChanged();
 
   // Process file watch notifications.
-  void HandleFileWatchNotification(const FilePath& path,
+  void HandleFileWatchNotification(const base::FilePath& path,
                                    bool got_error);
 
   // Sends directory change event.
-  void DispatchDirectoryChangeEvent(const FilePath& path, bool error,
+  void DispatchDirectoryChangeEvent(const base::FilePath& path, bool error,
                                     const ExtensionUsageRegistry& extensions);
-
-  // Sends filesystem changed extension message to all renderers.
-  void DispatchDiskEvent(const chromeos::disks::DiskMountManager::Disk* disk,
-                         bool added);
 
   void DispatchMountEvent(
       chromeos::disks::DiskMountManager::MountEvent event,
       chromeos::MountError error_code,
       const chromeos::disks::DiskMountManager::MountPointInfo& mount_info);
 
-  void RemoveBrowserFromVector(const std::string& path);
-
-  // Used to create a window of a standard size, and add it to a list
-  // of tracked browser windows in case that device goes away.
-  void OpenFileBrowse(const std::string& url,
-                      const std::string& device_path,
-                      bool small);
+  // If needed, opens a file manager window for the removable device mounted at
+  // |mount_path|. Disk.mount_path() is empty, since it is being filled out
+  // after calling notifying observers by DiskMountManager.
+  void ShowRemovableDeviceInFileManager(
+      const chromeos::disks::DiskMountManager::Disk& disk,
+      const base::FilePath& mount_path);
 
   // Returns the DriveFileSystem for the current profile.
   drive::DriveFileSystemInterface* GetRemoteFileSystem() const;
@@ -186,11 +197,9 @@ class FileBrowserEventRouter
   WatcherMap file_watchers_;
   scoped_ptr<FileBrowserNotifications> notifications_;
   scoped_ptr<PrefChangeRegistrar> pref_change_registrar_;
+  scoped_ptr<SuspendStateDelegate> suspend_state_delegate_;
   Profile* profile_;
   base::Lock lock_;
-
-  bool current_gdata_operation_failed_;
-  int last_active_gdata_operation_count_;
 
   // Number of active update requests on the remote file system.
   int num_remote_update_requests_;

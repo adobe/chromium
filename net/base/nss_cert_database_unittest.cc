@@ -8,8 +8,8 @@
 
 #include <algorithm>
 
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/lazy_instance.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
@@ -67,7 +67,7 @@ class CertDatabaseNSSTest : public testing::Test {
  protected:
   static std::string ReadTestFile(const std::string& name) {
     std::string result;
-    FilePath cert_path = GetTestCertsDirectory().AppendASCII(name);
+    base::FilePath cert_path = GetTestCertsDirectory().AppendASCII(name);
     EXPECT_TRUE(file_util::ReadFileToString(cert_path, &result));
     return result;
   }

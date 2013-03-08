@@ -7,8 +7,8 @@
 #include <vector>
 
 #include "base/bind.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/message_loop.h"
 #include "base/platform_file.h"
 #include "base/single_thread_task_runner.h"
@@ -28,13 +28,17 @@
 
 #define FPL FILE_PATH_LITERAL
 
+using fileapi::FileSystemContext;
+using fileapi::FileSystemURL;
+using fileapi::FileSystemURLSet;
+
 // This tests LocalFileSyncContext behavior in multi-thread /
 // multi-file-system-context environment.
 // Basic combined tests (single-thread / single-file-system-context)
 // that involve LocalFileSyncContext are also in
 // syncable_file_system_unittests.cc.
 
-namespace fileapi {
+namespace sync_file_system {
 
 namespace {
 const char kOrigin1[] = "http://example.com";
@@ -51,7 +55,7 @@ class LocalFileSyncContextTest : public testing::Test {
         has_inflight_prepare_for_sync_(false) {}
 
   virtual void SetUp() OVERRIDE {
-    EXPECT_TRUE(fileapi::RegisterSyncableFileSystem(kServiceName));
+    EXPECT_TRUE(RegisterSyncableFileSystem(kServiceName));
 
     io_thread_.reset(new base::Thread("Thread_IO"));
     io_thread_->StartWithOptions(
@@ -66,7 +70,7 @@ class LocalFileSyncContextTest : public testing::Test {
   }
 
   virtual void TearDown() OVERRIDE {
-    EXPECT_TRUE(fileapi::RevokeSyncableFileSystem(kServiceName));
+    EXPECT_TRUE(RevokeSyncableFileSystem(kServiceName));
     io_thread_->Stop();
     file_thread_->Stop();
   }
@@ -119,7 +123,7 @@ class LocalFileSyncContextTest : public testing::Test {
 
   SyncStatusCode ApplyRemoteChange(FileSystemContext* file_system_context,
                                    const FileChange& change,
-                                   const FilePath& local_path,
+                                   const base::FilePath& local_path,
                                    const FileSystemURL& url,
                                    SyncFileType expected_file_type) {
     SCOPED_TRACE(testing::Message() << "ApplyChange for " <<
@@ -302,8 +306,9 @@ TEST_F(LocalFileSyncContextTest, MultipleFileSystemContexts) {
 
   SyncFileMetadata metadata;
   FileChangeList changes;
-  EXPECT_EQ(SYNC_STATUS_OK, PrepareForSync(file_system1.file_system_context(),
-                                           kURL1, &metadata, &changes));
+  EXPECT_EQ(SYNC_STATUS_OK,
+            PrepareForSync(file_system1.file_system_context(), kURL1,
+                           &metadata, &changes));
   EXPECT_EQ(1U, changes.size());
   EXPECT_TRUE(changes.list().back().IsFile());
   EXPECT_TRUE(changes.list().back().IsAddOrUpdate());
@@ -311,8 +316,9 @@ TEST_F(LocalFileSyncContextTest, MultipleFileSystemContexts) {
   EXPECT_EQ(0, metadata.size);
 
   changes.clear();
-  EXPECT_EQ(SYNC_STATUS_OK, PrepareForSync(file_system2.file_system_context(),
-                                           kURL2, &metadata, &changes));
+  EXPECT_EQ(SYNC_STATUS_OK,
+            PrepareForSync(file_system2.file_system_context(), kURL2,
+                           &metadata, &changes));
   EXPECT_EQ(1U, changes.size());
   EXPECT_FALSE(changes.list().back().IsFile());
   EXPECT_TRUE(changes.list().back().IsAddOrUpdate());
@@ -431,15 +437,16 @@ TEST_F(LocalFileSyncContextTest, ApplyRemoteChangeForDeletion) {
                     SYNC_FILE_TYPE_FILE);
   EXPECT_EQ(SYNC_STATUS_OK,
             ApplyRemoteChange(file_system.file_system_context(),
-                              change, FilePath(), kFile,
+                              change, base::FilePath(), kFile,
                               SYNC_FILE_TYPE_FILE));
 
   // The implementation doesn't check file type for deletion, and it must be ok
   // even if we don't know if the deletion change was for a file or a directory.
-  change = FileChange(FileChange::FILE_CHANGE_DELETE, SYNC_FILE_TYPE_UNKNOWN);
+  change = FileChange(FileChange::FILE_CHANGE_DELETE,
+                      SYNC_FILE_TYPE_UNKNOWN);
   EXPECT_EQ(SYNC_STATUS_OK,
             ApplyRemoteChange(file_system.file_system_context(),
-                              change, FilePath(), kDir,
+                              change, base::FilePath(), kDir,
                               SYNC_FILE_TYPE_DIRECTORY));
 
   // Check the directory/files are deleted successfully.
@@ -506,8 +513,8 @@ TEST_F(LocalFileSyncContextTest, ApplyRemoteChangeForAddOrUpdate) {
   file_system.ClearChangeForURLInTracker(*urls.begin());
 
   // Prepare temporary files which represent the remote file data.
-  const FilePath kFilePath1(temp_dir.path().Append(FPL("file1")));
-  const FilePath kFilePath2(temp_dir.path().Append(FPL("file2")));
+  const base::FilePath kFilePath1(temp_dir.path().Append(FPL("file1")));
+  const base::FilePath kFilePath2(temp_dir.path().Append(FPL("file2")));
 
   ASSERT_EQ(static_cast<int>(arraysize(kTestFileData1) - 1),
             file_util::WriteFile(kFilePath1, kTestFileData1,
@@ -553,7 +560,8 @@ TEST_F(LocalFileSyncContextTest, ApplyRemoteChangeForAddOrUpdate) {
   // Apply remote changes to kFile2 and kDir (should create a file and
   // directory respectively).
   // They are non-existent yet so their expected file type (the last
-  // parameter of ApplyRemoteChange) are SYNC_FILE_TYPE_UNKNOWN.
+  // parameter of ApplyRemoteChange) are
+  // SYNC_FILE_TYPE_UNKNOWN.
   change = FileChange(FileChange::FILE_CHANGE_ADD_OR_UPDATE,
                       SYNC_FILE_TYPE_FILE);
   EXPECT_EQ(SYNC_STATUS_OK,
@@ -565,7 +573,7 @@ TEST_F(LocalFileSyncContextTest, ApplyRemoteChangeForAddOrUpdate) {
                       SYNC_FILE_TYPE_DIRECTORY);
   EXPECT_EQ(SYNC_STATUS_OK,
             ApplyRemoteChange(file_system.file_system_context(),
-                              change, FilePath(), kDir,
+                              change, base::FilePath(), kDir,
                               SYNC_FILE_TYPE_UNKNOWN));
 
   // This should not happen, but calling ApplyRemoteChange
@@ -600,4 +608,4 @@ TEST_F(LocalFileSyncContextTest, ApplyRemoteChangeForAddOrUpdate) {
   file_system.TearDown();
 }
 
-}  // namespace fileapi
+}  // namespace sync_file_system

@@ -2,12 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/path_service.h"
 #include "base/test/test_timeouts.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/common/chrome_paths.h"
 #include "chrome/common/automation_constants.h"
+#include "chrome/common/chrome_paths.h"
 #include "chrome/test/automation/tab_proxy.h"
 #include "chrome/test/perf/perf_test.h"
 #include "chrome/test/ui/javascript_test_util.h"
@@ -17,7 +17,7 @@
 
 namespace {
 
-static const FilePath::CharType kStartFile[] =
+static const base::FilePath::CharType kStartFile[] =
     FILE_PATH_LITERAL("perf_test.html");
 
 class IndexedDBTest : public UIPerfTest {
@@ -30,8 +30,8 @@ class IndexedDBTest : public UIPerfTest {
   }
 
   void RunTest() {
-    FilePath::StringType start_file(kStartFile);
-    FilePath test_path = GetIndexedDBTestDir();
+    base::FilePath::StringType start_file(kStartFile);
+    base::FilePath test_path = GetIndexedDBTestDir();
     test_path = test_path.Append(start_file);
     GURL test_url(net::FilePathToFileURL(test_path));
 
@@ -50,8 +50,8 @@ class IndexedDBTest : public UIPerfTest {
 
  private:
   // Return the path to the IndexedDB test directory on the local filesystem.
-  FilePath GetIndexedDBTestDir() {
-    FilePath test_dir;
+  base::FilePath GetIndexedDBTestDir() {
+    base::FilePath test_dir;
     PathService::Get(chrome::DIR_TEST_DATA, &test_dir);
     return test_dir.AppendASCII("indexeddb");
   }
@@ -97,7 +97,7 @@ class IndexedDBReferenceTest : public IndexedDBTest {
     reference_ = true;
   }
 
-  void SetUp() {
+  virtual void SetUp() {
     UseReferenceBuild();
     IndexedDBTest::SetUp();
   }

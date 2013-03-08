@@ -11,14 +11,15 @@
 #include <shellapi.h>
 
 #include "base/basictypes.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
+#include "base/safe_numerics.h"
 #include "base/shared_memory.h"
 #include "base/stl_util.h"
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
-#include "base/utf_offset_string_conversions.h"
+#include "base/strings/utf_offset_string_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "base/win/scoped_gdi_object.h"
 #include "base/win/scoped_hdc.h"
@@ -207,7 +208,9 @@ Clipboard::~Clipboard() {
   clipboard_owner_ = NULL;
 }
 
-void Clipboard::WriteObjects(Buffer buffer, const ObjectMap& objects) {
+void Clipboard::WriteObjectsImpl(Buffer buffer,
+                                 const ObjectMap& objects,
+                                 SourceTag tag) {
   DCHECK_EQ(buffer, BUFFER_STANDARD);
 
   ScopedClipboard clipboard;
@@ -220,6 +223,7 @@ void Clipboard::WriteObjects(Buffer buffer, const ObjectMap& objects) {
        iter != objects.end(); ++iter) {
     DispatchObject(static_cast<ObjectType>(iter->first), iter->second);
   }
+  WriteSourceTag(tag);
 }
 
 void Clipboard::WriteText(const char* text_data, size_t text_len) {
@@ -360,6 +364,13 @@ void Clipboard::WriteData(const FormatType& format,
   WriteToClipboard(format.ToUINT(), hdata);
 }
 
+void Clipboard::WriteSourceTag(SourceTag tag) {
+  if (tag != SourceTag()) {
+    ObjectMapParam binary = SourceTag2Binary(tag);
+    WriteData(GetSourceTagFormatType(), &binary[0], binary.size());
+  }
+}
+
 void Clipboard::WriteToClipboard(unsigned int format, HANDLE handle) {
   DCHECK(clipboard_owner_);
   if (handle && !::SetClipboardData(format, handle)) {
@@ -426,6 +437,7 @@ void Clipboard::ReadAvailableTypes(Clipboard::Buffer buffer,
 
 void Clipboard::ReadText(Clipboard::Buffer buffer, string16* result) const {
   DCHECK_EQ(buffer, BUFFER_STANDARD);
+  ReportAction(buffer, READ_TEXT);
   if (!result) {
     NOTREACHED();
     return;
@@ -449,6 +461,7 @@ void Clipboard::ReadText(Clipboard::Buffer buffer, string16* result) const {
 void Clipboard::ReadAsciiText(Clipboard::Buffer buffer,
                               std::string* result) const {
   DCHECK_EQ(buffer, BUFFER_STANDARD);
+  ReportAction(buffer, READ_TEXT);
   if (!result) {
     NOTREACHED();
     return;
@@ -509,20 +522,19 @@ void Clipboard::ReadHTML(Clipboard::Buffer buffer, string16* markup,
 
   DCHECK_GE(start_index, html_start);
   DCHECK_GE(end_index, html_start);
-  DCHECK((start_index - html_start) <= kuint32max);
-  DCHECK((end_index - html_start) <= kuint32max);
 
   std::vector<size_t> offsets;
   offsets.push_back(start_index - html_start);
   offsets.push_back(end_index - html_start);
-  markup->assign(UTF8ToUTF16AndAdjustOffsets(cf_html.data() + html_start,
-                                             &offsets));
-  *fragment_start = static_cast<uint32>(offsets[0]);
-  *fragment_end = static_cast<uint32>(offsets[1]);
+  markup->assign(base::UTF8ToUTF16AndAdjustOffsets(cf_html.data() + html_start,
+                                                   &offsets));
+  *fragment_start = base::checked_numeric_cast<uint32>(offsets[0]);
+  *fragment_end = base::checked_numeric_cast<uint32>(offsets[1]);
 }
 
 void Clipboard::ReadRTF(Buffer buffer, std::string* result) const {
   DCHECK_EQ(buffer, BUFFER_STANDARD);
+  ReportAction(buffer, READ_TEXT);
 
   ReadData(GetRtfFormatType(), result);
 }
@@ -655,6 +667,13 @@ void Clipboard::ReadData(const FormatType& format, std::string* result) const {
   result->assign(static_cast<const char*>(::GlobalLock(data)),
                  ::GlobalSize(data));
   ::GlobalUnlock(data);
+}
+
+Clipboard::SourceTag Clipboard::ReadSourceTag(Buffer buffer) const {
+  DCHECK_EQ(buffer, BUFFER_STANDARD);
+  std::string result;
+  ReadData(GetSourceTagFormatType(), &result);
+  return Binary2SourceTag(result);
 }
 
 // static
@@ -832,6 +851,15 @@ const Clipboard::FormatType& Clipboard::GetPepperCustomDataFormatType() {
       FormatType,
       type,
       (ClipboardUtil::GetPepperCustomDataFormat()->cfFormat));
+  return type;
+}
+
+// static
+const Clipboard::FormatType& Clipboard::GetSourceTagFormatType() {
+  CR_DEFINE_STATIC_LOCAL(
+      FormatType,
+      type,
+      (ClipboardUtil::GetSourceTagFormat()->cfFormat));
   return type;
 }
 

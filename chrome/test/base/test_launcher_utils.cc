@@ -9,7 +9,7 @@
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
-#include "base/string_number_conversions.h"
+#include "base/strings/string_number_conversions.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "ui/gl/gl_switches.h"
@@ -73,7 +73,7 @@ void PrepareBrowserCommandLineForTests(CommandLine* command_line) {
   command_line->AppendSwitch(switches::kDisableComponentUpdate);
 }
 
-bool OverrideUserDataDir(const FilePath& user_data_dir) {
+bool OverrideUserDataDir(const base::FilePath& user_data_dir) {
   bool success = true;
 
   // PathService::Override() is the best way to change the user data directory.

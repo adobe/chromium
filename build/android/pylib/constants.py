@@ -7,18 +7,39 @@
 import os
 
 
+CHROME_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__),
+                                          os.pardir, os.pardir, os.pardir))
+
 CHROME_PACKAGE = 'com.google.android.apps.chrome'
 CHROME_ACTIVITY = 'com.google.android.apps.chrome.Main'
+CHROME_DEVTOOLS_SOCKET = 'chrome_devtools_remote'
+
 CHROME_TESTS_PACKAGE = 'com.google.android.apps.chrome.tests'
+
 LEGACY_BROWSER_PACKAGE = 'com.google.android.browser'
 LEGACY_BROWSER_ACTIVITY = 'com.android.browser.BrowserActivity'
-CONTENT_SHELL_PACKAGE = "org.chromium.content_shell"
-CONTENT_SHELL_ACTIVITY = "org.chromium.content_shell.ContentShellActivity"
-CHROME_SHELL_PACKAGE = 'org.chromium.chrome.browser.test'
-CHROMIUM_TEST_SHELL_PACKAGE = 'org.chromium.chrome.testshell'
 
-CHROME_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__),
-                                          '..', '..', '..'))
+CONTENT_SHELL_PACKAGE = 'org.chromium.content_shell_apk'
+CONTENT_SHELL_ACTIVITY = 'org.chromium.content_shell_apk.ContentShellActivity'
+
+CHROME_SHELL_PACKAGE = 'org.chromium.chrome.browser.test'
+
+CHROMIUM_TEST_SHELL_PACKAGE = 'org.chromium.chrome.testshell'
+CHROMIUM_TEST_SHELL_ACTIVITY = (
+    'org.chromium.chrome.testshell.ChromiumTestShellActivity')
+CHROMIUM_TEST_SHELL_DEVTOOLS_SOCKET = 'chromium_testshell_devtools_remote'
+CHROMIUM_TEST_SHELL_HOST_DRIVEN_DIR = os.path.join(
+    CHROME_DIR, 'chrome', 'android')
+
+GTEST_TEST_PACKAGE_NAME = 'org.chromium.native_test'
+GTEST_TEST_ACTIVITY_NAME = 'org.chromium.native_test.ChromeNativeTestActivity'
+GTEST_COMMAND_LINE_FILE = 'chrome-native-tests-command-line'
+
+BROWSERTEST_SUITE_NAME = 'content_browsertests'
+BROWSERTEST_TEST_PACKAGE_NAME = 'org.chromium.content_browsertests_apk'
+BROWSERTEST_TEST_ACTIVITY_NAME = (
+    'org.chromium.content_browsertests_apk.ContentBrowserTestsActivity')
+BROWSERTEST_COMMAND_LINE_FILE = 'content-browser-tests-command-line'
 
 # Ports arrangement for various test servers used in Chrome for Android.
 # Lighttpd server will attempt to use 9000 as default port, if unavailable it

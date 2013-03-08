@@ -5,7 +5,7 @@
 #include "content/browser/renderer_host/pepper/browser_ppapi_host_impl.h"
 
 #include "content/browser/renderer_host/pepper/pepper_message_filter.h"
-#include "content/browser/trace_message_filter.h"
+#include "content/browser/tracing/trace_message_filter.h"
 #include "content/common/pepper_renderer_instance_data.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/common/process_type.h"
@@ -26,7 +26,7 @@ BrowserPpapiHost* BrowserPpapiHost::CreateExternalPluginProcess(
   // profile_data_directory through for NaCl. They are currently only needed for
   // PPB_Flash_File interfaces so it doesn't matter.
   std::string plugin_name;
-  FilePath profile_data_directory;
+  base::FilePath profile_data_directory;
   BrowserPpapiHostImpl* browser_ppapi_host =
       new BrowserPpapiHostImpl(sender, permissions, plugin_name,
                                profile_data_directory,
@@ -49,7 +49,7 @@ BrowserPpapiHostImpl::BrowserPpapiHostImpl(
     IPC::Sender* sender,
     const ppapi::PpapiPermissions& permissions,
     const std::string& plugin_name,
-    const FilePath& profile_data_directory,
+    const base::FilePath& profile_data_directory,
     ProcessType plugin_process_type)
     : ppapi_host_(new ppapi::host::PpapiHost(sender, permissions)),
       plugin_process_handle_(base::kNullProcessHandle),
@@ -105,7 +105,7 @@ const std::string& BrowserPpapiHostImpl::GetPluginName() {
   return plugin_name_;
 }
 
-const FilePath& BrowserPpapiHostImpl::GetProfileDataDirectory() {
+const base::FilePath& BrowserPpapiHostImpl::GetProfileDataDirectory() {
   return profile_data_directory_;
 }
 

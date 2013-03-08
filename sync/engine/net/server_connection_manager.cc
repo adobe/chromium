@@ -13,6 +13,7 @@
 #include "base/command_line.h"
 #include "build/build_config.h"
 #include "googleurl/src/gurl.h"
+#include "net/base/net_errors.h"
 #include "net/http/http_status_code.h"
 #include "sync/engine/net/url_translator.h"
 #include "sync/engine/syncer.h"
@@ -26,11 +27,6 @@ using std::string;
 using std::vector;
 
 static const char kSyncServerSyncPath[] = "/command/";
-
-// At the /time/ path of the sync server, we expect to find a very simple
-// time of day service that we can use to synchronize the local clock with
-// server time.
-static const char kSyncServerGetTimePath[] = "/time";
 
 HttpResponse::HttpResponse()
     : response_code(kUnsetResponseCode),
@@ -56,6 +52,23 @@ const char* HttpResponse::GetServerConnectionCodeString(
 }
 
 #undef ENUM_CASE
+
+// TODO(clamy): check if all errors are in the right category.
+HttpResponse::ServerConnectionCode
+HttpResponse::ServerConnectionCodeFromNetError(int error_code) {
+  switch (error_code) {
+    case net::ERR_ABORTED:
+    case net::ERR_SOCKET_NOT_CONNECTED:
+    case net::ERR_NETWORK_CHANGED:
+    case net::ERR_CONNECTION_FAILED:
+    case net::ERR_NAME_NOT_RESOLVED:
+    case net::ERR_INTERNET_DISCONNECTED:
+    case net::ERR_NETWORK_ACCESS_DENIED:
+    case net::ERR_NETWORK_IO_SUSPENDED:
+      return CONNECTION_UNAVAILABLE;
+  }
+  return IO_ERROR;
+}
 
 ServerConnectionManager::Connection::Connection(
     ServerConnectionManager* scm) : scm_(scm) {
@@ -157,11 +170,7 @@ ScopedServerStatusWatcher::ScopedServerStatusWatcher(
 }
 
 ScopedServerStatusWatcher::~ScopedServerStatusWatcher() {
-  if (conn_mgr_->server_status_ != response_->server_status) {
-    conn_mgr_->server_status_ = response_->server_status;
-    conn_mgr_->NotifyStatusChanged();
-    return;
-  }
+  conn_mgr_->SetServerStatus(response_->server_status);
 }
 
 ServerConnectionManager::ServerConnectionManager(
@@ -172,7 +181,6 @@ ServerConnectionManager::ServerConnectionManager(
       sync_server_port_(port),
       use_ssl_(use_ssl),
       proto_sync_path_(kSyncServerSyncPath),
-      get_time_path_(kSyncServerGetTimePath),
       server_status_(HttpResponse::NONE),
       terminated_(false),
       active_connection_(NULL) {
@@ -202,6 +210,28 @@ void ServerConnectionManager::OnConnectionDestroyed(Connection* connection) {
     return;
 
   active_connection_ = NULL;
+}
+
+void ServerConnectionManager::OnInvalidationCredentialsRejected() {
+  InvalidateAndClearAuthToken();
+  SetServerStatus(HttpResponse::SYNC_AUTH_ERROR);
+}
+
+void ServerConnectionManager::InvalidateAndClearAuthToken() {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  // Copy over the token to previous invalid token.
+  if (!auth_token_.empty()) {
+    previously_invalidated_token.assign(auth_token_);
+    auth_token_ = std::string();
+  }
+}
+
+void ServerConnectionManager::SetServerStatus(
+    HttpResponse::ServerConnectionCode server_status) {
+  if (server_status_ == server_status)
+    return;
+  server_status_ = server_status;
+  NotifyStatusChanged();
 }
 
 void ServerConnectionManager::NotifyStatusChanged() {

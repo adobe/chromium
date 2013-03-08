@@ -7,7 +7,7 @@
 
 #include <vector>
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/string16.h"
 #include "content/common/content_export.h"
 
@@ -40,7 +40,7 @@ struct CONTENT_EXPORT FileChooserParams {
   string16 title;
 
   // Default file name to select in the dialog.
-  FilePath default_file_name;
+  base::FilePath default_file_name;
 
   // A list of valid lower-cased MIME types or file extensions specified in an
   // input element. It is used to restrict selectable files to such types.

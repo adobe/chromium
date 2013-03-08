@@ -27,10 +27,15 @@ namespace content {
 
 SurfaceTextureTransportClient::SurfaceTextureTransportClient()
     : window_(NULL),
-      texture_id_(0) {
+      texture_id_(0),
+      surface_id_(0) {
 }
 
 SurfaceTextureTransportClient::~SurfaceTextureTransportClient() {
+  if (surface_id_) {
+    GpuSurfaceTracker::Get()->SetNativeWidget(
+        surface_id_, gfx::kNullAcceleratedWidget);
+  }
   if (window_)
     ANativeWindow_release(window_);
 }
@@ -51,11 +56,13 @@ scoped_refptr<cc::Layer> SurfaceTextureTransportClient::Initialize() {
 gfx::GLSurfaceHandle
 SurfaceTextureTransportClient::GetCompositingSurface(int surface_id) {
   DCHECK(surface_id);
+  surface_id_ = surface_id;
+
   if (!window_)
     window_ = surface_texture_->CreateSurface();
 
   GpuSurfaceTracker::Get()->SetNativeWidget(surface_id, window_);
-  return gfx::GLSurfaceHandle(gfx::kDummyPluginWindow, false);
+  return gfx::GLSurfaceHandle(gfx::kNullPluginWindow, gfx::NATIVE_DIRECT);
 }
 
 void SurfaceTextureTransportClient::SetSize(const gfx::Size& size) {
@@ -66,11 +73,12 @@ void SurfaceTextureTransportClient::SetSize(const gfx::Size& size) {
 
 scoped_refptr<media::VideoFrame> SurfaceTextureTransportClient::
     GetCurrentFrame() {
+  if (!context_)
+    context_ = ImageTransportFactoryAndroid::GetInstance()->GetContext3D();
+  DCHECK(context_ == ImageTransportFactoryAndroid::GetInstance()->GetContext3D());
+  context_->makeContextCurrent();
   if (!texture_id_) {
-    WebKit::WebGraphicsContext3D* context =
-        ImageTransportFactoryAndroid::GetInstance()->GetContext3D();
-    context->makeContextCurrent();
-    texture_id_ = context->createTexture();
+    texture_id_ = context_->createTexture();    
     surface_texture_->AttachToGLContext(texture_id_);
   }
   if (!video_frame_) {
@@ -87,6 +95,22 @@ scoped_refptr<media::VideoFrame> SurfaceTextureTransportClient::
   surface_texture_->UpdateTexImage();
 
   return video_frame_;
+}
+
+void SurfaceTextureTransportClient::DetachFromHostContext() {
+  if (!context_) {
+    DCHECK(!video_frame_);
+    DCHECK(!texture_id_);
+    return;
+  }
+  video_frame_ = 0;
+  if (texture_id_) {
+    context_->makeContextCurrent();
+    surface_texture_->DetachFromGLContext();
+    context_->deleteTexture(texture_id_);
+    texture_id_ = 0;
+  }
+  context_ = 0;
 }
 
 void SurfaceTextureTransportClient::PutCurrentFrame(

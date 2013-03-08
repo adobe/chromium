@@ -32,19 +32,20 @@ class SyncFileSystemDeleteFileSystemFunction
 };
 
 
-class SyncFileSystemGetFileSyncStatusFunction
+class SyncFileSystemGetFileStatusFunction
     : public AsyncExtensionFunction {
  public:
-  DECLARE_EXTENSION_FUNCTION("syncFileSystem.getFileSyncStatus",
+  DECLARE_EXTENSION_FUNCTION("syncFileSystem.getFileStatus",
                              SYNCFILESYSTEM_GETFILESYNCSTATUS)
 
  protected:
-  virtual ~SyncFileSystemGetFileSyncStatusFunction() {}
+  virtual ~SyncFileSystemGetFileStatusFunction() {}
   virtual bool RunImpl() OVERRIDE;
 
  private:
-  void DidGetFileSyncStatus(const fileapi::SyncStatusCode sync_service_status,
-                            const fileapi::SyncFileStatus sync_file_status);
+  void DidGetFileStatus(
+      const sync_file_system::SyncStatusCode sync_service_status,
+      const sync_file_system::SyncFileStatus sync_file_status);
 };
 
 class SyncFileSystemGetUsageAndQuotaFunction
@@ -80,7 +81,7 @@ class SyncFileSystemRequestFileSystemFunction
   fileapi::FileSystemContext* GetFileSystemContext();
 
   void DidInitializeFileSystemContext(const std::string& service_name,
-                                      fileapi::SyncStatusCode status);
+                                      sync_file_system::SyncStatusCode status);
   void DidOpenFileSystem(base::PlatformFileError error,
                          const std::string& file_system_name,
                          const GURL& root_url);

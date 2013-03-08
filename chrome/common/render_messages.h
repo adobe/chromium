@@ -9,7 +9,7 @@
 #include <vector>
 
 #include "base/basictypes.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/process.h"
 #include "base/shared_memory.h"
 #include "base/string16.h"
@@ -31,6 +31,7 @@
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebCache.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebConsoleMessage.h"
+#include "ui/base/window_open_disposition.h"
 #include "ui/gfx/rect.h"
 
 // Singly-included section for enums and custom IPC traits.
@@ -166,6 +167,11 @@ IPC_STRUCT_TRAITS_BEGIN(InstantAutocompleteResult)
   IPC_STRUCT_TRAITS_MEMBER(relevance)
 IPC_STRUCT_TRAITS_END()
 
+IPC_STRUCT_TRAITS_BEGIN(MostVisitedItem)
+  IPC_STRUCT_TRAITS_MEMBER(url)
+  IPC_STRUCT_TRAITS_MEMBER(title)
+IPC_STRUCT_TRAITS_END()
+
 IPC_STRUCT_TRAITS_BEGIN(InstantSuggestion)
   IPC_STRUCT_TRAITS_MEMBER(text)
   IPC_STRUCT_TRAITS_MEMBER(behavior)
@@ -199,6 +205,7 @@ IPC_STRUCT_TRAITS_BEGIN(ThemeBackgroundInfo)
   IPC_STRUCT_TRAITS_MEMBER(theme_id)
   IPC_STRUCT_TRAITS_MEMBER(image_horizontal_alignment)
   IPC_STRUCT_TRAITS_MEMBER(image_vertical_alignment)
+  IPC_STRUCT_TRAITS_MEMBER(image_top_offset)
   IPC_STRUCT_TRAITS_MEMBER(image_tiling)
   IPC_STRUCT_TRAITS_MEMBER(image_height)
 IPC_STRUCT_TRAITS_END()
@@ -314,6 +321,9 @@ IPC_MESSAGE_ROUTED1(ChromeViewMsg_SearchBoxAutocompleteResults,
 IPC_MESSAGE_ROUTED1(ChromeViewMsg_SearchBoxUpOrDownKeyPressed,
                     int /* count */)
 
+IPC_MESSAGE_ROUTED1(ChromeViewMsg_SearchBoxCancelSelection,
+                    string16 /* value */)
+
 IPC_MESSAGE_ROUTED1(ChromeViewMsg_SearchBoxModeChanged,
                     chrome::search::Mode /* mode */)
 
@@ -323,15 +333,23 @@ IPC_MESSAGE_ROUTED1(ChromeViewMsg_SearchBoxSetDisplayInstantResults,
 IPC_MESSAGE_ROUTED1(ChromeViewMsg_SearchBoxThemeChanged,
                     ThemeBackgroundInfo /* value */)
 
-IPC_MESSAGE_ROUTED1(ChromeViewMsg_SearchBoxThemeAreaHeightChanged,
-                    int /* height */)
-
 IPC_MESSAGE_ROUTED2(ChromeViewMsg_SearchBoxFontInformation,
                     string16 /* omnibox_font */,
                     size_t /* omnibox_font_size */)
 
 IPC_MESSAGE_ROUTED1(ChromeViewMsg_SearchBoxKeyCaptureChanged,
                     bool /* is_key_capture_enabled */)
+
+IPC_MESSAGE_ROUTED1(ChromeViewMsg_InstantMostVisitedItemsChanged,
+                    std::vector<MostVisitedItem> /* items */)
+
+IPC_MESSAGE_ROUTED1(ChromeViewHostMsg_InstantDeleteMostVisitedItem,
+                    GURL /* url */)
+
+IPC_MESSAGE_ROUTED1(ChromeViewHostMsg_InstantUndoMostVisitedDeletion,
+                    GURL /* url */)
+
+IPC_MESSAGE_ROUTED0(ChromeViewHostMsg_InstantUndoAllMostVisitedDeletions)
 
 // Toggles visual muting of the render view area. This is on when a constrained
 // window is showing.
@@ -357,6 +375,11 @@ IPC_MESSAGE_ROUTED1(ChromeViewMsg_RevertTranslation,
 // incognito mode.
 IPC_MESSAGE_CONTROL1(ChromeViewMsg_SetIsIncognitoProcess,
                      bool /* is_incognito_processs */)
+
+// Sent on process startup to indicate whether the extension activity
+// log is enabled.
+IPC_MESSAGE_CONTROL1(ChromeViewMsg_SetExtensionActivityLogEnabled,
+                     bool /* extension_activity_log_enabled */)
 
 // Sent in response to ViewHostMsg_DidBlockDisplayingInsecureContent.
 IPC_MESSAGE_ROUTED1(ChromeViewMsg_SetAllowDisplayingInsecureContent,
@@ -520,7 +543,7 @@ IPC_MESSAGE_ROUTED0(ChromeViewHostMsg_OpenAboutPlugins)
 
 // Tells the browser that there was an error loading a plug-in.
 IPC_MESSAGE_ROUTED1(ChromeViewHostMsg_CouldNotLoadPlugin,
-                    FilePath /* plugin_path */)
+                    base::FilePath /* plugin_path */)
 
 // Tells the browser that we blocked a plug-in because NPAPI is not supported.
 IPC_MESSAGE_ROUTED1(ChromeViewHostMsg_NPAPINotSupported,
@@ -645,24 +668,25 @@ IPC_MESSAGE_ROUTED1(ChromeViewHostMsg_FocusedNodeTouched,
 
 // Suggest results -----------------------------------------------------------
 
-// Sent by the Instant preview to populate the omnibox with query suggestions.
+// Sent by Instant to populate the omnibox with query suggestions.
 IPC_MESSAGE_ROUTED2(ChromeViewHostMsg_SetSuggestions,
                     int /* page_id */,
                     std::vector<InstantSuggestion> /* suggestions */)
 
-// Sent by the Instant preview indicating whether the page supports the Instant
-// API or not (http://dev.chromium.org/searchbox).
+// Sent by Instant to indicate whether the page supports the Instant API
+// (http://dev.chromium.org/searchbox).
 IPC_MESSAGE_ROUTED2(ChromeViewHostMsg_InstantSupportDetermined,
                     int /* page_id */,
                     bool /* result */)
 
-IPC_MESSAGE_ROUTED3(ChromeViewHostMsg_SearchBoxNavigate,
+IPC_MESSAGE_ROUTED4(ChromeViewHostMsg_SearchBoxNavigate,
                     int /* page_id */,
                     GURL /* destination */,
-                    content::PageTransition /* transition */)
+                    content::PageTransition /* transition */,
+                    WindowOpenDisposition /* disposition */)
 
-// Sent by the Instant preview asking to show itself with the given height.
-IPC_MESSAGE_ROUTED4(ChromeViewHostMsg_ShowInstantPreview,
+// Sent by the Instant overlay asking to show itself with the given height.
+IPC_MESSAGE_ROUTED4(ChromeViewHostMsg_ShowInstantOverlay,
                     int /* page_id */,
                     InstantShownReason /* reason */,
                     int /* height */,

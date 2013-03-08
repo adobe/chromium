@@ -17,9 +17,12 @@ class MockPolicyService : public PolicyService {
 
   MOCK_METHOD2(AddObserver, void(PolicyDomain, Observer*));
   MOCK_METHOD2(RemoveObserver, void(PolicyDomain, Observer*));
-  MOCK_CONST_METHOD2(GetPolicies, const PolicyMap&(PolicyDomain,
-                                                   const std::string&));
-  MOCK_CONST_METHOD0(IsInitializationComplete, bool(void));
+
+  MOCK_METHOD2(RegisterPolicyDomain, void(PolicyDomain,
+                                          const std::set<std::string>&));
+
+  MOCK_CONST_METHOD1(GetPolicies, const PolicyMap&(const PolicyNamespace&));
+  MOCK_CONST_METHOD1(IsInitializationComplete, bool(PolicyDomain domain));
   MOCK_METHOD1(RefreshPolicies, void(const base::Closure&));
 };
 

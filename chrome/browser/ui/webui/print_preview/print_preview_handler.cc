@@ -19,13 +19,13 @@
 #include "base/memory/ref_counted_memory.h"
 #include "base/metrics/histogram.h"
 #include "base/path_service.h"
+#include "base/prefs/pref_service.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/platform_util.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/printing/cloud_print/cloud_print_url.h"
 #include "chrome/browser/printing/print_dialog_cloud.h"
 #include "chrome/browser/printing/print_error_dialog.h"
@@ -51,7 +51,6 @@
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
-#include "content/public/browser/web_contents_delegate.h"
 #include "content/public/browser/web_ui.h"
 #include "printing/backend/print_backend.h"
 #include "printing/metafile.h"
@@ -155,6 +154,8 @@ const char kNumberFormat[] = "numberFormat";
 // Name of a dictionary field specifying whether to print automatically in
 // kiosk mode. See http://crbug.com/31395.
 const char kPrintAutomaticallyInKioskMode[] = "printAutomaticallyInKioskMode";
+// Name of a dictionary field holding the state of selection for document.
+const char kDocumentHasSelection[] = "documentHasSelection";
 
 
 // Get the print job settings dictionary from |args|. The caller takes
@@ -184,27 +185,10 @@ DictionaryValue* GetSettingsDictionary(const ListValue* args) {
   return settings.release();
 }
 
-void ReportPageCount(const DictionaryValue& settings,
-                     const std::string& printer_type) {
-  int count = 0;
-  const ListValue* page_range_array;
-  if (settings.GetList(printing::kSettingPageRange, &page_range_array)) {
-    for (size_t index = 0; index < page_range_array->GetSize(); ++index) {
-      const DictionaryValue* dict;
-      if (!page_range_array->GetDictionary(index, &dict))
-        continue;
-
-      printing::PageRange range;
-      if (!dict->GetInteger(printing::kSettingPageRangeFrom, &range.from) ||
-          !dict->GetInteger(printing::kSettingPageRangeTo, &range.to)) {
-        continue;
-      }
-      count += (range.to - range.from) + 1;
-    }
-  }
+void ReportPageCount(int page_count, const std::string& printer_type) {
   UMA_HISTOGRAM_COUNTS(base::StringPrintf("PrintPreview.PageCount.%s",
                                           printer_type.c_str()),
-                       count);
+                       page_count);
 }
 
 // Track the popularity of print settings and report the stats.
@@ -229,7 +213,7 @@ void ReportPrintSettingsStats(const DictionaryValue& settings) {
 }
 
 // Callback that stores a PDF file on disk.
-void PrintToPdfCallback(Metafile* metafile, const FilePath& path) {
+void PrintToPdfCallback(Metafile* metafile, const base::FilePath& path) {
   metafile->SaveTo(path);
   // |metafile| must be deleted on the UI thread.
   BrowserThread::PostTask(
@@ -240,7 +224,7 @@ void PrintToPdfCallback(Metafile* metafile, const FilePath& path) {
 #ifdef OS_CHROMEOS
 void PrintToPdfCallbackWithCheck(Metafile* metafile,
                                  drive::DriveFileError error,
-                                 const FilePath& path) {
+                                 const base::FilePath& path) {
   if (error != drive::DRIVE_FILE_OK) {
     LOG(ERROR) << "Save to pdf failed to write: " << error;
   } else {
@@ -452,8 +436,11 @@ void PrintPreviewHandler::HandlePrint(const ListValue* args) {
     is_cloud_printer = settings->HasKey(printing::kSettingCloudPrintId);
   }
 
+  int page_count = 0;
+  settings->GetInteger(printing::kSettingPreviewPageCount, &page_count);
+
   if (print_to_pdf) {
-    ReportPageCount(*settings, "PrintToPDF");
+    ReportPageCount(page_count, "PrintToPDF");
     ReportUserActionHistogram(PRINT_TO_PDF);
     PrintToPdf();
     return;
@@ -467,14 +454,14 @@ void PrintPreviewHandler::HandlePrint(const ListValue* args) {
   }
 
   if (is_cloud_printer) {
-    ReportPageCount(*settings, "PrintToCloudPrint");
+    ReportPageCount(page_count, "PrintToCloudPrint");
     ReportUserActionHistogram(PRINT_WITH_CLOUD_PRINT);
     SendCloudPrintJob(data);
   } else if (is_cloud_dialog) {
-    ReportPageCount(*settings, "PrintToCloudPrintWebDialog");
+    ReportPageCount(page_count, "PrintToCloudPrintWebDialog");
     PrintWithCloudPrintDialog(data, title);
   } else {
-    ReportPageCount(*settings, "PrintToPrinter");
+    ReportPageCount(page_count, "PrintToPrinter");
     ReportUserActionHistogram(PRINT_TO_PRINTER);
     ReportPrintSettingsStats(*settings);
 
@@ -484,12 +471,16 @@ void PrintPreviewHandler::HandlePrint(const ListValue* args) {
         web_ui()->GetController());
     print_preview_ui->OnHidePreviewDialog();
 
-    // Do this so the initiator tab can open a new print preview dialog.
+    // Do this so the initiator tab can open a new print preview dialog, while
+    // the current print preview dialog is still handling its print job.
     ClearInitiatorTabDetails();
 
     // The PDF being printed contains only the pages that the user selected,
     // so ignore the page range and print all pages.
     settings->Remove(printing::kSettingPageRange, NULL);
+    // Set ID to know whether printing is for preview.
+    settings->SetInteger(printing::kPreviewUIID,
+                         print_preview_ui->GetIDForPrintPreviewUI());
     RenderViewHost* rvh = preview_web_contents()->GetRenderViewHost();
     rvh->Send(new PrintMsg_PrintForPrintPreview(rvh->GetRoutingID(),
                                                 *settings));
@@ -513,20 +504,21 @@ void PrintPreviewHandler::PrintToPdf() {
   } else if (!select_file_dialog_ ||
              !select_file_dialog_->IsRunning(
                   platform_util::GetTopLevel(
-                      preview_web_contents()->GetNativeView()))) {
+                      preview_web_contents()->GetView()->GetNativeView()))) {
     PrintPreviewUI* print_preview_ui = static_cast<PrintPreviewUI*>(
         web_ui()->GetController());
     // Pre-populating select file dialog with print job title.
     string16 print_job_title_utf16 = print_preview_ui->initiator_tab_title();
 
 #if defined(OS_WIN)
-    FilePath::StringType print_job_title(print_job_title_utf16);
+    base::FilePath::StringType print_job_title(print_job_title_utf16);
 #elif defined(OS_POSIX)
-    FilePath::StringType print_job_title = UTF16ToUTF8(print_job_title_utf16);
+    base::FilePath::StringType print_job_title =
+        UTF16ToUTF8(print_job_title_utf16);
 #endif
 
     file_util::ReplaceIllegalCharactersInPath(&print_job_title, '_');
-    FilePath default_filename(print_job_title);
+    base::FilePath default_filename(print_job_title);
     default_filename =
         default_filename.ReplaceExtension(FILE_PATH_LITERAL("pdf"));
 
@@ -589,8 +581,8 @@ void PrintPreviewHandler::OnSigninComplete(
 }
 
 void PrintPreviewHandler::HandleSignin(const ListValue* /*args*/) {
-  gfx::NativeWindow modal_parent =
-      platform_util::GetTopLevel(preview_web_contents()->GetNativeView());
+  gfx::NativeWindow modal_parent = platform_util::GetTopLevel(
+      preview_web_contents()->GetView()->GetNativeView());
   print_dialog_cloud::CreateCloudPrintSigninDialog(
       preview_web_contents()->GetBrowserContext(),
       modal_parent,
@@ -604,8 +596,8 @@ void PrintPreviewHandler::PrintWithCloudPrintDialog(
   // instead of the print preview dialog.
   ReportStats();
 
-  gfx::NativeWindow modal_parent =
-      platform_util::GetTopLevel(preview_web_contents()->GetNativeView());
+  gfx::NativeWindow modal_parent = platform_util::GetTopLevel(
+      preview_web_contents()->GetView()->GetNativeView());
   print_dialog_cloud::CreatePrintDialogForBytes(
       preview_web_contents()->GetBrowserContext(),
       modal_parent,
@@ -618,7 +610,7 @@ void PrintPreviewHandler::PrintWithCloudPrintDialog(
   // printing situation.  Close the print preview.
   // TODO(abodenha@chromium.org) The flow should be changed as described in
   // http://code.google.com/p/chromium/issues/detail?id=44093
-  ClosePreviewDialogAndActivateInitiatorTab();
+  ClosePreviewDialog();
 }
 
 void PrintPreviewHandler::HandleManageCloudPrint(const ListValue* /*args*/) {
@@ -768,8 +760,11 @@ void PrintPreviewHandler::SendInitialSettings(
                              print_preview_ui->initiator_tab_title());
   initial_settings.SetBoolean(printing::kSettingPreviewModifiable,
                               print_preview_ui->source_is_modifiable());
-  initial_settings.SetString(printing::kSettingPrinterName,
-                             default_printer);
+  initial_settings.SetString(printing::kSettingPrinterName, default_printer);
+  initial_settings.SetBoolean(kDocumentHasSelection,
+                              print_preview_ui->source_has_selection());
+  initial_settings.SetBoolean(printing::kSettingShouldPrintSelectionOnly,
+                              print_preview_ui->print_selection_only());
   printing::StickySettings* sticky_settings = GetStickySettings();
   sticky_settings->RestoreFromPrefs(Profile::FromBrowserContext(
       preview_web_contents()->GetBrowserContext())->GetPrefs());
@@ -786,15 +781,10 @@ void PrintPreviewHandler::SendInitialSettings(
   web_ui()->CallJavascriptFunction("setInitialSettings", initial_settings);
 }
 
-void PrintPreviewHandler::ClosePreviewDialogAndActivateInitiatorTab() {
-  // Need to get the initiator tab before closing the print preview dialog.
-  WebContents* initiator_tab = GetInitiatorTab();
-  PrintPreviewUI* print_preview_ui = static_cast<PrintPreviewUI*>(
-      web_ui()->GetController());
-
+void PrintPreviewHandler::ClosePreviewDialog() {
+  PrintPreviewUI* print_preview_ui =
+      static_cast<PrintPreviewUI*>(web_ui()->GetController());
   print_preview_ui->OnClosePrintPreviewDialog();
-  if (initiator_tab)
-    initiator_tab->GetDelegate()->ActivateContents(initiator_tab);
 }
 
 void PrintPreviewHandler::SendPrinterCapabilities(
@@ -849,14 +839,14 @@ WebContents* PrintPreviewHandler::GetInitiatorTab() const {
 }
 
 void PrintPreviewHandler::OnPrintDialogShown() {
-  ClosePreviewDialogAndActivateInitiatorTab();
+  ClosePreviewDialog();
 }
 
-void PrintPreviewHandler::SelectFile(const FilePath& default_filename) {
+void PrintPreviewHandler::SelectFile(const base::FilePath& default_filename) {
   ui::SelectFileDialog::FileTypeInfo file_type_info;
   file_type_info.extensions.resize(1);
   file_type_info.extensions[0].push_back(FILE_PATH_LITERAL("pdf"));
-  file_type_info.support_gdata = true;
+  file_type_info.support_drive = true;
 
   // Initializing save_path_ if it is not already initialized.
   printing::StickySettings* sticky_settings = GetStickySettings();
@@ -865,7 +855,7 @@ void PrintPreviewHandler::SelectFile(const FilePath& default_filename) {
     // the select file dialog performs IO anyway in order to display the
     // folders and also it is modal.
     base::ThreadRestrictions::ScopedAllowIO allow_io;
-    FilePath file_path;
+    base::FilePath file_path;
     PathService::Get(chrome::DIR_USER_DOCUMENTS, &file_path);
     sticky_settings->StoreSavePath(file_path);
     sticky_settings->SaveInPrefs(Profile::FromBrowserContext(
@@ -881,7 +871,8 @@ void PrintPreviewHandler::SelectFile(const FilePath& default_filename) {
       &file_type_info,
       0,
       FILE_PATH_LITERAL(""),
-      platform_util::GetTopLevel(preview_web_contents()->GetNativeView()),
+      platform_util::GetTopLevel(
+          preview_web_contents()->GetView()->GetNativeView()),
       NULL);
 }
 
@@ -906,7 +897,7 @@ void PrintPreviewHandler::ShowSystemDialog() {
   HandleShowSystemDialog(NULL);
 }
 
-void PrintPreviewHandler::FileSelected(const FilePath& path,
+void PrintPreviewHandler::FileSelected(const base::FilePath& path,
                                        int index, void* params) {
   // Updating |save_path_| to the newly selected folder.
   printing::StickySettings* sticky_settings = GetStickySettings();
@@ -914,7 +905,7 @@ void PrintPreviewHandler::FileSelected(const FilePath& path,
   sticky_settings->SaveInPrefs(Profile::FromBrowserContext(
       preview_web_contents()->GetBrowserContext())->GetPrefs());
   web_ui()->CallJavascriptFunction("fileSelectionCompleted");
-  print_to_pdf_path_.reset(new FilePath(path));
+  print_to_pdf_path_.reset(new base::FilePath(path));
   PostPrintToPdfTask();
 }
 
@@ -941,7 +932,7 @@ void PrintPreviewHandler::PostPrintToPdfTask() {
 #endif
 
   print_to_pdf_path_.reset();
-  ClosePreviewDialogAndActivateInitiatorTab();
+  ClosePreviewDialog();
 }
 
 void PrintPreviewHandler::FileSelectionCanceled(void* params) {

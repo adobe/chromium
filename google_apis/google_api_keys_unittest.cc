@@ -35,15 +35,10 @@
 #include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/stringize_macros.h"
+#include "base/strings/stringize_macros.h"
 
-// These are the (temporary) default values for OAuth IDs and secrets.
-static const char kDefaultNonOfficialAPIKey[] =
-    "AIzaSyBHDrl33hwRp4rMQY0ziRbj8K9LPA6vUCY";
-static const char kDefaultNonOfficialClientID[] =
-    "609716072145.apps.googleusercontent.com";
-static const char kDefaultNonOfficialClientSecret[] =
-    "WF4uG3gJzEH0KLpS7OuFBDux";
+// This is the default baked-in value for OAuth IDs and secrets.
+static const char kDummyToken[] = "dummytoken";
 
 struct EnvironmentCache {
  public:
@@ -68,7 +63,7 @@ class GoogleAPIKeysTest : public testing::Test {
     env_cache_[8].variable_name = "GOOGLE_DEFAULT_CLIENT_SECRET";
   }
 
-  void SetUp() {
+  virtual void SetUp() {
     // Unset all environment variables that can affect these tests,
     // for the duration of the tests.
     for (size_t i = 0; i < arraysize(env_cache_); ++i) {
@@ -82,7 +77,7 @@ class GoogleAPIKeysTest : public testing::Test {
     }
   }
 
-  void TearDown() {
+  virtual void TearDown() {
     // Restore environment.
     for (size_t i = 0; i < arraysize(env_cache_); ++i) {
       EnvironmentCache& cache = env_cache_[i];
@@ -157,32 +152,32 @@ TEST_F(GoogleAPIKeysTest, OfficialKeys) {
   EXPECT_NE(0u, api_key.size());
   EXPECT_NE(DUMMY_API_TOKEN, api_key);
   EXPECT_NE("bogus api_key", api_key);
-  EXPECT_NE(kDefaultNonOfficialAPIKey, api_key);
+  EXPECT_NE(kDummyToken, api_key);
 
   EXPECT_NE(0u, id_main.size());
   EXPECT_NE(DUMMY_API_TOKEN, id_main);
   EXPECT_NE("bogus client_id_main", id_main);
-  EXPECT_NE(kDefaultNonOfficialClientID, id_main);
+  EXPECT_NE(kDummyToken, id_main);
 
   EXPECT_NE(0u, secret_main.size());
   EXPECT_NE(DUMMY_API_TOKEN, secret_main);
-  EXPECT_NE(kDefaultNonOfficialClientSecret, secret_main);
+  EXPECT_NE(kDummyToken, secret_main);
 
   EXPECT_NE(0u, id_cloud_print.size());
   EXPECT_NE(DUMMY_API_TOKEN, id_cloud_print);
-  EXPECT_NE(kDefaultNonOfficialClientID, id_cloud_print);
+  EXPECT_NE(kDummyToken, id_cloud_print);
 
   EXPECT_NE(0u, secret_cloud_print.size());
   EXPECT_NE(DUMMY_API_TOKEN, secret_cloud_print);
-  EXPECT_NE(kDefaultNonOfficialClientSecret, secret_cloud_print);
+  EXPECT_NE(kDummyToken, secret_cloud_print);
 
   EXPECT_NE(0u, id_remoting.size());
   EXPECT_NE(DUMMY_API_TOKEN, id_remoting);
-  EXPECT_NE(kDefaultNonOfficialClientID, id_remoting);
+  EXPECT_NE(kDummyToken, id_remoting);
 
   EXPECT_NE(0u, secret_remoting.size());
   EXPECT_NE(DUMMY_API_TOKEN, secret_remoting);
-  EXPECT_NE(kDefaultNonOfficialClientSecret, secret_remoting);
+  EXPECT_NE(kDummyToken, secret_remoting);
 }
 #endif  // defined(GOOGLE_CHROME_BUILD) || defined(USE_OFFICIAL_GOOGLE_API_KEYS)
 
@@ -234,13 +229,13 @@ TEST_F(GoogleAPIKeysTest, DefaultKeys) {
       testcase::g_api_key_cache.Get().GetClientSecret(
           testcase::CLIENT_REMOTING);
 
-  EXPECT_EQ(kDefaultNonOfficialAPIKey, api_key);
-  EXPECT_EQ(kDefaultNonOfficialClientID, id_main);
-  EXPECT_EQ(kDefaultNonOfficialClientSecret, secret_main);
-  EXPECT_EQ(kDefaultNonOfficialClientID, id_cloud_print);
-  EXPECT_EQ(kDefaultNonOfficialClientSecret, secret_cloud_print);
-  EXPECT_EQ(kDefaultNonOfficialClientID, id_remoting);
-  EXPECT_EQ(kDefaultNonOfficialClientSecret, secret_remoting);
+  EXPECT_EQ(kDummyToken, api_key);
+  EXPECT_EQ(kDummyToken, id_main);
+  EXPECT_EQ(kDummyToken, secret_main);
+  EXPECT_EQ(kDummyToken, id_cloud_print);
+  EXPECT_EQ(kDummyToken, secret_cloud_print);
+  EXPECT_EQ(kDummyToken, id_remoting);
+  EXPECT_EQ(kDummyToken, secret_remoting);
 }
 
 // Override a couple of keys, leave the rest default.
@@ -290,12 +285,12 @@ TEST_F(GoogleAPIKeysTest, OverrideSomeKeys) {
           testcase::CLIENT_REMOTING);
 
   EXPECT_EQ("API_KEY override", api_key);
-  EXPECT_EQ(kDefaultNonOfficialClientID, id_main);
-  EXPECT_EQ(kDefaultNonOfficialClientSecret, secret_main);
-  EXPECT_EQ(kDefaultNonOfficialClientID, id_cloud_print);
-  EXPECT_EQ(kDefaultNonOfficialClientSecret, secret_cloud_print);
+  EXPECT_EQ(kDummyToken, id_main);
+  EXPECT_EQ(kDummyToken, secret_main);
+  EXPECT_EQ(kDummyToken, id_cloud_print);
+  EXPECT_EQ(kDummyToken, secret_cloud_print);
   EXPECT_EQ("CLIENT_ID_REMOTING override", id_remoting);
-  EXPECT_EQ(kDefaultNonOfficialClientSecret, secret_remoting);
+  EXPECT_EQ(kDummyToken, secret_remoting);
 }
 
 // Override all keys.

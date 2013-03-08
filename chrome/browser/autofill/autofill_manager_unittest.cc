@@ -8,10 +8,10 @@
 #include "base/command_line.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
-#include "base/prefs/public/pref_service_base.h"
+#include "base/prefs/pref_service.h"
 #include "base/string16.h"
-#include "base/string_number_conversions.h"
 #include "base/stringprintf.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/time.h"
 #include "base/tuple.h"
 #include "base/utf_string_conversions.h"
@@ -38,6 +38,7 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "chrome/test/base/testing_profile.h"
+#include "components/user_prefs/user_prefs.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/ssl_status.h"
 #include "content/public/test/mock_render_process_host.h"
@@ -466,6 +467,7 @@ class TestAutofillManager : public AutofillManager {
         did_finish_async_form_submit_(false),
         message_loop_is_running_(false) {
   }
+  virtual ~TestAutofillManager() {}
 
   virtual bool IsAutofillEnabled() const OVERRIDE { return autofill_enabled_; }
 
@@ -590,9 +592,6 @@ class TestAutofillManager : public AutofillManager {
   }
 
  private:
-  // AutofillManager is ref counted.
-  virtual ~TestAutofillManager() {}
-
   // Weak reference.
   TestPersonalDataManager* personal_data_;
 
@@ -617,25 +616,28 @@ class AutofillManagerTest : public ChromeRenderViewHostTestHarness {
   AutofillManagerTest()
       : ChromeRenderViewHostTestHarness(),
         ui_thread_(BrowserThread::UI, &message_loop_),
-        file_thread_(BrowserThread::FILE) {
+        file_thread_(BrowserThread::FILE),
+        io_thread_(BrowserThread::IO) {
   }
 
   virtual ~AutofillManagerTest() {
   }
 
   virtual void SetUp() OVERRIDE {
-    Profile* profile = new TestingProfile();
+    TestingProfile* profile = CreateProfile();
+    profile->CreateRequestContext();
     browser_context_.reset(profile);
     PersonalDataManagerFactory::GetInstance()->SetTestingFactory(
         profile, TestPersonalDataManager::Build);
 
     ChromeRenderViewHostTestHarness::SetUp();
-    TabAutofillManagerDelegate::CreateForWebContents(web_contents());
+    io_thread_.StartIOThread();
+    autofill::TabAutofillManagerDelegate::CreateForWebContents(web_contents());
     personal_data_.SetBrowserContext(profile);
-    autofill_manager_ = new TestAutofillManager(
+    autofill_manager_.reset(new TestAutofillManager(
         web_contents(),
-        TabAutofillManagerDelegate::FromWebContents(web_contents()),
-        &personal_data_);
+        autofill::TabAutofillManagerDelegate::FromWebContents(web_contents()),
+        &personal_data_));
 
     file_thread_.Start();
   }
@@ -645,9 +647,14 @@ class AutofillManagerTest : public ChromeRenderViewHostTestHarness {
     // PersonalDataManager to be around when it gets destroyed. Also, a real
     // AutofillManager is tied to the lifetime of the WebContents, so it must
     // be destroyed at the destruction of the WebContents.
-    autofill_manager_ = NULL;
+    autofill_manager_.reset();
     file_thread_.Stop();
     ChromeRenderViewHostTestHarness::TearDown();
+    io_thread_.Stop();
+  }
+
+  virtual TestingProfile* CreateProfile() {
+    return new TestingProfile();
   }
 
   void UpdatePasswordGenerationState(bool new_renderer) {
@@ -675,10 +682,6 @@ class AutofillManagerTest : public ChromeRenderViewHostTestHarness {
 
   void FormsSeen(const std::vector<FormData>& forms) {
     autofill_manager_->OnFormsSeen(forms, base::TimeTicks());
-  }
-
-  void LoadServerPredictions(const std::string& response_xml) {
-    autofill_manager_->OnLoadedServerPredictions(response_xml);
   }
 
   void FormSubmitted(const FormData& form) {
@@ -746,8 +749,9 @@ class AutofillManagerTest : public ChromeRenderViewHostTestHarness {
  protected:
   content::TestBrowserThread ui_thread_;
   content::TestBrowserThread file_thread_;
+  content::TestBrowserThread io_thread_;
 
-  scoped_refptr<TestAutofillManager> autofill_manager_;
+  scoped_ptr<TestAutofillManager> autofill_manager_;
   TestPersonalDataManager personal_data_;
 
   // Used when we want an off the record profile. This will store the original
@@ -758,9 +762,24 @@ class AutofillManagerTest : public ChromeRenderViewHostTestHarness {
   DISALLOW_COPY_AND_ASSIGN(AutofillManagerTest);
 };
 
+class IncognitoAutofillManagerTest : public AutofillManagerTest {
+ public:
+  IncognitoAutofillManagerTest() {}
+  virtual ~IncognitoAutofillManagerTest() {}
+
+  virtual TestingProfile* CreateProfile() OVERRIDE {
+    // Create an incognito profile.
+    TestingProfile::Builder builder;
+    scoped_ptr<TestingProfile> profile = builder.Build();
+    profile->set_incognito(true);
+    return profile.release();
+  }
+};
+
 class TestFormStructure : public FormStructure {
  public:
-  explicit TestFormStructure(const FormData& form) : FormStructure(form) {}
+  explicit TestFormStructure(const FormData& form)
+      : FormStructure(form, std::string()) {}
   virtual ~TestFormStructure() {}
 
   void SetFieldTypes(const std::vector<AutofillFieldType>& heuristic_types,
@@ -1790,7 +1809,7 @@ TEST_F(AutofillManagerTest, FillAddressForm) {
 // Test that we correctly fill an address form from an auxiliary profile.
 TEST_F(AutofillManagerTest, FillAddressFormFromAuxiliaryProfile) {
   personal_data_.ClearAutofillProfiles();
-  PrefServiceBase* prefs = PrefServiceBase::FromBrowserContext(profile());
+  PrefService* prefs = components::UserPrefs::Get(profile());
   prefs->SetBoolean(prefs::kAutofillAuxiliaryProfilesEnabled, true);
   personal_data_.CreateTestAuxiliaryProfiles();
 
@@ -1828,56 +1847,6 @@ TEST_F(AutofillManagerTest, FillCreditCardForm) {
   FormData results;
   EXPECT_TRUE(GetAutofillFormDataFilledMessage(&page_id, &results));
   ExpectFilledCreditCardFormElvis(page_id, results, kDefaultPageID, false);
-}
-
-TEST_F(AutofillManagerTest, FillCheckableElements) {
-  FormData form;
-  CreateTestAddressFormData(&form);
-
-  // Add a checkbox field.
-  FormFieldData field;
-  autofill_test::CreateTestFormField(
-      "Checkbox", "checkbx", "fill-me", "checkbox", &field);
-  field.is_checkable = true;
-  form.fields.push_back(field);
-  autofill_test::CreateTestFormField(
-      "Checkbox", "checkbx", "fill-me", "checkbox", &field);
-  field.is_checkable = true;
-  form.fields.push_back(field);
-
-  std::vector<FormData> forms(1, form);
-  FormsSeen(forms);
-
-  // Replicate server response with XML.
-  const std::string response_xml =
-      "<autofillqueryresponse>"
-      "<field autofilltype=\"0\"/>"
-      "<field autofilltype=\"0\"/>"
-      "<field autofilltype=\"0\"/>"
-      "<field autofilltype=\"0\"/>"
-      "<field autofilltype=\"0\"/>"
-      "<field autofilltype=\"0\"/>"
-      "<field autofilltype=\"0\"/>"
-      "<field autofilltype=\"0\"/>"
-      "<field autofilltype=\"0\"/>"
-      "<field autofilltype=\"0\"/>"
-      "<field autofilltype=\"0\"/>"
-      "<field autofilltype=\"61\" defaultvalue=\"fill-me\"/>"
-      "<field autofilltype=\"61\" defaultvalue=\"dont-fill-me\"/>"
-      "</autofillqueryresponse>";
-  LoadServerPredictions(response_xml);
-
-  GUIDPair guid("00000000-0000-0000-0000-000000000001", 0);
-  GUIDPair empty(std::string(), 0);
-  FillAutofillFormData(kDefaultPageID, form, form.fields[0],
-                       PackGUIDs(empty, guid));
-  int page_id = 0;
-  FormData results;
-  EXPECT_TRUE(GetAutofillFormDataFilledMessage(&page_id, &results));
-  // Second to last field should be checked.
-  EXPECT_TRUE(results.fields[results.fields.size()-2].is_checked);
-  // Last field shouldn't be checked as values are not same.
-  EXPECT_FALSE(results.fields[results.fields.size()-1].is_checked);
 }
 
 // Test that we correctly fill a credit card form with month input type.
@@ -2675,7 +2644,7 @@ TEST_F(AutofillManagerTest, FormSubmittedWithDifferentFields) {
   FormsSeen(forms);
 
   // Cache the expected form signature.
-  std::string signature = FormStructure(form).FormSignature();
+  std::string signature = FormStructure(form, std::string()).FormSignature();
 
   // Change the structure of the form prior to submission.
   // Websites would typically invoke JavaScript either on page load or on form
@@ -2734,7 +2703,7 @@ TEST_F(AutofillManagerTest, FormSubmittedWithDefaultValues) {
 // Checks that resetting the auxiliary profile enabled preference does the right
 // thing on all platforms.
 TEST_F(AutofillManagerTest, AuxiliaryProfilesReset) {
-  PrefServiceBase* prefs = PrefServiceBase::FromBrowserContext(profile());
+  PrefService* prefs = components::UserPrefs::Get(profile());
 #if defined(OS_MACOSX)
   // Auxiliary profiles is implemented on Mac only.  It enables Mac Address
   // Book integration.
@@ -3035,7 +3004,7 @@ TEST_F(AutofillManagerTest, UpdatePasswordSyncState) {
       web_contents(),
       PasswordManagerDelegateImpl::FromWebContents(web_contents()));
 
-  PrefServiceBase* prefs = PrefServiceBase::FromBrowserContext(profile());
+  PrefService* prefs = components::UserPrefs::Get(profile());
 
   // Allow this test to control what should get synced.
   prefs->SetBoolean(prefs::kSyncKeepEverythingSynced, false);
@@ -3077,13 +3046,6 @@ TEST_F(AutofillManagerTest, UpdatePasswordSyncState) {
   EXPECT_FALSE(autofill_manager_->GetSentStates()[0]);
   autofill_manager_->ClearSentStates();
 
-  // Disable password manager by going incognito, and re-enable syncing. The
-  // feature should still be disabled, and nothing will be sent.
-  sync_service->SetSyncSetupCompleted();
-  profile()->set_incognito(true);
-  UpdatePasswordGenerationState(false);
-  EXPECT_EQ(0u, autofill_manager_->GetSentStates().size());
-
   // When a new render_view is created, we send the state even if it's the
   // same.
   UpdatePasswordGenerationState(true);
@@ -3092,13 +3054,35 @@ TEST_F(AutofillManagerTest, UpdatePasswordSyncState) {
   autofill_manager_->ClearSentStates();
 }
 
+TEST_F(IncognitoAutofillManagerTest, UpdatePasswordSyncStateIncognito) {
+  // Disable password manager by going incognito, and enable syncing. The
+  // feature should still be disabled, and nothing will be sent.
+  PasswordManagerDelegateImpl::CreateForWebContents(web_contents());
+  PasswordManager::CreateForWebContentsAndDelegate(
+      web_contents(),
+      PasswordManagerDelegateImpl::FromWebContents(web_contents()));
+
+  PrefService* prefs = components::UserPrefs::Get(profile());
+
+  // Allow this test to control what should get synced.
+  prefs->SetBoolean(prefs::kSyncKeepEverythingSynced, false);
+  // Always set password generation enabled check box so we can test the
+  // behavior of password sync.
+  prefs->SetBoolean(prefs::kPasswordGenerationEnabled, true);
+
+  browser_sync::SyncPrefs sync_prefs(profile()->GetPrefs());
+  sync_prefs.SetSyncSetupCompleted();
+  UpdatePasswordGenerationState(false);
+  EXPECT_EQ(0u, autofill_manager_->GetSentStates().size());
+}
+
 TEST_F(AutofillManagerTest, UpdatePasswordGenerationState) {
   PasswordManagerDelegateImpl::CreateForWebContents(web_contents());
   PasswordManager::CreateForWebContentsAndDelegate(
       web_contents(),
       PasswordManagerDelegateImpl::FromWebContents(web_contents()));
 
-  PrefServiceBase* prefs = PrefServiceBase::FromBrowserContext(profile());
+  PrefService* prefs = components::UserPrefs::Get(profile());
 
   // Always set password sync enabled so we can test the behavior of password
   // generation.
@@ -3208,18 +3192,17 @@ TEST_F(AutofillManagerTest, DisabledAutofillDispatchesError) {
 
 namespace {
 
-class MockAutofillExternalDelegate :
-      public autofill::TestAutofillExternalDelegate {
+class MockAutofillExternalDelegate : public AutofillExternalDelegate {
  public:
   explicit MockAutofillExternalDelegate(content::WebContents* web_contents,
                                         AutofillManager* autofill_manager)
-      : TestAutofillExternalDelegate(web_contents, autofill_manager) {}
+      : AutofillExternalDelegate(web_contents, autofill_manager) {}
   virtual ~MockAutofillExternalDelegate() {}
 
   MOCK_METHOD5(OnQuery, void(int query_id,
                              const FormData& form,
                              const FormFieldData& field,
-                             const gfx::Rect& bounds,
+                             const gfx::RectF& bounds,
                              bool display_warning));
 
  private:
@@ -3231,7 +3214,7 @@ class MockAutofillExternalDelegate :
 // Test our external delegate is called at the right time.
 TEST_F(AutofillManagerTest, TestExternalDelegate) {
   MockAutofillExternalDelegate external_delegate(web_contents(),
-                                                 autofill_manager_);
+                                                 autofill_manager_.get());
   EXPECT_CALL(external_delegate, OnQuery(_, _, _, _, _));
   autofill_manager_->SetExternalDelegate(&external_delegate);
 

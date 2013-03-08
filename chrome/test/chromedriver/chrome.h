@@ -5,52 +5,30 @@
 #ifndef CHROME_TEST_CHROMEDRIVER_CHROME_H_
 #define CHROME_TEST_CHROMEDRIVER_CHROME_H_
 
+#include <list>
 #include <string>
 
-#include "base/memory/scoped_ptr.h"
-
-namespace base {
-class ListValue;
-class Value;
-}
-
 class Status;
+class WebView;
 
 class Chrome {
  public:
   virtual ~Chrome() {}
 
-  // Load a given URL in the main frame.
-  virtual Status Load(const std::string& url) = 0;
+  virtual std::string GetVersion() = 0;
 
-  // Reload the current page.
-  virtual Status Reload() = 0;
+  // Return a list of opened WebViews.
+  virtual Status GetWebViews(std::list<WebView*>* web_views) = 0;
 
-  // Evaluates a JavaScript expression in a specified frame and returns
-  // the result. |frame| is a frame ID or an empty string for the main frame.
-  // If the expression evaluates to a element, it will be bound to a unique ID
-  // (per frame) and the ID will be returned.
-  virtual Status EvaluateScript(const std::string& frame,
-                                const std::string& expression,
-                                scoped_ptr<base::Value>* result) = 0;
+  // Returns whether a JavaScript dialog is open.
+  virtual Status IsJavaScriptDialogOpen(bool* is_open) = 0;
 
-  // Calls a JavaScript function in a specified frame with the given args and
-  // returns the result. |frame| is a frame ID or an empty string for the main
-  // frame. |args| may contain IDs that refer to previously returned elements.
-  // These will be translated back to their referred objects before invoking the
-  // function.
-  virtual Status CallFunction(const std::string& frame,
-                              const std::string& function,
-                              const base::ListValue& args,
-                              scoped_ptr<base::Value>* result) = 0;
+  // Returns the message of the open JavaScript dialog.
+  virtual Status GetJavaScriptDialogMessage(std::string* message) = 0;
 
-  // Gets the frame ID for a frame element returned by invoking the given
-  // JavaScript function. |frame| is a frame ID or an empty string for the main
-  // frame.
-  virtual Status GetFrameByFunction(const std::string& frame,
-                                    const std::string& function,
-                                    const base::ListValue& args,
-                                    std::string* out_frame) = 0;
+  // Handles an open JavaScript dialog.
+  virtual Status HandleJavaScriptDialog(bool accept,
+                                        const std::string& prompt_text) = 0;
 
   // Quits Chrome.
   virtual Status Quit() = 0;

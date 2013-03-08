@@ -4,14 +4,18 @@
 
 #include "chrome/browser/notifications/desktop_notifications_unittest.h"
 
+#include "base/prefs/testing_pref_service.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/notifications/balloon_notification_ui_manager.h"
 #include "chrome/browser/notifications/fake_balloon_view.h"
 #include "chrome/browser/prefs/browser_prefs.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/test/base/testing_pref_service.h"
 #include "content/public/common/show_desktop_notification_params.h"
+
+#if defined(ENABLE_MESSAGE_CENTER)
+#include "ui/message_center/message_center.h"
+#endif
 
 #if defined(USE_ASH)
 #include "ash/shell.h"
@@ -97,13 +101,18 @@ DesktopNotificationsTest::~DesktopNotificationsTest() {
 void DesktopNotificationsTest::SetUp() {
 #if defined(USE_ASH)
   WebKit::initialize(webkit_platform_support_.Get());
+#if defined(ENABLE_MESSAGE_CENTER)
+  // The message center is notmally initialized on |g_browser_process| which
+  // is not created for these tests.
+  message_center::MessageCenter::Initialize();
+#endif
   // MockBalloonCollection retrieves information about the screen on creation.
   // So it is necessary to make sure the desktop gets created first.
   ash::Shell::CreateInstance(new ash::test::TestShellDelegate);
   active_desktop_monitor_.reset(new ActiveDesktopMonitor);
 #endif
 
-  chrome::RegisterLocalState(&local_state_);
+  chrome::RegisterLocalState(local_state_.registry());
   profile_.reset(new TestingProfile());
   ui_manager_.reset(new BalloonNotificationUIManager(&local_state_));
   balloon_collection_ = new MockBalloonCollection();
@@ -119,6 +128,11 @@ void DesktopNotificationsTest::TearDown() {
 #if defined(USE_ASH)
   active_desktop_monitor_.reset();
   ash::Shell::DeleteInstance();
+#if defined(ENABLE_MESSAGE_CENTER)
+  // The message center is notmally shutdown on |g_browser_process| which
+  // is not created for these tests.
+  message_center::MessageCenter::Shutdown();
+#endif
   aura::Env::DeleteInstance();
   WebKit::shutdown();
 #endif

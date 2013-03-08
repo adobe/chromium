@@ -9,6 +9,7 @@
 #include "net/base/io_buffer.h"
 #include "net/base/test_completion_callback.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "webkit/fileapi/external_mount_points.h"
 #include "webkit/fileapi/file_system_context.h"
 #include "webkit/fileapi/file_system_file_util.h"
 #include "webkit/fileapi/file_system_operation_context.h"
@@ -36,6 +37,7 @@ class UploadFileSystemFileElementReaderTest : public testing::Test {
 
     file_system_context_ = new fileapi::FileSystemContext(
         fileapi::FileSystemTaskRunners::CreateMockTaskRunners(),
+        ExternalMountPoints::CreateRefCounted().get(),
         NULL,
         NULL,
         temp_dir_.path(),
@@ -79,9 +81,11 @@ class UploadFileSystemFileElementReaderTest : public testing::Test {
                            const char* buf,
                            int buf_size,
                            base::Time* modification_time) {
-    fileapi::FileSystemURL url(GURL(kFileSystemURLOrigin),
-                               kFileSystemType,
-                               FilePath().AppendASCII(filename));
+    fileapi::FileSystemURL url =
+        file_system_context_->CreateCrackedFileSystemURL(
+            GURL(kFileSystemURLOrigin),
+            kFileSystemType,
+            base::FilePath().AppendASCII(filename));
 
     fileapi::FileSystemFileUtil* file_util =
         file_system_context_->GetFileUtil(kFileSystemType);
@@ -104,7 +108,7 @@ class UploadFileSystemFileElementReaderTest : public testing::Test {
     base::ClosePlatformFile(handle);
 
     base::PlatformFileInfo file_info;
-    FilePath platform_path;
+    base::FilePath platform_path;
     ASSERT_EQ(base::PLATFORM_FILE_OK,
               file_util->GetFileInfo(&context, url, &file_info,
                                      &platform_path));

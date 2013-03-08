@@ -53,6 +53,9 @@ class FullscreenController : public content::NotificationObserver {
   bool IsFullscreenForTabOrPending() const;
   bool IsFullscreenForTabOrPending(
       const content::WebContents* web_contents) const;
+  // True if fullscreen was entered because of tab fullscreen (was not
+  // previously in browser fullscreen).
+  bool IsFullscreenCausedByTab() const;
 
   void ToggleFullscreenModeForTab(content::WebContents* web_contents,
                                   bool enter_fullscreen);
@@ -74,7 +77,7 @@ class FullscreenController : public content::NotificationObserver {
 #endif
 
 #if defined(OS_MACOSX)
-  void TogglePresentationMode();
+  void ToggleFullscreenWithChrome();
 #endif
 
   // Mouse Lock ////////////////////////////////////////////////////////////////
@@ -130,6 +133,14 @@ class FullscreenController : public content::NotificationObserver {
     MOUSELOCK_ACCEPTED_SILENTLY
   };
 
+  enum FullscreenInternalOption {
+    BROWSER,
+#if defined(OS_MACOSX)
+    BROWSER_WITH_CHROME,
+#endif
+    TAB
+  };
+
   void UpdateNotificationRegistrations();
 
   // Posts a task to call NotifyFullscreenChange.
@@ -141,11 +152,9 @@ class FullscreenController : public content::NotificationObserver {
   void NotifyTabOfExitIfNecessary();
   void NotifyMouseLockChange();
 
-  // TODO(koz): Change |for_tab| to an enum.
-  void ToggleFullscreenModeInternal(bool for_tab);
-#if defined(OS_MACOSX)
-  void TogglePresentationModeInternal(bool for_tab);
-#endif
+  void ToggleFullscreenModeInternal(FullscreenInternalOption option);
+  void EnterFullscreenModeInternal(FullscreenInternalOption option);
+  void ExitFullscreenModeInternal();
   void SetFullscreenedTab(content::WebContents* tab);
   void SetMouseLockTab(content::WebContents* tab);
 
@@ -170,8 +179,17 @@ class FullscreenController : public content::NotificationObserver {
   // The URL of the extension which trigerred "browser fullscreen" mode.
   GURL extension_caused_fullscreen_;
 
-  // True if the current tab entered fullscreen mode via webkitRequestFullScreen
-  bool tab_caused_fullscreen_;
+  enum PriorFullscreenState {
+    STATE_INVALID,
+    STATE_NORMAL,
+    STATE_BROWSER_FULLSCREEN_NO_CHROME,
+#if defined(OS_MACOSX)
+    STATE_BROWSER_FULLSCREEN_WITH_CHROME,
+#endif
+  };
+  // The state before entering tab fullscreen mode via webkitRequestFullScreen.
+  // When not in tab fullscreen, it is STATE_INVALID.
+  PriorFullscreenState state_prior_to_tab_fullscreen_;
   // True if tab fullscreen has been allowed, either by settings or by user
   // clicking the allow button on the fullscreen infobar.
   bool tab_fullscreen_accepted_;

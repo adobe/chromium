@@ -128,7 +128,8 @@ class SyncSchedulerTest : public testing::Test {
             connection_.get(), directory(), workers,
             &extensions_activity_monitor_, throttled_data_type_tracker_.get(),
             std::vector<SyncEngineEventListener*>(), NULL, NULL,
-            true  /* enable keystore encryption */));
+            true,  // enable keystore encryption
+            "fake_invalidator_client_id"));
     context_->set_routing_info(routing_info_);
     context_->set_notifications_enabled(true);
     context_->set_account_name("Test");
@@ -581,8 +582,8 @@ TEST_F(SyncSchedulerTest, NudgeWithStatesCoalescing) {
   ASSERT_EQ(1U, r.snapshots.size());
   EXPECT_GE(r.times[0], optimal_time);
   ModelTypeInvalidationMap coalesced_types;
-  CoalesceStates(&coalesced_types, types1);
-  CoalesceStates(&coalesced_types, types2);
+  CoalesceStates(types1, &coalesced_types);
+  CoalesceStates(types2, &coalesced_types);
   EXPECT_THAT(coalesced_types, Eq(r.snapshots[0].source().types));
   EXPECT_EQ(GetUpdatesCallerInfo::LOCAL,
             r.snapshots[0].source().updates_source);
@@ -730,7 +731,7 @@ TEST_F(SyncSchedulerTest, ThrottlingDoesThrottle) {
   ASSERT_EQ(0, counter.times_called());
 }
 
-TEST_F(SyncSchedulerTest, ThrottlingExpires) {
+TEST_F(SyncSchedulerTest, ThrottlingExpiresFromPoll) {
   SyncShareRecords records;
   TimeDelta poll(TimeDelta::FromMilliseconds(15));
   TimeDelta throttle1(TimeDelta::FromMilliseconds(150));
@@ -754,6 +755,70 @@ TEST_F(SyncSchedulerTest, ThrottlingExpires) {
 
   StopSyncScheduler();
   AnalyzePollRun(records, kMinNumSamples, optimal_start, poll);
+}
+
+TEST_F(SyncSchedulerTest, ThrottlingExpiresFromNudge) {
+  SyncShareRecords records;
+  TimeDelta poll(TimeDelta::FromDays(1));
+  TimeDelta throttle1(TimeDelta::FromMilliseconds(150));
+  scheduler()->OnReceivedLongPollIntervalUpdate(poll);
+
+  ::testing::InSequence seq;
+  EXPECT_CALL(*syncer(), SyncShare(_,_,_))
+      .WillOnce(DoAll(
+          WithArg<0>(sessions::test_util::SimulateThrottled(throttle1)),
+          Return(true)))
+      .RetiresOnSaturation();
+  EXPECT_CALL(*syncer(), SyncShare(_,_,_))
+      .WillOnce(DoAll(Invoke(sessions::test_util::SimulateSuccess),
+                      QuitLoopNowAction()));
+
+  const ModelTypeSet types(BOOKMARKS);
+  StartSyncScheduler(SyncScheduler::NORMAL_MODE);
+  scheduler()->ScheduleNudgeAsync(
+      zero(), NUDGE_SOURCE_LOCAL, types, FROM_HERE);
+
+  PumpLoop();
+  EXPECT_TRUE(scheduler()->IsSyncingCurrentlySilenced());
+  RunLoop();
+  EXPECT_FALSE(scheduler()->IsSyncingCurrentlySilenced());
+
+  StopSyncScheduler();
+}
+
+TEST_F(SyncSchedulerTest, ThrottlingExpiresFromConfigure) {
+  SyncShareRecords records;
+  TimeDelta poll(TimeDelta::FromDays(1));
+  TimeDelta throttle1(TimeDelta::FromMilliseconds(150));
+  scheduler()->OnReceivedLongPollIntervalUpdate(poll);
+
+  ::testing::InSequence seq;
+  EXPECT_CALL(*syncer(), SyncShare(_,_,_))
+      .WillOnce(DoAll(
+          WithArg<0>(sessions::test_util::SimulateThrottled(throttle1)),
+          Return(true)))
+      .RetiresOnSaturation();
+  EXPECT_CALL(*syncer(), SyncShare(_,_,_))
+      .WillOnce(DoAll(Invoke(sessions::test_util::SimulateSuccess),
+                      QuitLoopNowAction()));
+
+  const ModelTypeSet types(BOOKMARKS);
+  StartSyncScheduler(SyncScheduler::CONFIGURATION_MODE);
+
+  CallbackCounter counter;
+  ConfigurationParams params(
+      GetUpdatesCallerInfo::RECONFIGURATION,
+      types,
+      TypesToRoutingInfo(types),
+      base::Bind(&CallbackCounter::Callback, base::Unretained(&counter)));
+  EXPECT_FALSE(scheduler()->ScheduleConfiguration(params));
+  EXPECT_EQ(0, counter.times_called());
+  EXPECT_TRUE(scheduler()->IsSyncingCurrentlySilenced());
+
+  RunLoop();
+  EXPECT_FALSE(scheduler()->IsSyncingCurrentlySilenced());
+
+  StopSyncScheduler();
 }
 
 // Test nudges / polls don't run in config mode and config tasks do.
@@ -812,14 +877,14 @@ TEST_F(SyncSchedulerTest, ConfigurationMode) {
 }
 
 class BackoffTriggersSyncSchedulerTest : public SyncSchedulerTest {
-  void SetUp() {
+  virtual void SetUp() {
     SyncSchedulerTest::SetUp();
     UseMockDelayProvider();
     EXPECT_CALL(*delay(), GetDelay(_))
         .WillRepeatedly(Return(TimeDelta::FromMilliseconds(1)));
   }
 
-  void TearDown() {
+  virtual void TearDown() {
     StopSyncScheduler();
     SyncSchedulerTest::TearDown();
   }
@@ -1127,9 +1192,9 @@ TEST_F(SyncSchedulerTest, StartWhenNotConnected) {
   // Should save the nudge for until after the server is reachable.
   MessageLoop::current()->RunUntilIdle();
 
+  scheduler()->OnConnectionStatusChange();
   connection()->SetServerReachable();
   connection()->UpdateConnectionStatus();
-  scheduler()->OnConnectionStatusChange();
   MessageLoop::current()->RunUntilIdle();
 }
 
@@ -1155,9 +1220,9 @@ TEST_F(SyncSchedulerTest, ServerConnectionChangeDuringBackoff) {
   ASSERT_TRUE(scheduler()->IsBackingOff());
 
   // Before we run the scheduled canary, trigger a server connection change.
+  scheduler()->OnConnectionStatusChange();
   connection()->SetServerReachable();
   connection()->UpdateConnectionStatus();
-  scheduler()->OnConnectionStatusChange();
   MessageLoop::current()->RunUntilIdle();
 }
 
@@ -1183,9 +1248,9 @@ TEST_F(SyncSchedulerTest, ConnectionChangeCanaryPreemptedByNudge) {
   ASSERT_TRUE(scheduler()->IsBackingOff());
 
   // Before we run the scheduled canary, trigger a server connection change.
+  scheduler()->OnConnectionStatusChange();
   connection()->SetServerReachable();
   connection()->UpdateConnectionStatus();
-  scheduler()->OnConnectionStatusChange();
   scheduler()->ScheduleNudgeAsync(
       zero(), NUDGE_SOURCE_LOCAL, ModelTypeSet(BOOKMARKS), FROM_HERE);
   MessageLoop::current()->RunUntilIdle();

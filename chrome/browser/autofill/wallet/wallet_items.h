@@ -13,13 +13,21 @@
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
+#include "base/string16.h"
 #include "chrome/browser/autofill/wallet/required_action.h"
 #include "chrome/browser/autofill/wallet/wallet_address.h"
+
+class GURL;
 
 namespace base {
 class DictionaryValue;
 }
 
+namespace gfx {
+class Image;
+}
+
+namespace autofill {
 namespace wallet {
 
 class WalletItemsTest;
@@ -65,15 +73,17 @@ class WalletItems {
     bool operator==(const MaskedInstrument& other) const;
     bool operator!=(const MaskedInstrument& other) const;
 
-    const std::string& descriptive_name() const { return descriptive_name_; }
+    // Gets an image to display for this instrument.
+    const gfx::Image& CardIcon() const;
+
+    const string16& descriptive_name() const { return descriptive_name_; }
     const Type& type() const { return type_; }
-    const std::vector<std::string>& supported_currencies() const {
+    const std::vector<string16>& supported_currencies() const {
       return supported_currencies_;
     }
-    const std::string& last_four_digits() const { return last_four_digits_; }
+    const string16& last_four_digits() const { return last_four_digits_; }
     int expiration_month() const { return expiration_month_; }
     int expiration_year() const { return expiration_year_; }
-    const std::string& brand() const { return brand_; }
     const Address& address() const { return *address_; }
     const Status& status() const { return status_; }
     const std::string& object_id() const { return object_id_; }
@@ -82,26 +92,44 @@ class WalletItems {
     friend class WalletItemsTest;
     FRIEND_TEST_ALL_PREFIXES(WalletItemsTest, CreateMaskedInstrument);
     FRIEND_TEST_ALL_PREFIXES(WalletItemsTest, CreateWalletItems);
-    MaskedInstrument(const std::string& descriptve_name,
+    MaskedInstrument(const string16& descriptve_name,
                      const Type& type,
-                     const std::vector<std::string>& supported_currencies,
-                     const std::string& last_four_digits,
+                     const std::vector<string16>& supported_currencies,
+                     const string16& last_four_digits,
                      int expiration_month,
                      int expiration_year,
-                     const std::string& brand,
                      scoped_ptr<Address> address,
                      const Status& status,
                      const std::string& object_id);
-    std::string descriptive_name_;
+
+    // A user-provided description of the instrument. For example, "Google Visa
+    // Card".
+    string16 descriptive_name_;
+
+    // The payment network of the instrument. For example, Visa.
     Type type_;
-    std::vector<std::string> supported_currencies_;
-    std::string last_four_digits_;
+
+    // |supported_currencies_| are ISO 4217 currency codes, e.g. USD.
+    std::vector<string16> supported_currencies_;
+
+    // The last four digits of the primary account number of the instrument.
+    string16 last_four_digits_;
+
+    // |expiration month_| should be 1-12.
     int expiration_month_;
+
+    // |expiration_year_| should be a 4-digit year.
     int expiration_year_;
-    std::string brand_;
+
+    // The billing address for the instrument.
     scoped_ptr<Address> address_;
+
+    // The current status of the instrument. For example, expired or declined.
     Status status_;
+
+    // Externalized Online Wallet id for this instrument.
     std::string object_id_;
+
     DISALLOW_COPY_AND_ASSIGN(MaskedInstrument);
   };
 
@@ -116,23 +144,28 @@ class WalletItems {
     static scoped_ptr<LegalDocument>
         CreateLegalDocument(const base::DictionaryValue& dictionary);
 
+    // Get the url where this legal document is hosted.
+    GURL GetUrl();
+
     bool operator==(const LegalDocument& other) const;
     bool operator!=(const LegalDocument& other) const;
 
     const std::string& document_id() const { return document_id_; }
     const std::string& display_name() const { return display_name_; }
-    const std::string& document_body() const { return document_body_; }
 
    private:
     friend class WalletItemsTest;
     FRIEND_TEST_ALL_PREFIXES(WalletItemsTest, CreateLegalDocument);
     FRIEND_TEST_ALL_PREFIXES(WalletItemsTest, CreateWalletItems);
+    FRIEND_TEST_ALL_PREFIXES(WalletItemsTest, LegalDocumentGetUrl);
     LegalDocument(const std::string& document_id,
-                  const std::string& display_name,
-                  const std::string& document_body);
+                  const std::string& display_name);
+
+    // Externalized Online Wallet id for the document.
     std::string document_id_;
+
+    // User displayable name for the document.
     std::string display_name_;
-    std::string document_body_;
     DISALLOW_COPY_AND_ASSIGN(LegalDocument);
   };
 
@@ -159,6 +192,10 @@ class WalletItems {
     DCHECK(legal_document.get());
     legal_documents_.push_back(legal_document.release());
   }
+
+  // Whether or not |action| is in |required_actions_|.
+  bool HasRequiredAction(RequiredAction action) const;
+
   const std::vector<RequiredAction>& required_actions() const {
     return required_actions_;
   }
@@ -183,25 +220,42 @@ class WalletItems {
   FRIEND_TEST_ALL_PREFIXES(WalletItemsTest, CreateWalletItems);
   FRIEND_TEST_ALL_PREFIXES(WalletItemsTest,
                            CreateWalletItemsWithRequiredActions);
+
   WalletItems(const std::vector<RequiredAction>& required_actions,
               const std::string& google_transaction_id,
               const std::string& default_instrument_id,
               const std::string& default_address_id,
               const std::string& obfuscated_gaia_id);
+
   // Actions that must be completed by the user before a FullWallet can be
   // issued to them by the Online Wallet service.
   std::vector<RequiredAction> required_actions_;
+
+  // The id for this transaction issued by Google.
   std::string google_transaction_id_;
+
+  // The id of the user's default instrument.
   std::string default_instrument_id_;
+
+  // The id of the user's default address.
   std::string default_address_id_;
+
+  // The externalized Gaia id of the user.
   std::string obfuscated_gaia_id_;
+
+  // The user's backing instruments.
   ScopedVector<MaskedInstrument> instruments_;
+
+  // The user's shipping addresses.
   ScopedVector<Address> addresses_;
+
+  // Legal documents the user must accept before using Online Wallet.
   ScopedVector<LegalDocument> legal_documents_;
+
   DISALLOW_COPY_AND_ASSIGN(WalletItems);
 };
 
 }  // namespace wallet
+}  // namespace autofill
 
 #endif  // CHROME_BROWSER_AUTOFILL_WALLET_WALLET_ITEMS_H_
-

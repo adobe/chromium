@@ -12,6 +12,7 @@
 #include "base/compiler_specific.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/javascript_test_observer.h"
+#include "net/test/test_server.h"
 
 namespace content {
 class RenderViewHost;
@@ -79,15 +80,15 @@ class PPAPITestBase : public InProcessBrowserTest {
   // Runs the test for a tab given the tab that's already navigated to the
   // given URL.
   void RunTestURL(const GURL& test_url);
-  // Run the given |test_case| on a HTTP test server whose document root is
-  // specified by |document_root|. |extra_params| will be passed as URL
-  // parameters to the test.
-  void RunHTTPTestServer(const FilePath& document_root,
-                         const std::string& test_case,
-                         const std::string& extra_params);
+  // Gets the URL of the the given |test_case| for the given HTTP test server.
+  // If |extra_params| is non-empty, it will be appended as URL parameters.
+  GURL GetTestURL(const net::TestServer& http_server,
+                  const std::string& test_case,
+                  const std::string& extra_params);
+
   // Return the document root for the HTTP server on which tests will be run.
   // The result is placed in |document_root|. False is returned upon failure.
-  bool GetHTTPDocumentRoot(FilePath* document_root);
+  bool GetHTTPDocumentRoot(base::FilePath* document_root);
 };
 
 // In-process plugin test runner.  See OutOfProcessPPAPITest below for the
@@ -100,6 +101,8 @@ class PPAPITest : public PPAPITestBase {
 
   virtual std::string BuildQuery(const std::string& base,
                                  const std::string& test_case) OVERRIDE;
+ protected:
+  bool in_process_;  // Controls the --ppapi-in-process switch.
 };
 
 // Variant of PPAPITest that runs plugins out-of-process to test proxy

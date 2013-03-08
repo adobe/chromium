@@ -10,6 +10,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.Message;
 import android.test.UiThreadTest;
+import android.test.suitebuilder.annotation.LargeTest;
 import android.test.suitebuilder.annotation.SmallTest;
 import android.util.Pair;
 
@@ -17,7 +18,6 @@ import org.chromium.android_webview.AwContents;
 import org.chromium.android_webview.test.util.CommonResources;
 import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Feature;
-import org.chromium.base.test.util.UrlUtils;
 import org.chromium.content.browser.test.util.CallbackHelper;
 import org.chromium.content.browser.test.util.Criteria;
 import org.chromium.content.browser.test.util.CriteriaHelper;
@@ -27,17 +27,81 @@ import java.io.InputStream;
 import java.net.URL;
 import java.util.ArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.Callable;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 /**
  * AwContents tests.
  */
 public class AwContentsTest extends AndroidWebViewTestBase {
+    public static class OnDownloadStartHelper extends CallbackHelper {
+        String mUrl;
+        String mUserAgent;
+        String mContentDisposition;
+        String mMimeType;
+        long mContentLength;
+
+        public String getUrl() {
+            assert getCallCount() > 0;
+            return mUrl;
+        }
+
+        public String getUserAgent() {
+            assert getCallCount() > 0;
+            return mUserAgent;
+        }
+
+        public String getContentDisposition() {
+            assert getCallCount() > 0;
+            return mContentDisposition;
+        }
+
+        public String getMimeType() {
+            assert getCallCount() > 0;
+            return mMimeType;
+        }
+
+        public long getContentLength() {
+            assert getCallCount() > 0;
+            return mContentLength;
+        }
+
+        public void notifyCalled(String url, String userAgent, String contentDisposition,
+                String mimeType, long contentLength) {
+            mUrl = url;
+            mUserAgent = userAgent;
+            mContentDisposition = contentDisposition;
+            mMimeType = mimeType;
+            mContentLength = contentLength;
+            notifyCalled();
+        }
+    }
+
+    private static class TestAwContentsClient
+            extends org.chromium.android_webview.test.TestAwContentsClient {
+
+        private OnDownloadStartHelper mOnDownloadStartHelper;
+
+        public TestAwContentsClient() {
+            mOnDownloadStartHelper = new OnDownloadStartHelper();
+        }
+
+        public OnDownloadStartHelper getOnDownloadStartHelper() {
+            return mOnDownloadStartHelper;
+        }
+
+        @Override
+        public void onDownloadStart(String url,
+                                    String userAgent,
+                                    String contentDisposition,
+                                    String mimeType,
+                                    long contentLength) {
+            getOnDownloadStartHelper().notifyCalled(url, userAgent, contentDisposition, mimeType,
+                    contentLength);
+        }
+    }
+
     private TestAwContentsClient mContentsClient = new TestAwContentsClient();
 
     @SmallTest
@@ -46,6 +110,45 @@ public class AwContentsTest extends AndroidWebViewTestBase {
     public void testCreateDestroy() throws Throwable {
         // NOTE this test runs on UI thread, so we cannot call any async methods.
         createAwTestContainerView(mContentsClient).getAwContents().destroy();
+    }
+
+    /*
+     * @LargeTest
+     * @Feature({"AndroidWebView"})
+     * Disabled until we switch to final rendering pipeline.
+     */
+    @DisabledTest
+    public void testCreateLoadDestroyManyTimes() throws Throwable {
+        final int CREATE_AND_DESTROY_REPEAT_COUNT = 10;
+        for (int i = 0; i < CREATE_AND_DESTROY_REPEAT_COUNT; ++i) {
+            AwTestContainerView testView = createAwTestContainerViewOnMainSync(mContentsClient);
+            AwContents awContents = testView.getAwContents();
+
+            loadUrlSync(awContents, mContentsClient.getOnPageFinishedHelper(), "about:blank");
+            destroyAwContentsOnMainSync(awContents);
+        }
+    }
+
+    /*
+     * @LargeTest
+     * @Feature({"AndroidWebView"})
+     * Disabled until we switch to final rendering pipeline.
+     */
+    @DisabledTest
+    public void testCreateLoadDestroyManyAtOnce() throws Throwable {
+        final int CREATE_AND_DESTROY_REPEAT_COUNT = 10;
+        AwTestContainerView views[] = new AwTestContainerView[CREATE_AND_DESTROY_REPEAT_COUNT];
+
+        for (int i = 0; i < views.length; ++i) {
+            views[i] = createAwTestContainerViewOnMainSync(mContentsClient);
+            loadUrlSync(views[i].getAwContents(), mContentsClient.getOnPageFinishedHelper(),
+                    "about:blank");
+        }
+
+        for (int i = 0; i < views.length; ++i) {
+            destroyAwContentsOnMainSync(views[i].getAwContents());
+            views[i] = null;
+        }
     }
 
     private int callDocumentHasImagesSync(final AwContents awContents)
@@ -98,9 +201,8 @@ public class AwContentsTest extends AndroidWebViewTestBase {
     @SmallTest
     @Feature({"AndroidWebView"})
     public void testClearCacheMemoryAndDisk() throws Throwable {
-        final TestAwContentsClient contentClient = new TestAwContentsClient();
         final AwTestContainerView testContainer =
-                createAwTestContainerViewOnMainSync(contentClient);
+                createAwTestContainerViewOnMainSync(mContentsClient);
         final AwContents awContents = testContainer.getAwContents();
 
         TestWebServer webServer = null;
@@ -117,31 +219,31 @@ public class AwContentsTest extends AndroidWebViewTestBase {
             // First load to populate cache.
             clearCacheOnUiThread(awContents, true);
             loadUrlSync(awContents,
-                        contentClient.getOnPageFinishedHelper(),
+                        mContentsClient.getOnPageFinishedHelper(),
                         pageUrl);
             assertEquals(1, webServer.getRequestCount(pagePath));
 
             // Load about:blank so next load is not treated as reload by webkit and force
             // revalidate with the server.
             loadUrlSync(awContents,
-                        contentClient.getOnPageFinishedHelper(),
+                        mContentsClient.getOnPageFinishedHelper(),
                         "about:blank");
 
             // No clearCache call, so should be loaded from cache.
             loadUrlSync(awContents,
-                        contentClient.getOnPageFinishedHelper(),
+                        mContentsClient.getOnPageFinishedHelper(),
                         pageUrl);
             assertEquals(1, webServer.getRequestCount(pagePath));
 
             // Same as above.
             loadUrlSync(awContents,
-                        contentClient.getOnPageFinishedHelper(),
+                        mContentsClient.getOnPageFinishedHelper(),
                         "about:blank");
 
             // Clear cache, so should hit server again.
             clearCacheOnUiThread(awContents, true);
             loadUrlSync(awContents,
-                        contentClient.getOnPageFinishedHelper(),
+                        mContentsClient.getOnPageFinishedHelper(),
                         pageUrl);
             assertEquals(2, webServer.getRequestCount(pagePath));
         } finally {
@@ -169,12 +271,8 @@ public class AwContentsTest extends AndroidWebViewTestBase {
     private static final long TEST_TIMEOUT = 20000L;
     private static final int CHECK_INTERVAL = 100;
 
-    /**
-     * @SmallTest
-     * @Feature({"AndroidWebView"})
-     * BUG 6094807
-     */
-    @DisabledTest
+    @SmallTest
+    @Feature({"AndroidWebView"})
     public void testGetFavicon() throws Throwable {
         final AwTestContainerView testView = createAwTestContainerViewOnMainSync(mContentsClient);
         final AwContents awContents = testView.getAwContents();
@@ -236,111 +334,18 @@ public class AwContentsTest extends AndroidWebViewTestBase {
             webServer = new TestWebServer(false);
             final String pageUrl = webServer.setResponse(
                     "/download.txt", data, downloadHeaders);
-            loadUrlSync(awContents, mContentsClient.getOnPageFinishedHelper(), pageUrl);
+            final OnDownloadStartHelper downloadStartHelper =
+                mContentsClient.getOnDownloadStartHelper();
+            final int callCount = downloadStartHelper.getCallCount();
+            loadUrlAsync(awContents, pageUrl);
+            downloadStartHelper.waitForCallback(callCount);
 
-            assertTrue(pollOnUiThread(new Callable<Boolean>() {
-                @Override
-                public Boolean call() {
-                    // Assert failures are treated as return false.
-                    assertEquals(pageUrl, mContentsClient.mLastDownloadUrl);
-                    assertEquals(contentDisposition,
-                                 mContentsClient.mLastDownloadContentDisposition);
-                    assertEquals(mimeType,
-                                 mContentsClient.mLastDownloadMimeType);
-                    assertEquals(data.length(),
-                                 mContentsClient.mLastDownloadContentLength);
-                    return true;
-                }
-            }));
+            assertEquals(pageUrl, downloadStartHelper.getUrl());
+            assertEquals(contentDisposition, downloadStartHelper.getContentDisposition());
+            assertEquals(mimeType, downloadStartHelper.getMimeType());
+            assertEquals(data.length(), downloadStartHelper.getContentLength());
         } finally {
             if (webServer != null) webServer.shutdown();
         }
-    }
-
-    @Feature({"AndroidWebView"})
-    @SmallTest
-    public void testUpdateVisitedHistoryCallback() throws Throwable {
-        AwTestContainerView testView = createAwTestContainerViewOnMainSync(mContentsClient);
-        AwContents awContents = testView.getAwContents();
-
-        final String path = "/testUpdateVisitedHistoryCallback.html";
-        final String html = "testUpdateVisitedHistoryCallback";
-
-        TestWebServer webServer = null;
-        try {
-            webServer = new TestWebServer(false);
-            final String pageUrl = webServer.setResponse(path, html, null);
-
-            loadUrlSync(awContents, mContentsClient.getOnPageFinishedHelper(), pageUrl);
-            assertEquals(pageUrl, mContentsClient.mLastVisitedUrl);
-            assertEquals(false, mContentsClient.mLastVisitIsReload);
-
-            // Reload
-            loadUrlSync(awContents, mContentsClient.getOnPageFinishedHelper(), pageUrl);
-            assertEquals(pageUrl, mContentsClient.mLastVisitedUrl);
-            assertEquals(true, mContentsClient.mLastVisitIsReload);
-        } finally {
-            if (webServer != null) webServer.shutdown();
-        }
-    }
-
-    private void autoLoginTestHelper(final String testName, final String xAutoLoginHeader,
-            final String expectedRealm, final String expectedAccount, final String expectedArgs)
-            throws Throwable {
-        AwTestContainerView testView = createAwTestContainerViewOnMainSync(mContentsClient);
-        AwContents awContents = testView.getAwContents();
-
-        final String path = "/" + testName + ".html";
-        final String html = testName;
-        List<Pair<String, String>> headers = new ArrayList<Pair<String, String>>();
-        headers.add(Pair.create("x-auto-login", xAutoLoginHeader));
-
-        TestWebServer webServer = null;
-        try {
-            webServer = new TestWebServer(false);
-            final String pageUrl = webServer.setResponse(path, html, headers);
-
-            loadUrlSync(awContents, mContentsClient.getOnPageFinishedHelper(), pageUrl);
-
-            assertEquals(expectedRealm, mContentsClient.mLastAutoLoginRealm);
-            assertEquals(expectedAccount, mContentsClient.mLastAutoLoginAccount);
-            assertEquals(expectedArgs, mContentsClient.mLastAutoLoginArgs);
-        } finally {
-            if (webServer != null) webServer.shutdown();
-        }
-    }
-
-    @Feature({"AndroidWebView"})
-    @SmallTest
-    public void testAutoLoginOnGoogleCom() throws Throwable {
-        autoLoginTestHelper(
-                "testAutoLoginOnGoogleCom",  /* testName */
-                "realm=com.google&account=foo%40bar.com&args=random_string", /* xAutoLoginHeader */
-                "com.google",  /* expectedRealm */
-                "foo@bar.com",  /* expectedAccount */
-                "random_string"  /* expectedArgs */);
-
-    }
-
-    @Feature({"AndroidWebView"})
-    @SmallTest
-    public void testAutoLoginWithNullAccount() throws Throwable {
-        autoLoginTestHelper(
-                "testAutoLoginOnGoogleCom",  /* testName */
-                "realm=com.google&args=not.very.inventive", /* xAutoLoginHeader */
-                "com.google",  /* expectedRealm */
-                null,  /* expectedAccount */
-                "not.very.inventive"  /* expectedArgs */);
-    }
-
-    @Feature({"AndroidWebView"})
-    @SmallTest
-    public void testAutoLoginOnNonGoogle() throws Throwable {
-        autoLoginTestHelper(
-                "testAutoLoginOnGoogleCom",  /* testName */
-                "realm=com.bar&account=foo%40bar.com&args=args", /* xAutoLoginHeader */
-                "com.bar",  /* expectedRealm */
-                "foo@bar.com",  /* expectedAccount */
-                "args"  /* expectedArgs */);
     }
 }

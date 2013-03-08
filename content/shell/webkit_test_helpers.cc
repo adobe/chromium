@@ -4,7 +4,9 @@
 
 #include "content/shell/webkit_test_helpers.h"
 
+#include "base/command_line.h"
 #include "base/utf_string_conversions.h"
+#include "content/shell/shell_switches.h"
 #include "third_party/WebKit/Tools/DumpRenderTree/chromium/TestRunner/public/WebPreferences.h"
 #include "webkit/glue/webpreferences.h"
 
@@ -43,9 +45,21 @@ void ExportLayoutTestSpecificPreferences(const WebPreferences& from,
   to->allow_running_insecure_content = from.allowRunningOfInsecureContent;
   to->css_shaders_enabled = from.cssCustomFilterEnabled;
   to->should_respect_image_orientation = from.shouldRespectImageOrientation;
+  to->asynchronous_spell_checking_enabled =
+      from.asynchronousSpellCheckingEnabled;
+  to->allow_file_access_from_file_urls = from.allowFileAccessFromFileURLs;
+  to->author_and_user_styles_enabled = from.authorAndUserStylesEnabled;
+  to->javascript_can_open_windows_automatically =
+      from.javaScriptCanOpenWindowsAutomatically;
+  to->user_style_sheet_location = from.userStyleSheetLocation;
+  to->touch_drag_drop_enabled = from.touchDragDropEnabled;
 }
 
+// Applies settings that differ between layout tests and regular mode. Some
+// of the defaults are controlled via command line flags which are
+// automatically set for layout tests.
 void ApplyLayoutTestDefaultPreferences(webkit_glue::WebPreferences* prefs) {
+  CommandLine& command_line = *CommandLine::ForCurrentProcess();
   prefs->allow_universal_access_from_file_urls = true;
   prefs->dom_paste_enabled = true;
   prefs->javascript_can_access_clipboard = true;
@@ -86,6 +100,13 @@ void ApplyLayoutTestDefaultPreferences(webkit_glue::WebPreferences* prefs) {
       webkit_glue::WebPreferences::kCommonScript] = ASCIIToUTF16("Helvetica");
   prefs->minimum_logical_font_size = 9;
   prefs->asynchronous_spell_checking_enabled = false;
+  prefs->user_style_sheet_enabled = true;
+  prefs->threaded_html_parser = true;
+  prefs->accelerated_2d_canvas_enabled =
+      command_line.HasSwitch(switches::kEnableAccelerated2DCanvas);
+  prefs->accelerated_compositing_for_video_enabled = false;
+  prefs->deferred_2d_canvas_enabled = false;
+  prefs->mock_scrollbars_enabled = false;
 }
 
 }  // namespace content

@@ -10,7 +10,7 @@ extern "C" {
 
 #include <map>
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "content/common/sandbox_mac.h"
@@ -154,7 +154,7 @@ MULTIPROCESS_TEST_MAIN(mac_sandbox_test_runner) {
 
   Sandbox::SandboxWarmup(sandbox_type);
 
-  if (!Sandbox::EnableSandbox(sandbox_type, FilePath())) {
+  if (!Sandbox::EnableSandbox(sandbox_type, base::FilePath())) {
     LOG(ERROR) << "Failed to initialize sandbox " << sandbox_type;
     return -1;
   }

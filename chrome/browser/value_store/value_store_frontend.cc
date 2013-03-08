@@ -6,7 +6,7 @@
 
 #include "base/bind.h"
 #include "base/debug/trace_event.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "chrome/browser/value_store/leveldb_value_store.h"
 #include "content/public/browser/browser_thread.h"
@@ -17,11 +17,10 @@ class ValueStoreFrontend::Backend : public base::RefCountedThreadSafe<Backend> {
  public:
   Backend() : storage_(NULL) {}
 
-  void Init(const FilePath& db_path) {
+  void Init(const base::FilePath& db_path) {
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
     DCHECK(!storage_);
-    TRACE_EVENT1("ValueStoreFrontend::Backend", "Init",
-                 "db_path", db_path.value().c_str());
+    TRACE_EVENT0("ValueStoreFrontend::Backend", "Init");
     db_path_ = db_path;
     storage_ = new LeveldbValueStore(db_path);
   }
@@ -50,7 +49,7 @@ class ValueStoreFrontend::Backend : public base::RefCountedThreadSafe<Backend> {
     scoped_ptr<base::Value> passed_value(value);
     BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
         base::Bind(&ValueStoreFrontend::Backend::RunCallback,
-                   this, callback, base::Passed(passed_value.Pass())));
+                   this, callback, base::Passed(&passed_value)));
   }
 
   void Set(const std::string& key, scoped_ptr<base::Value> value) {
@@ -86,7 +85,7 @@ class ValueStoreFrontend::Backend : public base::RefCountedThreadSafe<Backend> {
   // exclusively on the FILE thread.
   ValueStore* storage_;
 
-  FilePath db_path_;
+  base::FilePath db_path_;
 
   DISALLOW_COPY_AND_ASSIGN(Backend);
 };
@@ -95,7 +94,7 @@ ValueStoreFrontend::ValueStoreFrontend()
     : backend_(new Backend()) {
 }
 
-ValueStoreFrontend::ValueStoreFrontend(const FilePath& db_path)
+ValueStoreFrontend::ValueStoreFrontend(const base::FilePath& db_path)
     : backend_(new Backend()) {
   Init(db_path);
 }
@@ -111,7 +110,7 @@ ValueStoreFrontend::~ValueStoreFrontend() {
   DCHECK(CalledOnValidThread());
 }
 
-void ValueStoreFrontend::Init(const FilePath& db_path) {
+void ValueStoreFrontend::Init(const base::FilePath& db_path) {
   BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
       base::Bind(&ValueStoreFrontend::Backend::Init,
                  backend_, db_path));
@@ -132,7 +131,7 @@ void ValueStoreFrontend::Set(const std::string& key,
 
   BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
       base::Bind(&ValueStoreFrontend::Backend::Set,
-                 backend_, key, base::Passed(value.Pass())));
+                 backend_, key, base::Passed(&value)));
 }
 
 void ValueStoreFrontend::Remove(const std::string& key) {

@@ -15,8 +15,8 @@
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <sys/types.h>
-#include <sys/wait.h>
 #include <sys/uio.h>
+#include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -24,7 +24,7 @@
 #include <string>
 
 #include "base/command_line.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/linux_util.h"
 #include "base/path_service.h"
 #include "base/platform_file.h"
@@ -41,6 +41,7 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info_posix.h"
+#include "chrome/common/dump_without_crashing.h"
 #include "chrome/common/env_vars.h"
 #include "chrome/common/logging_chrome.h"
 #include "content/public/common/content_descriptors.h"
@@ -80,13 +81,7 @@ using google_breakpad::MinidumpDescriptor;
 
 namespace {
 
-#if !defined(ADDRESS_SANITIZER)
 const char kUploadURL[] = "https://clients2.google.com/cr/report";
-#else
-// AddressSanitizer should currently upload the crash reports to the staging
-// crash server.
-const char kUploadURL[] = "https://clients2.google.com/cr/staging_report";
-#endif
 
 bool g_is_crash_reporter_enabled = false;
 uint64_t g_process_start_time = 0;
@@ -517,12 +512,12 @@ void AsanLinuxBreakpadCallback(const char* report) {
 void EnableCrashDumping(bool unattended) {
   g_is_crash_reporter_enabled = true;
 
-  FilePath tmp_path("/tmp");
+  base::FilePath tmp_path("/tmp");
   PathService::Get(base::DIR_TEMP, &tmp_path);
 
-  FilePath dumps_path(tmp_path);
+  base::FilePath dumps_path(tmp_path);
   if (PathService::Get(chrome::DIR_CRASH_DUMPS, &dumps_path)) {
-    FilePath logfile =
+    base::FilePath logfile =
         dumps_path.AppendASCII(CrashUploadList::kReporterLogFilename);
     std::string logfile_str = logfile.value();
     const size_t crash_log_path_len = logfile_str.size() + 1;
@@ -980,17 +975,14 @@ void HandleCrashDump(const BreakpadInfo& info) {
 #elif defined(OS_CHROMEOS)
     static const char chrome_product_msg[] = "Chrome_ChromeOS";
 #else  // OS_LINUX
+#if !defined(ADDRESS_SANITIZER)
     static const char chrome_product_msg[] = "Chrome_Linux";
+#else
+    static const char chrome_product_msg[] = "Chrome_Linux_ASan";
+#endif
 #endif
 
-#if defined (OS_ANDROID)
-    base::android::BuildInfo* android_build_info =
-        base::android::BuildInfo::GetInstance();
-    static const char* version_msg =
-        android_build_info->package_version_code();
-#else
     static const char version_msg[] = PRODUCT_VERSION;
-#endif
 
     writer.AddBoundary();
     writer.AddPairString("prod", chrome_product_msg);
@@ -1017,6 +1009,8 @@ void HandleCrashDump(const BreakpadInfo& info) {
     static const char brand[] = "brand";
     static const char exception_info[] = "exception_info";
 
+    base::android::BuildInfo* android_build_info =
+        base::android::BuildInfo::GetInstance();
     writer.AddPairString(
         android_build_id, android_build_info->android_build_id());
     writer.AddBoundary();

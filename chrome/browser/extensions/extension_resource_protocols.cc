@@ -4,7 +4,7 @@
 
 #include "chrome/browser/extensions/extension_resource_protocols.h"
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/path_service.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/extension_file_util.h"
@@ -17,14 +17,14 @@ class ExtensionResourcesJob : public net::URLRequestFileJob {
  public:
   ExtensionResourcesJob(net::URLRequest* request,
                         net::NetworkDelegate* network_delegate)
-    : net::URLRequestFileJob(request, network_delegate, FilePath()),
+    : net::URLRequestFileJob(request, network_delegate, base::FilePath()),
       thread_id_(content::BrowserThread::UI) {
   }
 
   virtual void Start() OVERRIDE;
 
  protected:
-  ~ExtensionResourcesJob() {}
+  virtual ~ExtensionResourcesJob() {}
 
   void ResolvePath();
   void ResolvePathDone();
@@ -43,7 +43,7 @@ void ExtensionResourcesJob::Start() {
 }
 
 void ExtensionResourcesJob::ResolvePath() {
-  FilePath root_path;
+  base::FilePath root_path;
   PathService::Get(chrome::DIR_RESOURCES_EXTENSION, &root_path);
   file_path_ = extension_file_util::ExtensionResourceURLToFilePath(
       request()->url(), root_path);

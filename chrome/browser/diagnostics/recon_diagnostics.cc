@@ -9,12 +9,12 @@
 #include "base/file_util.h"
 #include "base/json/json_reader.h"
 #include "base/json/json_string_value_serializer.h"
-#include "base/stringprintf.h"
-#include "base/string_number_conversions.h"
-#include "base/string_util.h"
-#include "base/utf_string_conversions.h"
-#include "base/sys_info.h"
 #include "base/path_service.h"
+#include "base/string_util.h"
+#include "base/stringprintf.h"
+#include "base/strings/string_number_conversions.h"
+#include "base/sys_info.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/diagnostics/diagnostics_test.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
@@ -45,9 +45,9 @@ class OperatingSystemTest : public DiagnosticTest {
  public:
   OperatingSystemTest() : DiagnosticTest(ASCIIToUTF16("Operating System")) {}
 
-  virtual int GetId() { return 0; }
+  virtual int GetId() OVERRIDE { return 0; }
 
-  virtual bool ExecuteImpl(DiagnosticsModel::Observer* observer) {
+  virtual bool ExecuteImpl(DiagnosticsModel::Observer* observer) OVERRIDE {
 #if defined(OS_WIN)
     base::win::Version version = base::win::GetVersion();
     if ((version < base::win::VERSION_XP) ||
@@ -75,9 +75,9 @@ class ConflictingDllsTest : public DiagnosticTest {
  public:
   ConflictingDllsTest() : DiagnosticTest(ASCIIToUTF16("Conflicting modules")) {}
 
-  virtual int GetId() { return 0; }
+  virtual int GetId() OVERRIDE { return 0; }
 
-  virtual bool ExecuteImpl(DiagnosticsModel::Observer* observer) {
+  virtual bool ExecuteImpl(DiagnosticsModel::Observer* observer) OVERRIDE {
 #if defined(OS_WIN)
     EnumerateModulesModel* model = EnumerateModulesModel::GetInstance();
     model->set_limited_mode(true);
@@ -131,11 +131,11 @@ class InstallTypeTest : public DiagnosticTest {
   InstallTypeTest() : DiagnosticTest(ASCIIToUTF16("Install Type")),
                       user_level_(false) {}
 
-  virtual int GetId() { return 0; }
+  virtual int GetId() OVERRIDE { return 0; }
 
-  virtual bool ExecuteImpl(DiagnosticsModel::Observer* observer) {
+  virtual bool ExecuteImpl(DiagnosticsModel::Observer* observer) OVERRIDE {
 #if defined(OS_WIN)
-    FilePath chrome_exe;
+    base::FilePath chrome_exe;
     if (!PathService::Get(base::FILE_EXE, &chrome_exe)) {
       RecordFailure(ASCIIToUTF16("Path provider failure"));
       return false;
@@ -163,9 +163,9 @@ class VersionTest : public DiagnosticTest {
  public:
   VersionTest() : DiagnosticTest(ASCIIToUTF16("Browser Version")) {}
 
-  virtual int GetId() { return 0; }
+  virtual int GetId() OVERRIDE { return 0; }
 
-  virtual bool ExecuteImpl(DiagnosticsModel::Observer* observer) {
+  virtual bool ExecuteImpl(DiagnosticsModel::Observer* observer) OVERRIDE {
     chrome::VersionInfo version_info;
     if (!version_info.is_valid()) {
       RecordFailure(ASCIIToUTF16("No Version"));
@@ -223,14 +223,14 @@ class PathTest : public DiagnosticTest {
       : DiagnosticTest(ASCIIToUTF16(path_info.test_name)),
         path_info_(path_info) {}
 
-  virtual int GetId() { return 0; }
+  virtual int GetId() OVERRIDE { return 0; }
 
-  virtual bool ExecuteImpl(DiagnosticsModel::Observer* observer) {
+  virtual bool ExecuteImpl(DiagnosticsModel::Observer* observer) OVERRIDE {
     if (!g_install_type) {
       RecordStopFailure(ASCIIToUTF16("dependency failure"));
       return false;
     }
-    FilePath dir_or_file;
+    base::FilePath dir_or_file;
     if (!PathService::Get(path_info_.path_id, &dir_or_file)) {
       RecordStopFailure(ASCIIToUTF16("Path provider failure"));
       return false;
@@ -288,10 +288,10 @@ class DiskSpaceTest : public DiagnosticTest {
  public:
   DiskSpaceTest() : DiagnosticTest(ASCIIToUTF16("Disk Space")) {}
 
-  virtual int GetId() { return 0; }
+  virtual int GetId() OVERRIDE { return 0; }
 
-  virtual bool ExecuteImpl(DiagnosticsModel::Observer* observer) {
-    FilePath data_dir;
+  virtual bool ExecuteImpl(DiagnosticsModel::Observer* observer) OVERRIDE {
+    base::FilePath data_dir;
     if (!PathService::Get(chrome::DIR_USER_DATA, &data_dir))
       return false;
     int64 disk_space = base::SysInfo::AmountOfFreeDiskSpace(data_dir);
@@ -315,13 +315,15 @@ class DiskSpaceTest : public DiagnosticTest {
 // Checks that a given json file can be correctly parsed.
 class JSONTest : public DiagnosticTest {
  public:
-  JSONTest(const FilePath& path, const string16& name, int64 max_file_size)
+  JSONTest(const base::FilePath& path,
+           const string16& name,
+           int64 max_file_size)
       : DiagnosticTest(name), path_(path), max_file_size_(max_file_size) {
   }
 
-  virtual int GetId() { return 0; }
+  virtual int GetId() OVERRIDE { return 0; }
 
-  virtual bool ExecuteImpl(DiagnosticsModel::Observer* observer) {
+  virtual bool ExecuteImpl(DiagnosticsModel::Observer* observer) OVERRIDE {
     if (!file_util::PathExists(path_)) {
       RecordFailure(ASCIIToUTF16("File not found"));
       return true;
@@ -361,7 +363,7 @@ class JSONTest : public DiagnosticTest {
   }
 
  private:
-  FilePath path_;
+  base::FilePath path_;
   int64 max_file_size_;
   DISALLOW_COPY_AND_ASSIGN(JSONTest);
 };
@@ -405,19 +407,19 @@ DiagnosticTest* MakeInstallTypeTest() {
 }
 
 DiagnosticTest* MakePreferencesTest() {
-  FilePath path = DiagnosticTest::GetUserDefaultProfileDir();
+  base::FilePath path = DiagnosticTest::GetUserDefaultProfileDir();
   path = path.Append(chrome::kPreferencesFilename);
   return new JSONTest(path, ASCIIToUTF16("Profile JSON"), 100 * kOneKilo);
 }
 
 DiagnosticTest* MakeBookMarksTest() {
-  FilePath path = DiagnosticTest::GetUserDefaultProfileDir();
+  base::FilePath path = DiagnosticTest::GetUserDefaultProfileDir();
   path = path.Append(chrome::kBookmarksFileName);
   return new JSONTest(path, ASCIIToUTF16("BookMarks JSON"), 2 * kOneMeg);
 }
 
 DiagnosticTest* MakeLocalStateTest() {
-  FilePath path;
+  base::FilePath path;
   PathService::Get(chrome::DIR_USER_DATA, &path);
   path = path.Append(chrome::kLocalStateFilename);
   return new JSONTest(path, ASCIIToUTF16("Local State JSON"), 50 * kOneKilo);

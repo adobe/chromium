@@ -113,12 +113,6 @@
             '../build/linux/system.gyp:gtkprint',
           ],
         }],
-        ['OS=="mac" and use_skia==0', {
-          'sources/': [
-            ['exclude', 'pdf_metafile_skia\\.(cc|h)$'],
-            ['exclude', 'metafile_skia_wrapper\\.(cc|h)$'],
-          ],
-        }],
         # Mac-Aura does not support printing.
         ['OS=="mac" and use_aura==1',{
           'sources!': [
@@ -263,6 +257,8 @@
           ],
         }],
       ],
+      # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
+      'msvs_disabled_warnings': [ 4267, ],
     },
     {
       'target_name': 'cups',

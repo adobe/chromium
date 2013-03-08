@@ -16,11 +16,17 @@ const std::string kAllUrlsTarget =
 
 typedef ExtensionApiTest AllUrlsApiTest;
 
-IN_PROC_BROWSER_TEST_F(AllUrlsApiTest, WhitelistedExtension) {
+#if defined(OS_WIN) && !defined(NDEBUG)
+// http://crbug.com/174341
+#define MAYBE_WhitelistedExtension DISABLED_WhitelistedExtension
+#else
+#define MAYBE_WhitelistedExtension WhitelistedExtension
+#endif
+IN_PROC_BROWSER_TEST_F(AllUrlsApiTest, MAYBE_WhitelistedExtension) {
   // First setup the two extensions.
-  FilePath extension_dir1 = test_data_dir_.AppendASCII("all_urls")
+  base::FilePath extension_dir1 = test_data_dir_.AppendASCII("all_urls")
                                           .AppendASCII("content_script");
-  FilePath extension_dir2 = test_data_dir_.AppendASCII("all_urls")
+  base::FilePath extension_dir2 = test_data_dir_.AppendASCII("all_urls")
                                           .AppendASCII("execute_script");
 
   // Then add the two extensions to the whitelist.
@@ -86,9 +92,9 @@ IN_PROC_BROWSER_TEST_F(AllUrlsApiTest, WhitelistedExtension) {
 // and run scripts on non-restricted all pages.
 IN_PROC_BROWSER_TEST_F(AllUrlsApiTest, RegularExtensions) {
   // First load the two extensions.
-  FilePath extension_dir1 = test_data_dir_.AppendASCII("all_urls")
+  base::FilePath extension_dir1 = test_data_dir_.AppendASCII("all_urls")
                                           .AppendASCII("content_script");
-  FilePath extension_dir2 = test_data_dir_.AppendASCII("all_urls")
+  base::FilePath extension_dir2 = test_data_dir_.AppendASCII("all_urls")
                                           .AppendASCII("execute_script");
 
   ExtensionService* service = extensions::ExtensionSystem::Get(

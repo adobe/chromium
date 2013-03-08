@@ -53,6 +53,9 @@ class BrowserLauncherItemController : public LauncherItemController,
                                 const std::string& app_id);
   virtual ~BrowserLauncherItemController();
 
+  // Overriding the app id for V1 apps.
+  virtual const std::string& app_id() const OVERRIDE;
+
   // Sets up this BrowserLauncherItemController.
   void Init();
 
@@ -76,11 +79,11 @@ class BrowserLauncherItemController : public LauncherItemController,
   virtual void Launch(int event_flags) OVERRIDE;
   virtual void Activate() OVERRIDE;
   virtual void Close() OVERRIDE;
-  virtual void Clicked() OVERRIDE;
+  virtual void Clicked(const ui::Event& event) OVERRIDE;
   virtual void OnRemoved() OVERRIDE;
   virtual void LauncherItemChanged(int index,
                                    const ash::LauncherItem& old_item) OVERRIDE;
-  virtual ChromeLauncherAppMenuItems* GetApplicationList() OVERRIDE;
+  virtual ChromeLauncherAppMenuItems GetApplicationList() OVERRIDE;
 
   // TabStripModel overrides:
   virtual void ActiveTabChanged(content::WebContents* old_contents,
@@ -132,6 +135,10 @@ class BrowserLauncherItemController : public LauncherItemController,
 
   // Browser window we're in.
   aura::Window* window_;
+
+  // If running a windowed V1 app with the new launcher, this (empty) app id
+  // will be returned by app_id().
+  std::string empty_app_id_;
 
   TabStripModel* tab_model_;
 

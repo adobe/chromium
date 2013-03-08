@@ -32,6 +32,7 @@
 #include "ppapi/c/dev/ppb_scrollbar_dev.h"
 #include "ppapi/c/dev/ppb_testing_dev.h"
 #include "ppapi/c/dev/ppb_text_input_dev.h"
+#include "ppapi/c/dev/ppb_trace_event_dev.h"
 #include "ppapi/c/dev/ppb_url_util_dev.h"
 #include "ppapi/c/dev/ppb_var_deprecated.h"
 #include "ppapi/c/dev/ppb_video_capture_dev.h"
@@ -73,15 +74,18 @@
 #include "ppapi/c/private/ppb_flash_file.h"
 #include "ppapi/c/private/ppb_flash_font_file.h"
 #include "ppapi/c/private/ppb_flash_fullscreen.h"
+#include "ppapi/c/private/ppb_flash_menu.h"
 #include "ppapi/c/private/ppb_flash_message_loop.h"
 #include "ppapi/c/private/ppb_flash_print.h"
 #include "ppapi/c/private/ppb_gpu_blacklist_private.h"
+#include "ppapi/c/private/ppb_host_resolver_private.h"
 #include "ppapi/c/private/ppb_instance_private.h"
 #include "ppapi/c/private/ppb_network_list_private.h"
 #include "ppapi/c/private/ppb_network_monitor_private.h"
 #include "ppapi/c/private/ppb_pdf.h"
 #include "ppapi/c/private/ppb_proxy_private.h"
 #include "ppapi/c/private/ppb_talk_private.h"
+#include "ppapi/c/private/ppb_tcp_server_socket_private.h"
 #include "ppapi/c/private/ppb_tcp_socket_private.h"
 #include "ppapi/c/private/ppb_udp_socket_private.h"
 #include "ppapi/c/private/ppb_uma_private.h"
@@ -103,15 +107,14 @@
 #include "ppapi/shared_impl/ppb_var_shared.h"
 #include "ppapi/shared_impl/time_conversion.h"
 #include "ppapi/thunk/enter.h"
+#include "ppapi/thunk/ppb_graphics_2d_api.h"
 #include "ppapi/thunk/thunk.h"
 #include "webkit/plugins/plugin_switches.h"
 #include "webkit/plugins/ppapi/common.h"
 #include "webkit/plugins/ppapi/host_globals.h"
 #include "webkit/plugins/ppapi/ppapi_interface_factory.h"
 #include "webkit/plugins/ppapi/ppapi_plugin_instance.h"
-#include "webkit/plugins/ppapi/ppb_directory_reader_impl.h"
 #include "webkit/plugins/ppapi/ppb_gpu_blacklist_private_impl.h"
-#include "webkit/plugins/ppapi/ppb_graphics_2d_impl.h"
 #include "webkit/plugins/ppapi/ppb_image_data_impl.h"
 #include "webkit/plugins/ppapi/ppb_proxy_impl.h"
 #include "webkit/plugins/ppapi/ppb_scrollbar_impl.h"
@@ -399,7 +402,7 @@ PluginModule::EntryPoints::EntryPoints()
 // PluginModule ----------------------------------------------------------------
 
 PluginModule::PluginModule(const std::string& name,
-                           const FilePath& path,
+                           const base::FilePath& path,
                            PluginDelegate::ModuleLifetime* lifetime_delegate,
                            const ::ppapi::PpapiPermissions& perms)
     : lifetime_delegate_(lifetime_delegate),
@@ -475,7 +478,7 @@ bool PluginModule::InitAsInternalPlugin(const EntryPoints& entry_points) {
   return false;
 }
 
-bool PluginModule::InitAsLibrary(const FilePath& path) {
+bool PluginModule::InitAsLibrary(const base::FilePath& path) {
   base::NativeLibrary library = base::LoadNativeLibrary(path, NULL);
   if (!library)
     return false;

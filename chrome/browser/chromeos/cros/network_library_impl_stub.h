@@ -64,6 +64,7 @@ class NetworkLibraryImplStub : public NetworkLibraryImplBase {
   virtual void SetCellularDataRoamingAllowed(bool new_value) OVERRIDE;
   virtual void SetCarrier(const std::string& carrier,
                           const NetworkOperationCallback& completed) OVERRIDE;
+  virtual void ResetModem() OVERRIDE;
   virtual bool IsCellularAlwaysInRoaming() OVERRIDE;
   virtual void RequestNetworkScan() OVERRIDE;
 
@@ -99,6 +100,7 @@ class NetworkLibraryImplStub : public NetworkLibraryImplBase {
  private:
   void CompleteWifiInit();
   void CompleteCellularInit();
+  void CompleteCellularActivate();
   void AddStubNetwork(Network* network, NetworkProfileType profile_type);
   void AddStubRememberedNetwork(Network* network);
   void ConnectToNetwork(Network* network);

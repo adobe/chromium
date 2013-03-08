@@ -10,6 +10,7 @@
 #include "base/message_loop.h"
 #include "base/prefs/default_pref_store.h"
 #include "base/prefs/overlay_user_pref_store.h"
+#include "base/prefs/pref_service.h"
 #include "base/prefs/public/pref_change_registrar.h"
 #include "base/prefs/testing_pref_store.h"
 #include "base/threading/platform_thread.h"
@@ -17,14 +18,15 @@
 #include "chrome/browser/content_settings/content_settings_mock_observer.h"
 #include "chrome/browser/content_settings/content_settings_utils.h"
 #include "chrome/browser/prefs/browser_prefs.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prefs/pref_service_mock_builder.h"
+#include "chrome/browser/prefs/pref_service_syncable.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
-#include "chrome/test/base/testing_pref_service.h"
+#include "chrome/test/base/testing_pref_service_syncable.h"
 #include "chrome/test/base/testing_profile.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/test/test_browser_thread.h"
 #include "googleurl/src/gurl.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -39,7 +41,7 @@ class DeadlockCheckerThread : public base::PlatformThread::Delegate {
   explicit DeadlockCheckerThread(PrefProvider* provider)
       : provider_(provider) {}
 
-  virtual void ThreadMain() {
+  virtual void ThreadMain() OVERRIDE {
     bool got_lock = provider_->lock_.Try();
     EXPECT_TRUE(got_lock);
     if (got_lock)
@@ -134,23 +136,27 @@ TEST_F(PrefProviderTest, Incognito) {
 
   PrefServiceMockBuilder builder;
   builder.WithUserPrefs(user_prefs);
-  PrefServiceSyncable* regular_prefs = builder.CreateSyncable();
+  scoped_refptr<PrefRegistrySyncable> registry(new PrefRegistrySyncable);
+  PrefServiceSyncable* regular_prefs = builder.CreateSyncable(registry);
 
-  Profile::RegisterUserPrefs(regular_prefs);
-  chrome::RegisterUserPrefs(regular_prefs);
+  chrome::RegisterUserPrefs(registry);
 
   builder.WithUserPrefs(otr_user_prefs);
-  PrefServiceSyncable* otr_prefs = builder.CreateSyncable();
+  scoped_refptr<PrefRegistrySyncable> otr_registry(new PrefRegistrySyncable);
+  PrefServiceSyncable* otr_prefs = builder.CreateSyncable(otr_registry);
 
-  Profile::RegisterUserPrefs(otr_prefs);
-  chrome::RegisterUserPrefs(otr_prefs);
+  chrome::RegisterUserPrefs(otr_registry);
 
-  TestingProfile profile;
-  TestingProfile* otr_profile = new TestingProfile;
-  profile.SetOffTheRecordProfile(otr_profile);
-  profile.SetPrefService(regular_prefs);
+  TestingProfile::Builder profile_builder;
+  profile_builder.SetPrefService(make_scoped_ptr(regular_prefs));
+  scoped_ptr<TestingProfile> profile = profile_builder.Build();
+
+  TestingProfile::Builder otr_profile_builder;
+  otr_profile_builder.SetPrefService(make_scoped_ptr(otr_prefs));
+  TestingProfile* otr_profile = otr_profile_builder.Build().release();
+
   otr_profile->set_incognito(true);
-  otr_profile->SetPrefService(otr_prefs);
+  profile->SetOffTheRecordProfile(otr_profile);
 
   PrefProvider pref_content_settings_provider(regular_prefs, false);
   PrefProvider pref_content_settings_provider_incognito(otr_prefs, true);
@@ -368,7 +374,7 @@ TEST_F(PrefProviderTest, AutoSubmitCertificateContentSetting) {
 // http://crosbug.com/17760
 TEST_F(PrefProviderTest, Deadlock) {
   TestingPrefServiceSyncable prefs;
-  PrefProvider::RegisterUserPrefs(&prefs);
+  PrefProvider::RegisterUserPrefs(prefs.registry());
 
   // Chain of events: a preference changes, |PrefProvider| notices it, and reads
   // and writes the preference. When the preference is written, a notification

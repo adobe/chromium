@@ -73,9 +73,14 @@ ConstrainedWindowGtk::ConstrainedWindowGtk(
   g_signal_connect(widget(), "hierarchy-changed",
                    G_CALLBACK(OnHierarchyChangedThunk), this);
 
+  // TODO(wittman): Getting/setting data on the widget is a hack to facilitate
+  // looking up the ConstrainedWindowGtk from the GtkWindow during refactoring.
+  // Remove once ConstrainedWindowGtk is gone.
+  g_object_set_data(G_OBJECT(widget()), "ConstrainedWindowGtk", this);
+
   WebContentsModalDialogManager* web_contents_modal_dialog_manager =
       WebContentsModalDialogManager::FromWebContents(web_contents_);
-  web_contents_modal_dialog_manager->AddDialog(this);
+  web_contents_modal_dialog_manager->ShowDialog(widget());
 }
 
 ConstrainedWindowGtk::~ConstrainedWindowGtk() {
@@ -98,7 +103,7 @@ void ConstrainedWindowGtk::CloseWebContentsModalDialog() {
   delegate_->DeleteDelegate();
   WebContentsModalDialogManager* web_contents_modal_dialog_manager =
       WebContentsModalDialogManager::FromWebContents(web_contents_);
-  web_contents_modal_dialog_manager->WillClose(this);
+  web_contents_modal_dialog_manager->WillClose(widget());
 
   delete this;
 }
@@ -119,8 +124,8 @@ void ConstrainedWindowGtk::FocusWebContentsModalDialog() {
 void ConstrainedWindowGtk::PulseWebContentsModalDialog() {
 }
 
-gfx::NativeWindow ConstrainedWindowGtk::GetNativeWindow() {
-  return GTK_WINDOW(gtk_widget_get_toplevel(widget()));
+NativeWebContentsModalDialog ConstrainedWindowGtk::GetNativeDialog() {
+  return widget();
 }
 
 void ConstrainedWindowGtk::BackgroundColorChanged() {

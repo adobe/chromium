@@ -131,7 +131,7 @@ void InstallerState::Initialize(const CommandLine& command_line,
             << " distribution: " << p->distribution()->GetAppShortCutName();
   }
 
-  if (prefs.install_chrome_app_host() || prefs.install_chrome_app_launcher()) {
+  if (prefs.install_chrome_app_launcher()) {
     Product* p = AddProductFromPreferences(
         BrowserDistribution::CHROME_APP_HOST, prefs, machine_state);
     VLOG(1) << (is_uninstall ? "Uninstall" : "Install")
@@ -286,14 +286,12 @@ void InstallerState::Initialize(const CommandLine& command_line,
   if (operand == NULL) {
     BrowserDistribution::Type operand_distribution_type =
         BrowserDistribution::CHROME_BINARIES;
-    if (prefs.install_chrome()) {
+    if (prefs.install_chrome())
       operand_distribution_type = BrowserDistribution::CHROME_BROWSER;
-    } else if (prefs.install_chrome_frame()) {
+    else if (prefs.install_chrome_frame())
       operand_distribution_type = BrowserDistribution::CHROME_FRAME;
-    } else if (prefs.install_chrome_app_host() ||
-               prefs.install_chrome_app_launcher()) {
+    else if (prefs.install_chrome_app_launcher())
       operand_distribution_type = BrowserDistribution::CHROME_APP_HOST;
-    }
 
     operand = BrowserDistribution::GetSpecificDistribution(
         operand_distribution_type);
@@ -346,7 +344,7 @@ void InstallerState::set_package_type(PackageType type) {
 
 // Returns the Chrome binaries directory for multi-install or |dist|'s directory
 // otherwise.
-FilePath InstallerState::GetDefaultProductInstallPath(
+base::FilePath InstallerState::GetDefaultProductInstallPath(
     BrowserDistribution* dist) const {
   DCHECK(dist);
   DCHECK(package_type_ != UNKNOWN_PACKAGE_TYPE);
@@ -364,7 +362,7 @@ FilePath InstallerState::GetDefaultProductInstallPath(
 // We never expect these checks to fail, hence they all terminate the process in
 // debug builds.  See the log messages for details.
 bool InstallerState::CanAddProduct(const Product& product,
-                                   const FilePath* product_dir) const {
+                                   const base::FilePath* product_dir) const {
   switch (package_type_) {
     case SINGLE_PACKAGE:
       if (!products_.empty()) {
@@ -383,10 +381,10 @@ bool InstallerState::CanAddProduct(const Product& product,
         return false;
       }
       if (!target_path_.empty()) {
-        FilePath default_dir;
+        base::FilePath default_dir;
         if (product_dir == NULL)
           default_dir = GetDefaultProductInstallPath(product.distribution());
-        if (!FilePath::CompareEqualIgnoreCase(
+        if (!base::FilePath::CompareEqualIgnoreCase(
                 (product_dir == NULL ? default_dir : *product_dir).value(),
                 target_path_.value())) {
           LOG(DFATAL) << "Cannot process products in different directories.";
@@ -405,8 +403,9 @@ bool InstallerState::CanAddProduct(const Product& product,
 // |product_dir| is NULL, the product's default install location is used.
 // Returns NULL if |product| is incompatible with this object.  Otherwise,
 // returns a pointer to the product (ownership is held by this object).
-Product* InstallerState::AddProductInDirectory(const FilePath* product_dir,
-                                               scoped_ptr<Product>* product) {
+Product* InstallerState::AddProductInDirectory(
+    const base::FilePath* product_dir,
+    scoped_ptr<Product>* product) {
   DCHECK(product != NULL);
   DCHECK(product->get() != NULL);
   const Product& the_product = *product->get();
@@ -471,7 +470,8 @@ Product* InstallerState::AddProductFromState(
   product_ptr->InitializeFromUninstallCommand(state.uninstall_command());
 
   // Strip off <version>/Installer/setup.exe; see GetInstallerDirectory().
-  FilePath product_dir = state.GetSetupPath().DirName().DirName().DirName();
+  base::FilePath product_dir =
+      state.GetSetupPath().DirName().DirName().DirName();
 
   Product* product = AddProductInDirectory(&product_dir, &product_ptr);
 
@@ -586,7 +586,7 @@ bool InstallerState::IsChromeFrameRunning(
   bool in_use = false;
   scoped_ptr<Version> current_version(GetCurrentVersion(machine_state));
   if (current_version != NULL) {
-    FilePath cf_install_path(
+    base::FilePath cf_install_path(
         target_path().AppendASCII(current_version->GetString())
                      .Append(kChromeFrameDll));
     in_use = file_util::PathExists(cf_install_path) &&
@@ -595,13 +595,14 @@ bool InstallerState::IsChromeFrameRunning(
   return in_use;
 }
 
-FilePath InstallerState::GetInstallerDirectory(const Version& version) const {
+base::FilePath InstallerState::GetInstallerDirectory(
+    const Version& version) const {
   return target_path().Append(ASCIIToWide(version.GetString()))
       .Append(kInstallerDir);
 }
 
 // static
-bool InstallerState::IsFileInUse(const FilePath& file) {
+bool InstallerState::IsFileInUse(const base::FilePath& file) {
   // Call CreateFile with a share mode of 0 which should cause this to fail
   // with ERROR_SHARING_VIOLATION if the file exists and is in-use.
   return !base::win::ScopedHandle(CreateFile(file.value().c_str(),
@@ -619,7 +620,7 @@ void InstallerState::GetExistingExeVersions(
   };
 
   for (int i = 0; i < arraysize(kChromeFilenames); ++i) {
-    FilePath chrome_exe(target_path().Append(kChromeFilenames[i]));
+    base::FilePath chrome_exe(target_path().Append(kChromeFilenames[i]));
     scoped_ptr<FileVersionInfo> file_version_info(
         FileVersionInfo::CreateFileVersionInfo(chrome_exe));
     if (file_version_info) {
@@ -633,9 +634,9 @@ void InstallerState::GetExistingExeVersions(
 void InstallerState::RemoveOldVersionDirectories(
     const Version& new_version,
     Version* existing_version,
-    const FilePath& temp_path) const {
+    const base::FilePath& temp_path) const {
   Version version;
-  std::vector<FilePath> key_files;
+  std::vector<base::FilePath> key_files;
   scoped_ptr<WorkItem> item;
 
   std::set<std::string> existing_version_strings;
@@ -650,9 +651,9 @@ void InstallerState::RemoveOldVersionDirectories(
   // Try to delete all directories that are not in the set we care to keep.
   file_util::FileEnumerator version_enum(target_path(), false,
       file_util::FileEnumerator::DIRECTORIES);
-  for (FilePath next_version = version_enum.Next(); !next_version.empty();
+  for (base::FilePath next_version = version_enum.Next(); !next_version.empty();
        next_version = version_enum.Next()) {
-    FilePath dir_name(next_version.BaseName());
+    base::FilePath dir_name(next_version.BaseName());
     version = Version(WideToASCII(dir_name.value()));
     // Delete the version folder if it is less than the new version and not
     // equal to the old version (if we have an old version).
@@ -673,7 +674,8 @@ void InstallerState::RemoveOldVersionDirectories(
   }
 }
 
-void InstallerState::AddComDllList(std::vector<FilePath>* com_dll_list) const {
+void InstallerState::AddComDllList(
+    std::vector<base::FilePath>* com_dll_list) const {
   std::for_each(products_.begin(), products_.end(),
                 std::bind2nd(std::mem_fun(&Product::AddComDllList),
                              com_dll_list));

@@ -9,6 +9,7 @@
 #include "ash/system/tray_accessibility.h"
 #include "ash/system/user/login_status.h"
 #include "base/command_line.h"
+#include "base/prefs/pref_service.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/accessibility/accessibility_util.h"
 #include "chrome/browser/chromeos/accessibility/magnification_manager.h"
@@ -17,7 +18,6 @@
 #include "chrome/browser/chromeos/login/login_utils.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/login/user_manager_impl.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -88,19 +88,19 @@ class TrayAccessibilityTest : public CrosInProcessBrowserTest {
 
   void ClickSpokenFeedbackOnDetailMenu() {
     views::View* button = tray()->detailed_menu_->spoken_feedback_view_;
-    tray()->detailed_menu_->ClickedOn(button);
+    tray()->detailed_menu_->OnViewClicked(button);
   }
 
   void ClickHighContrastOnDetailMenu() {
     views::View* button = tray()->detailed_menu_->high_contrast_view_;
     EXPECT_TRUE(button);
-    tray()->detailed_menu_->ClickedOn(button);
+    tray()->detailed_menu_->OnViewClicked(button);
   }
 
   void ClickScreenMagnifierOnDetailMenu() {
     views::View* button = tray()->detailed_menu_->screen_magnifier_view_;
     EXPECT_TRUE(button);
-    tray()->detailed_menu_->ClickedOn(button);
+    tray()->detailed_menu_->OnViewClicked(button);
   }
 
   bool IsSpokenFeedbackEnabledOnDetailMenu() {
@@ -336,7 +336,29 @@ IN_PROC_BROWSER_TEST_F(TrayAccessibilityTest, ShowMenuWithShowOnLoginScreen) {
   EXPECT_TRUE(CanCreateMenuItem());
 }
 
-IN_PROC_BROWSER_TEST_F(TrayAccessibilityTest, ClickDetailMenu) {
+IN_PROC_BROWSER_TEST_F(TrayAccessibilityTest, KeepMenuVisibilityOnLockScreen) {
+  // Enables high contrast mode.
+  accessibility::EnableHighContrast(true);
+  EXPECT_TRUE(CanCreateMenuItem());
+
+  // Locks the screen.
+  SetLoginStatus(ash::user::LOGGED_IN_LOCKED);
+  EXPECT_TRUE(CanCreateMenuItem());
+
+  // Disables high contrast mode.
+  accessibility::EnableHighContrast(false);
+
+  // Confirms that the menu is still visible.
+  EXPECT_TRUE(CanCreateMenuItem());
+}
+
+#if defined(OS_CHROMEOS)
+#define MAYBE_ClickDetailMenu DISABLED_ClickDetailMenu
+#else
+#define MAYBE_ClickDetailMenu ClickDetailMenu
+#endif
+
+IN_PROC_BROWSER_TEST_F(TrayAccessibilityTest, MAYBE_ClickDetailMenu) {
   // Confirms that the check item toggles the spoken feedback.
   EXPECT_FALSE(accessibility::IsSpokenFeedbackEnabled());
 

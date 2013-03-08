@@ -23,7 +23,7 @@ function beforeunload() { return Gallery.instance.onBeforeUnload() }
 
 /**
  * Called from the main frame when unloading.
- * @param {boolean} opt_exiting True if the app is exiting.
+ * @param {boolean=} opt_exiting True if the app is exiting.
  */
 function unload(opt_exiting) { Gallery.instance.onUnload(opt_exiting) }
 
@@ -38,7 +38,7 @@ function unload(opt_exiting) { Gallery.instance.onUnload(opt_exiting) }
  *     {Array.<Object>} shareActions
  *     {string} readonlyDirName Directory name for readonly warning or null.
  *     {DirEntry} saveDirEntry Directory to save to.
- *     {function(string)} displayStringFunction
+ *     {function(string)} displayStringFunction.
  * @class
  * @constructor
  */
@@ -83,7 +83,7 @@ Gallery.open = function(context, urls, selectedUrls) {
 /**
  * Create a Gallery object in a tab.
  * @param {string} path File system path to a selected file.
- * @param {object} pageState Page state object.
+ * @param {Object} pageState Page state object.
  * @param {function=} opt_callback Called when gallery object is constructed.
  */
 Gallery.openStandalone = function(path, pageState, opt_callback) {
@@ -137,7 +137,6 @@ Gallery.openStandalone = function(path, pageState, opt_callback) {
         metadataCache: MetadataCache.createFull(),
         pageState: pageState,
         onClose: onClose,
-        allowMosaic: true, /* For debugging purposes */
         displayStringFunction: strf
       };
       Gallery.open(context, urls, selectedUrls);
@@ -148,18 +147,30 @@ Gallery.openStandalone = function(path, pageState, opt_callback) {
 
 /**
  * Tools fade-out timeout im milliseconds.
+ * @const
  * @type {number}
  */
 Gallery.FADE_TIMEOUT = 3000;
 
 /**
  * First time tools fade-out timeout im milliseconds.
+ * @const
  * @type {number}
  */
 Gallery.FIRST_FADE_TIMEOUT = 1000;
 
 /**
+ * Time until mosaic is initialized in the background. Used to make gallery
+ * in the slide mode load faster. In miiliseconds.
+ * @const
+ * @type {number}
+ */
+Gallery.MOSAIC_BACKGROUND_INIT_DELAY = 1000;
+
+/**
  * Types of metadata Gallery uses (to query the metadata cache).
+ * @const
+ * @type {string}
  */
 Gallery.METADATA_TYPE = 'thumbnail|filesystem|media|streaming';
 
@@ -167,13 +178,14 @@ Gallery.METADATA_TYPE = 'thumbnail|filesystem|media|streaming';
  * Initialize listeners.
  * @private
  */
-
 Gallery.prototype.initListeners_ = function() {
   if (!util.TEST_HARNESS)
     this.document_.oncontextmenu = function(e) { e.preventDefault(); };
 
   this.keyDownBound_ = this.onKeyDown_.bind(this);
   this.document_.body.addEventListener('keydown', this.keyDownBound_);
+
+  util.disableBrowserShortcutKeys(this.document_);
 
   this.inactivityWatcher_ = new MouseInactivityWatcher(
       this.container_, Gallery.FADE_TIMEOUT, this.hasActiveTool.bind(this));
@@ -259,15 +271,13 @@ Gallery.prototype.initDom_ = function() {
 
   var onThumbnailError = this.context_.onThumbnailError || function() {};
 
-  if (this.context_.allowMosaic) {
-    this.modeButton_ = util.createChild(this.toolbar_, 'button mode', 'button');
-    this.modeButton_.addEventListener('click',
-        this.toggleMode_.bind(this, null));
+  this.modeButton_ = util.createChild(this.toolbar_, 'button mode', 'button');
+  this.modeButton_.addEventListener('click',
+      this.toggleMode_.bind(this, null));
 
-    this.mosaicMode_ = new MosaicMode(content,
-        this.dataModel_, this.selectionModel_, this.metadataCache_,
-        this.toggleMode_.bind(this, null), onThumbnailError);
-  }
+  this.mosaicMode_ = new MosaicMode(content,
+      this.dataModel_, this.selectionModel_, this.metadataCache_,
+      this.toggleMode_.bind(this, null), onThumbnailError);
 
   this.slideMode_ = new SlideMode(this.container_, content,
       this.toolbar_, this.prompt_,
@@ -363,7 +373,8 @@ Gallery.prototype.load = function(urls, selectedUrls) {
   } else {
     this.setCurrentMode_(this.slideMode_);
     var maybeLoadMosaic = function() {
-      if (mosaic) mosaic.init();
+      if (mosaic)
+        mosaic.init();
       cr.dispatchSimpleEvent(this, 'loaded');
     }.bind(this);
     /* TODO: consider nice blow-up animation for the first image */
@@ -438,7 +449,7 @@ Gallery.prototype.onUserAction_ = function() {
 
 /**
  * Set the current mode, update the UI.
- * @param {object} mode Current mode.
+ * @param {Object} mode Current mode.
  * @private
  */
 Gallery.prototype.setCurrentMode_ = function(mode) {
@@ -458,8 +469,8 @@ Gallery.prototype.setCurrentMode_ = function(mode) {
 
 /**
  * Mode toggle event handler.
- * @param {function} opt_callback Callback.
- * @param {Event} opt_event Event that caused this call.
+ * @param {function=} opt_callback Callback.
+ * @param {Event=} opt_event Event that caused this call.
  * @private
  */
 Gallery.prototype.toggleMode_ = function(opt_callback, opt_event) {
@@ -790,7 +801,7 @@ Gallery.prototype.onFilenameEditKeydown_ = function() {
 };
 
 /**
- * @return {boolean} True if file renaming is currently in progress
+ * @return {boolean} True if file renaming is currently in progress.
  * @private
  */
 Gallery.prototype.isRenaming_ = function() {

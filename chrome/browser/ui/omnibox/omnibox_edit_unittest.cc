@@ -49,7 +49,8 @@ class TestingOmniboxView : public OmniboxView {
   virtual void ApplyCaretVisibility() OVERRIDE {}
   virtual void OnTemporaryTextMaybeChanged(
       const string16& display_text,
-      bool save_original_selection) OVERRIDE {}
+      bool save_original_selection,
+      bool notify_text_changed) OVERRIDE {}
   virtual bool OnInlineAutocompleteTextMaybeChanged(
       const string16& display_text, size_t user_text_length) OVERRIDE {
     return false;
@@ -74,8 +75,8 @@ class TestingOmniboxView : public OmniboxView {
   virtual int OnPerformDrop(const ui::DropTargetEvent& event) OVERRIDE {
     return 0;
   }
-  virtual gfx::Font GetFont() { return gfx::Font(); }
-  virtual int WidthOfTextAfterCursor() { return 0; }
+  virtual gfx::Font GetFont() OVERRIDE { return gfx::Font(); }
+  virtual int WidthOfTextAfterCursor() OVERRIDE { return 0; }
 #endif
 
   virtual int GetOmniboxTextLength() const OVERRIDE { return 0; }

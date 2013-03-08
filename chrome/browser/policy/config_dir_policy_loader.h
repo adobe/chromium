@@ -5,7 +5,7 @@
 #ifndef CHROME_BROWSER_POLICY_CONFIG_DIR_POLICY_LOADER_H_
 #define CHROME_BROWSER_POLICY_CONFIG_DIR_POLICY_LOADER_H_
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/files/file_path_watcher.h"
 #include "chrome/browser/policy/async_policy_loader.h"
 #include "chrome/browser/policy/policy_types.h"
@@ -23,7 +23,7 @@ namespace policy {
 // last value read takes precedence in case of policy key collisions.
 class ConfigDirPolicyLoader : public AsyncPolicyLoader {
  public:
-  ConfigDirPolicyLoader(const FilePath& config_dir, PolicyScope scope);
+  ConfigDirPolicyLoader(const base::FilePath& config_dir, PolicyScope scope);
   virtual ~ConfigDirPolicyLoader();
 
   // AsyncPolicyLoader implementation.
@@ -33,7 +33,7 @@ class ConfigDirPolicyLoader : public AsyncPolicyLoader {
 
  private:
   // Loads the policy files at |path| into the |bundle|, with the given |level|.
-  void LoadFromPath(const FilePath& path,
+  void LoadFromPath(const base::FilePath& path,
                     PolicyLevel level,
                     PolicyBundle* bundle);
 
@@ -43,10 +43,10 @@ class ConfigDirPolicyLoader : public AsyncPolicyLoader {
                            PolicyBundle* bundle);
 
   // Callback for the FilePathWatchers.
-  void OnFileUpdated(const FilePath& path, bool error);
+  void OnFileUpdated(const base::FilePath& path, bool error);
 
   // The directory containing the policy files.
-  FilePath config_dir_;
+  base::FilePath config_dir_;
 
   // Policies loaded by this provider will have this scope.
   PolicyScope scope_;

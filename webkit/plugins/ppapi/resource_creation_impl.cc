@@ -13,12 +13,10 @@
 #include "webkit/plugins/ppapi/ppb_audio_impl.h"
 #include "webkit/plugins/ppapi/ppb_broker_impl.h"
 #include "webkit/plugins/ppapi/ppb_buffer_impl.h"
-#include "webkit/plugins/ppapi/ppb_directory_reader_impl.h"
 #include "webkit/plugins/ppapi/ppb_file_ref_impl.h"
 #include "webkit/plugins/ppapi/ppb_file_system_impl.h"
 #include "webkit/plugins/ppapi/ppb_flash_message_loop_impl.h"
 #include "webkit/plugins/ppapi/ppb_graphics_3d_impl.h"
-#include "webkit/plugins/ppapi/ppb_host_resolver_private_impl.h"
 #include "webkit/plugins/ppapi/ppb_image_data_impl.h"
 #include "webkit/plugins/ppapi/ppb_network_monitor_private_impl.h"
 #include "webkit/plugins/ppapi/ppb_scrollbar_impl.h"
@@ -79,8 +77,9 @@ PP_Resource ResourceCreationImpl::CreateBuffer(PP_Instance instance,
 }
 
 PP_Resource ResourceCreationImpl::CreateDirectoryReader(
+    PP_Instance instance,
     PP_Resource directory_ref) {
-  return PPB_DirectoryReader_Impl::Create(directory_ref);
+  return 0;  // Not supported in-process.
 }
 
 PP_Resource ResourceCreationImpl::CreateFileRef(PP_Resource file_system,
@@ -132,7 +131,7 @@ PP_Resource ResourceCreationImpl::CreateGraphics3DRaw(
 
 PP_Resource ResourceCreationImpl::CreateHostResolverPrivate(
     PP_Instance instance) {
-  return (new PPB_HostResolver_Private_Impl(instance))->GetReference();
+  return 0;  // Not supported in-process.
 }
 
 PP_Resource ResourceCreationImpl::CreateImageData(PP_Instance instance,
@@ -233,6 +232,10 @@ PP_Resource ResourceCreationImpl::CreateTCPServerSocketPrivate(
 
 PP_Resource ResourceCreationImpl::CreateTCPSocketPrivate(PP_Instance instance) {
   return PPB_TCPSocket_Private_Impl::CreateResource(instance);
+}
+
+PP_Resource ResourceCreationImpl::CreateUDPSocketPrivate(PP_Instance instance) {
+  return 0;  // Not supported in-process.
 }
 
 PP_Resource ResourceCreationImpl::CreateURLLoader(PP_Instance instance) {

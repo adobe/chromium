@@ -7,13 +7,13 @@
 #include "content/browser/devtools/devtools_manager_impl.h"
 #include "content/browser/devtools/render_view_devtools_agent_host.h"
 #include "content/browser/renderer_host/test_render_view_host.h"
-#include "content/browser/web_contents/test_web_contents.h"
 #include "content/common/view_messages.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/devtools_agent_host.h"
 #include "content/public/browser/devtools_client_host.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/test/test_content_browser_client.h"
+#include "content/test/test_web_contents.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using base::TimeDelta;
@@ -38,15 +38,16 @@ class TestDevToolsClientHost : public DevToolsClientHost {
     manager->ClientHostClosing(this);
     closed_ = true;
   }
-  virtual void InspectedContentsClosing() {
+  virtual void InspectedContentsClosing() OVERRIDE {
     FAIL();
   }
 
-  virtual void DispatchOnInspectorFrontend(const std::string& message) {
+  virtual void DispatchOnInspectorFrontend(
+      const std::string& message) OVERRIDE {
     last_sent_message = &message;
   }
 
-  virtual void ReplacedWithAnotherClient() {
+  virtual void ReplacedWithAnotherClient() OVERRIDE {
   }
 
   static void ResetCounters() {
@@ -71,7 +72,7 @@ class TestWebContentsDelegate : public WebContentsDelegate {
   TestWebContentsDelegate() : renderer_unresponsive_received_(false) {}
 
   // Notification that the contents is hung.
-  virtual void RendererUnresponsive(WebContents* source) {
+  virtual void RendererUnresponsive(WebContents* source) OVERRIDE {
     renderer_unresponsive_received_ = true;
   }
 
@@ -89,6 +90,7 @@ class DevToolsManagerTestBrowserClient : public TestContentBrowserClient {
   }
 
   virtual bool ShouldSwapProcessesForNavigation(
+      SiteInstance* site_instance,
       const GURL& current_url,
       const GURL& new_url) OVERRIDE {
     return true;

@@ -8,9 +8,10 @@
 #include <vector>
 
 #include "base/compiler_specific.h"
+#include "base/memory/weak_ptr.h"
 #include "base/string16.h"
+#include "chrome/browser/autofill/autofill_popup_delegate.h"
 #include "chrome/browser/autofill/password_autofill_manager.h"
-#include "chrome/browser/ui/autofill/autofill_popup_delegate.h"
 #include "chrome/common/form_data.h"
 #include "chrome/common/form_field_data.h"
 #include "chrome/common/password_form_fill_data.h"
@@ -20,7 +21,6 @@
 #include "ui/gfx/rect.h"
 
 class AutofillManager;
-class AutofillPopupControllerImpl;
 
 namespace gfx {
 class Rect;
@@ -47,12 +47,13 @@ class AutofillExternalDelegate
                                              AutofillManager* autofill_manager);
 
   // AutofillPopupDelegate implementation.
+  virtual void OnPopupShown(content::KeyboardListener* listener) OVERRIDE;
+  virtual void OnPopupHidden(content::KeyboardListener* listener) OVERRIDE;
   virtual void DidSelectSuggestion(int identifier) OVERRIDE;
   virtual void DidAcceptSuggestion(const string16& value,
                                    int identifier) OVERRIDE;
   virtual void RemoveSuggestion(const string16& value, int identifier) OVERRIDE;
   virtual void ClearPreviewedForm() OVERRIDE;
-  virtual void ControllerDestroyed() OVERRIDE;
 
   // Records and associates a query_id with web form data.  Called
   // when the renderer posts an Autofill query to the browser. |bounds|
@@ -64,7 +65,7 @@ class AutofillExternalDelegate
   virtual void OnQuery(int query_id,
                        const FormData& form,
                        const FormFieldData& field,
-                       const gfx::Rect& element_bounds,
+                       const gfx::RectF& element_bounds,
                        bool display_warning_if_disabled);
 
   // Records query results and correctly formats them before sending them off
@@ -79,7 +80,7 @@ class AutofillExternalDelegate
   // Show password suggestions in the popup.
   void OnShowPasswordSuggestions(const std::vector<string16>& suggestions,
                                  const FormFieldData& field,
-                                 const gfx::Rect& bounds);
+                                 const gfx::RectF& bounds);
 
   // Set the data list value associated with the current field.
   void SetCurrentDataListValues(const std::vector<string16>& autofill_values,
@@ -100,30 +101,13 @@ class AutofillExternalDelegate
       const FormFieldData& form,
       const PasswordFormFillData& fill_data);
 
-  virtual void HideAutofillPopup();
-
  protected:
   friend class content::WebContentsUserData<AutofillExternalDelegate>;
   AutofillExternalDelegate(content::WebContents* web_contents,
                            AutofillManager* autofill_manager);
   virtual ~AutofillExternalDelegate();
 
-  // Displays the Autofill results to the user with an external Autofill popup
-  // that lives completely in the browser.  The suggestions have been correctly
-  // formatted by this point.
-  virtual void ApplyAutofillSuggestions(
-      const std::vector<string16>& autofill_values,
-      const std::vector<string16>& autofill_labels,
-      const std::vector<string16>& autofill_icons,
-      const std::vector<int>& autofill_unique_ids);
-
-  // Create the popup if it doesn't already exist. |element_bounds| is the
-  // bounding rect for the element it is popping up for.
-  virtual void EnsurePopupForElement(const gfx::Rect& element_bounds);
-
   content::WebContents* web_contents() { return web_contents_; }
-
-  AutofillPopupControllerImpl* controller() { return controller_; }
 
  private:
   // Fills the form with the Autofill data corresponding to |unique_id|.
@@ -161,7 +145,6 @@ class AutofillExternalDelegate
   // The web_contents associated with this delegate.
   content::WebContents* web_contents_;  // weak; owns me.
   AutofillManager* autofill_manager_;  // weak.
-  AutofillPopupControllerImpl* controller_;  // weak.
 
   // Password Autofill manager, handles all password-related Autofilling.
   PasswordAutofillManager password_autofill_manager_;
@@ -177,12 +160,22 @@ class AutofillExternalDelegate
   FormData autofill_query_form_;
   FormFieldData autofill_query_field_;
 
+  // The bounds of the form field that user is interacting with.
+  gfx::RectF element_bounds_;
+
   // Should we display a warning if Autofill is disabled?
   bool display_warning_if_disabled_;
+
+  // Does the popup include any Autofill profile or credit card suggestions?
+  bool has_autofill_suggestion_;
 
   // Have we already shown Autofill suggestions for the field the user is
   // currently editing?  Used to keep track of state for metrics logging.
   bool has_shown_autofill_popup_for_current_edit_;
+
+  // The RenderViewHost that this object has been registered with as a
+  // keyboard listener.
+  content::RenderViewHost* registered_keyboard_listener_with_;
 
   // The current data list values.
   std::vector<string16> data_list_values_;

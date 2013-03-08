@@ -49,11 +49,13 @@ class OmniboxUIHandler : public AutocompleteControllerDelegate,
  private:
   // Gets called from the javascript when a user enters text into the
   // chrome://omnibox/ text box and clicks submit or hits enter.
-  // |two_element_input_string| is expected to be a two-element list
-  // where the first element is the input string and the second element
-  // is a boolean indicating whether we should set prevent_inline_autocomplete
-  // or not.
-  void StartOmniboxQuery(const base::ListValue* two_element_input_string);
+  // |input| is expected to be a four-element list:
+  // - first element: input string.
+  // - second element: the cursor position.
+  // - third element: boolean indicating whether we should set
+  //   prevent_inline_autocomplete or not.
+  // - fourth element: boolean indicating whether we should set prefer_keyword
+  void StartOmniboxQuery(const base::ListValue* input);
 
   // Helper function for OnResultChanged().
   // Takes an iterator over AutocompleteMatches and packages them into
@@ -63,6 +65,10 @@ class OmniboxUIHandler : public AutocompleteControllerDelegate,
                              ACMatches::const_iterator end,
                              base::DictionaryValue* output);
 
+  // Re-initializes the AutocompleteController in preparation for the
+  // next query.
+  void ResetController();
+
   // The omnibox AutocompleteController that collects/sorts/dup-
   // eliminates the results as they come in.
   scoped_ptr<AutocompleteController> controller_;
@@ -71,6 +77,9 @@ class OmniboxUIHandler : public AutocompleteControllerDelegate,
   // Needed because we also pass timing information in the object we
   // hand back to the javascript.
   base::Time time_omnibox_started_;
+
+  // The Profile* handed to us in our constructor.
+  Profile* profile_;
 
   DISALLOW_COPY_AND_ASSIGN(OmniboxUIHandler);
 };

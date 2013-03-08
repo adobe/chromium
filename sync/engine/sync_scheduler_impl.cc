@@ -171,7 +171,6 @@ SyncSchedulerImpl::SyncSchedulerImpl(const std::string& name,
       mode_(NORMAL_MODE),
       // Start with assuming everything is fine with the connection.
       // At the end of the sync cycle we would have the correct status.
-      connection_code_(HttpResponse::SERVER_CONNECTION_OK),
       pending_nudge_(NULL),
       delay_provider_(delay_provider),
       syncer_(syncer),
@@ -193,19 +192,15 @@ void SyncSchedulerImpl::OnJobDestroyed(SyncSessionJob* job) {
 void SyncSchedulerImpl::OnCredentialsUpdated() {
   DCHECK_EQ(MessageLoop::current(), sync_loop_);
 
-  // TODO(lipalani): crbug.com/106262. One issue here is that if after
-  // the auth error we happened to do gettime and it succeeded then
-  // the |connection_code_| would be briefly OK however it would revert
-  // back to SYNC_AUTH_ERROR at the end of the sync cycle. The
-  // referenced bug explores the option of removing gettime calls
-  // altogethere
-  if (HttpResponse::SYNC_AUTH_ERROR == connection_code_) {
+  if (HttpResponse::SYNC_AUTH_ERROR ==
+      session_context_->connection_manager()->server_status()) {
     OnServerConnectionErrorFixed();
   }
 }
 
 void SyncSchedulerImpl::OnConnectionStatusChange() {
-  if (HttpResponse::CONNECTION_UNAVAILABLE  == connection_code_) {
+  if (HttpResponse::CONNECTION_UNAVAILABLE  ==
+      session_context_->connection_manager()->server_status()) {
     // Optimistically assume that the connection is fixed and try
     // connecting.
     OnServerConnectionErrorFixed();
@@ -213,7 +208,6 @@ void SyncSchedulerImpl::OnConnectionStatusChange() {
 }
 
 void SyncSchedulerImpl::OnServerConnectionErrorFixed() {
-  connection_code_ = HttpResponse::SERVER_CONNECTION_OK;
   // There could be a pending nudge or configuration job in several cases:
   //
   // 1. We're in exponential backoff.
@@ -233,15 +227,6 @@ void SyncSchedulerImpl::OnServerConnectionErrorFixed() {
            base::Bind(&SyncSchedulerImpl::DoCanaryJob,
                       weak_ptr_factory_.GetWeakPtr(),
                       base::Passed(&pending)));
-}
-
-void SyncSchedulerImpl::UpdateServerConnectionManagerStatus(
-    HttpResponse::ServerConnectionCode code) {
-  DCHECK_EQ(MessageLoop::current(), sync_loop_);
-  SDVLOG(2) << "New server connection code: "
-            << HttpResponse::GetServerConnectionCodeString(code);
-
-  connection_code_ = code;
 }
 
 void SyncSchedulerImpl::Start(Mode mode) {
@@ -273,23 +258,16 @@ void SyncSchedulerImpl::Start(Mode mode) {
 
     scoped_ptr<SyncSessionJob> pending(TakePendingJobForCurrentMode());
     if (pending.get()) {
-      // TODO(tim): We should be able to remove this...
-      scoped_ptr<SyncSession> session(CreateSyncSession(
-          pending->session()->source()));
-      // Also the routing info might have been changed since we cached the
-      // pending nudge. Update it by coalescing to the latest.
-      pending->mutable_session()->Coalesce(*session);
       SDVLOG(2) << "Executing pending job. Good luck!";
-      DoSyncSessionJob(pending.Pass());
+      DoSyncSessionJob(pending.Pass(), NORMAL_PRIORITY);
     }
   }
 }
 
 void SyncSchedulerImpl::SendInitialSnapshot() {
   DCHECK_EQ(MessageLoop::current(), sync_loop_);
-  scoped_ptr<SyncSession> dummy(new SyncSession(session_context_, this,
-      SyncSourceInfo(), ModelSafeRoutingInfo(),
-      std::vector<ModelSafeWorker*>()));
+  scoped_ptr<SyncSession> dummy(new SyncSession(
+          session_context_, this, SyncSourceInfo()));
   SyncEngineEvent event(SyncEngineEvent::STATUS_CHANGED);
   event.snapshot = dummy->TakeSnapshot();
   session_context_->NotifyListeners(event);
@@ -298,7 +276,7 @@ void SyncSchedulerImpl::SendInitialSnapshot() {
 namespace {
 
 // Helper to extract the routing info corresponding to types in
-// |types| from |current_routes|.
+// |types_to_download| from |current_routes|.
 void BuildModelSafeParams(
     ModelTypeSet types_to_download,
     const ModelSafeRoutingInfo& current_routes,
@@ -332,7 +310,7 @@ bool SyncSchedulerImpl::ScheduleConfiguration(
   BuildModelSafeParams(params.types_to_download,
                        params.routing_info,
                        &restricted_routes);
-  session_context_->set_routing_info(params.routing_info);
+  session_context_->set_routing_info(restricted_routes);
 
   // Only reconfigure if we have types to download.
   if (!params.types_to_download.Empty()) {
@@ -343,17 +321,14 @@ bool SyncSchedulerImpl::ScheduleConfiguration(
         SyncSourceInfo(params.source,
                        ModelSafeRoutingInfoToInvalidationMap(
                            restricted_routes,
-                           std::string())),
-        restricted_routes,
-        session_context_->workers()));
+                           std::string()))));
     scoped_ptr<SyncSessionJob> job(new SyncSessionJob(
         SyncSessionJob::CONFIGURATION,
         TimeTicks::Now(),
         session.Pass(),
-        params,
-        FROM_HERE));
+        params));
     job->set_destruction_observer(weak_ptr_factory_.GetWeakPtr());
-    bool succeeded = DoSyncSessionJob(job.Pass());
+    bool succeeded = DoSyncSessionJob(job.Pass(), NORMAL_PRIORITY);
 
     // If we failed, the job would have been saved as the pending configure
     // job and a wait interval would have been set.
@@ -370,14 +345,15 @@ bool SyncSchedulerImpl::ScheduleConfiguration(
 }
 
 SyncSchedulerImpl::JobProcessDecision
-SyncSchedulerImpl::DecideWhileInWaitInterval(const SyncSessionJob& job) {
+SyncSchedulerImpl::DecideWhileInWaitInterval(const SyncSessionJob& job,
+                                             JobPriority priority) {
   DCHECK_EQ(MessageLoop::current(), sync_loop_);
   DCHECK(wait_interval_.get());
 
   SDVLOG(2) << "DecideWhileInWaitInterval with WaitInterval mode "
             << WaitInterval::GetModeString(wait_interval_->mode)
             << (wait_interval_->had_nudge ? " (had nudge)" : "")
-            << (job.is_canary() ? " (canary)" : "");
+            << ((priority == CANARY_PRIORITY) ? " (canary)" : "");
 
   if (job.purpose() == SyncSessionJob::POLL)
     return DROP;
@@ -400,16 +376,17 @@ SyncSchedulerImpl::DecideWhileInWaitInterval(const SyncSessionJob& job) {
 
     // If we already had one nudge then just drop this nudge. We will retry
     // later when the timer runs out.
-    if (!job.is_canary())
+    if (priority == NORMAL_PRIORITY)
       return wait_interval_->had_nudge ? DROP : CONTINUE;
     else // We are here because timer ran out. So retry.
       return CONTINUE;
   }
-  return job.is_canary() ? CONTINUE : SAVE;
+  return (priority == CANARY_PRIORITY) ? CONTINUE : SAVE;
 }
 
 SyncSchedulerImpl::JobProcessDecision SyncSchedulerImpl::DecideOnJob(
-    const SyncSessionJob& job) {
+    const SyncSessionJob& job,
+    JobPriority priority) {
   DCHECK_EQ(MessageLoop::current(), sync_loop_);
 
   // See if our type is throttled.
@@ -432,11 +409,11 @@ SyncSchedulerImpl::JobProcessDecision SyncSchedulerImpl::DecideOnJob(
     // Note that there may already be such an event if we're in a WaitInterval,
     // so we can retry it then.
     if (!requested_types.Empty() && throttled_types.HasAll(requested_types))
-      return SAVE;
+      return DROP;  // TODO(tim): Don't drop. http://crbug.com/177659
   }
 
   if (wait_interval_.get())
-    return DecideWhileInWaitInterval(job);
+    return DecideWhileInWaitInterval(job, priority);
 
   if (mode_ == CONFIGURATION_MODE) {
     if (job.purpose() == SyncSessionJob::NUDGE)
@@ -498,7 +475,6 @@ SyncSchedulerImpl::JobProcessDecision SyncSchedulerImpl::DecideOnJob(
 }
 
 void SyncSchedulerImpl::HandleSaveJobDecision(scoped_ptr<SyncSessionJob> job) {
-  DCHECK_EQ(DecideOnJob(*job), SAVE);
   const bool is_nudge = job->purpose() == SyncSessionJob::NUDGE;
   if (is_nudge && pending_nudge_) {
     SDVLOG(2) << "Coalescing a pending nudge";
@@ -506,7 +482,8 @@ void SyncSchedulerImpl::HandleSaveJobDecision(scoped_ptr<SyncSessionJob> job) {
     // logic in ScheduleNudgeImpl that takes the min of the two nudge start
     // times, because we're calling this function first.  Pull this out
     // into a function to coalesce + set start times and reuse.
-    pending_nudge_->mutable_session()->Coalesce(*(job->session()));
+    pending_nudge_->mutable_session()->CoalesceSources(
+        job->session()->source());
     return;
   }
 
@@ -621,10 +598,9 @@ void SyncSchedulerImpl::ScheduleNudgeImpl(
       SyncSessionJob::NUDGE,
       TimeTicks::Now() + delay,
       CreateSyncSession(info).Pass(),
-      ConfigurationParams(),
-      nudge_location));
+      ConfigurationParams()));
   job->set_destruction_observer(weak_ptr_factory_.GetWeakPtr());
-  JobProcessDecision decision = DecideOnJob(*job);
+  JobProcessDecision decision = DecideOnJob(*job, NORMAL_PRIORITY);
   SDVLOG(2) << "Should run "
             << SyncSessionJob::GetPurposeString(job->purpose())
             << " job " << job->session()
@@ -642,7 +618,8 @@ void SyncSchedulerImpl::ScheduleNudgeImpl(
 
   if (pending_nudge_) {
     SDVLOG(2) << "Rescheduling pending nudge";
-    pending_nudge_->mutable_session()->Coalesce(*(job->session()));
+    pending_nudge_->mutable_session()->CoalesceSources(
+        job->session()->source());
     // Choose the start time as the earliest of the 2. Note that this means
     // if a nudge arrives with delay (e.g. kDefaultSessionsCommitDelaySeconds)
     // but a nudge is already scheduled to go out, we'll send the (tab) commit
@@ -663,7 +640,7 @@ void SyncSchedulerImpl::ScheduleNudgeImpl(
 
   // TODO(zea): Consider adding separate throttling/backoff for datatype
   // refresh requests.
-  ScheduleSyncSessionJob(job.Pass());
+  ScheduleSyncSessionJob(nudge_location, job.Pass());
 }
 
 const char* SyncSchedulerImpl::GetModeString(SyncScheduler::Mode mode) {
@@ -710,6 +687,7 @@ void SyncSchedulerImpl::PostDelayedTask(
 }
 
 void SyncSchedulerImpl::ScheduleSyncSessionJob(
+    const tracked_objects::Location& loc,
     scoped_ptr<SyncSessionJob> job) {
   DCHECK_EQ(MessageLoop::current(), sync_loop_);
   if (no_scheduling_allowed_) {
@@ -718,7 +696,6 @@ void SyncSchedulerImpl::ScheduleSyncSessionJob(
   }
 
   TimeDelta delay = job->scheduled_start() - TimeTicks::Now();
-  tracked_objects::Location loc(job->from_location());
   if (delay < TimeDelta::FromMilliseconds(0))
     delay = TimeDelta::FromMilliseconds(0);
   SDVLOG_LOC(loc, 2)
@@ -738,11 +715,13 @@ void SyncSchedulerImpl::ScheduleSyncSessionJob(
   PostDelayedTask(loc, "DoSyncSessionJob",
       base::Bind(base::IgnoreResult(&SyncSchedulerImpl::DoSyncSessionJob),
                                     weak_ptr_factory_.GetWeakPtr(),
-                                    base::Passed(&job)),
+                                    base::Passed(&job),
+                                    NORMAL_PRIORITY),
       delay);
 }
 
-bool SyncSchedulerImpl::DoSyncSessionJob(scoped_ptr<SyncSessionJob> job) {
+bool SyncSchedulerImpl::DoSyncSessionJob(scoped_ptr<SyncSessionJob> job,
+                                         JobPriority priority) {
   DCHECK_EQ(MessageLoop::current(), sync_loop_);
   if (job->purpose() == SyncSessionJob::NUDGE) {
     if (pending_nudge_ == NULL ||
@@ -753,15 +732,10 @@ bool SyncSchedulerImpl::DoSyncSessionJob(scoped_ptr<SyncSessionJob> job) {
       return false;
     }
     pending_nudge_ = NULL;
-
-    // Rebase the session with the latest model safe table and use it to purge
-    // and update any disabled or modified entries in the job.
-    job->mutable_session()->RebaseRoutingInfoWithLatest(
-        session_context_->routing_info(), session_context_->workers());
   }
 
   base::AutoReset<bool> protector(&no_scheduling_allowed_, true);
-  JobProcessDecision decision = DecideOnJob(*job);
+  JobProcessDecision decision = DecideOnJob(*job, priority);
   SDVLOG(2) << "Should run "
             << SyncSessionJob::GetPurposeString(job->purpose())
             << " job " << job->session()
@@ -815,16 +789,6 @@ void SyncSchedulerImpl::UpdateNudgeTimeRecords(const SyncSourceInfo& info) {
 bool SyncSchedulerImpl::FinishSyncSessionJob(scoped_ptr<SyncSessionJob> job,
                                              bool exited_prematurely) {
   DCHECK_EQ(MessageLoop::current(), sync_loop_);
-  // Now update the status of the connection from SCM. We need this to decide
-  // whether we need to save/run future jobs. The notifications from SCM are
-  // not reliable.
-  //
-  // TODO(rlarocque): crbug.com/110954
-  // We should get rid of the notifications and it is probably not needed to
-  // maintain this status variable in 2 places. We should query it directly
-  // from SCM when needed.
-  ServerConnectionManager* scm = session_context_->connection_manager();
-  UpdateServerConnectionManagerStatus(scm->server_status());
 
   // Let job know that we're through syncing (calling SyncShare) at this point.
   bool succeeded = false;
@@ -850,14 +814,11 @@ void SyncSchedulerImpl::ScheduleNextSync(
   AdjustPolling(finished_job.get());
 
   if (succeeded) {
-    // Only reset backoff if we actually reached the server.
-    // It's possible that we reached the server on one attempt, then had an
-    // error on the next (or didn't perform some of the server-communicating
-    // commands). We want to verify that, for all commands attempted, we
-    // successfully spoke with the server. Therefore, we verify no errors
-    // and at least one SYNCER_OK.
-    if (finished_job->session()->DidReachServer())
-      wait_interval_.reset();
+    // No job currently supported by the scheduler could succeed without
+    // successfully reaching the server.  Therefore, if we make it here, it is
+    // appropriate to reset the backoff interval.
+    wait_interval_.reset();
+    NotifyRetryTime(base::Time());
     SDVLOG(2) << "Job succeeded so not scheduling more jobs";
     return;
   }
@@ -956,11 +917,6 @@ void SyncSchedulerImpl::RestartWaiting(scoped_ptr<SyncSessionJob> job) {
 void SyncSchedulerImpl::HandleContinuationError(
     scoped_ptr<SyncSessionJob> old_job) {
   DCHECK_EQ(MessageLoop::current(), sync_loop_);
-  if (DCHECK_IS_ON()) {
-    if (IsBackingOff()) {
-      DCHECK(wait_interval_->timer.IsRunning() || old_job->is_canary());
-    }
-  }
 
   TimeDelta length = delay_provider_->GetDelay(
       IsBackingOff() ? wait_interval_->length :
@@ -975,7 +931,8 @@ void SyncSchedulerImpl::HandleContinuationError(
   // This will reset the had_nudge variable as well.
   wait_interval_.reset(new WaitInterval(WaitInterval::EXPONENTIAL_BACKOFF,
                                         length));
-  scoped_ptr<SyncSessionJob> new_job(old_job->CloneFromLocation(FROM_HERE));
+  NotifyRetryTime(base::Time::Now() + length);
+  scoped_ptr<SyncSessionJob> new_job(old_job->Clone());
   new_job->set_scheduled_start(TimeTicks::Now() + length);
   if (old_job->purpose() == SyncSessionJob::CONFIGURATION) {
     SDVLOG(2) << "Configuration did not succeed, scheduling retry.";
@@ -1009,6 +966,7 @@ void SyncSchedulerImpl::StopImpl(const base::Closure& callback) {
   // Kill any in-flight method calls.
   weak_ptr_factory_.InvalidateWeakPtrs();
   wait_interval_.reset();
+  NotifyRetryTime(base::Time());
   poll_timer_.Stop();
   pending_nudge_ = NULL;
   unscheduled_nudge_storage_.reset();
@@ -1023,12 +981,6 @@ void SyncSchedulerImpl::DoCanaryJob(scoped_ptr<SyncSessionJob> to_be_canary) {
   DCHECK_EQ(MessageLoop::current(), sync_loop_);
   SDVLOG(2) << "Do canary job";
 
-  // Only set canary privileges here, when we are about to run the job. This
-  // avoids confusion in managing canary bits during scheduling, when you
-  // consider that mode switches (e.g., to config) can "pre-empt" a NUDGE that
-  // was scheduled as canary, and send it to an "unscheduled" state.
-  to_be_canary->GrantCanaryPrivilege();
-
   if (to_be_canary->purpose() == SyncSessionJob::NUDGE) {
     // TODO(tim): Bug 158313.  Remove this check.
     if (pending_nudge_ == NULL ||
@@ -1039,14 +991,11 @@ void SyncSchedulerImpl::DoCanaryJob(scoped_ptr<SyncSessionJob> to_be_canary) {
       return;
     }
     DCHECK_EQ(pending_nudge_->session(), to_be_canary->session());
-    // TODO(tim): We should be able to remove this...
-    scoped_ptr<SyncSession> temp = CreateSyncSession(
-        to_be_canary->session()->source()).Pass();
-    // The routing info might have been changed since we cached the
-    // pending nudge. Update it by coalescing to the latest.
-    to_be_canary->mutable_session()->Coalesce(*(temp));
   }
-  DoSyncSessionJob(to_be_canary.Pass());
+
+  // This is the only place where we invoke DoSyncSessionJob with canary
+  // privileges.  Everyone else should use NORMAL_PRIORITY.
+  DoSyncSessionJob(to_be_canary.Pass(), CANARY_PRIORITY);
 }
 
 scoped_ptr<SyncSessionJob> SyncSchedulerImpl::TakePendingJobForCurrentMode() {
@@ -1079,8 +1028,7 @@ scoped_ptr<SyncSession> SyncSchedulerImpl::CreateSyncSession(
            << ModelSafeRoutingInfoToString(session_context_->routing_info());
 
   SyncSourceInfo info(source);
-  return scoped_ptr<SyncSession>(new SyncSession(session_context_, this, info,
-      session_context_->routing_info(), session_context_->workers()));
+  return scoped_ptr<SyncSession>(new SyncSession(session_context_, this, info));
 }
 
 void SyncSchedulerImpl::PollTimerCallback() {
@@ -1093,30 +1041,44 @@ void SyncSchedulerImpl::PollTimerCallback() {
   scoped_ptr<SyncSessionJob> job(new SyncSessionJob(SyncSessionJob::POLL,
                                                     TimeTicks::Now(),
                                                     s.Pass(),
-                                                    ConfigurationParams(),
-                                                    FROM_HERE));
+                                                    ConfigurationParams()));
   job->set_destruction_observer(weak_ptr_factory_.GetWeakPtr());
-  ScheduleSyncSessionJob(job.Pass());
+  ScheduleSyncSessionJob(FROM_HERE, job.Pass());
 }
 
 void SyncSchedulerImpl::Unthrottle(scoped_ptr<SyncSessionJob> to_be_canary) {
   DCHECK_EQ(MessageLoop::current(), sync_loop_);
   DCHECK_EQ(WaitInterval::THROTTLED, wait_interval_->mode);
+  DCHECK(!to_be_canary.get() || pending_nudge_ == to_be_canary.get() ||
+         wait_interval_->pending_configure_job == to_be_canary.get());
   SDVLOG(2) << "Unthrottled " << (to_be_canary.get() ? "with " : "without ")
-            << "canary.";
-  if (to_be_canary.get())
-    DoCanaryJob(to_be_canary.Pass());
+           << "canary.";
 
-  // TODO(tim): The way DecideOnJob works today, canary privileges aren't
-  // enough to bypass a THROTTLED wait interval, which would suggest we need
-  // to reset before DoCanaryJob (though trusting canary in DecideOnJob is
-  // probably the "right" thing to do). Bug 154216.
+  // We're no longer throttled, so clear the wait interval.
   wait_interval_.reset();
+  NotifyRetryTime(base::Time());
+
+  // We treat this as a 'canary' in the sense that it was originally scheduled
+  // to run some time ago, failed, and we now want to retry, versus a job that
+  // was just created (e.g via ScheduleNudgeImpl). The main implication is
+  // that we're careful to update routing info (etc) with such potentially
+  // stale canary jobs.
+  if (to_be_canary.get()) {
+    DoCanaryJob(to_be_canary.Pass());
+  } else {
+    DCHECK(!unscheduled_nudge_storage_.get());
+  }
 }
 
 void SyncSchedulerImpl::Notify(SyncEngineEvent::EventCause cause) {
   DCHECK_EQ(MessageLoop::current(), sync_loop_);
   session_context_->NotifyListeners(SyncEngineEvent(cause));
+}
+
+void SyncSchedulerImpl::NotifyRetryTime(base::Time retry_time) {
+  SyncEngineEvent event(SyncEngineEvent::RETRY_TIME_CHANGED);
+  event.retry_time = retry_time;
+  session_context_->NotifyListeners(event);
 }
 
 bool SyncSchedulerImpl::IsBackingOff() const {
@@ -1130,6 +1092,7 @@ void SyncSchedulerImpl::OnSilencedUntil(
   DCHECK_EQ(MessageLoop::current(), sync_loop_);
   wait_interval_.reset(new WaitInterval(WaitInterval::THROTTLED,
                                         silenced_until - TimeTicks::Now()));
+  NotifyRetryTime(base::Time::Now() + wait_interval_->length);
 }
 
 bool SyncSchedulerImpl::IsSyncingCurrentlySilenced() {

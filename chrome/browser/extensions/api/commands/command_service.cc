@@ -16,8 +16,8 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/api/commands/commands_handler.h"
-#include "chrome/common/extensions/extension_manifest_constants.h"
 #include "chrome/common/pref_names.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_service.h"
 
@@ -39,15 +39,14 @@ std::string GetPlatformKeybindingKeyForAccelerator(
 namespace extensions {
 
 // static
-void CommandService::RegisterUserPrefs(PrefServiceSyncable* user_prefs) {
-  user_prefs->RegisterDictionaryPref(prefs::kExtensionCommands,
-                                     PrefServiceSyncable::SYNCABLE_PREF);
+void CommandService::RegisterUserPrefs(PrefRegistrySyncable* registry) {
+  registry->RegisterDictionaryPref(prefs::kExtensionCommands,
+                                   PrefRegistrySyncable::SYNCABLE_PREF);
 }
 
 CommandService::CommandService(Profile* profile)
     : profile_(profile) {
-  ManifestHandler::Register(extension_manifest_keys::kCommands,
-                            new CommandsHandler);
+  (new CommandsHandler)->Register();
 
   ExtensionFunctionRegistry::GetInstance()->
       RegisterFunction<GetAllCommandsFunction>();
@@ -202,10 +201,9 @@ ui::Accelerator CommandService::FindShortcutForCommand(
     const std::string& extension_id, const std::string& command) {
   const DictionaryValue* bindings =
       profile_->GetPrefs()->GetDictionary(prefs::kExtensionCommands);
-  for (DictionaryValue::key_iterator it = bindings->begin_keys();
-       it != bindings->end_keys(); ++it) {
+  for (DictionaryValue::Iterator it(*bindings); !it.IsAtEnd(); it.Advance()) {
     const DictionaryValue* item = NULL;
-    bindings->GetDictionary(*it, &item);
+    it.value().GetAsDictionary(&item);
 
     std::string extension;
     item->GetString(kExtension, &extension);
@@ -216,7 +214,7 @@ ui::Accelerator CommandService::FindShortcutForCommand(
     if (command != command_name)
       continue;
 
-    std::string shortcut = *it;
+    std::string shortcut = it.key();
     if (StartsWithASCII(shortcut, Command::CommandPlatform() + ":", true))
       shortcut = shortcut.substr(Command::CommandPlatform().length() + 1);
 
@@ -276,11 +274,9 @@ void CommandService::RemoveKeybindingPrefs(const std::string& extension_id,
 
   typedef std::vector<std::string> KeysToRemove;
   KeysToRemove keys_to_remove;
-  for (DictionaryValue::key_iterator it = bindings->begin_keys();
-       it != bindings->end_keys(); ++it) {
-    std::string key = *it;
-    DictionaryValue* item = NULL;
-    bindings->GetDictionary(key, &item);
+  for (DictionaryValue::Iterator it(*bindings); !it.IsAtEnd(); it.Advance()) {
+    const DictionaryValue* item = NULL;
+    it.value().GetAsDictionary(&item);
 
     std::string extension;
     item->GetString(kExtension, &extension);
@@ -295,7 +291,7 @@ void CommandService::RemoveKeybindingPrefs(const std::string& extension_id,
           continue;
       }
 
-      keys_to_remove.push_back(key);
+      keys_to_remove.push_back(it.key());
     }
   }
 

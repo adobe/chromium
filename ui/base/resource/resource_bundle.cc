@@ -55,54 +55,6 @@ const unsigned char kPngDataChunkType[4] = { 'I', 'D', 'A', 'T' };
 
 ResourceBundle* g_shared_instance_ = NULL;
 
-bool ShouldHighlightMissingScaledResources() {
-  return CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kHighlightMissingScaledResources);
-}
-
-// A wrapper for PNGCodec::Decode that returns information about custom chunks.
-// For security reasons we can't alter PNGCodec to return this information. Our
-// PNG files are preprocessed by GRIT, and any special chunks should occur
-// immediately after the IHDR chunk.
-bool DecodePNG(const unsigned char* buf,
-               size_t size,
-               SkBitmap* bitmap,
-               bool* fell_back_to_1x) {
-  *fell_back_to_1x = false;
-
-  if (size < arraysize(kPngMagic) ||
-      memcmp(buf, kPngMagic, arraysize(kPngMagic)) != 0) {
-    // Data invalid or a JPEG.
-    return false;
-  }
-  size_t pos = arraysize(kPngMagic);
-
-  // Scan for custom chunks until we find one, find the IDAT chunk, or run out
-  // of chunks.
-  for (;;) {
-    if (size - pos < kPngChunkMetadataSize)
-      break;
-    uint32 length = 0;
-    net::ReadBigEndian(reinterpret_cast<const char*>(buf + pos), &length);
-    if (size - pos - kPngChunkMetadataSize < length)
-      break;
-    if (length == 0 && memcmp(buf + pos + sizeof(uint32), kPngScaleChunkType,
-                              arraysize(kPngScaleChunkType)) == 0) {
-      *fell_back_to_1x = true;
-      break;
-    }
-    if (memcmp(buf + pos + sizeof(uint32), kPngDataChunkType,
-               arraysize(kPngDataChunkType)) == 0) {
-      // Stop looking for custom chunks, any custom chunks should be before an
-      // IDAT chunk.
-      break;
-    }
-    pos += length + kPngChunkMetadataSize;
-  }
-  // Pass the data to the PNG decoder.
-  return gfx::PNGCodec::Decode(buf, size, bitmap);
-}
-
 }  // namespace
 
 // An ImageSkiaSource that loads bitmaps for the requested scale factor from
@@ -201,7 +153,7 @@ void ResourceBundle::InitSharedInstanceWithPakFile(
 }
 
 // static
-void ResourceBundle::InitSharedInstanceWithPakPath(const FilePath& path) {
+void ResourceBundle::InitSharedInstanceWithPakPath(const base::FilePath& path) {
   DCHECK(g_shared_instance_ == NULL) << "ResourceBundle initialized twice";
   g_shared_instance_ = new ResourceBundle(NULL);
 
@@ -232,12 +184,12 @@ bool ResourceBundle::LocaleDataPakExists(const std::string& locale) {
   return !GetLocaleFilePath(locale, true).empty();
 }
 
-void ResourceBundle::AddDataPackFromPath(const FilePath& path,
+void ResourceBundle::AddDataPackFromPath(const base::FilePath& path,
                                          ScaleFactor scale_factor) {
   AddDataPackFromPathInternal(path, scale_factor, false);
 }
 
-void ResourceBundle::AddOptionalDataPackFromPath(const FilePath& path,
+void ResourceBundle::AddOptionalDataPackFromPath(const base::FilePath& path,
                                          ScaleFactor scale_factor) {
   AddDataPackFromPathInternal(path, scale_factor, true);
 }
@@ -255,12 +207,12 @@ void ResourceBundle::AddDataPackFromFile(base::PlatformFile file,
 }
 
 #if !defined(OS_MACOSX)
-FilePath ResourceBundle::GetLocaleFilePath(const std::string& app_locale,
-                                           bool test_file_exists) {
+base::FilePath ResourceBundle::GetLocaleFilePath(const std::string& app_locale,
+                                                 bool test_file_exists) {
   if (app_locale.empty())
-    return FilePath();
+    return base::FilePath();
 
-  FilePath locale_file_path;
+  base::FilePath locale_file_path;
 
   PathService::Get(ui::DIR_LOCALES, &locale_file_path);
 
@@ -274,10 +226,10 @@ FilePath ResourceBundle::GetLocaleFilePath(const std::string& app_locale,
 
   // Don't try to load empty values or values that are not absolute paths.
   if (locale_file_path.empty() || !locale_file_path.IsAbsolute())
-    return FilePath();
+    return base::FilePath();
 
   if (test_file_exists && !file_util::PathExists(locale_file_path))
-    return FilePath();
+    return base::FilePath();
 
   return locale_file_path;
 }
@@ -287,7 +239,7 @@ std::string ResourceBundle::LoadLocaleResources(
     const std::string& pref_locale) {
   DCHECK(!locale_resources_data_.get()) << "locale.pak already loaded";
   std::string app_locale = l10n_util::GetApplicationLocale(pref_locale);
-  FilePath locale_file_path = GetOverriddenPakPath();
+  base::FilePath locale_file_path = GetOverriddenPakPath();
   if (locale_file_path.empty()) {
     CommandLine* command_line = CommandLine::ForCurrentProcess();
     if (command_line->HasSwitch(switches::kLocalePak)) {
@@ -318,8 +270,8 @@ std::string ResourceBundle::LoadLocaleResources(
   return app_locale;
 }
 
-void ResourceBundle::LoadTestResources(const FilePath& path,
-                                       const FilePath& locale_path) {
+void ResourceBundle::LoadTestResources(const base::FilePath& path,
+                                       const base::FilePath& locale_path) {
   // Use the given resource pak for both common and localized resources.
   scoped_ptr<DataPack> data_pack(
       new DataPack(SCALE_FACTOR_100P));
@@ -339,11 +291,11 @@ void ResourceBundle::UnloadLocaleResources() {
   locale_resources_data_.reset();
 }
 
-void ResourceBundle::OverrideLocalePakForTest(const FilePath& pak_path) {
+void ResourceBundle::OverrideLocalePakForTest(const base::FilePath& pak_path) {
   overridden_pak_path_ = pak_path;
 }
 
-const FilePath& ResourceBundle::GetOverriddenPakPath() {
+const base::FilePath& ResourceBundle::GetOverriddenPakPath() {
   return overridden_pak_path_;
 }
 
@@ -556,14 +508,14 @@ void ResourceBundle::FreeImages() {
   images_.clear();
 }
 
-void ResourceBundle::AddDataPackFromPathInternal(const FilePath& path,
+void ResourceBundle::AddDataPackFromPathInternal(const base::FilePath& path,
                                                  ScaleFactor scale_factor,
                                                  bool optional) {
   // Do not pass an empty |path| value to this method. If the absolute path is
   // unknown pass just the pack file name.
   DCHECK(!path.empty());
 
-  FilePath pack_path = path;
+  base::FilePath pack_path = path;
   if (delegate_)
     pack_path = delegate_->GetPathForResourcePack(pack_path, scale_factor);
 
@@ -713,6 +665,55 @@ gfx::Image& ResourceBundle::GetEmptyImage() {
     empty_image_ = gfx::Image::CreateFrom1xBitmap(bitmap);
   }
   return empty_image_;
+}
+
+// static
+bool ResourceBundle::ShouldHighlightMissingScaledResources() {
+  return CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kHighlightMissingScaledResources);
+}
+
+// static
+bool ResourceBundle::PNGContainsFallbackMarker(const unsigned char* buf,
+                               size_t size) {
+  if (size < arraysize(kPngMagic) ||
+      memcmp(buf, kPngMagic, arraysize(kPngMagic)) != 0) {
+    // Data invalid or a JPEG.
+    return false;
+  }
+  size_t pos = arraysize(kPngMagic);
+
+  // Scan for custom chunks until we find one, find the IDAT chunk, or run out
+  // of chunks.
+  for (;;) {
+    if (size - pos < kPngChunkMetadataSize)
+      break;
+    uint32 length = 0;
+    net::ReadBigEndian(reinterpret_cast<const char*>(buf + pos), &length);
+    if (size - pos - kPngChunkMetadataSize < length)
+      break;
+    if (length == 0 && memcmp(buf + pos + sizeof(uint32), kPngScaleChunkType,
+                              arraysize(kPngScaleChunkType)) == 0) {
+      return true;
+    }
+    if (memcmp(buf + pos + sizeof(uint32), kPngDataChunkType,
+               arraysize(kPngDataChunkType)) == 0) {
+      // Stop looking for custom chunks, any custom chunks should be before an
+      // IDAT chunk.
+      break;
+    }
+    pos += length + kPngChunkMetadataSize;
+  }
+  return false;
+}
+
+// static
+bool ResourceBundle::DecodePNG(const unsigned char* buf,
+                               size_t size,
+                               SkBitmap* bitmap,
+                               bool* fell_back_to_1x) {
+  *fell_back_to_1x = PNGContainsFallbackMarker(buf, size);
+  return gfx::PNGCodec::Decode(buf, size, bitmap);
 }
 
 }  // namespace ui

@@ -5,6 +5,8 @@
 #include "base/stl_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "webkit/fileapi/file_system_context.h"
+#include "webkit/fileapi/file_system_file_util.h"
+#include "webkit/fileapi/file_system_operation_context.h"
 #include "webkit/fileapi/file_system_task_runners.h"
 #include "webkit/fileapi/file_system_types.h"
 #include "webkit/fileapi/isolated_context.h"
@@ -18,10 +20,15 @@
 #include "webkit/quota/quota_types.h"
 
 using base::PlatformFileError;
+using fileapi::FileSystemContext;
+using fileapi::FileSystemOperationContext;
+using fileapi::FileSystemURL;
+using fileapi::FileSystemURLSet;
+using fileapi::LocalFileSystemTestOriginHelper;
 using quota::QuotaManager;
 using quota::QuotaStatusCode;
 
-namespace fileapi {
+namespace sync_file_system {
 
 class SyncableFileSystemTest : public testing::Test {
  public:
@@ -31,16 +38,16 @@ class SyncableFileSystemTest : public testing::Test {
                      base::MessageLoopProxy::current()),
         weak_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)) {}
 
-  void SetUp() {
+  virtual void SetUp() {
     file_system_.SetUp();
 
     sync_context_ = new LocalFileSyncContext(base::MessageLoopProxy::current(),
                                              base::MessageLoopProxy::current());
-    ASSERT_EQ(SYNC_STATUS_OK,
+    ASSERT_EQ(sync_file_system::SYNC_STATUS_OK,
               file_system_.MaybeInitializeFileSystemContext(sync_context_));
   }
 
-  void TearDown() {
+  virtual void TearDown() {
     if (sync_context_)
       sync_context_->ShutdownOnUIThread();
     sync_context_ = NULL;
@@ -187,13 +194,13 @@ TEST_F(SyncableFileSystemTest, ChangeTrackerSimple) {
 
   VerifyAndClearChange(URL(kPath0),
                        FileChange(FileChange::FILE_CHANGE_ADD_OR_UPDATE,
-                                  SYNC_FILE_TYPE_DIRECTORY));
+                                  sync_file_system::SYNC_FILE_TYPE_DIRECTORY));
   VerifyAndClearChange(URL(kPath1),
                        FileChange(FileChange::FILE_CHANGE_ADD_OR_UPDATE,
-                                  SYNC_FILE_TYPE_DIRECTORY));
+                                  sync_file_system::SYNC_FILE_TYPE_DIRECTORY));
   VerifyAndClearChange(URL(kPath2),
                        FileChange(FileChange::FILE_CHANGE_ADD_OR_UPDATE,
-                                  SYNC_FILE_TYPE_FILE));
+                                  sync_file_system::SYNC_FILE_TYPE_FILE));
 
   // Creates and removes a same directory.
   EXPECT_EQ(base::PLATFORM_FILE_OK,
@@ -221,13 +228,13 @@ TEST_F(SyncableFileSystemTest, ChangeTrackerSimple) {
 
   VerifyAndClearChange(URL(kPath0),
                        FileChange(FileChange::FILE_CHANGE_DELETE,
-                                  SYNC_FILE_TYPE_DIRECTORY));
+                                  sync_file_system::SYNC_FILE_TYPE_DIRECTORY));
   VerifyAndClearChange(URL(kPath1),
                        FileChange(FileChange::FILE_CHANGE_DELETE,
-                                  SYNC_FILE_TYPE_DIRECTORY));
+                                  sync_file_system::SYNC_FILE_TYPE_DIRECTORY));
   VerifyAndClearChange(URL(kPath2),
                        FileChange(FileChange::FILE_CHANGE_DELETE,
-                                  SYNC_FILE_TYPE_FILE));
+                                  sync_file_system::SYNC_FILE_TYPE_FILE));
 }
 
 // Make sure directory operation is disabled (when it's configured so).
@@ -241,8 +248,8 @@ TEST_F(SyncableFileSystemTest, DisableDirectoryOperations) {
             file_system_.CreateDirectory(URL("dir")));
 
   // Set up another (non-syncable) local file system.
-  LocalFileSystemTestOriginHelper other_file_system_(GURL("http://foo.com/"),
-                                                     kFileSystemTypeTemporary);
+  LocalFileSystemTestOriginHelper other_file_system_(
+      GURL("http://foo.com/"), fileapi::kFileSystemTypeTemporary);
   other_file_system_.SetUp(file_system_.file_system_context());
 
   // Create directory '/a' and file '/a/b' in the other file system.
@@ -268,10 +275,10 @@ TEST_F(SyncableFileSystemTest, DisableDirectoryOperations) {
 
   // Now try copying the directory into the syncable file system, which should
   // fail if directory operation is disabled. (http://crbug.com/161442)
-  EXPECT_EQ(base::PLATFORM_FILE_ERROR_INVALID_OPERATION,
+  EXPECT_NE(base::PLATFORM_FILE_OK,
             file_system_.Copy(kSrcDir, URL("dest")));
 
   other_file_system_.TearDown();
 }
 
-}  // namespace fileapi
+}  // namespace sync_file_system

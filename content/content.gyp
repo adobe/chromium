@@ -22,6 +22,15 @@
           '../webkit/support/setup_third_party.gyp:third_party_headers',
         ],
       }],
+      # TODO(jschuh): Remove this after crbug.com/173851 gets fixed.
+      ['OS=="win" and target_arch=="x64"', {
+        'msvs_settings': {
+          'VCCLCompilerTool': {
+            'AdditionalOptions': ['/bigobj'],
+          },
+        },
+      }],
+      
     ],
   },
   'conditions': [
@@ -113,6 +122,8 @@
               ],
             }],
           ],
+          # Disable c4267 warnings until we fix size_t to int truncations.
+          'msvs_disabled_warnings': [ 4267, ],
         },
       ],
       'conditions': [
@@ -147,6 +158,8 @@
               'includes': [
                 'content_ppapi_plugin.gypi',
               ],
+              # Disable c4267 warnings until we fix size_t to int truncations.
+              'msvs_disabled_warnings': [ 4267, ],
             },
             {
               'target_name': 'content_renderer',
@@ -237,6 +250,8 @@
           'target_name': 'content_common',
           'type': 'none',
           'dependencies': ['content', 'content_resources.gyp:content_resources'],
+          # Disable c4267 warnings until we fix size_t to int truncations.
+          'msvs_disabled_warnings': [ 4267, ],
         },
         {
           'target_name': 'content_gpu',
@@ -252,6 +267,8 @@
           'target_name': 'content_ppapi_plugin',
           'type': 'none',
           'dependencies': ['content'],
+          # Disable c4267 warnings until we fix size_t to int truncations.
+          'msvs_disabled_warnings': [ 4267, ],
         },
         {
           'target_name': 'content_renderer',
@@ -276,7 +293,6 @@
           'target_name': 'common_aidl',
           'type': 'none',
           'variables': {
-            'package_name': 'content',
             'aidl_interface_file': 'public/android/java/src/org/chromium/content/common/common.aidl',
           },
           'sources': [
@@ -290,6 +306,7 @@
           'type': 'none',
           'dependencies': [
             '../base/base.gyp:base',
+            '../media/media.gyp:media_java',
             '../net/net.gyp:net',
             '../ui/ui.gyp:ui_java',
             'common_aidl',
@@ -297,7 +314,6 @@
             'page_transition_types_java',
           ],
           'variables': {
-            'package_name': 'content',
             'java_in_dir': '../content/public/android/java',
             'has_java_resources': 1,
             'R_package': 'org.chromium.content',
@@ -321,7 +337,7 @@
             'public/android/java/src/org/chromium/content/browser/PageTransitionTypes.template',
           ],
           'variables': {
-            'package_name': 'org.chromium.content.browser',
+            'package_name': 'org/chromium/content/browser',
             'template_deps': ['public/common/page_transition_types_list.h'],
           },
           'includes': [ '../build/android/java_cpp_template.gypi' ],

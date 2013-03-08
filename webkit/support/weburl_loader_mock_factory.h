@@ -7,7 +7,7 @@
 
 #include <map>
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebURL.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebURLRequest.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebURLResponse.h"
@@ -89,7 +89,7 @@ class WebURLLoaderMockFactory {
 
   // Reads |m_filePath| and puts its content in |data|.
   // Returns true if it successfully read the file.
-  static bool ReadFile(const FilePath& file_path, WebKit::WebData* data);
+  static bool ReadFile(const base::FilePath& file_path, WebKit::WebData* data);
 
   // The loaders that have not being served data yet.
   typedef std::map<WebURLLoaderMock*, WebKit::WebURLRequest> LoaderToRequestMap;

@@ -8,10 +8,10 @@
 #include "base/command_line.h"
 #include "base/json/json_reader.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/prefs/pref_service.h"
 #include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/spellchecker/spelling_service_client.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
@@ -162,7 +162,7 @@ class TestingSpellingServiceClient : public SpellingServiceClient {
   }
 
  private:
-  virtual net::URLFetcher* CreateURLFetcher(const GURL& url) {
+  virtual net::URLFetcher* CreateURLFetcher(const GURL& url) OVERRIDE {
     EXPECT_EQ("https://www.googleapis.com/rpc", url.spec());
     fetcher_ = new TestSpellingURLFetcher(0, url, this,
                                           request_type_, request_text_,
@@ -189,7 +189,7 @@ class SpellingServiceClientTest : public testing::Test {
   SpellingServiceClientTest() {}
   virtual ~SpellingServiceClientTest() {}
 
-  void SetUp() OVERRIDE {
+  virtual void SetUp() OVERRIDE {
   }
 
   void OnTextCheckComplete(int tag,
@@ -353,11 +353,11 @@ TEST_F(SpellingServiceClientTest, AvailableServices) {
     "en-AU", "en-CA", "en-GB", "en-US",
 #endif
   };
-  // TODO(rlp): We are currently allowing suggest for languages even if
-  // spellcheck is also available.
+  // If spellcheck is allowed, then suggest is not since spellcheck is a
+  // superset of suggest.
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(kSupported); ++i) {
     pref->SetString(prefs::kSpellCheckDictionary, kSupported[i]);
-    EXPECT_TRUE(client_.IsAvailable(&profile_, kSuggest));
+    EXPECT_FALSE(client_.IsAvailable(&profile_, kSuggest));
     EXPECT_TRUE(client_.IsAvailable(&profile_, kSpellcheck));
   }
 

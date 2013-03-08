@@ -47,6 +47,7 @@ const char* kNonPermissionModuleNames[] = {
   "omnibox",
   "pageAction",
   "pageActions",
+  "pageLauncher",
   "permissions",
   "runtime",
   "scriptBadge",
@@ -69,6 +70,7 @@ const char* kNonPermissionFunctionNames[] = {
   "app.installState",
   "app.runningState",
   "management.getPermissionWarningsByManifest",
+  "management.uninstallSelf",
 };
 const size_t kNumNonPermissionFunctionNames =
     arraysize(kNonPermissionFunctionNames);
@@ -223,20 +225,9 @@ bool PermissionSet::operator==(
 }
 
 bool PermissionSet::Contains(const PermissionSet& set) const {
-  // Every set includes the empty set.
-  if (set.IsEmpty())
-    return true;
-
-  if (!apis_.Contains(set.apis()))
-      return false;
-
-  if (!explicit_hosts().Contains(set.explicit_hosts()))
-    return false;
-
-  if (!scriptable_hosts().Contains(set.scriptable_hosts()))
-    return false;
-
-  return true;
+  return apis_.Contains(set.apis()) &&
+         explicit_hosts().Contains(set.explicit_hosts()) &&
+         scriptable_hosts().Contains(set.scriptable_hosts());
 }
 
 std::set<std::string> PermissionSet::GetAPIsAsStrings() const {
@@ -250,7 +241,7 @@ std::set<std::string> PermissionSet::GetAPIsAsStrings() const {
 
 bool PermissionSet::HasAnyAccessToAPI(
     const std::string& api_name) const {
-  if (HasAccessToFunction(api_name))
+  if (HasAccessToFunction(api_name, true))
     return true;
 
   for (size_t i = 0; i < kNumNonPermissionFunctionNames; ++i) {
@@ -267,7 +258,7 @@ std::set<std::string>
 }
 
 PermissionMessages PermissionSet::GetPermissionMessages(
-    Extension::Type extension_type) const {
+    Manifest::Type extension_type) const {
   PermissionMessages messages;
 
   if (HasEffectiveFullAccess()) {
@@ -279,7 +270,7 @@ PermissionMessages PermissionSet::GetPermissionMessages(
 
   // Since platform apps always use isolated storage, they can't (silently)
   // access user data on other domains, so there's no need to prompt.
-  if (extension_type != Extension::TYPE_PLATFORM_APP) {
+  if (extension_type != Manifest::TYPE_PLATFORM_APP) {
     if (HasEffectiveAccessToAllHosts()) {
       messages.push_back(PermissionMessage(
           PermissionMessage::kHostsAll,
@@ -299,7 +290,7 @@ PermissionMessages PermissionSet::GetPermissionMessages(
 }
 
 std::vector<string16> PermissionSet::GetWarningMessages(
-    Extension::Type extension_type) const {
+    Manifest::Type extension_type) const {
   std::vector<string16> messages;
   PermissionMessages permissions = GetPermissionMessages(extension_type);
 
@@ -360,14 +351,16 @@ bool PermissionSet::CheckAPIPermissionWithParam(
 }
 
 bool PermissionSet::HasAccessToFunction(
-    const std::string& function_name) const {
+    const std::string& function_name, bool allow_implicit) const {
   // TODO(jstritar): Embed this information in each permission and add a method
   // like GrantsAccess(function_name) to APIPermission. A "default"
   // permission can then handle the modules and functions that everyone can
   // access.
-  for (size_t i = 0; i < kNumNonPermissionFunctionNames; ++i) {
-    if (function_name == kNonPermissionFunctionNames[i])
-      return true;
+  if (allow_implicit) {
+    for (size_t i = 0; i < kNumNonPermissionFunctionNames; ++i) {
+      if (function_name == kNonPermissionFunctionNames[i])
+        return true;
+    }
   }
 
   // Search for increasingly smaller substrings of |function_name| to see if we
@@ -381,9 +374,11 @@ bool PermissionSet::HasAccessToFunction(
     if (permission && apis_.count(permission->id()))
       return true;
 
-    for (size_t i = 0; i < kNumNonPermissionModuleNames; ++i) {
-      if (name == kNonPermissionModuleNames[i]) {
-        return true;
+    if (allow_implicit) {
+      for (size_t i = 0; i < kNumNonPermissionModuleNames; ++i) {
+        if (name == kNonPermissionModuleNames[i]) {
+          return true;
+        }
       }
     }
     lastdot = name.find_last_of("./");
@@ -516,6 +511,10 @@ std::set<std::string> PermissionSet::GetDistinctHosts(
 }
 
 void PermissionSet::InitImplicitPermissions() {
+  // The downloads permission implies the internal version as well.
+  if (apis_.find(APIPermission::kDownloads) != apis_.end())
+    apis_.insert(APIPermission::kDownloadsInternal);
+
   // The webRequest permission implies the internal version as well.
   if (apis_.find(APIPermission::kWebRequest) != apis_.end())
     apis_.insert(APIPermission::kWebRequestInternal);

@@ -9,11 +9,10 @@
 
 #include "base/bind.h"
 #include "base/message_loop_proxy.h"
+#include "base/prefs/pref_service.h"
 #include "base/prefs/public/pref_change_registrar.h"
 #include "chrome/browser/chromeos/drive/drive.pb.h"
 #include "chrome/browser/chromeos/drive/drive_file_system_interface.h"
-#include "chrome/browser/chromeos/drive/drive_sync_client_observer.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/browser_thread.h"
@@ -153,14 +152,6 @@ void DriveSyncClient::OnCacheCommitted(const std::string& resource_id) {
   AddTaskToQueue(UPLOAD, resource_id);
 }
 
-void DriveSyncClient::AddObserver(DriveSyncClientObserver* observer) {
-  observers_.AddObserver(observer);
-}
-
-void DriveSyncClient::RemoveObserver(DriveSyncClientObserver* observer) {
-  observers_.RemoveObserver(observer);
-}
-
 void DriveSyncClient::AddTaskToQueue(SyncType type,
                                      const std::string& resource_id) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
@@ -194,8 +185,6 @@ void DriveSyncClient::AddTaskToQueue(SyncType type,
 }
 
 void DriveSyncClient::StartTask(SyncType type, const std::string& resource_id) {
-  FOR_EACH_OBSERVER(DriveSyncClientObserver, observers_, OnSyncTaskStarted());
-
   switch (type) {
     case FETCH:
       // Check if the resource has been removed from the start list.
@@ -205,6 +194,7 @@ void DriveSyncClient::StartTask(SyncType type, const std::string& resource_id) {
 
         file_system_->GetFileByResourceId(
             resource_id,
+            DriveClientContext(BACKGROUND),
             base::Bind(&DriveSyncClient::OnFetchFileComplete,
                        weak_ptr_factory_.GetWeakPtr(),
                        resource_id),
@@ -218,6 +208,7 @@ void DriveSyncClient::StartTask(SyncType type, const std::string& resource_id) {
       DVLOG(1) << "Uploading " << resource_id;
       file_system_->UpdateFileByResourceId(
           resource_id,
+          DriveClientContext(BACKGROUND),
           base::Bind(&DriveSyncClient::OnUploadFileComplete,
                      weak_ptr_factory_.GetWeakPtr(),
                      resource_id));
@@ -264,7 +255,7 @@ void DriveSyncClient::OnGetEntryInfoByResourceId(
     const std::string& resource_id,
     const DriveCacheEntry& cache_entry,
     DriveFileError error,
-    const FilePath& /* drive_file_path */,
+    const base::FilePath& /* drive_file_path */,
     scoped_ptr<DriveEntryProto> entry_proto) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
@@ -321,7 +312,7 @@ void DriveSyncClient::OnPinned(const std::string& resource_id,
 
 void DriveSyncClient::OnFetchFileComplete(const std::string& resource_id,
                                           DriveFileError error,
-                                          const FilePath& local_path,
+                                          const base::FilePath& local_path,
                                           const std::string& ununsed_mime_type,
                                           DriveFileType file_type) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
@@ -342,10 +333,6 @@ void DriveSyncClient::OnFetchFileComplete(const std::string& resource_id,
                      << ": " << error;
     }
   }
-
-  if (fetch_list_.empty() && upload_list_.empty()) {
-    FOR_EACH_OBSERVER(DriveSyncClientObserver, observers_, OnSyncClientIdle());
-  }
 }
 
 void DriveSyncClient::OnUploadFileComplete(const std::string& resource_id,
@@ -359,10 +346,6 @@ void DriveSyncClient::OnUploadFileComplete(const std::string& resource_id,
   } else {
     // TODO(satorux): We should re-queue if the error is recoverable.
     LOG(WARNING) << "Failed to upload " << resource_id << ": " << error;
-  }
-
-  if (fetch_list_.empty() && upload_list_.empty()) {
-    FOR_EACH_OBSERVER(DriveSyncClientObserver, observers_, OnSyncClientIdle());
   }
 }
 

@@ -34,6 +34,7 @@
       'dependencies': [
         '<(DEPTH)/base/base.gyp:base',
         '<(DEPTH)/base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
+        '<(DEPTH)/media/media.gyp:media',
         '<(DEPTH)/media/media.gyp:shared_memory_support',
         '<(DEPTH)/media/media.gyp:yuv_convert',
         '<(DEPTH)/skia/skia.gyp:skia',
@@ -90,8 +91,6 @@
         'webmediaplayer_ms.h',
         'webmediaplayer_params.cc',
         'webmediaplayer_params.h',
-        'webmediaplayer_proxy.cc',
-        'webmediaplayer_proxy.h',
         'webmediaplayer_util.cc',
         'webmediaplayer_util.h',
         'webvideoframe_impl.cc',
@@ -123,6 +122,8 @@
           ],
         }],
       ],
+      # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
+      'msvs_disabled_warnings': [ 4267, ],
     },
     {
       'target_name': 'clearkeycdm',
@@ -169,6 +170,11 @@
         }, {  # 'os_posix != 1 or OS == "mac"'
           'type': 'shared_library',
         }],
+        ['OS == "mac"', {
+          'xcode_settings': {
+            'DYLIB_INSTALL_NAME_BASE': '@loader_path',
+          },
+        }]
       ],
       'defines': ['CDM_IMPLEMENTATION'],
       'dependencies': [
@@ -183,9 +189,11 @@
         'crypto/ppapi/clear_key_cdm.cc',
         'crypto/ppapi/clear_key_cdm.h',
       ],
+      # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
+      'msvs_disabled_warnings': [ 4267, ],
     },
     {
-      'target_name': 'clearkeycdmplugin',
+      'target_name': 'clearkeycdmadapter',
       'type': 'none',
       'dependencies': [
         '<(DEPTH)/ppapi/ppapi.gyp:ppapi_cpp',
@@ -209,6 +217,8 @@
         }],
         ['OS == "win"', {
           'type': 'shared_library',
+          # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
+          'msvs_disabled_warnings': [ 4267, ],
         }],
         ['OS == "mac"', {
           'type': 'loadable_module',
@@ -221,6 +231,15 @@
               '-Wl,-exported_symbol,_PPP_InitializeModule',
               '-Wl,-exported_symbol,_PPP_ShutdownModule'
             ]},
+          'copies': [
+            {
+              'destination': '<(PRODUCT_DIR)/clearkeycdmadapter.plugin/Contents/MacOS/',
+              'files': [
+                '<(PRODUCT_DIR)/libclearkeycdm.dylib',
+                '<(PRODUCT_DIR)/ffmpegsumo.so'
+              ]
+            }
+          ]
         }],
       ],
     }

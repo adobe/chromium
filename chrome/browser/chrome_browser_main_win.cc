@@ -11,12 +11,12 @@
 
 #include "base/command_line.h"
 #include "base/environment.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/i18n/rtl.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
 #include "base/scoped_native_library.h"
-#include "base/string_number_conversions.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "base/win/metro.h"
 #include "base/win/text_services_message_filter.h"
@@ -28,7 +28,7 @@
 #include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_shortcut_manager.h"
 #include "chrome/browser/shell_integration.h"
-#include "chrome/browser/system_monitor/removable_device_notifications_window_win.h"
+#include "chrome/browser/storage_monitor/storage_monitor_win.h"
 #include "chrome/browser/ui/simple_message_box.h"
 #include "chrome/browser/ui/uninstall_browser_prompt.h"
 #include "chrome/common/chrome_constants.h"
@@ -135,7 +135,7 @@ int DoUninstallTasks(bool chrome_still_running) {
     VLOG(1) << "Executing uninstall actions";
     if (!first_run::RemoveSentinel())
       VLOG(1) << "Failed to delete sentinel file.";
-    FilePath chrome_exe;
+    base::FilePath chrome_exe;
     if (PathService::Get(base::FILE_EXE, &chrome_exe)) {
       ShellUtil::ShortcutLocation user_shortcut_locations[] = {
         ShellUtil::SHORTCUT_LOCATION_DESKTOP,
@@ -199,8 +199,7 @@ void ChromeBrowserMainPartsWin::PreMainMessageLoopStart() {
     // Make sure that we know how to handle exceptions from the message loop.
     InitializeWindowProcExceptions();
   }
-  removable_device_notifications_window_.reset(
-      chrome::RemovableDeviceNotificationsWindowWin::Create());
+  storage_monitor_.reset(chrome::StorageMonitorWin::Create());
 }
 
 void ChromeBrowserMainPartsWin::PostMainMessageLoopStart() {
@@ -221,7 +220,7 @@ void ChromeBrowserMainPartsWin::PostMainMessageLoopStart() {
 void ChromeBrowserMainPartsWin::PreMainMessageLoopRun() {
   ChromeBrowserMainParts::PreMainMessageLoopRun();
 
-  removable_device_notifications_window_->Init();
+  storage_monitor_->Init();
 }
 
 void ChromeBrowserMainPartsWin::ShowMissingLocaleMessageBox() {
@@ -268,7 +267,7 @@ void ChromeBrowserMainPartsWin::PrepareRestartOnCrashEnviroment(
 void ChromeBrowserMainPartsWin::RegisterApplicationRestart(
     const CommandLine& parsed_command_line) {
   DCHECK(base::win::GetVersion() >= base::win::VERSION_VISTA);
-  base::ScopedNativeLibrary library(FilePath(L"kernel32.dll"));
+  base::ScopedNativeLibrary library(base::FilePath(L"kernel32.dll"));
   // Get the function pointer for RegisterApplicationRestart.
   RegisterApplicationRestartProc register_application_restart =
       static_cast<RegisterApplicationRestartProc>(
@@ -335,11 +334,11 @@ bool ChromeBrowserMainPartsWin::CheckMachineLevelInstall() {
   Version version;
   InstallUtil::GetChromeVersion(dist, true, &version);
   if (version.IsValid()) {
-    FilePath exe_path;
+    base::FilePath exe_path;
     PathService::Get(base::DIR_EXE, &exe_path);
     std::wstring exe = exe_path.value();
-    FilePath user_exe_path(installer::GetChromeInstallPath(false, dist));
-    if (FilePath::CompareEqualIgnoreCase(exe, user_exe_path.value())) {
+    base::FilePath user_exe_path(installer::GetChromeInstallPath(false, dist));
+    if (base::FilePath::CompareEqualIgnoreCase(exe, user_exe_path.value())) {
       bool is_metro = base::win::IsMetroProcess();
       if (!is_metro) {
         // The dialog cannot be shown in Win8 Metro as doing so hangs Chrome on
@@ -360,7 +359,7 @@ bool ChromeBrowserMainPartsWin::CheckMachineLevelInstall() {
         uninstall_cmd.AppendSwitch(
             installer::switches::kDoNotRemoveSharedItems);
 
-        const FilePath setup_exe(uninstall_cmd.GetProgram());
+        const base::FilePath setup_exe(uninstall_cmd.GetProgram());
         const string16 params(uninstall_cmd.GetArgumentsString());
 
         SHELLEXECUTEINFO sei = { sizeof(sei) };

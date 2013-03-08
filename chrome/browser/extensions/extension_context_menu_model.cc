@@ -4,6 +4,7 @@
 
 #include "chrome/browser/extensions/extension_context_menu_model.h"
 
+#include "base/prefs/pref_service.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/extensions/extension_action.h"
 #include "chrome/browser/extensions/extension_action_manager.h"
@@ -11,11 +12,10 @@
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
 #include "chrome/browser/extensions/management_policy.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/chrome_pages.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/manifest_url_handler.h"
@@ -77,7 +77,8 @@ bool ExtensionContextMenuModel::IsCommandIdEnabled(int command_id) const {
     // homepage, we just disable this menu item.
     return extensions::ManifestURL::GetHomepageURL(extension).is_valid();
   } else if (command_id == INSPECT_POPUP) {
-    WebContents* web_contents = chrome::GetActiveWebContents(browser_);
+    WebContents* web_contents =
+        browser_->tab_strip_model()->GetActiveWebContents();
     if (!web_contents)
       return false;
 
@@ -129,7 +130,7 @@ void ExtensionContextMenuModel::ExecuteCommand(int command_id) {
       break;
     }
     case MANAGE: {
-      chrome::ShowExtensions(browser_);
+      chrome::ShowExtensions(browser_, extension->id());
       break;
     }
     case INSPECT_POPUP: {
@@ -164,7 +165,6 @@ void ExtensionContextMenuModel::InitMenu(const Extension* extension) {
   extension_action_ = extension_action_manager->GetBrowserAction(*extension);
   if (!extension_action_)
     extension_action_ = extension_action_manager->GetPageAction(*extension);
-  DCHECK(extension_action_);
 
   std::string extension_name = extension->name();
   // Ampersands need to be escaped to avoid being treated like
@@ -177,7 +177,7 @@ void ExtensionContextMenuModel::InitMenu(const Extension* extension) {
   if (extension_action_manager->GetBrowserAction(*extension))
     AddItemWithStringId(HIDE, IDS_EXTENSIONS_HIDE_BUTTON);
   AddSeparator(ui::NORMAL_SEPARATOR);
-  AddItemWithStringId(MANAGE, IDS_MANAGE_EXTENSIONS);
+  AddItemWithStringId(MANAGE, IDS_MANAGE_EXTENSION);
 }
 
 const Extension* ExtensionContextMenuModel::GetExtension() const {

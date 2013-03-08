@@ -90,9 +90,20 @@ void ErrorScreenHandler::ShowCaptivePortalError(const std::string& network) {
   state_ = STATE_CAPTIVE_PORTAL_ERROR;
 }
 
+void ErrorScreenHandler::ShowTimeoutError() {
+  web_ui()->CallJavascriptFunction("login.ErrorMessageScreen.showTimeoutError");
+  state_ = STATE_TIMEOUT_ERROR;
+}
+
 void ErrorScreenHandler::ShowOfflineError() {
   web_ui()->CallJavascriptFunction("login.ErrorMessageScreen.showOfflineError");
   state_ = STATE_OFFLINE_ERROR;
+}
+
+void ErrorScreenHandler::AllowGuestSignin(bool allowed) {
+  base::FundamentalValue allowed_value(allowed);
+  web_ui()->CallJavascriptFunction("login.ErrorMessageScreen.allowGuestSignin",
+                                   allowed_value);
 }
 
 void ErrorScreenHandler::AllowOfflineLogin(bool allowed) {

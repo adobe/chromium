@@ -132,9 +132,17 @@ TEST_F(LauncherViewIconObserverTest, AddRemove) {
   observer()->Reset();
 }
 
+// Sometimes fails on trybots on win7_aura. http://crbug.com/177135
+#if defined(OS_WIN)
+#define MAYBE_AddRemoveWithMultipleDisplays \
+    DISABLED_AddRemoveWithMultipleDisplays
+#else
+#define MAYBE_AddRemoveWithMultipleDisplays \
+    AddRemoveWithMultipleDisplays
+#endif
 // Make sure creating/deleting an window on one displays notifies a
 // launcher on external display as well as one on primary.
-TEST_F(LauncherViewIconObserverTest, AddRemoveWithMultipleDisplays) {
+TEST_F(LauncherViewIconObserverTest, MAYBE_AddRemoveWithMultipleDisplays) {
   UpdateDisplay("400x400,400x400");
   TestLauncherIconObserver second_observer(LauncherForSecondaryDisplay());
 
@@ -838,6 +846,17 @@ TEST_F(LauncherViewTest, ResizeDuringOverflowAddAnimation) {
   const gfx::Rect& app_list_bounds =
       test_api_->GetBoundsByIndex(app_list_button_index);
   EXPECT_EQ(app_list_bounds, app_list_ideal_bounds);
+}
+
+// Check that the first item in the list follows Fitt's law by including the
+// first pixel and being therefore bigger then the others.
+TEST_F(LauncherViewTest, CheckFittsLaw) {
+  // All buttons should be visible.
+  ASSERT_EQ(test_api_->GetLastVisibleIndex() + 1,
+            test_api_->GetButtonCount());
+  gfx::Rect ideal_bounds_0 = test_api_->GetIdealBoundsByIndex(0);
+  gfx::Rect ideal_bounds_1 = test_api_->GetIdealBoundsByIndex(1);
+  EXPECT_GT(ideal_bounds_0.width(), ideal_bounds_1.width());
 }
 
 }  // namespace test

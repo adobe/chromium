@@ -16,6 +16,7 @@
 #include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/gfx/font.h"
 #include "ui/gfx/native_widget_types.h"
+#include "ui/gfx/text_constants.h"
 #include "ui/views/controls/textfield/native_textfield_wrapper.h"
 #include "ui/views/view.h"
 
@@ -24,8 +25,8 @@
 #endif
 
 namespace gfx {
-struct StyleRange;
-}  // namespace gfx
+class ImageSkia;
+}
 
 namespace ui {
 class Range;
@@ -33,6 +34,8 @@ class TextInputClient;
 }  // namespace ui
 
 namespace views {
+
+class ImageView;
 
 class TextfieldController;
 
@@ -168,6 +171,10 @@ class VIEWS_EXPORT Textfield : public View {
     placeholder_text_color_ = color;
   }
 
+  // Adds an icon which displays inside the border on the right side of the view
+  // (left in RTL).
+  void SetIcon(const gfx::ImageSkia& icon);
+
   // Getter for the horizontal margins that were set. Returns false if
   // horizontal margins weren't set.
   bool GetHorizontalMargins(int* left, int* right);
@@ -191,7 +198,8 @@ class VIEWS_EXPORT Textfield : public View {
 
   // Gets the selected range. This is views-implementation only and
   // has to be called after the wrapper is created.
-  void GetSelectedRange(ui::Range* range) const;
+  // TODO(msw): Return a const reference when NativeTextfieldWin is gone.
+  ui::Range GetSelectedRange() const;
 
   // Selects the text given by |range|. This is views-implementation only and
   // has to be called after the wrapper is created.
@@ -199,7 +207,8 @@ class VIEWS_EXPORT Textfield : public View {
 
   // Gets the selection model. This is views-implementation only and
   // has to be called after the wrapper is created.
-  void GetSelectionModel(gfx::SelectionModel* sel) const;
+  // TODO(msw): Return a const reference when NativeTextfieldWin is gone.
+  gfx::SelectionModel GetSelectionModel() const;
 
   // Selects the text given by |sel|. This is views-implementation only and
   // has to be called after the wrapper is created.
@@ -209,14 +218,18 @@ class VIEWS_EXPORT Textfield : public View {
   // only and has to be called after the wrapper is created.
   size_t GetCursorPosition() const;
 
-  // Applies |style| to the text specified by its range. The style will be
-  // ignored if range is empty or invalid. This is views-implementation only and
+  // Set the text color over the entire text or a logical character range.
+  // Empty and invalid ranges are ignored. This is views-implementation only and
   // has to be called after the wrapper is created.
-  void ApplyStyleRange(const gfx::StyleRange& style);
+  void SetColor(SkColor value);
+  void ApplyColor(SkColor value, const ui::Range& range);
 
-  // Applies the default style to the textfield. This is views-implementation
-  // only and has to be called after the wrapper is created.
-  void ApplyDefaultStyle();
+  // Set various text styles over the entire text or a logical character range.
+  // The respective |style| is applied if |value| is true, or removed if false.
+  // Empty and invalid ranges are ignored. This is views-implementation only and
+  // has to be called after the wrapper is created.
+  void SetStyle(gfx::TextStyle style, bool value);
+  void ApplyStyle(gfx::TextStyle style, bool value, const ui::Range& range);
 
   // Clears Edit history.
   void ClearEditHistory();
@@ -316,6 +329,9 @@ class VIEWS_EXPORT Textfield : public View {
 
   // Placeholder text color.
   SkColor placeholder_text_color_;
+
+  // When non-NULL, an icon to display inside the border of the textfield.
+  views::ImageView* icon_view_;
 
   // The accessible name of the text field.
   string16 accessible_name_;

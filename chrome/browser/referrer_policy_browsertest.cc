@@ -3,14 +3,14 @@
 // found in the LICENSE file.
 
 #include "base/bind.h"
-#include "base/string_number_conversions.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/tab_contents/render_view_context_menu.h"
 #include "chrome/browser/tab_contents/render_view_context_menu_browsertest_util.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
-#include "chrome/browser/ui/browser_tabstrip.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
@@ -36,7 +36,7 @@
 
 namespace {
 
-const FilePath::CharType kDocRoot[] =
+const base::FilePath::CharType kDocRoot[] =
     FILE_PATH_LITERAL("chrome/test/data/referrer_policy");
 
 }  // namespace
@@ -49,11 +49,11 @@ class ReferrerPolicyTest : public InProcessBrowserTest {
    virtual void SetUp() OVERRIDE {
      test_server_.reset(new net::TestServer(net::TestServer::TYPE_HTTP,
                                             net::TestServer::kLocalhost,
-                                            FilePath(kDocRoot)));
+                                            base::FilePath(kDocRoot)));
      ASSERT_TRUE(test_server_->Start());
      ssl_test_server_.reset(new net::TestServer(net::TestServer::TYPE_HTTPS,
                                                 net::TestServer::kLocalhost,
-                                                FilePath(kDocRoot)));
+                                                base::FilePath(kDocRoot)));
      ASSERT_TRUE(ssl_test_server_->Start());
 
      InProcessBrowserTest::SetUp();
@@ -139,7 +139,8 @@ class ReferrerPolicyTest : public InProcessBrowserTest {
         content::NotificationService::AllSources());
 
     string16 expected_title = GetExpectedTitle(start_url, expected_referrer);
-    content::WebContents* tab = chrome::GetActiveWebContents(browser());
+    content::WebContents* tab =
+        browser()->tab_strip_model()->GetActiveWebContents();
     content::TitleWatcher title_watcher(tab, expected_title);
 
     // Watch for all possible outcomes to avoid timeouts if something breaks.
@@ -379,7 +380,8 @@ IN_PROC_BROWSER_TEST_F(ReferrerPolicyTest, History) {
 
   string16 expected_title =
       GetExpectedTitle(start_url, EXPECT_ORIGIN_AS_REFERRER);
-  content::WebContents* tab = chrome::GetActiveWebContents(browser());
+  content::WebContents* tab =
+      browser()->tab_strip_model()->GetActiveWebContents();
   scoped_ptr<content::TitleWatcher> title_watcher(
       new content::TitleWatcher(tab, expected_title));
 

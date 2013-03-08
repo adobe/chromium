@@ -4,7 +4,7 @@
 
 #include "chrome/browser/ui/views/website_settings/website_settings_popup_view.h"
 
-#include "base/string_number_conversions.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/api/infobars/infobar_service.h"
 #include "chrome/browser/certificate_viewer.h"
@@ -322,14 +322,12 @@ WebsiteSettingsPopupView::WebsiteSettingsPopupView(
   tabbed_pane_->AddTabAtIndex(
       TAB_ID_PERMISSIONS,
       l10n_util::GetStringUTF16(IDS_WEBSITE_SETTINGS_TAB_LABEL_PERMISSIONS),
-      CreatePermissionsTab(),
-      true);
+      CreatePermissionsTab());
   connection_tab_ = CreateConnectionTab();
   tabbed_pane_->AddTabAtIndex(
       TAB_ID_CONNECTION,
       l10n_util::GetStringUTF16(IDS_WEBSITE_SETTINGS_TAB_LABEL_CONNECTION),
-      connection_tab_,
-      true);
+      connection_tab_);
   DCHECK_EQ(tabbed_pane_->GetTabCount(), NUM_TAB_IDS);
   tabbed_pane_->set_listener(this);
 
@@ -359,7 +357,7 @@ void WebsiteSettingsPopupView::OnPermissionChanged(
                                       permission_selector->current_setting());
 }
 
-void WebsiteSettingsPopupView::OnWidgetClosing(views::Widget* widget) {
+void WebsiteSettingsPopupView::OnWidgetDestroying(views::Widget* widget) {
   presenter_->OnUIClosing();
 }
 

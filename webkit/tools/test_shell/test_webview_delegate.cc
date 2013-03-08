@@ -532,7 +532,7 @@ WebPlugin* TestWebViewDelegate::createPlugin(WebFrame* frame,
 WebMediaPlayer* TestWebViewDelegate::createMediaPlayer(
     WebFrame* frame, const WebKit::WebURL& url, WebMediaPlayerClient* client) {
   webkit_media::WebMediaPlayerParams params(
-      NULL, NULL, NULL, new media::MediaLog());
+      NULL, NULL, new media::MediaLog());
   return new webkit_media::WebMediaPlayerImpl(
       frame,
       client,
@@ -823,7 +823,7 @@ void TestWebViewDelegate::openFileSystem(
 // WebPluginPageDelegate -----------------------------------------------------
 
 WebKit::WebPlugin* TestWebViewDelegate::CreatePluginReplacement(
-    const FilePath& file_path) {
+    const base::FilePath& file_path) {
   return NULL;
 }
 

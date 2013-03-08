@@ -5,12 +5,15 @@
 #include "base/command_line.h"
 #include "base/memory/singleton.h"
 #include "base/run_loop.h"
+#include "base/string_util.h"
+#include "base/strings/string_split.h"
 #include "base/test/test_timeouts.h"
 #include "base/utf_string_conversions.h"
 #include "content/browser/browser_plugin/browser_plugin_guest.h"
 #include "content/browser/browser_plugin/browser_plugin_host_factory.h"
 #include "content/browser/browser_plugin/test_browser_plugin_embedder.h"
 #include "content/browser/browser_plugin/test_browser_plugin_guest.h"
+#include "content/browser/browser_plugin/test_browser_plugin_guest_manager.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/common/view_messages.h"
@@ -22,8 +25,8 @@
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_utils.h"
 #include "content/shell/shell.h"
-#include "content/test/content_browser_test_utils.h"
 #include "content/test/content_browser_test.h"
+#include "content/test/content_browser_test_utils.h"
 #include "net/base/net_util.h"
 #include "net/test/test_server.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
@@ -103,6 +106,14 @@ namespace content {
 // BrowserPluginGuest.
 class TestBrowserPluginHostFactory : public BrowserPluginHostFactory {
  public:
+  virtual BrowserPluginGuestManager*
+      CreateBrowserPluginGuestManager() OVERRIDE {
+    guest_manager_instance_count_++;
+    if (message_loop_runner_)
+      message_loop_runner_->Quit();
+    return new TestBrowserPluginGuestManager();
+  }
+
   virtual BrowserPluginGuest* CreateBrowserPluginGuest(
       int instance_id,
       WebContentsImpl* web_contents,
@@ -114,13 +125,9 @@ class TestBrowserPluginHostFactory : public BrowserPluginHostFactory {
 
   // Also keeps track of number of instances created.
   virtual BrowserPluginEmbedder* CreateBrowserPluginEmbedder(
-      WebContentsImpl* web_contents,
-      RenderViewHost* render_view_host) OVERRIDE {
-    embedder_instance_count_++;
-    if (message_loop_runner_)
-      message_loop_runner_->Quit();
+      WebContentsImpl* web_contents) OVERRIDE {
 
-    return new TestBrowserPluginEmbedder(web_contents, render_view_host);
+    return new TestBrowserPluginEmbedder(web_contents);
   }
 
   // Singleton getter.
@@ -130,9 +137,9 @@ class TestBrowserPluginHostFactory : public BrowserPluginHostFactory {
 
   // Waits for at least one embedder to be created in the test. Returns true if
   // we have a guest, false if waiting times out.
-  void WaitForEmbedderCreation() {
-    // Check if already have created instance.
-    if (embedder_instance_count_ > 0)
+  void WaitForGuestManagerCreation() {
+    // Check if already have created an instance.
+    if (guest_manager_instance_count_ > 0)
       return;
     // Wait otherwise.
     message_loop_runner_ = new MessageLoopRunner();
@@ -140,7 +147,7 @@ class TestBrowserPluginHostFactory : public BrowserPluginHostFactory {
   }
 
  protected:
-  TestBrowserPluginHostFactory() : embedder_instance_count_(0) {}
+  TestBrowserPluginHostFactory() : guest_manager_instance_count_(0) {}
   virtual ~TestBrowserPluginHostFactory() {}
 
  private:
@@ -148,7 +155,7 @@ class TestBrowserPluginHostFactory : public BrowserPluginHostFactory {
   friend struct DefaultSingletonTraits<TestBrowserPluginHostFactory>;
 
   scoped_refptr<MessageLoopRunner> message_loop_runner_;
-  int embedder_instance_count_;
+  int guest_manager_instance_count_;
 
   DISALLOW_COPY_AND_ASSIGN(TestBrowserPluginHostFactory);
 };
@@ -231,13 +238,16 @@ class BrowserPluginHostTest : public ContentBrowserTest {
  public:
   BrowserPluginHostTest()
       : test_embedder_(NULL),
-        test_guest_(NULL) {}
+        test_guest_(NULL),
+        test_guest_manager_(NULL) {}
 
   virtual void SetUp() OVERRIDE {
     // Override factory to create tests instances of BrowserPlugin*.
     content::BrowserPluginEmbedder::set_factory_for_testing(
         TestBrowserPluginHostFactory::GetInstance());
     content::BrowserPluginGuest::set_factory_for_testing(
+        TestBrowserPluginHostFactory::GetInstance());
+    content::BrowserPluginGuestManager::set_factory_for_testing(
         TestBrowserPluginHostFactory::GetInstance());
 
     ContentBrowserTest::SetUp();
@@ -279,6 +289,23 @@ class BrowserPluginHostTest : public ContentBrowserTest {
         content::ExecuteScriptAndGetValue(rvh, jscript);
   }
 
+  bool IsAttributeNull(RenderViewHost* rvh, const std::string& attribute) {
+    scoped_ptr<base::Value> value = content::ExecuteScriptAndGetValue(rvh,
+        "document.getElementById('plugin').getAttribute('" + attribute + "');");
+    return value->GetType() == Value::TYPE_NULL;
+  }
+
+  // Removes all attributes in the comma-delimited string |attributes|.
+  void RemoveAttributes(RenderViewHost* rvh, const std::string& attributes) {
+    std::vector<std::string> attributes_list;
+    base::SplitString(attributes, ',', &attributes_list);
+    std::vector<std::string>::const_iterator itr;
+    for (itr = attributes_list.begin(); itr != attributes_list.end(); ++itr) {
+      ExecuteSyncJSFunction(rvh, "document.getElementById('plugin')"
+                                 "." + *itr + " = null;");
+    }
+  }
+
   // This helper method does the following:
   // 1. Start the test server and navigate the shell to |embedder_url|.
   // 2. Execute custom pre-navigation |embedder_code| if provided.
@@ -314,16 +341,21 @@ class BrowserPluginHostTest : public ContentBrowserTest {
     }
 
     // Wait to make sure embedder is created/attached to WebContents.
-    TestBrowserPluginHostFactory::GetInstance()->WaitForEmbedderCreation();
+    TestBrowserPluginHostFactory::GetInstance()->WaitForGuestManagerCreation();
 
     test_embedder_ = static_cast<TestBrowserPluginEmbedder*>(
         embedder_web_contents->GetBrowserPluginEmbedder());
     ASSERT_TRUE(test_embedder_);
-    test_embedder_->WaitForGuestAdded();
+
+    test_guest_manager_ = static_cast<TestBrowserPluginGuestManager*>(
+        embedder_web_contents->GetBrowserPluginGuestManager());
+    ASSERT_TRUE(test_guest_manager_);
+
+    test_guest_manager_->WaitForGuestAdded();
 
     // Verify that we have exactly one guest.
-    const BrowserPluginEmbedder::ContainerInstanceMap& instance_map =
-        test_embedder_->guest_web_contents_for_testing();
+    const TestBrowserPluginGuestManager::GuestInstanceMap& instance_map =
+        test_guest_manager_->guest_web_contents_for_testing();
     EXPECT_EQ(1u, instance_map.size());
 
     WebContentsImpl* test_guest_web_contents = static_cast<WebContentsImpl*>(
@@ -335,10 +367,14 @@ class BrowserPluginHostTest : public ContentBrowserTest {
 
   TestBrowserPluginEmbedder* test_embedder() const { return test_embedder_; }
   TestBrowserPluginGuest* test_guest() const { return test_guest_; }
+  TestBrowserPluginGuestManager* test_guest_manager() const {
+    return test_guest_manager_;
+  }
 
  private:
   TestBrowserPluginEmbedder* test_embedder_;
   TestBrowserPluginGuest* test_guest_;
+  TestBrowserPluginGuestManager* test_guest_manager_;
   DISALLOW_COPY_AND_ASSIGN(BrowserPluginHostTest);
 };
 
@@ -449,7 +485,7 @@ IN_PROC_BROWSER_TEST_F(BrowserPluginHostTest, EmbedderChangedAfterSwap) {
   net::TestServer https_server(
       net::TestServer::TYPE_HTTPS,
       net::TestServer::kLocalhost,
-      FilePath(FILE_PATH_LITERAL("content/test/data")));
+      base::FilePath(FILE_PATH_LITERAL("content/test/data")));
   ASSERT_TRUE(https_server.Start());
 
   // 1. Load an embedder page with one guest in it.
@@ -710,10 +746,10 @@ IN_PROC_BROWSER_TEST_F(BrowserPluginHostTest, ReloadEmbedder) {
     ExecuteSyncJSFunction(
         test_embedder()->web_contents()->GetRenderViewHost(),
         StringPrintf("SetSrc('%s');", kHTMLForGuest));
-    test_embedder()->WaitForGuestAdded();
+    test_guest_manager()->WaitForGuestAdded();
 
-    const BrowserPluginEmbedder::ContainerInstanceMap& instance_map =
-        test_embedder()->guest_web_contents_for_testing();
+    const TestBrowserPluginGuestManager::GuestInstanceMap& instance_map =
+        test_guest_manager()->guest_web_contents_for_testing();
     WebContentsImpl* test_guest_web_contents = static_cast<WebContentsImpl*>(
         instance_map.begin()->second);
     TestBrowserPluginGuest* new_test_guest =
@@ -818,7 +854,7 @@ IN_PROC_BROWSER_TEST_F(BrowserPluginHostTest, LoadAbort) {
 
   {
     // Navigate the guest to an illegal chrome:// URL.
-    const string16 expected_title = ASCIIToUTF16("ERR_FAILED");
+    const string16 expected_title = ASCIIToUTF16("ERR_INVALID_URL");
     content::TitleWatcher title_watcher(test_embedder()->web_contents(),
                                         expected_title);
     RenderViewHostImpl* rvh = static_cast<RenderViewHostImpl*>(
@@ -1058,10 +1094,7 @@ IN_PROC_BROWSER_TEST_F(BrowserPluginHostTest, HiddenBeforeNavigation) {
 
 // This test verifies that if we lose the guest, and get a new one,
 // the new guest will inherit the visibility state of the old guest.
-//
-// Very flaky on Linux, Linux CrOS, somewhat flaky on XP, slightly on
-// Mac; http://crbug.com/162809.
-IN_PROC_BROWSER_TEST_F(BrowserPluginHostTest, DISABLED_VisibilityPreservation) {
+IN_PROC_BROWSER_TEST_F(BrowserPluginHostTest, VisibilityPreservation) {
   const char* kEmbedderURL = "files/browser_plugin_embedder.html";
   StartBrowserPluginTest(kEmbedderURL, kHTMLForGuest, true, "");
   RenderViewHostImpl* rvh = static_cast<RenderViewHostImpl*>(
@@ -1171,11 +1204,11 @@ IN_PROC_BROWSER_TEST_F(BrowserPluginHostTest, FocusTracksEmbedder) {
 IN_PROC_BROWSER_TEST_F(BrowserPluginHostTest, AutoSizeBeforeNavigation) {
   const char* kEmbedderURL = "files/browser_plugin_embedder.html";
   const std::string embedder_code =
-      "document.getElementById('plugin').minWidth = 300;"
-      "document.getElementById('plugin').minHeight = 200;"
-      "document.getElementById('plugin').maxWidth = 600;"
-      "document.getElementById('plugin').maxHeight = 400;"
-      "document.getElementById('plugin').autoSize = true;";
+      "document.getElementById('plugin').minwidth = 300;"
+      "document.getElementById('plugin').minheight = 200;"
+      "document.getElementById('plugin').maxwidth = 600;"
+      "document.getElementById('plugin').maxheight = 400;"
+      "document.getElementById('plugin').autosize = true;";
   StartBrowserPluginTest(
       kEmbedderURL, kHTMLForGuestWithSize, true, embedder_code);
   // Verify that the guest has been auto-sized.
@@ -1197,28 +1230,28 @@ IN_PROC_BROWSER_TEST_F(BrowserPluginHostTest, AutoSizeAfterNavigation) {
                                         expected_title);
     ExecuteSyncJSFunction(
         rvh,
-        "document.getElementById('plugin').minWidth = 300;"
-        "document.getElementById('plugin').minHeight = 200;"
-        "document.getElementById('plugin').maxWidth = 600;"
-        "document.getElementById('plugin').maxHeight = 400;"
-        "document.getElementById('plugin').autoSize = true;");
+        "document.getElementById('plugin').minwidth = 300;"
+        "document.getElementById('plugin').minheight = 200;"
+        "document.getElementById('plugin').maxwidth = 600;"
+        "document.getElementById('plugin').maxheight = 400;"
+        "document.getElementById('plugin').autosize = true;");
     string16 actual_title = title_watcher.WaitAndGetTitle();
     EXPECT_EQ(expected_title, actual_title);
   }
   {
-    // Change the minWidth and verify that it causes relayout.
+    // Change the minwidth and verify that it causes relayout.
     const string16 expected_title = ASCIIToUTF16("AutoSize(350, 400)");
     content::TitleWatcher title_watcher(test_embedder()->web_contents(),
                                         expected_title);
     ExecuteSyncJSFunction(
-        rvh, "document.getElementById('plugin').minWidth = 350;");
+        rvh, "document.getElementById('plugin').minwidth = 350;");
     string16 actual_title = title_watcher.WaitAndGetTitle();
     EXPECT_EQ(expected_title, actual_title);
   }
   {
     // Turn off autoSize and verify that the guest resizes to fit the container.
     ExecuteSyncJSFunction(
-        rvh, "document.getElementById('plugin').autoSize = false;");
+        rvh, "document.getElementById('plugin').autosize = null;");
     test_guest()->WaitForViewSize(gfx::Size(640, 480));
   }
 }
@@ -1279,6 +1312,79 @@ IN_PROC_BROWSER_TEST_F(BrowserPluginHostTest, ChangeWindowName) {
     string16 actual_title = title_watcher.WaitAndGetTitle();
     EXPECT_EQ(expected_title, actual_title);
 
+  }
+}
+
+// This test verifies that all autosize attributes can be removed
+// without crashing the plugin, or throwing errors.
+IN_PROC_BROWSER_TEST_F(BrowserPluginHostTest, RemoveAutosizeAttributes) {
+  const char* kEmbedderURL = "files/browser_plugin_embedder.html";
+  const std::string embedder_code =
+      "document.getElementById('plugin').minwidth = 300;"
+      "document.getElementById('plugin').minheight = 200;"
+      "document.getElementById('plugin').maxwidth = 600;"
+      "document.getElementById('plugin').maxheight = 400;"
+      "document.getElementById('plugin').name = 'name';"
+      "document.getElementById('plugin').src = 'foo';"
+      "document.getElementById('plugin').autosize = '';";
+  StartBrowserPluginTest(
+      kEmbedderURL, kHTMLForGuestWithSize, true, embedder_code);
+  RenderViewHostImpl* rvh = static_cast<RenderViewHostImpl*>(
+      test_embedder()->web_contents()->GetRenderViewHost());
+  RemoveAttributes(rvh, "maxheight, maxwidth, minheight, minwidth, autosize");
+
+  // Verify that the guest resizes to fit the container (and hasn't crashed).
+  test_guest()->WaitForViewSize(gfx::Size(640, 480));
+  EXPECT_TRUE(IsAttributeNull(rvh, "maxheight"));
+  EXPECT_TRUE(IsAttributeNull(rvh, "maxwidth"));
+  EXPECT_TRUE(IsAttributeNull(rvh, "minheight"));
+  EXPECT_TRUE(IsAttributeNull(rvh, "minwidth"));
+  EXPECT_TRUE(IsAttributeNull(rvh, "autosize"));
+}
+
+// This test verifies that autosize works when some of the parameters are unset.
+IN_PROC_BROWSER_TEST_F(BrowserPluginHostTest, PartialAutosizeAttributes) {
+  const char* kEmbedderURL = "files/browser_plugin_embedder.html";
+  const std::string embedder_code =
+      "document.getElementById('plugin').minwidth = 300;"
+      "document.getElementById('plugin').minheight = 200;"
+      "document.getElementById('plugin').maxwidth = 700;"
+      "document.getElementById('plugin').maxheight = 600;"
+      "document.getElementById('plugin').autosize = '';";
+  StartBrowserPluginTest(
+      kEmbedderURL, kHTMLForGuestWithSize, true, embedder_code);
+  RenderViewHostImpl* rvh = static_cast<RenderViewHostImpl*>(
+      test_embedder()->web_contents()->GetRenderViewHost());
+  {
+    // Remove an autosize attribute and verify that it causes relayout.
+    const string16 expected_title = ASCIIToUTF16("AutoSize(640, 400)");
+    content::TitleWatcher title_watcher(test_embedder()->web_contents(),
+                                        expected_title);
+    RemoveAttributes(rvh, "minwidth");
+    string16 actual_title = title_watcher.WaitAndGetTitle();
+    EXPECT_EQ(expected_title, actual_title);
+  }
+  {
+    // Remove an autosize attribute and verify that it causes relayout.
+    // Also tests that when minwidth > maxwidth, minwidth = maxwidth.
+    const string16 expected_title = ASCIIToUTF16("AutoSize(700, 480)");
+    content::TitleWatcher title_watcher(test_embedder()->web_contents(),
+                                        expected_title);
+    RemoveAttributes(rvh, "maxheight");
+    ExecuteSyncJSFunction(
+        rvh, "document.getElementById('plugin').minwidth = 800;"
+             "document.getElementById('plugin').minheight = 800;");
+    string16 actual_title = title_watcher.WaitAndGetTitle();
+    EXPECT_EQ(expected_title, actual_title);
+  }
+  {
+    // Remove maxwidth and make sure the size returns to plugin size.
+    const string16 expected_title = ASCIIToUTF16("AutoSize(640, 480)");
+    content::TitleWatcher title_watcher(test_embedder()->web_contents(),
+                                        expected_title);
+    RemoveAttributes(rvh, "maxwidth");
+    string16 actual_title = title_watcher.WaitAndGetTitle();
+    EXPECT_EQ(expected_title, actual_title);
   }
 }
 

@@ -218,6 +218,10 @@
 	path = third_party/freetype
 	url = https://chromium.googlesource.com/chromium/src/third_party/freetype.git
 	os = android
+[submodule "third_party/freetype2/src"]
+	path = third_party/freetype2/src
+	url = https://chromium.googlesource.com/chromium/src/third_party/freetype2.git
+	os = unix
 [submodule "third_party/gnu_binutils"]
 	path = third_party/gnu_binutils
 	url = https://chromium.googlesource.com/native_client/deps/third_party/gnu_binutils.git

@@ -8,7 +8,7 @@
 #include "content/public/browser/web_ui_controller.h"
 
 class Profile;
-class PrefServiceSyncable;
+class PrefRegistrySyncable;
 
 // The Web UI handler for chrome://signin.
 class SyncPromoUI : public content::WebUIController {
@@ -20,6 +20,8 @@ class SyncPromoUI : public content::WebUIController {
     SOURCE_MENU,
     SOURCE_SETTINGS,
     SOURCE_EXTENSION_INSTALL_BUBBLE,
+    SOURCE_WEBSTORE_INSTALL,
+    SOURCE_APP_LAUNCHER,
     SOURCE_UNKNOWN, // This must be last.
   };
 
@@ -48,7 +50,7 @@ class SyncPromoUI : public content::WebUIController {
   static void SetUserSkippedSyncPromo(Profile* profile);
 
   // Registers the preferences the Sync Promo UI needs.
-  static void RegisterUserPrefs(PrefServiceSyncable* prefs);
+  static void RegisterUserPrefs(PrefRegistrySyncable* registry);
 
   // Returns the sync promo URL wth the given arguments in the query.
   // |next_page| is the URL to navigate to when the user completes or skips the

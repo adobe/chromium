@@ -20,6 +20,28 @@
 
 namespace cloud_print {
 
+static CloudPrintURLFetcherFactory* g_factory = NULL;
+
+// virtual
+CloudPrintURLFetcherFactory::~CloudPrintURLFetcherFactory() {}
+
+// static
+CloudPrintURLFetcher* CloudPrintURLFetcher::Create() {
+  CloudPrintURLFetcherFactory* factory = CloudPrintURLFetcher::factory();
+  return factory ? factory->CreateCloudPrintURLFetcher() :
+      new CloudPrintURLFetcher;
+}
+
+// static
+CloudPrintURLFetcherFactory* CloudPrintURLFetcher::factory() {
+  return g_factory;
+}
+
+// static
+void CloudPrintURLFetcher::set_factory(CloudPrintURLFetcherFactory* factory) {
+  g_factory = factory;
+}
+
 CloudPrintURLFetcher::ResponseAction
 CloudPrintURLFetcher::Delegate::HandleRawResponse(
     const net::URLFetcher* source,
@@ -122,15 +144,17 @@ void CloudPrintURLFetcher::OnURLFetchComplete(
       // response, we will retry (to handle the case where we got redirected
       // to a non-cloudprint-server URL eg. for authentication).
       bool succeeded = false;
-      DictionaryValue* response_dict = NULL;
-      ParseResponseJSON(data, &succeeded, &response_dict);
-      if (response_dict)
+      scoped_ptr<DictionaryValue> response_dict =
+          ParseResponseJSON(data, &succeeded);
+
+      if (response_dict) {
         action = delegate_->HandleJSONData(source,
                                            source->GetURL(),
-                                           response_dict,
+                                           response_dict.get(),
                                            succeeded);
-      else
+      } else {
         action = RETRY_REQUEST;
+      }
     }
   }
   // Retry the request if needed.
@@ -174,7 +198,7 @@ void CloudPrintURLFetcher::StartRequestHelper(
   DCHECK(delegate);
   // Persist the additional headers in case we need to retry the request.
   additional_headers_ = additional_headers;
-  request_.reset(net::URLFetcher::Create(url, request_type, this));
+  request_.reset(net::URLFetcher::Create(0, url, request_type, this));
   request_->SetRequestContext(GetRequestContextGetter());
   // Since we implement our own retry logic, disable the retry in URLFetcher.
   request_->SetAutomaticallyRetryOn5xx(false);

@@ -19,6 +19,10 @@ namespace dbus {
 class Bus;
 }
 
+namespace power_manager {
+class PowerManagementPolicy;
+}
+
 namespace chromeos {
 
 // Callback used for processing the idle time.  The int64 param is the number of
@@ -44,6 +48,9 @@ class CHROMEOS_EXPORT PowerManagerClient {
 
     virtual ~Observer() {}
 
+    // Called if the power manager process restarts.
+    virtual void PowerManagerRestarted() {}
+
     // Called when the brightness is changed.
     // |level| is of the range [0, 100].
     // |user_initiated| is true if the action is initiated by the user.
@@ -67,6 +74,15 @@ class CHROMEOS_EXPORT PowerManagerClient {
     // (as opposed to the more-common method of adjusting the backlight).
     virtual void ScreenDimmingRequested(ScreenDimmingState state) {}
 
+    // Called when the system is about to suspend. Suspend is deferred until
+    // all observers' implementations of this method have finished running.
+    //
+    // If an observer wishes to asynchronously delay suspend,
+    // PowerManagerClient::GetSuspendReadinessCallback() may be called from
+    // within SuspendImminent().  The returned callback must be called once
+    // the observer is ready for suspend.
+    virtual void SuspendImminent() {}
+
     // Called when the power button is pressed or released.
     virtual void PowerButtonEventReceived(bool down,
                                           const base::TimeTicks& timestamp) {}
@@ -89,7 +105,7 @@ class CHROMEOS_EXPORT PowerManagerClient {
     DISABLE_IDLE_DIM         = 1 << 0,  // Disable screen dimming on idle.
     DISABLE_IDLE_BLANK       = 1 << 1,  // Disable screen blanking on idle.
     DISABLE_IDLE_SUSPEND     = 1 << 2,  // Disable suspend on idle.
-    DISABLE_IDLE_LID_SUSPEND = 1 << 3,  // Disable suspend on lid closed.
+    DISABLE_LID_SUSPEND      = 1 << 3,  // Disable suspend on lid closed.
   };
 
   // Adds and removes the observer.
@@ -153,6 +169,10 @@ class CHROMEOS_EXPORT PowerManagerClient {
       const base::TimeTicks& last_activity_time,
       bool is_fullscreen) = 0;
 
+  // Tells the power manager to begin using |policy|.
+  virtual void SetPolicy(
+      const power_manager::PowerManagementPolicy& policy) = 0;
+
   // Override the current power state on the machine. The overrides will be
   // applied to the request ID specified. To specify a new request; use 0 as the
   // request id and the method will call the provided callback with the new
@@ -174,6 +194,10 @@ class CHROMEOS_EXPORT PowerManagerClient {
   // adjust idleness thresholds and derived, on this side, from the number of
   // video outputs attached.
   virtual void SetIsProjecting(bool is_projecting) = 0;
+
+  // Returns a callback that can be called by an observer to report
+  // readiness for suspend.  See Observer::SuspendImminent().
+  virtual base::Closure GetSuspendReadinessCallback() = 0;
 
   // Creates the instance.
   static PowerManagerClient* Create(DBusClientImplementationType type,

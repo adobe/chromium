@@ -9,7 +9,6 @@
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/debug/alias.h"
-#include "base/file_util.h"
 #include "base/i18n/case_conversion.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
@@ -163,54 +162,62 @@ void EnsureNoPendingDownloadJobsOnFile(bool* result) {
 
 class DownloadItemFactoryImpl : public DownloadItemFactory {
  public:
-    DownloadItemFactoryImpl() {}
-    virtual ~DownloadItemFactoryImpl() {}
+  DownloadItemFactoryImpl() {}
+  virtual ~DownloadItemFactoryImpl() {}
 
-    virtual DownloadItemImpl* CreatePersistedItem(
-        DownloadItemImplDelegate* delegate,
-        DownloadId download_id,
-        const FilePath& path,
-        const GURL& url,
-        const GURL& referrer_url,
-        const base::Time& start_time,
-        const base::Time& end_time,
-        int64 received_bytes,
-        int64 total_bytes,
-        DownloadItem::DownloadState state,
-        bool opened,
-        const net::BoundNetLog& bound_net_log) OVERRIDE {
-      return new DownloadItemImpl(
-          delegate,
-          download_id,
-          path,
-          url,
-          referrer_url,
-          start_time,
-          end_time,
-          received_bytes,
-          total_bytes,
-          state,
-          opened,
-          bound_net_log);
-    }
+  virtual DownloadItemImpl* CreatePersistedItem(
+      DownloadItemImplDelegate* delegate,
+      DownloadId download_id,
+      const base::FilePath& current_path,
+      const base::FilePath& target_path,
+      const std::vector<GURL>& url_chain,
+      const GURL& referrer_url,
+      const base::Time& start_time,
+      const base::Time& end_time,
+      int64 received_bytes,
+      int64 total_bytes,
+      DownloadItem::DownloadState state,
+      DownloadDangerType danger_type,
+      DownloadInterruptReason interrupt_reason,
+      bool opened,
+      const net::BoundNetLog& bound_net_log) OVERRIDE {
+    return new DownloadItemImpl(
+        delegate,
+        download_id,
+        current_path,
+        target_path,
+        url_chain,
+        referrer_url,
+        start_time,
+        end_time,
+        received_bytes,
+        total_bytes,
+        state,
+        danger_type,
+        interrupt_reason,
+        opened,
+        bound_net_log);
+  }
 
-    virtual DownloadItemImpl* CreateActiveItem(
-        DownloadItemImplDelegate* delegate,
-        const DownloadCreateInfo& info,
-        const net::BoundNetLog& bound_net_log) OVERRIDE {
+  virtual DownloadItemImpl* CreateActiveItem(
+      DownloadItemImplDelegate* delegate,
+      const DownloadCreateInfo& info,
+      const net::BoundNetLog& bound_net_log) OVERRIDE {
       return new DownloadItemImpl(delegate, info, bound_net_log);
-    }
+  }
 
-    virtual DownloadItemImpl* CreateSavePageItem(
-        DownloadItemImplDelegate* delegate,
-        const FilePath& path,
-        const GURL& url,
-        DownloadId download_id,
-        const std::string& mime_type,
-        const net::BoundNetLog& bound_net_log) OVERRIDE {
-      return new DownloadItemImpl(delegate, path, url, download_id,
-                                  mime_type, bound_net_log);
-    }
+  virtual DownloadItemImpl* CreateSavePageItem(
+      DownloadItemImplDelegate* delegate,
+      const base::FilePath& path,
+      const GURL& url,
+      DownloadId download_id,
+      const std::string& mime_type,
+      scoped_ptr<DownloadRequestHandleInterface> request_handle,
+      const net::BoundNetLog& bound_net_log) OVERRIDE {
+    return new DownloadItemImpl(delegate, path, url, download_id,
+                                mime_type, request_handle.Pass(),
+                                bound_net_log);
+  }
 };
 
 }  // namespace
@@ -223,8 +230,7 @@ DownloadManagerImpl::DownloadManagerImpl(
       shutdown_needed_(false),
       browser_context_(NULL),
       delegate_(NULL),
-      net_log_(net_log),
-      open_enabled_(true) {
+      net_log_(net_log) {
 }
 
 DownloadManagerImpl::~DownloadManagerImpl() {
@@ -251,7 +257,7 @@ void DownloadManagerImpl::DetermineDownloadTarget(
   // type.  If the types ever diverge, gasket code will need to
   // be written here.
   if (!delegate_ || !delegate_->DetermineDownloadTarget(item, callback)) {
-    FilePath target_path = item->GetForcedFilePath();
+    base::FilePath target_path = item->GetForcedFilePath();
     // TODO(asanka): Determine a useful path if |target_path| is empty.
     callback.Run(target_path,
                  DownloadItem::TARGET_DISPOSITION_OVERWRITE,
@@ -271,7 +277,8 @@ bool DownloadManagerImpl::ShouldCompleteDownload(
   return false;
 }
 
-bool DownloadManagerImpl::ShouldOpenFileBasedOnExtension(const FilePath& path) {
+bool DownloadManagerImpl::ShouldOpenFileBasedOnExtension(
+    const base::FilePath& path) {
   if (!delegate_)
     return false;
 
@@ -362,10 +369,10 @@ DownloadItem* DownloadManagerImpl::StartDownload(
     scoped_ptr<ByteStreamReader> stream) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  FilePath default_download_directory;
+  base::FilePath default_download_directory;
   if (delegate_) {
-    FilePath website_save_directory;      // Unused
-    bool skip_dir_check = false;          // Unused
+    base::FilePath website_save_directory;  // Unused
+    bool skip_dir_check = false;            // Unused
     delegate_->GetSaveDir(GetBrowserContext(), &website_save_directory,
                           &default_download_directory, &skip_dir_check);
   }
@@ -404,31 +411,22 @@ void DownloadManagerImpl::CheckForHistoryFilesRemoval() {
 void DownloadManagerImpl::CheckForFileRemoval(DownloadItemImpl* download_item) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   if (download_item->IsComplete() &&
-      !download_item->GetFileExternallyRemoved()) {
-    BrowserThread::PostTask(
-        BrowserThread::FILE, FROM_HERE,
-        base::Bind(&DownloadManagerImpl::CheckForFileRemovalOnFileThread,
-                   this, download_item->GetId(),
-                   download_item->GetTargetFilePath()));
+      !download_item->GetFileExternallyRemoved() &&
+      delegate_) {
+    delegate_->CheckForFileExistence(
+        download_item,
+        base::Bind(&DownloadManagerImpl::OnFileExistenceChecked,
+                   this, download_item->GetId()));
   }
 }
 
-void DownloadManagerImpl::CheckForFileRemovalOnFileThread(
-    int32 download_id, const FilePath& path) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
-  if (!file_util::PathExists(path)) {
-    BrowserThread::PostTask(
-        BrowserThread::UI, FROM_HERE,
-        base::Bind(&DownloadManagerImpl::OnFileRemovalDetected,
-                   this,
-                   download_id));
-  }
-}
-
-void DownloadManagerImpl::OnFileRemovalDetected(int32 download_id) {
+void DownloadManagerImpl::OnFileExistenceChecked(int32 download_id,
+                                                 bool result) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  if (ContainsKey(downloads_, download_id))
-    downloads_[download_id]->OnDownloadedFileRemoved();
+  if (!result) {  // File does not exist.
+    if (ContainsKey(downloads_, download_id))
+      downloads_[download_id]->OnDownloadedFileRemoved();
+  }
 }
 
 BrowserContext* DownloadManagerImpl::GetBrowserContext() const {
@@ -459,9 +457,10 @@ DownloadItemImpl* DownloadManagerImpl::GetOrCreateDownloadItem(
 }
 
 DownloadItemImpl* DownloadManagerImpl::CreateSavePackageDownloadItem(
-    const FilePath& main_file_path,
+    const base::FilePath& main_file_path,
     const GURL& page_url,
     const std::string& mime_type,
+    scoped_ptr<DownloadRequestHandleInterface> request_handle,
     DownloadItem::Observer* observer) {
   net::BoundNetLog bound_net_log =
       net::BoundNetLog::Make(net_log_, net::NetLog::SOURCE_DOWNLOAD);
@@ -471,6 +470,7 @@ DownloadItemImpl* DownloadManagerImpl::CreateSavePackageDownloadItem(
       page_url,
       GetNextId(),
       mime_type,
+      request_handle.Pass(),
       bound_net_log);
 
   download_item->AddObserver(observer);
@@ -479,10 +479,13 @@ DownloadItemImpl* DownloadManagerImpl::CreateSavePackageDownloadItem(
   FOR_EACH_OBSERVER(Observer, observers_, OnDownloadCreated(
       this, download_item));
 
-  // TODO(asanka): Make the ui an observer.
-  ShowDownloadInBrowser(download_item);
-
   return download_item;
+}
+
+void DownloadManagerImpl::OnSavePackageSuccessfullyFinished(
+    DownloadItem* download_item) {
+  FOR_EACH_OBSERVER(Observer, observers_,
+                    OnSavePackageSuccessfullyFinished(this, download_item));
 }
 
 void DownloadManagerImpl::CancelDownload(int32 download_id) {
@@ -501,7 +504,7 @@ void DownloadManagerImpl::ResumeInterruptedDownload(
   BrowserThread::PostTask(
       BrowserThread::IO,
       FROM_HERE,
-      base::Bind(&BeginDownload, base::Passed(params.Pass()), id));
+      base::Bind(&BeginDownload, base::Passed(&params), id));
 }
 
 void DownloadManagerImpl::SetDownloadItemFactoryForTesting(
@@ -595,26 +598,32 @@ void DownloadManagerImpl::RemoveObserver(Observer* observer) {
 }
 
 DownloadItem* DownloadManagerImpl::CreateDownloadItem(
-    const FilePath& path,
-    const GURL& url,
+    const base::FilePath& current_path,
+    const base::FilePath& target_path,
+    const std::vector<GURL>& url_chain,
     const GURL& referrer_url,
     const base::Time& start_time,
     const base::Time& end_time,
     int64 received_bytes,
     int64 total_bytes,
     DownloadItem::DownloadState state,
+    DownloadDangerType danger_type,
+    DownloadInterruptReason interrupt_reason,
     bool opened) {
   DownloadItemImpl* item = item_factory_->CreatePersistedItem(
       this,
       GetNextId(),
-      path,
-      url,
+      current_path,
+      target_path,
+      url_chain,
       referrer_url,
       start_time,
       end_time,
       received_bytes,
       total_bytes,
       state,
+      danger_type,
+      interrupt_reason,
       opened,
       net::BoundNetLog::Make(net_log_, net::NetLog::SOURCE_DOWNLOAD));
   DCHECK(!ContainsKey(downloads_, item->GetId()));
@@ -622,21 +631,6 @@ DownloadItem* DownloadManagerImpl::CreateDownloadItem(
   FOR_EACH_OBSERVER(Observer, observers_, OnDownloadCreated(this, item));
   VLOG(20) << __FUNCTION__ << "() download = " << item->DebugString(true);
   return item;
-}
-
-// TODO(asanka) Move into an observer.
-void DownloadManagerImpl::ShowDownloadInBrowser(DownloadItemImpl* download) {
-  // The 'contents' may no longer exist if the user closed the contents before
-  // we get this start completion event.
-  WebContents* content = download->GetWebContents();
-
-  // If the contents no longer exists, we ask the embedder to suggest another
-  // contents.
-  if (!content && delegate_)
-    content = delegate_->GetAlternativeWebContentsToNotifyForDownload();
-
-  if (content && content->GetDelegate())
-    content->GetDelegate()->OnStartDownload(content, download);
 }
 
 int DownloadManagerImpl::InProgressCount() const {
@@ -660,10 +654,6 @@ void DownloadManagerImpl::GetAllDownloads(DownloadVector* downloads) {
   }
 }
 
-void DownloadManagerImpl::MockDownloadOpenForTesting() {
-  open_enabled_ = false;
-}
-
 void DownloadManagerImpl::OpenDownload(DownloadItemImpl* download) {
   int num_unopened = 0;
   for (DownloadMap::iterator it = downloads_.begin();
@@ -675,7 +665,7 @@ void DownloadManagerImpl::OpenDownload(DownloadItemImpl* download) {
   }
   RecordOpensOutstanding(num_unopened);
 
-  if (delegate_ && open_enabled_)  // Some tests disable OpenDownload().
+  if (delegate_)
     delegate_->OpenDownload(download);
 }
 

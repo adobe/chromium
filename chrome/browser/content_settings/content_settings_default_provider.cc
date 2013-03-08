@@ -11,14 +11,15 @@
 #include "base/basictypes.h"
 #include "base/command_line.h"
 #include "base/metrics/histogram.h"
+#include "base/prefs/pref_service.h"
 #include "chrome/browser/content_settings/content_settings_rule.h"
 #include "chrome/browser/content_settings/content_settings_utils.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/content_settings.h"
 #include "chrome/common/content_settings_pattern.h"
 #include "chrome/common/pref_names.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
@@ -39,7 +40,6 @@ const ContentSetting kDefaultSettings[] = {
   CONTENT_SETTING_BLOCK,    // CONTENT_SETTINGS_TYPE_POPUPS
   CONTENT_SETTING_ASK,      // CONTENT_SETTINGS_TYPE_GEOLOCATION
   CONTENT_SETTING_ASK,      // CONTENT_SETTINGS_TYPE_NOTIFICATIONS
-  CONTENT_SETTING_ASK,      // CONTENT_SETTINGS_TYPE_INTENTS
   CONTENT_SETTING_DEFAULT,  // CONTENT_SETTINGS_TYPE_AUTO_SELECT_CERTIFICATE
   CONTENT_SETTING_ASK,      // CONTENT_SETTINGS_TYPE_FULLSCREEN
   CONTENT_SETTING_ASK,      // CONTENT_SETTINGS_TYPE_MOUSELOCK
@@ -69,11 +69,11 @@ class DefaultRuleIterator : public RuleIterator {
       value_.reset(value->DeepCopy());
   }
 
-  bool HasNext() const {
+  virtual bool HasNext() const OVERRIDE {
     return value_.get() != NULL;
   }
 
-  Rule Next() {
+  virtual Rule Next() OVERRIDE {
     DCHECK(value_.get());
     return Rule(ContentSettingsPattern::Wildcard(),
                 ContentSettingsPattern::Wildcard(),
@@ -87,7 +87,7 @@ class DefaultRuleIterator : public RuleIterator {
 }  // namespace
 
 // static
-void DefaultProvider::RegisterUserPrefs(PrefServiceSyncable* prefs) {
+void DefaultProvider::RegisterUserPrefs(PrefRegistrySyncable* registry) {
   // The registration of the preference prefs::kDefaultContentSettings should
   // also include the default values for default content settings. This allows
   // functional tests to get default content settings by reading the preference
@@ -95,9 +95,9 @@ void DefaultProvider::RegisterUserPrefs(PrefServiceSyncable* prefs) {
   // TODO(markusheintz): Write pyauto hooks for the content settings map as
   // content settings should be read from the host content settings map.
   DictionaryValue* default_content_settings = new DictionaryValue();
-  prefs->RegisterDictionaryPref(prefs::kDefaultContentSettings,
-                                default_content_settings,
-                                PrefServiceSyncable::SYNCABLE_PREF);
+  registry->RegisterDictionaryPref(prefs::kDefaultContentSettings,
+                                   default_content_settings,
+                                   PrefRegistrySyncable::SYNCABLE_PREF);
 }
 
 DefaultProvider::DefaultProvider(PrefService* prefs, bool incognito)
@@ -143,11 +143,6 @@ DefaultProvider::DefaultProvider(PrefService* prefs, bool incognito)
       "ContentSettings.DefaultNotificationsSetting",
       ValueToContentSetting(
           default_settings_[CONTENT_SETTINGS_TYPE_NOTIFICATIONS].get()),
-      CONTENT_SETTING_NUM_SETTINGS);
-  UMA_HISTOGRAM_ENUMERATION(
-      "ContentSettings.DefaultHandlersSetting",
-      ValueToContentSetting(
-          default_settings_[CONTENT_SETTINGS_TYPE_INTENTS].get()),
       CONTENT_SETTING_NUM_SETTINGS);
   UMA_HISTOGRAM_ENUMERATION(
       "ContentSettings.DefaultMouseCursorSetting",
@@ -307,15 +302,13 @@ void DefaultProvider::ForceDefaultsToBeExplicit() {
 
 void DefaultProvider::GetSettingsFromDictionary(
     const DictionaryValue* dictionary) {
-  for (DictionaryValue::key_iterator i(dictionary->begin_keys());
-       i != dictionary->end_keys(); ++i) {
-    const std::string& content_type(*i);
+  for (DictionaryValue::Iterator i(*dictionary); !i.IsAtEnd(); i.Advance()) {
+    const std::string& content_type(i.key());
     for (size_t type = 0; type < CONTENT_SETTINGS_NUM_TYPES; ++type) {
       if (content_type == GetTypeName(ContentSettingsType(type))) {
         int int_value = CONTENT_SETTING_DEFAULT;
-        bool found = dictionary->GetIntegerWithoutPathExpansion(content_type,
-                                                                &int_value);
-        DCHECK(found);
+        bool is_integer = i.value().GetAsInteger(&int_value);
+        DCHECK(is_integer);
         default_settings_[ContentSettingsType(type)].reset(
             Value::CreateIntegerValue(int_value));
         break;

@@ -223,23 +223,29 @@ class scoped_ptr_impl {
   }
 
   void reset(T* p) {
-    // This self-reset check is deprecated.
-    // this->reset(this->get()) currently works, but it is DEPRECATED, and
-    // will be removed once we verify that no one depends on it.
+    // This is a self-reset, which is no longer allowed: http://crbug.com/162971
+    if (p != NULL && p == data_.ptr)
+      abort();
+
+    // Note that running data_.ptr = p can lead to undefined behavior if
+    // get_deleter()(get()) deletes this. In order to pevent this, reset()
+    // should update the stored pointer before deleting its old value.
     //
-    // TODO(ajwong): Change this behavior to match unique_ptr<>.
-    // http://crbug.com/162971
-    if (p != data_.ptr) {
-      if (data_.ptr != NULL) {
-        // Note that this can lead to undefined behavior and memory leaks
-        // in the unlikely but possible case that get_deleter()(get())
-        // indirectly deletes this. The fix is to reset ptr_ before deleting
-        // its old value, but first we need to clean up the code that relies
-        // on the current sequencing.
-        static_cast<D&>(data_)(data_.ptr);
-      }
-      data_.ptr = p;
-    }
+    // However, changing reset() to use that behavior may cause current code to
+    // break in unexpected ways. If the destruction of the owned object
+    // dereferences the scoped_ptr when it is destroyed by a call to reset(),
+    // then it will incorrectly dispatch calls to |p| rather than the original
+    // value of |data_.ptr|.
+    //
+    // During the transition period, set the stored pointer to NULL while
+    // deleting the object. Eventually, this safety check will be removed to
+    // prevent the scenario initially described from occuring and
+    // http://crbug.com/176091 can be closed.
+    T* old = data_.ptr;
+    data_.ptr = NULL;
+    if (old != NULL)
+      static_cast<D&>(data_)(old);
+    data_.ptr = p;
   }
 
   T* get() const { return data_.ptr; }
@@ -526,10 +532,12 @@ class scoped_ptr<T[], D> {
   // call delete[] on an array whose static type does not match its dynamic
   // type.
   template <typename U> explicit scoped_ptr(U* array);
+  explicit scoped_ptr(int disallow_construction_from_null);
 
   // Disable reset() from any type other than element_type*, for the same
   // reasons as the constructor above.
   template <typename U> void reset(U* array);
+  void reset(int disallow_reset_from_null);
 
   // Forbid comparison of scoped_ptr types.  If U != T, it totally
   // doesn't make sense, and if U == T, it still doesn't make sense

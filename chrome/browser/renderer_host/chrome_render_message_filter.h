@@ -8,7 +8,7 @@
 #include <string>
 #include <vector>
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/memory/weak_ptr.h"
 #include "base/sequenced_task_runner_helpers.h"
 #include "chrome/browser/profiles/profile.h"
@@ -17,6 +17,7 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebCache.h"
 
 class CookieSettings;
+struct ExtensionHostMsg_DOMAction_Params;
 struct ExtensionHostMsg_Request_Params;
 class ExtensionInfoMap;
 class GURL;
@@ -122,7 +123,7 @@ class ChromeRenderMessageFilter : public content::BrowserMessageFilter {
   void OnGetExtensionMessageBundle(const std::string& extension_id,
                                    IPC::Message* reply_msg);
   void OnGetExtensionMessageBundleOnFileThread(
-      const FilePath& extension_path,
+      const base::FilePath& extension_path,
       const std::string& extension_id,
       const std::string& default_locale,
       IPC::Message* reply_msg);
@@ -146,11 +147,14 @@ class ChromeRenderMessageFilter : public content::BrowserMessageFilter {
   void OnExtensionRequestForIOThread(
       int routing_id,
       const ExtensionHostMsg_Request_Params& params);
-  void OnExtensionShouldUnloadAck(const std::string& extension_id,
-                                  int sequence_id);
-  void OnExtensionUnloadAck(const std::string& extension_id);
+  void OnExtensionShouldSuspendAck(const std::string& extension_id,
+                                   int sequence_id);
+  void OnExtensionSuspendAck(const std::string& extension_id);
   void OnExtensionGenerateUniqueID(int* unique_id);
   void OnExtensionResumeRequests(int route_id);
+  void OnAddDOMActionToExtensionActivityLog(
+      const std::string& extension_id,
+      const ExtensionHostMsg_DOMAction_Params& params);
   void OnAllowDatabase(int render_view_id,
                        const GURL& origin_url,
                        const GURL& top_origin_url,

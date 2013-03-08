@@ -12,7 +12,9 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
+#include "cc/animation_events.h"
 #include "cc/content_layer_client.h"
+#include "cc/layer_animation_event_observer.h"
 #include "cc/texture_layer_client.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "third_party/skia/include/core/SkRegion.h"
@@ -27,10 +29,14 @@ class SkCanvas;
 
 namespace cc {
 class ContentLayer;
+class DelegatedFrameData;
+class DelegatedRendererLayer;
 class Layer;
 class ResourceUpdateQueue;
 class SolidColorLayer;
 class TextureLayer;
+struct TransferableResource;
+typedef std::vector<TransferableResource> TransferableResourceArray;
 }
 
 namespace ui {
@@ -52,7 +58,8 @@ class Texture;
 class COMPOSITOR_EXPORT Layer
     : public LayerAnimationDelegate,
       NON_EXPORTED_BASE(public cc::ContentLayerClient),
-      NON_EXPORTED_BASE(public cc::TextureLayerClient) {
+      NON_EXPORTED_BASE(public cc::TextureLayerClient),
+      NON_EXPORTED_BASE(public cc::LayerAnimationEventObserver) {
  public:
   Layer();
   explicit Layer(LayerType type);
@@ -134,7 +141,7 @@ class COMPOSITOR_EXPORT Layer
 
   // The opacity of the layer. The opacity is applied to each pixel of the
   // texture (resulting alpha = opacity * alpha).
-  float opacity() const { return opacity_; }
+  float opacity() const;
   void SetOpacity(float opacity);
 
   // Returns the actual opacity, which the opacity of this layer multipled by
@@ -232,6 +239,14 @@ class COMPOSITOR_EXPORT Layer
   void SetExternalTexture(ui::Texture* texture);
   ui::Texture* external_texture() { return texture_.get(); }
 
+  // Sets a delegated frame, coming from a child compositor.
+  void SetDelegatedFrame(scoped_ptr<cc::DelegatedFrameData> frame,
+                         gfx::Size frame_size_in_dip);
+
+  // Gets unused resources to recycle to the child compositor.
+  void TakeUnusedResourcesForChildCompositor(
+      cc::TransferableResourceArray* array);
+
   // Sets the layer's fill color.  May only be called for LAYER_SOLID_COLOR.
   void SetColor(SkColor color);
 
@@ -287,6 +302,9 @@ class COMPOSITOR_EXPORT Layer
   void SetForceRenderSurface(bool force);
   bool force_render_surface() const { return force_render_surface_; }
 
+  // LayerAnimationEventObserver
+  virtual void OnAnimationStarted(const cc::AnimationEvent& event) OVERRIDE;
+
  private:
   // Stacks |child| above or below |other|.  Helper method for StackAbove() and
   // StackBelow().
@@ -297,11 +315,6 @@ class COMPOSITOR_EXPORT Layer
 
   bool GetTargetTransformRelativeTo(const Layer* ancestor,
                                     gfx::Transform* transform) const;
-
-  // The only externally updated layers are ones that get their pixels from
-  // WebKit and WebKit does not produce valid alpha values. All other layers
-  // should have valid alpha.
-  bool has_valid_alpha_channel() const { return !layer_updated_externally_; }
 
   // Following are invoked from the animation or if no animation exists to
   // update the values immediately.
@@ -330,6 +343,9 @@ class COMPOSITOR_EXPORT Layer
   virtual float GetBrightnessForAnimation() const OVERRIDE;
   virtual float GetGrayscaleForAnimation() const OVERRIDE;
   virtual SkColor GetColorForAnimation() const OVERRIDE;
+  virtual void AddThreadedAnimation(
+      scoped_ptr<cc::Animation> animation) OVERRIDE;
+  virtual void RemoveThreadedAnimation(int animation_id) OVERRIDE;
 
   void CreateWebLayer();
   void RecomputeTransform();
@@ -340,6 +356,10 @@ class COMPOSITOR_EXPORT Layer
 
   // Set all filters which got applied to the layer background.
   void SetLayerBackgroundFilters();
+
+  void UpdateIsDrawn();
+
+  void SwitchToLayer(scoped_refptr<cc::Layer> new_layer);
 
   const LayerType type_;
 
@@ -359,6 +379,9 @@ class COMPOSITOR_EXPORT Layer
   // Visibility of this layer. See SetVisible/IsDrawn for more details.
   bool visible_;
 
+  // Computed based on the visibility of this layer and its ancestors.
+  bool is_drawn_;
+
   bool force_render_surface_;
 
   bool fills_bounds_opaquely_;
@@ -370,7 +393,6 @@ class COMPOSITOR_EXPORT Layer
   // compositor is ready to paint the content.
   SkRegion damaged_region_;
 
-  float opacity_;
   int background_blur_radius_;
 
   // Several variables which will change the visible representation of
@@ -410,8 +432,8 @@ class COMPOSITOR_EXPORT Layer
   scoped_refptr<cc::ContentLayer> content_layer_;
   scoped_refptr<cc::TextureLayer> texture_layer_;
   scoped_refptr<cc::SolidColorLayer> solid_color_layer_;
+  scoped_refptr<cc::DelegatedRendererLayer> delegated_renderer_layer_;
   cc::Layer* cc_layer_;
-  bool cc_layer_is_accelerated_;
 
   // If true, the layer scales the canvas and the texture with the device scale
   // factor as appropriate. When true, the texture size is in DIP.
@@ -419,6 +441,10 @@ class COMPOSITOR_EXPORT Layer
 
   // A cached copy of |Compositor::device_scale_factor()|.
   float device_scale_factor_;
+
+  // The size of the delegated frame in DIP, set when SetDelegatedFrame was
+  // called.
+  gfx::Size delegated_frame_size_in_dip_;
 
   DISALLOW_COPY_AND_ASSIGN(Layer);
 };

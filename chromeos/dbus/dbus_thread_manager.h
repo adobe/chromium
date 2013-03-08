@@ -7,6 +7,7 @@
 
 #include <string>
 
+#include "base/callback.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "chromeos/chromeos_export.h"
@@ -40,11 +41,13 @@ class IBusConfigClient;
 class IBusEngineFactoryService;
 class IBusEngineService;
 class IBusInputContextClient;
+class IBusPanelService;
 class ImageBurnerClient;
 class IntrospectableClient;
 class ModemMessagingClient;
 class PermissionBrokerClient;
 class PowerManagerClient;
+class PowerPolicyController;
 class SMSClient;
 class SessionManagerClient;
 class ShillDeviceClient;
@@ -52,13 +55,7 @@ class ShillIPConfigClient;
 class ShillManagerClient;
 class ShillProfileClient;
 class ShillServiceClient;
-class SpeechSynthesizerClient;
 class UpdateEngineClient;
-
-// TODO(nona): Remove ibus namespace after complete libibus removal.
-namespace ibus {
-class IBusPanelService;
-}  // namespace ibus
 
 // DBusThreadManager manages the D-Bus thread, the thread dedicated to
 // handling asynchronous D-Bus operations.
@@ -109,9 +106,12 @@ class CHROMEOS_EXPORT DBusThreadManager {
   virtual void RemoveObserver(DBusThreadManagerObserver* observer) = 0;
 
   // Creates new IBusBus instance to communicate with ibus-daemon with specified
-  // ibus address. Must be called before using ibus related clients.
+  // ibus address. |on_disconnected_callback| will be called when the connection
+  // with ibus-daemon is disconnected. Must be called before using ibus related
+  // clients.
   // TODO(nona): Support shutdown to enable dynamical ibus-daemon shutdown.
-  virtual void InitIBusBus(const std::string &ibus_address) = 0;
+  virtual void InitIBusBus(const std::string& ibus_address,
+                           const base::Closure& on_disconnected_callback) = 0;
 
   // Returns various D-Bus bus instances, owned by DBusThreadManager.
   virtual dbus::Bus* GetSystemBus() = 0;
@@ -135,12 +135,13 @@ class CHROMEOS_EXPORT DBusThreadManager {
   virtual IBusEngineService* GetIBusEngineService(
       const dbus::ObjectPath& object_path) = 0;
   virtual IBusInputContextClient* GetIBusInputContextClient() = 0;
-  virtual ibus::IBusPanelService* GetIBusPanelService() = 0;
+  virtual IBusPanelService* GetIBusPanelService() = 0;
   virtual ImageBurnerClient* GetImageBurnerClient() = 0;
   virtual IntrospectableClient* GetIntrospectableClient() = 0;
   virtual ModemMessagingClient* GetModemMessagingClient() = 0;
   virtual PermissionBrokerClient* GetPermissionBrokerClient() = 0;
   virtual PowerManagerClient* GetPowerManagerClient() = 0;
+  virtual PowerPolicyController* GetPowerPolicyController() = 0;
   virtual SessionManagerClient* GetSessionManagerClient() = 0;
   virtual ShillDeviceClient* GetShillDeviceClient() = 0;
   virtual ShillIPConfigClient* GetShillIPConfigClient() = 0;
@@ -148,7 +149,6 @@ class CHROMEOS_EXPORT DBusThreadManager {
   virtual ShillProfileClient* GetShillProfileClient() = 0;
   virtual ShillServiceClient* GetShillServiceClient() = 0;
   virtual SMSClient* GetSMSClient() = 0;
-  virtual SpeechSynthesizerClient* GetSpeechSynthesizerClient() = 0;
   virtual UpdateEngineClient* GetUpdateEngineClient() = 0;
 
   // Removes the ibus engine services for |object_path|.

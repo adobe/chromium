@@ -10,16 +10,19 @@
 #include "webkit/fileapi/syncable/sync_callbacks.h"
 #include "webkit/fileapi/syncable/sync_status_code.h"
 
+namespace base {
 class FilePath;
+}
 
 namespace fileapi {
-class FileChange;
-class FileChangeList;
 class FileSystemURL;
-class SyncFileMetadata;
 }
 
 namespace sync_file_system {
+
+class FileChange;
+class FileChangeList;
+class SyncFileMetadata;
 
 // Represents an interface to process one remote change and applies
 // it to the local file system.
@@ -32,9 +35,9 @@ class RemoteChangeProcessor {
   // set to SYNC_FILE_TYPE_UNKNOWN.
   // |changes| indicates a set of pending changes for the target URL.
   typedef base::Callback<void(
-      fileapi::SyncStatusCode status,
-      const fileapi::SyncFileMetadata& metadata,
-      const fileapi::FileChangeList& changes)> PrepareChangeCallback;
+      SyncStatusCode status,
+      const SyncFileMetadata& metadata,
+      const FileChangeList& changes)> PrepareChangeCallback;
 
   RemoteChangeProcessor() {}
   virtual ~RemoteChangeProcessor() {}
@@ -58,10 +61,10 @@ class RemoteChangeProcessor {
   // (as we must have checked the change status in PrepareRemoteSync and
   // have disabled any further writing).
   virtual void ApplyRemoteChange(
-      const fileapi::FileChange& change,
-      const FilePath& local_path,
+      const FileChange& change,
+      const base::FilePath& local_path,
       const fileapi::FileSystemURL& url,
-      const fileapi::SyncStatusCallback& callback) = 0;
+      const SyncStatusCallback& callback) = 0;
 
   // Clears all local changes. This should be called when the remote sync
   // service reconciled or processed the existing local changes while
@@ -77,8 +80,8 @@ class RemoteChangeProcessor {
   // resolve a conflict by uploading the local file).
   virtual void RecordFakeLocalChange(
       const fileapi::FileSystemURL& url,
-      const fileapi::FileChange& change,
-      const fileapi::SyncStatusCallback& callback) = 0;
+      const FileChange& change,
+      const SyncStatusCallback& callback) = 0;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(RemoteChangeProcessor);

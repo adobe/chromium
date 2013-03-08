@@ -6,23 +6,29 @@
 #define DEVICE_BLUETOOTH_BLUETOOTH_DEVICE_WIN_H_
 
 #include <string>
+#include <vector>
 
 #include "base/basictypes.h"
 #include "device/bluetooth/bluetooth_device.h"
+#include "device/bluetooth/bluetooth_task_manager_win.h"
 
 namespace device {
 
+class BluetoothAdapterWin;
+
 class BluetoothDeviceWin : public BluetoothDevice {
  public:
-  BluetoothDeviceWin();
+  BluetoothDeviceWin(const BluetoothTaskManagerWin::DeviceState& state);
   virtual ~BluetoothDeviceWin();
 
+  void SetVisible(bool visible);
+
+  // BluetoothDevice override
   virtual bool IsPaired() const OVERRIDE;
   virtual const ServiceList& GetServices() const OVERRIDE;
   virtual void GetServiceRecords(
       const ServiceRecordsCallback& callback,
       const ErrorCallback& error_callback) OVERRIDE;
-  virtual bool ProvidesServiceWithUUID(const std::string& uuid) const OVERRIDE;
   virtual void ProvidesServiceWithName(
       const std::string& name,
       const ProvidesServiceCallback& callback) OVERRIDE;
@@ -54,8 +60,21 @@ class BluetoothDeviceWin : public BluetoothDevice {
       const ErrorCallback& error_callback) OVERRIDE;
 
  private:
-  // The services (identified by UUIDs) that this device provides.
-  std::vector<std::string> service_uuids_;
+  friend class BluetoothAdapterWin;
+
+  // Computes the fingerprint that can be used to compare the devices.
+  static uint32 ComputeDeviceFingerprint(
+      const BluetoothTaskManagerWin::DeviceState& state);
+
+  uint32 device_fingerprint() const {
+    return device_fingerprint_;
+  }
+
+  // Used to compare the devices.
+  uint32 device_fingerprint_;
+  ServiceRecordList service_record_list_;
+
+  DISALLOW_COPY_AND_ASSIGN(BluetoothDeviceWin);
 };
 
 }  // namespace device

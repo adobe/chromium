@@ -53,7 +53,7 @@ class UI_EXPORT Event {
    public:
     explicit TestApi(Event* event) : event_(event) {}
 
-    void set_time_stamp(const base::TimeDelta& time_stamp) {
+    void set_time_stamp(base::TimeDelta time_stamp) {
       event_->time_stamp_ = time_stamp;
     }
 
@@ -141,9 +141,9 @@ class UI_EXPORT Event {
 
       case ET_SCROLL_FLING_CANCEL:
       case ET_SCROLL_FLING_START:
-        // These can be ScrollEvents too. But for ScrollEvents have valid native
-        // events. No gesture events have native events.
-        return !HasNativeEvent();
+        // These can be ScrollEvents too. EF_FROM_TOUCH determines if they're
+        // Gesture or Scroll events.
+        return (flags_ & EF_FROM_TOUCH) == EF_FROM_TOUCH;
 
       default:
         break;
@@ -152,9 +152,12 @@ class UI_EXPORT Event {
   }
 
   bool IsScrollEvent() const {
+    // Flings can be GestureEvents too. EF_FROM_TOUCH determins if they're
+    // Gesture or Scroll events.
     return type_ == ET_SCROLL ||
            ((type_ == ET_SCROLL_FLING_START ||
-             type_ == ET_SCROLL_FLING_CANCEL) && HasNativeEvent());
+           type_ == ET_SCROLL_FLING_CANCEL) &&
+           !(flags() & EF_FROM_TOUCH));
   }
 
   bool IsScrollGestureEvent() const {
@@ -199,6 +202,10 @@ class UI_EXPORT Event {
     dispatch_to_hidden_targets_ = dispatch_to_hidden_targets;
   }
 
+  void set_time_stamp(const base::TimeDelta& time_stamp) {
+    time_stamp_ = time_stamp;
+  }
+
   void set_name(const std::string& name) { name_ = name; }
 
  private:
@@ -219,6 +226,12 @@ class UI_EXPORT Event {
   EventTarget* target_;
   EventPhase phase_;
   EventResult result_;
+};
+
+class UI_EXPORT CancelModeEvent : public Event {
+ public:
+  CancelModeEvent();
+  virtual ~CancelModeEvent();
 };
 
 class UI_EXPORT LocatedEvent : public Event {
@@ -512,8 +525,6 @@ class UI_EXPORT TouchEvent : public LocatedEvent {
 
   // Force (pressure) of the touch. Normalized to be [0, 1]. Default to be 0.0.
   float force_;
-
-  DISALLOW_COPY_AND_ASSIGN(TouchEvent);
 };
 
 class UI_EXPORT KeyEvent : public Event {
@@ -564,8 +575,6 @@ class UI_EXPORT KeyEvent : public Event {
 
   uint16 character_;
   uint16 unmodified_character_;
-
-  DISALLOW_COPY_AND_ASSIGN(KeyEvent);
 };
 
 // A key event which is translated by an input method (IME).
@@ -615,21 +624,25 @@ class UI_EXPORT ScrollEvent : public MouseEvent {
   template <class T>
   ScrollEvent(const ScrollEvent& model,
               T* source,
-              T* target,
-              EventType type,
-              int flags)
-      : MouseEvent(model, source, target, type, flags),
+              T* target)
+      : MouseEvent(model, source, target),
         x_offset_(model.x_offset_),
         y_offset_(model.y_offset_),
+        x_offset_ordinal_(model.x_offset_ordinal_),
+        y_offset_ordinal_(model.y_offset_ordinal_),
         finger_count_(model.finger_count_){
   }
 
   // Used for tests.
   ScrollEvent(EventType type,
               const gfx::Point& location,
+              base::TimeDelta time_stamp,
               int flags,
               float x_offset,
-              float y_offset);
+              float y_offset,
+              float x_offset_ordinal,
+              float y_offset_ordinal,
+              int finger_count);
 
   // Scale the scroll event's offset value.
   // This is useful in the multi-monitor setup where it needs to be scaled
@@ -638,14 +651,23 @@ class UI_EXPORT ScrollEvent : public MouseEvent {
 
   float x_offset() const { return x_offset_; }
   float y_offset() const { return y_offset_; }
+  float x_offset_ordinal() const { return x_offset_ordinal_; }
+  float y_offset_ordinal() const { return y_offset_ordinal_; }
   int finger_count() const { return finger_count_; }
 
+  // Overridden from LocatedEvent.
+  virtual void UpdateForRootTransform(
+      const gfx::Transform& root_transform) OVERRIDE;
+
  private:
+  // Potential accelerated offsets.
   float x_offset_;
   float y_offset_;
+  // Unaccelerated offsets.
+  float x_offset_ordinal_;
+  float y_offset_ordinal_;
+  // Number of fingers on the pad.
   int finger_count_;
-
-  DISALLOW_COPY_AND_ASSIGN(ScrollEvent);
 };
 
 class UI_EXPORT GestureEvent : public LocatedEvent {

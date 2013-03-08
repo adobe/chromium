@@ -20,6 +20,13 @@ namespace android {
 BASE_EXPORT ScopedJavaLocalRef<jbyteArray> ToJavaByteArray(
     JNIEnv* env, const uint8* bytes, size_t len);
 
+// Returns a new Java long array converted from the given int64 array.
+BASE_EXPORT ScopedJavaLocalRef<jlongArray> ToJavaLongArray(
+    JNIEnv* env, const int64* longs, size_t len);
+
+BASE_EXPORT ScopedJavaLocalRef<jlongArray> ToJavaLongArray(
+    JNIEnv* env, const std::vector<int64>& longs);
+
 // Returns a array of Java byte array converted from |v|.
 BASE_EXPORT ScopedJavaLocalRef<jobjectArray> ToJavaArrayOfByteArray(
     JNIEnv* env, const std::vector<std::string>& v);
@@ -62,7 +69,7 @@ BASE_EXPORT void JavaIntArrayToIntVector(
 // Assuming |array| is an byte[][] (array of byte arrays), replaces the
 // content of |out| with the corresponding vector of strings. No UTF-8
 // conversion is performed.
-void JavaArrayOfByteArrayToStringVector(
+BASE_EXPORT void JavaArrayOfByteArrayToStringVector(
     JNIEnv* env,
     jobjectArray array,
     std::vector<std::string>* out);

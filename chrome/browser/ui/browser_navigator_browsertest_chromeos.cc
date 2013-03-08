@@ -5,9 +5,9 @@
 #include "chrome/browser/ui/browser_navigator_browsertest.h"
 
 #include "base/command_line.h"
-#include "chrome/browser/chromeos/login/login_utils.h"
+#include "chrome/browser/chromeos/login/chrome_restart_request.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_switches.h"
@@ -23,12 +23,12 @@ GURL GetGoogleURL() {
 // Subclass that tests navigation while in the Guest session.
 class BrowserGuestSessionNavigatorTest: public BrowserNavigatorTest {
  protected:
-  virtual void SetUpCommandLine(CommandLine* command_line) {
+  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
     CommandLine command_line_copy = *command_line;
     command_line_copy.AppendSwitchASCII(switches::kLoginProfile, "user");
-    chromeos::LoginUtils::Get()->GetOffTheRecordCommandLine(GetGoogleURL(),
-                                                            command_line_copy,
-                                                            command_line);
+    chromeos::GetOffTheRecordCommandLine(GetGoogleURL(),
+                                         command_line_copy,
+                                         command_line);
   }
 };
 
@@ -38,7 +38,7 @@ IN_PROC_BROWSER_TEST_F(BrowserGuestSessionNavigatorTest,
                        Disposition_Settings_UseIncognitoWindow) {
   Browser* incognito_browser = CreateIncognitoBrowser();
 
-  EXPECT_EQ(2u, BrowserList::size());
+  EXPECT_EQ(2u, chrome::GetTotalBrowserCount());
   EXPECT_EQ(1, browser()->tab_strip_model()->count());
   EXPECT_EQ(1, incognito_browser->tab_strip_model()->count());
 

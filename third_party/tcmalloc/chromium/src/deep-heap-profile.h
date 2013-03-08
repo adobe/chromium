@@ -116,6 +116,8 @@ class DeepHeapProfile {
     NUMBER_OF_MAPS_REGION_TYPES
   };
 
+  static const char* kMapsRegionTypeDict[NUMBER_OF_MAPS_REGION_TYPES];
+
   // Manages a buffer to keep a dumped text for FillOrderedProfile and other
   // functions.
   class TextBuffer {
@@ -146,12 +148,6 @@ class DeepHeapProfile {
     int size_;
     int cursor_;
     DISALLOW_COPY_AND_ASSIGN(TextBuffer);
-  };
-
-  struct MMapListEntry {
-    uint64 first_address;
-    uint64 last_address;
-    MapsRegionType type;
   };
 
   // Contains extended information for HeapProfileTable::Bucket.  These objects
@@ -215,6 +211,13 @@ class DeepHeapProfile {
     int bucket_id_;
   };
 
+  struct MMapListEntry {
+    uint64 first_address;
+    uint64 last_address;
+    MapsRegionType type;
+    DeepBucket* deep_bucket;
+  };
+
   class RegionStats {
    public:
     RegionStats(): virtual_bytes_(0), committed_bytes_(0) {}
@@ -226,7 +229,7 @@ class DeepHeapProfile {
     // Updates itself to contain the tallies of 'virtual_bytes' and
     // 'committed_bytes' in the region from |first_adress| to |last_address|
     // inclusive.
-    void Record(
+    uint64 Record(
         const MemoryResidenceInfoGetterInterface* memory_residence_info_getter,
         uint64 first_address,
         uint64 last_address);
@@ -258,7 +261,8 @@ class DeepHeapProfile {
     void SnapshotProcMaps(
         const MemoryResidenceInfoGetterInterface* memory_residence_info_getter,
         MMapListEntry* mmap_list,
-        int mmap_list_length);
+        int mmap_list_length,
+        TextBuffer* mmap_dump_buffer);
 
     // Snapshots allocations by malloc and mmap.
     void SnapshotAllocations(DeepHeapProfile* deep_profile);
@@ -285,7 +289,7 @@ class DeepHeapProfile {
     // for more detailed analysis.
     RegionStats all_[NUMBER_OF_MAPS_REGION_TYPES];
 
-    RegionStats nonprofiled_[NUMBER_OF_MAPS_REGION_TYPES];
+    RegionStats unhooked_[NUMBER_OF_MAPS_REGION_TYPES];
 
     // Total bytes of malloc'ed regions.
     RegionStats profiled_malloc_;
@@ -294,13 +298,9 @@ class DeepHeapProfile {
     RegionStats profiled_mmap_;
   };
 
-  // Writes reformatted /proc/<pid>/maps into a file with using |raw_buffer|
-  // of |buffer_size|.
-  //
-  // If |count| is zero, the filename will be "|prefix|.<pid>.maps".
-  // Otherwise, "|prefix|.<pid>.|count|.maps".
+  // Writes reformatted /proc/<pid>/maps into a file "|prefix|.<pid>.maps"
+  // with using |raw_buffer| of |buffer_size|.
   static void WriteProcMaps(const char* prefix,
-                            unsigned count,
                             int buffer_size,
                             char raw_buffer[]);
 

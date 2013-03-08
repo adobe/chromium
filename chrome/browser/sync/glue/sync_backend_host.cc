@@ -12,8 +12,8 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/location.h"
 #include "base/metrics/histogram.h"
 #include "base/threading/thread_restrictions.h"
@@ -24,20 +24,23 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/token_service.h"
 #include "chrome/browser/signin/token_service_factory.h"
-#include "chrome/browser/sync/glue/bridged_invalidator.h"
+#include "chrome/browser/sync/glue/android_invalidator_bridge.h"
+#include "chrome/browser/sync/glue/android_invalidator_bridge_proxy.h"
 #include "chrome/browser/sync/glue/change_processor.h"
 #include "chrome/browser/sync/glue/chrome_encryptor.h"
-#include "chrome/browser/sync/glue/chrome_sync_notification_bridge.h"
 #include "chrome/browser/sync/glue/device_info.h"
 #include "chrome/browser/sync/glue/sync_backend_registrar.h"
 #include "chrome/browser/sync/glue/synced_device_tracker.h"
 #include "chrome/browser/sync/invalidations/invalidator_storage.h"
 #include "chrome/browser/sync/sync_prefs.h"
 #include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/notification_source.h"
 #include "content/public/common/content_client.h"
 #include "google_apis/gaia/gaia_constants.h"
 #include "jingle/notifier/base/notification_method.h"
@@ -58,7 +61,7 @@
 #include "sync/util/nigori.h"
 
 static const int kSaveChangesIntervalSeconds = 10;
-static const FilePath::CharType kSyncDataFolderName[] =
+static const base::FilePath::CharType kSyncDataFolderName[] =
     FILE_PATH_LITERAL("Sync Data");
 
 typedef TokenService::TokenAvailableDetails TokenAvailableDetails;
@@ -87,7 +90,7 @@ class SyncBackendHost::Core
       public syncer::InvalidationHandler {
  public:
   Core(const std::string& name,
-       const FilePath& sync_data_folder_path,
+       const base::FilePath& sync_data_folder_path,
        const base::WeakPtr<SyncBackendHost>& backend);
 
   // SyncManager::Observer implementation.  The Core just acts like an air
@@ -129,8 +132,7 @@ class SyncBackendHost::Core
   virtual void OnInvalidatorStateChange(
       syncer::InvalidatorState state) OVERRIDE;
   virtual void OnIncomingInvalidation(
-      const syncer::ObjectIdInvalidationMap& invalidation_map,
-      syncer::IncomingInvalidationSource source) OVERRIDE;
+      const syncer::ObjectIdInvalidationMap& invalidation_map) OVERRIDE;
 
   // Note:
   //
@@ -151,6 +153,11 @@ class SyncBackendHost::Core
   // SyncBackendHost::UpdateRegisteredInvalidationIds.
   void DoUpdateRegisteredInvalidationIds(const syncer::ObjectIdSet& ids);
 
+  // Called to acknowledge an invalidation on behalf of
+  // SyncBackendHost::AcknowledgeInvalidation.
+  void DoAcknowledgeInvalidation(const invalidation::ObjectId& id,
+                                 const syncer::AckHandle& ack_handle);
+
   // Called to tell the syncapi to start syncing (generally after
   // initialization and authentication).
   void DoStartSyncing(const syncer::ModelSafeRoutingInfo& routing_info);
@@ -170,6 +177,9 @@ class SyncBackendHost::Core
   // DoInitialProcessControlTypes on success, and OnControlTypesDownloadRetry
   // if an error occurred.
   void DoDownloadControlTypes();
+
+  // Ask the syncer to check for updates for the specified types.
+  void DoRefreshTypes(syncer::ModelTypeSet types);
 
   // Invoked if we failed to download the necessary control types at startup.
   // Invokes SyncBackendHost::HandleControlTypesDownloadRetry.
@@ -203,6 +213,7 @@ class SyncBackendHost::Core
   void DoConfigureSyncer(
       syncer::ConfigureReason reason,
       syncer::ModelTypeSet types_to_config,
+      syncer::ModelTypeSet failed_types,
       const syncer::ModelSafeRoutingInfo routing_info,
       const base::Callback<void(syncer::ModelTypeSet)>& ready_task,
       const base::Closure& retry_callback);
@@ -251,7 +262,7 @@ class SyncBackendHost::Core
   const std::string name_;
 
   // Path of the folder that stores the sync data files.
-  const FilePath sync_data_folder_path_;
+  const base::FilePath sync_data_folder_path_;
 
   // Our parent SyncBackendHost.
   syncer::WeakHandle<SyncBackendHost> host_;
@@ -263,10 +274,6 @@ class SyncBackendHost::Core
   // Our parent's registrar (not owned).  Non-NULL only between
   // calls to DoInitialize() and DoShutdown().
   SyncBackendRegistrar* registrar_;
-
-  // Our parent's notification bridge (not owned).  Non-NULL only
-  // between calls to DoInitialize() and DoShutdown().
-  ChromeSyncNotificationBridge* chrome_sync_notification_bridge_;
 
   // The timer used to periodically call SaveChanges.
   scoped_ptr<base::RepeatingTimer<Core> > save_changes_timer_;
@@ -377,7 +384,7 @@ SyncBackendHost::SyncBackendHost(Profile* profile)
 
 SyncBackendHost::~SyncBackendHost() {
   DCHECK(!core_ && !frontend_) << "Must call Shutdown before destructor.";
-  DCHECK(!chrome_sync_notification_bridge_.get());
+  DCHECK(!android_invalidator_bridge_.get());
   DCHECK(!registrar_.get());
 }
 
@@ -406,8 +413,8 @@ void SyncBackendHost::Initialize(
   if (!sync_thread_.Start())
     return;
 
-  chrome_sync_notification_bridge_.reset(
-      new ChromeSyncNotificationBridge(
+  android_invalidator_bridge_.reset(
+      new AndroidInvalidatorBridge(
           profile_, sync_thread_.message_loop_proxy()));
 
   frontend_ = frontend;
@@ -448,7 +455,7 @@ void SyncBackendHost::Initialize(
       base::Bind(&MakeHttpBridgeFactory,
                  make_scoped_refptr(profile_->GetRequestContext())),
       credentials,
-      chrome_sync_notification_bridge_.get(),
+      android_invalidator_bridge_.get(),
       &invalidator_factory_,
       sync_manager_factory,
       delete_sync_data_folder,
@@ -473,6 +480,15 @@ void SyncBackendHost::UpdateRegisteredInvalidationIds(
   sync_thread_.message_loop()->PostTask(FROM_HERE,
       base::Bind(&SyncBackendHost::Core::DoUpdateRegisteredInvalidationIds,
                  core_.get(), ids));
+}
+
+void SyncBackendHost::AcknowledgeInvalidation(
+    const invalidation::ObjectId& id, const syncer::AckHandle& ack_handle) {
+  DCHECK_EQ(MessageLoop::current(), frontend_loop_);
+  DCHECK(sync_thread_.IsRunning());
+  sync_thread_.message_loop()->PostTask(FROM_HERE,
+      base::Bind(&SyncBackendHost::Core::DoAcknowledgeInvalidation,
+                 core_.get(), id, ack_handle));
 }
 
 void SyncBackendHost::StartSyncingWithServer() {
@@ -577,6 +593,9 @@ void SyncBackendHost::StopSyncingForShutdown() {
   // Immediately stop sending messages to the frontend.
   frontend_ = NULL;
 
+  // Stop listening for and forwarding locally-triggered sync refresh requests.
+  notification_registrar_.RemoveAll();
+
   // Thread shutdown should occur in the following order:
   // - Sync Thread
   // - UI Thread (stops some time after we return from this call).
@@ -621,8 +640,8 @@ void SyncBackendHost::Shutdown(bool sync_disabled) {
         base::Bind(&SyncBackendHost::Core::DoShutdown, core_.get(),
                    sync_disabled));
 
-    if (chrome_sync_notification_bridge_.get())
-      chrome_sync_notification_bridge_->StopForShutdown();
+    if (android_invalidator_bridge_.get())
+      android_invalidator_bridge_->StopForShutdown();
   }
 
   // Stop will return once the thread exits, which will be after DoShutdown
@@ -648,14 +667,13 @@ void SyncBackendHost::Shutdown(bool sync_disabled) {
 
   registrar_.reset();
   js_backend_.Reset();
-  chrome_sync_notification_bridge_.reset();
+  android_invalidator_bridge_.reset();
   core_ = NULL;  // Releases reference to core_.
 }
 
 void SyncBackendHost::ConfigureDataTypes(
     syncer::ConfigureReason reason,
-    syncer::ModelTypeSet types_to_add,
-    syncer::ModelTypeSet types_to_remove,
+    const DataTypeConfigStateMap& config_state_map,
     const base::Callback<void(syncer::ModelTypeSet)>& ready_task,
     const base::Callback<void()>& retry_callback) {
   // Only one configure is allowed at a time.  This is guaranteed by our
@@ -682,7 +700,10 @@ void SyncBackendHost::ConfigureDataTypes(
   // until they succeed or the backend is shut down.
 
   syncer::ModelTypeSet types_to_download = registrar_->ConfigureDataTypes(
-      types_to_add, types_to_remove);
+      GetDataTypesInState(ENABLED, config_state_map),
+      syncer::Union(GetDataTypesInState(DISABLED, config_state_map),
+                    GetDataTypesInState(FAILED, config_state_map)));
+  types_to_download.RemoveAll(syncer::ProxyTypes());
   if (!types_to_download.Empty())
     types_to_download.Put(syncer::NIGORI);
 
@@ -719,6 +740,7 @@ void SyncBackendHost::ConfigureDataTypes(
   // need for GetKey as part of the SyncManager::ConfigureSyncer logic.
   RequestConfigureSyncer(reason,
                          types_to_download,
+                         GetDataTypesInState(FAILED, config_state_map),
                          routing_info,
                          ready_task,
                          retry_callback);
@@ -799,6 +821,7 @@ void SyncBackendHost::InitCore(const DoInitializeOptions& options) {
 void SyncBackendHost::RequestConfigureSyncer(
     syncer::ConfigureReason reason,
     syncer::ModelTypeSet types_to_config,
+    syncer::ModelTypeSet failed_types,
     const syncer::ModelSafeRoutingInfo& routing_info,
     const base::Callback<void(syncer::ModelTypeSet)>& ready_task,
     const base::Closure& retry_callback) {
@@ -807,6 +830,7 @@ void SyncBackendHost::RequestConfigureSyncer(
                   core_.get(),
                   reason,
                   types_to_config,
+                  failed_types,
                   routing_info,
                   ready_task,
                   retry_callback));
@@ -839,12 +863,33 @@ void SyncBackendHost::HandleSyncManagerInitializationOnFrontendLoop(
   // applied.
   registrar_->SetInitialTypes(restored_types);
 
+  // Start forwarding refresh requests to the SyncManager
+  notification_registrar_.Add(this, chrome::NOTIFICATION_SYNC_REFRESH_LOCAL,
+                              content::Source<Profile>(profile_));
+
   // Kick off the next step in SyncBackendHost initialization by downloading
   // any necessary control types.
   sync_thread_.message_loop()->PostTask(
       FROM_HERE,
       base::Bind(&SyncBackendHost::Core::DoDownloadControlTypes,
                  core_.get()));
+}
+
+void SyncBackendHost::Observe(
+    int type,
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_EQ(type, chrome::NOTIFICATION_SYNC_REFRESH_LOCAL);
+
+  content::Details<const syncer::ModelTypeInvalidationMap>
+      state_details(details);
+  const syncer::ModelTypeInvalidationMap& invalidation_map =
+      *(state_details.ptr());
+  const syncer::ModelTypeSet types =
+      ModelTypeInvalidationMapToSet(invalidation_map);
+  sync_thread_.message_loop()->PostTask(FROM_HERE,
+      base::Bind(&SyncBackendHost::Core::DoRefreshTypes, core_.get(), types));
 }
 
 SyncBackendHost::DoInitializeOptions::DoInitializeOptions(
@@ -857,7 +902,7 @@ SyncBackendHost::DoInitializeOptions::DoInitializeOptions(
     const GURL& service_url,
     MakeHttpBridgeFactoryFn make_http_bridge_factory_fn,
     const syncer::SyncCredentials& credentials,
-    ChromeSyncNotificationBridge* chrome_sync_notification_bridge,
+    AndroidInvalidatorBridge* android_invalidator_bridge,
     syncer::InvalidatorFactory* invalidator_factory,
     syncer::SyncManagerFactory* sync_manager_factory,
     bool delete_sync_data_folder,
@@ -876,7 +921,7 @@ SyncBackendHost::DoInitializeOptions::DoInitializeOptions(
       service_url(service_url),
       make_http_bridge_factory_fn(make_http_bridge_factory_fn),
       credentials(credentials),
-      chrome_sync_notification_bridge(chrome_sync_notification_bridge),
+      android_invalidator_bridge(android_invalidator_bridge),
       invalidator_factory(invalidator_factory),
       sync_manager_factory(sync_manager_factory),
       delete_sync_data_folder(delete_sync_data_folder),
@@ -892,14 +937,13 @@ SyncBackendHost::DoInitializeOptions::DoInitializeOptions(
 SyncBackendHost::DoInitializeOptions::~DoInitializeOptions() {}
 
 SyncBackendHost::Core::Core(const std::string& name,
-                            const FilePath& sync_data_folder_path,
+                            const base::FilePath& sync_data_folder_path,
                             const base::WeakPtr<SyncBackendHost>& backend)
     : name_(name),
       sync_data_folder_path_(sync_data_folder_path),
       host_(backend),
       sync_loop_(NULL),
       registrar_(NULL),
-      chrome_sync_notification_bridge_(NULL),
       registered_as_invalidation_handler_(false) {
   DCHECK(backend.get());
 }
@@ -933,11 +977,17 @@ void SyncBackendHost::Core::DoDownloadControlTypes() {
   sync_manager_->ConfigureSyncer(
       syncer::CONFIGURE_REASON_NEW_CLIENT,
       new_control_types,
+      syncer::ModelTypeSet(),
       routing_info,
       base::Bind(&SyncBackendHost::Core::DoInitialProcessControlTypes,
                  this),
       base::Bind(&SyncBackendHost::Core::OnControlTypesDownloadRetry,
                  this));
+}
+
+void SyncBackendHost::Core::DoRefreshTypes(syncer::ModelTypeSet types) {
+  DCHECK_EQ(MessageLoop::current(), sync_loop_);
+  sync_manager_->RefreshTypes(types);
 }
 
 void SyncBackendHost::Core::OnControlTypesDownloadRetry() {
@@ -1097,14 +1147,13 @@ void SyncBackendHost::Core::OnInvalidatorStateChange(
 }
 
 void SyncBackendHost::Core::OnIncomingInvalidation(
-    const syncer::ObjectIdInvalidationMap& invalidation_map,
-    syncer::IncomingInvalidationSource source) {
+    const syncer::ObjectIdInvalidationMap& invalidation_map) {
   if (!sync_loop_)
     return;
   DCHECK_EQ(MessageLoop::current(), sync_loop_);
   host_.Call(FROM_HERE,
              &SyncBackendHost::HandleIncomingInvalidationOnFrontendLoop,
-             invalidation_map, source);
+             invalidation_map);
 }
 
 void SyncBackendHost::Core::DoInitialize(const DoInitializeOptions& options) {
@@ -1128,19 +1177,6 @@ void SyncBackendHost::Core::DoInitialize(const DoInitializeOptions& options) {
   registrar_ = options.registrar;
   DCHECK(registrar_);
 
-  DCHECK(!chrome_sync_notification_bridge_);
-  chrome_sync_notification_bridge_ = options.chrome_sync_notification_bridge;
-  DCHECK(chrome_sync_notification_bridge_);
-
-#if defined(OS_ANDROID)
-  // Android uses ChromeSyncNotificationBridge exclusively.
-  const syncer::InvalidatorState kDefaultInvalidatorState =
-      syncer::INVALIDATIONS_ENABLED;
-#else
-  const syncer::InvalidatorState kDefaultInvalidatorState =
-      syncer::DEFAULT_INVALIDATION_ERROR;
-#endif
-
   sync_manager_ = options.sync_manager_factory->CreateSyncManager(name_);
   sync_manager_->AddObserver(this);
   sync_manager_->Init(
@@ -1154,10 +1190,14 @@ void SyncBackendHost::Core::DoInitialize(const DoInitializeOptions& options) {
       options.extensions_activity_monitor,
       options.registrar /* as SyncManager::ChangeDelegate */,
       options.credentials,
-      scoped_ptr<syncer::Invalidator>(new BridgedInvalidator(
-          options.chrome_sync_notification_bridge,
-          options.invalidator_factory->CreateInvalidator(),
-          kDefaultInvalidatorState)),
+#if defined(OS_ANDROID)
+      scoped_ptr<syncer::Invalidator>(
+          new AndroidInvalidatorBridgeProxy(
+              options.android_invalidator_bridge)),
+#else
+      scoped_ptr<syncer::Invalidator>(
+          options.invalidator_factory->CreateInvalidator()),
+#endif
       options.restored_key_for_bootstrapping,
       options.restored_keystore_key_for_bootstrapping,
       scoped_ptr<InternalComponentsFactory>(
@@ -1209,6 +1249,18 @@ void SyncBackendHost::Core::DoUpdateRegisteredInvalidationIds(
   // TODO(akalin): Fix this behavior (see http://crbug.com/140354).
   if (sync_manager_.get()) {
     sync_manager_->UpdateRegisteredInvalidationIds(this, ids);
+  }
+}
+
+void SyncBackendHost::Core::DoAcknowledgeInvalidation(
+    const invalidation::ObjectId& id, const syncer::AckHandle& ack_handle) {
+  DCHECK_EQ(MessageLoop::current(), sync_loop_);
+  // |sync_manager_| may end up being NULL here in tests (in
+  // synchronous initialization mode).
+  //
+  // TODO(akalin): Fix this behavior (see http://crbug.com/140354).
+  if (sync_manager_.get()) {
+    sync_manager_->AcknowledgeInvalidation(id, ack_handle);
   }
 }
 
@@ -1307,7 +1359,6 @@ void SyncBackendHost::Core::DoShutdown(bool sync_disabled) {
 
   DoDestroySyncManager();
 
-  chrome_sync_notification_bridge_ = NULL;
   registrar_ = NULL;
 
   if (sync_disabled)
@@ -1335,6 +1386,7 @@ void SyncBackendHost::Core::DoDestroySyncManager() {
 void SyncBackendHost::Core::DoConfigureSyncer(
     syncer::ConfigureReason reason,
     syncer::ModelTypeSet types_to_config,
+    syncer::ModelTypeSet failed_types,
     const syncer::ModelSafeRoutingInfo routing_info,
     const base::Callback<void(syncer::ModelTypeSet)>& ready_task,
     const base::Closure& retry_callback) {
@@ -1342,6 +1394,7 @@ void SyncBackendHost::Core::DoConfigureSyncer(
   sync_manager_->ConfigureSyncer(
       reason,
       types_to_config,
+      failed_types,
       routing_info,
       base::Bind(&SyncBackendHost::Core::DoFinishConfigureDataTypes,
                  this,
@@ -1360,7 +1413,8 @@ void SyncBackendHost::Core::DoFinishConfigureDataTypes(
   // Update the enabled types for the bridge and sync manager.
   syncer::ModelSafeRoutingInfo routing_info;
   registrar_->GetModelSafeRoutingInfo(&routing_info);
-  const syncer::ModelTypeSet enabled_types = GetRoutingInfoTypes(routing_info);
+  syncer::ModelTypeSet enabled_types = GetRoutingInfoTypes(routing_info);
+  enabled_types.RemoveAll(syncer::ProxyTypes());
   sync_manager_->UpdateEnabledTypes(enabled_types);
 
   const syncer::ModelTypeSet failed_configuration_types =
@@ -1506,12 +1560,11 @@ void SyncBackendHost::HandleInvalidatorStateChangeOnFrontendLoop(
 }
 
 void SyncBackendHost::HandleIncomingInvalidationOnFrontendLoop(
-    const syncer::ObjectIdInvalidationMap& invalidation_map,
-    syncer::IncomingInvalidationSource source) {
+    const syncer::ObjectIdInvalidationMap& invalidation_map) {
   if (!frontend_)
     return;
   DCHECK_EQ(MessageLoop::current(), frontend_loop_);
-  frontend_->OnIncomingInvalidation(invalidation_map, source);
+  frontend_->OnIncomingInvalidation(invalidation_map);
 }
 
 bool SyncBackendHost::CheckPassphraseAgainstCachedPendingKeys(

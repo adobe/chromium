@@ -9,11 +9,11 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 
 namespace file_util {
 
-bool EvictFileFromSystemCache(const FilePath& file) {
+bool EvictFileFromSystemCache(const base::FilePath& file) {
   int fd = open(file.value().c_str(), O_RDONLY);
   if (fd < 0)
     return false;

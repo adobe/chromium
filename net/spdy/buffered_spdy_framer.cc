@@ -144,9 +144,11 @@ bool BufferedSpdyFramer::OnControlFrameHeaderData(SpdyStreamId stream_id,
   return true;
 }
 
-void BufferedSpdyFramer::OnDataFrameHeader(const SpdyDataFrame* frame) {
+void BufferedSpdyFramer::OnDataFrameHeader(SpdyStreamId stream_id,
+                                           size_t length,
+                                           bool fin) {
   frames_received_++;
-  header_stream_id_ = frame->stream_id();
+  header_stream_id_ = stream_id;
 }
 
 void BufferedSpdyFramer::OnStreamFrameData(SpdyStreamId stream_id,
@@ -167,7 +169,7 @@ void BufferedSpdyFramer::OnPing(uint32 unique_id) {
 }
 
 void BufferedSpdyFramer::OnRstStream(SpdyStreamId stream_id,
-                                     SpdyStatusCodes status) {
+                                     SpdyRstStreamStatus status) {
   visitor_->OnRstStream(stream_id, status);
 }
 void BufferedSpdyFramer::OnGoAway(SpdyStreamId last_accepted_stream_id,
@@ -176,16 +178,15 @@ void BufferedSpdyFramer::OnGoAway(SpdyStreamId last_accepted_stream_id,
 }
 
 void BufferedSpdyFramer::OnWindowUpdate(SpdyStreamId stream_id,
-                                        int delta_window_size) {
+                                        uint32 delta_window_size) {
   visitor_->OnWindowUpdate(stream_id, delta_window_size);
 }
 
-void BufferedSpdyFramer::OnControlFrameCompressed(
-    const SpdyControlFrame& uncompressed_frame,
-    const SpdyControlFrame& compressed_frame) {
-  visitor_->OnControlFrameCompressed(uncompressed_frame, compressed_frame);
+void BufferedSpdyFramer::OnSynStreamCompressed(
+    size_t uncompressed_size,
+    size_t compressed_size) {
+  visitor_->OnSynStreamCompressed(uncompressed_size, compressed_size);
 }
-
 
 int BufferedSpdyFramer::protocol_version() {
   return spdy_framer_.protocol_version();
@@ -208,14 +209,14 @@ SpdyFramer::SpdyState BufferedSpdyFramer::state() const {
 }
 
 bool BufferedSpdyFramer::MessageFullyRead() {
-  return spdy_framer_.MessageFullyRead();
+  return state() == SpdyFramer::SPDY_AUTO_RESET;
 }
 
 bool BufferedSpdyFramer::HasError() {
   return spdy_framer_.HasError();
 }
 
-SpdySynStreamControlFrame* BufferedSpdyFramer::CreateSynStream(
+SpdyFrame* BufferedSpdyFramer::CreateSynStream(
     SpdyStreamId stream_id,
     SpdyStreamId associated_stream_id,
     SpdyPriority priority,
@@ -228,7 +229,7 @@ SpdySynStreamControlFrame* BufferedSpdyFramer::CreateSynStream(
                                       headers);
 }
 
-SpdySynReplyControlFrame* BufferedSpdyFramer::CreateSynReply(
+SpdyFrame* BufferedSpdyFramer::CreateSynReply(
     SpdyStreamId stream_id,
     SpdyControlFlags flags,
     bool compressed,
@@ -236,29 +237,29 @@ SpdySynReplyControlFrame* BufferedSpdyFramer::CreateSynReply(
   return spdy_framer_.CreateSynReply(stream_id, flags, compressed, headers);
 }
 
-SpdyRstStreamControlFrame* BufferedSpdyFramer::CreateRstStream(
+SpdyFrame* BufferedSpdyFramer::CreateRstStream(
     SpdyStreamId stream_id,
-    SpdyStatusCodes status) const {
+    SpdyRstStreamStatus status) const {
   return spdy_framer_.CreateRstStream(stream_id, status);
 }
 
-SpdySettingsControlFrame* BufferedSpdyFramer::CreateSettings(
+SpdyFrame* BufferedSpdyFramer::CreateSettings(
     const SettingsMap& values) const {
   return spdy_framer_.CreateSettings(values);
 }
 
-SpdyPingControlFrame* BufferedSpdyFramer::CreatePingFrame(
+SpdyFrame* BufferedSpdyFramer::CreatePingFrame(
     uint32 unique_id) const {
   return spdy_framer_.CreatePingFrame(unique_id);
 }
 
-SpdyGoAwayControlFrame* BufferedSpdyFramer::CreateGoAway(
+SpdyFrame* BufferedSpdyFramer::CreateGoAway(
     SpdyStreamId last_accepted_stream_id,
     SpdyGoAwayStatus status) const {
   return spdy_framer_.CreateGoAway(last_accepted_stream_id, status);
 }
 
-SpdyHeadersControlFrame* BufferedSpdyFramer::CreateHeaders(
+SpdyFrame* BufferedSpdyFramer::CreateHeaders(
     SpdyStreamId stream_id,
     SpdyControlFlags flags,
     bool compressed,
@@ -266,30 +267,26 @@ SpdyHeadersControlFrame* BufferedSpdyFramer::CreateHeaders(
   return spdy_framer_.CreateHeaders(stream_id, flags, compressed, headers);
 }
 
-SpdyWindowUpdateControlFrame* BufferedSpdyFramer::CreateWindowUpdate(
+SpdyFrame* BufferedSpdyFramer::CreateWindowUpdate(
     SpdyStreamId stream_id,
     uint32 delta_window_size) const {
   return spdy_framer_.CreateWindowUpdate(stream_id, delta_window_size);
 }
 
-SpdyCredentialControlFrame* BufferedSpdyFramer::CreateCredentialFrame(
+SpdyFrame* BufferedSpdyFramer::CreateCredentialFrame(
     const SpdyCredential& credential) const {
   return spdy_framer_.CreateCredentialFrame(credential);
 }
 
-SpdyDataFrame* BufferedSpdyFramer::CreateDataFrame(SpdyStreamId stream_id,
-                                                   const char* data,
-                                                   uint32 len,
-                                                   SpdyDataFlags flags) {
+SpdyFrame* BufferedSpdyFramer::CreateDataFrame(SpdyStreamId stream_id,
+                                               const char* data,
+                                               uint32 len,
+                                               SpdyDataFlags flags) {
   return spdy_framer_.CreateDataFrame(stream_id, data, len, flags);
 }
 
 SpdyPriority BufferedSpdyFramer::GetHighestPriority() const {
   return spdy_framer_.GetHighestPriority();
-}
-
-bool BufferedSpdyFramer::IsCompressible(const SpdyFrame& frame) const {
-  return spdy_framer_.IsCompressible(frame);
 }
 
 void BufferedSpdyFramer::InitHeaderStreaming(SpdyStreamId stream_id) {

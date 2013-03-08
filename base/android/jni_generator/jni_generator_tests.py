@@ -16,7 +16,7 @@ import os
 import sys
 import unittest
 import jni_generator
-from jni_generator import CalledByNative, NativeMethod, Param
+from jni_generator import CalledByNative, JniParams, NativeMethod, Param
 
 
 class TestGenerator(unittest.TestCase):
@@ -1888,7 +1888,6 @@ import org.chromium.content.app.ContentMain;
 import org.chromium.content.browser.SandboxedProcessConnection;
 import org.chromium.content.common.ISandboxedProcessCallback;
 import org.chromium.content.common.ISandboxedProcessService;
-import org.chromium.content.common.SurfaceCallback;
 import org.chromium.content.common.WillNotRaise.AnException;
 import org.chromium.content.common.WillRaise.AnException;
 
@@ -1917,6 +1916,12 @@ class Foo {
     self.assertRaises(SyntaxError,
                       jni_generator.JniParams.JavaToJni,
                       'AnException')
+
+  def testJniParamsJavaToJni(self):
+    self.assertTextEquals('I', JniParams.JavaToJni('int'))
+    self.assertTextEquals('[B', JniParams.JavaToJni('byte[]'))
+    self.assertTextEquals(
+        '[Ljava/nio/ByteBuffer;', JniParams.JavaToJni('java/nio/ByteBuffer[]'))
 
 
 if __name__ == '__main__':

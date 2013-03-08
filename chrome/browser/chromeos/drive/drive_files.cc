@@ -46,8 +46,8 @@ const DriveDirectory* DriveEntry::AsDriveDirectoryConst() const {
   return const_cast<DriveEntry*>(this)->AsDriveDirectory();
 }
 
-FilePath DriveEntry::GetFilePath() const {
-  FilePath path;
+base::FilePath DriveEntry::GetFilePath() const {
+  base::FilePath path;
   if (parent())
     path = parent()->GetFilePath();
   path = path.Append(base_name());
@@ -120,17 +120,17 @@ void DriveDirectory::AddEntry(DriveEntry* entry) {
   // Do file name de-duplication - find files with the same name and
   // append a name modifier to the name.
   int max_modifier = 1;
-  FilePath full_file_name(entry->base_name());
+  base::FilePath full_file_name(entry->base_name());
   const std::string extension = full_file_name.Extension();
   const std::string file_name = full_file_name.RemoveExtension().value();
   while (!FindChild(full_file_name.value()).empty()) {
     if (!extension.empty()) {
-      full_file_name = FilePath(base::StringPrintf("%s (%d)%s",
+      full_file_name = base::FilePath(base::StringPrintf("%s (%d)%s",
                                                    file_name.c_str(),
                                                    ++max_modifier,
                                                    extension.c_str()));
     } else {
-      full_file_name = FilePath(base::StringPrintf("%s (%d)",
+      full_file_name = base::FilePath(base::StringPrintf("%s (%d)",
                                                    file_name.c_str(),
                                                    ++max_modifier));
     }
@@ -183,7 +183,7 @@ void DriveDirectory::RemoveEntry(DriveEntry* entry) {
 }
 
 std::string DriveDirectory::FindChild(
-    const FilePath::StringType& file_name) const {
+    const base::FilePath::StringType& file_name) const {
   ChildMap::const_iterator iter = child_files_.find(file_name);
   if (iter != child_files_.end())
     return iter->second;
@@ -242,7 +242,8 @@ void DriveDirectory::RemoveChildDirectories() {
   child_directories_.clear();
 }
 
-void DriveDirectory::GetChildDirectoryPaths(std::set<FilePath>* child_dirs) {
+void DriveDirectory::GetChildDirectoryPaths(
+    std::set<base::FilePath>* child_dirs) {
   for (ChildMap::const_iterator iter = child_directories_.begin();
        iter != child_directories_.end(); ++iter) {
     DriveDirectory* dir = resource_metadata_->GetEntryByResourceId(
@@ -264,7 +265,7 @@ void DriveEntry::FromProto(const DriveEntryProto& proto) {
   resource_id_ = proto.resource_id();
   parent_resource_id_ = proto.parent_resource_id();
   edit_url_ = GURL(proto.edit_url());
-  content_url_ = GURL(proto.content_url());
+  download_url_ = GURL(proto.download_url());
   upload_url_ = GURL(proto.upload_url());
   deleted_ = proto.deleted();
   SetBaseNameFromTitle();
@@ -280,7 +281,7 @@ void DriveEntry::ToProto(DriveEntryProto* proto) const {
   proto->set_resource_id(resource_id_);
   proto->set_parent_resource_id(parent_resource_id_);
   proto->set_edit_url(edit_url_.spec());
-  proto->set_content_url(content_url_.spec());
+  proto->set_download_url(download_url_.spec());
   proto->set_upload_url(upload_url_.spec());
   proto->set_deleted(deleted_);
 }

@@ -7,10 +7,11 @@
 
 #include <set>
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/prefs/public/pref_member.h"
 
-class PrefServiceSyncable;
+class PrefRegistrySyncable;
+class PrefService;
 class Profile;
 
 namespace content {
@@ -24,7 +25,7 @@ class DownloadPrefs {
   explicit DownloadPrefs(Profile* profile);
   ~DownloadPrefs();
 
-  static void RegisterUserPrefs(PrefServiceSyncable* prefs);
+  static void RegisterUserPrefs(PrefRegistrySyncable* registry);
 
   // Returns the DownloadPrefs corresponding to the given DownloadManager
   // or BrowserContext.
@@ -33,7 +34,7 @@ class DownloadPrefs {
   static DownloadPrefs* FromBrowserContext(
       content::BrowserContext* browser_context);
 
-  FilePath DownloadPath() const;
+  base::FilePath DownloadPath() const;
   int save_file_type() const { return *save_file_type_; }
 
   // Returns true if the prompt_for_download preference has been set and the
@@ -49,14 +50,14 @@ class DownloadPrefs {
   bool IsAutoOpenUsed() const;
 
   bool IsAutoOpenEnabledForExtension(
-      const FilePath::StringType& extension) const;
+      const base::FilePath::StringType& extension) const;
 
   // Enables auto-open based on file extension. Returns true on success.
   // TODO(phajdan.jr): Add WARN_UNUSED_RESULT here.
-  bool EnableAutoOpenBasedOnExtension(const FilePath& file_name);
+  bool EnableAutoOpenBasedOnExtension(const base::FilePath& file_name);
 
   // Disables auto-open based on file extension.
-  void DisableAutoOpenBasedOnExtension(const FilePath& file_name);
+  void DisableAutoOpenBasedOnExtension(const base::FilePath& file_name);
 
   void ResetAutoOpen();
 
@@ -71,10 +72,11 @@ class DownloadPrefs {
 
   // Set of file extensions to open at download completion.
   struct AutoOpenCompareFunctor {
-    bool operator()(const FilePath::StringType& a,
-                    const FilePath::StringType& b) const;
+    bool operator()(const base::FilePath::StringType& a,
+                    const base::FilePath::StringType& b) const;
   };
-  typedef std::set<FilePath::StringType, AutoOpenCompareFunctor> AutoOpenSet;
+  typedef std::set<base::FilePath::StringType,
+                   AutoOpenCompareFunctor> AutoOpenSet;
   AutoOpenSet auto_open_;
 
   DISALLOW_COPY_AND_ASSIGN(DownloadPrefs);

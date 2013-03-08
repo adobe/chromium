@@ -5,16 +5,17 @@
 #include "chrome/browser/managed_mode/managed_user_service.h"
 
 #include "base/memory/ref_counted.h"
+#include "base/prefs/pref_service.h"
 #include "base/sequenced_task_runner.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/managed_mode/managed_mode_site_list.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension_set.h"
 #include "chrome/common/pref_names.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/browser_thread.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -43,8 +44,7 @@ void ManagedUserService::URLFilterContext::SetDefaultFilteringBehavior(
       BrowserThread::IO,
       FROM_HERE,
       base::Bind(&ManagedModeURLFilter::SetDefaultFilteringBehavior,
-                 io_url_filter_.get(),
-                 behavior));
+                 io_url_filter_.get(), behavior));
 }
 
 void ManagedUserService::URLFilterContext::LoadWhitelists(
@@ -62,40 +62,32 @@ void ManagedUserService::URLFilterContext::LoadWhitelists(
       BrowserThread::IO,
       FROM_HERE,
       base::Bind(&ManagedModeURLFilter::LoadWhitelists,
-                 io_url_filter_,
-                 base::Passed(&site_lists_copy)));
+                 io_url_filter_, base::Passed(&site_lists_copy)));
 }
 
-void ManagedUserService::URLFilterContext::SetManualLists(
-    scoped_ptr<ListValue> whitelist,
-    scoped_ptr<ListValue> blacklist) {
-  ui_url_filter_->SetManualLists(whitelist.get(), blacklist.get());
+void ManagedUserService::URLFilterContext::SetManualHosts(
+    scoped_ptr<std::map<std::string, bool> > host_map) {
+  ui_url_filter_->SetManualHosts(host_map.get());
   BrowserThread::PostTask(
       BrowserThread::IO,
       FROM_HERE,
-      base::Bind(&ManagedModeURLFilter::SetManualLists,
-                 io_url_filter_,
-                 base::Owned(whitelist.release()),
-                 base::Owned(blacklist.release())));
+      base::Bind(&ManagedModeURLFilter::SetManualHosts,
+                 io_url_filter_, base::Owned(host_map.release())));
 }
 
-void ManagedUserService::URLFilterContext::AddURLPatternToManualList(
-    const bool is_whitelist,
-    const std::string& url) {
-  ui_url_filter_->AddURLPatternToManualList(is_whitelist, url);
+void ManagedUserService::URLFilterContext::SetManualURLs(
+    scoped_ptr<std::map<GURL, bool> > url_map) {
+  ui_url_filter_->SetManualURLs(url_map.get());
   BrowserThread::PostTask(
       BrowserThread::IO,
       FROM_HERE,
-      base::Bind(&ManagedModeURLFilter::AddURLPatternToManualList,
-                 io_url_filter_,
-                 is_whitelist,
-                 url));
+      base::Bind(&ManagedModeURLFilter::SetManualURLs,
+                 io_url_filter_, base::Owned(url_map.release())));
 }
 
 ManagedUserService::ManagedUserService(Profile* profile)
     : profile_(profile),
       is_elevated_(false) {
-  Init();
 }
 
 ManagedUserService::~ManagedUserService() {
@@ -105,15 +97,43 @@ bool ManagedUserService::ProfileIsManaged() const {
   return profile_->GetPrefs()->GetBoolean(prefs::kProfileIsManaged);
 }
 
+bool ManagedUserService::IsElevated() const {
+  PrefService* pref_service = profile_->GetPrefs();
+  // If there is no passphrase set, the profile is considered to be elevated.
+  if (pref_service->GetString(prefs::kManagedModeLocalPassphrase).empty())
+    return true;
+  return is_elevated_;
+}
+
+void ManagedUserService::RequestAuthorization(
+    content::WebContents* web_contents,
+    const PassphraseCheckedCallback& callback) {
+  PrefService* pref_service = profile_->GetPrefs();
+
+  // If there is no passphrase set, we do not need to ask for authentication.
+  if (pref_service->GetString(prefs::kManagedModeLocalPassphrase).empty()) {
+    callback.Run(true);
+    return;
+  }
+  // Is deleted automatically when the dialog is closed.
+  new ManagedUserPassphraseDialog(web_contents, callback);
+}
+
 // static
-void ManagedUserService::RegisterUserPrefs(PrefServiceSyncable* prefs) {
-  prefs->RegisterListPref(prefs::kManagedModeWhitelist,
-                          PrefServiceSyncable::UNSYNCABLE_PREF);
-  prefs->RegisterListPref(prefs::kManagedModeBlacklist,
-                          PrefServiceSyncable::UNSYNCABLE_PREF);
-  prefs->RegisterIntegerPref(prefs::kDefaultManagedModeFilteringBehavior,
-                             ManagedModeURLFilter::BLOCK,
-                             PrefServiceSyncable::UNSYNCABLE_PREF);
+void ManagedUserService::RegisterUserPrefs(PrefRegistrySyncable* registry) {
+  registry->RegisterDictionaryPref(prefs::kManagedModeManualHosts,
+                                   PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterDictionaryPref(prefs::kManagedModeManualURLs,
+                                   PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterIntegerPref(prefs::kDefaultManagedModeFilteringBehavior,
+                                ManagedModeURLFilter::BLOCK,
+                                PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterStringPref(prefs::kManagedModeLocalPassphrase,
+                               "",
+                               PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterStringPref(prefs::kManagedModeLocalSalt,
+                               "",
+                               PrefRegistrySyncable::UNSYNCABLE_PREF);
 }
 
 scoped_refptr<const ManagedModeURLFilter>
@@ -144,56 +164,6 @@ void ManagedUserService::GetCategoryNames(CategoryList* list) {
   ManagedModeSiteList::GetCategoryNames(list);
 };
 
-void ManagedUserService::AddToManualList(bool is_whitelist,
-                                         const base::ListValue& list) {
-  ListPrefUpdate pref_update(profile_->GetPrefs(),
-                             is_whitelist ? prefs::kManagedModeWhitelist :
-                                            prefs::kManagedModeBlacklist);
-  ListValue* pref_list = pref_update.Get();
-
-  for (size_t i = 0; i < list.GetSize(); ++i) {
-    std::string url_pattern;
-    list.GetString(i, &url_pattern);
-
-    if (!IsInManualList(is_whitelist, url_pattern)) {
-      pref_list->AppendString(url_pattern);
-      AddURLPatternToManualList(is_whitelist, url_pattern);
-    }
-  }
-}
-
-void ManagedUserService::RemoveFromManualList(bool is_whitelist,
-                                              const base::ListValue& list) {
-  ListPrefUpdate pref_update(profile_->GetPrefs(),
-                             is_whitelist ? prefs::kManagedModeWhitelist :
-                                            prefs::kManagedModeBlacklist);
-  ListValue* pref_list = pref_update.Get();
-
-  for (size_t i = 0; i < list.GetSize(); ++i) {
-    std::string pattern;
-    size_t out_index;
-    list.GetString(i, &pattern);
-    StringValue value_to_remove(pattern);
-
-    pref_list->Remove(value_to_remove, &out_index);
-  }
-}
-
-bool ManagedUserService::IsInManualList(bool is_whitelist,
-                                        const std::string& url_pattern) {
-  StringValue pattern(url_pattern);
-  const ListValue* list = profile_->GetPrefs()->GetList(
-      is_whitelist ? prefs::kManagedModeWhitelist :
-                     prefs::kManagedModeBlacklist);
-  return list->Find(pattern) != list->end();
-}
-
-// static
-scoped_ptr<base::ListValue> ManagedUserService::GetBlacklist() {
-  return make_scoped_ptr(
-      profile_->GetPrefs()->GetList(prefs::kManagedModeBlacklist)->DeepCopy());
-}
-
 std::string ManagedUserService::GetDebugPolicyProviderName() const {
   // Save the string space in official builds.
 #ifdef NDEBUG
@@ -219,6 +189,24 @@ bool ManagedUserService::UserMayLoad(const extensions::Extension* extension,
   if (extension_service &&
       extension_service->GetInstalledExtension(extension->id()))
     return true;
+
+  if (extension) {
+    bool was_installed_by_default = extension->was_installed_by_default();
+#ifdef OS_CHROMEOS
+    // On Chrome OS all external sources are controlled by us so it means that
+    // they are "default". Method was_installed_by_default returns false because
+    // extensions creation flags are ignored in case of default extensions with
+    // update URL(the flags aren't passed to OnExternalExtensionUpdateUrlFound).
+    // TODO(dpolukhin): remove this Chrome OS specific code as soon as creation
+    // flags are not ignored.
+    was_installed_by_default =
+        extensions::Manifest::IsExternalLocation(extension->location());
+#endif
+    if (extension->location() == extensions::Manifest::COMPONENT ||
+        was_installed_by_default) {
+      return true;
+    }
+  }
 
   if (error)
     *error = tmp_error;
@@ -305,11 +293,67 @@ void ManagedUserService::UpdateSiteLists() {
   url_filter_context_.LoadWhitelists(GetActiveSiteLists());
 }
 
-void ManagedUserService::UpdateManualLists() {
-  url_filter_context_.SetManualLists(GetWhitelist(), GetBlacklist());
+ManagedUserService::ManualBehavior ManagedUserService::GetManualBehaviorForHost(
+    const std::string& hostname) {
+  const DictionaryValue* dict =
+      profile_->GetPrefs()->GetDictionary(prefs::kManagedModeManualHosts);
+  bool allow = false;
+  if (!dict->GetBooleanWithoutPathExpansion(hostname, &allow))
+    return MANUAL_NONE;
+
+  return allow ? MANUAL_ALLOW : MANUAL_BLOCK;
 }
 
-void ManagedUserService::SetElevatedForTesting(bool is_elevated) {
+void ManagedUserService::SetManualBehaviorForHosts(
+    const std::vector<std::string>& hostnames,
+    ManualBehavior behavior) {
+  DictionaryPrefUpdate update(profile_->GetPrefs(),
+                              prefs::kManagedModeManualHosts);
+  DictionaryValue* dict = update.Get();
+  for (std::vector<std::string>::const_iterator it = hostnames.begin();
+       it != hostnames.end(); ++it) {
+    if (behavior == MANUAL_NONE)
+      dict->RemoveWithoutPathExpansion(*it, NULL);
+    else
+      dict->SetBooleanWithoutPathExpansion(*it, behavior == MANUAL_ALLOW);
+  }
+
+  UpdateManualHosts();
+}
+
+ManagedUserService::ManualBehavior ManagedUserService::GetManualBehaviorForURL(
+    const GURL& url) {
+  const DictionaryValue* dict =
+      profile_->GetPrefs()->GetDictionary(prefs::kManagedModeManualURLs);
+  GURL normalized_url = ManagedModeURLFilter::Normalize(url);
+  bool allow = false;
+  if (!dict->GetBooleanWithoutPathExpansion(normalized_url.spec(), &allow))
+    return MANUAL_NONE;
+
+  return allow ? MANUAL_ALLOW : MANUAL_BLOCK;
+}
+
+void ManagedUserService::SetManualBehaviorForURLs(const std::vector<GURL>& urls,
+                                                  ManualBehavior behavior) {
+  DictionaryPrefUpdate update(profile_->GetPrefs(),
+                              prefs::kManagedModeManualURLs);
+  DictionaryValue* dict = update.Get();
+
+  for (std::vector<GURL>::const_iterator it = urls.begin(); it != urls.end();
+       ++it) {
+    GURL url = ManagedModeURLFilter::Normalize(*it);
+    if (behavior == MANUAL_NONE) {
+      dict->RemoveWithoutPathExpansion(url.spec(), NULL);
+    } else {
+      dict->SetBooleanWithoutPathExpansion(url.spec(),
+                                           behavior == MANUAL_ALLOW);
+    }
+  }
+
+  UpdateManualURLs();
+}
+
+void ManagedUserService::SetElevated(bool is_elevated) {
   is_elevated_ = is_elevated;
 }
 
@@ -335,19 +379,42 @@ void ManagedUserService::Init() {
           &ManagedUserService::OnDefaultFilteringBehaviorChanged,
           base::Unretained(this)));
 
+  // TODO(bauerb): Setting the default value here does not currently trigger
+  // the proper notification. Once that is fixed use SetDefaultPrefValue
+  // instead.
+  if (!profile_->GetPrefs()->HasPrefPath(prefs::kForceSafeSearch))
+    profile_->GetPrefs()->SetBoolean(prefs::kForceSafeSearch, true);
+
   // Initialize the filter.
   OnDefaultFilteringBehaviorChanged();
   UpdateSiteLists();
-  UpdateManualLists();
+  UpdateManualHosts();
+  UpdateManualURLs();
 }
 
-scoped_ptr<base::ListValue> ManagedUserService::GetWhitelist() {
-  return make_scoped_ptr(
-      profile_->GetPrefs()->GetList(prefs::kManagedModeWhitelist)->DeepCopy());
+void ManagedUserService::UpdateManualHosts() {
+  const DictionaryValue* dict =
+      profile_->GetPrefs()->GetDictionary(prefs::kManagedModeManualHosts);
+  scoped_ptr<std::map<std::string, bool> > host_map(
+      new std::map<std::string, bool>());
+  for (DictionaryValue::Iterator it(*dict); !it.IsAtEnd(); it.Advance()) {
+    bool allow = false;
+    bool result = it.value().GetAsBoolean(&allow);
+    DCHECK(result);
+    (*host_map)[it.key()] = allow;
+  }
+  url_filter_context_.SetManualHosts(host_map.Pass());
 }
 
-void ManagedUserService::AddURLPatternToManualList(
-    bool is_whitelist,
-    const std::string& url_pattern) {
-  url_filter_context_.AddURLPatternToManualList(true, url_pattern);
+void ManagedUserService::UpdateManualURLs() {
+  const DictionaryValue* dict =
+      profile_->GetPrefs()->GetDictionary(prefs::kManagedModeManualURLs);
+  scoped_ptr<std::map<GURL, bool> > url_map(new std::map<GURL, bool>());
+  for (DictionaryValue::Iterator it(*dict); !it.IsAtEnd(); it.Advance()) {
+    bool allow = false;
+    bool result = it.value().GetAsBoolean(&allow);
+    DCHECK(result);
+    (*url_map)[GURL(it.key())] = allow;
+  }
+  url_filter_context_.SetManualURLs(url_map.Pass());
 }

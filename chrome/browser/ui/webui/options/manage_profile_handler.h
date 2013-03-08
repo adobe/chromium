@@ -74,6 +74,13 @@ class ManageProfileHandler : public OptionsPageUIHandler {
   // |args| is of the form: [ {string} profileFilePath ]
   void DeleteProfile(const base::ListValue* args);
 
+#if defined(ENABLE_SETTINGS_APP)
+  // Callback for the "switchAppListProfile" message. Asks the
+  // app_list_controller to change the profile registered for the AppList.
+  // |args| is of the form: [ {string} profileFilePath ]
+  void SwitchAppListProfile(const base::ListValue* args);
+#endif
+
   // Callback for the 'profileIconSelectionChanged' message. Used to update the
   // name in the manager profile dialog based on the selected icon.
   void ProfileIconSelectionChanged(const base::ListValue* args);
@@ -87,6 +94,16 @@ class ManageProfileHandler : public OptionsPageUIHandler {
   // Callback invoked from the profile manager indicating whether the profile
   // being edited has any desktop shortcuts.
   void OnHasProfileShortcuts(bool has_shortcuts);
+
+  // Callback for the "addProfileShortcut" message, which is called when editing
+  // an existing profile and the user clicks the "Add desktop shortcut" button.
+  // Adds a desktop shortcut for the profile.
+  void AddProfileShortcut(const base::ListValue* args);
+
+  // Callback for the "removeProfileShortcut" message, which is called when
+  // editing an existing profile and the user clicks the "Remove desktop
+  // shortcut" button. Removes the desktop shortcut for the profile.
+  void RemoveProfileShortcut(const base::ListValue* args);
 
   // URL for the current profile's GAIA picture.
   std::string gaia_picture_url_;

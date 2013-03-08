@@ -15,9 +15,10 @@ Id3Parser.prototype = {__proto__: MetadataParser.prototype};
  * Reads synchsafe integer.
  * 'SynchSafe' term is taken from id3 documentation.
  *
- * @param {ByteReader} reader - reader to use
- * @param {int} length - bytes to read
- * @return {int}
+ * @param {ByteReader} reader - reader to use.
+ * @param {number} length - bytes to read.
+ * @return {number}  // TODO(JSDOC).
+ * @private
  */
 Id3Parser.readSynchSafe_ = function(reader, length) {
   var rv = 0;
@@ -39,8 +40,9 @@ Id3Parser.readSynchSafe_ = function(reader, length) {
 /**
  * Reads 3bytes integer.
  *
- * @param {ByteReader} reader - reader to use
- * @return {int}
+ * @param {ByteReader} reader - reader to use.
+ * @return {number}  // TODO(JSDOC).
+ * @private
  */
 Id3Parser.readUInt24_ = function(reader) {
   return reader.readScalar(2, false) << 16 | reader.readScalar(1, false);
@@ -49,10 +51,11 @@ Id3Parser.readUInt24_ = function(reader) {
 /**
  * Reads string from reader with specified encoding
  *
- * @param {ByteReader} reader reader to use
- * @param {int} encoding string encoding.
- * @param {int} size maximum string size. Actual result may be shorter.
- *
+ * @param {ByteReader} reader reader to use.
+ * @param {number} encoding string encoding.
+ * @param {number} size maximum string size. Actual result may be shorter.
+ * @return {string}  // TODO(JSDOC).
+ * @private
  */
 Id3Parser.prototype.readString_ = function(reader, encoding, size) {
   switch (encoding) {
@@ -80,10 +83,11 @@ Id3Parser.prototype.readString_ = function(reader, encoding, size) {
 /**
  * Reads text frame from reader.
  *
- * @param {ByteReader} reader reader to use
- * @param {int} majorVersion major id3 version to use
- * @param {Object} frame frame so store data at
- * @param {int} end frame end position in reader
+ * @param {ByteReader} reader reader to use.
+ * @param {number} majorVersion major id3 version to use.
+ * @param {Object} frame frame so store data at.
+ * @param {number} end frame end position in reader.
+ * @private
  */
 Id3Parser.prototype.readTextFrame_ = function(reader,
                                               majorVersion,
@@ -96,10 +100,11 @@ Id3Parser.prototype.readTextFrame_ = function(reader,
 /**
  * Reads user defined text frame from reader.
  *
- * @param {ByteReader} reader reader to use
- * @param {int} majorVersion major id3 version to use
- * @param {Object} frame frame so store data at
- * @param {int} end frame end position in reader
+ * @param {ByteReader} reader reader to use.
+ * @param {number} majorVersion major id3 version to use.
+ * @param {Object} frame frame so store data at.
+ * @param {number} end frame end position in reader.
+ * @private
  */
 Id3Parser.prototype.readUserDefinedTextFrame_ = function(reader,
                                                          majorVersion,
@@ -118,6 +123,13 @@ Id3Parser.prototype.readUserDefinedTextFrame_ = function(reader,
       end - reader.tell());
 };
 
+/**
+ * @param {ByteReader} reader Reader to use.
+ * @param {number} majorVersion Major id3 version to use.
+ * @param {Object} frame Frame so store data at.
+ * @param {number} end Frame end position in reader.
+ * @private
+ */
 Id3Parser.prototype.readPIC_ = function(reader, majorVersion, frame, end) {
   frame.encoding = reader.readScalar(1, false, end);
   frame.format = reader.readNullTerminatedString(3, end - reader.tell());
@@ -134,6 +146,13 @@ Id3Parser.prototype.readPIC_ = function(reader, majorVersion, frame, end) {
   }
 };
 
+/**
+ * @param {ByteReader} reader Reader to use.
+ * @param {number} majorVersion Major id3 version to use.
+ * @param {Object} frame Frame so store data at.
+ * @param {number} end Frame end position in reader.
+ * @private
+ */
 Id3Parser.prototype.readAPIC_ = function(reader, majorVersion, frame, end) {
   this.vlog('Extracting picture');
   frame.encoding = reader.readScalar(1, false, end);
@@ -154,8 +173,10 @@ Id3Parser.prototype.readAPIC_ = function(reader, majorVersion, frame, end) {
 /**
  * Reads string from reader with specified encoding
  *
- * @param {ByteReader} reader  reader to use
- * @return {Object} frame read
+ * @param {ByteReader} reader  reader to use.
+ * @param {number} majorVersion  // TODO(JSDOC).
+ * @return {Object} frame read.
+ * @private
  */
 Id3Parser.prototype.readFrame_ = function(reader, majorVersion) {
   if (reader.eof())
@@ -167,14 +188,13 @@ Id3Parser.prototype.readFrame_ = function(reader, majorVersion) {
 
   var position = reader.tell();
 
-  frame.name = (majorVersion == 2)
-      ? reader.readNullTerminatedString(3)
-      : reader.readNullTerminatedString(4);
+  frame.name = (majorVersion == 2) ? reader.readNullTerminatedString(3) :
+                                     reader.readNullTerminatedString(4);
 
   if (frame.name == '')
     return null;
 
-  this.vlog('Found frame ' + (frame.name) + ' at position ' + position );
+  this.vlog('Found frame ' + (frame.name) + ' at position ' + position);
 
   switch (majorVersion) {
     case 2:
@@ -193,7 +213,7 @@ Id3Parser.prototype.readFrame_ = function(reader, majorVersion) {
       break;
   }
 
-  this.vlog('Found frame [' + frame.name + '] with size ['+frame.size+']');
+  this.vlog('Found frame [' + frame.name + '] with size [' + frame.size + ']');
 
   if (Id3Parser.v2.HANDLERS[frame.name]) {
     Id3Parser.v2.HANDLERS[frame.name].call(
@@ -217,7 +237,13 @@ Id3Parser.prototype.readFrame_ = function(reader, majorVersion) {
   return frame;
 };
 
-Id3Parser.prototype.parse = function (file, metadata, callback, onError) {
+/**
+ * @param {File} file  // TODO(JSDOC).
+ * @param {Object} metadata  // TODO(JSDOC).
+ * @param {function(Object)} callback  // TODO(JSDOC).
+ * @param {function(etring)} onError  // TODO(JSDOC).
+ */
+Id3Parser.prototype.parse = function(file, metadata, callback, onError) {
   var self = this;
 
   this.log('Starting id3 parser for ' + file.name);
@@ -229,7 +255,7 @@ Id3Parser.prototype.parse = function (file, metadata, callback, onError) {
          * Reads last 128 bytes of file in bytebuffer,
          * which passes further.
          * In last 128 bytes should be placed ID3v1 tag if available.
-         * @param file - file which bytes to read.
+         * @param {File} file File which bytes to read.
          */
         function readTail(file) {
           util.readFileBytes(file, file.size - 128, file.size,
@@ -238,12 +264,12 @@ Id3Parser.prototype.parse = function (file, metadata, callback, onError) {
 
         /**
          * Attempts to extract ID3v1 tag from 128 bytes long ByteBuffer
-         * @param file file which tags are being extracted.
-         *        Could be used for logging purposes.
+         * @param {File} file File which tags are being extracted. Could be used
+         *     for logging purposes.
          * @param {ByteReader} reader ByteReader of 128 bytes.
          */
         function extractId3v1(file, reader) {
-          if ( reader.readString(3) == 'TAG') {
+          if (reader.readString(3) == 'TAG') {
             this.logger.vlog('id3v1 found');
             var id3v1 = metadata.id3v1 = {};
 
@@ -283,8 +309,9 @@ Id3Parser.prototype.parse = function (file, metadata, callback, onError) {
 
         /**
          * Check if passed array of 10 bytes contains ID3 header.
-         * @param file to check and continue reading if ID3 metadata found
-         * @param {ByteReader} reader reader to fill with stream bytes.
+         * @param {File} file File to check and continue reading if ID3
+         *     metadata found.
+         * @param {ByteReader} reader Reader to fill with stream bytes.
          */
         function checkId3v2(file, reader) {
           if (reader.readString(3) == 'ID3') {
@@ -304,14 +331,14 @@ Id3Parser.prototype.parse = function (file, metadata, callback, onError) {
 
         /**
          * Extracts all ID3v2 frames from given bytebuffer.
-         * @param file being parsed.
-         * @param {ByteReader} reader to use for metadata extraction.
+         * @param {File} file File being parsed.
+         * @param {ByteReader} reader Reader to use for metadata extraction.
          */
         function extractFrames(file, reader) {
           var id3v2 = metadata.id3v2;
 
-          if ((id3v2.major > 2)
-              && (id3v2.flags & Id3Parser.v2.FLAG_EXTENDED_HEADER != 0)) {
+          if ((id3v2.major > 2) &&
+              (id3v2.flags & Id3Parser.v2.FLAG_EXTENDED_HEADER != 0)) {
             // Skip extended header if found
             if (id3v2.major == 3) {
               reader.seek(reader.readScalar(4, false) - 4);
@@ -371,7 +398,7 @@ Id3Parser.prototype.parse = function (file, metadata, callback, onError) {
           extract('artist', 'TPE1', 'TP1');
 
           metadata.description.sort(function(a, b) {
-            return Id3Parser.METADATA_ORDER.indexOf(a.key)-
+            return Id3Parser.METADATA_ORDER.indexOf(a.key) -
                    Id3Parser.METADATA_ORDER.indexOf(b.key);
           });
           this.nextStep();
@@ -439,7 +466,7 @@ Id3Parser.v1 = {
    * other languages), translation exists at least fo 10% and most time
    * translation would degrade to transliteration.
    */
-  GENRES : [
+  GENRES: [
     'Blues',
     'Classic Rock',
     'Country',
@@ -602,9 +629,9 @@ Id3Parser.v2 = {
      * ISO-8859-1 [ISO-8859-1]. Terminated with $00.
      *
      * @const
-     * @type {int}
+     * @type {number}
      */
-    ISO_8859_1 : 0,
+    ISO_8859_1: 0,
 
 
     /**
@@ -613,26 +640,26 @@ Id3Parser.v2 = {
      * Terminated with $00 00.
      *
      * @const
-     * @type {int}
+     * @type {number}
      */
-    UTF_16 : 1,
+    UTF_16: 1,
 
     /**
      * UTF-16BE [UTF-16] encoded Unicode [UNICODE] without BOM.
      * Terminated with $00 00.
      *
      * @const
-     * @type {int}
+     * @type {number}
      */
-    UTF_16BE : 2,
+    UTF_16BE: 2,
 
     /**
      * UTF-8 [UTF-8] encoded Unicode [UNICODE]. Terminated with $00.
      *
      * @const
-     * @type {int}
+     * @type {number}
      */
-    UTF_8 : 3
+    UTF_8: 3
   },
   HANDLERS: {
    //User defined text information frame

@@ -92,6 +92,7 @@ const char kPageActionId[] = "id";
 const char kPageActionPopup[] = "popup";
 const char kPageActionPopupPath[] = "path";
 const char kPageActions[] = "page_actions";
+const char kPageLauncher[] = "page_launcher";
 const char kPermissions[] = "permissions";
 const char kPlatformAppBackground[] = "app.background";
 const char kPlatformAppBackgroundPage[] = "app.background.page";
@@ -111,6 +112,7 @@ const char kShortcutKey[] = "shortcutKey";
 const char kSignature[] = "signature";
 const char kSuggestedKey[] = "suggested_key";
 const char kSystemIndicator[] = "system_indicator";
+const char kSystemInfoDisplay[] = "systemInfo.display";
 const char kTheme[] = "theme";
 const char kThemeColors[] = "colors";
 const char kThemeDisplayProperties[] = "properties";
@@ -420,6 +422,8 @@ const char kInvalidPageActionsListSize[] =
     "Invalid value for 'page_actions'. There can be at most one page action.";
 const char kInvalidPageActionTypeValue[] =
     "Invalid value for 'page_actions[*].type', expected 'tab' or 'permanent'.";
+const char kInvalidPageLauncher[] =
+    "Invalid value for 'page_launcher'.";
 const char kInvalidPermission[] =
     "Invalid value for 'permissions[*]'.";
 const char kInvalidPermissions[] =

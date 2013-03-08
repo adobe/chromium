@@ -8,8 +8,8 @@
 #include <vector>
 
 #include "base/basictypes.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/memory/ref_counted.h"
 #include "base/stl_util.h"
@@ -59,7 +59,7 @@ class OwnerKeyUtilTest : public testing::Test {
   }
 
   base::ScopedTempDir tmpdir_;
-  FilePath key_file_;
+  base::FilePath key_file_;
   scoped_refptr<OwnerKeyUtil> util_;
 
  private:

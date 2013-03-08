@@ -19,6 +19,7 @@
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_view.h"
 #include "grit/theme_resources.h"
 #import "third_party/GTM/AppKit/GTMNSAnimation+Duration.h"
 #include "third_party/skia/include/utils/mac/SkCGUtils.h"
@@ -65,9 +66,10 @@ class DownloadAnimationWebObserver : public content::NotificationObserver {
 
   // Runs when a tab is hidden or destroyed. Let our owner know we should end
   // the animation.
-  void Observe(int type,
-               const content::NotificationSource& source,
-               const content::NotificationDetails& details) {
+  virtual void Observe(
+      int type,
+      const content::NotificationSource& source,
+      const content::NotificationDetails& details) OVERRIDE {
     if (type == content::NOTIFICATION_WEB_CONTENTS_VISIBILITY_CHANGED) {
       bool visible = *content::Details<bool>(details).ptr();
       if (visible)
@@ -104,7 +106,7 @@ class DownloadAnimationWebObserver : public content::NotificationObserver {
     // the bottom of the tab, assuming there is enough room. If there isn't
     // enough, don't show the animation and let the shelf speak for itself.
     gfx::Rect bounds;
-    webContents->GetContainerBounds(&bounds);
+    webContents->GetView()->GetContainerBounds(&bounds);
     imageWidth_ = [image size].width;
     CGFloat imageHeight = [image size].height;
 
@@ -114,7 +116,7 @@ class DownloadAnimationWebObserver : public content::NotificationObserver {
       return nil;
     }
 
-    NSView* tabContentsView = webContents->GetNativeView();
+    NSView* tabContentsView = webContents->GetView()->GetNativeView();
     NSWindow* parentWindow = [tabContentsView window];
     if (!parentWindow) {
       // The tab is no longer frontmost.

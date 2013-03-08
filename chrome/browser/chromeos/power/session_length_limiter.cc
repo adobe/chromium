@@ -10,10 +10,10 @@
 #include "base/bind_helpers.h"
 #include "base/location.h"
 #include "base/logging.h"
-#include "base/prefs/public/pref_service_base.h"
+#include "base/prefs/pref_registry_simple.h"
+#include "base/prefs/pref_service.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/common/pref_names.h"
 
 namespace chromeos {
@@ -26,10 +26,6 @@ const int kSessionLengthLimitMinMs = 30 * 1000; // 30 seconds.
 // The maximum session time limit that can be set.
 const int kSessionLengthLimitMaxMs = 24 * 60 * 60 * 1000; // 24 hours.
 
-// The interval at which to fire periodic callbacks and check whether the
-// session time limit has been reached.
-const int kSessionLengthLimitTimerIntervalMs = 1000;
-
 // A default delegate implementation that returns the current time and does end
 // the current user's session when requested. This can be replaced with a mock
 // in tests.
@@ -38,8 +34,8 @@ class SessionLengthLimiterDelegateImpl : public SessionLengthLimiter::Delegate {
   SessionLengthLimiterDelegateImpl();
   virtual ~SessionLengthLimiterDelegateImpl();
 
-  virtual const base::Time GetCurrentTime() const;
-  virtual void StopSession();
+  virtual const base::Time GetCurrentTime() const OVERRIDE;
+  virtual void StopSession() OVERRIDE;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(SessionLengthLimiterDelegateImpl);
@@ -56,7 +52,7 @@ const base::Time SessionLengthLimiterDelegateImpl::GetCurrentTime() const {
 }
 
 void SessionLengthLimiterDelegateImpl::StopSession() {
-  browser::AttemptUserExit();
+  chrome::AttemptUserExit();
 }
 
 }  // namespace
@@ -65,9 +61,9 @@ SessionLengthLimiter::Delegate::~Delegate() {
 }
 
 // static
-void SessionLengthLimiter::RegisterPrefs(PrefServiceSimple* local_state) {
-  local_state->RegisterInt64Pref(prefs::kSessionStartTime, 0);
-  local_state->RegisterIntegerPref(prefs::kSessionLengthLimit, 0);
+void SessionLengthLimiter::RegisterPrefs(PrefRegistrySimple* registry) {
+  registry->RegisterInt64Pref(prefs::kSessionStartTime, 0);
+  registry->RegisterIntegerPref(prefs::kSessionLengthLimit, 0);
 }
 
 SessionLengthLimiter::SessionLengthLimiter(Delegate* delegate,
@@ -97,6 +93,8 @@ SessionLengthLimiter::SessionLengthLimiter(Delegate* delegate,
       prefs::kSessionLengthLimit,
       base::Bind(&SessionLengthLimiter::OnSessionLengthLimitChanged,
                  base::Unretained(this)));
+
+  // Handle the current session length limit, if any.
   OnSessionLengthLimitChanged();
 }
 
@@ -105,61 +103,43 @@ SessionLengthLimiter::~SessionLengthLimiter() {
 
 void SessionLengthLimiter::OnSessionLengthLimitChanged() {
   DCHECK(thread_checker_.CalledOnValidThread());
+
+  // Stop any currently running timer.
+  if (timer_)
+    timer_->Stop();
+
   int limit;
-  const PrefServiceBase::Preference* session_length_limit_pref =
+  const PrefService::Preference* session_length_limit_pref =
       pref_change_registrar_.prefs()->
           FindPreference(prefs::kSessionLengthLimit);
-  // If no session length limit is set, stop the timer.
   if (session_length_limit_pref->IsDefaultValue() ||
       !session_length_limit_pref->GetValue()->GetAsInteger(&limit)) {
-    session_length_limit_ = base::TimeDelta();
-    StopTimer();
+    // If no session length limit is set, destroy the timer.
+    timer_.reset();
     return;
   }
 
-  // If a session length limit is set, clamp it to the valid range and start
-  // the timer.
-  session_length_limit_ = base::TimeDelta::FromMilliseconds(
-      std::min(std::max(limit, kSessionLengthLimitMinMs),
-               kSessionLengthLimitMaxMs));
-  StartTimer();
-}
+  // Clamp the session length limit to the valid range.
+  const base::TimeDelta session_length_limit =
+      base::TimeDelta::FromMilliseconds(std::min(std::max(
+          limit, kSessionLengthLimitMinMs), kSessionLengthLimitMaxMs));
 
-void SessionLengthLimiter::StartTimer() {
-  if (repeating_timer_ && repeating_timer_->IsRunning())
-    return;
-  if (!repeating_timer_)
-    repeating_timer_.reset(new base::RepeatingTimer<SessionLengthLimiter>);
-  repeating_timer_->Start(
-      FROM_HERE,
-      base::TimeDelta::FromMilliseconds(kSessionLengthLimitTimerIntervalMs),
-      this,
-      &SessionLengthLimiter::UpdateRemainingTime);
-}
-
-void SessionLengthLimiter::StopTimer() {
-  if (!repeating_timer_)
-    return;
-  repeating_timer_.reset();
-  UpdateRemainingTime();
-}
-
-void SessionLengthLimiter::UpdateRemainingTime() {
-  const base::TimeDelta kZeroTimeDelta = base::TimeDelta();
-  // If no session length limit is set, return.
-  if (session_length_limit_ == kZeroTimeDelta)
-    return;
-
-  // Calculate the remaining session time, clamping so that it never falls below
-  // zero.
-  base::TimeDelta remaining = session_length_limit_ -
+  // Calculate the remaining session time.
+  const base::TimeDelta remaining = session_length_limit -
       (delegate_->GetCurrentTime() - session_start_time_);
-  if (remaining < kZeroTimeDelta)
-    remaining = kZeroTimeDelta;
 
-  // End the session if the remaining time reaches zero.
-  if (remaining == base::TimeDelta())
+  // Log out the user immediately if the session length limit has been reached
+  // or exceeded.
+  if (remaining <= base::TimeDelta()) {
     delegate_->StopSession();
+    return;
+  }
+
+  // Set a timer to log out the user when the session length limit is reached.
+  if (!timer_)
+    timer_.reset(new base::OneShotTimer<SessionLengthLimiter::Delegate>);
+  timer_->Start(FROM_HERE, remaining, delegate_.get(),
+                &SessionLengthLimiter::Delegate::StopSession);
 }
 
 }  // namespace chromeos

@@ -13,6 +13,7 @@ importScripts('../util.js');
  * Dispatches metadata requests to the correct parser.
  *
  * @param {Object} port Worker port.
+ * @constructor
  */
 function MetadataDispatcher(port) {
   this.port_ = port;
@@ -93,7 +94,7 @@ MetadataDispatcher.prototype.request_ = function(fileURL) {
  * Indicate to the caller that an operation has failed.
  *
  * No other messages relating to the failed operation should be sent.
- * @param {Object...} var_args Arguments.
+ * @param {...Object} var_args Arguments.
  */
 MetadataDispatcher.prototype.error = function(var_args) {
   var ary = Array.apply(null, arguments);
@@ -104,7 +105,7 @@ MetadataDispatcher.prototype.error = function(var_args) {
  * Send a log message to the caller.
  *
  * Callers must not parse log messages for control flow.
- * @param {Object...} var_args Arguments.
+ * @param {...Object} var_args Arguments.
  */
 MetadataDispatcher.prototype.log = function(var_args) {
   var ary = Array.apply(null, arguments);
@@ -113,7 +114,7 @@ MetadataDispatcher.prototype.log = function(var_args) {
 
 /**
  * Send a log message to the caller only if this.verbose is true.
- * @param {Object...} var_args Arguments.
+ * @param {...Object} var_args Arguments.
  */
 MetadataDispatcher.prototype.vlog = function(var_args) {
   if (this.verbose)

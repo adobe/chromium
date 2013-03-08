@@ -14,11 +14,11 @@
 #include "base/auto_reset.h"
 #include "base/command_line.h"
 #include "base/logging.h"
+#include "base/prefs/pref_service.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/memory_purger.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/ui/gtk/gtk_chrome_link_button.h"
 #include "chrome/browser/ui/gtk/gtk_theme_service.h"
@@ -274,14 +274,14 @@ class TaskManagerGtk::ContextMenuController
 
  private:
   // ui::SimpleMenuModel::Delegate implementation:
-  virtual bool IsCommandIdEnabled(int command_id) const {
+  virtual bool IsCommandIdEnabled(int command_id) const OVERRIDE {
     if (!task_manager_)
       return false;
 
     return true;
   }
 
-  virtual bool IsCommandIdChecked(int command_id) const {
+  virtual bool IsCommandIdChecked(int command_id) const OVERRIDE {
     if (!task_manager_)
       return false;
 
@@ -291,11 +291,11 @@ class TaskManagerGtk::ContextMenuController
 
   virtual bool GetAcceleratorForCommandId(
       int command_id,
-      ui::Accelerator* accelerator) {
+      ui::Accelerator* accelerator) OVERRIDE {
     return false;
   }
 
-  virtual void ExecuteCommand(int command_id) {
+  virtual void ExecuteCommand(int command_id) OVERRIDE {
     if (!task_manager_)
       return;
 

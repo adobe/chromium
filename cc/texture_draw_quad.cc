@@ -13,6 +13,10 @@ TextureDrawQuad::TextureDrawQuad()
     : resource_id(0),
       premultiplied_alpha(false),
       flipped(false) {
+  this->vertex_opacity[0] = 0.f;
+  this->vertex_opacity[1] = 0.f;
+  this->vertex_opacity[2] = 0.f;
+  this->vertex_opacity[3] = 0.f;
 }
 
 scoped_ptr<TextureDrawQuad> TextureDrawQuad::Create() {
@@ -61,9 +65,9 @@ void TextureDrawQuad::SetAll(const SharedQuadState* shared_quad_state,
   this->flipped = flipped;
 }
 
-void TextureDrawQuad::AppendResources(
-    ResourceProvider::ResourceIdArray* resources) {
-  resources->push_back(resource_id);
+void TextureDrawQuad::IterateResources(
+    const ResourceIteratorCallback& callback) {
+  resource_id = callback.Run(resource_id);
 }
 
 const TextureDrawQuad* TextureDrawQuad::MaterialCast(const DrawQuad* quad) {

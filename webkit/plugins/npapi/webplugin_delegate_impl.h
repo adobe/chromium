@@ -27,7 +27,9 @@
 typedef struct _GdkDrawable GdkPixmap;
 #endif
 
+namespace base {
 class FilePath;
+}
 
 #if defined(OS_MACOSX)
 #ifdef __OBJC__
@@ -77,7 +79,7 @@ class WEBKIT_PLUGINS_EXPORT WebPluginDelegateImpl : public WebPluginDelegate {
     PLUGIN_QUIRK_EMULATE_IME = 131072,  // Windows.
   };
 
-  static WebPluginDelegateImpl* Create(const FilePath& filename,
+  static WebPluginDelegateImpl* Create(const base::FilePath& filename,
                                        const std::string& mime_type);
 
 #if defined(OS_WIN)
@@ -133,12 +135,14 @@ class WEBKIT_PLUGINS_EXPORT WebPluginDelegateImpl : public WebPluginDelegate {
       unsigned long resource_id, int range_request_id) OVERRIDE;
   // End of WebPluginDelegate implementation.
 
-  bool IsWindowless() const { return windowless_ ; }
+  gfx::PluginWindowHandle windowed_handle() const { return windowed_handle_; }
+  bool IsWindowless() const { return windowless_; }
+  PluginInstance* instance() { return instance_.get(); }
   gfx::Rect GetRect() const { return window_rect_; }
   gfx::Rect GetClipRect() const { return clip_rect_; }
 
   // Returns the path for the library implementing this plugin.
-  FilePath GetPluginPath();
+  base::FilePath GetPluginPath();
 
   // Returns a combination of PluginQuirks.
   int GetQuirks() const { return quirks_; }
@@ -195,10 +199,6 @@ class WEBKIT_PLUGINS_EXPORT WebPluginDelegateImpl : public WebPluginDelegate {
   // and all callers will use the Paint defined above.
   void CGPaint(CGContextRef context, const gfx::Rect& rect);
 #endif  // OS_MACOSX && !USE_AURA
-
-  gfx::PluginWindowHandle windowed_handle() const {
-    return windowed_handle_;
-  }
 
 #if defined(OS_MACOSX)
   // Allow setting a "fake" window handle to associate this plug-in with
@@ -293,8 +293,6 @@ class WEBKIT_PLUGINS_EXPORT WebPluginDelegateImpl : public WebPluginDelegate {
   // to HandleInputEvent.
   bool PlatformHandleInputEvent(const WebKit::WebInputEvent& event,
                                 WebKit::WebCursorInfo* cursor_info);
-
-  PluginInstance* instance() { return instance_.get(); }
 
   // Closes down and destroys our plugin instance.
   void DestroyInstance();

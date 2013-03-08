@@ -7,14 +7,14 @@
 
 #include <string>
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/path_service.h"
+#include "base/test/test_process_killer_win.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome_frame/chrome_frame_automation.h"
 #include "chrome_frame/chrome_frame_plugin.h"
 #include "chrome_frame/navigation_constraints.h"
-#include "chrome_frame/test/chrome_frame_test_utils.h"
 #include "chrome_frame/test/test_scrubber.h"
 #include "chrome_frame/test/test_with_web_server.h"
 #include "chrome_frame/utils.h"
@@ -35,13 +35,13 @@ class AutomationMockDelegate
             chrome_frame_test::GetTestDataFolder()) {
 
     // Endeavour to only kill off Chrome Frame derived Chrome processes.
-    KillAllNamedProcessesWithArgument(
+    base::KillAllNamedProcessesWithArgument(
         UTF8ToWide(chrome_frame_test::kChromeImageName),
         UTF8ToWide(switches::kChromeFrame));
 
     mock_server_.ExpectAndServeAnyRequests(CFInvocation(CFInvocation::NONE));
 
-    FilePath profile_path;
+    base::FilePath profile_path;
     GetChromeFrameProfilePath(profile_name, &profile_path);
     chrome_frame_test::OverrideDataDirectoryForThisTest(profile_path.value());
 
@@ -76,7 +76,7 @@ class AutomationMockDelegate
 
   // Navigate the external to a 'file://' url for unit test files
   bool NavigateRelativeFile(const std::wstring& file) {
-    FilePath cf_source_path;
+    base::FilePath cf_source_path;
     PathService::Get(base::DIR_SOURCE_ROOT, &cf_source_path);
     std::wstring file_url(L"file://");
     file_url.append(cf_source_path.Append(

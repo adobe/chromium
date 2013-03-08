@@ -6,6 +6,7 @@
 
 #include "gpu/command_buffer/common/gles2_cmd_format.h"
 #include "gpu/command_buffer/service/gl_utils.h"
+#include "gpu/command_buffer/service/shader_manager.h"
 #include "gpu/command_buffer/service/shader_translator.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/gl/gl_bindings.h"
@@ -75,7 +76,7 @@ class MemoryProgramCacheTest : public testing::Test {
       : cache_(new MemoryProgramCache(kCacheSizeBytes)),
         vertex_shader_(NULL),
         fragment_shader_(NULL) { }
-  ~MemoryProgramCacheTest() {
+  virtual ~MemoryProgramCacheTest() {
     shader_manager_.Destroy(false);
   }
 
@@ -84,10 +85,10 @@ class MemoryProgramCacheTest : public testing::Test {
     gl_.reset(new ::testing::StrictMock<gfx::MockGLInterface>());
     ::gfx::GLInterface::SetGLInterface(gl_.get());
 
-    vertex_shader_ = shader_manager_.CreateShaderInfo(kVertexShaderClientId,
+    vertex_shader_ = shader_manager_.CreateShader(kVertexShaderClientId,
                                                       kVertexShaderServiceId,
                                                       GL_VERTEX_SHADER);
-    fragment_shader_ = shader_manager_.CreateShaderInfo(
+    fragment_shader_ = shader_manager_.CreateShader(
         kFragmentShaderClientId,
         kFragmentShaderServiceId,
         GL_FRAGMENT_SHADER);
@@ -168,8 +169,8 @@ class MemoryProgramCacheTest : public testing::Test {
   scoped_ptr< ::testing::StrictMock<gfx::MockGLInterface> > gl_;
   scoped_ptr<MemoryProgramCache> cache_;
   ShaderManager shader_manager_;
-  ShaderManager::ShaderInfo* vertex_shader_;
-  ShaderManager::ShaderInfo* fragment_shader_;
+  Shader* vertex_shader_;
+  Shader* fragment_shader_;
 };
 
 TEST_F(MemoryProgramCacheTest, CacheSave) {

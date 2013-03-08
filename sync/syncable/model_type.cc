@@ -27,6 +27,10 @@ namespace syncer {
 
 void AddDefaultFieldValue(ModelType datatype,
                           sync_pb::EntitySpecifics* specifics) {
+  if (!ProtocolTypes().Has(datatype)) {
+    NOTREACHED() << "Only protocol types have field values.";
+    return;
+  }
   switch (datatype) {
     case BOOKMARKS:
       specifics->mutable_bookmark();
@@ -91,21 +95,32 @@ void AddDefaultFieldValue(ModelType datatype,
     case DICTIONARY:
       specifics->mutable_dictionary();
       break;
+    case FAVICON_IMAGES:
+      specifics->mutable_favicon_image();
+      break;
+    case FAVICON_TRACKING:
+      specifics->mutable_favicon_tracking();
+      break;
     default:
       NOTREACHED() << "No known extension for model type.";
   }
 }
 
 ModelType GetModelTypeFromSpecificsFieldNumber(int field_number) {
-  for (int i = FIRST_REAL_MODEL_TYPE; i < MODEL_TYPE_COUNT; ++i) {
-    ModelType model_type = ModelTypeFromInt(i);
-    if (GetSpecificsFieldNumberFromModelType(model_type) == field_number)
-      return model_type;
+  ModelTypeSet protocol_types = ProtocolTypes();
+  for (ModelTypeSet::Iterator iter = protocol_types.First(); iter.Good();
+       iter.Inc()) {
+    if (GetSpecificsFieldNumberFromModelType(iter.Get()) == field_number)
+      return iter.Get();
   }
   return UNSPECIFIED;
 }
 
 int GetSpecificsFieldNumberFromModelType(ModelType model_type) {
+  if (!ProtocolTypes().Has(model_type)) {
+    NOTREACHED() << "Only protocol types have field values.";
+    return 0;
+  }
   switch (model_type) {
     case BOOKMARKS:
       return sync_pb::EntitySpecifics::kBookmarkFieldNumber;
@@ -168,6 +183,10 @@ int GetSpecificsFieldNumberFromModelType(ModelType model_type) {
     case DICTIONARY:
       return sync_pb::EntitySpecifics::kDictionaryFieldNumber;
       break;
+    case FAVICON_IMAGES:
+      return sync_pb::EntitySpecifics::kFaviconImageFieldNumber;
+    case FAVICON_TRACKING:
+      return sync_pb::EntitySpecifics::kFaviconTrackingFieldNumber;
     default:
       NOTREACHED() << "No known extension for model type.";
       return 0;
@@ -278,6 +297,12 @@ ModelType GetModelTypeFromSpecifics(const sync_pb::EntitySpecifics& specifics) {
   if (specifics.has_dictionary())
     return DICTIONARY;
 
+  if (specifics.has_favicon_image())
+    return FAVICON_IMAGES;
+
+  if (specifics.has_favicon_tracking())
+    return FAVICON_TRACKING;
+
   return UNSPECIFIED;
 }
 
@@ -285,12 +310,41 @@ bool ShouldMaintainPosition(ModelType model_type) {
   return model_type == BOOKMARKS;
 }
 
+ModelTypeSet ProtocolTypes() {
+  ModelTypeSet set = ModelTypeSet::All();
+  set.RemoveAll(ProxyTypes());
+  return set;
+}
+
 ModelTypeSet UserTypes() {
   ModelTypeSet set;
+  // TODO(sync): We should be able to build the actual enumset's internal
+  // bitset value here at compile time, rather than performing an iteration
+  // every time.
   for (int i = FIRST_USER_MODEL_TYPE; i <= LAST_USER_MODEL_TYPE; ++i) {
     set.Put(ModelTypeFromInt(i));
   }
   return set;
+}
+
+ModelTypeSet UserSelectableTypes() {
+  ModelTypeSet set;
+  // Although the order doesn't technically matter here, it's clearer to keep
+  // these in the same order as their definition in the ModelType enum.
+  set.Put(BOOKMARKS);
+  set.Put(PREFERENCES);;
+  set.Put(PASSWORDS);
+  set.Put(AUTOFILL);
+  set.Put(THEMES);
+  set.Put(TYPED_URLS);
+  set.Put(EXTENSIONS);
+  set.Put(APPS);
+  set.Put(PROXY_TABS);
+  return set;
+}
+
+bool IsUserSelectableType(ModelType model_type) {
+  return UserSelectableTypes().Has(model_type);
 }
 
 ModelTypeSet EncryptableUserTypes() {
@@ -299,11 +353,18 @@ ModelTypeSet EncryptableUserTypes() {
   encryptable_user_types.Remove(HISTORY_DELETE_DIRECTIVES);
   // Synced notifications are not encrypted since the server must see changes.
   encryptable_user_types.Remove(SYNCED_NOTIFICATIONS);
+  // Proxy types have no sync representation and are therefore not encrypted.
+  // Note however that proxy types map to one or more protocol types, which
+  // may or may not be encrypted themselves.
+  encryptable_user_types.RemoveAll(ProxyTypes());
   return encryptable_user_types;
 }
 
 ModelTypeSet ControlTypes() {
   ModelTypeSet set;
+  // TODO(sync): We should be able to build the actual enumset's internal
+  // bitset value here at compile time, rather than performing an iteration
+  // every time.
   for (int i = FIRST_CONTROL_MODEL_TYPE; i <= LAST_CONTROL_MODEL_TYPE; ++i) {
     set.Put(ModelTypeFromInt(i));
   }
@@ -311,6 +372,12 @@ ModelTypeSet ControlTypes() {
   // TODO(albertb): Re-enable this when the server supports it.
   set.Remove(PRIORITY_PREFERENCES);
 
+  return set;
+}
+
+ModelTypeSet ProxyTypes() {
+  ModelTypeSet set;
+  set.Put(PROXY_TABS);
   return set;
 }
 
@@ -369,6 +436,12 @@ const char* ModelTypeToString(ModelType model_type) {
       return "Priority Preferences";
     case DICTIONARY:
       return "Dictionary";
+    case FAVICON_IMAGES:
+      return "Favicon Images";
+    case FAVICON_TRACKING:
+      return "Favicon Tracking";
+    case PROXY_TABS:
+      return "Tabs";
     default:
       break;
   }
@@ -376,24 +449,24 @@ const char* ModelTypeToString(ModelType model_type) {
   return "INVALID";
 }
 
-StringValue* ModelTypeToValue(ModelType model_type) {
+base::StringValue* ModelTypeToValue(ModelType model_type) {
   if (model_type >= FIRST_REAL_MODEL_TYPE) {
-    return Value::CreateStringValue(ModelTypeToString(model_type));
+    return new base::StringValue(ModelTypeToString(model_type));
   } else if (model_type == TOP_LEVEL_FOLDER) {
-    return Value::CreateStringValue("Top-level folder");
+    return new base::StringValue("Top-level folder");
   } else if (model_type == UNSPECIFIED) {
-    return Value::CreateStringValue("Unspecified");
+    return new base::StringValue("Unspecified");
   }
   NOTREACHED();
-  return Value::CreateStringValue("");
+  return new base::StringValue("");
 }
 
-ModelType ModelTypeFromValue(const Value& value) {
-  if (value.IsType(Value::TYPE_STRING)) {
+ModelType ModelTypeFromValue(const base::Value& value) {
+  if (value.IsType(base::Value::TYPE_STRING)) {
     std::string result;
     CHECK(value.GetAsString(&result));
     return ModelTypeFromString(result);
-  } else if (value.IsType(Value::TYPE_INTEGER)) {
+  } else if (value.IsType(base::Value::TYPE_INTEGER)) {
     int result;
     CHECK(value.GetAsInteger(&result));
     return ModelTypeFromInt(result);
@@ -446,6 +519,12 @@ ModelType ModelTypeFromString(const std::string& model_type_string) {
     return PRIORITY_PREFERENCES;
   else if (model_type_string == "Dictionary")
     return DICTIONARY;
+  else if (model_type_string == "Favicon Images")
+    return FAVICON_IMAGES;
+  else if (model_type_string == "Favicon Tracking")
+    return FAVICON_TRACKING;
+  else if (model_type_string == "Tabs")
+    return PROXY_TABS;
   else
     NOTREACHED() << "No known model type corresponding to "
                  << model_type_string << ".";
@@ -464,17 +543,17 @@ std::string ModelTypeSetToString(ModelTypeSet model_types) {
 }
 
 base::ListValue* ModelTypeSetToValue(ModelTypeSet model_types) {
-  ListValue* value = new ListValue();
+  base::ListValue* value = new base::ListValue();
   for (ModelTypeSet::Iterator it = model_types.First(); it.Good(); it.Inc()) {
-    value->Append(
-        Value::CreateStringValue(ModelTypeToString(it.Get())));
+    value->Append(new base::StringValue(ModelTypeToString(it.Get())));
   }
   return value;
 }
 
 ModelTypeSet ModelTypeSetFromValue(const base::ListValue& value) {
   ModelTypeSet result;
-  for (ListValue::const_iterator i = value.begin(); i != value.end(); ++i) {
+  for (base::ListValue::const_iterator i = value.begin();
+       i != value.end(); ++i) {
     result.Put(ModelTypeFromValue(**i));
   }
   return result;
@@ -482,6 +561,8 @@ ModelTypeSet ModelTypeSetFromValue(const base::ListValue& value) {
 
 // TODO(zea): remove all hardcoded tags in model associators and have them use
 // this instead.
+// NOTE: Proxy types should return empty strings (so that we don't NOTREACHED
+// in tests when we verify they have no root node).
 std::string ModelTypeToRootTag(ModelType type) {
   switch (type) {
     case BOOKMARKS:
@@ -526,6 +607,12 @@ std::string ModelTypeToRootTag(ModelType type) {
       return "google_chrome_priority_preferences";
     case DICTIONARY:
       return "google_chrome_dictionary";
+    case FAVICON_IMAGES:
+      return "google_chrome_favicon_images";
+    case FAVICON_TRACKING:
+      return "google_chrome_favicon_tracking";
+    case PROXY_TABS:
+      return std::string();
     default:
       break;
   }
@@ -534,7 +621,8 @@ std::string ModelTypeToRootTag(ModelType type) {
 }
 
 // TODO(akalin): Figure out a better way to do these mappings.
-
+// Note: Do not include proxy types in this list. They should never receive
+// or trigger notifications.
 namespace {
 const char kBookmarkNotificationType[] = "BOOKMARK";
 const char kPreferenceNotificationType[] = "PREFERENCE";
@@ -558,6 +646,8 @@ const char kDeviceInfoNotificationType[] = "DEVICE_INFO";
 const char kExperimentsNotificationType[] = "EXPERIMENTS";
 const char kPriorityPreferenceNotificationType[] = "PRIORITY_PREFERENCE";
 const char kDictionaryNotificationType[] = "DICTIONARY";
+const char kFaviconImageNotificationType[] = "FAVICON_IMAGE";
+const char kFaviconTrackingNotificationType[] = "FAVICON_TRACKING";
 }  // namespace
 
 bool RealModelTypeToNotificationType(ModelType model_type,
@@ -610,8 +700,10 @@ bool RealModelTypeToNotificationType(ModelType model_type,
       return true;
     case HISTORY_DELETE_DIRECTIVES:
       *notification_type = kHistoryDeleteDirectiveNotificationType;
+      return true;
     case SYNCED_NOTIFICATIONS:
       *notification_type = kSyncedNotificationType;
+      return true;
     case DEVICE_INFO:
       *notification_type = kDeviceInfoNotificationType;
       return true;
@@ -623,6 +715,12 @@ bool RealModelTypeToNotificationType(ModelType model_type,
       return true;
     case DICTIONARY:
       *notification_type = kDictionaryNotificationType;
+      return true;
+    case FAVICON_IMAGES:
+      *notification_type = kFaviconImageNotificationType;
+      return true;
+    case FAVICON_TRACKING:
+      *notification_type = kFaviconTrackingNotificationType;
       return true;
     default:
       break;
@@ -680,16 +778,27 @@ bool NotificationTypeToRealModelType(const std::string& notification_type,
     return true;
   } else if (notification_type == kHistoryDeleteDirectiveNotificationType) {
     *model_type = HISTORY_DELETE_DIRECTIVES;
+    return true;
   } else if (notification_type == kSyncedNotificationType) {
     *model_type = SYNCED_NOTIFICATIONS;
+    return true;
   } else if (notification_type == kDeviceInfoNotificationType) {
-    *model_type = DEVICE_INFO;;
+    *model_type = DEVICE_INFO;
+    return true;
+  } else if (notification_type == kExperimentsNotificationType) {
+    *model_type = EXPERIMENTS;
     return true;
   } else if (notification_type == kPriorityPreferenceNotificationType) {
     *model_type = PRIORITY_PREFERENCES;
     return true;
   } else if (notification_type == kDictionaryNotificationType) {
     *model_type = DICTIONARY;
+    return true;
+  } else if (notification_type == kFaviconImageNotificationType) {
+    *model_type = FAVICON_IMAGES;
+    return true;
+  } else if (notification_type == kFaviconTrackingNotificationType) {
+    *model_type = FAVICON_TRACKING;
     return true;
   }
   *model_type = UNSPECIFIED;
@@ -698,6 +807,10 @@ bool NotificationTypeToRealModelType(const std::string& notification_type,
 
 bool IsRealDataType(ModelType model_type) {
   return model_type >= FIRST_REAL_MODEL_TYPE && model_type < MODEL_TYPE_COUNT;
+}
+
+bool IsActOnceDataType(ModelType model_type) {
+  return model_type == HISTORY_DELETE_DIRECTIVES;
 }
 
 }  // namespace syncer

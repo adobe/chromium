@@ -37,6 +37,7 @@ PRINTING_EXPORT extern const char kSettingMarginRight[];
 PRINTING_EXPORT extern const char kSettingMarginTop[];
 PRINTING_EXPORT extern const char kSettingMarginsCustom[];
 PRINTING_EXPORT extern const char kSettingMarginsType[];
+PRINTING_EXPORT extern const char kSettingPreviewPageCount[];
 PRINTING_EXPORT extern const char kSettingPageRange[];
 PRINTING_EXPORT extern const char kSettingPageRangeFrom[];
 PRINTING_EXPORT extern const char kSettingPageRangeTo[];
@@ -48,6 +49,7 @@ PRINTING_EXPORT extern const char kSettingPrintableAreaHeight[];
 PRINTING_EXPORT extern const char kSettingPrinterName[];
 PRINTING_EXPORT extern const char kSettingPrintToPDF[];
 PRINTING_EXPORT extern const char kSettingShouldPrintBackgrounds[];
+PRINTING_EXPORT extern const char kSettingShouldPrintSelectionOnly[];
 
 PRINTING_EXPORT extern const int FIRST_PAGE_INDEX;
 PRINTING_EXPORT extern const int COMPLETE_PREVIEW_DOCUMENT_INDEX;

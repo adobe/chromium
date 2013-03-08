@@ -5,6 +5,7 @@
 #ifndef CHROME_BROWSER_UI_VIEWS_PANELS_PANEL_FRAME_VIEW_H_
 #define CHROME_BROWSER_UI_VIEWS_PANELS_PANEL_FRAME_VIEW_H_
 
+#include "chrome/browser/ui/panels/panel_constants.h"
 #include "chrome/browser/ui/views/tab_icon_view_model.h"
 #include "ui/views/controls/button/button.h"
 #include "ui/views/window/non_client_view.h"
@@ -22,7 +23,6 @@ class PanelFrameView : public views::NonClientFrameView,
                        public chrome::TabIconViewModel {
  public:
   enum PaintState {
-    NOT_PAINTED,
     PAINT_AS_INACTIVE,
     PAINT_AS_ACTIVE,
     PAINT_AS_MINIMIZED,
@@ -37,6 +37,7 @@ class PanelFrameView : public views::NonClientFrameView,
   void UpdateIcon();
   void UpdateThrobber();
   void UpdateTitlebarMinimizeRestoreButtonVisibility();
+  void SetWindowCornerStyle(panel::CornerStyle corner_style);
 
   // Returns the size of the non-client area, that is, the window size minus
   // the size of the client area.
@@ -44,12 +45,14 @@ class PanelFrameView : public views::NonClientFrameView,
 
   int BorderThickness() const;
 
-  PaintState paint_state() const { return paint_state_; }
+  PaintState GetPaintState() const;
+
   views::ImageButton* close_button() const { return close_button_; }
   views::ImageButton* minimize_button() const { return minimize_button_; }
   views::ImageButton* restore_button() const { return restore_button_; }
   TabIconView* title_icon() const { return title_icon_; }
   views::Label* title_label() const { return title_label_; }
+  panel::CornerStyle corner_style() const { return corner_style_; }
 
  private:
   // Overridden from views::NonClientFrameView:
@@ -68,7 +71,6 @@ class PanelFrameView : public views::NonClientFrameView,
   virtual std::string GetClassName() const OVERRIDE;
   virtual gfx::Size GetMinimumSize() OVERRIDE;
   virtual gfx::Size GetMaximumSize() OVERRIDE;
-  virtual ui::ThemeProvider* GetThemeProvider() const OVERRIDE;
   virtual void Layout() OVERRIDE;
   virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
   virtual bool OnMousePressed(const ui::MouseEvent& event) OVERRIDE;
@@ -86,10 +88,7 @@ class PanelFrameView : public views::NonClientFrameView,
 
   int TitlebarHeight() const;
 
-  bool UsingDefaultTheme(PaintState paint_state) const;
   const gfx::ImageSkia* GetFrameBackground(PaintState paint_state) const;
-  const gfx::ImageSkia* GetDefaultFrameBackground(PaintState paint_state) const;
-  const gfx::ImageSkia* GetThemedFrameBackground(PaintState paint_state) const;
 
   // Update control styles to indicate if the titlebar is active or not.
   void UpdateControlStyles(PaintState paint_state);
@@ -100,19 +99,17 @@ class PanelFrameView : public views::NonClientFrameView,
 
   // Retrieves the drawing metrics based on the current painting state.
   SkColor GetTitleColor(PaintState paint_state) const;
-  SkColor GetDefaultTitleColor(PaintState paint_state) const;
-  SkColor GetThemedTitleColor(PaintState paint_state) const;
 
   static const char kViewClassName[];
 
   bool is_frameless_;
   PanelView* panel_view_;
-  PaintState paint_state_;
   views::ImageButton* close_button_;
   views::ImageButton* minimize_button_;
   views::ImageButton* restore_button_;
   TabIconView* title_icon_;
   views::Label* title_label_;
+  panel::CornerStyle corner_style_;
 
   DISALLOW_COPY_AND_ASSIGN(PanelFrameView);
 };

@@ -32,10 +32,10 @@ const char kDiffLevelPolicy[] = "chrome-diff-level-and-scope";
 class MockPolicyServiceObserver : public PolicyService::Observer {
  public:
   virtual ~MockPolicyServiceObserver() {}
-  MOCK_METHOD4(OnPolicyUpdated, void(PolicyDomain,
-                                     const std::string&,
+  MOCK_METHOD3(OnPolicyUpdated, void(const PolicyNamespace&,
                                      const PolicyMap& previous,
                                      const PolicyMap& current));
+  MOCK_METHOD1(OnPolicyServiceInitialized, void(PolicyDomain));
 };
 
 // Helper to compare the arguments to an EXPECT_CALL of OnPolicyUpdated() with
@@ -55,12 +55,14 @@ void AddTestPolicies(PolicyBundle* bundle,
                      const char* value,
                      PolicyLevel level,
                      PolicyScope scope) {
-  PolicyMap* policy_map = &bundle->Get(POLICY_DOMAIN_CHROME, "");
+  PolicyMap* policy_map =
+      &bundle->Get(PolicyNamespace(POLICY_DOMAIN_CHROME, std::string()));
   policy_map->Set(kSameLevelPolicy, POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
                   base::Value::CreateStringValue(value));
   policy_map->Set(kDiffLevelPolicy, level, scope,
                   base::Value::CreateStringValue(value));
-  policy_map = &bundle->Get(POLICY_DOMAIN_EXTENSIONS, kExtension);
+  policy_map =
+      &bundle->Get(PolicyNamespace(POLICY_DOMAIN_EXTENSIONS, kExtension));
   policy_map->Set(kSameLevelPolicy, POLICY_LEVEL_MANDATORY,
                   POLICY_SCOPE_USER, base::Value::CreateStringValue(value));
   policy_map->Set(kDiffLevelPolicy, level, scope,
@@ -75,8 +77,7 @@ class ChangePolicyObserver : public PolicyService::Observer {
       : provider_(provider),
         observer_invoked_(false) {}
 
-  virtual void OnPolicyUpdated(PolicyDomain domain,
-                               const std::string& ns,
+  virtual void OnPolicyUpdated(const PolicyNamespace&,
                                const PolicyMap& previous,
                                const PolicyMap& current) OVERRIDE {
     PolicyMap new_policy;
@@ -99,11 +100,11 @@ class PolicyServiceTest : public testing::Test {
  public:
   PolicyServiceTest() {}
   virtual void SetUp() OVERRIDE {
-    EXPECT_CALL(provider0_, IsInitializationComplete())
+    EXPECT_CALL(provider0_, IsInitializationComplete(_))
         .WillRepeatedly(Return(true));
-    EXPECT_CALL(provider1_, IsInitializationComplete())
+    EXPECT_CALL(provider1_, IsInitializationComplete(_))
         .WillRepeatedly(Return(true));
-    EXPECT_CALL(provider2_, IsInitializationComplete())
+    EXPECT_CALL(provider2_, IsInitializationComplete(_))
         .WillRepeatedly(Return(true));
 
     provider0_.Init();
@@ -132,11 +133,10 @@ class PolicyServiceTest : public testing::Test {
 
   MOCK_METHOD0(OnPolicyRefresh, void());
 
-  // Returns true if the policies for |domain|, |component_id| match |expected|.
-  bool VerifyPolicies(PolicyDomain domain,
-                      const std::string& component_id,
+  // Returns true if the policies for namespace |ns| match |expected|.
+  bool VerifyPolicies(const PolicyNamespace& ns,
                       const PolicyMap& expected) {
-    return policy_service_->GetPolicies(domain, component_id).Equals(expected);
+    return policy_service_->GetPolicies(ns).Equals(expected);
   }
 
   void UpdateProviderPolicy(const PolicyMap& policy) {
@@ -167,7 +167,8 @@ TEST_F(PolicyServiceTest, LoadsPoliciesBeforeProvidersRefresh) {
   PolicyMap expected;
   expected.Set("pre", POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
                base::Value::CreateIntegerValue(13));
-  EXPECT_TRUE(VerifyPolicies(POLICY_DOMAIN_CHROME, "", expected));
+  EXPECT_TRUE(VerifyPolicies(
+      PolicyNamespace(POLICY_DOMAIN_CHROME, std::string()), expected));
 }
 
 TEST_F(PolicyServiceTest, NotifyObservers) {
@@ -184,17 +185,19 @@ TEST_F(PolicyServiceTest, NotifyObservers) {
                       base::Value::CreateIntegerValue(123));
   policy0_.Set("aaa", POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
                base::Value::CreateIntegerValue(123));
-  EXPECT_CALL(observer, OnPolicyUpdated(POLICY_DOMAIN_CHROME, "",
+  EXPECT_CALL(observer, OnPolicyUpdated(PolicyNamespace(POLICY_DOMAIN_CHROME,
+                                                        std::string()),
                                         PolicyEquals(&expectedPrevious),
                                         PolicyEquals(&expectedCurrent)));
   UpdateProviderPolicy(policy0_);
   Mock::VerifyAndClearExpectations(&observer);
 
   // No changes.
-  EXPECT_CALL(observer, OnPolicyUpdated(_, _, _, _)).Times(0);
+  EXPECT_CALL(observer, OnPolicyUpdated(_, _, _)).Times(0);
   UpdateProviderPolicy(policy0_);
   Mock::VerifyAndClearExpectations(&observer);
-  EXPECT_TRUE(VerifyPolicies(POLICY_DOMAIN_CHROME, "", expectedCurrent));
+  EXPECT_TRUE(VerifyPolicies(
+      PolicyNamespace(POLICY_DOMAIN_CHROME, std::string()), expectedCurrent));
 
   // New policy.
   expectedPrevious.CopyFrom(expectedCurrent);
@@ -202,7 +205,8 @@ TEST_F(PolicyServiceTest, NotifyObservers) {
                       base::Value::CreateIntegerValue(456));
   policy0_.Set("bbb", POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
                base::Value::CreateIntegerValue(456));
-  EXPECT_CALL(observer, OnPolicyUpdated(POLICY_DOMAIN_CHROME, "",
+  EXPECT_CALL(observer, OnPolicyUpdated(PolicyNamespace(POLICY_DOMAIN_CHROME,
+                                                        std::string()),
                                         PolicyEquals(&expectedPrevious),
                                         PolicyEquals(&expectedCurrent)));
   UpdateProviderPolicy(policy0_);
@@ -212,7 +216,8 @@ TEST_F(PolicyServiceTest, NotifyObservers) {
   expectedPrevious.CopyFrom(expectedCurrent);
   expectedCurrent.Erase("bbb");
   policy0_.Erase("bbb");
-  EXPECT_CALL(observer, OnPolicyUpdated(POLICY_DOMAIN_CHROME, "",
+  EXPECT_CALL(observer, OnPolicyUpdated(PolicyNamespace(POLICY_DOMAIN_CHROME,
+                                                        std::string()),
                                         PolicyEquals(&expectedPrevious),
                                         PolicyEquals(&expectedCurrent)));
   UpdateProviderPolicy(policy0_);
@@ -225,17 +230,19 @@ TEST_F(PolicyServiceTest, NotifyObservers) {
   policy0_.Set("aaa", POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
                base::Value::CreateIntegerValue(789));
 
-  EXPECT_CALL(observer, OnPolicyUpdated(POLICY_DOMAIN_CHROME, "",
+  EXPECT_CALL(observer, OnPolicyUpdated(PolicyNamespace(POLICY_DOMAIN_CHROME,
+                                                        std::string()),
                                         PolicyEquals(&expectedPrevious),
                                         PolicyEquals(&expectedCurrent)));
   UpdateProviderPolicy(policy0_);
   Mock::VerifyAndClearExpectations(&observer);
 
   // No changes again.
-  EXPECT_CALL(observer, OnPolicyUpdated(_, _, _, _)).Times(0);
+  EXPECT_CALL(observer, OnPolicyUpdated(_, _, _)).Times(0);
   UpdateProviderPolicy(policy0_);
   Mock::VerifyAndClearExpectations(&observer);
-  EXPECT_TRUE(VerifyPolicies(POLICY_DOMAIN_CHROME, "", expectedCurrent));
+  EXPECT_TRUE(VerifyPolicies(
+      PolicyNamespace(POLICY_DOMAIN_CHROME, std::string()), expectedCurrent));
 
   policy_service_->RemoveObserver(POLICY_DOMAIN_CHROME, &observer);
 }
@@ -259,23 +266,29 @@ TEST_F(PolicyServiceTest, NotifyObserversInMultipleNamespaces) {
 
   scoped_ptr<PolicyBundle> bundle(new PolicyBundle());
   // The initial setup includes a policy for chrome that is now changing.
-  bundle->Get(POLICY_DOMAIN_CHROME, "").CopyFrom(policy_map);
-  bundle->Get(POLICY_DOMAIN_EXTENSIONS, kExtension0).CopyFrom(policy_map);
-  bundle->Get(POLICY_DOMAIN_EXTENSIONS, kExtension1).CopyFrom(policy_map);
+  bundle->Get(PolicyNamespace(POLICY_DOMAIN_CHROME, std::string()))
+      .CopyFrom(policy_map);
+  bundle->Get(PolicyNamespace(POLICY_DOMAIN_EXTENSIONS, kExtension0))
+      .CopyFrom(policy_map);
+  bundle->Get(PolicyNamespace(POLICY_DOMAIN_EXTENSIONS, kExtension1))
+      .CopyFrom(policy_map);
 
   const PolicyMap kEmptyPolicyMap;
-  EXPECT_CALL(chrome_observer,
-              OnPolicyUpdated(POLICY_DOMAIN_CHROME, "",
-                              PolicyEquals(&previous_policy_map),
-                              PolicyEquals(&policy_map)));
-  EXPECT_CALL(extension_observer,
-              OnPolicyUpdated(POLICY_DOMAIN_EXTENSIONS, kExtension0,
-                              PolicyEquals(&kEmptyPolicyMap),
-                              PolicyEquals(&policy_map)));
-  EXPECT_CALL(extension_observer,
-              OnPolicyUpdated(POLICY_DOMAIN_EXTENSIONS, kExtension1,
-                              PolicyEquals(&kEmptyPolicyMap),
-                              PolicyEquals(&policy_map)));
+  EXPECT_CALL(
+      chrome_observer,
+      OnPolicyUpdated(PolicyNamespace(POLICY_DOMAIN_CHROME, std::string()),
+                      PolicyEquals(&previous_policy_map),
+                      PolicyEquals(&policy_map)));
+  EXPECT_CALL(
+      extension_observer,
+      OnPolicyUpdated(PolicyNamespace(POLICY_DOMAIN_EXTENSIONS, kExtension0),
+                      PolicyEquals(&kEmptyPolicyMap),
+                      PolicyEquals(&policy_map)));
+  EXPECT_CALL(
+      extension_observer,
+      OnPolicyUpdated(PolicyNamespace(POLICY_DOMAIN_EXTENSIONS, kExtension1),
+                      PolicyEquals(&kEmptyPolicyMap),
+                      PolicyEquals(&policy_map)));
   provider0_.UpdatePolicy(bundle.Pass());
   RunUntilIdle();
   Mock::VerifyAndClearExpectations(&chrome_observer);
@@ -285,25 +298,31 @@ TEST_F(PolicyServiceTest, NotifyObserversInMultipleNamespaces) {
   // and kExtension2 is new.
   previous_policy_map.CopyFrom(policy_map);
   bundle.reset(new PolicyBundle());
-  bundle->Get(POLICY_DOMAIN_CHROME, "").CopyFrom(policy_map);
+  bundle->Get(PolicyNamespace(POLICY_DOMAIN_CHROME, std::string()))
+      .CopyFrom(policy_map);
   policy_map.Set("policy", POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
                  base::Value::CreateStringValue("another value"));
-  bundle->Get(POLICY_DOMAIN_EXTENSIONS, kExtension1).CopyFrom(policy_map);
-  bundle->Get(POLICY_DOMAIN_EXTENSIONS, kExtension2).CopyFrom(policy_map);
+  bundle->Get(PolicyNamespace(POLICY_DOMAIN_EXTENSIONS, kExtension1))
+      .CopyFrom(policy_map);
+  bundle->Get(PolicyNamespace(POLICY_DOMAIN_EXTENSIONS, kExtension2))
+      .CopyFrom(policy_map);
 
-  EXPECT_CALL(chrome_observer, OnPolicyUpdated(_, _, _, _)).Times(0);
-  EXPECT_CALL(extension_observer,
-              OnPolicyUpdated(POLICY_DOMAIN_EXTENSIONS, kExtension0,
-                              PolicyEquals(&previous_policy_map),
-                              PolicyEquals(&kEmptyPolicyMap)));
-  EXPECT_CALL(extension_observer,
-              OnPolicyUpdated(POLICY_DOMAIN_EXTENSIONS, kExtension1,
-                              PolicyEquals(&previous_policy_map),
-                              PolicyEquals(&policy_map)));
-  EXPECT_CALL(extension_observer,
-              OnPolicyUpdated(POLICY_DOMAIN_EXTENSIONS, kExtension2,
-                              PolicyEquals(&kEmptyPolicyMap),
-                              PolicyEquals(&policy_map)));
+  EXPECT_CALL(chrome_observer, OnPolicyUpdated(_, _, _)).Times(0);
+  EXPECT_CALL(
+      extension_observer,
+      OnPolicyUpdated(PolicyNamespace(POLICY_DOMAIN_EXTENSIONS, kExtension0),
+                      PolicyEquals(&previous_policy_map),
+                      PolicyEquals(&kEmptyPolicyMap)));
+  EXPECT_CALL(
+      extension_observer,
+      OnPolicyUpdated(PolicyNamespace(POLICY_DOMAIN_EXTENSIONS, kExtension1),
+                      PolicyEquals(&previous_policy_map),
+                      PolicyEquals(&policy_map)));
+  EXPECT_CALL(
+      extension_observer,
+      OnPolicyUpdated(PolicyNamespace(POLICY_DOMAIN_EXTENSIONS, kExtension2),
+                      PolicyEquals(&kEmptyPolicyMap),
+                      PolicyEquals(&policy_map)));
   provider0_.UpdatePolicy(bundle.Pass());
   RunUntilIdle();
   Mock::VerifyAndClearExpectations(&chrome_observer);
@@ -342,26 +361,29 @@ TEST_F(PolicyServiceTest, Priorities) {
   provider0_.UpdateChromePolicy(policy0_);
   provider1_.UpdateChromePolicy(policy1_);
   provider2_.UpdateChromePolicy(policy2_);
-  EXPECT_TRUE(VerifyPolicies(POLICY_DOMAIN_CHROME, "", expected));
+  EXPECT_TRUE(VerifyPolicies(
+      PolicyNamespace(POLICY_DOMAIN_CHROME, std::string()), expected));
 
   expected.Set("aaa", POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
                base::Value::CreateIntegerValue(1));
   policy0_.Erase("aaa");
   provider0_.UpdateChromePolicy(policy0_);
-  EXPECT_TRUE(VerifyPolicies(POLICY_DOMAIN_CHROME, "", expected));
+  EXPECT_TRUE(VerifyPolicies(
+      PolicyNamespace(POLICY_DOMAIN_CHROME, std::string()), expected));
 
   expected.Set("aaa", POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
                base::Value::CreateIntegerValue(2));
   policy1_.Set("aaa", POLICY_LEVEL_RECOMMENDED, POLICY_SCOPE_USER,
                base::Value::CreateIntegerValue(1));
   provider1_.UpdateChromePolicy(policy1_);
-  EXPECT_TRUE(VerifyPolicies(POLICY_DOMAIN_CHROME, "", expected));
+  EXPECT_TRUE(VerifyPolicies(
+      PolicyNamespace(POLICY_DOMAIN_CHROME, std::string()), expected));
 }
 
 TEST_F(PolicyServiceTest, PolicyChangeRegistrar) {
-  scoped_ptr<PolicyChangeRegistrar> registrar(
-      new PolicyChangeRegistrar(
-          policy_service_.get(), POLICY_DOMAIN_CHROME, ""));
+  scoped_ptr<PolicyChangeRegistrar> registrar(new PolicyChangeRegistrar(
+      policy_service_.get(),
+      PolicyNamespace(POLICY_DOMAIN_CHROME, std::string())));
 
   // Starting to observe existing policies doesn't trigger a notification.
   EXPECT_CALL(*this, OnPolicyValueUpdated(_, _)).Times(0);
@@ -484,7 +506,7 @@ TEST_F(PolicyServiceTest, RefreshPolicies) {
   Mock::VerifyAndClearExpectations(this);
 
   const PolicyMap& policies = policy_service_->GetPolicies(
-      POLICY_DOMAIN_CHROME, "");
+      PolicyNamespace(POLICY_DOMAIN_CHROME, std::string()));
   EXPECT_TRUE(base::Value::Equals(&kValue2, policies.GetValue("aaa")));
   EXPECT_TRUE(base::Value::Equals(&kValue0, policies.GetValue("bbb")));
 }
@@ -514,10 +536,119 @@ TEST_F(PolicyServiceTest, NamespaceMerge) {
   // level/scope combination takes precedence, on every namespace.
   expected.Set(kDiffLevelPolicy, POLICY_LEVEL_MANDATORY, POLICY_SCOPE_MACHINE,
                base::Value::CreateStringValue("bundle2"));
-  EXPECT_TRUE(policy_service_->GetPolicies(POLICY_DOMAIN_CHROME, "")
-      .Equals(expected));
-  EXPECT_TRUE(policy_service_->GetPolicies(POLICY_DOMAIN_EXTENSIONS, kExtension)
-      .Equals(expected));
+  EXPECT_TRUE(policy_service_->GetPolicies(
+      PolicyNamespace(POLICY_DOMAIN_CHROME, std::string())).Equals(expected));
+  EXPECT_TRUE(policy_service_->GetPolicies(
+      PolicyNamespace(POLICY_DOMAIN_EXTENSIONS, kExtension)).Equals(expected));
+}
+
+TEST_F(PolicyServiceTest, IsInitializationComplete) {
+  // |provider0| has all domains initialized.
+  Mock::VerifyAndClearExpectations(&provider1_);
+  Mock::VerifyAndClearExpectations(&provider2_);
+  EXPECT_CALL(provider1_, IsInitializationComplete(_))
+      .WillRepeatedly(Return(false));
+  EXPECT_CALL(provider2_, IsInitializationComplete(_))
+      .WillRepeatedly(Return(false));
+  PolicyServiceImpl::Providers providers;
+  providers.push_back(&provider0_);
+  providers.push_back(&provider1_);
+  providers.push_back(&provider2_);
+  policy_service_.reset(new PolicyServiceImpl(providers));
+  EXPECT_FALSE(policy_service_->IsInitializationComplete(POLICY_DOMAIN_CHROME));
+  EXPECT_FALSE(
+      policy_service_->IsInitializationComplete(POLICY_DOMAIN_EXTENSIONS));
+
+  // |provider2_| still doesn't have POLICY_DOMAIN_CHROME initialized, so
+  // the initialization status of that domain won't change.
+  MockPolicyServiceObserver observer;
+  policy_service_->AddObserver(POLICY_DOMAIN_CHROME, &observer);
+  policy_service_->AddObserver(POLICY_DOMAIN_EXTENSIONS, &observer);
+  EXPECT_CALL(observer, OnPolicyServiceInitialized(_)).Times(0);
+  Mock::VerifyAndClearExpectations(&provider1_);
+  EXPECT_CALL(provider1_, IsInitializationComplete(POLICY_DOMAIN_CHROME))
+      .WillRepeatedly(Return(true));
+  EXPECT_CALL(provider1_, IsInitializationComplete(POLICY_DOMAIN_EXTENSIONS))
+      .WillRepeatedly(Return(false));
+  const PolicyMap kPolicyMap;
+  provider1_.UpdateChromePolicy(kPolicyMap);
+  RunUntilIdle();
+  Mock::VerifyAndClearExpectations(&observer);
+  EXPECT_FALSE(policy_service_->IsInitializationComplete(POLICY_DOMAIN_CHROME));
+  EXPECT_FALSE(
+      policy_service_->IsInitializationComplete(POLICY_DOMAIN_EXTENSIONS));
+
+  // Same if |provider1_| doesn't have POLICY_DOMAIN_EXTENSIONS initialized.
+  EXPECT_CALL(observer, OnPolicyServiceInitialized(_)).Times(0);
+  Mock::VerifyAndClearExpectations(&provider2_);
+  EXPECT_CALL(provider2_, IsInitializationComplete(POLICY_DOMAIN_CHROME))
+      .WillRepeatedly(Return(false));
+  EXPECT_CALL(provider2_, IsInitializationComplete(POLICY_DOMAIN_EXTENSIONS))
+      .WillRepeatedly(Return(true));
+  provider2_.UpdateChromePolicy(kPolicyMap);
+  RunUntilIdle();
+  Mock::VerifyAndClearExpectations(&observer);
+  EXPECT_FALSE(policy_service_->IsInitializationComplete(POLICY_DOMAIN_CHROME));
+  EXPECT_FALSE(
+      policy_service_->IsInitializationComplete(POLICY_DOMAIN_EXTENSIONS));
+
+  // Now initialize POLICY_DOMAIN_CHROME on all the providers.
+  EXPECT_CALL(observer, OnPolicyServiceInitialized(POLICY_DOMAIN_CHROME));
+  Mock::VerifyAndClearExpectations(&provider2_);
+  EXPECT_CALL(provider2_, IsInitializationComplete(POLICY_DOMAIN_CHROME))
+      .WillRepeatedly(Return(true));
+  EXPECT_CALL(provider2_, IsInitializationComplete(POLICY_DOMAIN_EXTENSIONS))
+      .WillRepeatedly(Return(true));
+  provider2_.UpdateChromePolicy(kPolicyMap);
+  RunUntilIdle();
+  Mock::VerifyAndClearExpectations(&observer);
+  EXPECT_TRUE(policy_service_->IsInitializationComplete(POLICY_DOMAIN_CHROME));
+  // Other domains are still not initialized.
+  EXPECT_FALSE(
+      policy_service_->IsInitializationComplete(POLICY_DOMAIN_EXTENSIONS));
+
+  // Initialize the remaining domain.
+  EXPECT_CALL(observer, OnPolicyServiceInitialized(POLICY_DOMAIN_EXTENSIONS));
+  Mock::VerifyAndClearExpectations(&provider1_);
+  EXPECT_CALL(provider1_, IsInitializationComplete(POLICY_DOMAIN_CHROME))
+      .WillRepeatedly(Return(true));
+  EXPECT_CALL(provider1_, IsInitializationComplete(POLICY_DOMAIN_EXTENSIONS))
+      .WillRepeatedly(Return(true));
+  provider1_.UpdateChromePolicy(kPolicyMap);
+  RunUntilIdle();
+  Mock::VerifyAndClearExpectations(&observer);
+  EXPECT_TRUE(policy_service_->IsInitializationComplete(POLICY_DOMAIN_CHROME));
+  EXPECT_TRUE(
+      policy_service_->IsInitializationComplete(POLICY_DOMAIN_EXTENSIONS));
+
+  // Cleanup.
+  policy_service_->RemoveObserver(POLICY_DOMAIN_CHROME, &observer);
+  policy_service_->RemoveObserver(POLICY_DOMAIN_EXTENSIONS, &observer);
+}
+
+TEST_F(PolicyServiceTest, RegisterPolicyDomain) {
+  EXPECT_CALL(provider1_, RegisterPolicyDomain(_, _)).Times(AnyNumber());
+  EXPECT_CALL(provider2_, RegisterPolicyDomain(_, _)).Times(AnyNumber());
+
+  const std::set<std::string> empty_set;
+  EXPECT_CALL(provider0_,
+              RegisterPolicyDomain(POLICY_DOMAIN_CHROME, empty_set));
+  policy_service_->RegisterPolicyDomain(POLICY_DOMAIN_CHROME, empty_set);
+  Mock::VerifyAndClearExpectations(&provider0_);
+
+  // Register another namespace.
+  std::set<std::string> extensions;
+  extensions.insert(kExtension);
+  EXPECT_CALL(provider0_,
+              RegisterPolicyDomain(POLICY_DOMAIN_EXTENSIONS, extensions));
+  policy_service_->RegisterPolicyDomain(POLICY_DOMAIN_EXTENSIONS, extensions);
+  Mock::VerifyAndClearExpectations(&provider0_);
+
+  // Remove those components.
+  EXPECT_CALL(provider0_,
+              RegisterPolicyDomain(POLICY_DOMAIN_EXTENSIONS, empty_set));
+  policy_service_->RegisterPolicyDomain(POLICY_DOMAIN_EXTENSIONS, empty_set);
+  Mock::VerifyAndClearExpectations(&provider0_);
 }
 
 }  // namespace policy

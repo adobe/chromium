@@ -14,6 +14,7 @@
 #include "base/mac/mac_util.h"
 #include "base/mac/scoped_nsautorelease_pool.h"
 #include "base/metrics/histogram.h"
+#include "base/prefs/pref_service.h"
 #include "base/sys_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/autocomplete/autocomplete_classifier.h"
@@ -23,7 +24,6 @@
 #include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/favicon/favicon_tab_helper.h"
 #include "chrome/browser/net/url_fixer_upper.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/themes/theme_service.h"
@@ -38,12 +38,12 @@
 #import "chrome/browser/ui/cocoa/tab_contents/favicon_util_mac.h"
 #import "chrome/browser/ui/cocoa/tab_contents/tab_contents_controller.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_controller.h"
+#import "chrome/browser/ui/cocoa/tabs/tab_projecting_image_view.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_strip_drag_controller.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_strip_model_observer_bridge.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_strip_view.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_view.h"
 #import "chrome/browser/ui/cocoa/tabs/throbber_view.h"
-#import "chrome/browser/ui/cocoa/tabs/tab_projecting_image_view.h"
 #import "chrome/browser/ui/cocoa/tabs/throbbing_image_view.h"
 #import "chrome/browser/ui/cocoa/tracking_area.h"
 #include "chrome/browser/ui/find_bar/find_bar.h"
@@ -70,7 +70,6 @@
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/theme_provider.h"
 #include "ui/gfx/image/image.h"
-#include "ui/gfx/mac/nsimage_cache.h"
 
 using content::OpenURLParams;
 using content::Referrer;
@@ -111,6 +110,9 @@ const CGFloat kProjectingIconWidthAndHeight = 32.0;
 
 // Throbbing duration on webrtc "this web page is watching you" favicon overlay.
 const int kRecordingDurationMs = 1000;
+
+// Throbbing duration on audio playing animation.
+const int kAudioPlayingDurationMs = 2000;
 
 // Helper class for doing NSAnimationContext calls that takes a bool to disable
 // all the work.  Useful for code that wants to conditionally animate.
@@ -1605,6 +1607,20 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
                   autorelease];
 
           iconView = recordingView;
+        } else if (theme && chrome::IsPlayingAudio(contents)) {
+          NSImage* audioImage =
+              theme->GetNSImageNamed(IDR_AUDIO_ANIMATION, true);
+          NSRect frame =
+              NSMakeRect(0, 0, kIconWidthAndHeight, kIconWidthAndHeight);
+          ThrobbingImageView* equalizerFaviconView =
+              [[[ThrobbingImageView alloc]
+                  initWithFrame:frame
+                backgroundImage:[imageView image]
+                     throbImage:audioImage
+                     durationMS:kAudioPlayingDurationMs] autorelease];
+          [equalizerFaviconView setTweenType:ui::Tween::LINEAR];
+
+          iconView = equalizerFaviconView;
         } else {
           iconView = imageView;
         }
@@ -2238,5 +2254,5 @@ NSView* GetSheetParentViewForWebContents(WebContents* web_contents) {
   //
   // Changing it? Do not forget to modify
   // -[TabStripController swapInTabAtIndex:] too.
-  return [web_contents->GetNativeView() superview];
+  return [web_contents->GetView()->GetNativeView() superview];
 }

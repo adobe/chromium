@@ -8,8 +8,8 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "base/string16.h"
-#include "base/string_number_conversions.h"
 #include "base/string_util.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/autocomplete/autocomplete_controller.h"
 #include "chrome/browser/autocomplete/autocomplete_input.h"
@@ -52,7 +52,7 @@ class TestProvider : public AutocompleteProvider {
   }
 
   virtual void Start(const AutocompleteInput& input,
-                     bool minimal_changes);
+                     bool minimal_changes) OVERRIDE;
 
   void set_listener(AutocompleteProviderListener* listener) {
     listener_ = listener;
@@ -192,7 +192,7 @@ class AutocompleteProviderTest : public testing::Test,
   // content::NotificationObserver
   virtual void Observe(int type,
                        const content::NotificationSource& source,
-                       const content::NotificationDetails& details);
+                       const content::NotificationDetails& details) OVERRIDE;
 
   MessageLoopForUI message_loop_;
   content::NotificationRegistrar registrar_;
@@ -255,6 +255,9 @@ void AutocompleteProviderTest::ResetControllerWithTestProviders(
 
   // Reset the controller to contain our new providers.
   controller_.reset(new AutocompleteController(&profile_, NULL, 0));
+  // We're going to swap the providers vector, but the old vector should be
+  // empty so no elements need to be freed at this point.
+  EXPECT_TRUE(controller_->providers_.empty());
   controller_->providers_.swap(providers);
   provider1->set_listener(controller_.get());
   provider2->set_listener(controller_.get());
@@ -397,15 +400,20 @@ void AutocompleteProviderTest::RunExactKeymatchTest(
     bool allow_exact_keyword_match) {
   // Send the controller input which exactly matches the keyword provider we
   // created in ResetControllerWithKeywordAndSearchProviders().  The default
-  // match should thus be a keyword match iff |allow_exact_keyword_match| is
-  // true.
+  // match should thus be a search-other-engine match iff
+  // |allow_exact_keyword_match| is true.  Regardless, the match should
+  // be from SearchProvider.  (It provides all verbatim search matches,
+  // keyword or not.)
   controller_->Start(AutocompleteInput(
       ASCIIToUTF16("k test"), string16::npos, string16(), true, false,
       allow_exact_keyword_match, AutocompleteInput::SYNCHRONOUS_MATCHES));
   EXPECT_TRUE(controller_->done());
-  EXPECT_EQ(allow_exact_keyword_match ?
-      AutocompleteProvider::TYPE_KEYWORD : AutocompleteProvider::TYPE_SEARCH,
+  EXPECT_EQ(AutocompleteProvider::TYPE_SEARCH,
       controller_->result().default_match()->provider->type());
+  EXPECT_EQ(allow_exact_keyword_match ?
+      AutocompleteMatch::SEARCH_OTHER_ENGINE :
+      AutocompleteMatch::SEARCH_WHAT_YOU_TYPED,
+      controller_->result().default_match()->type);
 }
 
 void AutocompleteProviderTest::Observe(
@@ -549,4 +557,50 @@ TEST_F(AutocompleteProviderTest, UpdateAssistedQueryStats) {
     SCOPED_TRACE("Multiple matches");
     RunAssistedQueryStatsTest(test_data, ARRAYSIZE_UNSAFE(test_data));
   }
+}
+
+TEST_F(AutocompleteProviderTest, GetDestinationURL) {
+  ResetControllerWithKeywordAndSearchProviders();
+
+  // For the destination URL to have aqs parameters for query formulation time
+  // and the field trial triggered bit, many conditions need to be satisfied.
+  AutocompleteMatch match(NULL, 1100, false,
+                          AutocompleteMatch::SEARCH_SUGGEST);
+  GURL url = controller_->
+      GetDestinationURL(match, base::TimeDelta::FromMilliseconds(2456));
+  EXPECT_TRUE(url.path().empty());
+
+  // The protocol needs to be https.
+  RegisterTemplateURL(ASCIIToUTF16(kTestTemplateURLKeyword),
+                      "https://aqs/{searchTerms}/{google:assistedQueryStats}");
+  url = controller_->GetDestinationURL(match,
+                                       base::TimeDelta::FromMilliseconds(2456));
+  EXPECT_TRUE(url.path().empty());
+
+  // There needs to be a keyword provider.
+  match.keyword = ASCIIToUTF16(kTestTemplateURLKeyword);
+  url = controller_->GetDestinationURL(match,
+                                       base::TimeDelta::FromMilliseconds(2456));
+  EXPECT_TRUE(url.path().empty());
+
+  // search_terms_args needs to be set.
+  match.search_terms_args.reset(
+      new TemplateURLRef::SearchTermsArgs(string16()));
+  url = controller_->GetDestinationURL(match,
+                                       base::TimeDelta::FromMilliseconds(2456));
+  EXPECT_TRUE(url.path().empty());
+
+  // assisted_query_stats needs to have been previously set.
+  match.search_terms_args->assisted_query_stats = "chrome.0.57j58j5l2j0l3j59";
+  url = controller_->GetDestinationURL(match,
+                                       base::TimeDelta::FromMilliseconds(2456));
+  EXPECT_EQ("//aqs=chrome.0.57j58j5l2j0l3j59.2456j0&", url.path());
+
+  // Test field trial triggered bit set.
+  controller_->search_provider_->field_trial_triggered_in_session_ = true;
+  EXPECT_TRUE(
+      controller_->search_provider_->field_trial_triggered_in_session());
+  url = controller_->GetDestinationURL(match,
+                                       base::TimeDelta::FromMilliseconds(2456));
+  EXPECT_EQ("//aqs=chrome.0.57j58j5l2j0l3j59.2456j1&", url.path());
 }

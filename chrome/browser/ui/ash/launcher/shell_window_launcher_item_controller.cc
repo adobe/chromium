@@ -4,6 +4,7 @@
 
 #include "chrome/browser/ui/ash/launcher/shell_window_launcher_item_controller.h"
 
+#include "ash/launcher/launcher_util.h"
 #include "chrome/browser/ui/ash/launcher/chrome_launcher_app_menu_item.h"
 #include "chrome/browser/ui/ash/launcher/chrome_launcher_app_menu_item_v2app.h"
 #include "chrome/browser/ui/ash/launcher/chrome_launcher_controller.h"
@@ -30,10 +31,11 @@ class ShellWindowHasWindow {
 }  // namespace
 
 ShellWindowLauncherItemController::ShellWindowLauncherItemController(
+    Type type,
     const std::string& app_launcher_id,
     const std::string& app_id,
     ChromeLauncherController* controller)
-    : LauncherItemController(TYPE_APP, app_id, controller),
+    : LauncherItemController(type, app_id, controller),
       app_launcher_id_(app_launcher_id) {
 }
 
@@ -43,6 +45,9 @@ ShellWindowLauncherItemController::~ShellWindowLauncherItemController() {
 void ShellWindowLauncherItemController::AddShellWindow(
     ShellWindow* shell_window,
     ash::LauncherItemStatus status) {
+  if (shell_window->window_type_is_panel() && type() != TYPE_APP_PANEL) {
+    LOG(ERROR) << "ShellWindow of type Panel added to non-panel launcher item";
+  }
   if (status == ash::STATUS_ACTIVE)
     shell_windows_.push_front(shell_window);
   else
@@ -110,11 +115,15 @@ void ShellWindowLauncherItemController::Close() {
 // * Multiple windows:
 // ** If the first window is not active, activate it.
 // ** Otherwise activate the next window.
-void ShellWindowLauncherItemController::Clicked() {
+void ShellWindowLauncherItemController::Clicked(const ui::Event& event) {
   if (shell_windows_.empty())
     return;
   ShellWindow* first_window = shell_windows_.front();
   if (shell_windows_.size() == 1) {
+    ash::launcher::MoveToEventRootIfPanel(first_window->GetNativeWindow(),
+                                          event);
+    // If the window moves, it becomes inactive first then
+    // gets activated in |RestoreOrShow| below.
     if (first_window->GetBaseWindow()->IsActive())
       first_window->GetBaseWindow()->Minimize();
     else
@@ -159,23 +168,24 @@ ShellWindowLauncherItemController::GetIconOfIndexedApp(size_t index) {
   return new gfx::Image();
 }
 
-ChromeLauncherAppMenuItems*
+ChromeLauncherAppMenuItems
 ShellWindowLauncherItemController::GetApplicationList() {
-  ChromeLauncherAppMenuItems* items = new ChromeLauncherAppMenuItems;
+  ChromeLauncherAppMenuItems items;
   if (!launcher_controller()->GetPerAppInterface()) {
-    items->push_back(new ChromeLauncherAppMenuItem(GetTitle(), NULL));
+    items.push_back(new ChromeLauncherAppMenuItem(GetTitle(), NULL, false));
     for (size_t i = 0; i < shell_window_count(); i++) {
       gfx::Image* image = GetIconOfIndexedApp(i);
-      items->push_back(new ChromeLauncherAppMenuItemV2App(
+      items.push_back(new ChromeLauncherAppMenuItemV2App(
           GetTitleOfIndexedApp(i),
           image,
           app_id(),
           launcher_controller()->GetPerAppInterface(),
-          i));
+          i,
+          i == 0));
       delete image;
     }
   }
-  return items;
+  return items.Pass();
 }
 
 void ShellWindowLauncherItemController::RestoreOrShow(

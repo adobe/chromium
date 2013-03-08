@@ -38,6 +38,8 @@ static const int kInternetProtocolReadIndex = 9;
 static const int kInternetProtocolStartExIndex = 13;
 static const int kInternetProtocolLockRequestIndex = 11;
 static const int kInternetProtocolUnlockRequestIndex = 12;
+static const int kInternetProtocolAbortIndex = 5;
+static const int kInternetProtocolTerminateIndex = 6;
 
 
 // IInternetProtocol/Ex patches.
@@ -64,10 +66,20 @@ STDMETHODIMP Hook_Read(InternetProtocol_Read_Fn orig_read,
                        ULONG* size_read);
 
 STDMETHODIMP Hook_LockRequest(InternetProtocol_LockRequest_Fn orig_req,
-                              IInternetProtocol* protocol, DWORD dwOptions);
+                              IInternetProtocol* protocol,
+                              DWORD options);
 
 STDMETHODIMP Hook_UnlockRequest(InternetProtocol_UnlockRequest_Fn orig_req,
                                 IInternetProtocol* protocol);
+
+STDMETHODIMP Hook_Abort(InternetProtocol_Abort_Fn orig_req,
+                        IInternetProtocol* protocol,
+                        HRESULT hr,
+                        DWORD options);
+
+STDMETHODIMP Hook_Terminate(InternetProtocol_Terminate_Fn orig_req,
+                            IInternetProtocol* protocol,
+                            DWORD options);
 
 /////////////////////////////////////////////////////////////////////////////
 BEGIN_VTABLE_PATCHES(CTransaction)
@@ -75,6 +87,8 @@ BEGIN_VTABLE_PATCHES(CTransaction)
   VTABLE_PATCH_ENTRY(kInternetProtocolReadIndex, Hook_Read)
   VTABLE_PATCH_ENTRY(kInternetProtocolLockRequestIndex, Hook_LockRequest)
   VTABLE_PATCH_ENTRY(kInternetProtocolUnlockRequestIndex, Hook_UnlockRequest)
+  VTABLE_PATCH_ENTRY(kInternetProtocolAbortIndex, Hook_Abort)
+  VTABLE_PATCH_ENTRY(kInternetProtocolTerminateIndex, Hook_Terminate)
 END_VTABLE_PATCHES()
 
 BEGIN_VTABLE_PATCHES(CTransaction2)
@@ -807,7 +821,8 @@ STDMETHODIMP Hook_Read(InternetProtocol_Read_Fn orig_read,
 }
 
 STDMETHODIMP Hook_LockRequest(InternetProtocol_LockRequest_Fn orig_req,
-                              IInternetProtocol* protocol, DWORD options) {
+                              IInternetProtocol* protocol,
+                              DWORD options) {
   DCHECK(orig_req);
 
   scoped_refptr<ProtData> prot_data = ProtData::DataFromProtocol(protocol);
@@ -836,6 +851,48 @@ STDMETHODIMP Hook_UnlockRequest(InternetProtocol_UnlockRequest_Fn orig_req,
   // reports.
   ExceptionBarrierReportOnlyModule barrier;
   return orig_req(protocol);
+}
+
+STDMETHODIMP Hook_Abort(InternetProtocol_Abort_Fn orig_req,
+                        IInternetProtocol* protocol,
+                        HRESULT hr,
+                        DWORD options) {
+  scoped_refptr<ProtData> prot_data = ProtData::DataFromProtocol(protocol);
+  if (prot_data)
+    prot_data->Invalidate();
+
+  // We are just pass through at this point, avoid false positive crash
+  // reports.
+  ExceptionBarrierReportOnlyModule barrier;
+  return orig_req(protocol, hr, options);
+}
+
+STDMETHODIMP Hook_Terminate(InternetProtocol_Terminate_Fn orig_req,
+                            IInternetProtocol* protocol,
+                            DWORD options) {
+  scoped_refptr<ProtData> prot_data = ProtData::DataFromProtocol(protocol);
+  // We should not be invalidating the cached protocol data in the following
+  // cases:-
+  // 1. Pages which are switching into ChromeFrame.
+  //    When IE switches into ChromeFrame, we report the Chrome mime type as
+  //    the handler for the page. This results in urlmon terminating the
+  //    protocol. When Chrome attempts to read the data we need to report the
+  //    cached data back to Chrome.
+  // 2. For the attach external tab requests which are temporary navigations
+  //    to ensure that a top level URL is opened in IE from ChromeFrame.
+  //    We rely on the mapping to identify these requests as attach tab
+  //    requests. This mapping is referred to in the
+  //    IInternetProtocol::LockRequest/IInternetProtocol::UnlockRequest
+  //    intercepts. Invalidating the mapping after LockRequest is called and
+  //    before UnlockRequest causes IE to crash.
+  if (prot_data && !IsChrome(prot_data->renderer_type()) &&
+      !prot_data->is_attach_external_tab_request())
+    prot_data->Invalidate();
+
+  // We are just pass through at this point, avoid false positive crash
+  // reports.
+  ExceptionBarrierReportOnlyModule barrier;
+  return orig_req(protocol, options);
 }
 
 // Patching / Hooking code.

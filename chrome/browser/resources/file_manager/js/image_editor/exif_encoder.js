@@ -78,8 +78,8 @@ ExifEncoder.prototype.setImageData = function(canvas) {
 
 
 /**
- * @param {HTMLCanvasElement} canvas Thumbnail canvas
- * @param {number} quality (0..1] Thumbnail encoding quality
+ * @param {HTMLCanvasElement} canvas Thumbnail canvas.
+ * @param {number} quality (0..1] Thumbnail encoding quality.
  */
 ExifEncoder.prototype.setThumbnailData = function(canvas, quality) {
   // Empirical formula with reasonable behavior:
@@ -366,14 +366,14 @@ ExifEncoder.writeValue = function(bw, tag) {
   } else {  // Scalar or rational
     var width = ExifEncoder.getComponentWidth(tag);
 
-    function writeComponent(value, signed) {
+    var writeComponent = function(value, signed) {
       if (width == 8) {
         bw.writeScalar(value[0], 4, signed);
         bw.writeScalar(value[1], 4, signed);
       } else {
         bw.writeScalar(value, width, signed);
       }
-    }
+    };
 
     var signed = (tag.format == 9 || tag.format == 10);
     if (tag.componentCount == 1) {
@@ -437,7 +437,7 @@ ByteWriter.BIG_ENDIAN = 1;
 /**
  * Set the byte ordering for future writes.
  * @param {number} order ByteOrder to use {ByteWriter.LITTLE_ENDIAN}
- *   or {ByteWriter.BIG_ENDIAN}
+ *   or {ByteWriter.BIG_ENDIAN}.
  */
 ByteWriter.prototype.setByteOrder = function(order) {
   this.littleEndian_ = (order == ByteWriter.LITTLE_ENDIAN);
@@ -471,7 +471,7 @@ ByteWriter.prototype.validateWrite = function(width) {
  * Writes scalar value to output stream.
  * @param {number} value Value to write.
  * @param {number} width Desired width of written value.
- * @param {boolean} opt_signed True if value represents signed number.
+ * @param {boolean=} opt_signed True if value represents signed number.
  */
 ByteWriter.prototype.writeScalar = function(value, width, opt_signed) {
   var method;

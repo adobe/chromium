@@ -6,7 +6,6 @@
 
 #include "base/bind.h"
 #include "base/message_loop_proxy.h"
-#include "net/base/upload_data_stream.h"
 #include "net/url_request/url_fetcher_core.h"
 #include "net/url_request/url_fetcher_factory.h"
 
@@ -25,15 +24,16 @@ URLFetcherImpl::~URLFetcherImpl() {
   core_->Stop();
 }
 
-void URLFetcherImpl::SetUploadDataStream(
-    const std::string& upload_content_type,
-    scoped_ptr<UploadDataStream> upload_content) {
-  core_->SetUploadDataStream(upload_content_type, upload_content.Pass());
-}
-
 void URLFetcherImpl::SetUploadData(const std::string& upload_content_type,
                                    const std::string& upload_content) {
   core_->SetUploadData(upload_content_type, upload_content);
+}
+
+void URLFetcherImpl::SetUploadFilePath(
+    const std::string& upload_content_type,
+    const base::FilePath& file_path,
+    scoped_refptr<base::TaskRunner> file_task_runner) {
+  core_->SetUploadFilePath(upload_content_type, file_path, file_task_runner);
 }
 
 void URLFetcherImpl::SetChunkedUpload(const std::string& content_type) {
@@ -114,7 +114,7 @@ void URLFetcherImpl::SetAutomaticallyRetryOnNetworkChanges(int max_retries) {
 }
 
 void URLFetcherImpl::SaveResponseToFileAtPath(
-    const FilePath& file_path,
+    const base::FilePath& file_path,
     scoped_refptr<base::TaskRunner> file_task_runner) {
   core_->SaveResponseToFileAtPath(file_path, file_task_runner);
 }
@@ -176,7 +176,7 @@ bool URLFetcherImpl::GetResponseAsString(
 
 bool URLFetcherImpl::GetResponseAsFilePath(
     bool take_ownership,
-    FilePath* out_response_path) const {
+    base::FilePath* out_response_path) const {
   return core_->GetResponseAsFilePath(take_ownership, out_response_path);
 }
 
@@ -188,6 +188,11 @@ void URLFetcherImpl::CancelAll() {
 // static
 void URLFetcherImpl::SetEnableInterceptionForTests(bool enabled) {
   URLFetcherCore::SetEnableInterceptionForTests(enabled);
+}
+
+// static
+void URLFetcherImpl::SetIgnoreCertificateRequests(bool ignored) {
+  URLFetcherCore::SetIgnoreCertificateRequests(ignored);
 }
 
 // static

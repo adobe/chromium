@@ -123,7 +123,7 @@ const wchar_t* const kTroublesomeGpuDlls[] = {
 bool AddDirectory(int path, const wchar_t* sub_dir, bool children,
                   sandbox::TargetPolicy::Semantics access,
                   sandbox::TargetPolicy* policy) {
-  FilePath directory;
+  base::FilePath directory;
   if (!PathService::Get(path, &directory))
     return false;
 
@@ -181,7 +181,7 @@ bool IsExpandedModuleName(HMODULE module, const wchar_t* module_name) {
   }
   if (!::GetLongPathName(path, path, arraysize(path)))
     return false;
-  FilePath fname(path);
+  base::FilePath fname(path);
   return (fname.BaseName().value() == module_name);
 }
 
@@ -341,7 +341,7 @@ bool AddGenericPolicy(sandbox::TargetPolicy* policy) {
 
   // Add the policy for debug message only in debug
 #ifndef NDEBUG
-  FilePath app_dir;
+  base::FilePath app_dir;
   if (!PathService::Get(base::DIR_MODULE, &app_dir))
     return false;
 
@@ -352,7 +352,7 @@ bool AddGenericPolicy(sandbox::TargetPolicy* policy) {
   if (long_path_return_value == 0 || long_path_return_value >= MAX_PATH)
     return false;
 
-  FilePath debug_message(long_path_buf);
+  base::FilePath debug_message(long_path_buf);
   debug_message = debug_message.AppendASCII("debug_message.exe");
   result = policy->AddRule(sandbox::TargetPolicy::SUBSYS_PROCESS,
                            sandbox::TargetPolicy::PROCESS_MIN_EXEC,
@@ -360,7 +360,6 @@ bool AddGenericPolicy(sandbox::TargetPolicy* policy) {
   if (result != sandbox::SBOX_ALL_OK)
     return false;
 #endif  // NDEBUG
-
   return true;
 }
 
@@ -447,6 +446,17 @@ bool AddPolicyForGPU(CommandLine* cmd_line, sandbox::TargetPolicy* policy) {
 
   AddGenericDllEvictionPolicy(policy);
   AddGpuDllEvictionPolicy(policy);
+
+  if (cmd_line->HasSwitch(switches::kEnableLogging)) {
+    string16 log_file_path = logging::GetLogFileFullPath();
+    if (!log_file_path.empty()) {
+      result = policy->AddRule(sandbox::TargetPolicy::SUBSYS_FILES,
+                               sandbox::TargetPolicy::FILES_ALLOW_ANY,
+                               log_file_path.c_str());
+      if (result != sandbox::SBOX_ALL_OK)
+        return false;
+    }
+  }
 #endif
   return true;
 }
@@ -653,7 +663,7 @@ bool InitTargetServices(sandbox::TargetServices* target_services) {
 }
 
 base::ProcessHandle StartProcessWithAccess(CommandLine* cmd_line,
-                                           const FilePath& exposed_dir) {
+                                           const base::FilePath& exposed_dir) {
   const CommandLine& browser_command_line = *CommandLine::ForCurrentProcess();
   ProcessType type;
   std::string type_str = cmd_line->GetSwitchValueASCII(switches::kProcessType);
@@ -746,30 +756,17 @@ base::ProcessHandle StartProcessWithAccess(CommandLine* cmd_line,
   base::win::ScopedProcessInformation target;
   sandbox::TargetPolicy* policy = g_broker_services->CreatePolicy();
 
-  // TODO(jschuh): Make NaCl work with DEP and SEHOP. crbug.com/147752
   sandbox::MitigationFlags mitigations = sandbox::MITIGATION_HEAP_TERMINATE |
-                                         sandbox::MITIGATION_BOTTOM_UP_ASLR;
-#if !defined(NACL_WIN64)
-  // TODO(jschuh,bsy): Make NaCl work with HIGH_ENTROPY_ASLR. crbug.com/158133
-  mitigations |= sandbox::MITIGATION_DEP |
-                 sandbox::MITIGATION_DEP_NO_ATL_THUNK |
-                 sandbox::MITIGATION_SEHOP |
-                 sandbox::MITIGATION_HIGH_ENTROPY_ASLR;
-#if defined(NDEBUG)
-  mitigations |= sandbox::MITIGATION_RELOCATE_IMAGE |
-                 sandbox::MITIGATION_RELOCATE_IMAGE_REQUIRED;
-#endif
-#endif
+                                         sandbox::MITIGATION_BOTTOM_UP_ASLR |
+                                         sandbox::MITIGATION_DEP |
+                                         sandbox::MITIGATION_DEP_NO_ATL_THUNK |
+                                         sandbox::MITIGATION_SEHOP;
 
   if (policy->SetProcessMitigations(mitigations) != sandbox::SBOX_ALL_OK)
     return 0;
 
   mitigations = sandbox::MITIGATION_STRICT_HANDLE_CHECKS |
                 sandbox::MITIGATION_DLL_SEARCH_ORDER;
-#if defined(NACL_WIN64)
-  mitigations |= sandbox::MITIGATION_DEP |
-                 sandbox::MITIGATION_DEP_NO_ATL_THUNK;
-#endif
 
   if (policy->SetDelayedProcessMitigations(mitigations) != sandbox::SBOX_ALL_OK)
     return 0;
@@ -810,7 +807,7 @@ base::ProcessHandle StartProcessWithAccess(CommandLine* cmd_line,
     if (result != sandbox::SBOX_ALL_OK)
       return 0;
 
-    FilePath exposed_files = exposed_dir.AppendASCII("*");
+    base::FilePath exposed_files = exposed_dir.AppendASCII("*");
     result = policy->AddRule(sandbox::TargetPolicy::SUBSYS_FILES,
                              sandbox::TargetPolicy::FILES_ALLOW_ANY,
                              exposed_files.value().c_str());
@@ -821,6 +818,13 @@ base::ProcessHandle StartProcessWithAccess(CommandLine* cmd_line,
   if (!AddGenericPolicy(policy)) {
     NOTREACHED();
     return 0;
+  }
+
+  if (browser_command_line.HasSwitch(switches::kEnableLogging)) {
+    // If stdout/stderr point to a Windows console, these calls will
+    // have no effect.
+    policy->SetStdoutHandle(GetStdHandle(STD_OUTPUT_HANDLE));
+    policy->SetStderrHandle(GetStdHandle(STD_ERROR_HANDLE));
   }
 
   TRACE_EVENT_BEGIN_ETW("StartProcessWithAccess::LAUNCHPROCESS", 0, 0);

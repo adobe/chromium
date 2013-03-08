@@ -5,8 +5,12 @@
 #include "cc/software_renderer.h"
 
 #include "base/debug/trace_event.h"
+#include "cc/compositor_frame.h"
+#include "cc/compositor_frame_ack.h"
+#include "cc/compositor_frame_metadata.h"
 #include "cc/debug_border_draw_quad.h"
 #include "cc/math_util.h"
+#include "cc/output_surface.h"
 #include "cc/render_pass_draw_quad.h"
 #include "cc/software_output_device.h"
 #include "cc/solid_color_draw_quad.h"
@@ -15,6 +19,7 @@
 #include "third_party/WebKit/Source/Platform/chromium/public/WebImage.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkColor.h"
+#include "third_party/skia/include/core/SkDevice.h"
 #include "third_party/skia/include/core/SkMatrix.h"
 #include "third_party/skia/include/core/SkShader.h"
 #include "third_party/skia/include/effects/SkLayerRasterizer.h"
@@ -51,15 +56,19 @@ bool isScaleAndTranslate(const SkMatrix& matrix)
 
 } // anonymous namespace
 
-scoped_ptr<SoftwareRenderer> SoftwareRenderer::create(RendererClient* client, ResourceProvider* resourceProvider, SoftwareOutputDevice* outputDevice)
+scoped_ptr<SoftwareRenderer> SoftwareRenderer::create(RendererClient* client, OutputSurface* outputSurface, ResourceProvider* resourceProvider)
 {
-    return make_scoped_ptr(new SoftwareRenderer(client, resourceProvider, outputDevice));
+    return make_scoped_ptr(new SoftwareRenderer(client, outputSurface, resourceProvider));
 }
 
-SoftwareRenderer::SoftwareRenderer(RendererClient* client, ResourceProvider* resourceProvider, SoftwareOutputDevice* outputDevice)
+SoftwareRenderer::SoftwareRenderer(RendererClient* client,
+                                   OutputSurface* outputSurface,
+                                   ResourceProvider* resourceProvider)
     : DirectRenderer(client, resourceProvider)
+    , m_outputSurface(outputSurface)
     , m_visible(true)
-    , m_outputDevice(outputDevice)
+    , m_isScissorEnabled(false)
+    , m_outputDevice(outputSurface->software_device())
     , m_skCurrentCanvas(0)
 {
     m_resourceProvider->setDefaultResourceType(ResourceProvider::Bitmap);
@@ -69,6 +78,10 @@ SoftwareRenderer::SoftwareRenderer(RendererClient* client, ResourceProvider* res
     m_capabilities.usingSetVisibility = true;
     // The updater can access bitmaps while the SoftwareRenderer is using them.
     m_capabilities.allowPartialTextureUpdates = true;
+    m_capabilities.usingPartialSwap = true;
+    if (m_client->hasImplThread())
+      m_capabilities.usingSwapCompleteCallback = true;
+    m_compositorFrame.software_frame_data.reset(new SoftwareFrameData());
 
     viewportChanged();
 }
@@ -84,22 +97,42 @@ const RendererCapabilities& SoftwareRenderer::capabilities() const
 
 void SoftwareRenderer::viewportChanged()
 {
-    m_outputDevice->DidChangeViewportSize(viewportSize());
+    m_outputDevice->Resize(viewportSize());
 }
 
 void SoftwareRenderer::beginDrawingFrame(DrawingFrame& frame)
 {
     TRACE_EVENT0("cc", "SoftwareRenderer::beginDrawingFrame");
-    m_skRootCanvas = make_scoped_ptr(new SkCanvas(m_outputDevice->Lock(true)->getSkBitmap()));
+    m_skRootCanvas = m_outputDevice->BeginPaint(
+        gfx::ToEnclosingRect(frame.rootDamageRect));
 }
 
 void SoftwareRenderer::finishDrawingFrame(DrawingFrame& frame)
 {
     TRACE_EVENT0("cc", "SoftwareRenderer::finishDrawingFrame");
     m_currentFramebufferLock.reset();
-    m_skCurrentCanvas = 0;
-    m_skRootCanvas.reset();
-    m_outputDevice->Unlock();
+    m_skCurrentCanvas = NULL;
+    m_skRootCanvas = NULL;
+    if (settings().compositorFrameMessage) {
+        m_compositorFrame.metadata = m_client->makeCompositorFrameMetadata();
+        m_outputDevice->EndPaint(m_compositorFrame.software_frame_data.get());
+    } else {
+        m_outputDevice->EndPaint();
+    }
+}
+
+bool SoftwareRenderer::swapBuffers()
+{
+    if (settings().compositorFrameMessage)
+        m_outputSurface->SendFrameToParentCompositor(&m_compositorFrame);
+    return true;
+}
+
+void SoftwareRenderer::receiveCompositorFrameAck(const CompositorFrameAck& ack)
+{
+    if (m_client->hasImplThread())
+        m_client->onSwapBuffersComplete();
+    m_outputDevice->ReclaimDIB(ack.last_content_dib);
 }
 
 bool SoftwareRenderer::flippedFramebuffer() const
@@ -109,8 +142,8 @@ bool SoftwareRenderer::flippedFramebuffer() const
 
 void SoftwareRenderer::ensureScissorTestEnabled()
 {
-    // Nothing to do here. Current implementation of software rendering has no
-    // notion of enabling/disabling the feature.
+    m_isScissorEnabled = true;
+    setClipRect(m_scissorRect);
 }
 
 void SoftwareRenderer::ensureScissorTestDisabled()
@@ -119,9 +152,9 @@ void SoftwareRenderer::ensureScissorTestDisabled()
     // rendering, but the underlying effect we want is to clear any existing
     // clipRect on the current SkCanvas. This is done by setting clipRect to
     // the viewport's dimensions.
-    SkISize canvasSize = m_skCurrentCanvas->getDeviceSize();
-    SkRect canvasRect = SkRect::MakeXYWH(0, 0, canvasSize.width(), canvasSize.height());
-    m_skCurrentCanvas->clipRect(canvasRect, SkRegion::kReplace_Op);
+    m_isScissorEnabled = false;
+    SkDevice* device = m_skCurrentCanvas->getDevice();
+    setClipRect(gfx::Rect(device->width(), device->height()));
 }
 
 void SoftwareRenderer::finish()
@@ -131,7 +164,7 @@ void SoftwareRenderer::finish()
 void SoftwareRenderer::bindFramebufferToOutputSurface(DrawingFrame& frame)
 {
     m_currentFramebufferLock.reset();
-    m_skCurrentCanvas = m_skRootCanvas.get();
+    m_skCurrentCanvas = m_skRootCanvas;
 }
 
 bool SoftwareRenderer::bindFramebufferToTexture(DrawingFrame& frame, const ScopedResource* texture, const gfx::Rect& framebufferRect)
@@ -146,17 +179,38 @@ bool SoftwareRenderer::bindFramebufferToTexture(DrawingFrame& frame, const Scope
 
 void SoftwareRenderer::setScissorTestRect(const gfx::Rect& scissorRect)
 {
-    m_skCurrentCanvas->clipRect(gfx::RectToSkRect(scissorRect), SkRegion::kReplace_Op);
+    m_isScissorEnabled = true;
+    m_scissorRect = scissorRect;
+    setClipRect(scissorRect);
+}
+
+void SoftwareRenderer::setClipRect(const gfx::Rect& rect)
+{
+    // Skia applies the current matrix to clip rects so we reset it temporary.
+    SkMatrix currentMatrix = m_skCurrentCanvas->getTotalMatrix();
+    m_skCurrentCanvas->resetMatrix();
+    m_skCurrentCanvas->clipRect(gfx::RectToSkRect(rect), SkRegion::kReplace_Op);
+    m_skCurrentCanvas->setMatrix(currentMatrix);
+}
+
+void SoftwareRenderer::clearCanvas(SkColor color)
+{
+    // SkCanvas::clear doesn't respect the current clipping region
+    // so we SkCanvas::drawColor instead if scissoring is active.
+    if (m_isScissorEnabled)
+        m_skCurrentCanvas->drawColor(color, SkXfermode::kSrc_Mode);
+    else
+        m_skCurrentCanvas->clear(color);
 }
 
 void SoftwareRenderer::clearFramebuffer(DrawingFrame& frame)
 {
     if (frame.currentRenderPass->has_transparent_background) {
-        m_skCurrentCanvas->clear(SkColorSetARGB(0, 0, 0, 0));
+        clearCanvas(SkColorSetARGB(0, 0, 0, 0));
     } else {
 #ifndef NDEBUG
         // On DEBUG builds, opaque render passes are cleared to blue to easily see regions that were not drawn on the screen.
-        m_skCurrentCanvas->clear(SkColorSetARGB(255, 0, 0, 255));
+        clearCanvas(SkColorSetARGB(255, 0, 0, 255));
 #endif
     }
 }
@@ -292,15 +346,12 @@ void SoftwareRenderer::drawRenderPassQuad(const DrawingFrame& frame, const Rende
     ResourceProvider::ScopedReadLockSoftware lock(m_resourceProvider, contentTexture->id());
 
     SkRect destRect = gfx::RectFToSkRect(quadVertexRect());
-
-    const SkBitmap* content = lock.skBitmap();
-
-    SkRect contentRect;
-    content->getBounds(&contentRect);
+    SkRect contentRect = SkRect::MakeWH(quad->rect.width(), quad->rect.height());
 
     SkMatrix contentMat;
     contentMat.setRectToRect(contentRect, destRect, SkMatrix::kFill_ScaleToFit);
 
+    const SkBitmap* content = lock.skBitmap();
     skia::RefPtr<SkShader> shader = skia::AdoptRef(
         SkShader::CreateBitmapShader(*content,
                                      SkShader::kClamp_TileMode,
@@ -353,22 +404,14 @@ void SoftwareRenderer::drawUnsupportedQuad(const DrawingFrame& frame, const Draw
     m_skCurrentCanvas->drawRect(gfx::RectFToSkRect(quadVertexRect()), m_skCurrentPaint);
 }
 
-bool SoftwareRenderer::swapBuffers()
-{
-    if (m_client->hasImplThread())
-        m_client->onSwapBuffersComplete();
-    return true;
-}
-
 void SoftwareRenderer::getFramebufferPixels(void *pixels, const gfx::Rect& rect)
 {
     TRACE_EVENT0("cc", "SoftwareRenderer::getFramebufferPixels");
-    SkBitmap fullBitmap = m_outputDevice->Lock(false)->getSkBitmap();
     SkBitmap subsetBitmap;
-    SkIRect invertRect = SkIRect::MakeXYWH(rect.x(), viewportSize().height() - rect.bottom(), rect.width(), rect.height());
-    fullBitmap.extractSubset(&subsetBitmap, invertRect);
-    subsetBitmap.copyPixelsTo(pixels, rect.width() * rect.height() * 4, rect.width() * 4);
-    m_outputDevice->Unlock();
+    m_outputDevice->CopyToBitmap(rect, &subsetBitmap);
+    subsetBitmap.copyPixelsTo(pixels,
+                              4 * rect.width() * rect.height(),
+                              4 * rect.width());
 }
 
 void SoftwareRenderer::setVisible(bool visible)

@@ -7,7 +7,6 @@
 #include "base/file_util.h"
 #include "base/logging.h"
 #include "content/browser/gpu/browser_gpu_channel_host_factory.h"
-#include "content/public/common/serialized_script_value.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebData.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebString.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebURL.h"
@@ -117,13 +116,8 @@ WebKit::WebData BrowserWebKitPlatformSupportImpl::loadResource(
 
 int BrowserWebKitPlatformSupportImpl::databaseDeleteFile(
     const WebKit::WebString& vfs_file_name, bool sync_dir) {
-  const FilePath path = webkit_base::WebStringToFilePath(vfs_file_name);
+  const base::FilePath path = webkit_base::WebStringToFilePath(vfs_file_name);
   return file_util::Delete(path, false) ? 0 : 1;
-}
-
-GpuChannelHostFactory*
-BrowserWebKitPlatformSupportImpl::GetGpuChannelHostFactory() {
-  return BrowserGpuChannelHostFactory::instance();
 }
 
 }  // namespace content

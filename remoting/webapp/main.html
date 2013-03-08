@@ -8,9 +8,8 @@ found in the LICENSE file.
 <html>
   <head>
     <meta charset="utf-8">
-    <link href="https://fonts.googleapis.com/css?family=Open+Sans&amp;v1"
-          rel="stylesheet" type="text/css">
-    <link rel="icon" type="image/png" href="chromoting16.png">
+    <link rel="icon" type="image/png" href="chromoting16.webp">
+    <link rel="stylesheet" href="open_sans.css">
     <link rel="stylesheet" href="connection_stats.css">
     <link rel="stylesheet" href="connection_history.css">
     <link rel="stylesheet" href="main.css">
@@ -23,8 +22,10 @@ found in the LICENSE file.
     <script src="clipboard.js"></script>
     <script src="connection_history.js"></script>
     <script src="connection_stats.js"></script>
+    <script src="error.js"></script>
     <script src="event_handlers.js"></script>
     <script src="format_iq.js"></script>
+    <script src="host.js"></script>
     <script src="host_controller.js"></script>
     <script src="host_list.js"></script>
     <script src="host_screen.js"></script>
@@ -38,15 +39,14 @@ found in the LICENSE file.
     <script src="oauth2.js"></script>
     <script src="plugin_settings.js"></script>
     <script src="remoting.js"></script>
+    <script src="session_connector.js"></script>
     <script src="server_log_entry.js"></script>
     <script src="stats_accumulator.js"></script>
     <script src="storage.js"></script>
-    <script src="suspend_monitor.js"></script>
     <script src="toolbar.js"></script>
     <script src="ui_mode.js"></script>
     <script src="xhr.js"></script>
-    <script src="wcs.js"></script>
-    <script src="wcs_loader.js"></script>
+    <script src="wcs_sandbox_container.js"></script>
     <title i18n-content="PRODUCT_NAME"></title>
   </head>
 
@@ -61,9 +61,11 @@ found in the LICENSE file.
 
     <div id="daemon-plugin-container"></div>
 
+    <iframe id="wcs-sandbox" src="wcs_sandbox.html" hidden></iframe>
+
     <header data-ui-mode="home" hidden>
       <div>
-        <img src="chromoting48.png">
+        <img src="chromoting48.webp">
         <h1 class="icon-label" i18n-content="PRODUCT_NAME"></h1>
       </div>
       <div class="box-spacer"></div>
@@ -94,7 +96,7 @@ found in the LICENSE file.
                     disabled></button>
           </div>
           <div class="infographic">
-            <img src="infographic_remote_assistance.png">
+            <img src="infographic_remote_assistance.webp">
           </div>
         </div>
         <div id="it2me-content">
@@ -142,7 +144,7 @@ found in the LICENSE file.
                     disabled></button>
           </div>
           <div class="infographic">
-            <img src="infographic_my_computers.png">
+            <img src="infographic_my_computers.webp">
           </div>
         </div>
         <div id="me2me-content">
@@ -156,7 +158,7 @@ found in the LICENSE file.
           <div id="daemon-control" data-daemon-state="enabled disabled" hidden>
             <div class="section-row no-non-local-hosts"
                  data-daemon-state="disabled">
-              <img src="icon_host.png" class="host-list-main-icon">
+              <img src="icon_host.webp" class="host-list-main-icon">
               <div class="box-spacer host-list-label"
                    id="start-daemon-message"
                    i18n-content="HOME_DAEMON_START_MESSAGE"></div>
@@ -169,16 +171,18 @@ found in the LICENSE file.
             <div id="this-host-connect"
                  class="section-row clickable no-non-local-hosts"
                  data-daemon-state="enabled">
-              <img id="this-host-icon"
-                   src="icon_host.png"
-                   class="host-list-main-icon">
+              <div class="host-list-main-icon">
+                <span id="this-host-warning"></span>
+                <img id="this-host-icon"
+                     src="icon_host.webp">
+              </div>
               <div id="this-host-name" class="box-spacer"></div>
               <span id="this-host-rename"
                     class="host-list-edit"
                     tabIndex="0">
                 <img id="this-host-rename"
                      class="host-list-rename-icon"
-                     src="icon_pencil.png">
+                     src="icon_pencil.webp">
               </span>
               <button type="button"
                       id="stop-daemon"
@@ -264,10 +268,14 @@ found in the LICENSE file.
         <form id="ask-pin-form"
               data-ui-mode="home.host-setup.ask-pin"
               action="">
-          <p class="message"
-             i18n-content="HOST_SETUP_DIALOG_DESCRIPTION"
-             i18n-value-1="<b>"
-             i18n-value-2="</b>"></p>
+          <p class="message">
+            <span i18n-content="HOST_SETUP_DIALOG_DESCRIPTION"
+                  i18n-value-1="<b>"
+                  i18n-value-2="</b>"></span>
+            <a href="http://support.google.com/chrome/bin/answer.py?hl=en&answer=1649523"
+               target="_blank"
+               i18n-content="WHY_IS_THIS_SAFE"></a>
+          </p>
           <table id="set-pin-table">
             <tr>
               <td class="table-label">
@@ -292,21 +300,17 @@ found in the LICENSE file.
               </td>
             <tr>
           </table>
+          <div id="daemon-pin-error-div" class="message centered" hidden>
+            <span id="daemon-pin-error-message" class="error-state">
+            </span>
+          </div>
           <div id="usagestats-consent" hidden>
             <label class="checkbox-label">
               <input id="usagestats-consent-checkbox" type="checkbox">
               <span i18n-content="HOST_SETUP_CRASH_REPORTING_MESSAGE"></span>
             </label>
           </div>
-          <div id="daemon-pin-error-div" class="message centered" hidden>
-            <span id="daemon-pin-error-message" class="error-state">
-            </span>
-          </div>
           <div class="box">
-            <a href="http://support.google.com/chrome/bin/answer.py?hl=en&answer=1649523"
-               target="_blank"
-               id="why-is-this-safe"
-               i18n-content="WHY_IS_THIS_SAFE"></a>
             <div class="box-spacer"></div>
             <button id="daemon-pin-ok" type="submit" i18n-content="OK">
             </button>
@@ -461,6 +465,13 @@ found in the LICENSE file.
               </div>
             </form>
           </div> <!-- code-entry-row -->
+          <div id="startup-mode-box-it2me" class="information-box" hidden>
+            <span i18n-content="WARNING_NOT_WINDOWED"></span>
+            <a href="http://support.google.com/chrome/bin/answer.py?hl=en&answer=1649523"
+               target="_blank"
+               i18n-content="LEARN_HOW"></a>
+          </div> <!-- startup-mode-box-it2me -->
+
         </div> <!-- client.unconnected -->
 
         <div data-ui-mode="home.client.connecting" class="box">
@@ -469,6 +480,29 @@ found in the LICENSE file.
           <div class="box-spacer"></div>
           <button id="cancel-connect-button" i18n-content="CANCEL"></button>
         </div> <!-- client.connecting -->
+
+        <div data-ui-mode="home.client.host-needs-upgrade">
+          <div id="host-needs-update-message"
+               class="message error-state multi-line-error-state">
+          </div>
+          <div class="message">
+            <span i18n-content="HOST_NEEDS_UPDATE_DETAIL"></span>
+            <a href="http://support.google.com/chrome/bin/answer.py?hl=en&answer=1649523"
+               i18n-content="LEARN_HOW"></a>
+          </div>
+          <div class="box">
+            <div class="box-spacer"></div>
+            <button id="host-needs-update-connect-button"
+                    type="button"
+                    i18n-content="CONNECT_ANYWAY"
+                    autofocus="autofocus">
+            </button>
+            <button id="host-needs-update-cancel-button"
+                    type="button"
+                    i18n-content="CANCEL">
+            </button>
+          </div>
+        </div> <!-- home.client.host-needs-upgrade -->
 
         <div data-ui-mode="home.client.pin-prompt" class="centered">
           <div id="pin-message"
@@ -492,6 +526,12 @@ found in the LICENSE file.
                       i18n-content="CANCEL">
               </button>
             </form>
+            <div id="startup-mode-box-me2me" class="information-box" hidden>
+              <span i18n-content="WARNING_NOT_WINDOWED"></span>
+              <a href="http://support.google.com/chrome/bin/answer.py?hl=en&answer=1649523"
+                 target="_blank"
+                 i18n-content="LEARN_HOW"></a>
+            </div> <!-- startup-mode-box-it2me -->
           </div>
         </div> <!-- client.pin-prompt -->
 
@@ -610,7 +650,7 @@ found in the LICENSE file.
           <span class="menu-button" id="send-keys-menu">
             <button>
               <span i18n-content="SEND_KEYS"></span>
-              <img src="disclosure_arrow_down.png"
+              <img src="disclosure_arrow_down.webp"
                    class="kd-disclosureindicator">
             </button>
             <ul>
@@ -621,7 +661,7 @@ found in the LICENSE file.
           <span class="menu-button" id="screen-options-menu">
             <button>
               <span i18n-content="SCREEN_OPTIONS"></span>
-              <img src="disclosure_arrow_down.png"
+              <img src="disclosure_arrow_down.webp"
                    class="kd-disclosureindicator">
             </button>
             <ul>

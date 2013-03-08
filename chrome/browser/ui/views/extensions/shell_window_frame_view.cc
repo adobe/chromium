@@ -6,7 +6,7 @@
 
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/ui/views/extensions/native_app_window_views.h"
-#include "chrome/common/extensions/draggable_region.h"
+#include "extensions/common/draggable_region.h"
 #include "grit/theme_resources.h"
 #include "grit/ui_strings.h"  // Accessibility names
 #include "third_party/skia/include/core/SkPaint.h"
@@ -31,6 +31,9 @@
 #include "ash/ash_constants.h"
 #include "chrome/browser/ui/ash/ash_util.h"
 #include "ui/aura/env.h"
+#endif
+
+#if defined(USE_AURA)
 #include "ui/aura/window.h"
 #endif
 
@@ -104,23 +107,29 @@ void ShellWindowFrameView::Init(views::Widget* frame) {
     AddChildView(minimize_button_);
   }
 
-#if defined(USE_ASH)
+#if defined(USE_AURA)
+  int resize_inside_bounds_size = kResizeInsideBoundsSize;
   aura::Window* window = frame->GetNativeWindow();
+#if defined(USE_ASH)
   if (chrome::IsNativeWindowInAsh(window)) {
-  // Ensure we get resize cursors for a few pixels outside our bounds.
-  window->SetHitTestBoundsOverrideOuter(
-      gfx::Insets(-ash::kResizeOutsideBoundsSize,
-                  -ash::kResizeOutsideBoundsSize,
-                  -ash::kResizeOutsideBoundsSize,
-                  -ash::kResizeOutsideBoundsSize),
-      ash::kResizeOutsideBoundsScaleForTouch);
+    // Ensure we get resize cursors for a few pixels outside our bounds.
+    window->SetHitTestBoundsOverrideOuter(
+        gfx::Insets(-ash::kResizeOutsideBoundsSize,
+                    -ash::kResizeOutsideBoundsSize,
+                    -ash::kResizeOutsideBoundsSize,
+                    -ash::kResizeOutsideBoundsSize),
+        ash::kResizeOutsideBoundsScaleForTouch);
+
+    // If the window is in ash, the inside area used for resizing will be
+    // smaller due to the fact that outside area is also used for resizing.
+    resize_inside_bounds_size = ash::kResizeInsideBoundsSize;
+  }
+#endif
   // Ensure we get resize cursors just inside our bounds as well.
   // TODO(jeremya): do we need to update these when in fullscreen/maximized?
   window->set_hit_test_bounds_override_inner(
-      gfx::Insets(ash::kResizeInsideBoundsSize, ash::kResizeInsideBoundsSize,
-                    ash::kResizeInsideBoundsSize,
-                    ash::kResizeInsideBoundsSize));
-  }
+      gfx::Insets(resize_inside_bounds_size, resize_inside_bounds_size,
+                  resize_inside_bounds_size, resize_inside_bounds_size));
 #endif
 }
 
@@ -164,16 +173,19 @@ int ShellWindowFrameView::NonClientHitTest(const gfx::Point& point) {
   int resize_area_corner_size = kResizeAreaCornerSize;
 
 #if defined(USE_ASH)
-  gfx::Rect expanded_bounds = bounds();
-  int outside_bounds = ash::kResizeOutsideBoundsSize;
-  if (aura::Env::GetInstance()->is_touch_down())
-    outside_bounds *= ash::kResizeOutsideBoundsScaleForTouch;
-  expanded_bounds.Inset(-outside_bounds, -outside_bounds);
-  if (!expanded_bounds.Contains(point))
-    return HTNOWHERE;
+  aura::Window* window = frame_->GetNativeWindow();
+  if (chrome::IsNativeWindowInAsh(window)) {
+    gfx::Rect expanded_bounds = bounds();
+    int outside_bounds = ash::kResizeOutsideBoundsSize;
+    if (aura::Env::GetInstance()->is_touch_down())
+      outside_bounds *= ash::kResizeOutsideBoundsScaleForTouch;
+    expanded_bounds.Inset(-outside_bounds, -outside_bounds);
+    if (!expanded_bounds.Contains(point))
+      return HTNOWHERE;
 
-  resize_inside_bounds_size = ash::kResizeInsideBoundsSize;
-  resize_area_corner_size = ash::kResizeAreaCornerSize;
+    resize_inside_bounds_size = ash::kResizeInsideBoundsSize;
+    resize_area_corner_size = ash::kResizeAreaCornerSize;
+  }
 #endif
 
   // Check the frame first, as we allow a small area overlapping the contents
@@ -235,13 +247,13 @@ void ShellWindowFrameView::Layout() {
   if (window_->frameless())
     return;
   gfx::Size close_size = close_button_->GetPreferredSize();
-  int closeButtonOffsetY =
-      (kCaptionHeight - close_size.height()) / 2;
-  const int kButtonSpacing = 9;
+  const int kButtonOffsetY = 0;
+  const int kButtonSpacing = 1;
+  const int kRightMargin = 3;
 
   close_button_->SetBounds(
-      width() - kButtonSpacing - close_size.width(),
-      closeButtonOffsetY,
+      width() - kRightMargin - close_size.width(),
+      kButtonOffsetY,
       close_size.width(),
       close_size.height());
 
@@ -252,13 +264,13 @@ void ShellWindowFrameView::Layout() {
   gfx::Size maximize_size = maximize_button_->GetPreferredSize();
   maximize_button_->SetBounds(
       close_button_->x() - kButtonSpacing - maximize_size.width(),
-      closeButtonOffsetY,
+      kButtonOffsetY,
       maximize_size.width(),
       maximize_size.height());
   gfx::Size restore_size = restore_button_->GetPreferredSize();
   restore_button_->SetBounds(
       close_button_->x() - kButtonSpacing - restore_size.width(),
-      closeButtonOffsetY,
+      kButtonOffsetY,
       restore_size.width(),
       restore_size.height());
 
@@ -273,7 +285,7 @@ void ShellWindowFrameView::Layout() {
   gfx::Size minimize_size = minimize_button_->GetPreferredSize();
   minimize_button_->SetBounds(
       maximize_button_->x() - kButtonSpacing - minimize_size.width(),
-      closeButtonOffsetY,
+      kButtonOffsetY,
       minimize_size.width(),
       minimize_size.height());
 }
@@ -281,6 +293,16 @@ void ShellWindowFrameView::Layout() {
 void ShellWindowFrameView::OnPaint(gfx::Canvas* canvas) {
   if (window_->frameless())
     return;
+
+  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
+  if (ShouldPaintAsActive()) {
+    close_button_->SetImage(views::CustomButton::STATE_NORMAL,
+        rb.GetNativeImageNamed(IDR_APP_WINDOW_CLOSE).ToImageSkia());
+  } else {
+    close_button_->SetImage(views::CustomButton::STATE_NORMAL,
+        rb.GetNativeImageNamed(IDR_APP_WINDOW_CLOSE_U).ToImageSkia());
+  }
+
   // TODO(jeremya): different look for inactive?
   SkPaint paint;
   paint.setAntiAlias(false);

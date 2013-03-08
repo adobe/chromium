@@ -7,7 +7,7 @@
 
 #include <vector>
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/string16.h"
 #include "base/utf_string_conversions.h"
 #include "content/browser/accessibility/browser_accessibility.h"
@@ -31,6 +31,7 @@ class DumpAccessibilityTreeHelper {
   struct Filter {
     enum Type {
       ALLOW,
+      ALLOW_EMPTY,
       DENY
     };
     string16 match_str;
@@ -49,20 +50,23 @@ class DumpAccessibilityTreeHelper {
   // HTML test:      test-file.html
   // Expected:       test-file-expected-mac.txt.
   // Auto-generated: test-file-actual-mac.txt
-  const FilePath::StringType GetActualFileSuffix() const;
-  const FilePath::StringType GetExpectedFileSuffix() const;
+  const base::FilePath::StringType GetActualFileSuffix() const;
+  const base::FilePath::StringType GetExpectedFileSuffix() const;
 
   // A platform-specific string that indicates a given line in a file
-  // is an allow or deny filter. Example:
+  // is an allow-empty, allow or deny filter. Example:
   // Mac values:
+  //   GetAllowEmptyString() -> "@MAC-ALLOW-EMPTY:"
   //   GetAllowString() -> "@MAC-ALLOW:"
   //   GetDenyString() -> "@MAC-DENY:"
   // Example html:
   // <!--
+  // @MAC-ALLOW-EMPTY:description*
   // @MAC-ALLOW:roleDescription*
   // @MAC-DENY:subrole*
   // -->
   // <p>Text</p>
+  const std::string GetAllowEmptyString() const;
   const std::string GetAllowString() const;
   const std::string GetDenyString() const;
 

@@ -6,7 +6,7 @@
 #include <string.h>
 
 #include "base/android/path_utils.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/memory/singleton.h"
 #include "base/message_loop.h"
@@ -139,7 +139,7 @@ base::MessagePump* CreateMessagePumpForUIStub() {
 };
 
 // Provides the test path for DIR_MODULE and DIR_ANDROID_APP_DATA.
-bool GetTestProviderPath(int key, FilePath* result) {
+bool GetTestProviderPath(int key, base::FilePath* result) {
   switch (key) {
     case base::DIR_MODULE: {
       return base::android::GetExternalStorageDirectory(result);
@@ -154,7 +154,7 @@ bool GetTestProviderPath(int key, FilePath* result) {
 }
 
 void InitPathProvider(int key) {
-  FilePath path;
+  base::FilePath path;
   // If failed to override the key, that means the way has not been registered.
   if (GetTestProviderPath(key, &path) && !PathService::Override(key, path))
     PathService::RegisterProvider(&GetTestProviderPath, key, key + 1);
@@ -183,7 +183,8 @@ void InitAndroidTestPaths() {
 }
 
 void InitAndroidTestMessageLoop() {
-  MessageLoop::InitMessagePumpForUIFactory(&CreateMessagePumpForUIStub);
+  if (!MessageLoop::InitMessagePumpForUIFactory(&CreateMessagePumpForUIStub))
+    LOG(INFO) << "MessagePumpForUIFactory already set, unable to override.";
 }
 
 void InitAndroidTest() {

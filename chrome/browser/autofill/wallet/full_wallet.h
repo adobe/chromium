@@ -18,6 +18,7 @@ namespace base {
 class DictionaryValue;
 }
 
+namespace autofill {
 namespace wallet {
 
 class FullWalletTest;
@@ -36,13 +37,16 @@ class FullWallet {
   static scoped_ptr<FullWallet>
       CreateFullWallet(const base::DictionaryValue& dictionary);
 
-  // Decrypts and returns primary account number (PAN) using generated one time
-  // pad, |otp|.
-  const std::string& GetPan(void* otp, size_t length);
+  // Decrypts and returns the primary account number (PAN) using the generated
+  // one time pad, |one_time_pad_|.
+  const std::string& GetPan();
 
-  // Decrypts and returns card verification number (CVN) using generated one
-  // time pad, |otp|.
-  const std::string& GetCvn(void* otp, size_t length);
+  // Decrypts and returns the card verification number (CVN) using the generated
+  // one time pad, |one_time_pad_|.
+  const std::string& GetCvn();
+
+  // Whether or not |action| is in |required_actions_|.
+  bool HasRequiredAction(RequiredAction action) const;
 
   bool operator==(const FullWallet& other) const;
   bool operator!=(const FullWallet& other) const;
@@ -60,6 +64,10 @@ class FullWallet {
   int expiration_month() const { return expiration_month_; }
   int expiration_year() const { return expiration_year_; }
 
+  void set_one_time_pad(const std::vector<uint8>& one_time_pad) {
+    one_time_pad_ = one_time_pad;
+  }
+
  private:
   friend class FullWalletTest;
   FRIEND_TEST_ALL_PREFIXES(FullWalletTest, CreateFullWallet);
@@ -71,26 +79,43 @@ class FullWallet {
              scoped_ptr<Address> billing_address,
              scoped_ptr<Address> shipping_address,
              const std::vector<RequiredAction>& required_actions);
-  void DecryptCardInfo(uint8* otp, size_t length);
+  void DecryptCardInfo();
+
+  // The expiration month of the proxy card. It should be 1-12.
   int expiration_month_;
+
+  // The expiration year of the proxy card. It should be a 4-digit year.
   int expiration_year_;
+
   // Primary account number (PAN). Its format is \d{16}.
   std::string pan_;
+
   // Card verification number (CVN). Its format is \d{3}.
   std::string cvn_;
+
   // Issuer identification number (IIN). Its format is \d{6}.
   std::string iin_;
+
   // Encrypted concatentation of CVN and PAN without IIN
   std::string encrypted_rest_;
+
+  // The billing address of the backing instrument.
   scoped_ptr<Address> billing_address_;
+
+  // The shipping address for the transaction.
   scoped_ptr<Address> shipping_address_;
+
   // Actions that must be completed by the user before a FullWallet can be
   // issued to them by the Online Wallet service.
   std::vector<RequiredAction> required_actions_;
+
+  // The one time pad used for FullWallet encryption.
+  std::vector<uint8> one_time_pad_;
+
   DISALLOW_COPY_AND_ASSIGN(FullWallet);
 };
 
 }  // namespace wallet
+}  // namespace autofill
 
 #endif  // CHROME_BROWSER_AUTOFILL_WALLET_FULL_WALLET_H_
-

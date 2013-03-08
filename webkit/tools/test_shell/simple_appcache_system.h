@@ -5,7 +5,7 @@
 #ifndef WEBKIT_TOOLS_TEST_SHELL_SIMPLE_APPCACHE_SYSTEM_H_
 #define WEBKIT_TOOLS_TEST_SHELL_SIMPLE_APPCACHE_SYSTEM_H_
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/message_loop.h"
 #include "base/threading/thread.h"
 #include "webkit/appcache/appcache_backend_impl.h"
@@ -38,7 +38,7 @@ class SimpleAppCacheSystem {
   virtual ~SimpleAppCacheSystem();
 
   // One-time main UI thread initialization.
-  static void InitializeOnUIThread(const FilePath& cache_directory) {
+  static void InitializeOnUIThread(const base::FilePath& cache_directory) {
     if (instance_)
       instance_->InitOnUIThread(cache_directory);
   }
@@ -85,7 +85,7 @@ class SimpleAppCacheSystem {
   friend class SimpleFrontendProxy;
 
   // Instance methods called by our static public methods
-  void InitOnUIThread(const FilePath& cache_directory);
+  void InitOnUIThread(const base::FilePath& cache_directory);
   void InitOnIOThread(net::URLRequestContext* request_context);
   void CleanupIOThread();
   WebKit::WebApplicationCacheHost* CreateCacheHostForWebKit(
@@ -109,7 +109,7 @@ class SimpleAppCacheSystem {
     return ui_message_loop_ ? true : false;
   }
 
-  FilePath cache_directory_;
+  base::FilePath cache_directory_;
   MessageLoop* io_message_loop_;
   MessageLoop* ui_message_loop_;
   scoped_refptr<SimpleBackendProxy> backend_proxy_;

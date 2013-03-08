@@ -5,7 +5,7 @@
 #include <vector>
 
 #include "base/basictypes.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/autofill/autofill_common_test.h"
@@ -20,8 +20,8 @@
 
 namespace {
 
-const FilePath::CharType kTestName[] = FILE_PATH_LITERAL("merge");
-const FilePath::CharType kFileNamePattern[] = FILE_PATH_LITERAL("*.in");
+const base::FilePath::CharType kTestName[] = FILE_PATH_LITERAL("merge");
+const base::FilePath::CharType kFileNamePattern[] = FILE_PATH_LITERAL("*.in");
 
 const char kFieldSeparator[] = ": ";
 const char kProfileSeparator[] = "---";
@@ -187,7 +187,7 @@ void AutofillMergeTest::MergeProfiles(const std::string& profiles,
     // followed by an explicit separator.
     if ((i > 0 && line == kProfileSeparator) || i == lines.size() - 1) {
       // Reached the end of a profile.  Try to import it.
-      FormStructure form_structure(form);
+      FormStructure form_structure(form, std::string());
       for (size_t i = 0; i < form_structure.field_count(); ++i) {
         // Set the heuristic type for each field, which is currently serialized
         // into the field's name.

@@ -5,6 +5,7 @@
 #ifndef CC_DRAW_QUAD_H_
 #define CC_DRAW_QUAD_H_
 
+#include "base/callback.h"
 #include "cc/cc_export.h"
 #include "cc/resource_provider.h"
 #include "cc/shared_quad_state.h"
@@ -66,12 +67,41 @@ class CC_EXPORT DrawQuad {
   const SharedQuadState* shared_quad_state;
 
   bool IsDebugQuad() const { return material == DEBUG_BORDER; }
+
   bool ShouldDrawWithBlending() const {
     return needs_blending || shared_quad_state->opacity < 1.0f ||
         !opaque_rect.Contains(visible_rect);
   }
 
-  virtual void AppendResources(ResourceProvider::ResourceIdArray* resources);
+  typedef base::Callback<ResourceProvider::ResourceId(
+      ResourceProvider::ResourceId)> ResourceIteratorCallback;
+  virtual void IterateResources(const ResourceIteratorCallback& callback) = 0;
+
+  // Is the left edge of this tile aligned with the originating layer's
+  // left edge?
+  bool IsLeftEdge() const { return !rect.x(); }
+
+  // Is the top edge of this tile aligned with the originating layer's
+  // top edge?
+  bool IsTopEdge() const { return !rect.y(); }
+
+  // Is the right edge of this tile aligned with the originating layer's
+  // right edge?
+  bool IsRightEdge() const {
+    return rect.right() == shared_quad_state->content_bounds.width();
+  }
+
+  // Is the bottom edge of this tile aligned with the originating layer's
+  // bottom edge?
+  bool IsBottomEdge() const {
+    return rect.bottom() == shared_quad_state->content_bounds.height();
+  }
+
+  // Is any edge of this tile aligned with the originating layer's
+  // corresponding edge?
+  bool IsEdge() const {
+    return IsLeftEdge() || IsTopEdge() || IsRightEdge() || IsBottomEdge();
+  }
 
  protected:
   DrawQuad();

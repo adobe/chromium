@@ -238,6 +238,10 @@ void WebUIScreenLocker::OnStartDeviceReset() {
   NOTREACHED();
 }
 
+void WebUIScreenLocker::ShowWrongHWIDScreen() {
+  NOTREACHED();
+}
+
 void WebUIScreenLocker::ResyncUserData() {
   NOTREACHED();
 }
@@ -272,7 +276,7 @@ void WebUIScreenLocker::OnSessionStateEvent(
 ////////////////////////////////////////////////////////////////////////////////
 // WidgetObserver override.
 
-void WebUIScreenLocker::OnWidgetClosing(views::Widget* widget) {
+void WebUIScreenLocker::OnWidgetDestroying(views::Widget* widget) {
   lock_window_->RemoveObserver(this);
   lock_window_ = NULL;
 }

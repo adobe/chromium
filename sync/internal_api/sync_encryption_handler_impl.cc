@@ -49,11 +49,19 @@ enum NigoriMigrationResult {
   FAILED_TO_SET_NONDEFAULT_KEYSTORE,
   FAILED_TO_EXTRACT_DECRYPTOR,
   FAILED_TO_EXTRACT_KEYBAG,
-  MIGRATION_SUCCESS_KEYSTORE_DEFAULT,
   MIGRATION_SUCCESS_KEYSTORE_NONDEFAULT,
+  MIGRATION_SUCCESS_KEYSTORE_DEFAULT,
   MIGRATION_SUCCESS_FROZEN_IMPLICIT,
   MIGRATION_SUCCESS_CUSTOM,
   MIGRATION_RESULT_SIZE,
+};
+
+enum NigoriMigrationState {
+  MIGRATED,
+  NOT_MIGRATED_CRYPTO_NOT_READY,
+  NOT_MIGRATED_NO_KEYSTORE_KEY,
+  NOT_MIGRATED_UNKNOWN_REASON,
+  MIGRATION_STATE_SIZE,
 };
 
 // The new passphrase state is sufficient to determine whether a nigori node
@@ -247,6 +255,48 @@ void SyncEncryptionHandlerImpl::Init() {
     WriteEncryptionStateToNigori(&trans);
   }
 
+  bool has_pending_keys = UnlockVault(
+      trans.GetWrappedTrans()).cryptographer.has_pending_keys();
+  bool is_ready = UnlockVault(
+      trans.GetWrappedTrans()).cryptographer.is_ready();
+  // Log the state of the cryptographer regardless of migration state.
+  UMA_HISTOGRAM_BOOLEAN("Sync.CryptographerReady", is_ready);
+  UMA_HISTOGRAM_BOOLEAN("Sync.CryptographerPendingKeys", has_pending_keys);
+  if (IsNigoriMigratedToKeystore(node.GetNigoriSpecifics())) {
+    // This account has a nigori node that has been migrated to support
+    // keystore.
+    UMA_HISTOGRAM_ENUMERATION("Sync.NigoriMigrationState",
+                              MIGRATED,
+                              MIGRATION_STATE_SIZE);
+    if (has_pending_keys && passphrase_type_ == KEYSTORE_PASSPHRASE) {
+      // If this is happening, it means the keystore decryptor is either
+      // undecryptable with the available keystore keys or does not match the
+      // nigori keybag's encryption key. Otherwise we're simply missing the
+      // keystore key.
+      UMA_HISTOGRAM_BOOLEAN("Sync.KeystoreDecryptionFailed",
+                            !keystore_key_.empty());
+    }
+  } else if (!is_ready) {
+    // Migration cannot occur until the cryptographer is ready (initialized
+    // with GAIA password and any pending keys resolved).
+    UMA_HISTOGRAM_ENUMERATION("Sync.NigoriMigrationState",
+                              NOT_MIGRATED_CRYPTO_NOT_READY,
+                              MIGRATION_STATE_SIZE);
+  } else if (keystore_key_.empty()) {
+    // The client has no keystore key, either because it is not yet enabled or
+    // the server is not sending a valid keystore key.
+    UMA_HISTOGRAM_ENUMERATION("Sync.NigoriMigrationState",
+                              NOT_MIGRATED_NO_KEYSTORE_KEY,
+                              MIGRATION_STATE_SIZE);
+  } else {
+    // If the above conditions have been met and the nigori node is still not
+    // migrated, something failed in the migration process.
+    UMA_HISTOGRAM_ENUMERATION("Sync.NigoriMigrationState",
+                              NOT_MIGRATED_UNKNOWN_REASON,
+                              MIGRATION_STATE_SIZE);
+  }
+
+
   // Always trigger an encrypted types and cryptographer state change event at
   // init time so observers get the initial values.
   FOR_EACH_OBSERVER(
@@ -306,6 +356,10 @@ void SyncEncryptionHandlerImpl::SetEncryptionPassphrase(
     // Will fail if we already have an explicit passphrase or we have pending
     // keys.
     SetCustomPassphrase(passphrase, &trans, &node);
+
+    // When keystore migration occurs, the "CustomEncryption" UMA stat must be
+    // logged as true.
+    UMA_HISTOGRAM_BOOLEAN("Sync.CustomEncryption", true);
     return;
   }
 
@@ -353,6 +407,15 @@ void SyncEncryptionHandlerImpl::SetEncryptionPassphrase(
           DVLOG(1) << "Setting implicit passphrase for encryption.";
         }
         cryptographer->GetBootstrapToken(&bootstrap_token);
+
+        // With M26, sync accounts can be in only one of two encryption states:
+        // 1) Encrypt only passwords with an implicit passphrase.
+        // 2) Encrypt all sync datatypes with an explicit passphrase.
+        // We deprecate the "EncryptAllData" and "CustomPassphrase" histograms,
+        // and keep track of an account's encryption state via the
+        // "CustomEncryption" histogram. See http://crbug.com/131478.
+        UMA_HISTOGRAM_BOOLEAN("Sync.CustomEncryption", is_explicit);
+
         success = true;
       } else {
         NOTREACHED() << "Failed to add key to cryptographer.";
@@ -1422,11 +1485,11 @@ bool SyncEncryptionHandlerImpl::AttemptToMigrateNigoriToKeystore(
     case KEYSTORE_PASSPHRASE:
       if (old_keystore_keys_.size() > 0) {
         UMA_HISTOGRAM_ENUMERATION("Sync.AttemptNigoriMigration",
-                                  MIGRATION_SUCCESS_KEYSTORE_DEFAULT,
+                                  MIGRATION_SUCCESS_KEYSTORE_NONDEFAULT,
                                   MIGRATION_RESULT_SIZE);
       } else {
         UMA_HISTOGRAM_ENUMERATION("Sync.AttemptNigoriMigration",
-                                  MIGRATION_SUCCESS_KEYSTORE_NONDEFAULT,
+                                  MIGRATION_SUCCESS_KEYSTORE_DEFAULT,
                                   MIGRATION_RESULT_SIZE);
       }
       break;

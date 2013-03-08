@@ -11,13 +11,14 @@
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/string_number_conversions.h"
+#include "base/prefs/pref_registry_simple.h"
+#include "base/prefs/pref_service.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/chromeos/settings/cros_settings_names.h"
 #include "chrome/browser/chromeos/system/statistics_provider.h"
 #include "chrome/browser/policy/proto/device_management_backend.pb.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_version_info.h"
@@ -152,11 +153,11 @@ DeviceStatusCollector::~DeviceStatusCollector() {
 }
 
 // static
-void DeviceStatusCollector::RegisterPrefs(PrefServiceSimple* local_state) {
-  local_state->RegisterDictionaryPref(prefs::kDeviceActivityTimes,
-                                      new base::DictionaryValue);
-  local_state->RegisterDictionaryPref(prefs::kDeviceLocation,
-                                      new base::DictionaryValue);
+void DeviceStatusCollector::RegisterPrefs(PrefRegistrySimple* registry) {
+  registry->RegisterDictionaryPref(prefs::kDeviceActivityTimes,
+                                   new base::DictionaryValue);
+  registry->RegisterDictionaryPref(prefs::kDeviceLocation,
+                                   new base::DictionaryValue);
 }
 
 void DeviceStatusCollector::CheckIdleState() {
@@ -287,12 +288,12 @@ void DeviceStatusCollector::GetActivityTimes(
   DictionaryPrefUpdate update(local_state_, prefs::kDeviceActivityTimes);
   base::DictionaryValue* activity_times = update.Get();
 
-  for (base::DictionaryValue::key_iterator it = activity_times->begin_keys();
-       it != activity_times->end_keys(); ++it) {
+  for (base::DictionaryValue::Iterator it(*activity_times); !it.IsAtEnd();
+       it.Advance()) {
     int64 start_timestamp;
     int activity_milliseconds;
-    if (base::StringToInt64(*it, &start_timestamp) &&
-        activity_times->GetInteger(*it, &activity_milliseconds)) {
+    if (base::StringToInt64(it.key(), &start_timestamp) &&
+        it.value().GetAsInteger(&activity_milliseconds)) {
       // This is correct even when there are leap seconds, because when a leap
       // second occurs, two consecutive seconds have the same timestamp.
       int64 end_timestamp = start_timestamp + kMillisecondsPerDay;

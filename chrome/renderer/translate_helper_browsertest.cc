@@ -40,9 +40,9 @@ class TestTranslateHelper : public TranslateHelper {
   DISALLOW_COPY_AND_ASSIGN(TestTranslateHelper);
 };
 
-class TranslateHelperTest : public ChromeRenderViewTest {
+class TranslateHelperBrowserTest : public ChromeRenderViewTest {
  public:
-  TranslateHelperTest() : translate_helper_(NULL) {}
+  TranslateHelperBrowserTest() : translate_helper_(NULL) {}
 
  protected:
   virtual void SetUp() {
@@ -82,7 +82,7 @@ class TranslateHelperTest : public ChromeRenderViewTest {
 
 // Tests that the browser gets notified of the translation failure if the
 // translate library fails/times-out during initialization.
-TEST_F(TranslateHelperTest, TranslateLibNeverReady) {
+TEST_F(TranslateHelperBrowserTest, TranslateLibNeverReady) {
   // We make IsTranslateLibAvailable true so we don't attempt to inject the
   // library.
   EXPECT_CALL(*translate_helper_, IsTranslateLibAvailable())
@@ -107,7 +107,7 @@ TEST_F(TranslateHelperTest, TranslateLibNeverReady) {
 
 // Tests that the browser gets notified of the translation success when the
 // translation succeeds.
-TEST_F(TranslateHelperTest, TranslateSuccess) {
+TEST_F(TranslateHelperBrowserTest, TranslateSuccess) {
   // We make IsTranslateLibAvailable true so we don't attempt to inject the
   // library.
   EXPECT_CALL(*translate_helper_, IsTranslateLibAvailable())
@@ -150,7 +150,7 @@ TEST_F(TranslateHelperTest, TranslateSuccess) {
 
 // Tests that the browser gets notified of the translation failure when the
 // translation fails.
-TEST_F(TranslateHelperTest, TranslateFailure) {
+TEST_F(TranslateHelperBrowserTest, TranslateFailure) {
   // We make IsTranslateLibAvailable true so we don't attempt to inject the
   // library.
   EXPECT_CALL(*translate_helper_, IsTranslateLibAvailable())
@@ -186,7 +186,7 @@ TEST_F(TranslateHelperTest, TranslateFailure) {
 
 // Tests that when the browser translate a page for which the language is
 // undefined we query the translate element to get the language.
-TEST_F(TranslateHelperTest, UndefinedSourceLang) {
+TEST_F(TranslateHelperBrowserTest, UndefinedSourceLang) {
   // We make IsTranslateLibAvailable true so we don't attempt to inject the
   // library.
   EXPECT_CALL(*translate_helper_, IsTranslateLibAvailable())
@@ -225,7 +225,7 @@ TEST_F(TranslateHelperTest, UndefinedSourceLang) {
 
 // Tests that starting a translation while a similar one is pending does not
 // break anything.
-TEST_F(TranslateHelperTest, MultipleSimilarTranslations) {
+TEST_F(TranslateHelperBrowserTest, MultipleSimilarTranslations) {
   // We make IsTranslateLibAvailable true so we don't attempt to inject the
   // library.
   EXPECT_CALL(*translate_helper_, IsTranslateLibAvailable())
@@ -266,7 +266,7 @@ TEST_F(TranslateHelperTest, MultipleSimilarTranslations) {
 }
 
 // Tests that starting a translation while a different one is pending works.
-TEST_F(TranslateHelperTest, MultipleDifferentTranslations) {
+TEST_F(TranslateHelperBrowserTest, MultipleDifferentTranslations) {
   EXPECT_CALL(*translate_helper_, IsTranslateLibAvailable())
       .Times(AtLeast(1))
       .WillRepeatedly(Return(true));
@@ -414,7 +414,6 @@ TEST_F(ChromeRenderViewTest, LanguageCommonMistakesAreCorrected) {
   render_thread_->sink().ClearMessages();
 }
 
-
 // Tests that a back navigation gets a translate language message.
 TEST_F(ChromeRenderViewTest, BackToTranslatablePage) {
   SendContentStateImmediately();
@@ -446,4 +445,3 @@ TEST_F(ChromeRenderViewTest, BackToTranslatablePage) {
   EXPECT_EQ("zh", params.a);
   render_thread_->sink().ClearMessages();
 }
-

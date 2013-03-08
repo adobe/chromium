@@ -11,7 +11,7 @@
 #include "ash/launcher/launcher_model.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "base/values.h"
@@ -21,12 +21,13 @@
 #include "chrome/browser/ui/ash/launcher/launcher_item_controller.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/test/base/testing_pref_service.h"
+#include "chrome/test/base/testing_pref_service_syncable.h"
 #include "chrome/test/base/testing_profile.h"
 #include "content/public/test/test_browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using extensions::Extension;
+using extensions::Manifest;
 
 namespace {
 const int kExpectedAppIndex = 1;
@@ -48,24 +49,28 @@ class ChromeLauncherControllerPerBrowserTest : public testing::Test {
         static_cast<extensions::TestExtensionSystem*>(
             extensions::ExtensionSystem::Get(profile_.get())));
     extension_service_ = extension_system->CreateExtensionService(
-        CommandLine::ForCurrentProcess(), FilePath(), false);
+        CommandLine::ForCurrentProcess(), base::FilePath(), false);
 
     std::string error;
-    extension1_ = Extension::Create(FilePath(), Extension::LOAD, manifest,
+    extension1_ = Extension::Create(base::FilePath(), Manifest::UNPACKED,
+                                    manifest,
                                     Extension::NO_FLAGS,
                                     "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                                     &error);
-    extension2_ = Extension::Create(FilePath(), Extension::LOAD, manifest,
+    extension2_ = Extension::Create(base::FilePath(), Manifest::UNPACKED,
+                                    manifest,
                                     Extension::NO_FLAGS,
                                     "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
                                     &error);
     // Fake gmail extension.
-    extension3_ = Extension::Create(FilePath(), Extension::LOAD, manifest,
+    extension3_ = Extension::Create(base::FilePath(), Manifest::UNPACKED,
+                                    manifest,
                                     Extension::NO_FLAGS,
                                     "pjkljhegncpnkpknbcohdijeoejaedia",
                                     &error);
     // Fake search extension.
-    extension4_ = Extension::Create(FilePath(), Extension::LOAD, manifest,
+    extension4_ = Extension::Create(base::FilePath(), Manifest::UNPACKED,
+                                    manifest,
                                     Extension::NO_FLAGS,
                                     "coobgpohoikkiipiblmjeljniedjpjpf",
                                     &error);

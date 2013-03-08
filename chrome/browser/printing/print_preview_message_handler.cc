@@ -73,31 +73,29 @@ PrintPreviewMessageHandler::PrintPreviewMessageHandler(
 PrintPreviewMessageHandler::~PrintPreviewMessageHandler() {
 }
 
-WebContents* PrintPreviewMessageHandler::GetPrintPreviewTab() {
-  PrintPreviewDialogController* tab_controller =
+WebContents* PrintPreviewMessageHandler::GetPrintPreviewDialog() {
+  PrintPreviewDialogController* dialog_controller =
       PrintPreviewDialogController::GetInstance();
-  if (!tab_controller)
+  if (!dialog_controller)
     return NULL;
-
-  return tab_controller->GetPrintPreviewForTab(web_contents());
+  return dialog_controller->GetPrintPreviewForContents(web_contents());
 }
 
 PrintPreviewUI* PrintPreviewMessageHandler::GetPrintPreviewUI() {
-  WebContents* tab = GetPrintPreviewTab();
-  if (!tab || !tab->GetWebUI())
+  WebContents* dialog = GetPrintPreviewDialog();
+  if (!dialog || !dialog->GetWebUI())
     return NULL;
-  return static_cast<PrintPreviewUI*>(tab->GetWebUI()->GetController());
+  return static_cast<PrintPreviewUI*>(dialog->GetWebUI()->GetController());
 }
 
 void PrintPreviewMessageHandler::OnRequestPrintPreview(
-    bool source_is_modifiable, bool webnode_only) {
-  if (webnode_only) {
+    const PrintHostMsg_RequestPrintPreview_Params& params) {
+  if (params.webnode_only) {
     printing::PrintViewManager::FromWebContents(web_contents())->
         PrintPreviewForWebNode();
   }
   PrintPreviewDialogController::PrintPreview(web_contents());
-  PrintPreviewUI::SetSourceIsModifiable(GetPrintPreviewTab(),
-                                        source_is_modifiable);
+  PrintPreviewUI::SetInitialParams(GetPrintPreviewDialog(), params);
 }
 
 void PrintPreviewMessageHandler::OnDidGetPreviewPageCount(

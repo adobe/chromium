@@ -15,6 +15,7 @@
 #include "sync/api/sync_data.h"
 #include "sync/api/syncable_service.h"
 
+class PrefRegistrySyncable;
 class PrefServiceSyncable;
 
 namespace sync_pb {
@@ -64,10 +65,6 @@ class PrefModelAssociator
 
   // Returns true if the specified preference is registered for syncing.
   virtual bool IsPrefRegistered(const char* name);
-
-  // Unregisters a previously registered preference. This must be called
-  // prior to making the first sync.
-  virtual void UnregisterPref(const char* name);
 
   // Process a local preference change. This can trigger new SyncChanges being
   // sent to the syncer.

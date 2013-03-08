@@ -7,9 +7,9 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <stddef.h>
-#include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/types.h>
 #include <sys/un.h>
 #include <unistd.h>
 
@@ -17,12 +17,12 @@
 #include <sys/uio.h>
 #endif
 
-#include <string>
 #include <map>
+#include <string>
 
 #include "base/command_line.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
@@ -170,8 +170,8 @@ bool CreateServerUnixDomainSocket(const std::string& pipe_name,
   unlink(pipe_name.c_str());
 
   // Make sure the path we need exists.
-  FilePath path(pipe_name);
-  FilePath dir_path = path.DirName();
+  base::FilePath path(pipe_name);
+  base::FilePath dir_path = path.DirName();
   if (!file_util::CreateDirectory(dir_path)) {
     if (HANDLE_EINTR(close(fd)) < 0)
       PLOG(ERROR) << "close " << pipe_name;
@@ -738,7 +738,7 @@ void Channel::ChannelImpl::ResetToAcceptingConnectionState() {
 // static
 bool Channel::ChannelImpl::IsNamedServerInitialized(
     const std::string& channel_id) {
-  return file_util::PathExists(FilePath(channel_id));
+  return file_util::PathExists(base::FilePath(channel_id));
 }
 
 #if defined(OS_LINUX)

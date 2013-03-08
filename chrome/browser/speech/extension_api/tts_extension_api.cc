@@ -12,9 +12,8 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/speech/extension_api/tts_engine_extension_api.h"
 #include "chrome/browser/speech/extension_api/tts_extension_api_constants.h"
-#include "chrome/browser/speech/extension_api/tts_extension_api_controller.h"
+#include "chrome/browser/speech/tts_controller.h"
 #include "chrome/common/extensions/api/speech/tts_engine_manifest_handler.h"
-#include "chrome/common/extensions/extension_manifest_constants.h"
 #include "ui/base/l10n/l10n_util.h"
 
 namespace constants = tts_extension_api_constants;
@@ -159,24 +158,24 @@ bool TtsSpeakFunction::RunImpl() {
   utterance->set_extension_id(voice_extension_id);
   utterance->set_options(options.get());
 
-  ExtensionTtsController* controller = ExtensionTtsController::GetInstance();
+  TtsController* controller = TtsController::GetInstance();
   controller->SpeakOrEnqueue(utterance);
   return true;
 }
 
 bool TtsStopSpeakingFunction::RunImpl() {
-  ExtensionTtsController::GetInstance()->Stop();
+  TtsController::GetInstance()->Stop();
   return true;
 }
 
 bool TtsIsSpeakingFunction::RunImpl() {
   SetResult(Value::CreateBooleanValue(
-      ExtensionTtsController::GetInstance()->IsSpeaking()));
+      TtsController::GetInstance()->IsSpeaking()));
   return true;
 }
 
 bool TtsGetVoicesFunction::RunImpl() {
-  SetResult(ExtensionTtsController::GetInstance()->GetVoices(profile()));
+  SetResult(TtsController::GetInstance()->GetVoices(profile()));
   return true;
 }
 
@@ -186,8 +185,7 @@ TtsAPI* TtsAPI::Get(Profile* profile) {
 }
 
 TtsAPI::TtsAPI(Profile* profile) {
-  ManifestHandler::Register(extension_manifest_keys::kTtsEngine,
-                            new TtsEngineManifestHandler);
+  (new TtsEngineManifestHandler)->Register();
   ExtensionFunctionRegistry* registry =
       ExtensionFunctionRegistry::GetInstance();
   registry->RegisterFunction<ExtensionTtsEngineSendTtsEventFunction>();

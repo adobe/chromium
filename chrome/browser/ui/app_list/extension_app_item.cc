@@ -4,6 +4,7 @@
 
 #include "chrome/browser/ui/app_list/extension_app_item.h"
 
+#include "base/prefs/pref_service.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/extensions/context_menu_matcher.h"
 #include "chrome/browser/extensions/extension_prefs.h"
@@ -13,13 +14,13 @@
 #include "chrome/browser/extensions/extension_uninstall_dialog.h"
 #include "chrome/browser/extensions/management_policy.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/app_list/app_list_controller_delegate.h"
 #include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/extensions/extension_enable_flow.h"
+#include "chrome/common/extensions/api/icons/icons_handler.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_icon_set.h"
@@ -127,7 +128,7 @@ class TabOverlayImageSource : public gfx::CanvasImageSource {
 
  private:
   // gfx::CanvasImageSource overrides:
-  void Draw(gfx::Canvas* canvas) OVERRIDE {
+  virtual void Draw(gfx::Canvas* canvas) OVERRIDE {
     using extension_misc::EXTENSION_ICON_SMALL;
     using extension_misc::EXTENSION_ICON_MEDIUM;
 
@@ -176,32 +177,51 @@ bool MenuItemHasLauncherContext(const extensions::MenuItem* item) {
   return item->contexts().Contains(extensions::MenuItem::LAUNCHER);
 }
 
-bool HasOverlay(const Extension* extension) {
-#if defined(OS_CHROMEOS)
-  return false;
-#else
-  return !extension->is_platform_app();
-#endif
-}
+const color_utils::HSL shift = {-1, 0, 0.6};
 
 }  // namespace
 
 ExtensionAppItem::ExtensionAppItem(Profile* profile,
-                                   const Extension* extension,
-                                   AppListControllerDelegate* controller)
+                                   const std::string& extension_id,
+                                   AppListControllerDelegate* controller,
+                                   const std::string& extension_name,
+                                   const gfx::ImageSkia& installing_icon)
     : ChromeAppListItem(TYPE_APP),
       profile_(profile),
-      extension_id_(extension->id()),
+      extension_id_(extension_id),
       controller_(controller),
-      has_overlay_(HasOverlay(extension)) {
+      extension_name_(extension_name),
+      installing_icon_(
+          gfx::ImageSkiaOperations::CreateHSLShiftedImage(installing_icon,
+                                                          shift)) {
   Reload();
+  GetExtensionSorting(profile_)->EnsureValidOrdinals(extension_id_,
+                                                     syncer::StringOrdinal());
 }
 
 ExtensionAppItem::~ExtensionAppItem() {
 }
 
+bool ExtensionAppItem::HasOverlay() const {
+#if defined(OS_CHROMEOS)
+  return false;
+#else
+  const Extension* extension = GetExtension();
+  return extension &&
+         !extension->is_platform_app() &&
+         extension->id() != extension_misc::kChromeAppId;
+#endif
+}
+
 void ExtensionAppItem::Reload() {
   const Extension* extension = GetExtension();
+  bool is_installing = !extension;
+  SetIsInstalling(is_installing);
+  if (is_installing) {
+    SetTitle(extension_name_);
+    UpdateIcon();
+    return;
+  }
   SetTitle(extension->name());
   LoadImage(extension);
 }
@@ -256,6 +276,10 @@ void ExtensionAppItem::Move(const ExtensionAppItem* prev,
 }
 
 void ExtensionAppItem::UpdateIcon() {
+  if (!GetExtension()) {
+    SetIcon(installing_icon_, false);
+    return;
+  }
   gfx::ImageSkia icon = icon_->image_skia();
 
   const ExtensionService* service =
@@ -266,13 +290,13 @@ void ExtensionAppItem::UpdateIcon() {
     icon = gfx::ImageSkiaOperations::CreateHSLShiftedImage(icon, shift);
   }
 
-  if (has_overlay_) {
+  if (HasOverlay()) {
     const gfx::Size size(extension_misc::EXTENSION_ICON_MEDIUM,
                          extension_misc::EXTENSION_ICON_MEDIUM);
     icon = gfx::ImageSkia(new TabOverlayImageSource(icon, size), size);
   }
 
-  SetIcon(icon);
+  SetIcon(icon, !HasOverlay());
 }
 
 const Extension* ExtensionAppItem::GetExtension() const {
@@ -284,14 +308,15 @@ const Extension* ExtensionAppItem::GetExtension() const {
 
 void ExtensionAppItem::LoadImage(const Extension* extension) {
   int icon_size = extension_misc::EXTENSION_ICON_MEDIUM;
-  if (has_overlay_)
+  if (HasOverlay())
     icon_size = extension_misc::EXTENSION_ICON_SMALL;
 
   icon_.reset(new extensions::IconImage(
+      profile_,
       extension,
-      extension->icons(),
+      extensions::IconsInfo::GetIcons(extension),
       icon_size,
-      Extension::GetDefaultIcon(true),
+      extensions::IconsInfo::GetDefaultAppIcon(),
       this));
   UpdateIcon();
 }
@@ -515,8 +540,6 @@ ui::MenuModel* ExtensionAppItem::GetContextMenuModel() {
           MENU_NEW_INCOGNITO_WINDOW,
           IDS_LAUNCHER_NEW_INCOGNITO_WINDOW);
     }
-#else
-    NOTREACHED();
 #endif
   } else {
     extension_menu_items_.reset(new extensions::ContextMenuMatcher(
@@ -531,7 +554,7 @@ ui::MenuModel* ExtensionAppItem::GetContextMenuModel() {
                                                 &index);
 
     if (controller_->CanPin()) {
-      context_menu_model_->AddSeparatorIfNecessary(ui::NORMAL_SEPARATOR);
+      context_menu_model_->AddSeparator(ui::NORMAL_SEPARATOR);
       context_menu_model_->AddItemWithStringId(
           TOGGLE_PIN,
           controller_->IsAppPinned(extension_id_) ?
@@ -541,13 +564,12 @@ ui::MenuModel* ExtensionAppItem::GetContextMenuModel() {
 
     if (controller_->CanShowCreateShortcutsDialog() &&
         extension->is_platform_app()) {
-      context_menu_model_->AddItemWithStringId(
-          CREATE_SHORTCUTS,
-          IDS_NEW_TAB_APP_CREATE_SHORTCUT);
+      context_menu_model_->AddItemWithStringId(CREATE_SHORTCUTS,
+                                               IDS_NEW_TAB_APP_CREATE_SHORTCUT);
     }
 
     if (!extension->is_platform_app()) {
-      context_menu_model_->AddSeparatorIfNecessary(ui::NORMAL_SEPARATOR);
+      context_menu_model_->AddSeparator(ui::NORMAL_SEPARATOR);
       context_menu_model_->AddCheckItemWithStringId(
           LAUNCH_TYPE_REGULAR_TAB,
           IDS_APP_CONTEXT_MENU_OPEN_REGULAR);
@@ -562,10 +584,8 @@ ui::MenuModel* ExtensionAppItem::GetContextMenuModel() {
       context_menu_model_->AddCheckItemWithStringId(
           LAUNCH_TYPE_FULLSCREEN,
           IDS_APP_CONTEXT_MENU_OPEN_MAXIMIZED);
-    }
 
-    if (!extension->is_platform_app()) {
-      context_menu_model_->AddSeparatorIfNecessary(ui::NORMAL_SEPARATOR);
+      context_menu_model_->AddSeparator(ui::NORMAL_SEPARATOR);
       context_menu_model_->AddItemWithStringId(OPTIONS,
                                                IDS_NEW_TAB_APP_OPTIONS);
       context_menu_model_->AddItemWithStringId(DETAILS,

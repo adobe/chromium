@@ -5,12 +5,14 @@
 #include "chrome/browser/chromeos/input_method/input_method_configuration.h"
 
 #include "base/bind.h"
+#include "base/chromeos/chromeos_version.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/chromeos/input_method/browser_state_monitor.h"
 #include "chrome/browser/chromeos/input_method/input_method_delegate_impl.h"
 #include "chrome/browser/chromeos/input_method/input_method_manager_impl.h"
 #include "chrome/browser/chromeos/input_method/input_method_persistence.h"
+#include "chromeos/ime/ibus_bridge.h"
 
 namespace chromeos {
 namespace input_method {
@@ -28,8 +30,19 @@ void OnSessionStateChange(InputMethodManagerImpl* input_method_manager_impl,
   input_method_manager_impl->SetState(new_state);
 }
 
-void Initialize() {
+void Initialize(
+    const scoped_refptr<base::SequencedTaskRunner>& ui_task_runner,
+    const scoped_refptr<base::SequencedTaskRunner>& file_task_runner) {
   DCHECK(!g_input_method_manager);
+
+  IBusDaemonController::Initialize(ui_task_runner, file_task_runner);
+  if (!base::chromeos::IsRunningOnChromeOS()) {
+    // IBusBridge is for ChromeOS on desktop Linux not for ChromeOS Devices or
+    // production at this moment.
+    // TODO(nona): Remove this condition when ibus-daemon is gone.
+    //             (crbug.com/170671)
+    IBusBridge::Initialize();
+  }
 
   InputMethodManagerImpl* impl = new InputMethodManagerImpl(
       scoped_ptr<InputMethodDelegate>(new InputMethodDelegateImpl));
@@ -58,6 +71,12 @@ void Shutdown() {
 
   delete g_input_method_manager;
   g_input_method_manager = NULL;
+
+  if (IBusBridge::Get()) {
+    // TODO(nona): Remove this condition when ibus-daemon is gone.
+    IBusBridge::Shutdown();
+  }
+  IBusDaemonController::Shutdown();
 
   DVLOG(1) << "InputMethodManager shutdown";
 }

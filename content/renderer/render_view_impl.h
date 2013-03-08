@@ -5,7 +5,11 @@
 #ifndef CONTENT_RENDERER_RENDER_VIEW_IMPL_H_
 #define CONTENT_RENDERER_RENDER_VIEW_IMPL_H_
 
+#include <deque>
+#include <map>
 #include <set>
+#include <string>
+#include <vector>
 
 #include "base/basictypes.h"
 #include "base/gtest_prod_util.h"
@@ -164,7 +168,6 @@ class RendererPpapiHost;
 class RendererWebColorChooserImpl;
 class RenderWidgetFullscreenPepper;
 class SpeechRecognitionDispatcher;
-class WebIntentsHost;
 class WebPluginDelegateProxy;
 struct CustomContextMenuContext;
 struct FileChooserParams;
@@ -299,7 +302,8 @@ class CONTENT_EXPORT RenderViewImpl
   // (See also WebPluginPageDelegate implementation.)
 
   // Notification that the given plugin has crashed.
-  void PluginCrashed(const FilePath& plugin_path, base::ProcessId plugin_pid);
+  void PluginCrashed(const base::FilePath& plugin_path,
+                     base::ProcessId plugin_pid);
 
   // Creates a fullscreen container for a pepper plugin instance.
   RenderWidgetFullscreenPepper* CreatePepperFullscreenContainer(
@@ -390,6 +394,20 @@ class CONTENT_EXPORT RenderViewImpl
 
   void GetWindowSnapshot(const WindowSnapshotCallback& callback);
 
+  // Dispatches the current navigation state to the browser. Called on a
+  // periodic timer so we don't send too many messages.
+  void SyncNavigationState();
+
+  // Returns the length of the session history of this RenderView. Note that
+  // this only coincides with the actual length of the session history if this
+  // RenderView is the currently active RenderView of a WebContents.
+  unsigned GetLocalSessionHistoryLengthForTesting() const;
+
+  // Invokes OnSetFocus and marks the widget as active depending on the value
+  // of |enable|. This is used for layout tests that need to control the focus
+  // synchronously from the renderer.
+  void SetFocusAndActivateForTesting(bool enable);
+
   // IPC::Listener implementation ----------------------------------------------
 
   virtual bool OnMessageReceived(const IPC::Message& msg) OVERRIDE;
@@ -424,7 +442,6 @@ class CONTENT_EXPORT RenderViewImpl
       WebKit::WebExternalPopupMenuClient* popup_menu_client);
   virtual WebKit::WebStorageNamespace* createSessionStorageNamespace(
       unsigned quota);
-  virtual WebKit::WebCompositorOutputSurface* createOutputSurface() OVERRIDE;
   virtual void didAddMessageToConsole(
       const WebKit::WebConsoleMessage& message,
       const WebKit::WebString& source_name,
@@ -441,6 +458,7 @@ class CONTENT_EXPORT RenderViewImpl
                                      double load_progress);
   virtual bool isSmartInsertDeleteEnabled();
   virtual bool isSelectTrailingWhitespaceEnabled();
+  virtual void didCancelCompositionOnSelectionChange();
   virtual void didChangeSelection(bool is_selection_empty);
   virtual void didExecuteCommand(const WebKit::WebString& command_name);
   virtual bool handleCurrentKeyboardEvent();
@@ -636,6 +654,7 @@ class CONTENT_EXPORT RenderViewImpl
                                         v8::Handle<v8::Context>,
                                         int world_id);
   virtual void didChangeScrollOffset(WebKit::WebFrame* frame);
+  virtual void willInsertBody(WebKit::WebFrame* frame) OVERRIDE;
 #if defined(OS_ANDROID)
   virtual void didFirstVisuallyNonEmptyLayout(WebKit::WebFrame*) OVERRIDE;
 #endif
@@ -664,11 +683,6 @@ class CONTENT_EXPORT RenderViewImpl
       WebKit::WebStorageQuotaType type,
       unsigned long long requested_size,
       WebKit::WebStorageQuotaCallbacks* callbacks);
-  virtual void registerIntentService(
-      WebKit::WebFrame* frame,
-      const WebKit::WebIntentServiceInfo& service);
-  virtual void dispatchIntent(WebKit::WebFrame* frame,
-                              const WebKit::WebIntentRequest& intentRequest);
   virtual void willOpenSocketStream(
       WebKit::WebSocketStreamHandle* handle);
   virtual void willStartUsingPeerConnectionHandler(WebKit::WebFrame* frame,
@@ -733,14 +747,17 @@ class CONTENT_EXPORT RenderViewImpl
                                              const std::string& value) OVERRIDE;
   virtual void ClearEditCommands() OVERRIDE;
   virtual SSLStatus GetSSLStatusOfFrame(WebKit::WebFrame* frame) const OVERRIDE;
+#if defined(OS_ANDROID)
+  virtual skia::RefPtr<SkPicture> CapturePicture() OVERRIDE;
+#endif
 
   // webkit_glue::WebPluginPageDelegate implementation -------------------------
 
   virtual webkit::npapi::WebPluginDelegate* CreatePluginDelegate(
-      const FilePath& file_path,
+      const base::FilePath& file_path,
       const std::string& mime_type) OVERRIDE;
   virtual WebKit::WebPlugin* CreatePluginReplacement(
-      const FilePath& file_path) OVERRIDE;
+      const base::FilePath& file_path) OVERRIDE;
   virtual void CreatedPluginWindow(gfx::PluginWindowHandle handle) OVERRIDE;
   virtual void WillDestroyPluginWindow(gfx::PluginWindowHandle handle) OVERRIDE;
   virtual void DidMovePlugin(
@@ -768,6 +785,7 @@ class CONTENT_EXPORT RenderViewImpl
   // RenderWidget overrides:
   virtual void Close() OVERRIDE;
   virtual void OnResize(const gfx::Size& new_size,
+                        const gfx::Size& physical_backing_size,
                         const gfx::Rect& resizer_rect,
                         bool is_fullscreen) OVERRIDE;
   virtual void WillInitiatePaint() OVERRIDE;
@@ -793,6 +811,7 @@ class CONTENT_EXPORT RenderViewImpl
   virtual void OnWasShown(bool needs_repainting) OVERRIDE;
   virtual bool SupportsAsynchronousSwapBuffers() OVERRIDE;
   virtual bool ForceCompositingModeEnabled() OVERRIDE;
+  virtual scoped_ptr<cc::OutputSurface> CreateOutputSurface() OVERRIDE;
   virtual void OnImeSetComposition(
       const string16& text,
       const std::vector<WebKit::WebCompositionUnderline>& underlines,
@@ -806,10 +825,16 @@ class CONTENT_EXPORT RenderViewImpl
   virtual void GetCompositionCharacterBounds(
       std::vector<gfx::Rect>* character_bounds) OVERRIDE;
   virtual bool CanComposeInline() OVERRIDE;
-  virtual bool WebWidgetHandlesCompositorScheduling() const OVERRIDE;
+  virtual void DidCommitCompositorFrame() OVERRIDE;
+  virtual void InstrumentWillBeginFrame() OVERRIDE;
+  virtual void InstrumentDidBeginFrame() OVERRIDE;
+  virtual void InstrumentDidCancelFrame() OVERRIDE;
+  virtual void InstrumentWillComposite() OVERRIDE;
 
  protected:
-  RenderViewImpl(RenderViewImplParams* params);
+  explicit RenderViewImpl(RenderViewImplParams* params);
+
+  void Initialize(RenderViewImplParams* params);
 
   // Do not delete directly.  This class is reference counted.
   virtual ~RenderViewImpl();
@@ -819,7 +844,6 @@ class CONTENT_EXPORT RenderViewImpl
   friend class ExternalPopupMenuTest;
   friend class PepperDeviceTest;
   friend class RendererAccessibilityTest;
-  friend class WebIntentsHostTest;
   friend class RenderViewTest;
 
   FRIEND_TEST_ALL_PREFIXES(ExternalPopupMenuRemoveTest, RemoveOnChange);
@@ -853,6 +877,8 @@ class CONTENT_EXPORT RenderViewImpl
   FRIEND_TEST_ALL_PREFIXES(RenderViewImplTest, SetHistoryLengthAndPrune);
   FRIEND_TEST_ALL_PREFIXES(RenderViewImplTest, ZoomLimit);
   FRIEND_TEST_ALL_PREFIXES(RenderViewImplTest, NavigateFrame);
+  FRIEND_TEST_ALL_PREFIXES(RenderViewImplTest,
+                           ShouldUpdateSelectionTextFromContextMenuParams);
 
   typedef std::map<GURL, double> HostZoomLevels;
 
@@ -953,7 +979,8 @@ class CONTENT_EXPORT RenderViewImpl
   void OnEnablePreferredSizeChangedMode();
   void OnEnableAutoResize(const gfx::Size& min_size, const gfx::Size& max_size);
   void OnDisableAutoResize(const gfx::Size& new_size);
-  void OnEnumerateDirectoryResponse(int id, const std::vector<FilePath>& paths);
+  void OnEnumerateDirectoryResponse(int id,
+                                    const std::vector<base::FilePath>& paths);
   void OnExecuteEditCommand(const std::string& name, const std::string& value);
   void OnExtendSelectionAndDelete(int before, int after);
   void OnFileChooserResponse(
@@ -962,8 +989,8 @@ class CONTENT_EXPORT RenderViewImpl
   void OnGetAllSavableResourceLinksForCurrentPage(const GURL& page_url);
   void OnGetSerializedHtmlDataForCurrentPageWithLocalLinks(
       const std::vector<GURL>& links,
-      const std::vector<FilePath>& local_paths,
-      const FilePath& local_directory_name);
+      const std::vector<base::FilePath>& local_paths,
+      const base::FilePath& local_directory_name);
   void OnMediaPlayerActionAt(const gfx::Point& location,
                              const WebKit::WebMediaPlayerAction& action);
 
@@ -981,6 +1008,7 @@ class CONTENT_EXPORT RenderViewImpl
   void OnReleaseDisambiguationPopupDIB(TransportDIB::Handle dib_handle);
   void OnReloadFrame();
   void OnReplace(const string16& text);
+  void OnReplaceMisspelling(const string16& text);
   void OnResetPageEncodingToDefault();
   void OnScriptEvalRequest(const string16& frame_xpath,
                            const string16& jscript,
@@ -1042,6 +1070,7 @@ class CONTENT_EXPORT RenderViewImpl
                          const WebKit::WebFindOptions& options,
                          IPC::Message* reply_msg);
   void OnUndoScrollFocusedEditableNodeIntoRect();
+  void OnEnableHidingTopControls(bool enable);
 #elif defined(OS_MACOSX)
   void OnCopyToFindPboard();
   void OnPluginImeCompositionCompleted(const string16& text, int plugin_id);
@@ -1085,7 +1114,8 @@ class CONTENT_EXPORT RenderViewImpl
   // |frame_tree|. For each node, the frame is navigated to the swapped out URL,
   // the name (if present) is set on it, and all the subframes are created
   // and added to the DOM.
-  void CreateFrameTree(WebKit::WebFrame* frame, DictionaryValue* frame_tree);
+  void CreateFrameTree(WebKit::WebFrame* frame,
+                       base::DictionaryValue* frame_tree);
 
   // If this is a swapped out RenderView, which maintains a copy of the frame
   // tree of an active RenderView, we keep a map from frame ids in this view to
@@ -1158,10 +1188,6 @@ class CONTENT_EXPORT RenderViewImpl
 #if defined(OS_ANDROID)
   // Launch an Android content intent with the given URL.
   void LaunchAndroidContentIntent(const GURL& intent_url, size_t request_id);
-
-  // Send ViewHostMsg_UpdateFrameInfo to report scale/scroll/size changes.
-  void ScheduleUpdateFrameInfo();
-  void SendUpdateFrameInfo();
 #endif
 
   // Sends a reply to the current find operation handling if it was a
@@ -1172,15 +1198,19 @@ class CONTENT_EXPORT RenderViewImpl
                      const WebKit::WebRect& selection_rect,
                      bool final_status_update);
 
+  // Returns whether |params.selection_text| should be synchronized to the
+  // browser before bringing up the context menu. Static for testing.
+  static bool ShouldUpdateSelectionTextFromContextMenuParams(
+      const string16& selection_text,
+      size_t selection_text_offset,
+      const ui::Range& selection_range,
+      const ContextMenuParams& params);
+
   // Starts nav_state_sync_timer_ if it isn't already running.
   void StartNavStateSyncTimerIfNecessary();
 
   // Stops the current find-in-page search.
   void StopFinding(StopFindAction action);
-
-  // Dispatches the current navigation state to the browser. Called on a
-  // periodic timer so we don't send too many messages.
-  void SyncNavigationState();
 
   // Dispatches the current state of selection on the webpage to the browser if
   // it has changed.
@@ -1197,6 +1227,10 @@ class CONTENT_EXPORT RenderViewImpl
   // Update the target url and tell the browser that the target URL has changed.
   // If |url| is empty, show |fallback_url|.
   void UpdateTargetURL(const GURL& url, const GURL& fallback_url);
+
+  // Coordinate conversion -----------------------------------------------------
+
+  gfx::RectF ClientRectToPhysicalWindowRect(const gfx::RectF& rect) const;
 
   // ---------------------------------------------------------------------------
   // ADDING NEW FUNCTIONS? Please keep private functions alphabetized and put
@@ -1224,6 +1258,10 @@ class CONTENT_EXPORT RenderViewImpl
 
   // If true, we send IPC messages when |preferred_size_| changes.
   bool send_preferred_size_changes_;
+
+  // Whether the WebView is in auto resize mode, which is used for example
+  // by extension popups.
+  bool auto_resize_mode_;
 
   // If non-empty, and |send_preferred_size_changes_| is true, disable drawing
   // scroll bars on windows smaller than this size.  Used for windows that the
@@ -1334,9 +1372,16 @@ class CONTENT_EXPORT RenderViewImpl
   // The next target URL we want to send to the browser.
   GURL pending_target_url_;
 
-  // The text selection the last time DidChangeSelection got called.
+  // The text selection the last time DidChangeSelection got called. May contain
+  // additional characters before and after the selected text, for IMEs. The
+  // portion of this string that is the actual selected text starts at index
+  // |selection_range_.GetMin() - selection_text_offset_| and has length
+  // |selection_range_.length()|.
   string16 selection_text_;
+  // The offset corresponding to the start of |selection_text_| in the document.
   size_t selection_text_offset_;
+  // Range over the document corresponding to the actual selected text (which
+  // could correspond to a substring of |selection_text_|; see above).
   ui::Range selection_range_;
 
   // External context menu requests we're waiting for. "Internal"
@@ -1391,9 +1436,6 @@ class CONTENT_EXPORT RenderViewImpl
 
   // The geolocation dispatcher attached to this view, lazily initialized.
   GeolocationDispatcher* geolocation_dispatcher_;
-
-  // The intents host attached to this view. Not lazily initialized.
-  WebIntentsHost* intents_host_;
 
   // The speech dispatcher attached to this view, lazily initialized.
   InputTagSpeechDispatcher* input_tag_speech_dispatcher_;

@@ -173,6 +173,8 @@ void ChildModalParent::DeleteDelegate() {
     child_->Close();
     child_ = NULL;
   }
+
+  delete this;
 }
 
 void ChildModalParent::Layout() {
@@ -205,7 +207,7 @@ void ChildModalParent::ButtonPressed(Button* sender,
   }
 }
 
-void ChildModalParent::OnWidgetClosing(Widget* widget) {
+void ChildModalParent::OnWidgetDestroying(Widget* widget) {
   if (child_) {
     DCHECK_EQ(child_, widget);
     child_ = NULL;

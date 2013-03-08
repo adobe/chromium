@@ -2,12 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/prefs/pref_service.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/content_settings/cookie_settings.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/extensions/api/content_settings/content_settings_api.h"
 #include "chrome/browser/extensions/extension_apitest.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/chrome_switches.h"
@@ -100,32 +100,36 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest,
   CommandLine::ForCurrentProcess()->AppendSwitch(
       switches::kEnableExperimentalExtensionApis);
 
-  FilePath::CharType kFooPath[] = FILE_PATH_LITERAL("/plugins/foo.plugin");
-  FilePath::CharType kBarPath[] = FILE_PATH_LITERAL("/plugins/bar.plugin");
+  base::FilePath::CharType kFooPath[] =
+      FILE_PATH_LITERAL("/plugins/foo.plugin");
+  base::FilePath::CharType kBarPath[] =
+      FILE_PATH_LITERAL("/plugins/bar.plugin");
   const char* kFooName = "Foo Plugin";
   const char* kBarName = "Bar Plugin";
 
   webkit::npapi::MockPluginList plugin_list;
   plugin_list.AddPluginToLoad(
       webkit::WebPluginInfo(ASCIIToUTF16(kFooName),
-                            FilePath(kFooPath),
+                            base::FilePath(kFooPath),
                             ASCIIToUTF16("1.2.3"),
                             ASCIIToUTF16("foo")));
   plugin_list.AddPluginToLoad(
       webkit::WebPluginInfo(ASCIIToUTF16(kBarName),
-                            FilePath(kBarPath),
+                            base::FilePath(kBarPath),
                             ASCIIToUTF16("2.3.4"),
                             ASCIIToUTF16("bar")));
 
   std::vector<webkit::WebPluginInfo> plugins;
   plugin_list.GetPlugins(&plugins);
 
-  ContentSettingsGetResourceIdentifiersFunction::SetPluginsForTesting(&plugins);
+  ContentSettingsContentSettingGetResourceIdentifiersFunction::
+      SetPluginsForTesting(&plugins);
 
   EXPECT_TRUE(RunExtensionTest("content_settings/getresourceidentifiers"))
       << message_;
 
-  ContentSettingsGetResourceIdentifiersFunction::SetPluginsForTesting(NULL);
+  ContentSettingsContentSettingGetResourceIdentifiersFunction::
+      SetPluginsForTesting(NULL);
 }
 
 }  // namespace extensions

@@ -8,14 +8,14 @@
 #include <copyfile.h>
 
 #include "base/basictypes.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/mac/foundation_util.h"
 #include "base/string_util.h"
 #include "base/threading/thread_restrictions.h"
 
 namespace file_util {
 
-bool GetTempDir(FilePath* path) {
+bool GetTempDir(base::FilePath* path) {
   NSString* tmp = NSTemporaryDirectory();
   if (tmp == nil)
     return false;
@@ -23,11 +23,12 @@ bool GetTempDir(FilePath* path) {
   return true;
 }
 
-bool GetShmemTempDir(FilePath* path, bool executable) {
+bool GetShmemTempDir(base::FilePath* path, bool executable) {
   return GetTempDir(path);
 }
 
-bool CopyFile(const FilePath& from_path, const FilePath& to_path) {
+bool CopyFileUnsafe(const base::FilePath& from_path,
+                    const base::FilePath& to_path) {
   base::ThreadRestrictions::AssertIOAllowed();
   return (copyfile(from_path.value().c_str(),
                    to_path.value().c_str(), NULL, COPYFILE_ALL) == 0);

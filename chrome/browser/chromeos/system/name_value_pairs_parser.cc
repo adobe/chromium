@@ -5,13 +5,13 @@
 #include "chrome/browser/chromeos/system/name_value_pairs_parser.h"
 
 #include "base/command_line.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/process_util.h"
 #include "base/stl_util.h"
-#include "base/string_tokenizer.h"
 #include "base/string_util.h"
+#include "base/strings/string_tokenizer.h"
 
 namespace chromeos {  // NOLINT
 namespace system {
@@ -24,7 +24,7 @@ const char kTrimChars[] = "\" ";
 bool GetToolOutput(int argc, const char* argv[], std::string& output) {
   DCHECK_GE(argc, 1);
 
-  if (!file_util::PathExists(FilePath(argv[0]))) {
+  if (!file_util::PathExists(base::FilePath(argv[0]))) {
     LOG(WARNING) << "Tool for statistics not found: " << argv[0];
     return false;
   }
@@ -70,7 +70,7 @@ bool NameValuePairsParser::ParseNameValuePairsWithComments(
     const std::string& comment_delim) {
   bool all_valid = true;
   // Set up the pair tokenizer.
-  StringTokenizer pair_toks(in_string, delim);
+  base::StringTokenizer pair_toks(in_string, delim);
   pair_toks.set_quote_chars(kQuoteChars);
   // Process token pairs.
   while (pair_toks.GetNext()) {
@@ -118,9 +118,10 @@ bool NameValuePairsParser::GetSingleValueFromTool(int argc,
   return true;
 }
 
-bool NameValuePairsParser::GetNameValuePairsFromFile(const FilePath& file_path,
-                                                     const std::string& eq,
-                                                     const std::string& delim) {
+bool NameValuePairsParser::GetNameValuePairsFromFile(
+    const base::FilePath& file_path,
+    const std::string& eq,
+    const std::string& delim) {
   std::string contents;
   if (file_util::ReadFileToString(file_path, &contents)) {
     return ParseNameValuePairs(contents, eq, delim);

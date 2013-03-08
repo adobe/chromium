@@ -11,8 +11,8 @@
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/json/json_writer.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/metrics/histogram.h"
@@ -105,7 +105,7 @@ std::vector<std::string> MakeNextProtos(const char* a, ...) {
 // SpdyNextProtos returns a vector of NPN protocol strings for negotiating
 // SPDY.
 std::vector<std::string> SpdyNextProtos() {
-  return MakeNextProtos("http/1.1", "spdy/2", "spdy/3", NULL);
+  return MakeNextProtos("http/1.1", "spdy/2", "spdy/3", "spdy/3.1", NULL);
 }
 
 int GetIdleSocketCountInTransportSocketPool(net::HttpNetworkSession* session) {
@@ -256,6 +256,8 @@ class HttpNetworkTransactionSpdy3Test : public PlatformTest {
     PlatformTest::TearDown();
     NetworkChangeNotifier::NotifyObserversOfIPAddressChangeForTests();
     MessageLoop::current()->RunUntilIdle();
+    HttpStreamFactory::set_use_alternate_protocols(false);
+    HttpStreamFactory::SetNextProtos(std::vector<std::string>());
   }
 
   // Either |write_failure| specifies a write failure or |read_failure|
@@ -2753,7 +2755,7 @@ TEST_F(HttpNetworkTransactionSpdy3Test, HttpsProxySpdyConnectHttps) {
   scoped_ptr<SpdyFrame> wrapped_body(
       ConstructSpdyBodyFrame(1, "1234567890", 10, false));
   scoped_ptr<SpdyFrame> window_update(
-      ConstructSpdyWindowUpdate(1, wrapped_get_resp->length()));
+      ConstructSpdyWindowUpdate(1, wrapped_get_resp->size()));
 
   MockWrite spdy_writes[] = {
       CreateMockWrite(*connect, 1),
@@ -2833,9 +2835,9 @@ TEST_F(HttpNetworkTransactionSpdy3Test, HttpsProxySpdyConnectSpdy) {
   scoped_ptr<SpdyFrame> body(ConstructSpdyBodyFrame(1, true));
   scoped_ptr<SpdyFrame> wrapped_body(ConstructWrappedSpdyFrame(body, 1));
   scoped_ptr<SpdyFrame> window_update_get_resp(
-      ConstructSpdyWindowUpdate(1, wrapped_get_resp->length()));
+      ConstructSpdyWindowUpdate(1, wrapped_get_resp->size()));
   scoped_ptr<SpdyFrame> window_update_body(
-      ConstructSpdyWindowUpdate(1, wrapped_body->length()));
+      ConstructSpdyWindowUpdate(1, wrapped_body->size()));
 
   MockWrite spdy_writes[] = {
       CreateMockWrite(*connect, 1),
@@ -2904,7 +2906,7 @@ TEST_F(HttpNetworkTransactionSpdy3Test, HttpsProxySpdyConnectFailure) {
 
   // CONNECT to www.google.com:443 via SPDY
   scoped_ptr<SpdyFrame> connect(ConstructSpdyConnect(NULL, 0, 1));
-  scoped_ptr<SpdyFrame> get(ConstructSpdyRstStream(1, CANCEL));
+  scoped_ptr<SpdyFrame> get(ConstructSpdyRstStream(1, RST_STREAM_CANCEL));
 
   MockWrite spdy_writes[] = {
       CreateMockWrite(*connect, 1),
@@ -2939,6 +2941,389 @@ TEST_F(HttpNetworkTransactionSpdy3Test, HttpsProxySpdyConnectFailure) {
   EXPECT_EQ(ERR_TUNNEL_CONNECTION_FAILED, rv);
 
   // TODO(ttuttle): Anything else to check here?
+}
+
+// Test load timing in the case of two HTTPS (non-SPDY) requests through a SPDY
+// HTTPS Proxy to different servers.
+TEST_F(HttpNetworkTransactionSpdy3Test,
+       HttpsProxySpdyConnectHttpsLoadTimingTwoRequestsTwoServers) {
+  // Configure against https proxy server "proxy:70".
+  SpdySessionDependencies session_deps(ProxyService::CreateFixed(
+      "https://proxy:70"));
+  CapturingBoundNetLog log;
+  session_deps.net_log = log.bound().net_log();
+  scoped_refptr<HttpNetworkSession> session(
+      SpdySessionDependencies::SpdyCreateSessionDeterministic(&session_deps));
+
+  HttpRequestInfo request1;
+  request1.method = "GET";
+  request1.url = GURL("https://www.google.com/");
+  request1.load_flags = 0;
+
+  HttpRequestInfo request2;
+  request2.method = "GET";
+  request2.url = GURL("https://news.google.com/");
+  request2.load_flags = 0;
+
+  // CONNECT to www.google.com:443 via SPDY.
+  scoped_ptr<SpdyFrame> connect1(ConstructSpdyConnect(NULL, 0, 1));
+  scoped_ptr<SpdyFrame> conn_resp1(ConstructSpdyGetSynReply(NULL, 0, 1));
+
+  // Fetch https://www.google.com/ via HTTP.
+  const char get1[] = "GET / HTTP/1.1\r\n"
+      "Host: www.google.com\r\n"
+      "Connection: keep-alive\r\n\r\n";
+  scoped_ptr<SpdyFrame> wrapped_get1(
+      ConstructSpdyBodyFrame(1, get1, strlen(get1), false));
+  const char resp1[] = "HTTP/1.1 200 OK\r\n"
+      "Content-Length: 1\r\n\r\n";
+  scoped_ptr<SpdyFrame> wrapped_get_resp1(
+      ConstructSpdyBodyFrame(1, resp1, strlen(resp1), false));
+  scoped_ptr<SpdyFrame> wrapped_body1(ConstructSpdyBodyFrame(1, "1", 1, false));
+  scoped_ptr<SpdyFrame> window_update(
+      ConstructSpdyWindowUpdate(1, wrapped_get_resp1->size()));
+
+  // CONNECT to news.google.com:443 via SPDY.
+  const char* const kConnectHeaders2[] = {
+    ":method", "CONNECT",
+    ":path", "news.google.com:443",
+    ":host", "news.google.com",
+    ":version", "HTTP/1.1",
+  };
+  scoped_ptr<SpdyFrame> connect2(
+      ConstructSpdyControlFrame(NULL,
+                                0,
+                                /*compressed*/ false,
+                                3,
+                                LOWEST,
+                                SYN_STREAM,
+                                CONTROL_FLAG_NONE,
+                                kConnectHeaders2,
+                                arraysize(kConnectHeaders2)));
+  scoped_ptr<SpdyFrame> conn_resp2(ConstructSpdyGetSynReply(NULL, 0, 3));
+
+  // Fetch https://news.google.com/ via HTTP.
+  const char get2[] = "GET / HTTP/1.1\r\n"
+      "Host: news.google.com\r\n"
+      "Connection: keep-alive\r\n\r\n";
+  scoped_ptr<SpdyFrame> wrapped_get2(
+      ConstructSpdyBodyFrame(3, get2, strlen(get2), false));
+  const char resp2[] = "HTTP/1.1 200 OK\r\n"
+      "Content-Length: 2\r\n\r\n";
+  scoped_ptr<SpdyFrame> wrapped_get_resp2(
+      ConstructSpdyBodyFrame(3, resp2, strlen(resp2), false));
+  scoped_ptr<SpdyFrame> wrapped_body2(
+      ConstructSpdyBodyFrame(3, "22", 2, false));
+
+  MockWrite spdy_writes[] = {
+      CreateMockWrite(*connect1, 0),
+      CreateMockWrite(*wrapped_get1, 2),
+      CreateMockWrite(*connect2, 5),
+      CreateMockWrite(*wrapped_get2, 7),
+  };
+
+  MockRead spdy_reads[] = {
+    CreateMockRead(*conn_resp1, 1, ASYNC),
+    CreateMockRead(*wrapped_get_resp1, 3, ASYNC),
+    CreateMockRead(*wrapped_body1, 4, ASYNC),
+    CreateMockRead(*conn_resp2, 6, ASYNC),
+    CreateMockRead(*wrapped_get_resp2, 8, ASYNC),
+    CreateMockRead(*wrapped_body2, 9, ASYNC),
+    MockRead(ASYNC, 0, 10),
+  };
+
+  DeterministicSocketData spdy_data(
+      spdy_reads, arraysize(spdy_reads),
+      spdy_writes, arraysize(spdy_writes));
+  session_deps.deterministic_socket_factory->AddSocketDataProvider(&spdy_data);
+
+  SSLSocketDataProvider ssl(ASYNC, OK);
+  ssl.SetNextProto(kProtoSPDY3);
+  session_deps.deterministic_socket_factory->AddSSLSocketDataProvider(&ssl);
+  SSLSocketDataProvider ssl2(ASYNC, OK);
+  ssl2.was_npn_negotiated = false;
+  ssl2.protocol_negotiated = kProtoUnknown;
+  session_deps.deterministic_socket_factory->AddSSLSocketDataProvider(&ssl2);
+  SSLSocketDataProvider ssl3(ASYNC, OK);
+  ssl3.was_npn_negotiated = false;
+  ssl3.protocol_negotiated = kProtoUnknown;
+  session_deps.deterministic_socket_factory->AddSSLSocketDataProvider(&ssl3);
+
+  TestCompletionCallback callback;
+
+  scoped_ptr<HttpTransaction> trans(new HttpNetworkTransaction(session));
+  int rv = trans->Start(&request1, callback.callback(), BoundNetLog());
+  EXPECT_EQ(ERR_IO_PENDING, rv);
+  // The first connect and request, each of their responses, and the body.
+  spdy_data.RunFor(5);
+
+  rv = callback.WaitForResult();
+  EXPECT_EQ(OK, rv);
+
+  LoadTimingInfo load_timing_info;
+  EXPECT_TRUE(trans->GetLoadTimingInfo(&load_timing_info));
+  TestLoadTimingNotReused(load_timing_info, CONNECT_TIMING_HAS_SSL_TIMES);
+
+  const HttpResponseInfo* response = trans->GetResponseInfo();
+  ASSERT_TRUE(response != NULL);
+  ASSERT_TRUE(response->headers != NULL);
+  EXPECT_EQ("HTTP/1.1 200 OK", response->headers->GetStatusLine());
+
+  std::string response_data;
+  scoped_refptr<net::IOBuffer> buf(new net::IOBuffer(256));
+  EXPECT_EQ(1, trans->Read(buf, 256, callback.callback()));
+
+  scoped_ptr<HttpTransaction> trans2(new HttpNetworkTransaction(session));
+  rv = trans2->Start(&request2, callback.callback(), BoundNetLog());
+  EXPECT_EQ(ERR_IO_PENDING, rv);
+
+  // The second connect and request, each of their responses, and the body.
+  spdy_data.RunFor(5);
+  rv = callback.WaitForResult();
+  EXPECT_EQ(OK, rv);
+
+  LoadTimingInfo load_timing_info2;
+  EXPECT_TRUE(trans2->GetLoadTimingInfo(&load_timing_info2));
+  // Even though the SPDY connection is reused, a new tunnelled connection has
+  // to be created, so the socket's load timing looks like a fresh connection.
+  TestLoadTimingNotReused(load_timing_info2, CONNECT_TIMING_HAS_SSL_TIMES);
+
+  // The requests should have different IDs, since they each are using their own
+  // separate stream.
+  EXPECT_NE(load_timing_info.socket_log_id, load_timing_info2.socket_log_id);
+
+  EXPECT_EQ(2, trans2->Read(buf, 256, callback.callback()));
+}
+
+// Test load timing in the case of two HTTPS (non-SPDY) requests through a SPDY
+// HTTPS Proxy to the same server.
+TEST_F(HttpNetworkTransactionSpdy3Test,
+       HttpsProxySpdyConnectHttpsLoadTimingTwoRequestsSameServer) {
+  // Configure against https proxy server "proxy:70".
+  SpdySessionDependencies session_deps(ProxyService::CreateFixed(
+      "https://proxy:70"));
+  CapturingBoundNetLog log;
+  session_deps.net_log = log.bound().net_log();
+  scoped_refptr<HttpNetworkSession> session(
+      SpdySessionDependencies::SpdyCreateSessionDeterministic(&session_deps));
+
+  HttpRequestInfo request1;
+  request1.method = "GET";
+  request1.url = GURL("https://www.google.com/");
+  request1.load_flags = 0;
+
+  HttpRequestInfo request2;
+  request2.method = "GET";
+  request2.url = GURL("https://www.google.com/2");
+  request2.load_flags = 0;
+
+  // CONNECT to www.google.com:443 via SPDY.
+  scoped_ptr<SpdyFrame> connect1(ConstructSpdyConnect(NULL, 0, 1));
+  scoped_ptr<SpdyFrame> conn_resp1(ConstructSpdyGetSynReply(NULL, 0, 1));
+
+  // Fetch https://www.google.com/ via HTTP.
+  const char get1[] = "GET / HTTP/1.1\r\n"
+      "Host: www.google.com\r\n"
+      "Connection: keep-alive\r\n\r\n";
+  scoped_ptr<SpdyFrame> wrapped_get1(
+      ConstructSpdyBodyFrame(1, get1, strlen(get1), false));
+  const char resp1[] = "HTTP/1.1 200 OK\r\n"
+      "Content-Length: 1\r\n\r\n";
+  scoped_ptr<SpdyFrame> wrapped_get_resp1(
+      ConstructSpdyBodyFrame(1, resp1, strlen(resp1), false));
+  scoped_ptr<SpdyFrame> wrapped_body1(ConstructSpdyBodyFrame(1, "1", 1, false));
+  scoped_ptr<SpdyFrame> window_update(
+      ConstructSpdyWindowUpdate(1, wrapped_get_resp1->size()));
+
+  // Fetch https://www.google.com/2 via HTTP.
+  const char get2[] = "GET /2 HTTP/1.1\r\n"
+      "Host: www.google.com\r\n"
+      "Connection: keep-alive\r\n\r\n";
+  scoped_ptr<SpdyFrame> wrapped_get2(
+      ConstructSpdyBodyFrame(1, get2, strlen(get2), false));
+  const char resp2[] = "HTTP/1.1 200 OK\r\n"
+      "Content-Length: 2\r\n\r\n";
+  scoped_ptr<SpdyFrame> wrapped_get_resp2(
+      ConstructSpdyBodyFrame(1, resp2, strlen(resp2), false));
+  scoped_ptr<SpdyFrame> wrapped_body2(
+      ConstructSpdyBodyFrame(1, "22", 2, false));
+
+  MockWrite spdy_writes[] = {
+      CreateMockWrite(*connect1, 0),
+      CreateMockWrite(*wrapped_get1, 2),
+      CreateMockWrite(*wrapped_get2, 5),
+  };
+
+  MockRead spdy_reads[] = {
+    CreateMockRead(*conn_resp1, 1, ASYNC),
+    CreateMockRead(*wrapped_get_resp1, 3, ASYNC),
+    CreateMockRead(*wrapped_body1, 4, ASYNC),
+    CreateMockRead(*wrapped_get_resp2, 6, ASYNC),
+    CreateMockRead(*wrapped_body2, 7, ASYNC),
+    MockRead(ASYNC, 0, 8),
+  };
+
+  DeterministicSocketData spdy_data(
+      spdy_reads, arraysize(spdy_reads),
+      spdy_writes, arraysize(spdy_writes));
+  session_deps.deterministic_socket_factory->AddSocketDataProvider(&spdy_data);
+
+  SSLSocketDataProvider ssl(ASYNC, OK);
+  ssl.SetNextProto(kProtoSPDY3);
+  session_deps.deterministic_socket_factory->AddSSLSocketDataProvider(&ssl);
+  SSLSocketDataProvider ssl2(ASYNC, OK);
+  ssl2.was_npn_negotiated = false;
+  ssl2.protocol_negotiated = kProtoUnknown;
+  session_deps.deterministic_socket_factory->AddSSLSocketDataProvider(&ssl2);
+
+  TestCompletionCallback callback;
+
+  scoped_ptr<HttpTransaction> trans(new HttpNetworkTransaction(session));
+  int rv = trans->Start(&request1, callback.callback(), BoundNetLog());
+  EXPECT_EQ(ERR_IO_PENDING, rv);
+  // The first connect and request, each of their responses, and the body.
+  spdy_data.RunFor(5);
+
+  rv = callback.WaitForResult();
+  EXPECT_EQ(OK, rv);
+
+  LoadTimingInfo load_timing_info;
+  EXPECT_TRUE(trans->GetLoadTimingInfo(&load_timing_info));
+  TestLoadTimingNotReused(load_timing_info, CONNECT_TIMING_HAS_SSL_TIMES);
+
+  const HttpResponseInfo* response = trans->GetResponseInfo();
+  ASSERT_TRUE(response != NULL);
+  ASSERT_TRUE(response->headers != NULL);
+  EXPECT_EQ("HTTP/1.1 200 OK", response->headers->GetStatusLine());
+
+  std::string response_data;
+  scoped_refptr<net::IOBuffer> buf(new net::IOBuffer(256));
+  EXPECT_EQ(1, trans->Read(buf, 256, callback.callback()));
+  // Delete the first request, so the second one can reuse the socket.
+  trans.reset();
+
+  scoped_ptr<HttpTransaction> trans2(new HttpNetworkTransaction(session));
+  rv = trans2->Start(&request2, callback.callback(), BoundNetLog());
+  EXPECT_EQ(ERR_IO_PENDING, rv);
+
+  // The second request, response, and body.  There should not be a second
+  // connect.
+  spdy_data.RunFor(3);
+  rv = callback.WaitForResult();
+  EXPECT_EQ(OK, rv);
+
+  LoadTimingInfo load_timing_info2;
+  EXPECT_TRUE(trans2->GetLoadTimingInfo(&load_timing_info2));
+  TestLoadTimingReused(load_timing_info2);
+
+  // The requests should have the same ID.
+  EXPECT_EQ(load_timing_info.socket_log_id, load_timing_info2.socket_log_id);
+
+  EXPECT_EQ(2, trans2->Read(buf, 256, callback.callback()));
+}
+
+// Test load timing in the case of of two HTTP requests through a SPDY HTTPS
+// Proxy to different servers.
+TEST_F(HttpNetworkTransactionSpdy3Test,
+       HttpsProxySpdyLoadTimingTwoHttpRequests) {
+  const char* const url1 = "http://www.google.com/";
+  const char* const url2 = "http://news.google.com/";
+
+  // Configure against https proxy server "proxy:70".
+  SpdySessionDependencies session_deps(ProxyService::CreateFixed(
+      "https://proxy:70"));
+  CapturingBoundNetLog log;
+  session_deps.net_log = log.bound().net_log();
+  scoped_refptr<HttpNetworkSession> session(
+      SpdySessionDependencies::SpdyCreateSessionDeterministic(&session_deps));
+
+  HttpRequestInfo request1;
+  request1.method = "GET";
+  request1.url = GURL(url1);
+  request1.load_flags = 0;
+
+  HttpRequestInfo request2;
+  request2.method = "GET";
+  request2.url = GURL(url2);
+  request2.load_flags = 0;
+
+  scoped_ptr<SpdyFrame> get1(ConstructSpdyGet(url1, false, 1, LOWEST));
+  scoped_ptr<SpdyFrame> get_resp1(ConstructSpdyGetSynReply(NULL, 0, 1));
+  scoped_ptr<SpdyFrame> body1(ConstructSpdyBodyFrame(1, "1", 1, true));
+
+  // http://news.google.com/
+  scoped_ptr<SpdyFrame> get2(ConstructSpdyGet(url2, false, 3, LOWEST));
+  scoped_ptr<SpdyFrame> get_resp2(ConstructSpdyGetSynReply(NULL, 0, 3));
+  scoped_ptr<SpdyFrame> body2(ConstructSpdyBodyFrame(3, "22", 2, true));
+
+  MockWrite spdy_writes[] = {
+      CreateMockWrite(*get1, 0),
+      CreateMockWrite(*get2, 3),
+  };
+
+  MockRead spdy_reads[] = {
+    CreateMockRead(*get_resp1, 1, ASYNC),
+    CreateMockRead(*body1, 2, ASYNC),
+    CreateMockRead(*get_resp2, 4, ASYNC),
+    CreateMockRead(*body2, 5, ASYNC),
+    MockRead(ASYNC, 0, 6),
+  };
+
+  DeterministicSocketData spdy_data(
+      spdy_reads, arraysize(spdy_reads),
+      spdy_writes, arraysize(spdy_writes));
+  session_deps.deterministic_socket_factory->AddSocketDataProvider(&spdy_data);
+
+  SSLSocketDataProvider ssl(ASYNC, OK);
+  ssl.SetNextProto(kProtoSPDY3);
+  session_deps.deterministic_socket_factory->AddSSLSocketDataProvider(&ssl);
+
+  TestCompletionCallback callback;
+
+  scoped_ptr<HttpTransaction> trans(new HttpNetworkTransaction(session));
+  int rv = trans->Start(&request1, callback.callback(), BoundNetLog());
+  EXPECT_EQ(ERR_IO_PENDING, rv);
+  spdy_data.RunFor(2);
+
+  rv = callback.WaitForResult();
+  EXPECT_EQ(OK, rv);
+
+  LoadTimingInfo load_timing_info;
+  EXPECT_TRUE(trans->GetLoadTimingInfo(&load_timing_info));
+  TestLoadTimingNotReused(load_timing_info,
+                          CONNECT_TIMING_HAS_CONNECT_TIMES_ONLY);
+
+  const HttpResponseInfo* response = trans->GetResponseInfo();
+  ASSERT_TRUE(response != NULL);
+  ASSERT_TRUE(response->headers != NULL);
+  EXPECT_EQ("HTTP/1.1 200 OK", response->headers->GetStatusLine());
+
+  std::string response_data;
+  scoped_refptr<net::IOBuffer> buf(new net::IOBuffer(256));
+  EXPECT_EQ(ERR_IO_PENDING, trans->Read(buf, 256, callback.callback()));
+  spdy_data.RunFor(1);
+  EXPECT_EQ(1, callback.WaitForResult());
+  // Delete the first request, so the second one can reuse the socket.
+  trans.reset();
+
+  scoped_ptr<HttpTransaction> trans2(new HttpNetworkTransaction(session));
+  rv = trans2->Start(&request2, callback.callback(), BoundNetLog());
+  EXPECT_EQ(ERR_IO_PENDING, rv);
+
+  spdy_data.RunFor(2);
+  rv = callback.WaitForResult();
+  EXPECT_EQ(OK, rv);
+
+  LoadTimingInfo load_timing_info2;
+  EXPECT_TRUE(trans2->GetLoadTimingInfo(&load_timing_info2));
+  TestLoadTimingReused(load_timing_info2);
+
+  // The requests should have the same ID.
+  EXPECT_EQ(load_timing_info.socket_log_id, load_timing_info2.socket_log_id);
+
+  EXPECT_EQ(ERR_IO_PENDING, trans2->Read(buf, 256, callback.callback()));
+  spdy_data.RunFor(1);
+  EXPECT_EQ(2, callback.WaitForResult());
 }
 
 // Test the challenge-response-retry sequence through an HTTPS Proxy
@@ -5192,7 +5577,7 @@ TEST_F(HttpNetworkTransactionSpdy3Test, RedirectOfHttpsConnectViaSpdyProxy) {
   request.load_flags = 0;
 
   scoped_ptr<SpdyFrame> conn(ConstructSpdyConnect(NULL, 0, 1));
-  scoped_ptr<SpdyFrame> goaway(ConstructSpdyRstStream(1, CANCEL));
+  scoped_ptr<SpdyFrame> goaway(ConstructSpdyRstStream(1, RST_STREAM_CANCEL));
   MockWrite data_writes[] = {
     CreateMockWrite(*conn.get(), 0, SYNCHRONOUS),
   };
@@ -5296,7 +5681,7 @@ TEST_F(HttpNetworkTransactionSpdy3Test,
   request.load_flags = 0;
 
   scoped_ptr<SpdyFrame> conn(ConstructSpdyConnect(NULL, 0, 1));
-  scoped_ptr<SpdyFrame> rst(ConstructSpdyRstStream(1, CANCEL));
+  scoped_ptr<SpdyFrame> rst(ConstructSpdyRstStream(1, RST_STREAM_CANCEL));
   MockWrite data_writes[] = {
     CreateMockWrite(*conn.get(), 0, SYNCHRONOUS),
     CreateMockWrite(*rst.get(), 3, SYNCHRONOUS),
@@ -5359,7 +5744,7 @@ TEST_F(HttpNetworkTransactionSpdy3Test, BasicAuthSpdyProxy) {
 
   // Since we have proxy, should try to establish tunnel.
   scoped_ptr<SpdyFrame> req(ConstructSpdyConnect(NULL, 0, 1));
-  scoped_ptr<SpdyFrame> rst(ConstructSpdyRstStream(1, CANCEL));
+  scoped_ptr<SpdyFrame> rst(ConstructSpdyRstStream(1, RST_STREAM_CANCEL));
 
   // After calling trans->RestartWithAuth(), this is the request we should
   // be issuing -- the final header line contains the credentials.
@@ -5627,7 +6012,7 @@ TEST_F(HttpNetworkTransactionSpdy3Test, CrossOriginProxyPushCorrectness) {
       stream1_syn(ConstructSpdyGet(NULL, 0, false, 1, LOWEST, false));
 
   scoped_ptr<SpdyFrame> push_rst(
-      ConstructSpdyRstStream(2, REFUSED_STREAM));
+      ConstructSpdyRstStream(2, RST_STREAM_REFUSED_STREAM));
 
   MockWrite spdy_writes[] = {
     CreateMockWrite(*stream1_syn, 1, ASYNC),
@@ -6590,7 +6975,6 @@ TEST_F(HttpNetworkTransactionSpdy3Test, GroupNameForDirectConnections) {
                 transport_conn_pool->last_group_name_received());
   }
 
-  HttpStreamFactory::set_use_alternate_protocols(false);
 }
 
 TEST_F(HttpNetworkTransactionSpdy3Test, GroupNameForHTTPProxyConnections) {
@@ -6656,8 +7040,6 @@ TEST_F(HttpNetworkTransactionSpdy3Test, GroupNameForHTTPProxyConnections) {
       EXPECT_EQ(tests[i].expected_group_name,
                 http_proxy_pool->last_group_name_received());
   }
-
-  HttpStreamFactory::set_use_alternate_protocols(false);
 }
 
 TEST_F(HttpNetworkTransactionSpdy3Test, GroupNameForSOCKSConnections) {
@@ -6730,8 +7112,6 @@ TEST_F(HttpNetworkTransactionSpdy3Test, GroupNameForSOCKSConnections) {
       EXPECT_EQ(tests[i].expected_group_name,
                 socks_conn_pool->last_group_name_received());
   }
-
-  HttpStreamFactory::set_use_alternate_protocols(false);
 }
 
 TEST_F(HttpNetworkTransactionSpdy3Test, ReconsiderProxyAfterFailedConnection) {
@@ -7052,7 +7432,7 @@ TEST_F(HttpNetworkTransactionSpdy3Test, LargeContentLengthThenClose) {
 }
 
 TEST_F(HttpNetworkTransactionSpdy3Test, UploadFileSmallerThanLength) {
-  FilePath temp_file_path;
+  base::FilePath temp_file_path;
   ASSERT_TRUE(file_util::CreateTemporaryFile(&temp_file_path));
   const uint64 kFakeSize = 100000;  // file is actually blank
   UploadFileElementReader::ScopedOverridingContentLengthForTests
@@ -7105,7 +7485,7 @@ TEST_F(HttpNetworkTransactionSpdy3Test, UploadFileSmallerThanLength) {
 }
 
 TEST_F(HttpNetworkTransactionSpdy3Test, UploadUnreadableFile) {
-  FilePath temp_file;
+  base::FilePath temp_file;
   ASSERT_TRUE(file_util::CreateTemporaryFile(&temp_file));
   std::string temp_file_content("Unreadable file.");
   ASSERT_TRUE(file_util::WriteFile(temp_file, temp_file_content.c_str(),
@@ -7162,7 +7542,7 @@ TEST_F(HttpNetworkTransactionSpdy3Test, UploadUnreadableFile) {
 }
 
 TEST_F(HttpNetworkTransactionSpdy3Test, UnreadableUploadFileAfterAuthRestart) {
-  FilePath temp_file;
+  base::FilePath temp_file;
   ASSERT_TRUE(file_util::CreateTemporaryFile(&temp_file));
   std::string temp_file_contents("Unreadable file.");
   std::string unreadable_contents(temp_file_contents.length(), '\0');
@@ -7459,7 +7839,6 @@ TEST_F(HttpNetworkTransactionSpdy3Test, HonorAlternateProtocolHeader) {
   expected_alternate.protocol = NPN_SPDY_3;
   EXPECT_TRUE(expected_alternate.Equals(alternate));
 
-  HttpStreamFactory::set_use_alternate_protocols(false);
   HttpStreamFactory::SetNextProtos(std::vector<std::string>());
 }
 
@@ -7520,7 +7899,6 @@ TEST_F(HttpNetworkTransactionSpdy3Test,
       http_server_properties->GetAlternateProtocol(
           HostPortPair::FromURL(request.url));
   EXPECT_EQ(ALTERNATE_PROTOCOL_BROKEN, alternate.protocol);
-  HttpStreamFactory::set_use_alternate_protocols(false);
 }
 
 TEST_F(HttpNetworkTransactionSpdy3Test,
@@ -7569,8 +7947,55 @@ TEST_F(HttpNetworkTransactionSpdy3Test,
   EXPECT_EQ(ERR_IO_PENDING, rv);
   // Invalid change to unrestricted port should fail.
   EXPECT_EQ(ERR_CONNECTION_REFUSED, callback.WaitForResult());
+}
 
-  HttpStreamFactory::set_use_alternate_protocols(false);
+TEST_F(HttpNetworkTransactionSpdy3Test,
+       AlternateProtocolPortRestrictedPermitted) {
+  // Ensure that we're allowed to redirect traffic via an alternate
+  // protocol to an unrestricted (port >= 1024) when the original traffic was
+  // on a restricted port (port < 1024) if we set
+  // enable_user_alternate_protocol_ports.
+
+  HttpStreamFactory::set_use_alternate_protocols(true);
+  SpdySessionDependencies session_deps;
+  session_deps.enable_user_alternate_protocol_ports = true;
+
+  HttpRequestInfo restricted_port_request;
+  restricted_port_request.method = "GET";
+  restricted_port_request.url = GURL("http://www.google.com:1023/");
+  restricted_port_request.load_flags = 0;
+
+  MockConnect mock_connect(ASYNC, ERR_CONNECTION_REFUSED);
+  StaticSocketDataProvider first_data;
+  first_data.set_connect_data(mock_connect);
+  session_deps.socket_factory->AddSocketDataProvider(&first_data);
+
+  MockRead data_reads[] = {
+    MockRead("HTTP/1.1 200 OK\r\n\r\n"),
+    MockRead("hello world"),
+    MockRead(ASYNC, OK),
+  };
+  StaticSocketDataProvider second_data(
+      data_reads, arraysize(data_reads), NULL, 0);
+  session_deps.socket_factory->AddSocketDataProvider(&second_data);
+
+  scoped_refptr<HttpNetworkSession> session(CreateSession(&session_deps));
+
+  HttpServerProperties* http_server_properties =
+      session->http_server_properties();
+  const int kUnrestrictedAlternatePort = 1024;
+  http_server_properties->SetAlternateProtocol(
+      HostPortPair::FromURL(restricted_port_request.url),
+      kUnrestrictedAlternatePort,
+      NPN_SPDY_3);
+
+  scoped_ptr<HttpTransaction> trans(new HttpNetworkTransaction(session));
+  TestCompletionCallback callback;
+
+  EXPECT_EQ(ERR_IO_PENDING, trans->Start(
+      &restricted_port_request, callback.callback(), BoundNetLog()));
+  // Change to unrestricted port should succeed.
+  EXPECT_EQ(OK, callback.WaitForResult());
 }
 
 TEST_F(HttpNetworkTransactionSpdy3Test,
@@ -7619,8 +8044,6 @@ TEST_F(HttpNetworkTransactionSpdy3Test,
   EXPECT_EQ(ERR_IO_PENDING, rv);
   // Valid change to restricted port should pass.
   EXPECT_EQ(OK, callback.WaitForResult());
-
-  HttpStreamFactory::set_use_alternate_protocols(false);
 }
 
 TEST_F(HttpNetworkTransactionSpdy3Test,
@@ -7669,8 +8092,6 @@ TEST_F(HttpNetworkTransactionSpdy3Test,
   EXPECT_EQ(ERR_IO_PENDING, rv);
   // Valid change to restricted port should pass.
   EXPECT_EQ(OK, callback.WaitForResult());
-
-  HttpStreamFactory::set_use_alternate_protocols(false);
 }
 
 TEST_F(HttpNetworkTransactionSpdy3Test,
@@ -7719,8 +8140,6 @@ TEST_F(HttpNetworkTransactionSpdy3Test,
   EXPECT_EQ(ERR_IO_PENDING, rv);
   // Valid change to an unrestricted port should pass.
   EXPECT_EQ(OK, callback.WaitForResult());
-
-  HttpStreamFactory::set_use_alternate_protocols(false);
 }
 
 TEST_F(HttpNetworkTransactionSpdy3Test, AlternateProtocolUnsafeBlocked) {
@@ -7861,9 +8280,6 @@ TEST_F(HttpNetworkTransactionSpdy3Test, UseAlternateProtocolForNpnSpdy) {
 
   ASSERT_EQ(OK, ReadTransaction(trans.get(), &response_data));
   EXPECT_EQ("hello!", response_data);
-
-  HttpStreamFactory::SetNextProtos(std::vector<std::string>());
-  HttpStreamFactory::set_use_alternate_protocols(false);
 }
 
 TEST_F(HttpNetworkTransactionSpdy3Test, AlternateProtocolWithSpdyLateBinding) {
@@ -7977,9 +8393,6 @@ TEST_F(HttpNetworkTransactionSpdy3Test, AlternateProtocolWithSpdyLateBinding) {
   EXPECT_TRUE(response->was_npn_negotiated);
   ASSERT_EQ(OK, ReadTransaction(&trans3, &response_data));
   EXPECT_EQ("hello!", response_data);
-
-  HttpStreamFactory::SetNextProtos(std::vector<std::string>());
-  HttpStreamFactory::set_use_alternate_protocols(false);
 }
 
 TEST_F(HttpNetworkTransactionSpdy3Test, StallAlternateProtocolForNpnSpdy) {
@@ -8052,9 +8465,6 @@ TEST_F(HttpNetworkTransactionSpdy3Test, StallAlternateProtocolForNpnSpdy) {
 
   ASSERT_EQ(OK, ReadTransaction(trans.get(), &response_data));
   EXPECT_EQ("hello world", response_data);
-
-  HttpStreamFactory::SetNextProtos(std::vector<std::string>());
-  HttpStreamFactory::set_use_alternate_protocols(false);
 }
 
 class CapturingProxyResolver : public ProxyResolver {
@@ -8066,7 +8476,7 @@ class CapturingProxyResolver : public ProxyResolver {
                              ProxyInfo* results,
                              const CompletionCallback& callback,
                              RequestHandle* request,
-                             const BoundNetLog& net_log) {
+                             const BoundNetLog& net_log) OVERRIDE {
     ProxyServer proxy_server(ProxyServer::SCHEME_HTTP,
                              HostPortPair("myproxy", 80));
     results->UseProxyServer(proxy_server);
@@ -8074,7 +8484,7 @@ class CapturingProxyResolver : public ProxyResolver {
     return OK;
   }
 
-  virtual void CancelRequest(RequestHandle request) {
+  virtual void CancelRequest(RequestHandle request) OVERRIDE {
     NOTREACHED();
   }
 
@@ -8083,18 +8493,12 @@ class CapturingProxyResolver : public ProxyResolver {
     return LOAD_STATE_IDLE;
   }
 
-  virtual LoadState GetLoadStateThreadSafe(
-      RequestHandle request) const OVERRIDE {
-    NOTREACHED();
-    return LOAD_STATE_IDLE;
-  }
-
-  virtual void CancelSetPacScript() {
+  virtual void CancelSetPacScript() OVERRIDE {
     NOTREACHED();
   }
 
   virtual int SetPacScript(const scoped_refptr<ProxyResolverScriptData>&,
-                           const CompletionCallback& /*callback*/) {
+                           const CompletionCallback& /*callback*/) OVERRIDE {
     return OK;
   }
 
@@ -8221,9 +8625,6 @@ TEST_F(HttpNetworkTransactionSpdy3Test,
   EXPECT_TRUE(trans->GetLoadTimingInfo(&load_timing_info));
   TestLoadTimingNotReusedWithPac(load_timing_info,
                                  CONNECT_TIMING_HAS_SSL_TIMES);
-
-  HttpStreamFactory::SetNextProtos(std::vector<std::string>());
-  HttpStreamFactory::set_use_alternate_protocols(false);
 }
 
 TEST_F(HttpNetworkTransactionSpdy3Test,
@@ -8337,9 +8738,6 @@ TEST_F(HttpNetworkTransactionSpdy3Test,
 
   ASSERT_EQ(OK, ReadTransaction(trans.get(), &response_data));
   EXPECT_EQ("hello!", response_data);
-
-  HttpStreamFactory::SetNextProtos(std::vector<std::string>());
-  HttpStreamFactory::set_use_alternate_protocols(false);
 }
 
 // GenerateAuthToken is a mighty big test.
@@ -8948,7 +9346,7 @@ class TLSDecompressionFailureSocketDataProvider : public SocketDataProvider {
       : fail_all_(fail_all) {
   }
 
-  virtual MockRead GetNextRead() {
+  virtual MockRead GetNextRead() OVERRIDE {
     if (fail_all_)
       return MockRead(SYNCHRONOUS, ERR_SSL_DECOMPRESSION_FAILURE_ALERT);
 
@@ -8956,11 +9354,11 @@ class TLSDecompressionFailureSocketDataProvider : public SocketDataProvider {
                     "HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\nok.\r\n");
   }
 
-  virtual MockWriteResult OnWrite(const std::string& data) {
+  virtual MockWriteResult OnWrite(const std::string& data) OVERRIDE {
     return MockWriteResult(SYNCHRONOUS /* async */, data.size());
   }
 
-  void Reset() {
+  virtual void Reset() OVERRIDE {
   }
 
  private:
@@ -9112,9 +9510,6 @@ TEST_F(HttpNetworkTransactionSpdy3Test, NpnWithHttpOverSSL) {
 
   EXPECT_FALSE(response->was_fetched_via_spdy);
   EXPECT_TRUE(response->was_npn_negotiated);
-
-  HttpStreamFactory::SetNextProtos(std::vector<std::string>());
-  HttpStreamFactory::set_use_alternate_protocols(false);
 }
 
 TEST_F(HttpNetworkTransactionSpdy3Test, SpdyPostNPNServerHangup) {
@@ -9155,9 +9550,6 @@ TEST_F(HttpNetworkTransactionSpdy3Test, SpdyPostNPNServerHangup) {
   int rv = trans->Start(&request, callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
   EXPECT_EQ(ERR_CONNECTION_CLOSED, callback.WaitForResult());
-
-  HttpStreamFactory::SetNextProtos(std::vector<std::string>());
-  HttpStreamFactory::set_use_alternate_protocols(false);
 }
 
 TEST_F(HttpNetworkTransactionSpdy3Test, SpdyAlternateProtocolThroughProxy) {
@@ -9166,7 +9558,7 @@ TEST_F(HttpNetworkTransactionSpdy3Test, SpdyAlternateProtocolThroughProxy) {
   HttpStreamFactory::set_use_alternate_protocols(true);
   HttpStreamFactory::SetNextProtos(
       MakeNextProtos(
-          "http/1.1", "http1.1", "spdy/2", "spdy/3", "spdy", NULL));
+          "http/1.1", "http1.1", "spdy/2", "spdy/3", "spdy/3.1", "spdy", NULL));
 
   SpdySessionDependencies session_deps(
       ProxyService::CreateFixedFromPacResult("PROXY myproxy:70"));
@@ -9313,9 +9705,6 @@ TEST_F(HttpNetworkTransactionSpdy3Test, SpdyAlternateProtocolThroughProxy) {
   EXPECT_TRUE(trans_2->GetLoadTimingInfo(&load_timing_info));
   TestLoadTimingNotReusedWithPac(load_timing_info,
                                  CONNECT_TIMING_HAS_SSL_TIMES);
-
-  HttpStreamFactory::SetNextProtos(std::vector<std::string>());
-  HttpStreamFactory::set_use_alternate_protocols(false);
 }
 
 // Test that if we cancel the transaction as the connection is completing, that
@@ -10058,9 +10447,6 @@ TEST_F(HttpNetworkTransactionSpdy3Test, UseIPConnectionPooling) {
   EXPECT_TRUE(response->was_npn_negotiated);
   ASSERT_EQ(OK, ReadTransaction(&trans2, &response_data));
   EXPECT_EQ("hello!", response_data);
-
-  HttpStreamFactory::SetNextProtos(std::vector<std::string>());
-  HttpStreamFactory::set_use_alternate_protocols(false);
 }
 
 TEST_F(HttpNetworkTransactionSpdy3Test, UseIPConnectionPoolingAfterResolution) {
@@ -10146,9 +10532,6 @@ TEST_F(HttpNetworkTransactionSpdy3Test, UseIPConnectionPoolingAfterResolution) {
   EXPECT_TRUE(response->was_npn_negotiated);
   ASSERT_EQ(OK, ReadTransaction(&trans2, &response_data));
   EXPECT_EQ("hello!", response_data);
-
-  HttpStreamFactory::SetNextProtos(std::vector<std::string>());
-  HttpStreamFactory::set_use_alternate_protocols(false);
 }
 
 class OneTimeCachingHostResolver : public net::HostResolver {
@@ -10287,9 +10670,6 @@ TEST_F(HttpNetworkTransactionSpdy3Test,
   EXPECT_TRUE(response->was_npn_negotiated);
   ASSERT_EQ(OK, ReadTransaction(&trans2, &response_data));
   EXPECT_EQ("hello!", response_data);
-
-  HttpStreamFactory::SetNextProtos(std::vector<std::string>());
-  HttpStreamFactory::set_use_alternate_protocols(false);
 }
 
 TEST_F(HttpNetworkTransactionSpdy3Test, ReadPipelineEvictionFallback) {
@@ -10464,8 +10844,10 @@ TEST_F(HttpNetworkTransactionSpdy3Test, DoNotUseSpdySessionForHttpOverTunnel) {
   MockConnect connect_data1(ASYNC, OK);
   data1.set_connect_data(connect_data1);
 
-  SpdySessionDependencies session_deps(ProxyService::CreateFixed(
-      "https://proxy:70"));
+  SpdySessionDependencies session_deps(
+      ProxyService::CreateFixedFromPacResult("HTTPS proxy:70"));
+  CapturingNetLog log;
+  session_deps.net_log = &log;
   SSLSocketDataProvider ssl1(ASYNC, OK);  // to the proxy
   ssl1.SetNextProto(kProtoSPDY3);
   session_deps.deterministic_socket_factory->AddSSLSocketDataProvider(&ssl1);
@@ -10493,6 +10875,11 @@ TEST_F(HttpNetworkTransactionSpdy3Test, DoNotUseSpdySessionForHttpOverTunnel) {
   EXPECT_EQ(OK, callback1.WaitForResult());
   EXPECT_TRUE(trans1.GetResponseInfo()->was_fetched_via_spdy);
 
+  LoadTimingInfo load_timing_info1;
+  EXPECT_TRUE(trans1.GetLoadTimingInfo(&load_timing_info1));
+  TestLoadTimingNotReusedWithPac(load_timing_info1,
+                                 CONNECT_TIMING_HAS_SSL_TIMES);
+
   // Now, start the HTTP request
   HttpRequestInfo request2;
   request2.method = "GET";
@@ -10508,6 +10895,13 @@ TEST_F(HttpNetworkTransactionSpdy3Test, DoNotUseSpdySessionForHttpOverTunnel) {
 
   EXPECT_EQ(OK, callback2.WaitForResult());
   EXPECT_TRUE(trans2.GetResponseInfo()->was_fetched_via_spdy);
+
+  // HTTP requests over a SPDY session should have a different connection
+  // socket_log_id than requests over a tunnel.
+  LoadTimingInfo load_timing_info2;
+  EXPECT_TRUE(trans2.GetLoadTimingInfo(&load_timing_info2));
+  TestLoadTimingReusedWithPac(load_timing_info2);
+  EXPECT_NE(load_timing_info1.socket_log_id, load_timing_info2.socket_log_id);
 }
 
 TEST_F(HttpNetworkTransactionSpdy3Test, UseSpdySessionForHttpWhenForced) {
@@ -10650,7 +11044,7 @@ TEST_F(HttpNetworkTransactionSpdy3Test, DoNotUseSpdySessionIfCertDoesNotMatch) {
   // be valid for proxy because the MockSSLClientSocket does
   // not actually verify it.  But SpdySession will use this
   // to see if it is valid for the new origin
-  FilePath certs_dir = GetTestCertsDirectory();
+  base::FilePath certs_dir = GetTestCertsDirectory();
   scoped_refptr<X509Certificate> server_cert(
       ImportCertFromFile(certs_dir, "ok_cert.pem"));
   ASSERT_NE(static_cast<X509Certificate*>(NULL), server_cert);

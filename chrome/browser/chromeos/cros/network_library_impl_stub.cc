@@ -8,7 +8,7 @@
 #include "base/command_line.h"
 #include "base/stl_util.h"
 #include "chrome/browser/chromeos/cros/native_network_constants.h"
-#include "chrome/common/chrome_switches.h"
+#include "chromeos/chromeos_switches.h"
 #include "content/public/browser/browser_thread.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
 
@@ -18,12 +18,12 @@ namespace {
 
 bool IsEthernetEnabled() {
   return !CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kDisableStubEthernet);
+      chromeos::switches::kDisableStubEthernet);
 }
 
 bool IsInteractive() {
   return CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kEnableStubInteractive);
+      chromeos::switches::kEnableStubInteractive);
 }
 
 }  // namespace
@@ -66,6 +66,7 @@ void NetworkLibraryImplStub::Init() {
   if (IsInteractive()) {
     const int kWifiInitDelaySeconds = 5;
     const int kCellularInitDelaySeconds = 10;
+    const int kCellularActivateDelaySeconds = 15;
     BrowserThread::PostDelayedTask(
         BrowserThread::UI, FROM_HERE,
         base::Bind(&NetworkLibraryImplStub::CompleteWifiInit,
@@ -76,6 +77,11 @@ void NetworkLibraryImplStub::Init() {
         base::Bind(&NetworkLibraryImplStub::CompleteCellularInit,
                    weak_pointer_factory_.GetWeakPtr()),
         base::TimeDelta::FromSeconds(kCellularInitDelaySeconds));
+    BrowserThread::PostDelayedTask(
+        BrowserThread::UI, FROM_HERE,
+        base::Bind(&NetworkLibraryImplStub::CompleteCellularActivate,
+                   weak_pointer_factory_.GetWeakPtr()),
+        base::TimeDelta::FromSeconds(kCellularActivateDelaySeconds));
   } else {
     CompleteWifiInit();
     CompleteCellularInit();
@@ -320,11 +326,11 @@ void NetworkLibraryImplStub::CompleteCellularInit() {
   cellular1->set_network_technology(NETWORK_TECHNOLOGY_EVDO);
   AddStubNetwork(cellular1, PROFILE_NONE);
 
-  CellularNetwork* cellular2 = new CellularNetwork("/cellular2");
+  CellularNetwork* cellular2 = new CellularNetwork("cellular2");
   cellular2->set_name("Fake Cellular 2");
   cellular2->set_device_path(cellular->device_path());
   cellular2->set_strength(50);
-  cellular2->set_activation_state(ACTIVATION_STATE_NOT_ACTIVATED);
+  cellular2->set_activation_state(ACTIVATION_STATE_ACTIVATING);
   cellular2->set_network_technology(NETWORK_TECHNOLOGY_UMTS);
   cellular2->set_roaming_state(ROAMING_STATE_ROAMING);
   cellular2->set_payment_url(std::string("http://www.google.com"));
@@ -366,6 +372,13 @@ void NetworkLibraryImplStub::CompleteCellularInit() {
   wimax2->set_passphrase_required(false);
   AddStubNetwork(wimax2, PROFILE_NONE);
 
+  SignalNetworkManagerObservers();
+}
+
+void NetworkLibraryImplStub::CompleteCellularActivate() {
+  VLOG(1) << "CompleteCellularActivate()";
+  CellularNetwork* cellular2 = FindCellularNetworkByPath("cellular2");
+  cellular2->set_activation_state(ACTIVATION_STATE_ACTIVATED);
   SignalNetworkManagerObservers();
 }
 
@@ -679,12 +692,16 @@ void NetworkLibraryImplStub::SetCellularDataRoamingAllowed(bool new_value) {}
 void NetworkLibraryImplStub::SetCarrier(
     const std::string& carrier,
     const NetworkOperationCallback& completed) {
-  // Call the completed callback with a 10s delay.
+  // Call the completed callback with a 10s delay if we're interactive.
+  int delay_ms = IsInteractive() ? 10000 : 100;
   BrowserThread::PostDelayedTask(
       BrowserThread::UI,
       FROM_HERE,
       base::Bind(completed, "", NETWORK_METHOD_ERROR_NONE,""),
-      base::TimeDelta::FromMilliseconds(10000));
+      base::TimeDelta::FromMilliseconds(delay_ms));
+}
+
+void NetworkLibraryImplStub::ResetModem() {
 }
 
 bool NetworkLibraryImplStub::IsCellularAlwaysInRoaming() {
@@ -693,13 +710,13 @@ bool NetworkLibraryImplStub::IsCellularAlwaysInRoaming() {
 
 void NetworkLibraryImplStub::RequestNetworkScan() {
   // This is triggered by user interaction, so set a network connect delay.
-  const int kScanDelayMs = 2 * 1000;
+  int scan_delay_ms = IsInteractive() ? 2 * 1000 : 100;
   wifi_scanning_ = true;
   BrowserThread::PostDelayedTask(
       BrowserThread::UI, FROM_HERE,
       base::Bind(&NetworkLibraryImplStub::ScanCompleted,
                  weak_pointer_factory_.GetWeakPtr()),
-      base::TimeDelta::FromMilliseconds(kScanDelayMs));
+      base::TimeDelta::FromMilliseconds(scan_delay_ms));
 }
 
 void NetworkLibraryImplStub::RefreshIPConfig(Network* network) {

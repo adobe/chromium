@@ -68,7 +68,7 @@ SyncerError DownloadUpdatesCommand::ExecuteImpl(SyncSession* session) {
 
   // Request updates for all enabled types.
   const ModelTypeSet enabled_types =
-      GetRoutingInfoTypes(session->routing_info());
+      GetRoutingInfoTypes(session->context()->routing_info());
   DVLOG(1) << "Getting updates for types "
            << ModelTypeSetToString(enabled_types);
   DCHECK(!enabled_types.Empty());
@@ -77,6 +77,8 @@ SyncerError DownloadUpdatesCommand::ExecuteImpl(SyncSession* session) {
       session->source().types;
   for (ModelTypeSet::Iterator it = enabled_types.First();
        it.Good(); it.Inc()) {
+    if (ProxyTypes().Has(it.Get()))
+      continue;
     sync_pb::DataTypeProgressMarker* progress_marker =
         get_updates->add_from_progress_marker();
     dir->GetDownloadProgress(it.Get(), progress_marker);

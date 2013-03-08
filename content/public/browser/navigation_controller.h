@@ -155,6 +155,10 @@ class NavigationController {
     // in which case it should replace the current navigation entry.
     bool is_cross_site_redirect;
 
+    // Used to specify which frame to navigate. If empty, the main frame is
+    // navigated. This is currently only used in tests.
+    std::string frame_name;
+
     explicit LoadURLParams(const GURL& url);
     ~LoadURLParams();
 
@@ -264,6 +268,15 @@ class NavigationController {
   // discarded if any navigation occurs. Note that the returned entry is owned
   // by the navigation controller and may be deleted at any time.
   virtual NavigationEntry* GetTransientEntry() const = 0;
+
+  // Adds an entry that is returned by GetActiveEntry(). The entry is
+  // transient: any navigation causes it to be removed and discarded.  The
+  // NavigationController becomes the owner of |entry| and deletes it when
+  // it discards it. This is useful with interstitial pages that need to be
+  // represented as an entry, but should go away when the user navigates away
+  // from them.
+  // Note that adding a transient entry does not change the active contents.
+  virtual void SetTransientEntry(NavigationEntry* entry) = 0;
 
   // New navigations -----------------------------------------------------------
 

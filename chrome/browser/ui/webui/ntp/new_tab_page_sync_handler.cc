@@ -8,12 +8,12 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
-#include "base/string_split.h"
+#include "base/prefs/pref_service.h"
 #include "base/string_util.h"
+#include "base/strings/string_split.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/net/chrome_url_request_context.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/signin_manager.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
@@ -67,9 +67,13 @@ NewTabPageSyncHandler::MessageType
 void NewTabPageSyncHandler::RegisterMessages() {
   sync_service_ = ProfileSyncServiceFactory::GetInstance()->GetForProfile(
       Profile::FromWebUI(web_ui()));
-  DCHECK(sync_service_);  // This shouldn't get called by an incognito NTP.
-  DCHECK(!sync_service_->IsManaged());  // And neither if sync is managed.
-  sync_service_->AddObserver(this);
+  if (sync_service_)
+    sync_service_->AddObserver(this);
+  profile_pref_registrar_.Init(Profile::FromWebUI(web_ui())->GetPrefs());
+  profile_pref_registrar_.Add(
+      prefs::kSigninAllowed,
+      base::Bind(&NewTabPageSyncHandler::OnSigninAllowedPrefChange,
+                 base::Unretained(this)));
 
   web_ui()->RegisterMessageCallback("GetSyncMessage",
       base::Bind(&NewTabPageSyncHandler::HandleGetSyncMessage,
@@ -90,9 +94,14 @@ void NewTabPageSyncHandler::HideSyncStatusSection() {
 
 void NewTabPageSyncHandler::BuildAndSendSyncStatus() {
   DCHECK(!waiting_for_initial_page_load_);
+  SigninManager* signin = SigninManagerFactory::GetForProfile(
+      Profile::FromWebUI(web_ui()));
 
   // Hide the sync status section if sync is managed or disabled entirely.
-  if (!sync_service_ || sync_service_->IsManaged()) {
+  if (!sync_service_ ||
+      sync_service_->IsManaged() ||
+      !signin ||
+      !signin->IsSigninAllowed()) {
     HideSyncStatusSection();
     return;
   }
@@ -110,8 +119,6 @@ void NewTabPageSyncHandler::BuildAndSendSyncStatus() {
   //               message).
   string16 status_msg;
   string16 link_text;
-  SigninManager* signin = SigninManagerFactory::GetForProfile(
-      Profile::FromWebUI(web_ui()));
 
   sync_ui_util::MessageType type =
       sync_ui_util::GetStatusLabelsForNewTabPage(sync_service_,
@@ -124,14 +131,13 @@ void NewTabPageSyncHandler::BuildAndSendSyncStatus() {
 
 void NewTabPageSyncHandler::HandleSyncLinkClicked(const ListValue* args) {
   DCHECK(!waiting_for_initial_page_load_);
-  DCHECK(sync_service_);
-  if (!sync_service_->IsSyncEnabled())
+  if (!sync_service_ || !sync_service_->IsSyncEnabled())
     return;
   Browser* browser =
       chrome::FindBrowserWithWebContents(web_ui()->GetWebContents());
   if (!browser || browser->IsAttemptingToCloseBrowser())
     return;
-  chrome::ShowSyncSetup(browser, SyncPromoUI::SOURCE_NTP_LINK);
+  chrome::ShowBrowserSignin(browser, SyncPromoUI::SOURCE_NTP_LINK);
 
   if (sync_service_->HasSyncSetupCompleted()) {
     string16 user = UTF8ToUTF16(SigninManagerFactory::GetForProfile(
@@ -147,6 +153,13 @@ void NewTabPageSyncHandler::HandleSyncLinkClicked(const ListValue* args) {
 }
 
 void NewTabPageSyncHandler::OnStateChanged() {
+  // Don't do anything if the page has not yet loaded.
+  if (waiting_for_initial_page_load_)
+    return;
+  BuildAndSendSyncStatus();
+}
+
+void NewTabPageSyncHandler::OnSigninAllowedPrefChange() {
   // Don't do anything if the page has not yet loaded.
   if (waiting_for_initial_page_load_)
     return;

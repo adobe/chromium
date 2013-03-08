@@ -7,6 +7,7 @@
 #include "base/command_line.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
+#include "base/prefs/testing_pref_service.h"
 #include "chrome/browser/printing/cloud_print/cloud_print_proxy_service.h"
 #include "chrome/browser/printing/cloud_print/cloud_print_proxy_service_factory.h"
 #include "chrome/browser/service/service_process_control.h"
@@ -16,7 +17,7 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/service_messages.h"
 #include "chrome/test/base/testing_browser_process.h"
-#include "chrome/test/base/testing_pref_service.h"
+#include "chrome/test/base/testing_pref_service_syncable.h"
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/testing_profile_manager.h"
 #include "content/public/browser/browser_thread.h"
@@ -169,7 +170,7 @@ class TestCloudPrintProxyService : public CloudPrintProxyService {
   explicit TestCloudPrintProxyService(Profile* profile)
       : CloudPrintProxyService(profile) { }
 
-  virtual ServiceProcessControl* GetServiceProcessControl() {
+  virtual ServiceProcessControl* GetServiceProcessControl() OVERRIDE {
     return &process_control_;
   }
   MockServiceProcessControl* GetMockServiceProcessControl() {
@@ -190,7 +191,7 @@ class CloudPrintProxyPolicyTest : public ::testing::Test {
     int return_code = 0;
     StartupBrowserCreator browser_creator;
     return StartupBrowserCreator::ProcessCmdLineImpl(
-        command_line, FilePath(), false, profile,
+        command_line, base::FilePath(), false, profile,
         StartupBrowserCreator::Profiles(), &return_code, &browser_creator);
   }
 

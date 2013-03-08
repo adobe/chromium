@@ -264,9 +264,6 @@ NativeAppWindowCocoa::NativeAppWindowCocoa(
       window,
       extensions::ExtensionKeybindingRegistry::PLATFORM_APPS_ONLY,
       shell_window));
-  registrar_.Add(this, content::NOTIFICATION_RENDER_VIEW_HOST_CHANGED,
-                 content::Source<content::NavigationController>(
-                     &web_contents()->GetController()));
 }
 
 void NativeAppWindowCocoa::InstallView() {
@@ -639,19 +636,9 @@ void NativeAppWindowCocoa::InstallDraggableRegionViews() {
                                        webViewHeight - iter->bottom(),
                                        iter->width(),
                                        iter->height())];
+    [controlRegion setAutoresizingMask:NSViewWidthSizable|NSViewHeightSizable];
     [webView addSubview:controlRegion];
   }
-}
-
-void NativeAppWindowCocoa::Observe(
-    int type,
-    const content::NotificationSource& source,
-    const content::NotificationDetails& details) {
-  if (type == content::NOTIFICATION_RENDER_VIEW_HOST_CHANGED) {
-    web_contents()->Focus();
-    return;
-  }
-  NOTREACHED();
 }
 
 void NativeAppWindowCocoa::FlashFrame(bool flash) {
@@ -667,13 +654,27 @@ bool NativeAppWindowCocoa::IsAlwaysOnTop() const {
   return false;
 }
 
+void NativeAppWindowCocoa::RenderViewHostChanged() {
+  web_contents()->GetView()->Focus();
+}
+
 gfx::Insets NativeAppWindowCocoa::GetFrameInsets() const {
   if (!has_frame_)
     return gfx::Insets();
-  gfx::Rect frameRect(NSRectToCGRect([window() frame]));
-  gfx::Rect contentRect(
-      NSRectToCGRect([window() contentRectForFrameRect:[window() frame]]));
-  return frameRect.InsetsFrom(contentRect);
+
+  // Flip the coordinates based on the main screen.
+  NSInteger screen_height =
+      NSHeight([[[NSScreen screens] objectAtIndex:0] frame]);
+
+  NSRect frame_nsrect = [window() frame];
+  gfx::Rect frame_rect(NSRectToCGRect(frame_nsrect));
+  frame_rect.set_y(screen_height - NSMaxY(frame_nsrect));
+
+  NSRect content_nsrect = [window() contentRectForFrameRect:frame_nsrect];
+  gfx::Rect content_rect(NSRectToCGRect(content_nsrect));
+  content_rect.set_y(screen_height - NSMaxY(content_nsrect));
+
+  return frame_rect.InsetsFrom(content_rect);
 }
 
 void NativeAppWindowCocoa::WindowWillClose() {

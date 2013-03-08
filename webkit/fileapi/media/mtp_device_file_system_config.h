@@ -7,10 +7,17 @@
 
 #include "build/build_config.h"
 
-// Support MTP device file system for Windows, Linux and ChromeOS. Note that
-// OS_LINUX implies OS_CHROMEOS.
-#if defined(OS_WIN) || defined(OS_LINUX)
+// Support MTP device file system for Windows, Mac, Linux and ChromeOS.
+// Note that OS_LINUX implies OS_CHROMEOS.
+// TODO(gbillock): remove this define and make this default.
+#if defined(OS_WIN) || defined(OS_MACOSX) || defined(OS_LINUX)
 #define SUPPORT_MTP_DEVICE_FILESYSTEM
+#endif
+
+// Use asynchronous MTP device delegate API.
+// TODO(kmadhusu): remove this define and make this default.
+#if defined(OS_WIN)
+#define USE_MTP_DEVICE_ASYNC_DELEGATE
 #endif
 
 #endif  // WEBKIT_FILEAPI_MEDIA_MTP_DEVICE_FILE_SYSTEM_CONFIG_H_

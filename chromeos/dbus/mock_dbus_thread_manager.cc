@@ -27,8 +27,8 @@
 #include "chromeos/dbus/mock_power_manager_client.h"
 #include "chromeos/dbus/mock_session_manager_client.h"
 #include "chromeos/dbus/mock_sms_client.h"
-#include "chromeos/dbus/mock_speech_synthesizer_client.h"
 #include "chromeos/dbus/mock_update_engine_client.h"
+#include "chromeos/dbus/power_policy_controller.h"
 
 using ::testing::AnyNumber;
 using ::testing::Return;
@@ -60,7 +60,6 @@ MockDBusThreadManager::MockDBusThreadManager()
       mock_power_manager_client_(new MockPowerManagerClient),
       mock_session_manager_client_(new MockSessionManagerClient),
       mock_sms_client_(new MockSMSClient),
-      mock_speech_synthesizer_client_(new MockSpeechSynthesizerClient),
       mock_update_engine_client_(new MockUpdateEngineClient) {
   EXPECT_CALL(*this, GetBluetoothAdapterClient())
       .WillRepeatedly(Return(mock_bluetooth_adapter_client_.get()));
@@ -104,22 +103,39 @@ MockDBusThreadManager::MockDBusThreadManager()
       .WillRepeatedly(Return(mock_session_manager_client_.get()));
   EXPECT_CALL(*this, GetSMSClient())
       .WillRepeatedly(Return(mock_sms_client_.get()));
-  EXPECT_CALL(*this, GetSpeechSynthesizerClient())
-      .WillRepeatedly(Return(mock_speech_synthesizer_client_.get()));
   EXPECT_CALL(*this, GetUpdateEngineClient())
       .WillRepeatedly(Return(mock_update_engine_client_.get()));
+  EXPECT_CALL(*this, GetIBusInputContextClient())
+      .WillRepeatedly(ReturnNull());
 
+  EXPECT_CALL(*this, GetSystemBus())
+      .WillRepeatedly(ReturnNull());
   EXPECT_CALL(*this, GetIBusBus())
       .WillRepeatedly(ReturnNull());
 
-  // These observers calls are used in ChromeBrowserMainPartsChromeos.
+  // |power_policy_controller_| calls some of these from the constructor, so
+  // set these expectations before creating the controller.
   EXPECT_CALL(*mock_power_manager_client_.get(), AddObserver(_))
       .Times(AnyNumber());
   EXPECT_CALL(*mock_power_manager_client_.get(), RemoveObserver(_))
       .Times(AnyNumber());
+  EXPECT_CALL(*mock_power_manager_client_.get(), NotifyUserActivity(_))
+      .Times(AnyNumber());
+  EXPECT_CALL(*mock_power_manager_client_.get(), NotifyVideoActivity(_, _))
+      .Times(AnyNumber());
+  EXPECT_CALL(*mock_power_manager_client_.get(), SetPolicy(_))
+      .Times(AnyNumber());
+  power_policy_controller_.reset(
+      new PowerPolicyController(this, mock_power_manager_client_.get()));
+  EXPECT_CALL(*this, GetPowerPolicyController())
+      .WillRepeatedly(Return(power_policy_controller_.get()));
+
+  // These observers calls are used in ChromeBrowserMainPartsChromeos.
   EXPECT_CALL(*mock_session_manager_client_.get(), AddObserver(_))
       .Times(AnyNumber());
   EXPECT_CALL(*mock_session_manager_client_.get(), RemoveObserver(_))
+      .Times(AnyNumber());
+  EXPECT_CALL(*mock_session_manager_client_.get(), HasObserver(_))
       .Times(AnyNumber());
   EXPECT_CALL(*mock_update_engine_client_.get(), AddObserver(_))
       .Times(AnyNumber());
@@ -153,6 +169,9 @@ MockDBusThreadManager::MockDBusThreadManager()
   // Called from DiskMountManager::Initialize(), ChromeBrowserMainPartsChromeos.
   EXPECT_CALL(*mock_cros_disks_client_.get(), SetUpConnections(_, _))
       .Times(AnyNumber());
+  EXPECT_CALL(*mock_cros_disks_client_.get(),
+              EnumerateAutoMountableDevices(_, _))
+      .Times(AnyNumber());
 
   // Called from BluetoothManagerImpl ctor.
   EXPECT_CALL(*mock_bluetooth_manager_client_.get(), DefaultAdapter(_))
@@ -167,6 +186,15 @@ MockDBusThreadManager::MockDBusThreadManager()
   // Called from BrightnessController::GetBrightnessPercent as part of ash tray
   // initialization.
   EXPECT_CALL(*mock_power_manager_client_.get(), GetScreenBrightnessPercent(_))
+      .Times(AnyNumber());
+
+  // Called from GeolocationHandler::Init().
+  EXPECT_CALL(*mock_shill_manager_client_.get(), GetProperties(_))
+      .Times(AnyNumber());
+  EXPECT_CALL(*mock_shill_manager_client_.get(), AddPropertyChangedObserver(_))
+      .Times(AnyNumber());
+  EXPECT_CALL(*mock_shill_manager_client_.get(),
+              RemovePropertyChangedObserver(_))
       .Times(AnyNumber());
 }
 

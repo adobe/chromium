@@ -8,6 +8,7 @@
 #include <string>
 
 #include "base/json/json_writer.h"
+#include "base/logging.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_vector.h"
 #include "base/utf_string_conversions.h"
@@ -35,11 +36,13 @@ ExtensionBluetoothEventRouter::ExtensionBluetoothEventRouter(Profile* profile)
 }
 
 ExtensionBluetoothEventRouter::~ExtensionBluetoothEventRouter() {
-  CHECK(socket_map_.size() == 0);
   if (adapter_) {
     adapter_->RemoveObserver(this);
     adapter_ = NULL;
   }
+  DLOG_IF(WARNING, socket_map_.size() != 0)
+      << "Bluetooth sockets are still open.";
+  socket_map_.clear();
 }
 
 bool ExtensionBluetoothEventRouter::IsBluetoothSupported() const {
@@ -47,14 +50,14 @@ bool ExtensionBluetoothEventRouter::IsBluetoothSupported() const {
          device::BluetoothAdapterFactory::IsBluetoothAdapterAvailable();
 }
 
-void ExtensionBluetoothEventRouter::RunCallbackOnAdapterReady(
-    const device::BluetoothAdapter::AdapterCallback& callback) {
+void ExtensionBluetoothEventRouter::GetAdapter(
+    const device::BluetoothAdapterFactory::AdapterCallback& callback) {
   if (adapter_) {
     callback.Run(scoped_refptr<device::BluetoothAdapter>(adapter_));
     return;
   }
 
-  device::BluetoothAdapterFactory::RunCallbackOnAdapterReady(callback);
+  device::BluetoothAdapterFactory::GetAdapter(callback);
 }
 
 void ExtensionBluetoothEventRouter::OnListenerAdded() {
@@ -63,8 +66,8 @@ void ExtensionBluetoothEventRouter::OnListenerAdded() {
 }
 
 void ExtensionBluetoothEventRouter::OnListenerRemoved() {
-  num_event_listeners_--;
-  CHECK(num_event_listeners_ >= 0);
+  if (num_event_listeners_ > 0)
+    num_event_listeners_--;
   MaybeReleaseAdapter();
 }
 
@@ -73,9 +76,8 @@ int ExtensionBluetoothEventRouter::RegisterSocket(
   // If there is a socket registered with the same fd, just return it's id
   for (SocketMap::const_iterator i = socket_map_.begin();
       i != socket_map_.end(); ++i) {
-    if (i->second->fd() == socket->fd()) {
+    if (i->second.get() == socket.get())
       return i->first;
-    }
   }
   int return_id = next_socket_id_++;
   socket_map_[return_id] = socket;
@@ -186,17 +188,17 @@ void ExtensionBluetoothEventRouter::DeviceAdded(
 
 void ExtensionBluetoothEventRouter::InitializeAdapterIfNeeded() {
   if (!adapter_) {
-    RunCallbackOnAdapterReady(
-        base::Bind(&ExtensionBluetoothEventRouter::InitializeAdapter,
-                   weak_ptr_factory_.GetWeakPtr()));
+    GetAdapter(base::Bind(&ExtensionBluetoothEventRouter::InitializeAdapter,
+                          weak_ptr_factory_.GetWeakPtr()));
   }
 }
 
 void ExtensionBluetoothEventRouter::InitializeAdapter(
     scoped_refptr<device::BluetoothAdapter> adapter) {
-  adapter_ = adapter;
-  if (adapter_)
+  if (!adapter_) {
+    adapter_ = adapter;
     adapter_->AddObserver(this);
+  }
 }
 
 void ExtensionBluetoothEventRouter::MaybeReleaseAdapter() {

@@ -17,6 +17,7 @@ var CookiesView = options.CookiesView;
 var CreateProfileOverlay = options.CreateProfileOverlay;
 var EditDictionaryOverlay = cr.IsMac ? null : options.EditDictionaryOverlay;
 var FactoryResetOverlay = options.FactoryResetOverlay;
+var ManagedUserSetPassphraseOverlay = options.ManagedUserSetPassphraseOverlay;
 var ManagedUserSettings = options.ManagedUserSettings;
 var FontSettings = options.FontSettings;
 var HandlerOptions = options.HandlerOptions;
@@ -144,9 +145,12 @@ function load() {
   OptionsPage.registerOverlay(ManageProfileOverlay.getInstance(),
                               BrowserOptions.getInstance());
   if (loadTimeData.getBoolean('managedUsersEnabled')) {
+    OptionsPage.registerOverlay(ManagedUserSetPassphraseOverlay.getInstance(),
+                                ManagedUserSettings.getInstance(),
+                                [$('set-passphrase')]);
     OptionsPage.registerOverlay(ManagedUserSettings.getInstance(),
                                 BrowserOptions.getInstance(),
-                                []);
+                                [$('managed-user-settings-button')]);
   }
   OptionsPage.registerOverlay(MediaGalleriesManager.getInstance(),
                               ContentSettings.getInstance(),
@@ -160,7 +164,8 @@ function load() {
   OptionsPage.registerOverlay(StartupOverlay.getInstance(),
                               BrowserOptions.getInstance());
   OptionsPage.registerOverlay(SyncSetupOverlay.getInstance(),
-                              BrowserOptions.getInstance());
+                              BrowserOptions.getInstance(),
+                              [$('customize-sync')]);
   if (cr.isChromeOS) {
     OptionsPage.registerOverlay(AccountsOptions.getInstance(),
                                 BrowserOptions.getInstance(),
@@ -181,9 +186,14 @@ function load() {
     OptionsPage.registerOverlay(DisplayOptions.getInstance(),
                                 BrowserOptions.getInstance(),
                                 [$('display-options')]);
+    OptionsPage.registerOverlay(DisplayOverscan.getInstance(),
+                                DisplayOptions.getInstance());
     OptionsPage.registerOverlay(KeyboardOverlay.getInstance(),
                                 BrowserOptions.getInstance(),
                                 [$('keyboard-settings-button')]);
+    OptionsPage.registerOverlay(KioskAppsOverlay.getInstance(),
+                                BrowserOptions.getInstance(),
+                                [$('manage-kiosk-apps-button')]);
     OptionsPage.registerOverlay(PointerOverlay.getInstance(),
                                 BrowserOptions.getInstance(),
                                 [$('pointer-settings-button')]);

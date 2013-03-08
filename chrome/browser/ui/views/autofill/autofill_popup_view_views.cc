@@ -118,7 +118,9 @@ void AutofillPopupViewViews::Show() {
     views::Widget::InitParams params(views::Widget::InitParams::TYPE_POPUP);
     params.delegate = this;
     params.transparent = true;
-    params.parent = controller_->container_view();
+    // Note: since there is no parent specified, this popup must handle deleting
+    // itself.
+    params.context = controller_->container_view();
     widget->Init(params);
     widget->SetContentsView(this);
     widget->SetBounds(controller_->popup_bounds());
@@ -148,57 +150,49 @@ void AutofillPopupViewViews::UpdateBoundsAndRedrawPopup() {
 void AutofillPopupViewViews::DrawAutofillEntry(gfx::Canvas* canvas,
                                                int index,
                                                const gfx::Rect& entry_rect) {
-  // TODO(csharp): support RTL
-
   if (controller_->selected_line() == index)
     canvas->FillRect(entry_rect, kHoveredBackgroundColor);
 
+  bool is_rtl = base::i18n::IsRTL();
+  int value_text_width = controller_->GetNameFontForRow(index).GetStringWidth(
+      controller_->names()[index]);
+  int value_content_x = is_rtl ?
+      entry_rect.width() - value_text_width - kEndPadding : kEndPadding;
+
   canvas->DrawStringInt(
       controller_->names()[index],
-      controller_->name_font(),
+      controller_->GetNameFontForRow(index),
       kValueTextColor,
-      kEndPadding,
+      value_content_x,
       entry_rect.y(),
       canvas->GetStringWidth(controller_->names()[index],
-                             controller_->name_font()),
+                             controller_->GetNameFontForRow(index)),
       entry_rect.height(),
       gfx::Canvas::TEXT_ALIGN_CENTER);
 
   // Use this to figure out where all the other Autofill items should be placed.
-  int x_align_left = entry_rect.width() - kEndPadding;
-
-  // Draw the delete icon, if one is needed.
-  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
-  int row_height = controller_->GetRowBounds(index).height();
-  if (controller_->CanDelete(index)) {
-    x_align_left -= kDeleteIconWidth;
-
-    // TODO(csharp): Create a custom resource for the delete icon.
-    // http://crbug.com/131801
-    canvas->DrawImageInt(
-        *rb.GetImageSkiaNamed(IDR_CLOSE_BAR),
-        x_align_left,
-        entry_rect.y() + (row_height - kDeleteIconHeight) / 2);
-
-    x_align_left -= kIconPadding;
-  }
+  int x_align_left = is_rtl ? kEndPadding : entry_rect.width() - kEndPadding;
 
   // Draw the Autofill icon, if one exists
+  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
+  int row_height = controller_->GetRowBounds(index).height();
   if (!controller_->icons()[index].empty()) {
     int icon = controller_->GetIconResourceID(controller_->icons()[index]);
     DCHECK_NE(-1, icon);
     int icon_y = entry_rect.y() + (row_height - kAutofillIconHeight) / 2;
 
-    x_align_left -= kAutofillIconWidth;
+    x_align_left += is_rtl ? 0 : -kAutofillIconWidth;
 
     canvas->DrawImageInt(*rb.GetImageSkiaNamed(icon), x_align_left, icon_y);
 
-    x_align_left -= kIconPadding;
+    x_align_left += is_rtl ? kAutofillIconWidth + kIconPadding : -kIconPadding;
   }
 
   // Draw the name text.
-  x_align_left -= canvas->GetStringWidth(controller_->subtexts()[index],
-                                         controller_->subtext_font());
+  if (!is_rtl) {
+    x_align_left -= canvas->GetStringWidth(controller_->subtexts()[index],
+                                           controller_->subtext_font());
+  }
 
   canvas->DrawStringInt(
       controller_->subtexts()[index],

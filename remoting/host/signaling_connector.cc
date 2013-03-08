@@ -6,6 +6,7 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
+#include "google_apis/gaia/gaia_urls.h"
 #include "google_apis/google_api_keys.h"
 #include "net/url_request/url_fetcher.h"
 #include "net/url_request/url_request_context_getter.h"
@@ -59,8 +60,9 @@ SignalingConnector::~SignalingConnector() {
 void SignalingConnector::EnableOAuth(
     scoped_ptr<OAuthCredentials> oauth_credentials) {
   oauth_credentials_ = oauth_credentials.Pass();
-  gaia_oauth_client_.reset(new gaia::GaiaOAuthClient(
-      gaia::kGaiaOAuth2Url, url_request_context_getter_));
+  gaia_oauth_client_.reset(
+      new gaia::GaiaOAuthClient(GaiaUrls::GetInstance()->oauth2_token_url(),
+                                url_request_context_getter_));
 }
 
 void SignalingConnector::OnSignalStrategyStateChange(
@@ -92,7 +94,8 @@ bool SignalingConnector::OnSignalStrategyIncomingStanza(
 void SignalingConnector::OnConnectionTypeChanged(
     net::NetworkChangeNotifier::ConnectionType type) {
   DCHECK(CalledOnValidThread());
-  if (type != net::NetworkChangeNotifier::CONNECTION_NONE) {
+  if (type != net::NetworkChangeNotifier::CONNECTION_NONE &&
+      signal_strategy_->GetState() == SignalStrategy::DISCONNECTED) {
     LOG(INFO) << "Network state changed to online.";
     ResetAndTryReconnect();
   }
@@ -100,8 +103,10 @@ void SignalingConnector::OnConnectionTypeChanged(
 
 void SignalingConnector::OnIPAddressChanged() {
   DCHECK(CalledOnValidThread());
-  LOG(INFO) << "IP address has changed.";
-  ResetAndTryReconnect();
+  if (signal_strategy_->GetState() == SignalStrategy::DISCONNECTED) {
+    LOG(INFO) << "IP address has changed.";
+    ResetAndTryReconnect();
+  }
 }
 
 void SignalingConnector::OnGetTokensResponse(const std::string& user_email,

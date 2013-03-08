@@ -7,23 +7,23 @@
 
 #include "chrome/installer/util/google_chrome_distribution.h"
 
-#include <vector>
 #include <windows.h>
-#include <wtsapi32.h>
 #include <msi.h>
 #include <sddl.h>
+#include <wtsapi32.h>
+#include <vector>
 
 #include "base/command_line.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/json/json_file_value_serializer.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
 #include "base/process_util.h"
 #include "base/rand_util.h"
-#include "base/string_number_conversions.h"
-#include "base/string_split.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
+#include "base/strings/string_number_conversions.h"
+#include "base/strings/string_split.h"
 #include "base/utf_string_conversions.h"
 #include "base/win/registry.h"
 #include "base/win/windows_version.h"
@@ -33,14 +33,15 @@
 #include "chrome/common/net/test_server_locations.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/installer/util/channel_info.h"
-#include "chrome/installer/util/product.h"
-#include "chrome/installer/util/install_util.h"
-#include "chrome/installer/util/l10n_string_util.h"
 #include "chrome/installer/util/google_update_constants.h"
 #include "chrome/installer/util/google_update_settings.h"
 #include "chrome/installer/util/helper.h"
+#include "chrome/installer/util/install_util.h"
+#include "chrome/installer/util/l10n_string_util.h"
+#include "chrome/installer/util/product.h"
 #include "chrome/installer/util/util_constants.h"
 #include "chrome/installer/util/wmi.h"
+#include "content/public/common/result_codes.h"
 
 #include "installer_util_strings.h"  // NOLINT
 
@@ -176,7 +177,7 @@ bool LaunchSetup(CommandLine* cmd_line,
 // This function changes the permissions so that any authenticated user
 // can launch |exe| later on. This function should only be called if the
 // code is running at the system level.
-bool FixDACLsForExecute(const FilePath& exe) {
+bool FixDACLsForExecute(const base::FilePath& exe) {
   // The general strategy to is to add an ACE to the exe DACL the quick
   // and dirty way: a) read the DACL b) convert it to sddl string c) add the
   // new ACE to the string d) convert sddl string back to DACL and finally
@@ -227,7 +228,7 @@ bool FixDACLsForExecute(const FilePath& exe) {
 // the computer is on but nobody has logged in locally.
 // Remote Desktop sessions do not count as interactive sessions; running this
 // method as a user logged in via remote desktop will do nothing.
-bool LaunchSetupAsConsoleUser(const FilePath& setup_path,
+bool LaunchSetupAsConsoleUser(const base::FilePath& setup_path,
                               const installer::Product& product,
                               const std::string& flag) {
   CommandLine cmd_line(setup_path);
@@ -290,9 +291,6 @@ GoogleChromeDistribution::GoogleChromeDistribution()
       product_guid_(kChromeGuid) {
 }
 
-// The functions below are not used by the 64-bit Windows binary -
-// see the comment in google_chrome_distribution_dummy.cc
-#ifndef _WIN64
 bool GoogleChromeDistribution::BuildUninstallMetricsString(
     const DictionaryValue* uninstall_metrics_dict, string16* metrics) {
   DCHECK(NULL != metrics);
@@ -314,7 +312,7 @@ bool GoogleChromeDistribution::BuildUninstallMetricsString(
 }
 
 bool GoogleChromeDistribution::ExtractUninstallMetricsFromFile(
-    const FilePath& file_path,
+    const base::FilePath& file_path,
     string16* uninstall_metrics_string) {
   JSONFileValueSerializer json_serializer(file_path);
 
@@ -357,11 +355,10 @@ bool GoogleChromeDistribution::ExtractUninstallMetrics(
 
   return true;
 }
-#endif
 
 void GoogleChromeDistribution::DoPostUninstallOperations(
     const Version& version,
-    const FilePath& local_data_path,
+    const base::FilePath& local_data_path,
     const string16& distribution_data) {
   // Send the Chrome version and OS version as params to the form.
   // It would be nice to send the locale, too, but I don't see an
@@ -377,7 +374,7 @@ void GoogleChromeDistribution::DoPostUninstallOperations(
   string16 os_version = base::StringPrintf(L"%d.%d.%d",
       version_number.major, version_number.minor, version_number.build);
 
-  FilePath iexplore;
+  base::FilePath iexplore;
   if (!PathService::Get(base::DIR_PROGRAM_FILES, &iexplore))
     return;
 
@@ -405,6 +402,10 @@ void GoogleChromeDistribution::DoPostUninstallOperations(
   // are processes running, the shell will not close the uninstall applet. WMI
   // allows us to escape from the Job object so the applet will close.
   installer::WMIProcess::Launch(command, &pid);
+}
+
+string16 GoogleChromeDistribution::GetActiveSetupGuid() {
+  return product_guid();
 }
 
 string16 GoogleChromeDistribution::GetAppGuid() {
@@ -568,9 +569,6 @@ void GoogleChromeDistribution::UpdateInstallStatus(bool system_install,
       product_guid());
 }
 
-// The functions below are not used by the 64-bit Windows binary -
-// see the comment in google_chrome_distribution_dummy.cc
-#ifndef _WIN64
 // A helper function that writes to HKLM if the handle was passed through the
 // command line, but HKCU otherwise. |experiment_group| is the value to write
 // and |last_write| is used when writing to HKLM to determine whether to close
@@ -715,7 +713,7 @@ bool GoogleChromeDistribution::GetExperimentDetails(
 // 3- It has been re-launched from the #2 case. In this case we enter
 //    this function with |system_install| true and a REENTRY_SYS_UPDATE status.
 void GoogleChromeDistribution::LaunchUserExperiment(
-    const FilePath& setup_path, installer::InstallStatus status,
+    const base::FilePath& setup_path, installer::InstallStatus status,
     const Version& version, const installer::Product& product,
     bool system_level) {
   VLOG(1) << "LaunchUserExperiment status: " << status << " product: "
@@ -763,7 +761,7 @@ void GoogleChromeDistribution::LaunchUserExperiment(
     }
     // Check browser usage inactivity by the age of the last-write time of the
     // most recently-used chrome user data directory.
-    std::vector<FilePath> user_data_dirs;
+    std::vector<base::FilePath> user_data_dirs;
     product.GetUserDataPaths(&user_data_dirs);
     int dir_age_hours = -1;
     for (size_t i = 0; i < user_data_dirs.size(); ++i) {
@@ -819,7 +817,7 @@ void GoogleChromeDistribution::LaunchUserExperiment(
 void GoogleChromeDistribution::InactiveUserToastExperiment(int flavor,
     const string16& experiment_group,
     const installer::Product& installation,
-    const FilePath& application_path) {
+    const base::FilePath& application_path) {
   // Add the 'welcome back' url for chrome to show.
   CommandLine options(CommandLine::NO_PROGRAM);
   options.AppendSwitchNative(switches::kTryChromeAgain,
@@ -868,7 +866,6 @@ void GoogleChromeDistribution::InactiveUserToastExperiment(int flavor,
                                                      GetType()));
   base::LaunchProcess(cmd, base::LaunchOptions(), NULL);
 }
-#endif  // ifndef _WIN64
 
 bool GoogleChromeDistribution::ShouldSetExperimentLabels() {
   return true;

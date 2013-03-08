@@ -4,12 +4,12 @@
 
 #include "chrome/browser/ui/views/bookmarks/bookmark_menu_delegate.h"
 
+#include "base/prefs/pref_service.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/bookmarks/bookmark_node_data.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/bookmarks/bookmark_utils.h"
 #include "chrome/browser/ui/browser.h"
@@ -216,7 +216,6 @@ int BookmarkMenuDelegate::GetDropOperation(
         // Dropping before this node makes no sense.
         *position = views::MenuDelegate::DROP_NONE;
       }
-      index_to_drop_at++;
       break;
 
     case views::MenuDelegate::DROP_ON:

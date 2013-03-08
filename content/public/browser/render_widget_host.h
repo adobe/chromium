@@ -22,12 +22,14 @@
 #include "skia/ext/platform_device.h"
 #endif
 
+class SkBitmap;
+
 namespace gfx {
 class Rect;
 }
 
-namespace skia {
-class PlatformBitmap;
+namespace WebKit {
+struct WebScreenInfo;
 }
 
 namespace content {
@@ -170,22 +172,24 @@ class CONTENT_EXPORT RenderWidgetHost : public IPC::Sender {
   // contents, but e.g. in the omnibox.
   virtual void SetActive(bool active) = 0;
 
-  // Copies the given subset of the backing store into the given (uninitialized)
-  // PlatformCanvas. If |src_rect| is empty, the whole contents is copied.
-  // If non empty |accelerated_dest_size| is given and accelerated compositing
-  // is active, the content is shrinked so that it fits in
-  // |accelerated_dest_size|. If |accelerated_dest_size| is larger than the
-  // contens size, the content is not resized. If |accelerated_dest_size| is
-  // empty, the size copied from the source contents is used.
-  // |callback| is invoked with true on success, false otherwise. |output| can
-  // be initialized even on failure.
+  // Copies the given subset of the backing store, and passes the result as a
+  // bitmap to a callback.
+  //
+  // If |src_rect| is empty, the whole contents is copied. If non empty
+  // |accelerated_dst_size| is given and accelerated compositing is active, the
+  // content is shrunk so that it fits in |accelerated_dst_size|. If
+  // |accelerated_dst_size| is larger than the content size, the content is not
+  // resized. If |accelerated_dst_size| is empty, the size copied from the
+  // source contents is used. |callback| is invoked with true on success, false
+  // otherwise, along with a SkBitmap containing the copied pixel data.
+  //
   // NOTE: |callback| is called synchronously if the backing store is available.
-  // When accelerated compositing is active, it is called asynchronously on Aura
-  // and synchronously on the other platforms.
-  virtual void CopyFromBackingStore(const gfx::Rect& src_rect,
-                                    const gfx::Size& accelerated_dest_size,
-                                    const base::Callback<void(bool)>& callback,
-                                    skia::PlatformBitmap* output) = 0;
+  // When accelerated compositing is active, |callback| may be called
+  // asynchronously.
+  virtual void CopyFromBackingStore(
+      const gfx::Rect& src_rect,
+      const gfx::Size& accelerated_dst_size,
+      const base::Callback<void(bool, const SkBitmap&)>& callback) = 0;
 #if defined(TOOLKIT_GTK)
   // Paint the backing store into the target's |dest_rect|.
   virtual bool CopyFromBackingStoreToGtkWindow(const gfx::Rect& dest_rect,
@@ -244,6 +248,10 @@ class CONTENT_EXPORT RenderWidgetHost : public IPC::Sender {
   // or a word around the cursor.
   virtual void Replace(const string16& word) = 0;
 
+  // Makes an IPC call to tell webkit to replace the misspelling in the current
+  // selection.
+  virtual void ReplaceMisspelling(const string16& word) = 0;
+
   // Called to notify the RenderWidget that the resize rect has changed without
   // the size of the RenderWidget itself changing.
   virtual void ResizeRectChanged(const gfx::Rect& new_rect) = 0;
@@ -272,6 +280,9 @@ class CONTENT_EXPORT RenderWidgetHost : public IPC::Sender {
 
   // Remove a keyboard listener.
   virtual void RemoveKeyboardListener(KeyboardListener* listener) = 0;
+
+  // Get the screen info corresponding to this render widget.
+  virtual void GetWebScreenInfo(WebKit::WebScreenInfo* result) = 0;
 
  protected:
   friend class RenderWidgetHostImpl;

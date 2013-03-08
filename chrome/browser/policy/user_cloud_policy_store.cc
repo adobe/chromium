@@ -41,13 +41,14 @@ struct PolicyLoadResult {
 namespace {
 
 // Subdirectory in the user's profile for storing user policies.
-const FilePath::CharType kPolicyDir[] = FILE_PATH_LITERAL("Policy");
+const base::FilePath::CharType kPolicyDir[] = FILE_PATH_LITERAL("Policy");
 // File in the above directory for storing user policy data.
-const FilePath::CharType kPolicyCacheFile[] = FILE_PATH_LITERAL("User Policy");
+const base::FilePath::CharType kPolicyCacheFile[] =
+    FILE_PATH_LITERAL("User Policy");
 
 // Loads policy from the backing file. Returns a PolicyLoadResult with the
 // results of the fetch.
-policy::PolicyLoadResult LoadPolicyFromDisk(const FilePath& path) {
+policy::PolicyLoadResult LoadPolicyFromDisk(const base::FilePath& path) {
   policy::PolicyLoadResult result;
   // If the backing file does not exist, just return.
   if (!file_util::PathExists(path)) {
@@ -68,7 +69,7 @@ policy::PolicyLoadResult LoadPolicyFromDisk(const FilePath& path) {
 
 // Stores policy to the backing file (must be called via a task on
 // the FILE thread).
-void StorePolicyToDiskOnFileThread(const FilePath& path,
+void StorePolicyToDiskOnFileThread(const base::FilePath& path,
                                    const em::PolicyFetchResponse& policy) {
   DVLOG(1) << "Storing policy to " << path.value();
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::FILE));
@@ -92,7 +93,7 @@ void StorePolicyToDiskOnFileThread(const FilePath& path,
 }  // namespace
 
 UserCloudPolicyStore::UserCloudPolicyStore(Profile* profile,
-                                           const FilePath& path)
+                                           const base::FilePath& path)
     : ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)),
       profile_(profile),
       backing_file_path_(path) {
@@ -103,7 +104,7 @@ UserCloudPolicyStore::~UserCloudPolicyStore() {}
 // static
 scoped_ptr<UserCloudPolicyStore> UserCloudPolicyStore::Create(
     Profile* profile) {
-  FilePath path =
+  base::FilePath path =
       profile->GetPath().Append(kPolicyDir).Append(kPolicyCacheFile);
   return make_scoped_ptr(new UserCloudPolicyStore(profile, path));
 }
@@ -188,7 +189,6 @@ void UserCloudPolicyStore::InstallLoadedPolicyAfterValidation(
   DVLOG(1) << "Device ID: " << validator->policy_data()->device_id();
 
   InstallPolicy(validator->policy_data().Pass(), validator->payload().Pass());
-  FilterDisallowedPolicies();
   status_ = STATUS_OK;
   NotifyStoreLoaded();
 }
@@ -215,8 +215,9 @@ void UserCloudPolicyStore::Validate(
   SigninManager* signin = SigninManagerFactory::GetForProfileIfExists(profile_);
   if (signin) {
     std::string username = signin->GetAuthenticatedUsername();
-    DCHECK(!username.empty());
-    validator->ValidateUsername(username);
+    // Validate the username if the user is signed in.
+    if (!username.empty())
+      validator->ValidateUsername(username);
   }
 
   if (validate_in_background) {
@@ -247,17 +248,8 @@ void UserCloudPolicyStore::StorePolicyAfterValidation(
       base::Bind(&StorePolicyToDiskOnFileThread,
                  backing_file_path_, *validator->policy()));
   InstallPolicy(validator->policy_data().Pass(), validator->payload().Pass());
-  FilterDisallowedPolicies();
   status_ = STATUS_OK;
   NotifyStoreLoaded();
-}
-
-void UserCloudPolicyStore::FilterDisallowedPolicies() {
-  // We don't yet allow setting SyncDisabled in desktop cloud policy, because
-  // it causes the user to be signed out which then removes the cloud policy.
-  // TODO(atwilson): Remove this once we support signing in with sync disabled
-  // (http://crbug.com/166148).
-  policy_map_.Erase(key::kSyncDisabled);
 }
 
 }  // namespace policy

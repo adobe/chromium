@@ -73,6 +73,10 @@ html.loading * {
   font-size: 1.25em;
 }
 
+html[dir=rtl] #footer-section {
+  background: url('chrome://theme/IDR_WEBSTORE_ICON_32') no-repeat right center;
+}
+
 #footer-section > a {
   -webkit-margin-start: 42px;
   line-height: 32px;
@@ -215,6 +219,10 @@ html[dir='rtl'] .extension-list-item {
   float: right;
 }
 
+html[dir=rtl] .extension-commands-config {
+  float: left;
+}
+
 /* Overlays */
 
 #overlay {
@@ -289,16 +297,21 @@ html[dir='rtl'] #extension-settings .trash {
 
 /* Managed mode */
 
-.page:not(.managed-mode) .managed-mode-banner {
+.page:not(.managed-user-locked) .profile-is-managed-banner,
+.managed-user-locked .more-extensions-link,
+.page:not(.profile-is-managed) #managed-user-control-div,
+.page:not(.managed-user-locked) #unlock-button,
+.managed-user-locked #lock-button {
   display: none;
 }
 
-.managed-mode-banner .page-banner-text {
+.profile-is-managed-banner .page-banner-text {
   background-image: url('chrome://theme/IDR_WARNING');
 }
 
-.managed-mode .more-extensions-link {
-  display: none;
+#managed-user-control-div {
+  display: inline-block;
+  padding-left: 7px;
 }
 
 /* Sideload Wipeout */

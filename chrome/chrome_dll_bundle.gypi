@@ -58,7 +58,6 @@
     '<@(mac_all_xibs)',
     'app/theme/find_next_Template.pdf',
     'app/theme/find_prev_Template.pdf',
-    'app/theme/menu_hierarchy_arrow.pdf',
     'app/theme/menu_overflow_down.pdf',
     'app/theme/menu_overflow_up.pdf',
     'browser/mac/install.sh',
@@ -82,7 +81,7 @@
     # dependency here. flash_player.gyp will copy the Flash bundle
     # into PRODUCT_DIR.
     '../third_party/adobe/flash/flash_player.gyp:flapper_binaries',
-    '../third_party/widevine/cdm/widevine_cdm.gyp:widevinecdmplugin',
+    '../third_party/widevine/cdm/widevine_cdm.gyp:widevinecdmadapter',
     'chrome_resources.gyp:packed_extra_resources',
     'chrome_resources.gyp:packed_resources',
   ],
@@ -158,9 +157,17 @@
         ['disable_nacl!=1', {
           'files': [
             '<(PRODUCT_DIR)/ppGoogleNaClPluginChrome.plugin',
-            # We leave out the x86-64 IRT nexe because we only
-            # support x86-32 NaCl on Mac OS X.
-            '<(PRODUCT_DIR)/nacl_irt_x86_32.nexe',
+          ],
+          'conditions': [
+            ['target_arch=="x64"', {
+              'files': [
+                '<(PRODUCT_DIR)/nacl_irt_x86_64.nexe',
+              ],
+            }, {
+              'files': [
+                '<(PRODUCT_DIR)/nacl_irt_x86_32.nexe',
+              ],
+            }],
           ],
         }],
       ],

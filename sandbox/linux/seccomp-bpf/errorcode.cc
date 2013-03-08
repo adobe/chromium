@@ -2,7 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "sandbox/linux/seccomp-bpf/sandbox_bpf.h"
+#include "sandbox/linux/seccomp-bpf/die.h"
+#include "sandbox/linux/seccomp-bpf/errorcode.h"
 
 
 namespace playground2 {
@@ -22,7 +23,7 @@ ErrorCode::ErrorCode(int err) {
   }
 }
 
-ErrorCode::ErrorCode(ErrorCode::TrapFnc fnc, const void *aux, bool safe,
+ErrorCode::ErrorCode(Trap::TrapFnc fnc, const void *aux, bool safe,
                      uint16_t id)
     : error_type_(ET_TRAP),
       fnc_(fnc),

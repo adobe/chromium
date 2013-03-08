@@ -92,12 +92,14 @@
             '../base/base.gyp:base_unittests_apk',
             '../cc/cc_tests.gyp:cc_unittests_apk',
             '../chrome/chrome.gyp:unit_tests_apk',
+            '../components/components.gyp:components_unittests_apk',
+            '../content/content.gyp:content_browsertests_apk',
             '../content/content.gyp:content_unittests_apk',
             '../gpu/gpu.gyp:gpu_unittests_apk',
             '../ipc/ipc.gyp:ipc_tests_apk',
             '../media/media.gyp:media_unittests_apk',
             '../net/net.gyp:net_unittests_apk',
-            '../sandbox/sandbox.gyp:sandbox_linux_unittests_apk',
+            '../sandbox/sandbox.gyp:sandbox_linux_jni_unittests_apk',
             '../sql/sql.gyp:sql_unittests_apk',
             '../sync/sync.gyp:sync_unit_tests_apk',
             '../ui/ui.gyp:ui_unittests_apk',
@@ -123,7 +125,6 @@
       'target_name': 'android_in_progress',
       'type': 'none',
       'dependencies': [
-        '../content/content.gyp:content_browsertests',
       ],
     },
   ],  # targets

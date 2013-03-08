@@ -34,7 +34,27 @@ const char* const kInvalidNumbers[] = {
   "4111-1111-1111-1110", /* wrong Luhn checksum */
   "3056 9309 0259 04aa", /* non-digit characters */
 };
-
+const char* const kValidCreditCardSecurityCode[] = {
+  "323",  // 3-digit CSC.
+  "3234",  // 4-digit CSC.
+};
+const char* const kInvalidCreditCardSecurityCode[] = {
+  "32",  // CSC too short.
+  "12345",  // CSC too long.
+  "asd",  // non-numeric CSC.
+};
+const char* const kValidEmailAddress[] = {
+  "user@example",
+  "user@example.com",
+  "user@subdomain.example.com",
+  "user+postfix@example.com",
+};
+const char* const kInvalidEmailAddress[] = {
+  "user",
+  "foo.com",
+  "user@",
+  "user@=example.com"
+};
 }  // namespace
 
 TEST(AutofillValidation, IsValidCreditCardNumber) {
@@ -49,3 +69,33 @@ TEST(AutofillValidation, IsValidCreditCardNumber) {
         autofill::IsValidCreditCardNumber(ASCIIToUTF16(kInvalidNumbers[i])));
   }
 }
+
+TEST(AutofillValidation, IsValidCreditCardSecurityCode) {
+  for (size_t i = 0; i < arraysize(kValidCreditCardSecurityCode); ++i) {
+    SCOPED_TRACE(kValidCreditCardSecurityCode[i]);
+    EXPECT_TRUE(
+        autofill::IsValidCreditCardSecurityCode(
+            ASCIIToUTF16(kValidCreditCardSecurityCode[i])));
+  }
+  for (size_t i = 0; i < arraysize(kInvalidCreditCardSecurityCode); ++i) {
+    SCOPED_TRACE(kInvalidCreditCardSecurityCode[i]);
+    EXPECT_FALSE(
+        autofill::IsValidCreditCardSecurityCode(
+            ASCIIToUTF16(kInvalidCreditCardSecurityCode[i])));
+  }
+}
+
+TEST(AutofillValidation, IsValidEmailAddress) {
+  for (size_t i = 0; i < arraysize(kValidEmailAddress); ++i) {
+    SCOPED_TRACE(kValidEmailAddress[i]);
+    EXPECT_TRUE(
+        autofill::IsValidEmailAddress(ASCIIToUTF16(kValidEmailAddress[i])));
+  }
+  for (size_t i = 0; i < arraysize(kInvalidEmailAddress); ++i) {
+    SCOPED_TRACE(kInvalidEmailAddress[i]);
+    EXPECT_FALSE(
+        autofill::IsValidEmailAddress(ASCIIToUTF16(kInvalidEmailAddress[i])));
+  }
+}
+
+

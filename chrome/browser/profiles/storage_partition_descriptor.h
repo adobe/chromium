@@ -5,7 +5,7 @@
 #ifndef CHROME_BROWSER_PROFILES_STORAGE_PARTITION_DESCRIPTOR_H_
 #define CHROME_BROWSER_PROFILES_STORAGE_PARTITION_DESCRIPTOR_H_
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/hash_tables.h"
 
 // This structure combines a StoragePartition's on-disk path and a boolean for
@@ -13,12 +13,12 @@
 // a unique key to look up RequestContext objects in the ProfileIOData derived
 // classes.
 struct StoragePartitionDescriptor {
-  StoragePartitionDescriptor(const FilePath& partition_path,
+  StoragePartitionDescriptor(const base::FilePath& partition_path,
                              const bool in_memory_only)
     : path(partition_path),
       in_memory(in_memory_only) {}
 
-  const FilePath path;
+  const base::FilePath path;
   const bool in_memory;
 };
 

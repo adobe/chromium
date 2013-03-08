@@ -9,19 +9,21 @@
 #include "base/bind.h"
 #include "base/json/json_string_value_serializer.h"
 #include "base/logging.h"
+#include "base/prefs/pref_registry_simple.h"
+#include "base/prefs/pref_service.h"
 #include "base/string_util.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/chromeos/settings/cros_settings_names.h"
 #include "chrome/browser/policy/proto/chrome_device_policy.pb.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prefs/proxy_config_dictionary.h"
 #include "chrome/browser/prefs/proxy_prefs.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "chromeos/network/onc/onc_constants.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/notification_service.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -580,18 +582,17 @@ bool ProxyConfigServiceImpl::ParseProxyConfig(const Network* network,
 }
 
 // static
-void ProxyConfigServiceImpl::RegisterPrefs(PrefServiceSimple* pref_service) {
+void ProxyConfigServiceImpl::RegisterPrefs(PrefRegistrySimple* registry) {
   // Use shared proxies default to off.  GetUseSharedProxies will return the
   // correct value based on pre-login and login.
-  pref_service->RegisterBooleanPref(prefs::kUseSharedProxies, true);
+  registry->RegisterBooleanPref(prefs::kUseSharedProxies, true);
 }
 
 // static
-void ProxyConfigServiceImpl::RegisterUserPrefs(
-    PrefServiceSyncable* pref_service) {
-  pref_service->RegisterBooleanPref(prefs::kUseSharedProxies,
-                                    true,
-                                    PrefServiceSyncable::UNSYNCABLE_PREF);
+void ProxyConfigServiceImpl::RegisterUserPrefs(PrefRegistrySyncable* registry) {
+  registry->RegisterBooleanPref(prefs::kUseSharedProxies,
+                                true,
+                                PrefRegistrySyncable::UNSYNCABLE_PREF);
 }
 
 //------------------ ProxyConfigServiceImpl: private methods -------------------

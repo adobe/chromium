@@ -9,9 +9,11 @@
 #include "base/callback.h"
 #include "base/command_line.h"
 #include "base/run_loop.h"
-#include "base/string_number_conversions.h"
+#include "base/strings/string_number_conversions.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_iterator.h"
 #include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/host_desktop.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/tabs/tab.h"
@@ -19,8 +21,8 @@
 #include "chrome/browser/ui/views/tabs/tab_strip.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/test/base/interactive_test_utils.h"
 #include "chrome/test/base/in_process_browser_test.h"
+#include "chrome/test/base/interactive_test_utils.h"
 #include "chrome/test/base/ui_controls.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/notification_details.h"
@@ -37,10 +39,9 @@
 #include "ash/display/display_manager.h"
 #include "ash/shell.h"
 #include "ash/test/cursor_manager_test_api.h"
-#include "ash/wm/cursor_manager.h"
 #include "ash/wm/window_util.h"
-#include "ui/aura/test/event_generator.h"
 #include "ui/aura/root_window.h"
+#include "ui/aura/test/event_generator.h"
 #endif
 
 using content::WebContents;
@@ -140,7 +141,9 @@ using test::ResetIDs;
 using test::IDString;
 using test::GetTabStripForBrowser;
 
-TabDragControllerTest::TabDragControllerTest() {
+TabDragControllerTest::TabDragControllerTest()
+    : native_browser_list(BrowserList::GetInstance(
+                              chrome::HOST_DESKTOP_TYPE_NATIVE)) {
 }
 
 TabDragControllerTest::~TabDragControllerTest() {
@@ -445,8 +448,8 @@ IN_PROC_BROWSER_TEST_P(DetachToBrowserTabDragControllerTest,
   ASSERT_FALSE(TabDragController::IsActive());
 
   // There should now be another browser.
-  ASSERT_EQ(2u, BrowserList::size());
-  Browser* new_browser = *(++BrowserList::begin());
+  ASSERT_EQ(2u, native_browser_list->size());
+  Browser* new_browser = native_browser_list->get(1);
   ASSERT_TRUE(new_browser->window()->IsActive());
   TabStrip* tab_strip2 = GetTabStripForBrowser(new_browser);
   ASSERT_FALSE(tab_strip2->IsDragSessionActive());
@@ -559,9 +562,10 @@ IN_PROC_BROWSER_TEST_P(DetachToBrowserTabDragControllerTest,
 
 namespace {
 
-void DeleteSourceDetachedStep2(WebContents* tab) {
-  ASSERT_EQ(2u, BrowserList::size());
-  Browser* new_browser = *(++BrowserList::begin());
+void DeleteSourceDetachedStep2(WebContents* tab,
+                               const BrowserList* browser_list) {
+  ASSERT_EQ(2u, browser_list->size());
+  Browser* new_browser = browser_list->get(1);
   // This ends up closing the source window.
   delete tab;
   // Cancel the drag.
@@ -585,12 +589,12 @@ IN_PROC_BROWSER_TEST_P(DetachToBrowserTabDragControllerTest,
   ASSERT_TRUE(PressInput(tab_0_center));
   ASSERT_TRUE(DragInputToNotifyWhenDone(
       tab_0_center.x(), tab_0_center.y() + GetDetachY(tab_strip),
-      base::Bind(&DeleteSourceDetachedStep2, to_delete)));
+      base::Bind(&DeleteSourceDetachedStep2, to_delete, native_browser_list)));
   QuitWhenNotDragging();
 
   // Should not be dragging.
-  ASSERT_EQ(1u, BrowserList::size());
-  Browser* new_browser = *BrowserList::begin();
+  ASSERT_EQ(1u, native_browser_list->size());
+  Browser* new_browser = native_browser_list->get(0);
   ASSERT_FALSE(GetTabStripForBrowser(new_browser)->IsDragSessionActive());
   ASSERT_FALSE(TabDragController::IsActive());
 
@@ -601,9 +605,9 @@ IN_PROC_BROWSER_TEST_P(DetachToBrowserTabDragControllerTest,
 
 namespace {
 
-void PressEscapeWhileDetachedStep2() {
-  ASSERT_EQ(2u, BrowserList::size());
-  Browser* new_browser = *(++BrowserList::begin());
+void PressEscapeWhileDetachedStep2(const BrowserList* browser_list) {
+  ASSERT_EQ(2u, browser_list->size());
+  Browser* new_browser = browser_list->get(1);
   ui_controls::SendKeyPress(
       new_browser->window()->GetNativeWindow(), ui::VKEY_ESCAPE, false, false,
       false, false);
@@ -624,7 +628,7 @@ IN_PROC_BROWSER_TEST_P(DetachToBrowserTabDragControllerTest,
   ASSERT_TRUE(PressInput(tab_0_center));
   ASSERT_TRUE(DragInputToNotifyWhenDone(
       tab_0_center.x(), tab_0_center.y() + GetDetachY(tab_strip),
-      base::Bind(&PressEscapeWhileDetachedStep2)));
+      base::Bind(&PressEscapeWhileDetachedStep2, native_browser_list)));
   QuitWhenNotDragging();
 
   // Should not be dragging.
@@ -632,16 +636,17 @@ IN_PROC_BROWSER_TEST_P(DetachToBrowserTabDragControllerTest,
   ASSERT_FALSE(TabDragController::IsActive());
 
   // And there should only be one window.
-  EXPECT_EQ(1u, BrowserList::size());
+  EXPECT_EQ(1u, native_browser_list->size());
 
   EXPECT_EQ("0 1", IDString(browser()->tab_strip_model()));
 }
 
 namespace {
 
-void DragAllStep2(DetachToBrowserTabDragControllerTest* test) {
+void DragAllStep2(DetachToBrowserTabDragControllerTest* test,
+                  const BrowserList* browser_list) {
   // Should only be one window.
-  ASSERT_EQ(1u, BrowserList::size());
+  ASSERT_EQ(1u, browser_list->size());
   if (test->input_source() == INPUT_SOURCE_TOUCH) {
     ASSERT_TRUE(test->ReleaseInput());
   } else {
@@ -665,7 +670,7 @@ IN_PROC_BROWSER_TEST_P(DetachToBrowserTabDragControllerTest, DragAll) {
   ASSERT_TRUE(PressInput(tab_0_center));
   ASSERT_TRUE(DragInputToNotifyWhenDone(
       tab_0_center.x(), tab_0_center.y() + GetDetachY(tab_strip),
-      base::Bind(&DragAllStep2, this)));
+      base::Bind(&DragAllStep2, this, native_browser_list)));
   QuitWhenNotDragging();
 
   // Should not be dragging.
@@ -673,7 +678,7 @@ IN_PROC_BROWSER_TEST_P(DetachToBrowserTabDragControllerTest, DragAll) {
   ASSERT_FALSE(TabDragController::IsActive());
 
   // And there should only be one window.
-  EXPECT_EQ(1u, BrowserList::size());
+  EXPECT_EQ(1u, native_browser_list->size());
 
   EXPECT_EQ("0 1", IDString(browser()->tab_strip_model()));
 
@@ -685,11 +690,12 @@ namespace {
 // Invoked from the nested message loop.
 void DragAllToSeparateWindowStep2(DetachToBrowserTabDragControllerTest* test,
                                   TabStrip* attached_tab_strip,
-                                  TabStrip* target_tab_strip) {
+                                  TabStrip* target_tab_strip,
+                                  const BrowserList* browser_list) {
   ASSERT_TRUE(attached_tab_strip->IsDragSessionActive());
   ASSERT_FALSE(target_tab_strip->IsDragSessionActive());
   ASSERT_TRUE(TabDragController::IsActive());
-  ASSERT_EQ(2u, BrowserList::size());
+  ASSERT_EQ(2u, browser_list->size());
 
   // Drag to target_tab_strip. This should stop the nested loop from dragging
   // the window.
@@ -723,13 +729,14 @@ IN_PROC_BROWSER_TEST_P(DetachToBrowserTabDragControllerTest,
   ASSERT_TRUE(PressInput(tab_0_center));
   ASSERT_TRUE(DragInputToNotifyWhenDone(
       tab_0_center.x(), tab_0_center.y() + GetDetachY(tab_strip),
-      base::Bind(&DragAllToSeparateWindowStep2, this, tab_strip, tab_strip2)));
+      base::Bind(&DragAllToSeparateWindowStep2, this, tab_strip, tab_strip2,
+                 native_browser_list)));
   QuitWhenNotDragging();
 
   // Should now be attached to tab_strip2.
   ASSERT_TRUE(tab_strip2->IsDragSessionActive());
   ASSERT_TRUE(TabDragController::IsActive());
-  ASSERT_EQ(1u, BrowserList::size());
+  ASSERT_EQ(1u, native_browser_list->size());
 
   // Release the mouse, stopping the drag session.
   ASSERT_TRUE(ReleaseInput());
@@ -746,11 +753,12 @@ namespace {
 void DragAllToSeparateWindowAndCancelStep2(
     DetachToBrowserTabDragControllerTest* test,
     TabStrip* attached_tab_strip,
-    TabStrip* target_tab_strip) {
+    TabStrip* target_tab_strip,
+    const BrowserList* browser_list) {
   ASSERT_TRUE(attached_tab_strip->IsDragSessionActive());
   ASSERT_FALSE(target_tab_strip->IsDragSessionActive());
   ASSERT_TRUE(TabDragController::IsActive());
-  ASSERT_EQ(2u, BrowserList::size());
+  ASSERT_EQ(2u, browser_list->size());
 
   // Drag to target_tab_strip. This should stop the nested loop from dragging
   // the window.
@@ -786,13 +794,13 @@ IN_PROC_BROWSER_TEST_P(DetachToBrowserTabDragControllerTest,
   ASSERT_TRUE(DragInputToNotifyWhenDone(
                   tab_0_center.x(), tab_0_center.y() + GetDetachY(tab_strip),
                   base::Bind(&DragAllToSeparateWindowAndCancelStep2, this,
-                             tab_strip, tab_strip2)));
+                             tab_strip, tab_strip2, native_browser_list)));
   QuitWhenNotDragging();
 
   // Should now be attached to tab_strip2.
   ASSERT_TRUE(tab_strip2->IsDragSessionActive());
   ASSERT_TRUE(TabDragController::IsActive());
-  ASSERT_EQ(1u, BrowserList::size());
+  ASSERT_EQ(1u, native_browser_list->size());
 
   // Cancel the drag.
   ASSERT_TRUE(ui_test_utils::SendKeyPressSync(
@@ -803,7 +811,7 @@ IN_PROC_BROWSER_TEST_P(DetachToBrowserTabDragControllerTest,
   EXPECT_EQ("100 0 1", IDString(browser2->tab_strip_model()));
 
   // browser() will have been destroyed, but browser2 should remain.
-  ASSERT_EQ(1u, BrowserList::size());
+  ASSERT_EQ(1u, native_browser_list->size());
 
   EXPECT_TRUE(GetTrackedByWorkspace(browser2));
 }
@@ -872,13 +880,14 @@ IN_PROC_BROWSER_TEST_P(DetachToBrowserTabDragControllerTest,
   ASSERT_TRUE(PressInput(tab_0_center));
   ASSERT_TRUE(DragInputToNotifyWhenDone(
       tab_0_center.x(), tab_0_center.y() + GetDetachY(tab_strip),
-      base::Bind(&DragAllToSeparateWindowStep2, this, tab_strip, tab_strip2)));
+      base::Bind(&DragAllToSeparateWindowStep2, this, tab_strip, tab_strip2,
+                 native_browser_list)));
   QuitWhenNotDragging();
 
   // Should now be attached to tab_strip2.
   ASSERT_TRUE(tab_strip2->IsDragSessionActive());
   ASSERT_TRUE(TabDragController::IsActive());
-  ASSERT_EQ(1u, BrowserList::size());
+  ASSERT_EQ(1u, native_browser_list->size());
 
   // Release the mouse, stopping the drag session.
   ASSERT_TRUE(ReleaseInput());
@@ -900,12 +909,13 @@ namespace {
 
 // Invoked from the nested message loop.
 void CancelOnNewTabWhenDraggingStep2(
-    DetachToBrowserTabDragControllerTest* test) {
+    DetachToBrowserTabDragControllerTest* test,
+    const BrowserList* browser_list) {
   ASSERT_TRUE(TabDragController::IsActive());
-  ASSERT_EQ(2u, BrowserList::size());
+  ASSERT_EQ(2u, browser_list->size());
 
-  // Add another tab. This shoudl trigger exiting the nested loop.
-  test->AddBlankTabAndShow(*BrowserList::begin_last_active());
+  // Add another tab. This should trigger exiting the nested loop.
+  test->AddBlankTabAndShow(browser_list->GetLastActive());
 }
 
 }  // namespace
@@ -925,16 +935,14 @@ IN_PROC_BROWSER_TEST_P(DetachToBrowserTabDragControllerTest,
   ASSERT_TRUE(PressInput(tab_0_center));
   ASSERT_TRUE(DragInputToNotifyWhenDone(
       tab_0_center.x(), tab_0_center.y() + GetDetachY(tab_strip),
-      base::Bind(&CancelOnNewTabWhenDraggingStep2, this)));
+      base::Bind(&CancelOnNewTabWhenDraggingStep2, this, native_browser_list)));
   QuitWhenNotDragging();
 
   // Should be two windows and not dragging.
   ASSERT_FALSE(TabDragController::IsActive());
-  ASSERT_EQ(2u, BrowserList::size());
-  for (BrowserList::const_iterator i = BrowserList::begin();
-       i != BrowserList::end(); ++i) {
-    EXPECT_TRUE(GetTrackedByWorkspace(*i));
-  }
+  ASSERT_EQ(2u, native_browser_list->size());
+  for (chrome::BrowserIterator it; !it.done(); it.Next())
+    EXPECT_TRUE(GetTrackedByWorkspace(*it));
 }
 
 #if defined(USE_ASH) && !defined(OS_WIN)  // TODO(win_ash)
@@ -943,10 +951,11 @@ namespace {
 
 void DragInMaximizedWindowStep2(DetachToBrowserTabDragControllerTest* test,
                                 Browser* browser,
-                                TabStrip* tab_strip) {
+                                TabStrip* tab_strip,
+                                const BrowserList* browser_list) {
   // There should be another browser.
-  ASSERT_EQ(2u, BrowserList::size());
-  Browser* new_browser = *(++BrowserList::begin());
+  ASSERT_EQ(2u, browser_list->size());
+  Browser* new_browser = browser_list->get(1);
   EXPECT_NE(browser, new_browser);
   ASSERT_TRUE(new_browser->window()->IsActive());
   TabStrip* tab_strip2 = GetTabStripForBrowser(new_browser);
@@ -978,14 +987,15 @@ IN_PROC_BROWSER_TEST_P(DetachToBrowserTabDragControllerTest,
   ASSERT_TRUE(PressInput(tab_0_center));
   ASSERT_TRUE(DragInputToNotifyWhenDone(
       tab_0_center.x(), tab_0_center.y() + GetDetachY(tab_strip),
-      base::Bind(&DragInMaximizedWindowStep2, this, browser(), tab_strip)));
+      base::Bind(&DragInMaximizedWindowStep2, this, browser(), tab_strip,
+                 native_browser_list)));
   QuitWhenNotDragging();
 
   ASSERT_FALSE(TabDragController::IsActive());
 
   // Should be two browsers.
-  ASSERT_EQ(2u, BrowserList::size());
-  Browser* new_browser = *(++BrowserList::begin());
+  ASSERT_EQ(2u, native_browser_list->size());
+  Browser* new_browser = native_browser_list->get(1);
   ASSERT_TRUE(new_browser->window()->IsActive());
 
   // Only the new browser should be visible.
@@ -1005,7 +1015,7 @@ class DetachToBrowserInSeparateDisplayTabDragControllerTest
 
   virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
     DetachToBrowserTabDragControllerTest::SetUpCommandLine(command_line);
-    command_line->AppendSwitchASCII("aura-host-window-size",
+    command_line->AppendSwitchASCII("ash-host-window-bounds",
                                     "0+0-250x250,251+0-250x250");
   }
 
@@ -1052,8 +1062,8 @@ IN_PROC_BROWSER_TEST_P(DetachToBrowserInSeparateDisplayTabDragControllerTest,
   ASSERT_FALSE(TabDragController::IsActive());
 
   // There should now be another browser.
-  ASSERT_EQ(2u, BrowserList::size());
-  Browser* new_browser = *(++BrowserList::begin());
+  ASSERT_EQ(2u, native_browser_list->size());
+  Browser* new_browser = native_browser_list->get(1);
   ASSERT_TRUE(new_browser->window()->IsActive());
   TabStrip* tab_strip2 = GetTabStripForBrowser(new_browser);
   ASSERT_FALSE(tab_strip2->IsDragSessionActive());
@@ -1139,7 +1149,7 @@ class DifferentDeviceScaleFactorDisplayTabDragControllerTest
 
   virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
     DetachToBrowserTabDragControllerTest::SetUpCommandLine(command_line);
-    command_line->AppendSwitchASCII("aura-host-window-size",
+    command_line->AppendSwitchASCII("ash-host-window-bounds",
                                     "400x400,800x800*2");
   }
 
@@ -1238,7 +1248,7 @@ class DetachToBrowserInSeparateDisplayAndCancelTabDragControllerTest
 
   virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
     TabDragControllerTest::SetUpCommandLine(command_line);
-    command_line->AppendSwitchASCII("aura-host-window-size",
+    command_line->AppendSwitchASCII("ash-host-window-bounds",
                                     "0+0-250x250,251+0-250x250");
   }
 
@@ -1266,10 +1276,11 @@ class DetachToBrowserInSeparateDisplayAndCancelTabDragControllerTest
 
 // Invoked from the nested message loop.
 void CancelDragTabToWindowInSeparateDisplayStep3(
-    TabStrip* tab_strip) {
+    TabStrip* tab_strip,
+    const BrowserList* browser_list) {
   ASSERT_FALSE(tab_strip->IsDragSessionActive());
   ASSERT_TRUE(TabDragController::IsActive());
-  ASSERT_EQ(2u, BrowserList::size());
+  ASSERT_EQ(2u, browser_list->size());
 
   // Switching display mode should cancel the drag operation.
   ash::internal::DisplayManager::CycleDisplay();
@@ -1280,19 +1291,20 @@ void CancelDragTabToWindowInSeparateDisplayStep2(
     DetachToBrowserInSeparateDisplayAndCancelTabDragControllerTest* test,
     TabStrip* tab_strip,
     aura::RootWindow* current_root,
-    gfx::Point final_destination) {
+    gfx::Point final_destination,
+    const BrowserList* browser_list) {
   ASSERT_FALSE(tab_strip->IsDragSessionActive());
   ASSERT_TRUE(TabDragController::IsActive());
-  ASSERT_EQ(2u, BrowserList::size());
+  ASSERT_EQ(2u, browser_list->size());
 
-  Browser* new_browser = *(++BrowserList::begin());
+  Browser* new_browser = browser_list->get(1);
   EXPECT_EQ(current_root,
             new_browser->window()->GetNativeWindow()->GetRootWindow());
 
   ASSERT_TRUE(test->DragTabAndExecuteTaskWhenDone(
       final_destination,
       base::Bind(&CancelDragTabToWindowInSeparateDisplayStep3,
-                 tab_strip)));
+                 tab_strip, browser_list)));
 }
 
 }  // namespace
@@ -1321,10 +1333,11 @@ IN_PROC_BROWSER_TEST_F(
   tab_0_dst.Offset(0, GetDetachY(tab_strip));
   ASSERT_TRUE(DragTabAndExecuteTaskWhenDone(
       tab_0_dst, base::Bind(&CancelDragTabToWindowInSeparateDisplayStep2,
-                            this, tab_strip, roots[0], final_destination)));
+                            this, tab_strip, roots[0], final_destination,
+                            native_browser_list)));
   QuitWhenNotDragging();
 
-  ASSERT_EQ(1u, BrowserList::size());
+  ASSERT_EQ(1u, native_browser_list->size());
   ASSERT_FALSE(tab_strip->IsDragSessionActive());
   ASSERT_FALSE(TabDragController::IsActive());
   EXPECT_EQ("0 1", IDString(browser()->tab_strip_model()));
@@ -1365,10 +1378,11 @@ IN_PROC_BROWSER_TEST_F(
   tab_0_dst.Offset(0, GetDetachY(tab_strip));
   ASSERT_TRUE(DragTabAndExecuteTaskWhenDone(
       tab_0_dst, base::Bind(&CancelDragTabToWindowInSeparateDisplayStep2,
-                            this, tab_strip, roots[1], final_destination)));
+                            this, tab_strip, roots[1], final_destination,
+                            native_browser_list)));
   QuitWhenNotDragging();
 
-  ASSERT_EQ(1u, BrowserList::size());
+  ASSERT_EQ(1u, native_browser_list->size());
   ASSERT_FALSE(tab_strip->IsDragSessionActive());
   ASSERT_FALSE(TabDragController::IsActive());
   EXPECT_EQ("0 1", IDString(browser()->tab_strip_model()));

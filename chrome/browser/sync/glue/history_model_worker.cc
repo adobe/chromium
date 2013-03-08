@@ -7,7 +7,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/message_loop.h"
 #include "base/synchronization/waitable_event.h"
-#include "chrome/browser/history/history.h"
+#include "chrome/browser/history/history_db_task.h"
 #include "content/public/browser/browser_thread.h"
 
 using base::WaitableEvent;
@@ -15,7 +15,7 @@ using content::BrowserThread;
 
 namespace browser_sync {
 
-class WorkerTask : public HistoryDBTask {
+class WorkerTask : public history::HistoryDBTask {
  public:
   WorkerTask(
       const syncer::WorkCallback& work,
@@ -24,7 +24,7 @@ class WorkerTask : public HistoryDBTask {
     : work_(work), done_(done), error_(error) {}
 
   virtual bool RunOnDBThread(history::HistoryBackend* backend,
-                             history::HistoryDatabase* db) {
+                             history::HistoryDatabase* db) OVERRIDE {
     *error_ = work_.Run();
     done_->Signal();
     return true;
@@ -32,7 +32,7 @@ class WorkerTask : public HistoryDBTask {
 
   // Since the DoWorkAndWaitUntilDone() is syncronous, we don't need to run any
   // code asynchronously on the main thread after completion.
-  virtual void DoneRunOnMainThread() {}
+  virtual void DoneRunOnMainThread() OVERRIDE {}
 
  protected:
   virtual ~WorkerTask() {}

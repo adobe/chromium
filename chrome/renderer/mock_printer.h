@@ -99,8 +99,8 @@ class MockPrinter {
   bool GetBitmapChecksum(unsigned int page, std::string* checksum) const;
   bool GetSource(unsigned int page, const void** data, uint32* size) const;
   bool GetBitmap(unsigned int page, const void** data, uint32* size) const;
-  bool SaveSource(unsigned int page, const FilePath& filepath) const;
-  bool SaveBitmap(unsigned int page, const FilePath& filepath) const;
+  bool SaveSource(unsigned int page, const base::FilePath& filepath) const;
+  bool SaveBitmap(unsigned int page, const base::FilePath& filepath) const;
 
  protected:
   int CreateDocumentCookie();
@@ -126,6 +126,9 @@ class MockPrinter {
 
   // Print selection.
   bool selection_only_;
+
+  // Print css backgrounds.
+  bool should_print_backgrounds_;
 
   // Cookie for the document to ensure correctness.
   int document_cookie_;

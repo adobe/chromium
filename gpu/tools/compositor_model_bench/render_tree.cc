@@ -7,8 +7,8 @@
 #include <sstream>
 #include <vector>
 
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
 #include "base/logging.h"
@@ -451,7 +451,7 @@ RenderNode* InterpretNode(DictionaryValue* node) {
   return NULL;
 }
 
-RenderNode* BuildRenderTreeFromFile(const FilePath& path) {
+RenderNode* BuildRenderTreeFromFile(const base::FilePath& path) {
   LOG(INFO) << "Reading " << path.LossyDisplayName();
   string contents;
   if (!ReadFileToString(path, &contents))

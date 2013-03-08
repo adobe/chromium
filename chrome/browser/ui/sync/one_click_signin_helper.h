@@ -19,6 +19,7 @@ class ProfileIOData;
 
 namespace content {
 class WebContents;
+struct PasswordForm;
 }
 
 namespace net {
@@ -33,7 +34,8 @@ class URLRequest;
 class OneClickSigninHelper
     : public content::WebContentsObserver,
       public content::WebContentsUserData<OneClickSigninHelper>,
-      public SigninTracker::Observer {
+      public SigninTracker::Observer,
+      public ProfileSyncServiceObserver {
  public:
   // Represents user's decision about sign in process.
   enum AutoAccept {
@@ -73,10 +75,6 @@ class OneClickSigninHelper
 
   virtual ~OneClickSigninHelper();
 
-  // Called only by tests to associate information with a given request.
-  static void AssociateWithRequestForTesting(base::SupportsUserData* request,
-                                             const std::string& email);
-
   // Returns true if the one-click signin feature can be offered at this time.
   // If |email| is not empty, then the profile is checked to see if it's
   // already connected to a google account or if the user has already rejected
@@ -94,7 +92,7 @@ class OneClickSigninHelper
   static bool CanOffer(content::WebContents* web_contents,
                        CanOfferFor can_offer_for,
                        const std::string& email,
-                       int* error_message_id);
+                       std::string* error_message);
 
   // Returns true if the one-click signin feature can be offered at this time.
   // It can be offered if the io_data is not in an incognito window and if the
@@ -110,6 +108,7 @@ class OneClickSigninHelper
   // tries to display an infobar in the tab contents identified by the
   // child/route id.
   static void ShowInfoBarIfPossible(net::URLRequest* request,
+                                    ProfileIOData* io_data,
                                     int child_id,
                                     int route_id);
 
@@ -118,6 +117,8 @@ class OneClickSigninHelper
   friend class content::WebContentsUserData<OneClickSigninHelper>;
   FRIEND_TEST_ALL_PREFIXES(OneClickSigninHelperTest,
                            ShowInfoBarUIThreadIncognito);
+  FRIEND_TEST_ALL_PREFIXES(OneClickSigninHelperTest,
+                           SigninFromWebstoreWithConfigSyncfirst);
   FRIEND_TEST_ALL_PREFIXES(OneClickSigninHelperIOTest, CanOfferOnIOThread);
   FRIEND_TEST_ALL_PREFIXES(OneClickSigninHelperIOTest,
                            CanOfferOnIOThreadIncognito);
@@ -172,15 +173,17 @@ class OneClickSigninHelper
                                   int child_id,
                                   int route_id);
 
-  void RedirectToNTP();
+  void RedirectToNTP(bool show_bubble);
+  void RedirectToSignin();
 
   // Clear all data member of the helper, except for the error.
   void CleanTransientState();
 
+  // Grab Gaia password if available.
+  bool OnFormSubmitted(const content::PasswordForm& form);
+
   // content::WebContentsObserver overrides.
-  virtual void DidNavigateAnyFrame(
-      const content::LoadCommittedDetails& details,
-      const content::FrameNavigateParams& params) OVERRIDE;
+  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
   virtual void DidStopLoading(
       content::RenderViewHost* render_view_host) OVERRIDE;
 
@@ -189,15 +192,27 @@ class OneClickSigninHelper
   virtual void SigninFailed(const GoogleServiceAuthError& error) OVERRIDE;
   virtual void SigninSuccess() OVERRIDE;
 
+  // ProfileSyncServiceObserver.
+  virtual void OnStateChanged() OVERRIDE;
+
+  // Tracks if we are in the process of showing the signin or one click
+  // interstitial page. It's set to true the first time we load one of those
+  // pages and set to false when transient state is cleaned.
+  bool showing_signin_;
+
   // Information about the account that has just logged in.
   std::string session_index_;
   std::string email_;
   std::string password_;
   AutoAccept auto_accept_;
   SyncPromoUI::Source source_;
+  bool switched_to_advanced_;
+  // When switching to advanced settings, we want to track the original source.
+  SyncPromoUI::Source original_source_;
   GURL continue_url_;
+  // Redirect URL after sync setup is complete.
+  GURL redirect_url_;
   std::string error_message_;
-
   scoped_ptr<SigninTracker> signin_tracker_;
 
   DISALLOW_COPY_AND_ASSIGN(OneClickSigninHelper);

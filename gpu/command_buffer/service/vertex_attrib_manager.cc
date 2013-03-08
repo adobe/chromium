@@ -13,6 +13,7 @@
 #define GLES2_GPU_SERVICE 1
 #include "gpu/command_buffer/common/gles2_cmd_format.h"
 #include "gpu/command_buffer/common/gles2_cmd_utils.h"
+#include "gpu/command_buffer/service/buffer_manager.h"
 #include "gpu/command_buffer/service/gl_utils.h"
 #include "gpu/command_buffer/service/gpu_switches.h"
 #include "gpu/command_buffer/service/vertex_array_manager.h"
@@ -20,7 +21,7 @@
 namespace gpu {
 namespace gles2 {
 
-VertexAttribManager::VertexAttribInfo::VertexAttribInfo()
+VertexAttrib::VertexAttrib()
     : index_(0),
       enabled_(false),
       size_(4),
@@ -33,10 +34,34 @@ VertexAttribManager::VertexAttribInfo::VertexAttribInfo()
       list_(NULL) {
 }
 
-VertexAttribManager::VertexAttribInfo::~VertexAttribInfo() {
+VertexAttrib::~VertexAttrib() {
 }
 
-bool VertexAttribManager::VertexAttribInfo::CanAccess(GLuint index) const {
+void VertexAttrib::SetInfo(
+    Buffer* buffer,
+    GLint size,
+    GLenum type,
+    GLboolean normalized,
+    GLsizei gl_stride,
+    GLsizei real_stride,
+    GLsizei offset) {
+  DCHECK_GT(real_stride, 0);
+  buffer_ = buffer;
+  size_ = size;
+  type_ = type;
+  normalized_ = normalized;
+  gl_stride_ = gl_stride;
+  real_stride_ = real_stride;
+  offset_ = offset;
+}
+
+void VertexAttrib::Unbind(Buffer* buffer) {
+  if (buffer_ == buffer) {
+    buffer_ = NULL;
+  }
+}
+
+bool VertexAttrib::CanAccess(GLuint index) const {
   if (!enabled_) {
     return true;
   }
@@ -104,11 +129,15 @@ void VertexAttribManager::Initialize(
   }
 }
 
+void VertexAttribManager::SetElementArrayBuffer(Buffer* buffer) {
+  element_array_buffer_ = buffer;
+}
+
 bool VertexAttribManager::Enable(GLuint index, bool enable) {
   if (index >= vertex_attrib_infos_.size()) {
     return false;
   }
-  VertexAttribInfo& info = vertex_attrib_infos_[index];
+  VertexAttrib& info = vertex_attrib_infos_[index];
   if (info.enabled() != enable) {
     info.set_enabled(enable);
     info.SetList(enable ? &enabled_vertex_attribs_ : &disabled_vertex_attribs_);
@@ -116,7 +145,7 @@ bool VertexAttribManager::Enable(GLuint index, bool enable) {
   return true;
 }
 
-void VertexAttribManager::Unbind(BufferManager::BufferInfo* buffer) {
+void VertexAttribManager::Unbind(Buffer* buffer) {
   if (element_array_buffer_ == buffer) {
     element_array_buffer_ = NULL;
   }

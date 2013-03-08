@@ -17,14 +17,25 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPageVisibilityState.h"
 #include "v8/include/v8.h"
 
-class FilePath;
 class GURL;
 class SkBitmap;
 
+namespace base {
+class FilePath;
+}
+
 namespace WebKit {
+class WebClipboard;
 class WebFrame;
+class WebHyphenator;
 class WebMediaPlayerClient;
+class WebMediaStreamCenter;
+class WebMediaStreamCenterClient;
+class WebMimeRegistry;
 class WebPlugin;
+class WebPluginContainer;
+class WebRTCPeerConnectionHandler;
+class WebRTCPeerConnectionHandlerClient;
 class WebURLRequest;
 struct WebPluginParams;
 struct WebURLError;
@@ -84,7 +95,7 @@ class CONTENT_EXPORT ContentRendererClient {
   // couldn't be loaded. This allows the embedder to show a custom placeholder.
   virtual WebKit::WebPlugin* CreatePluginReplacement(
       RenderView* render_view,
-      const FilePath& plugin_path);
+      const base::FilePath& plugin_path);
 
   // Returns true if the embedder has an error page to show for the given http
   // status code. If so |error_domain| should be set to according to WebURLError
@@ -116,6 +127,29 @@ class CONTENT_EXPORT ContentRendererClient {
       base::WeakPtr<webkit_media::WebMediaPlayerDelegate> delegate,
       const webkit_media::WebMediaPlayerParams& params);
 
+  // Allows the embedder to override creating a WebMediaStreamCenter. If it
+  // returns NULL the content layer will create the stream center.
+  virtual WebKit::WebMediaStreamCenter* OverrideCreateWebMediaStreamCenter(
+      WebKit::WebMediaStreamCenterClient* client);
+
+  // Allows the embedder to override creating a WebRTCPeerConnectionHandler. If
+  // it returns NULL the content layer will create the connection handler.
+  virtual WebKit::WebRTCPeerConnectionHandler*
+  OverrideCreateWebRTCPeerConnectionHandler(
+      WebKit::WebRTCPeerConnectionHandlerClient* client);
+
+  // Allows the embedder to override the WebKit::WebClipboard used. If it
+  // returns NULL the content layer will handle clipboard interactions.
+  virtual WebKit::WebClipboard* OverrideWebClipboard();
+
+  // Allows the embedder to override the WebKit::WebMimeRegistry used. If it
+  // returns NULL the content layer will provide its own mime registry.
+  virtual WebKit::WebMimeRegistry* OverrideWebMimeRegistry();
+
+  // Allows the embedder to override the WebKit::WebHyphenator used. If it
+  // returns NULL the content layer will handle hyphenation.
+  virtual WebKit::WebHyphenator* OverrideWebHyphenator();
+
   // Returns true if the renderer process should schedule the idle handler when
   // all widgets are hidden.
   virtual bool RunIdleHandlerWhenWidgetsHidden();
@@ -134,6 +168,7 @@ class CONTENT_EXPORT ContentRendererClient {
   // Returns true if we should fork a new process for the given navigation.
   virtual bool ShouldFork(WebKit::WebFrame* frame,
                           const GURL& url,
+                          const std::string& http_method,
                           bool is_initial_navigation,
                           bool* send_referrer);
 
@@ -158,7 +193,7 @@ class CONTENT_EXPORT ContentRendererClient {
                                         v8::Handle<v8::Context>,
                                         int world_id) {}
 
-  // See WebKit::WebKitPlatformSupport.
+  // See WebKit::Platform.
   virtual unsigned long long VisitedLinkHash(const char* canonical_url,
                                              size_t length);
   virtual bool IsLinkVisited(unsigned long long link_hash);
@@ -183,6 +218,9 @@ class CONTENT_EXPORT ContentRendererClient {
 
   virtual void RegisterPPAPIInterfaceFactories(
       webkit::ppapi::PpapiInterfaceFactoryManager* factory_manager) {}
+
+  // Returns whether BrowserPlugin should be allowed within the |container|.
+  virtual bool AllowBrowserPlugin(WebKit::WebPluginContainer* container) const;
 };
 
 }  // namespace content

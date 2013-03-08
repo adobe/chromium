@@ -6,9 +6,10 @@
 
 #include "base/basictypes.h"
 #include "base/message_loop.h"
+#include "base/prefs/pref_registry_simple.h"
+#include "base/prefs/testing_pref_service.h"
 #include "base/values.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/test/base/testing_pref_service.h"
 #include "content/public/test/test_browser_thread.h"
 #include "googleurl/src/gurl.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -84,7 +85,8 @@ class HttpServerPropertiesManagerTest : public testing::Test {
   }
 
   virtual void SetUp() OVERRIDE {
-    pref_service_.RegisterDictionaryPref(prefs::kHttpServerProperties);
+    pref_service_.registry()->RegisterDictionaryPref(
+        prefs::kHttpServerProperties);
     http_server_props_manager_.reset(
         new StrictMock<TestingHttpServerPropertiesManager>(&pref_service_));
     ExpectCacheUpdate();

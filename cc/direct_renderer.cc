@@ -240,8 +240,11 @@ void DirectRenderer::drawRenderPass(DrawingFrame& frame, const RenderPass* rende
         setScissorTestRect(moveScissorToWindowSpace(frame, renderPassScissor));
     }
 
-    if (frame.currentRenderPass != frame.rootRenderPass || m_client->shouldClearRootRenderPass())
+    if (frame.currentRenderPass != frame.rootRenderPass || m_client->shouldClearRootRenderPass()) {
+        if (!usingScissorAsOptimization)
+            ensureScissorTestDisabled();
         clearFramebuffer(frame);
+    }
 
     const QuadList& quadList = renderPass->quad_list;
     for (QuadList::constBackToFrontIterator it = quadList.backToFrontBegin(); it != quadList.backToFrontEnd(); ++it) {
@@ -288,6 +291,9 @@ bool DirectRenderer::useRenderPass(DrawingFrame& frame, const RenderPass* render
 
 bool DirectRenderer::haveCachedResourcesForRenderPassId(RenderPass::Id id) const
 {
+    if (!settings().cacheRenderPassContents)
+        return false;
+
     CachedResource* texture = m_renderPassTextures.get(id);
     return texture && texture->id() && texture->isComplete();
 }

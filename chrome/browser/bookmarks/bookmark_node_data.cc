@@ -13,7 +13,7 @@
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/common/url_constants.h"
+#include "content/public/common/url_constants.h"
 #include "net/base/escape.h"
 #include "ui/base/clipboard/scoped_clipboard_writer.h"
 
@@ -140,7 +140,9 @@ bool BookmarkNodeData::ReadFromTuple(const GURL& url, const string16& title) {
 #if !defined(OS_MACOSX)
 void BookmarkNodeData::WriteToClipboard(Profile* profile) const {
   ui::ScopedClipboardWriter scw(ui::Clipboard::GetForCurrentThread(),
-                                ui::Clipboard::BUFFER_STANDARD);
+                                ui::Clipboard::BUFFER_STANDARD,
+                                content::BrowserContext::
+                                    GetMarkerForOffTheRecordContext(profile));
 
   // If there is only one element and it is a URL, write the URL to the
   // clipboard.
@@ -204,11 +206,12 @@ void BookmarkNodeData::WriteToClipboard(Profile* profile) const {
   bookmark_pasteboard_helper_mac::WriteToPasteboard(
       bookmark_pasteboard_helper_mac::kCopyPastePasteboard,
       elements,
-      profile_path_);
+      profile_path_,
+      content::BrowserContext::GetMarkerForOffTheRecordContext(profile));
 }
 
 bool BookmarkNodeData::ReadFromClipboard() {
-  FilePath file_path;
+  base::FilePath file_path;
   if (!bookmark_pasteboard_helper_mac::ReadFromPasteboard(
       bookmark_pasteboard_helper_mac::kCopyPastePasteboard,
       elements,
@@ -221,7 +224,7 @@ bool BookmarkNodeData::ReadFromClipboard() {
 }
 
 bool BookmarkNodeData::ReadFromDragClipboard() {
-  FilePath file_path;
+  base::FilePath file_path;
   if (!bookmark_pasteboard_helper_mac::ReadFromPasteboard(
       bookmark_pasteboard_helper_mac::kDragPasteboard,
       elements,
@@ -284,7 +287,7 @@ bool BookmarkNodeData::Read(const ui::OSExchangeData& data) {
 #endif
 
 void BookmarkNodeData::WriteToPickle(Profile* profile, Pickle* pickle) const {
-  FilePath path = profile ? profile->GetPath() : FilePath();
+  base::FilePath path = profile ? profile->GetPath() : base::FilePath();
   path.WriteToPickle(pickle);
   pickle->WriteUInt64(elements.size());
 

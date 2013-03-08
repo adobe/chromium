@@ -310,7 +310,7 @@ void GLES2InterfaceStub::ShaderBinary(
     const void* /* binary */, GLsizei /* length */) {
 }
 void GLES2InterfaceStub::ShaderSource(
-    GLuint /* shader */, GLsizei /* count */, const char** /* str */,
+    GLuint /* shader */, GLsizei /* count */, const GLchar* const* /* str */,
     const GLint* /* length */) {
 }
 void GLES2InterfaceStub::StencilFunc(
@@ -623,12 +623,16 @@ void GLES2InterfaceStub::AsyncTexImage2DCHROMIUM(
     GLsizei /* width */, GLsizei /* height */, GLint /* border */,
     GLenum /* format */, GLenum /* type */, const void* /* pixels */) {
 }
+void GLES2InterfaceStub::WaitAsyncTexImage2DCHROMIUM(GLenum /* target */) {
+}
 void GLES2InterfaceStub::DiscardFramebufferEXT(
     GLenum /* target */, GLsizei /* count */,
     const GLenum* /* attachments */) {
 }
 void GLES2InterfaceStub::LoseContextCHROMIUM(
     GLenum /* current */, GLenum /* other */) {
+}
+void GLES2InterfaceStub::WaitSyncPointCHROMIUM(GLuint /* sync_point */) {
 }
 #endif  // GPU_COMMAND_BUFFER_CLIENT_GLES2_INTERFACE_STUB_IMPL_AUTOGEN_H_
 

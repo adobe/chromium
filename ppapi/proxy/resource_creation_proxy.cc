@@ -10,12 +10,14 @@
 #include "ppapi/proxy/audio_input_resource.h"
 #include "ppapi/proxy/browser_font_resource_trusted.h"
 #include "ppapi/proxy/connection.h"
+#include "ppapi/proxy/directory_reader_resource.h"
 #include "ppapi/proxy/file_chooser_resource.h"
 #include "ppapi/proxy/file_io_resource.h"
 #include "ppapi/proxy/flash_device_id_resource.h"
 #include "ppapi/proxy/flash_font_file_resource.h"
 #include "ppapi/proxy/flash_menu_resource.h"
 #include "ppapi/proxy/graphics_2d_resource.h"
+#include "ppapi/proxy/host_resolver_private_resource.h"
 #include "ppapi/proxy/plugin_dispatcher.h"
 #include "ppapi/proxy/plugin_globals.h"
 #include "ppapi/proxy/plugin_resource_tracker.h"
@@ -27,7 +29,6 @@
 #include "ppapi/proxy/ppb_file_system_proxy.h"
 #include "ppapi/proxy/ppb_flash_message_loop_proxy.h"
 #include "ppapi/proxy/ppb_graphics_3d_proxy.h"
-#include "ppapi/proxy/ppb_host_resolver_private_proxy.h"
 #include "ppapi/proxy/ppb_image_data_proxy.h"
 #include "ppapi/proxy/ppb_network_monitor_private_proxy.h"
 #include "ppapi/proxy/ppb_tcp_server_socket_private_proxy.h"
@@ -230,7 +231,8 @@ PP_Resource ResourceCreationProxy::CreateGraphics3DRaw(
 
 PP_Resource ResourceCreationProxy::CreateHostResolverPrivate(
     PP_Instance instance) {
-  return PPB_HostResolver_Private_Proxy::CreateProxyResource(instance);
+  return (new HostResolverPrivateResource(
+      GetConnection(), instance))->GetReference();
 }
 
 PP_Resource ResourceCreationProxy::CreateImageData(PP_Instance instance,
@@ -317,9 +319,10 @@ PP_Resource ResourceCreationProxy::CreateBuffer(PP_Instance instance,
 }
 
 PP_Resource ResourceCreationProxy::CreateDirectoryReader(
+    PP_Instance instance,
     PP_Resource directory_ref) {
-  NOTIMPLEMENTED();  // Not proxied yet.
-  return 0;
+  return (new DirectoryReaderResource(
+      GetConnection(), instance, directory_ref))->GetReference();
 }
 
 PP_Resource ResourceCreationProxy::CreateFlashDeviceID(PP_Instance instance) {

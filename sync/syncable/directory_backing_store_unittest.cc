@@ -6,8 +6,8 @@
 
 #include <string>
 
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/stl_util.h"
@@ -41,7 +41,7 @@ class MigrationTest : public testing::TestWithParam<int> {
     return "nick@chromium.org";
   }
 
-  FilePath GetDatabasePath() {
+  base::FilePath GetDatabasePath() {
     return temp_dir_.path().Append(Directory::kSyncDatabaseFilename);
   }
 
@@ -3172,10 +3172,12 @@ INSTANTIATE_TEST_CASE_P(DirectoryBackingStore, MigrationTest,
                         testing::Range(67, kCurrentDBVersion));
 
 TEST_F(DirectoryBackingStoreTest, ModelTypeIds) {
-  for (int i = FIRST_REAL_MODEL_TYPE; i < MODEL_TYPE_COUNT; ++i) {
+  ModelTypeSet protocol_types = ProtocolTypes();
+  for (ModelTypeSet::Iterator iter = protocol_types.First(); iter.Good();
+       iter.Inc()) {
     std::string model_id =
-        TestDirectoryBackingStore::ModelTypeEnumToModelId(ModelTypeFromInt(i));
-    EXPECT_EQ(i,
+        TestDirectoryBackingStore::ModelTypeEnumToModelId(iter.Get());
+    EXPECT_EQ(iter.Get(),
         TestDirectoryBackingStore::ModelIdToModelTypeEnum(model_id.data(),
                                                           model_id.size()));
   }
@@ -3186,7 +3188,7 @@ namespace {
 class OnDiskDirectoryBackingStoreForTest : public OnDiskDirectoryBackingStore {
  public:
   OnDiskDirectoryBackingStoreForTest(const std::string& dir_name,
-                                     const FilePath& backing_filepath);
+                                     const base::FilePath& backing_filepath);
   virtual ~OnDiskDirectoryBackingStoreForTest();
   bool DidFailFirstOpenAttempt();
 
@@ -3199,7 +3201,7 @@ class OnDiskDirectoryBackingStoreForTest : public OnDiskDirectoryBackingStore {
 
 OnDiskDirectoryBackingStoreForTest::OnDiskDirectoryBackingStoreForTest(
     const std::string& dir_name,
-    const FilePath& backing_filepath) :
+    const base::FilePath& backing_filepath) :
   OnDiskDirectoryBackingStore(dir_name, backing_filepath),
   first_open_failed_(false) { }
 

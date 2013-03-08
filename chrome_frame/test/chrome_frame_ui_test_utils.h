@@ -10,7 +10,7 @@
 #include <string>
 #include <vector>
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/memory/ref_counted.h"
 #include "base/win/scoped_comptr.h"
 #include "base/win/scoped_variant.h"
@@ -286,7 +286,7 @@ void DumpAccessibilityTreeForWindow(HWND hwnd);
 bool IsDesktopUnlocked();
 
 // Returns the location of the IAccessible2 COM proxy stub DLL.
-FilePath GetIAccessible2ProxyStubPath();
+base::FilePath GetIAccessible2ProxyStubPath();
 
 }  // namespace chrome_frame_test
 

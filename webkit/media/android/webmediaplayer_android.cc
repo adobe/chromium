@@ -4,7 +4,7 @@
 
 #include "webkit/media/android/webmediaplayer_android.h"
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "media/base/android/media_player_bridge.h"
 #include "media/base/video_frame.h"
@@ -146,7 +146,7 @@ bool WebMediaPlayerAndroid::hasVideo() const {
   if (!url_.has_path())
     return false;
   std::string mime;
-  if(!net::GetMimeTypeFromFile(FilePath(url_.path()), &mime))
+  if(!net::GetMimeTypeFromFile(base::FilePath(url_.path()), &mime))
     return true;
   return mime.find("audio/") == std::string::npos;
 }
@@ -360,6 +360,13 @@ void WebMediaPlayerAndroid::ReleaseMediaResources() {
 }
 
 void WebMediaPlayerAndroid::WillDestroyCurrentMessageLoop() {
+  if (manager_)
+    manager_->UnregisterMediaPlayer(player_id_);
+  Detach();
+  main_loop_ = NULL;
+}
+
+void WebMediaPlayerAndroid::Detach() {
   Destroy();
 
   if (stream_id_) {
@@ -367,18 +374,14 @@ void WebMediaPlayerAndroid::WillDestroyCurrentMessageLoop() {
     stream_id_ = 0;
   }
 
-  video_frame_.reset();
-
-  if (manager_)
-    manager_->UnregisterMediaPlayer(player_id_);
+  web_video_frame_.reset();
 
   manager_ = NULL;
-  main_loop_ = NULL;
 }
 
 void WebMediaPlayerAndroid::ReallocateVideoFrame() {
   if (texture_id_) {
-    video_frame_.reset(new WebVideoFrameImpl(VideoFrame::WrapNativeTexture(
+    web_video_frame_.reset(new WebVideoFrameImpl(VideoFrame::WrapNativeTexture(
         texture_id_, kGLTextureExternalOES, natural_size_,
         gfx::Rect(natural_size_), natural_size_, base::TimeDelta(),
         VideoFrame::ReadPixelsCB(),
@@ -389,11 +392,12 @@ void WebMediaPlayerAndroid::ReallocateVideoFrame() {
 WebVideoFrame* WebMediaPlayerAndroid::getCurrentFrame() {
   if (stream_texture_proxy_.get() && !stream_texture_proxy_->IsInitialized()
       && stream_id_) {
+    gfx::Size natural_size = web_video_frame_->video_frame->natural_size();
     stream_texture_proxy_->Initialize(
-        stream_id_, video_frame_->width(), video_frame_->height());
+        stream_id_, natural_size.width(), natural_size.height());
   }
 
-  return video_frame_.get();
+  return web_video_frame_.get();
 }
 
 void WebMediaPlayerAndroid::putCurrentFrame(

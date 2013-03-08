@@ -4,9 +4,12 @@
 
 #include "android_webview/browser/aw_content_browser_client.h"
 
+#include "android_webview/browser/aw_browser_context.h"
 #include "android_webview/browser/aw_browser_main_parts.h"
+#include "android_webview/browser/aw_contents_client_bridge_base.h"
 #include "android_webview/browser/aw_cookie_access_policy.h"
 #include "android_webview/browser/aw_quota_permission_context.h"
+#include "android_webview/browser/jni_dependency_factory.h"
 #include "android_webview/browser/net_disk_cache_remover.h"
 #include "android_webview/browser/renderer_host/aw_resource_dispatcher_host_delegate.h"
 #include "android_webview/common/url_constants.h"
@@ -19,43 +22,65 @@
 #include "content/public/browser/render_view_host.h"
 #include "content/public/common/url_constants.h"
 #include "grit/ui_resources.h"
+#include "net/android/network_library.h"
+#include "net/base/ssl_info.h"
 #include "ui/base/resource/resource_bundle.h"
 
 namespace {
 
-class DummyAccessTokenStore : public content::AccessTokenStore {
+class AwAccessTokenStore : public content::AccessTokenStore {
  public:
-  DummyAccessTokenStore() { }
+  AwAccessTokenStore() { }
 
+  // content::AccessTokenStore implementation
   virtual void LoadAccessTokens(
-      const LoadAccessTokensCallbackType& request) OVERRIDE { }
+      const LoadAccessTokensCallbackType& request) OVERRIDE {
+    AccessTokenStore::AccessTokenSet access_token_set;
+    // AccessTokenSet and net::URLRequestContextGetter not used on Android,
+    // but Run needs to be called to finish the geolocation setup.
+    request.Run(access_token_set, NULL);
+  }
+  virtual void SaveAccessToken(const GURL& server_url,
+                               const string16& access_token) OVERRIDE { }
 
  private:
-  virtual ~DummyAccessTokenStore() { }
+  virtual ~AwAccessTokenStore() { }
 
-  virtual void SaveAccessToken(
-      const GURL& server_url, const string16& access_token) OVERRIDE { }
-
-  DISALLOW_COPY_AND_ASSIGN(DummyAccessTokenStore);
+  DISALLOW_COPY_AND_ASSIGN(AwAccessTokenStore);
 };
 
 }
 
 namespace android_webview {
 
+// static
+AwContentBrowserClient* AwContentBrowserClient::FromContentBrowserClient(
+    content::ContentBrowserClient* client) {
+  return static_cast<AwContentBrowserClient*>(client);
+}
+
 AwContentBrowserClient::AwContentBrowserClient(
-    ViewDelegateFactoryFn* view_delegate_factory,
-    GeolocationPermissionFactoryFn* geolocation_permission_factory)
-    : view_delegate_factory_(view_delegate_factory) {
-  FilePath user_data_dir;
+    JniDependencyFactory* native_factory)
+    : native_factory_(native_factory) {
+  base::FilePath user_data_dir;
   if (!PathService::Get(base::DIR_ANDROID_APP_DATA, &user_data_dir)) {
     NOTREACHED() << "Failed to get app data directory for Android WebView";
   }
   browser_context_.reset(
-      new AwBrowserContext(user_data_dir, geolocation_permission_factory));
+      new AwBrowserContext(user_data_dir, native_factory_));
 }
 
 AwContentBrowserClient::~AwContentBrowserClient() {
+}
+
+void AwContentBrowserClient::AddCertificate(net::URLRequest* request,
+                                            net::CertificateMimeType cert_type,
+                                            const void* cert_data,
+                                            size_t cert_size,
+                                            int render_process_id,
+                                            int render_view_id) {
+  if (cert_size > 0)
+    net::android::StoreCertificate(cert_type, cert_data, cert_size);
 }
 
 AwBrowserContext* AwContentBrowserClient::GetAwBrowserContext() {
@@ -70,7 +95,7 @@ content::BrowserMainParts* AwContentBrowserClient::CreateBrowserMainParts(
 content::WebContentsViewDelegate*
 AwContentBrowserClient::GetWebContentsViewDelegate(
     content::WebContents* web_contents) {
-  return (*view_delegate_factory_)(web_contents);
+  return native_factory_->CreateViewDelegate(web_contents);
 }
 
 void AwContentBrowserClient::RenderProcessHostCreated(
@@ -88,6 +113,49 @@ void AwContentBrowserClient::RenderProcessHostCreated(
       host->GetID(), android_webview::kContentScheme);
   content::ChildProcessSecurityPolicy::GetInstance()->GrantScheme(
       host->GetID(), chrome::kFileScheme);
+}
+
+net::URLRequestContextGetter*
+AwContentBrowserClient::CreateRequestContext(
+    content::BrowserContext* browser_context,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        blob_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        file_system_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        developer_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        chrome_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        chrome_devtools_protocol_handler) {
+  DCHECK(browser_context_.get() == browser_context);
+  return browser_context_->CreateRequestContext(
+      blob_protocol_handler.Pass(), file_system_protocol_handler.Pass(),
+      developer_protocol_handler.Pass(), chrome_protocol_handler.Pass(),
+      chrome_devtools_protocol_handler.Pass());
+}
+
+net::URLRequestContextGetter*
+AwContentBrowserClient::CreateRequestContextForStoragePartition(
+    content::BrowserContext* browser_context,
+    const base::FilePath& partition_path,
+    bool in_memory,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        blob_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        file_system_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        developer_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        chrome_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        chrome_devtools_protocol_handler) {
+  DCHECK(browser_context_.get() == browser_context);
+  return browser_context_->CreateRequestContextForStoragePartition(
+      partition_path, in_memory, blob_protocol_handler.Pass(),
+      file_system_protocol_handler.Pass(),
+      developer_protocol_handler.Pass(), chrome_protocol_handler.Pass(),
+      chrome_devtools_protocol_handler.Pass());
 }
 
 std::string AwContentBrowserClient::GetCanonicalEncodingNameByAliasName(
@@ -202,13 +270,20 @@ void AwContentBrowserClient::AllowCertificateError(
     int cert_error,
     const net::SSLInfo& ssl_info,
     const GURL& request_url,
+    ResourceType::Type resource_type,
     bool overridable,
     bool strict_enforcement,
     const base::Callback<void(bool)>& callback,
     bool* cancel_request) {
-  // TODO(boliu): Implement this to power WebViewClient.onReceivedSslError.
-  NOTIMPLEMENTED();
-  *cancel_request = true;
+
+  AwContentsClientBridgeBase* client =
+      AwContentsClientBridgeBase::FromID(render_process_id, render_view_id);
+  if (client) {
+    client->AllowCertificateError(cert_error, ssl_info.cert, request_url,
+                                  callback, cancel_request);
+  } else {
+    *cancel_request = true;
+  }
 }
 
 WebKit::WebNotificationPresenter::Permission
@@ -272,8 +347,7 @@ net::NetLog* AwContentBrowserClient::GetNetLog() {
 }
 
 content::AccessTokenStore* AwContentBrowserClient::CreateAccessTokenStore() {
-  // TODO(boliu): Implement as part of geolocation code.
-  return new DummyAccessTokenStore();
+  return new AwAccessTokenStore();
 }
 
 bool AwContentBrowserClient::IsFastShutdownPossible() {
@@ -306,13 +380,13 @@ void AwContentBrowserClient::ClearCookies(content::RenderViewHost* rvh) {
   NOTIMPLEMENTED();
 }
 
-FilePath AwContentBrowserClient::GetDefaultDownloadDirectory() {
+base::FilePath AwContentBrowserClient::GetDefaultDownloadDirectory() {
   // Android WebView does not currently use the Chromium downloads system.
   // Download requests are cancelled immedately when recognized; see
   // AwResourceDispatcherHost::CreateResourceHandlerForDownload. However the
   // download system still tries to start up and calls this before recognizing
   // the request has been cancelled.
-  return FilePath();
+  return base::FilePath();
 }
 
 std::string AwContentBrowserClient::GetDefaultDownloadName() {

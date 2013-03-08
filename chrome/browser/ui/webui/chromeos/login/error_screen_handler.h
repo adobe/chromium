@@ -41,7 +41,9 @@ class ErrorScreenHandler : public BaseScreenHandler,
   virtual void HideCaptivePortal() OVERRIDE;
   virtual void ShowProxyError() OVERRIDE;
   virtual void ShowCaptivePortalError(const std::string& network) OVERRIDE;
+  virtual void ShowTimeoutError() OVERRIDE;
   virtual void ShowOfflineError() OVERRIDE;
+  virtual void AllowGuestSignin(bool allowed) OVERRIDE;
   virtual void AllowOfflineLogin(bool allowed) OVERRIDE;
 
  private:

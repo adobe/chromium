@@ -6,6 +6,7 @@
 
 #include "base/callback.h"
 #include "chrome/browser/chromeos/drive/file_system/copy_operation.h"
+#include "chrome/browser/chromeos/drive/file_system/create_directory_operation.h"
 #include "chrome/browser/chromeos/drive/file_system/move_operation.h"
 #include "chrome/browser/chromeos/drive/file_system/remove_operation.h"
 #include "chrome/browser/chromeos/drive/file_system/update_operation.h"
@@ -40,6 +41,10 @@ void DriveOperations::Init(
                                                        uploader,
                                                        blocking_task_runner,
                                                        observer));
+  create_directory_operation_.reset(
+      new CreateDirectoryOperation(drive_scheduler,
+                                   metadata,
+                                   observer));
   move_operation_.reset(new file_system::MoveOperation(drive_scheduler,
                                                        metadata,
                                                        observer));
@@ -49,7 +54,7 @@ void DriveOperations::Init(
                                                            observer));
   update_operation_.reset(new file_system::UpdateOperation(cache,
                                                            metadata,
-                                                           uploader,
+                                                           drive_scheduler,
                                                            blocking_task_runner,
                                                            observer));
 }
@@ -66,8 +71,8 @@ void DriveOperations::InitForTesting(CopyOperation* copy_operation,
   update_operation_.reset(update_operation);
 }
 
-void DriveOperations::Copy(const FilePath& src_file_path,
-                           const FilePath& dest_file_path,
+void DriveOperations::Copy(const base::FilePath& src_file_path,
+                           const base::FilePath& dest_file_path,
                            const FileOperationCallback& callback) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(!callback.is_null());
@@ -76,8 +81,8 @@ void DriveOperations::Copy(const FilePath& src_file_path,
 }
 
 void DriveOperations::TransferFileFromRemoteToLocal(
-    const FilePath& remote_src_file_path,
-    const FilePath& local_dest_file_path,
+    const base::FilePath& remote_src_file_path,
+    const base::FilePath& local_dest_file_path,
     const FileOperationCallback& callback) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(!callback.is_null());
@@ -88,8 +93,8 @@ void DriveOperations::TransferFileFromRemoteToLocal(
 }
 
 void DriveOperations::TransferFileFromLocalToRemote(
-    const FilePath& local_src_file_path,
-    const FilePath& remote_dest_file_path,
+    const base::FilePath& local_src_file_path,
+    const base::FilePath& remote_dest_file_path,
     const FileOperationCallback& callback) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(!callback.is_null());
@@ -100,8 +105,8 @@ void DriveOperations::TransferFileFromLocalToRemote(
 }
 
 void DriveOperations::TransferRegularFile(
-    const FilePath& local_src_file_path,
-    const FilePath& remote_dest_file_path,
+    const base::FilePath& local_src_file_path,
+    const base::FilePath& remote_dest_file_path,
     const FileOperationCallback& callback) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(!callback.is_null());
@@ -111,8 +116,20 @@ void DriveOperations::TransferRegularFile(
                                        callback);
 }
 
-void DriveOperations::Move(const FilePath& src_file_path,
-                           const FilePath& dest_file_path,
+void DriveOperations::CreateDirectory(
+    const base::FilePath& directory_path,
+    bool is_exclusive,
+    bool is_recursive,
+    const FileOperationCallback& callback) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK(!callback.is_null());
+
+  create_directory_operation_->CreateDirectory(
+      directory_path, is_exclusive, is_recursive, callback);
+}
+
+void DriveOperations::Move(const base::FilePath& src_file_path,
+                           const base::FilePath& dest_file_path,
                            const FileOperationCallback& callback) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(!callback.is_null());
@@ -120,7 +137,7 @@ void DriveOperations::Move(const FilePath& src_file_path,
   move_operation_->Move(src_file_path, dest_file_path, callback);
 }
 
-void DriveOperations::Remove(const FilePath& file_path,
+void DriveOperations::Remove(const base::FilePath& file_path,
                              bool is_recursive,
                              const FileOperationCallback& callback) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
@@ -131,11 +148,12 @@ void DriveOperations::Remove(const FilePath& file_path,
 
 void DriveOperations::UpdateFileByResourceId(
     const std::string& resource_id,
+    DriveClientContext context,
     const FileOperationCallback& callback) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(!callback.is_null());
 
-  update_operation_->UpdateFileByResourceId(resource_id, callback);
+  update_operation_->UpdateFileByResourceId(resource_id, context, callback);
 }
 
 }  // namespace file_system

@@ -5,11 +5,13 @@
 #include "chrome/browser/net/pref_proxy_config_tracker_impl.h"
 
 #include "base/bind.h"
+#include "base/prefs/pref_registry_simple.h"
+#include "base/prefs/pref_service.h"
 #include "base/values.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prefs/proxy_config_dictionary.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
@@ -195,19 +197,18 @@ net::ProxyConfigService::ConfigAvailability
 }
 
 // static
-void PrefProxyConfigTrackerImpl::RegisterPrefs(
-    PrefServiceSimple* local_state) {
+void PrefProxyConfigTrackerImpl::RegisterPrefs(PrefRegistrySimple* registry) {
   DictionaryValue* default_settings = ProxyConfigDictionary::CreateSystem();
-  local_state->RegisterDictionaryPref(prefs::kProxy, default_settings);
+  registry->RegisterDictionaryPref(prefs::kProxy, default_settings);
 }
 
 // static
 void PrefProxyConfigTrackerImpl::RegisterUserPrefs(
-    PrefServiceSyncable* pref_service) {
+    PrefRegistrySyncable* pref_service) {
   DictionaryValue* default_settings = ProxyConfigDictionary::CreateSystem();
   pref_service->RegisterDictionaryPref(prefs::kProxy,
                                        default_settings,
-                                       PrefServiceSyncable::UNSYNCABLE_PREF);
+                                       PrefRegistrySyncable::UNSYNCABLE_PREF);
 }
 
 ProxyPrefs::ConfigState PrefProxyConfigTrackerImpl::GetProxyConfig(

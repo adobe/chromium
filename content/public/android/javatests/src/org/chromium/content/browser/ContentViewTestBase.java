@@ -6,9 +6,10 @@ package org.chromium.content.browser;
 
 import android.util.Log;
 
+import org.chromium.base.test.util.UrlUtils;
 import org.chromium.content.browser.test.util.TestCallbackHelperContainer;
-import org.chromium.content_shell.ContentShellActivity;
 import org.chromium.content_shell.ContentShellTestBase;
+import org.chromium.content_shell_apk.ContentShellActivity;
 
 public class ContentViewTestBase extends ContentShellTestBase {
 
@@ -20,7 +21,7 @@ public class ContentViewTestBase extends ContentShellTestBase {
     protected void setUpContentView(final Object object, final String name) throws Exception {
         // This starts the activity, so must be called on the test thread.
         final ContentShellActivity activity = launchContentShellWithUrl(
-                "data:text/html;utf-8,<html><head></head><body>test</body></html>");
+                UrlUtils.encodeHtmlDataUri("<html><head></head><body>test</body></html>"));
 
         waitForActiveShellToBeDoneLoading();
 

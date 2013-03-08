@@ -6,6 +6,7 @@
 
 #include "ash/shell.h"
 #include "ash/shell_window_ids.h"
+#include "ash/system/tray/hover_highlight_view.h"
 #include "ash/system/tray/system_tray.h"
 #include "ash/system/tray/system_tray_delegate.h"
 #include "ash/system/tray/system_tray_item.h"
@@ -128,8 +129,7 @@ void NetworkListDetailedViewBase::ManagerChanged() {
   Update();
 }
 
-void NetworkListDetailedViewBase::NetworkListChanged(
-    const NetworkStateList& networks) {
+void NetworkListDetailedViewBase::NetworkListChanged() {
   Update();
 }
 
@@ -223,12 +223,13 @@ bool NetworkListDetailedViewBase::CreateOrUpdateInfoLabel(
 }
 
 bool NetworkListDetailedViewBase::UpdateNetworkChild(
-    int index, bool highlight, const NetworkIconInfo* info) {
+    int index, const NetworkIconInfo* info) {
   bool needs_relayout = false;
   HoverHighlightView* container = NULL;
   ServicePathMap::const_iterator found =
       service_path_map_.find(info->service_path);
-  gfx::Font::FontStyle font = highlight ? gfx::Font::BOLD : gfx::Font::NORMAL;
+  gfx::Font::FontStyle font =
+      info->highlight() ? gfx::Font::BOLD : gfx::Font::NORMAL;
   string16 desc = info->description.empty() ? info->name : info->description;
   if (found == service_path_map_.end()) {
     container = new HoverHighlightView(this);
@@ -297,13 +298,6 @@ void NetworkListDetailedViewBase::RefreshNetworkList() {
   }
 }
 
-void NetworkListDetailedViewBase::ClearNetworkScrollWithEmptyNetworkList() {
-  service_path_map_.clear();
-  network_map_.clear();
-  scroll_content()->RemoveAllChildViews(true);
-  ClearNetworkListEntries();
-}
-
 void NetworkListDetailedViewBase::RefreshNetworkScrollWithUpdatedNetworkData() {
   RefreshNetworkList();
 }
@@ -331,7 +325,7 @@ void NetworkListDetailedViewBase::ButtonPressed(views::Button* sender,
     CustomButtonPressed(sender, event);
 }
 
-void NetworkListDetailedViewBase::ClickedOn(views::View* sender) {
+void NetworkListDetailedViewBase::OnViewClicked(views::View* sender) {
   SystemTrayDelegate* delegate = Shell::GetInstance()->system_tray_delegate();
   // If the info bubble was visible, close it when some other item is clicked
   // on.

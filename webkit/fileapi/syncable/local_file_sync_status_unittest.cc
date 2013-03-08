@@ -8,7 +8,9 @@
 #include "googleurl/src/gurl.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-namespace fileapi {
+using fileapi::FileSystemURL;
+
+namespace sync_file_system {
 
 namespace {
 
@@ -20,7 +22,7 @@ const char kOther1[] = "filesystem:http://foo.com/test/dir b";
 const char kOther2[] = "filesystem:http://foo.com/temporary/dir a";
 
 FileSystemURL URL(const char* spec) {
-  return FileSystemURL(GURL(spec));
+  return FileSystemURL::CreateForTest((GURL(spec)));
 }
 
 }  // namespace
@@ -84,4 +86,4 @@ TEST(LocalFileSyncStatusTest, SyncingSimple) {
   EXPECT_TRUE(status.IsWritable(URL(kChild)));
 }
 
-}  // namespace fileapi
+}  // namespace sync_file_system

@@ -13,6 +13,7 @@
 #include <string>
 
 #include "base/basictypes.h"
+#include "chrome/browser/ui/host_desktop.h"
 
 class AutomationProviderList;
 class BackgroundModeManager;
@@ -29,7 +30,8 @@ class IntranetRedirectDetector;
 class IOThread;
 class MetricsService;
 class NotificationUIManager;
-class PrefServiceSimple;
+class PrefRegistrySimple;
+class PrefService;
 class Profile;
 class ProfileManager;
 class RenderWidgetSnapshotTaker;
@@ -103,7 +105,7 @@ class BrowserProcess {
   // Services: any of these getters may return NULL
   virtual MetricsService* metrics_service() = 0;
   virtual ProfileManager* profile_manager() = 0;
-  virtual PrefServiceSimple* local_state() = 0;
+  virtual PrefService* local_state() = 0;
   virtual net::URLRequestContextGetter* system_request_context() = 0;
   virtual chrome_variations::VariationsService* variations_service() = 0;
 
@@ -153,6 +155,7 @@ class BrowserProcess {
 
   virtual void CreateDevToolsHttpProtocolHandler(
       Profile* profile,
+      chrome::HostDesktopType host_desktop_type,
       const std::string& ip,
       int port,
       const std::string& frontend_url) = 0;

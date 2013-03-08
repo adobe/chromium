@@ -9,19 +9,21 @@
 
 #include "content/public/browser/web_contents_delegate.h"
 
-class PrefServiceSyncable;
+class PrefRegistrySyncable;
 class Profile;
+class TabSpecificContentSettings;
 
 class MediaStreamDevicesController {
  public:
   MediaStreamDevicesController(Profile* profile,
+                               TabSpecificContentSettings* content_settings,
                                const content::MediaStreamRequest& request,
                                const content::MediaResponseCallback& callback);
 
   virtual ~MediaStreamDevicesController();
 
   // Registers the prefs backing the audio and video policies.
-  static void RegisterUserPrefs(PrefServiceSyncable* prefs);
+  static void RegisterUserPrefs(PrefRegistrySyncable* registry);
 
   // Public method to be called before creating the MediaStreamInfoBarDelegate.
   // This function will check the content settings exceptions and take the
@@ -29,18 +31,22 @@ class MediaStreamDevicesController {
   bool DismissInfoBarAndTakeActionOnSettings();
 
   // Public methods to be called by MediaStreamInfoBarDelegate;
-  bool has_audio() const { return has_audio_; }
-  bool has_video() const { return has_video_; }
+  bool has_audio() const { return microphone_requested_; }
+  bool has_video() const { return webcam_requested_; }
   const std::string& GetSecurityOriginSpec() const;
   void Accept(bool update_content_setting);
   void Deny(bool update_content_setting);
 
  private:
-  // Returns true if audio capture is disabled by policy.
-  bool IsAudioDeviceBlockedByPolicy() const;
+  enum DevicePolicy {
+    POLICY_NOT_SET,
+    ALWAYS_DENY,
+    ALWAYS_ALLOW,
+  };
 
-  // Returns true if video capture is disabled by policy.
-  bool IsVideoDeviceBlockedByPolicy() const;
+  // Called by GetAudioDevicePolicy and GetVideoDevicePolicy to check
+  // the currently set capture device policy.
+  DevicePolicy GetDevicePolicy(const char* policy_name) const;
 
   // Returns true if the origin of the request has been granted the media
   // access before, otherwise returns false.
@@ -55,7 +61,7 @@ class MediaStreamDevicesController {
   bool IsDefaultMediaAccessBlocked() const;
 
   // Handles Tab Capture media request.
-  void HandleTapMediaRequest();
+  void HandleTabMediaRequest();
 
   // Returns true if the origin is a secure scheme, otherwise returns false.
   bool IsSchemeSecure() const;
@@ -71,6 +77,13 @@ class MediaStreamDevicesController {
   // The owner of this class needs to make sure it does not outlive the profile.
   Profile* profile_;
 
+  // Weak pointer to the tab specific content settings of the tab for which the
+  // MediaStreamDevicesController was created. The tab specific content
+  // settings are associated with a the web contents of the tab. The
+  // MediaStreamDeviceController must not outlive the web contents for which it
+  // was created.
+  TabSpecificContentSettings* content_settings_;
+
   // The original request for access to devices.
   const content::MediaStreamRequest request_;
 
@@ -78,8 +91,9 @@ class MediaStreamDevicesController {
   // audio/video devices was granted or not.
   content::MediaResponseCallback callback_;
 
-  bool has_audio_;
-  bool has_video_;
+  bool microphone_requested_;
+  bool webcam_requested_;
+
   DISALLOW_COPY_AND_ASSIGN(MediaStreamDevicesController);
 };
 

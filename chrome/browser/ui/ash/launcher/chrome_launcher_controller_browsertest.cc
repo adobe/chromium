@@ -4,12 +4,15 @@
 
 #include "chrome/browser/ui/ash/launcher/chrome_launcher_controller.h"
 
+#include "ash/ash_switches.h"
 #include "ash/launcher/launcher.h"
 #include "ash/launcher/launcher_model.h"
 #include "ash/shell.h"
+#include "ash/test/launcher_view_test_api.h"
 #include "ash/test/shell_test_api.h"
 #include "ash/wm/window_util.h"
 #include "base/command_line.h"
+#include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/automation/automation_util.h"
 #include "chrome/browser/extensions/extension_apitest.h"
@@ -26,6 +29,7 @@
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/extensions/application_launch.h"
 #include "chrome/browser/ui/extensions/shell_window.h"
+#include "chrome/browser/ui/host_desktop.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
@@ -54,10 +58,15 @@ class LauncherPlatformAppBrowserTest
     return ash::test::ShellTestApi(ash::Shell::GetInstance()).launcher_model();
   }
 
-  virtual void RunTestOnMainThreadLoop() {
+  virtual void RunTestOnMainThreadLoop() OVERRIDE {
     launcher_ = ash::Launcher::ForPrimaryDisplay();
     controller_ = static_cast<ChromeLauncherController*>(launcher_->delegate());
     return extensions::PlatformAppBrowserTest::RunTestOnMainThreadLoop();
+  }
+
+  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+    PlatformAppBrowserTest::SetUpCommandLine(command_line);
+    command_line->AppendSwitch(ash::switches::kAshDisablePerAppLauncher);
   }
 
   ash::LauncherID CreateAppShortcutLauncherItem(const std::string& name) {
@@ -78,11 +87,16 @@ class LauncherAppBrowserTest : public ExtensionBrowserTest {
 
   virtual ~LauncherAppBrowserTest() {}
 
-  virtual void RunTestOnMainThreadLoop() {
+  virtual void RunTestOnMainThreadLoop() OVERRIDE {
     launcher_ = ash::Launcher::ForPrimaryDisplay();
     model_ =
         ash::test::ShellTestApi(ash::Shell::GetInstance()).launcher_model();
     return ExtensionBrowserTest::RunTestOnMainThreadLoop();
+  }
+
+  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+    ExtensionBrowserTest::SetUpCommandLine(command_line);
+    command_line->AppendSwitch(ash::switches::kAshDisablePerAppLauncher);
   }
 
   const Extension* LoadAndLaunchExtension(
@@ -97,8 +111,8 @@ class LauncherAppBrowserTest : public ExtensionBrowserTest {
         service->GetExtensionById(last_loaded_extension_id_, false);
     EXPECT_TRUE(extension);
 
-    application_launch::OpenApplication(application_launch::LaunchParams(
-            browser()->profile(), extension, container, disposition));
+    chrome::OpenApplication(chrome::AppLaunchParams(
+        browser()->profile(), extension, container, disposition));
     return extension;
   }
 
@@ -123,6 +137,13 @@ class LauncherAppBrowserTest : public ExtensionBrowserTest {
     ash::LauncherItem item = *model_->ItemByID(shortcut_id);
     EXPECT_EQ(ash::TYPE_APP_SHORTCUT, item.type);
     return item.id;
+  }
+
+  ash::LauncherID PinFakeApp(const std::string& name) {
+    ChromeLauncherController* controller =
+        static_cast<ChromeLauncherController*>(launcher_->delegate());
+    return controller->CreateAppShortcutLauncherItem(
+        name, model_->item_count());
   }
 
   ash::Launcher* launcher_;
@@ -340,7 +361,26 @@ IN_PROC_BROWSER_TEST_F(LauncherPlatformAppBrowserTest, MultipleApps) {
   CloseShellWindow(window1);
   --item_count;
   ASSERT_EQ(item_count, launcher_model()->item_count());
+}
 
+// Test that we can launch a platform app panel and get a running item.
+IN_PROC_BROWSER_TEST_F(LauncherPlatformAppBrowserTest, LaunchPanelWindow) {
+  int item_count = launcher_model()->item_count();
+  const Extension* extension = LoadAndLaunchPlatformApp("launch");
+  ShellWindow::CreateParams params;
+  params.window_type = ShellWindow::WINDOW_TYPE_PANEL;
+  ShellWindow* window = CreateShellWindowFromParams(extension, params);
+  ++item_count;
+  ASSERT_EQ(item_count, launcher_model()->item_count());
+  // Panels show up on the right side of the launcher, so the new item should
+  // be the last one.
+  ash::LauncherItem item =
+      launcher_model()->items()[launcher_model()->item_count() - 1];
+  EXPECT_EQ(ash::TYPE_APP_PANEL, item.type);
+  EXPECT_EQ(ash::STATUS_ACTIVE, item.status);
+  CloseShellWindow(window);
+  --item_count;
+  EXPECT_EQ(item_count, launcher_model()->item_count());
 }
 
 // Confirm that app windows can be reactivated by clicking their icons and that
@@ -507,7 +547,7 @@ IN_PROC_BROWSER_TEST_F(LauncherAppBrowserTest, LaunchMaximized) {
   content::WindowedNotificationObserver open_observer(
       chrome::NOTIFICATION_BROWSER_WINDOW_READY,
       content::NotificationService::AllSources());
-  chrome::NewEmptyWindow(browser()->profile());
+  chrome::NewEmptyWindow(browser()->profile(), chrome::HOST_DESKTOP_TYPE_ASH);
   open_observer.Wait();
   Browser* browser2 = content::Source<Browser>(open_observer.source()).ptr();
   aura::Window* window2 = browser2->window()->GetNativeWindow();
@@ -733,4 +773,32 @@ IN_PROC_BROWSER_TEST_F(LauncherAppBrowserTest, RefocusFilterLaunch) {
   EXPECT_EQ(ash::STATUS_ACTIVE, model_->ItemByID(shortcut_id)->status);
   EXPECT_NE(first_tab, second_tab);
   EXPECT_EQ(tab_strip->GetActiveWebContents(), second_tab);
+}
+
+IN_PROC_BROWSER_TEST_F(LauncherAppBrowserTest, OverflowBubble) {
+  // Make sure to have a browser window
+  chrome::NewTab(browser());
+
+  // No overflow yet.
+  EXPECT_FALSE(launcher_->IsShowingOverflowBubble());
+
+  ash::test::LauncherViewTestAPI test(launcher_->GetLauncherViewForTest());
+
+  int items_added = 0;
+  while (!test.IsOverflowButtonVisible()) {
+    std::string fake_app_id = StringPrintf("fake_app_%d", items_added);
+    PinFakeApp(fake_app_id);
+
+    ++items_added;
+    ASSERT_LT(items_added, 10000);
+  }
+
+  // Now show overflow bubble.
+  test.ShowOverflowBubble();
+  EXPECT_TRUE(launcher_->IsShowingOverflowBubble());
+
+  // Unpin first pinned app and there should be no crash.
+  ChromeLauncherController* controller =
+      static_cast<ChromeLauncherController*>(launcher_->delegate());
+  controller->UnpinAppsWithID(std::string("fake_app_0"));
 }

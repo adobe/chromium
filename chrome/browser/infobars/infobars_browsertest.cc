@@ -23,14 +23,15 @@ class InfoBarsTest : public InProcessBrowserTest {
  public:
   InfoBarsTest() {}
 
-  void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
     command_line->AppendSwitchASCII(
         switches::kAppsGalleryInstallAutoConfirmForTests, "accept");
   }
 
   void InstallExtension(const char* filename) {
-    FilePath path = ui_test_utils::GetTestFilePath(
-        FilePath().AppendASCII("extensions"), FilePath().AppendASCII(filename));
+    base::FilePath path = ui_test_utils::GetTestFilePath(
+        base::FilePath().AppendASCII("extensions"),
+        base::FilePath().AppendASCII(filename));
     Profile* profile = browser()->profile();
     ExtensionService* service = profile->GetExtensionService();
 

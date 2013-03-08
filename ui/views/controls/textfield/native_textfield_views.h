@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2013 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,13 +10,13 @@
 #include "ui/base/events/event_constants.h"
 #include "ui/base/ime/text_input_client.h"
 #include "ui/base/models/simple_menu_model.h"
+#include "ui/base/touch/touch_editing_controller.h"
 #include "ui/gfx/font.h"
 #include "ui/views/border.h"
 #include "ui/views/context_menu_controller.h"
 #include "ui/views/controls/textfield/native_textfield_wrapper.h"
 #include "ui/views/controls/textfield/textfield_views_model.h"
 #include "ui/views/drag_controller.h"
-#include "ui/views/touchui/touch_selection_controller.h"
 #include "ui/views/view.h"
 
 namespace base {
@@ -41,7 +41,8 @@ class MenuRunner;
 // * X selection (only if we want to support).
 // Once completed, this will replace Textfield, NativeTextfieldWin and
 // NativeTextfieldGtk.
-class VIEWS_EXPORT NativeTextfieldViews : public TouchSelectionClientView,
+class VIEWS_EXPORT NativeTextfieldViews : public View,
+                                          public ui::TouchEditable,
                                           public ContextMenuController,
                                           public DragController,
                                           public NativeTextfieldWrapper,
@@ -76,9 +77,16 @@ class VIEWS_EXPORT NativeTextfieldViews : public TouchSelectionClientView,
   virtual void OnBlur() OVERRIDE;
   virtual void OnNativeThemeChanged(const ui::NativeTheme* theme) OVERRIDE;
 
-  // TouchSelectionClientView overrides:
+  // ui::TouchEditable overrides:
   virtual void SelectRect(const gfx::Point& start,
                           const gfx::Point& end) OVERRIDE;
+  virtual void GetSelectionEndPoints(gfx::Rect* p1, gfx::Rect* p2) OVERRIDE;
+  virtual gfx::Rect GetBounds() OVERRIDE;
+  virtual gfx::NativeView GetNativeView() OVERRIDE;
+  virtual void ConvertPointToScreen(gfx::Point* point) OVERRIDE;
+  virtual void ConvertPointFromScreen(gfx::Point* point) OVERRIDE;
+  virtual bool DrawsHandles() OVERRIDE;
+  virtual void OpenContextMenu(const gfx::Point anchor) OVERRIDE;
 
   // ContextMenuController overrides:
   virtual void ShowContextMenuForView(View* source,
@@ -118,9 +126,9 @@ class VIEWS_EXPORT NativeTextfieldViews : public TouchSelectionClientView,
   virtual View* GetView() OVERRIDE;
   virtual gfx::NativeView GetTestingHandle() const OVERRIDE;
   virtual bool IsIMEComposing() const OVERRIDE;
-  virtual void GetSelectedRange(ui::Range* range) const OVERRIDE;
+  virtual ui::Range GetSelectedRange() const OVERRIDE;
   virtual void SelectRange(const ui::Range& range) OVERRIDE;
-  virtual void GetSelectionModel(gfx::SelectionModel* sel) const OVERRIDE;
+  virtual gfx::SelectionModel GetSelectionModel() const OVERRIDE;
   virtual void SelectSelectionModel(const gfx::SelectionModel& sel) OVERRIDE;
   virtual size_t GetCursorPosition() const OVERRIDE;
   virtual bool GetCursorEnabled() const OVERRIDE;
@@ -130,8 +138,12 @@ class VIEWS_EXPORT NativeTextfieldViews : public TouchSelectionClientView,
   virtual void HandleFocus() OVERRIDE;
   virtual void HandleBlur() OVERRIDE;
   virtual ui::TextInputClient* GetTextInputClient() OVERRIDE;
-  virtual void ApplyStyleRange(const gfx::StyleRange& style) OVERRIDE;
-  virtual void ApplyDefaultStyle() OVERRIDE;
+  virtual void SetColor(SkColor value) OVERRIDE;
+  virtual void ApplyColor(SkColor value, const ui::Range& range) OVERRIDE;
+  virtual void SetStyle(gfx::TextStyle style, bool value) OVERRIDE;
+  virtual void ApplyStyle(gfx::TextStyle style,
+                          bool value,
+                          const ui::Range& range) OVERRIDE;
   virtual void ClearEditHistory() OVERRIDE;
   virtual int GetFontHeight() OVERRIDE;
   virtual int GetTextfieldBaseline() const OVERRIDE;
@@ -263,6 +275,11 @@ class VIEWS_EXPORT NativeTextfieldViews : public TouchSelectionClientView,
   // modified character, i.e., modifiers took effect when generating this char.
   static bool ShouldInsertChar(char16 ch, int flags);
 
+  void CreateTouchSelectionControllerAndNotifyIt();
+
+  // Platform specific gesture event handling.
+  void PlatformGestureEventHandling(const ui::GestureEvent* event);
+
   // The parent textfield, the owner of this object.
   Textfield* textfield_;
 
@@ -296,7 +313,7 @@ class VIEWS_EXPORT NativeTextfieldViews : public TouchSelectionClientView,
   scoped_ptr<views::MenuModelAdapter> context_menu_delegate_;
   scoped_ptr<views::MenuRunner> context_menu_runner_;
 
-  scoped_ptr<TouchSelectionController> touch_selection_controller_;
+  scoped_ptr<ui::TouchSelectionController> touch_selection_controller_;
 
   DISALLOW_COPY_AND_ASSIGN(NativeTextfieldViews);
 };

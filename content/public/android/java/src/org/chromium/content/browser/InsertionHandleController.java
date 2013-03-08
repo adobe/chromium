@@ -8,6 +8,7 @@ import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.res.TypedArray;
 import android.graphics.drawable.Drawable;
+import android.graphics.PointF;
 import android.view.Gravity;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -52,13 +53,10 @@ abstract class InsertionHandleController implements CursorController {
     }
 
     /**
-     * Sets the position and shows the handle.
-     * @param x1
-     * @param y1
+     * Shows the handle.
      */
-    void showHandleAt(int x, int y) {
+    void showHandle() {
         createHandleIfNeeded();
-        setHandlePosition(x, y);
         showHandleIfNeeded();
     }
 
@@ -68,25 +66,51 @@ abstract class InsertionHandleController implements CursorController {
         }
     }
 
-    void showHandleWithPastePopupAt(int x, int y) {
-        showHandleAt(x, y);
+    void showHandleWithPastePopup() {
+        showHandle();
         showPastePopup();
     }
 
     /** Shows the handle at the given coordinates, as long as automatic showing is allowed */
-    void onCursorPositionChanged(int x, int y) {
+    void onCursorPositionChanged() {
         if (mAllowAutomaticShowing) {
-            showHandleAt(x, y);
+            showHandle();
         }
     }
 
     /**
      * Moves the handle so that it points at the given coordinates.
-     * @param x
-     * @param y
+     * @param x Handle x in physical pixels.
+     * @param y Handle y in physical pixels.
      */
     void setHandlePosition(int x, int y) {
         mHandle.positionAt(x, y);
+    }
+
+    void setHandlePosition(float x, float y) {
+        setHandlePosition((int) x, (int) y);
+    }
+
+    /**
+     * If the handle is not visible, sets its visibility to View.VISIBLE and begins fading it in.
+     */
+    void beginHandleFadeIn() {
+        mHandle.beginFadeIn();
+    }
+
+    /**
+     * Sets the handle to the given visibility.
+     */
+    void setHandleVisibility(int visibility) {
+        mHandle.setVisibility(visibility);
+    }
+
+    int getHandleX() {
+        return mHandle.getAdjustedPositionX();
+    }
+
+    int getHandleY() {
+        return mHandle.getAdjustedPositionY();
     }
 
     public HandleView getHandleViewForTest() {
@@ -124,7 +148,7 @@ abstract class InsertionHandleController implements CursorController {
     /**
      * The concrete implementation must cause the cursor position to move to the given
      * coordinates and (possibly asynchronously) set the insertion handle position
-     * after the cursor position change is made via showHandleAt(x,y).
+     * after the cursor position change is made via setHandlePosition.
      * @param x
      * @param y
      */
@@ -152,6 +176,7 @@ abstract class InsertionHandleController implements CursorController {
         if (!mIsShowing) {
             mIsShowing = true;
             mHandle.show();
+            setHandleVisibility(HandleView.VISIBLE);
         }
     }
 

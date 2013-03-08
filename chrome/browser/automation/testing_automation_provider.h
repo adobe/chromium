@@ -16,7 +16,7 @@
 #include "chrome/browser/automation/automation_event_queue.h"
 #include "chrome/browser/automation/automation_provider.h"
 #include "chrome/browser/automation/automation_provider_json.h"
-#include "chrome/browser/history/history.h"
+#include "chrome/browser/history/history_service.h"
 #include "chrome/browser/importer/importer_list_observer.h"
 #include "chrome/browser/ui/browser_list_observer.h"
 #include "content/public/browser/notification_registrar.h"
@@ -451,12 +451,6 @@ class TestingAutomationProvider : public AutomationProvider,
                           base::DictionaryValue* args,
                           IPC::Message* reply_message);
 
-  // Generate dictionary info about instant tab.
-  // Uses the JSON interface for input/output.
-  void GetInstantInfo(Browser* browser,
-                      base::DictionaryValue* args,
-                      IPC::Message* reply_message);
-
   // Save the contents of a tab into a file.
   // Uses the JSON interface for input/output.
   void SaveTabContents(Browser* browser,
@@ -539,11 +533,6 @@ class TestingAutomationProvider : public AutomationProvider,
   // Uses the JSON interface for input/output.
   void OverrideGeoposition(base::DictionaryValue* args,
                            IPC::Message* reply_message);
-
-  // Append a command-line switch.
-  // Uses the JSON interface for input/output.
-  void AppendSwitchASCIIToCommandLine(base::DictionaryValue* args,
-                                      IPC::Message* reply_message);
 
   // Responds to the Find request and returns the match count.
   void FindInPage(Browser* browser,

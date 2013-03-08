@@ -8,8 +8,6 @@
 #include "chrome/browser/extensions/extension_web_ui.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "chrome/common/extensions/extension_manifest_constants.h"
-#include "chrome/common/extensions/manifest_handler.h"
 #include "chrome/common/extensions/manifest_url_handler.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_service.h"
@@ -18,16 +16,11 @@ namespace extensions {
 
 ManifestURLParser::ManifestURLParser(Profile* profile)
     : profile_(profile) {
-  ManifestHandler::Register(extension_manifest_keys::kDevToolsPage,
-                            new DevToolsPageHandler);
-  ManifestHandler::Register(extension_manifest_keys::kHomepageURL,
-                            new HomepageURLHandler);
-  ManifestHandler::Register(extension_manifest_keys::kUpdateURL,
-                            new UpdateURLHandler);
-  ManifestHandler::Register(extension_manifest_keys::kOptionsPage,
-                            new OptionsPageHandler);
-  ManifestHandler::Register(extension_manifest_keys::kChromeURLOverrides,
-                            new URLOverridesHandler);
+  (new DevToolsPageHandler)->Register();
+  (new HomepageURLHandler)->Register();
+  (new UpdateURLHandler)->Register();
+  (new OptionsPageHandler)->Register();
+  (new URLOverridesHandler)->Register();
 
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_LOADED,
                  content::Source<Profile>(profile));

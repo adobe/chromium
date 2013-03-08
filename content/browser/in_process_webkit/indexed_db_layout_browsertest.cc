@@ -9,7 +9,8 @@ namespace content {
 class IndexedDBLayoutTest : public InProcessBrowserLayoutTest {
  public:
   IndexedDBLayoutTest() : InProcessBrowserLayoutTest(
-      FilePath(), FilePath().AppendASCII("storage").AppendASCII("indexeddb")) {
+      base::FilePath(),
+      base::FilePath().AppendASCII("storage").AppendASCII("indexeddb")) {
   }
 
   void RunLayoutTests(const char* file_names[]) {
@@ -62,8 +63,7 @@ static const char* kKeyTests[] = {
   "keyrange-required-arguments.html",
   "key-sort-order-across-types.html",
   "key-sort-order-date.html",
-  // Flaky: http://crbug.com/165671
-  //"key-type-array.html",
+  "key-type-array.html",
   "key-type-infinity.html",
   "invalid-keys.html",
   NULL
@@ -90,13 +90,17 @@ static const char* kRegressionTests[] = {
   NULL
 };
 
-const char* kIntVersionTests[] = {
+const char* kIntVersionTests1[] = {
   "intversion-abort-in-initial-upgradeneeded.html",
   "intversion-blocked.html",
   "intversion-close-between-events.html",
   "intversion-close-in-oncomplete.html",
   "intversion-close-in-upgradeneeded.html",
   "delete-in-upgradeneeded-close-in-open-success.html",
+  NULL
+};
+
+const char* kIntVersionTests2[] = {
   "delete-in-upgradeneeded-close-in-versionchange.html",
   "intversion-gated-on-delete.html",
   "intversion-long-queue.html",
@@ -117,8 +121,7 @@ IN_PROC_BROWSER_TEST_F(IndexedDBLayoutTest, ComplexTests) {
   RunLayoutTests(kComplexTests);
 }
 
-// TODO(dgrogan): times out flakily. http://crbug.com/153064
-IN_PROC_BROWSER_TEST_F(IndexedDBLayoutTest, DISABLED_IndexTests) {
+IN_PROC_BROWSER_TEST_F(IndexedDBLayoutTest, IndexTests) {
   RunLayoutTests(kIndexTests);
 }
 
@@ -130,8 +133,12 @@ IN_PROC_BROWSER_TEST_F(IndexedDBLayoutTest, TransactionTests) {
   RunLayoutTests(kTransactionTests);
 }
 
-IN_PROC_BROWSER_TEST_F(IndexedDBLayoutTest, IntVersionTests) {
-  RunLayoutTests(kIntVersionTests);
+IN_PROC_BROWSER_TEST_F(IndexedDBLayoutTest, IntVersionTests1) {
+  RunLayoutTests(kIntVersionTests1);
+}
+
+IN_PROC_BROWSER_TEST_F(IndexedDBLayoutTest, IntVersionTests2) {
+  RunLayoutTests(kIntVersionTests2);
 }
 
 IN_PROC_BROWSER_TEST_F(IndexedDBLayoutTest, RegressionTests) {

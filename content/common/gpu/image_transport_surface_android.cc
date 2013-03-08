@@ -17,27 +17,30 @@ scoped_refptr<gfx::GLSurface> ImageTransportSurface::CreateSurface(
     GpuCommandBufferStub* stub,
     const gfx::GLSurfaceHandle& handle) {
   scoped_refptr<gfx::GLSurface> surface;
-  if (!handle.handle && handle.transport) {
+  if (handle.transport_type == gfx::TEXTURE_TRANSPORT) {
     surface = new TextureImageTransportSurface(manager, stub, handle);
-  } else if (handle.handle == gfx::kDummyPluginWindow && !handle.transport) {
+  } else if (handle.transport_type == gfx::NATIVE_DIRECT) {
     DCHECK(GpuSurfaceLookup::GetInstance());
-    ANativeWindow* window = GpuSurfaceLookup::GetInstance()->GetNativeWidget(
-        stub->surface_id());
-    DCHECK(window);
+    ANativeWindow* window =
+        GpuSurfaceLookup::GetInstance()->AcquireNativeWidget(
+            stub->surface_id());
     surface = new gfx::NativeViewGLSurfaceEGL(false, window);
-    if (!surface.get() || !surface->Initialize())
+    bool initialize_success = surface->Initialize();
+    if (window)
+      ANativeWindow_release(window);
+    if (!initialize_success)
       return NULL;
 
     surface = new PassThroughImageTransportSurface(
-        manager, stub, surface.get(), handle.transport);
+        manager, stub, surface.get(), false);
   } else {
     NOTIMPLEMENTED();
     return NULL;
   }
 
-  if (surface->Initialize())
+  if (surface->Initialize()) {
     return surface;
-  else {
+  } else {
     LOG(ERROR) << "Failed to initialize ImageTransportSurface";
     return NULL;
   }

@@ -28,17 +28,22 @@ bool SpdyHeadersToHttpResponse(const SpdyHeaderBlock& headers,
 
 // Create a SpdyHeaderBlock for a Spdy SYN_STREAM Frame from
 // HttpRequestInfo and HttpRequestHeaders.
-void CreateSpdyHeadersFromHttpRequest(const HttpRequestInfo& info,
-                                      const HttpRequestHeaders& request_headers,
-                                      SpdyHeaderBlock* headers,
-                                      int protocol_version,
-                                      bool direct);
+void NET_EXPORT_PRIVATE CreateSpdyHeadersFromHttpRequest(
+    const HttpRequestInfo& info,
+    const HttpRequestHeaders& request_headers,
+    SpdyHeaderBlock* headers,
+    int protocol_version,
+    bool direct);
 
 // Returns the URL associated with the |headers| by assembling the
 // scheme, host and path from the protocol specific keys.
 GURL GetUrlFromHeaderBlock(const SpdyHeaderBlock& headers,
                            int protocol_version,
                            bool pushed);
+
+// Returns true if the value of this header should be displayed.
+NET_EXPORT_PRIVATE bool ShouldShowHttpHeaderValue(
+    const std::string& header_name);
 
 NET_EXPORT_PRIVATE SpdyPriority ConvertRequestPriorityToSpdyPriority(
     RequestPriority priority,

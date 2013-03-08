@@ -17,12 +17,12 @@
 namespace content {
 class GpuCrashTest : public ContentBrowserTest {
  protected:
-  virtual void SetUpInProcessBrowserTestFixture() {
-    FilePath test_dir;
+  virtual void SetUpInProcessBrowserTestFixture() OVERRIDE {
+    base::FilePath test_dir;
     ASSERT_TRUE(PathService::Get(DIR_TEST_DATA, &test_dir));
     gpu_test_dir_ = test_dir.AppendASCII("gpu");
   }
-  FilePath gpu_test_dir_;
+  base::FilePath gpu_test_dir_;
 };
 
 IN_PROC_BROWSER_TEST_F(GpuCrashTest, MANUAL_Kill) {

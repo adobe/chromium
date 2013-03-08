@@ -8,8 +8,8 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/memory/scoped_handle.h"
@@ -102,7 +102,7 @@ void RecordFileUpdateHistogram(FileWriteResult file_write_result) {
                             NUM_FILE_WRITE_RESULTS);
 }
 
-void CheckThatCRXIsReadable(const FilePath& crx_path) {
+void CheckThatCRXIsReadable(const base::FilePath& crx_path) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
 
   FileWriteResult file_write_result = SUCCESS;
@@ -124,7 +124,7 @@ void CheckThatCRXIsReadable(const FilePath& crx_path) {
 // Record the result of writing a CRX file. Will be used to understand
 // high failure rates of CRX installs in the field.  If |success| is
 // true, |crx_path| should be set to the path to the CRX file.
-void RecordCRXWriteHistogram(bool success, const FilePath& crx_path) {
+void RecordCRXWriteHistogram(bool success, const base::FilePath& crx_path) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   if (!success) {
@@ -220,7 +220,7 @@ bool ExtensionDownloader::AddPendingExtension(const std::string& id,
   Version version("0.0.0.0");
   DCHECK(version.IsValid());
 
-  return AddExtensionData(id, version, Extension::TYPE_UNKNOWN, update_url, "",
+  return AddExtensionData(id, version, Manifest::TYPE_UNKNOWN, update_url, "",
                           request_id);
 }
 
@@ -256,7 +256,7 @@ void ExtensionDownloader::StartBlacklistUpdate(
 
 bool ExtensionDownloader::AddExtensionData(const std::string& id,
                                            const Version& version,
-                                           Extension::Type extension_type,
+                                           Manifest::Type extension_type,
                                            const GURL& extension_update_url,
                                            const std::string& update_url_data,
                                            int request_id) {
@@ -290,21 +290,21 @@ bool ExtensionDownloader::AddExtensionData(const std::string& id,
   }
 
   switch (extension_type) {
-    case Extension::TYPE_THEME:
+    case Manifest::TYPE_THEME:
       ++url_stats_.theme_count;
       break;
-    case Extension::TYPE_EXTENSION:
-    case Extension::TYPE_USER_SCRIPT:
+    case Manifest::TYPE_EXTENSION:
+    case Manifest::TYPE_USER_SCRIPT:
       ++url_stats_.extension_count;
       break;
-    case Extension::TYPE_HOSTED_APP:
-    case Extension::TYPE_LEGACY_PACKAGED_APP:
+    case Manifest::TYPE_HOSTED_APP:
+    case Manifest::TYPE_LEGACY_PACKAGED_APP:
       ++url_stats_.app_count;
       break;
-    case Extension::TYPE_PLATFORM_APP:
+    case Manifest::TYPE_PLATFORM_APP:
       ++url_stats_.platform_app_count;
       break;
-    case Extension::TYPE_UNKNOWN:
+    case Manifest::TYPE_UNKNOWN:
     default:
       ++url_stats_.pending_count;
       break;
@@ -710,7 +710,7 @@ void ExtensionDownloader::OnCRXFetchComplete(
   if (source->FileErrorOccurred(&error_code)) {
     LOG(ERROR) << "Failed to write update CRX with id " << id << ". "
                << "Error code is "<< error_code;
-    RecordCRXWriteHistogram(false, FilePath());
+    RecordCRXWriteHistogram(false, base::FilePath());
     delegate_->OnExtensionDownloadFailed(
         id, ExtensionDownloaderDelegate::CRX_FETCH_FAILED, ping, request_ids);
   } else if (status.status() == net::URLRequestStatus::SUCCESS &&
@@ -726,7 +726,7 @@ void ExtensionDownloader::OnCRXFetchComplete(
           data, extensions_queue_.active_request()->package_hash,
           extensions_queue_.active_request()->version, ping, request_ids);
     } else {
-      FilePath crx_path;
+      base::FilePath crx_path;
       // Take ownership of the file at |crx_path|.
       CHECK(source->GetResponseAsFilePath(true, &crx_path));
       RecordCRXWriteHistogram(true, crx_path);

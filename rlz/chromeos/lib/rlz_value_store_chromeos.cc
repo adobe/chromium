@@ -34,24 +34,25 @@ const char kStatefulEventKey[] = "stateful_events";
 const char kNoSupplementaryBrand[] = "_";
 
 // RLZ store filename.
-const FilePath::CharType kRLZDataFileName[] = FILE_PATH_LITERAL("RLZ Data");
+const base::FilePath::CharType kRLZDataFileName[] =
+    FILE_PATH_LITERAL("RLZ Data");
 
 // RLZ store lock filename
-const FilePath::CharType kRLZLockFileName[] =
+const base::FilePath::CharType kRLZLockFileName[] =
     FILE_PATH_LITERAL("RLZ Data.lock");
 
 // RLZ store path for testing.
-FilePath g_testing_rlz_store_path_;
+base::FilePath g_testing_rlz_store_path_;
 
 // Returns file path of the RLZ storage.
-FilePath GetRlzStorePath() {
+base::FilePath GetRlzStorePath() {
   return g_testing_rlz_store_path_.empty() ?
       file_util::GetHomeDir().Append(kRLZDataFileName) :
       g_testing_rlz_store_path_.Append(kRLZDataFileName);
 }
 
 // Returns file path of the RLZ storage lock file.
-FilePath GetRlzStoreLockPath() {
+base::FilePath GetRlzStoreLockPath() {
   return g_testing_rlz_store_path_.empty() ?
       file_util::GetHomeDir().Append(kRLZLockFileName) :
       g_testing_rlz_store_path_.Append(kRLZLockFileName);
@@ -75,7 +76,7 @@ std::string GetKeyName(std::string key, Product product) {
 
 }  // namespace
 
-RlzValueStoreChromeOS::RlzValueStoreChromeOS(const FilePath& store_path)
+RlzValueStoreChromeOS::RlzValueStoreChromeOS(const base::FilePath& store_path)
     : rlz_store_(new base::DictionaryValue),
       store_path_(store_path),
       read_only_(true) {
@@ -325,7 +326,7 @@ RlzValueStore* ScopedRlzValueStoreLock::GetStore() {
 
 namespace testing {
 
-void SetRlzStoreDirectory(const FilePath& directory) {
+void SetRlzStoreDirectory(const base::FilePath& directory) {
   g_testing_rlz_store_path_ = directory;
 }
 

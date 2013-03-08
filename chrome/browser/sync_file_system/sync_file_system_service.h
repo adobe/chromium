@@ -14,14 +14,18 @@
 #include "base/memory/singleton.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
+#include "chrome/browser/api/sync/profile_sync_service_observer.h"
 #include "chrome/browser/profiles/profile_keyed_service.h"
 #include "chrome/browser/profiles/profile_keyed_service_factory.h"
+#include "chrome/browser/sync_file_system/file_status_observer.h"
 #include "chrome/browser/sync_file_system/local_file_sync_service.h"
 #include "chrome/browser/sync_file_system/remote_file_sync_service.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "googleurl/src/gurl.h"
 #include "webkit/fileapi/syncable/sync_callbacks.h"
+
+class ProfileSyncServiceBase;
 
 namespace fileapi {
 class FileSystemContext;
@@ -33,8 +37,10 @@ class SyncEventObserver;
 
 class SyncFileSystemService
     : public ProfileKeyedService,
+      public ProfileSyncServiceObserver,
       public LocalFileSyncService::Observer,
       public RemoteFileSyncService::Observer,
+      public FileStatusObserver,
       public content::NotificationObserver,
       public base::SupportsWeakPtr<SyncFileSystemService> {
  public:
@@ -45,37 +51,15 @@ class SyncFileSystemService
       fileapi::FileSystemContext* file_system_context,
       const std::string& service_name,
       const GURL& app_origin,
-      const fileapi::SyncStatusCallback& callback);
-
-  // Returns a list (set) of files that are conflicting.
-  void GetConflictFiles(
-      const GURL& app_origin,
-      const std::string& service_name,
-      const fileapi::SyncFileSetCallback& callback);
-
-  // Returns metadata info for a conflicting file |url|.
-  void GetConflictFileInfo(
-      const GURL& app_origin,
-      const std::string& service_name,
-      const fileapi::FileSystemURL& url,
-      const fileapi::ConflictFileInfoCallback& callback);
+      const SyncStatusCallback& callback);
 
   // Returns the file |url|'s sync status.
   void GetFileSyncStatus(
       const fileapi::FileSystemURL& url,
-      const fileapi::SyncFileStatusCallback& callback);
+      const SyncFileStatusCallback& callback);
 
   void AddSyncEventObserver(SyncEventObserver* observer);
   void RemoveSyncEventObserver(SyncEventObserver* observer);
-
-  // Enables or disables automatic synchronization process.
-  // If this is enabled the service automatically runs remote/local sync
-  // process when it detects changes in remote/local filesystem for
-  // registered origins.
-  // It is enabled by default but can be disabled for testing (or maybe
-  // via an explicit API call).
-  void set_auto_sync_enabled(bool flag) { auto_sync_enabled_ = flag; }
-  bool auto_sync_enabled() const { return auto_sync_enabled_; }
 
  private:
   friend class SyncFileSystemServiceFactory;
@@ -88,19 +72,16 @@ class SyncFileSystemService
   void Initialize(scoped_ptr<LocalFileSyncService> local_file_service,
                   scoped_ptr<RemoteFileSyncService> remote_file_service);
 
-  void DidGetConflictFileInfo(const fileapi::ConflictFileInfoCallback& callback,
-                              const fileapi::FileSystemURL& url,
-                              const fileapi::SyncFileMetadata* local_metadata,
-                              const fileapi::SyncFileMetadata* remote_metadata,
-                              fileapi::SyncStatusCode status);
-
   // Callbacks for InitializeForApp.
   void DidInitializeFileSystem(const GURL& app_origin,
-                               const fileapi::SyncStatusCallback& callback,
-                               fileapi::SyncStatusCode status);
+                               const SyncStatusCallback& callback,
+                               SyncStatusCode status);
   void DidRegisterOrigin(const GURL& app_origin,
-                         const fileapi::SyncStatusCallback& callback,
-                         fileapi::SyncStatusCode status);
+                         const SyncStatusCallback& callback,
+                         SyncStatusCode status);
+
+  // Overrides sync_enabled_ setting. This should be called only by tests.
+  void SetSyncEnabledForTesting(bool enabled);
 
   // Called when following observer methods are called:
   // - OnLocalChangeAvailable()
@@ -113,13 +94,13 @@ class SyncFileSystemService
   void MaybeStartLocalSync();
 
   // Callbacks for remote/local sync.
-  void DidProcessRemoteChange(fileapi::SyncStatusCode status,
-                              const fileapi::FileSystemURL& url,
-                              fileapi::SyncOperationResult result);
-  void DidProcessLocalChange(fileapi::SyncStatusCode status,
+  void DidProcessRemoteChange(SyncStatusCode status,
+                              const fileapi::FileSystemURL& url);
+  void DidProcessLocalChange(SyncStatusCode status,
                              const fileapi::FileSystemURL& url);
 
-  void DidGetLocalChangeStatus(const fileapi::SyncFileStatusCallback& callback,
+  void DidGetLocalChangeStatus(const SyncFileStatusCallback& callback,
+                               SyncStatusCode status,
                                bool has_pending_local_changes);
 
   void OnSyncEnabledForRemoteSync();
@@ -137,6 +118,21 @@ class SyncFileSystemService
   virtual void Observe(int type,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE;
+
+  // ProfileSyncServiceObserver:
+  virtual void OnStateChanged() OVERRIDE;
+
+  // SyncFileStatusObserver:
+  virtual void OnFileStatusChanged(
+      const fileapi::FileSystemURL& url,
+      SyncFileStatus sync_status,
+      SyncAction action_taken,
+      SyncDirection direction) OVERRIDE;
+
+  // Check the profile's sync preference settings and call
+  // remote_file_service_->SetSyncEnabled() to update the status.
+  // |profile_sync_service| must be non-null.
+  void UpdateSyncEnabledStatus(ProfileSyncServiceBase* profile_sync_service);
 
   Profile* profile_;
   content::NotificationRegistrar registrar_;
@@ -156,9 +152,8 @@ class SyncFileSystemService
   // another remote sync.
   bool is_waiting_remote_sync_enabled_;
 
-  bool auto_sync_enabled_;
-
-  std::set<GURL> initialized_app_origins_;
+  // Indicates if sync is currently enabled or not.
+  bool sync_enabled_;
 
   ObserverList<SyncEventObserver> observers_;
 

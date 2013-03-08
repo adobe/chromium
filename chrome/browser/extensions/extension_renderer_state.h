@@ -6,6 +6,7 @@
 #define CHROME_BROWSER_EXTENSIONS_EXTENSION_RENDERER_STATE_H_
 
 #include <map>
+#include <set>
 #include <utility>
 
 #include "base/basictypes.h"
@@ -15,12 +16,23 @@
 // methods should be called on the IO thread except for Init and Shutdown.
 class ExtensionRendererState {
  public:
+  struct WebViewInfo {
+    int embedder_process_id;
+    int embedder_routing_id;
+    int web_view_instance_id;
+  };
+
   static ExtensionRendererState* GetInstance();
 
   // These are called on the UI thread to start and stop listening to tab
   // notifications.
   void Init();
   void Shutdown();
+
+  // Looks up the information for the embedder <webview> for a given render
+  // view, if one exists. Called on the IO thread.
+  bool GetWebViewInfo(int guest_process_id, int guest_routing_id,
+                      WebViewInfo* web_view_info);
 
   // Looks up the tab and window ID for a given render view. Returns true
   // if we have the IDs in our map. Called on the IO thread.
@@ -35,6 +47,7 @@ class ExtensionRendererState {
   typedef std::pair<int, int> RenderId;
   typedef std::pair<int, int> TabAndWindowId;
   typedef std::map<RenderId, TabAndWindowId> TabAndWindowIdMap;
+  typedef std::map<RenderId, WebViewInfo> WebViewInfoMap;
 
   ExtensionRendererState();
   ~ExtensionRendererState();
@@ -45,8 +58,14 @@ class ExtensionRendererState {
   void ClearTabAndWindowId(
       int render_process_host_id, int routing_id);
 
+  // Adds or removes a <webview> guest render process from the set.
+  void AddWebView(int render_process_host_id, int routing_id,
+                  const WebViewInfo& web_view_info);
+  void RemoveWebView(int render_process_host_id, int routing_id);
+
   TabObserver* observer_;
   TabAndWindowIdMap map_;
+  WebViewInfoMap web_view_info_map_;
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionRendererState);
 };

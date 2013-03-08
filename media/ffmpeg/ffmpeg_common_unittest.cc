@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/path_service.h"
 #include "media/base/media.h"
@@ -43,7 +43,7 @@ static bool InitFFmpeg() {
   if (initialized) {
     return true;
   }
-  FilePath path;
+  base::FilePath path;
   PathService::Get(base::DIR_MODULE, &path);
   return media::InitializeMediaLibrary(path);
 }

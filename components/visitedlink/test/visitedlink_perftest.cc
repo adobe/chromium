@@ -6,8 +6,8 @@
 #include <string>
 #include <vector>
 
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/perftimer.h"
 #include "base/shared_memory.h"
 #include "base/stringprintf.h"
@@ -37,9 +37,9 @@ GURL TestURL(const char* prefix, int i) {
 class DummyVisitedLinkEventListener : public VisitedLinkMaster::Listener {
  public:
   DummyVisitedLinkEventListener() {}
-  virtual void NewTable(base::SharedMemory* table) {}
-  virtual void Add(VisitedLinkCommon::Fingerprint) {}
-  virtual void Reset() {}
+  virtual void NewTable(base::SharedMemory* table) OVERRIDE {}
+  virtual void Add(VisitedLinkCommon::Fingerprint) OVERRIDE {}
+  virtual void Reset() OVERRIDE {}
 
   static DummyVisitedLinkEventListener* GetInstance() {
     static DummyVisitedLinkEventListener instance;
@@ -66,7 +66,7 @@ void FillTable(VisitedLinkMaster& master, const char* prefix,
 
 class VisitedLink : public testing::Test {
  protected:
-  FilePath db_path_;
+  base::FilePath db_path_;
   virtual void SetUp() {
     ASSERT_TRUE(file_util::CreateTemporaryFile(&db_path_));
   }
@@ -85,7 +85,7 @@ class VisitedLink : public testing::Test {
 TEST_F(VisitedLink, TestAddAndQuery) {
   // init
   VisitedLinkMaster master(DummyVisitedLinkEventListener::GetInstance(),
-                           NULL, true, db_path_, 0);
+                           NULL, true, true, db_path_, 0);
   ASSERT_TRUE(master.Init());
 
   PerfTimeLogger timer("Visited_link_add_and_query");
@@ -116,7 +116,7 @@ TEST_F(VisitedLink, TestLoad) {
     PerfTimeLogger table_initialization_timer("Table_initialization");
 
     VisitedLinkMaster master(DummyVisitedLinkEventListener::GetInstance(),
-                             NULL, true, db_path_, 0);
+                             NULL, true, true, db_path_, 0);
 
     // time init with empty table
     PerfTimeLogger initTimer("Empty_visited_link_init");
@@ -156,6 +156,7 @@ TEST_F(VisitedLink, TestLoad) {
       VisitedLinkMaster master(DummyVisitedLinkEventListener::GetInstance(),
                                NULL,
                                true,
+                               true,
                                db_path_,
                                0);
       bool success = master.Init();
@@ -171,6 +172,7 @@ TEST_F(VisitedLink, TestLoad) {
 
       VisitedLinkMaster master(DummyVisitedLinkEventListener::GetInstance(),
                                NULL,
+                               true,
                                true,
                                db_path_,
                                0);

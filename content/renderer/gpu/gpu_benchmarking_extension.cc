@@ -7,8 +7,8 @@
 #include <string>
 
 #include "base/base64.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/memory/scoped_vector.h"
 #include "base/string_number_conversions.h"
 #include "content/common/gpu/gpu_rendering_stats.h"
@@ -49,7 +49,7 @@ void InitSkGraphics() {
 
 class SkPictureRecorder : public WebViewBenchmarkSupport::PaintClient {
  public:
-  explicit SkPictureRecorder(const FilePath& dirpath)
+  explicit SkPictureRecorder(const base::FilePath& dirpath)
       : dirpath_(dirpath),
         layer_id_(0) {
     // Let skia register known effect subclasses. This basically enables
@@ -77,7 +77,7 @@ class SkPictureRecorder : public WebViewBenchmarkSupport::PaintClient {
   }
 
  private:
-  FilePath dirpath_;
+  base::FilePath dirpath_;
   int layer_id_;
   SkPicture picture_;
 };
@@ -87,20 +87,20 @@ class RenderingStatsEnumerator : public cc::RenderingStats::Enumerator {
   RenderingStatsEnumerator(v8::Handle<v8::Object> stats_object)
       : stats_object(stats_object) { }
 
-  virtual void AddInt64(const char* name, int64 value) {
+  virtual void AddInt64(const char* name, int64 value) OVERRIDE {
     stats_object->Set(v8::String::New(name), v8::Number::New(value));
   }
 
-  virtual void AddDouble(const char* name, double value) {
+  virtual void AddDouble(const char* name, double value) OVERRIDE {
     stats_object->Set(v8::String::New(name), v8::Number::New(value));
   }
 
-  virtual void AddInt(const char* name, int value) {
+  virtual void AddInt(const char* name, int value) OVERRIDE {
     stats_object->Set(v8::String::New(name), v8::Integer::New(value));
   }
 
   virtual void AddTimeDeltaInSecondsF(const char* name,
-                                      const base::TimeDelta& value) {
+                                      const base::TimeDelta& value) OVERRIDE {
     stats_object->Set(v8::String::New(name),
                       v8::Number::New(value.InSecondsF()));
   }
@@ -157,7 +157,7 @@ class GpuBenchmarkingWrapper : public v8::Extension {
           "};") {}
 
   virtual v8::Handle<v8::FunctionTemplate> GetNativeFunction(
-      v8::Handle<v8::String> name) {
+      v8::Handle<v8::String> name) OVERRIDE {
     if (name->Equals(v8::String::New("GetRenderingStats")))
       return v8::FunctionTemplate::New(GetRenderingStats);
     if (name->Equals(v8::String::New("PrintToSkPicture")))
@@ -220,8 +220,8 @@ class GpuBenchmarkingWrapper : public v8::Extension {
     if (!benchmark_support)
       return v8::Undefined();
 
-    FilePath dirpath(FilePath::StringType(*dirname,
-                                          *dirname + dirname.length()));
+    base::FilePath dirpath(
+        base::FilePath::StringType(*dirname, *dirname + dirname.length()));
     if (!file_util::CreateDirectory(dirpath) ||
         !file_util::PathIsWritable(dirpath)) {
       std::string msg("Path is not writable: ");
@@ -247,8 +247,9 @@ class GpuBenchmarkingWrapper : public v8::Extension {
                                               0,
                                               NULL);
     }
-    callback.Dispose();
-    context.Dispose();
+    v8::Isolate* isolate = context->GetIsolate();
+    callback.Dispose(isolate);
+    context.Dispose(isolate);
   }
 
   static v8::Handle<v8::Value> BeginSmoothScroll(const v8::Arguments& args) {
@@ -275,10 +276,12 @@ class GpuBenchmarkingWrapper : public v8::Extension {
     bool scroll_down = args[0]->BooleanValue();
     v8::Local<v8::Function> callback_local =
         v8::Local<v8::Function>(v8::Function::Cast(*args[1]));
+    v8::Isolate* isolate = args.GetIsolate();
     v8::Persistent<v8::Function> callback =
-        v8::Persistent<v8::Function>::New(callback_local);
+        v8::Persistent<v8::Function>::New(isolate, callback_local);
     v8::Persistent<v8::Context> context =
-        v8::Persistent<v8::Context>::New(web_frame->mainWorldScriptContext());
+        v8::Persistent<v8::Context>::New(isolate,
+                                         web_frame->mainWorldScriptContext());
 
     int pixels_to_scroll = args[2]->IntegerValue();
 
@@ -295,8 +298,8 @@ class GpuBenchmarkingWrapper : public v8::Extension {
           !args[4]->IsNumber())
         return v8::False();
 
-      mouse_event_x = args[3]->IntegerValue();
-      mouse_event_y = args[4]->IntegerValue();
+      mouse_event_x = args[3]->IntegerValue() * web_view->pageScaleFactor();
+      mouse_event_y = args[4]->IntegerValue() * web_view->pageScaleFactor();
     }
 
     // TODO(nduca): If the render_view_impl is destroyed while the gesture is in
@@ -410,8 +413,9 @@ class GpuBenchmarkingWrapper : public v8::Extension {
                                               1,
                                               argv);
     }
-    callback.Dispose();
-    context.Dispose();
+    v8::Isolate* isolate = context->GetIsolate();
+    callback.Dispose(isolate);
+    context.Dispose(isolate);
   }
 
   static v8::Handle<v8::Value> BeginWindowSnapshotPNG(
@@ -433,10 +437,12 @@ class GpuBenchmarkingWrapper : public v8::Extension {
 
     v8::Local<v8::Function> callback_local =
         v8::Local<v8::Function>(v8::Function::Cast(*args[0]));
+    v8::Isolate* isolate = args.GetIsolate();
     v8::Persistent<v8::Function> callback =
-        v8::Persistent<v8::Function>::New(callback_local);
+        v8::Persistent<v8::Function>::New(isolate, callback_local);
     v8::Persistent<v8::Context> context =
-        v8::Persistent<v8::Context>::New(web_frame->mainWorldScriptContext());
+        v8::Persistent<v8::Context>::New(isolate,
+                                         web_frame->mainWorldScriptContext());
 
     render_view_impl->GetWindowSnapshot(
         base::Bind(&OnSnapshotCompleted, callback, context));

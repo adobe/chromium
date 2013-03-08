@@ -17,11 +17,12 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/compiler_specific.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/message_loop.h"
 #include "base/message_loop_proxy.h"
+#include "base/run_loop.h"
 #include "base/stl_util.h"
 #include "base/stringprintf.h"
 #include "base/synchronization/waitable_event.h"
@@ -75,7 +76,7 @@ class NotificationCollector
 
     // Check whether all delegates have been signaled.
     if (signaled_ == delegates_)
-      loop_->PostTask(FROM_HERE, MessageLoop::QuitClosure());
+      loop_->PostTask(FROM_HERE, MessageLoop::QuitWhenIdleClosure());
   }
 
   // Set of registered delegates.
@@ -110,7 +111,7 @@ class TestDelegate : public TestDelegateBase {
       : collector_(collector) {
     collector_->Register(this);
   }
-  ~TestDelegate() {}
+  virtual ~TestDelegate() {}
 
   virtual void OnFileChanged(const FilePath& path, bool error) OVERRIDE {
     if (error)
@@ -147,7 +148,7 @@ void QuitLoopWatchCallback(MessageLoop* loop,
   *flag = true;
   EXPECT_EQ(expected_path, path);
   EXPECT_EQ(expected_error, error);
-  loop->PostTask(FROM_HERE, loop->QuitClosure());
+  loop->PostTask(FROM_HERE, loop->QuitWhenIdleClosure());
 }
 
 class FilePathWatcherTest : public testing::Test {
@@ -167,7 +168,7 @@ class FilePathWatcherTest : public testing::Test {
   }
 
   virtual void TearDown() OVERRIDE {
-    loop_.RunUntilIdle();
+    RunLoop().RunUntilIdle();
   }
 
   void DeleteDelegateOnFileThread(TestDelegate* delegate) {
@@ -286,11 +287,11 @@ class Deleter : public TestDelegateBase {
       : watcher_(watcher),
         loop_(loop) {
   }
-  ~Deleter() {}
+  virtual ~Deleter() {}
 
   virtual void OnFileChanged(const FilePath&, bool) OVERRIDE {
     watcher_.reset();
-    loop_->PostTask(FROM_HERE, MessageLoop::QuitClosure());
+    loop_->PostTask(FROM_HERE, MessageLoop::QuitWhenIdleClosure());
   }
 
   FilePathWatcher* watcher() const { return watcher_.get(); }
@@ -895,7 +896,7 @@ TEST_F(FilePathWatcherTest, DirAttributesChanged) {
   // to access the file.
   ASSERT_TRUE(ChangeFilePermissions(test_dir1, Read, false));
   loop_.PostDelayedTask(FROM_HERE,
-                        MessageLoop::QuitClosure(),
+                        MessageLoop::QuitWhenIdleClosure(),
                         TestTimeouts::tiny_timeout());
   ASSERT_FALSE(WaitForEvents());
   ASSERT_TRUE(ChangeFilePermissions(test_dir1, Read, true));

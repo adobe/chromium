@@ -72,7 +72,15 @@ typedef void (GL_APIENTRYP PFNGLCONSUMETEXTURECHROMIUMPROC) (
 #ifndef GL_PIXEL_UNPACK_TRANSFER_BUFFER_CHROMIUM
 // TODO(reveman): Get official numbers for this constants.
 #define GL_PIXEL_UNPACK_TRANSFER_BUFFER_CHROMIUM 0x88EC
+
+#ifdef GL_GLEXT_PROTOTYPES
+GL_APICALL void* GL_APIENTRY glMapBufferCHROMIUM(GLuint target,GLenum access);
+GL_APICALL GLboolean GL_APIENTRY glUnmapBufferCHROMIUM(GLuint target);
 #endif
+typedef void* (GL_APIENTRY PFNGLMAPBUFFERCHROMIUM) (
+    GLuint target,GLenum access);
+typedef GLboolean (GL_APIENTRY PFNGLUNMAPBUFFERCHROMIUM) (GLuint target);
+#endif  /* GL_CHROMIUM_pixel_transfer_buffer_object */
 
 #ifndef GL_PIXEL_UNPACK_TRANSFER_BUFFER_BINDING_CHROMIUM
 // TODO(reveman): Get official numbers for this constants.
@@ -434,6 +442,17 @@ typedef void (GL_APIENTRYP PFNGLGETPROGRAMINFOCHROMIUMPROC) (
 #ifndef GL_CHROMIUM_front_buffer_cached
 #define GL_CHROMIUM_front_buffer_cached 1
 #endif  /* GL_CHROMIUM_front_buffer_cached */
+
+/* GL_CHROMIUM_sync_point */
+#ifndef GL_CHROMIUM_sync_point
+#define GL_CHROMIUM_sync_point 1
+#ifdef GL_GLEXT_PROTOTYPES
+GL_APICALL GLuint GL_APIENTRY glInsertSyncPointCHROMIUM();
+GL_APICALL void GL_APIENTRY glWaitSyncPointCHROMIUM(GLuint sync_point);
+#endif
+typedef GLuint (GL_APIENTRYP PFNGLINSERTSYNCPOINTCHROMIUMPROC) ();
+typedef void (GL_APIENTRYP PFNGLWAITSYNCPOINTCHROMIUMPROC) (GLuint sync_point);
+#endif  /* GL_CHROMIUM_sync_point */
 
 #ifdef __cplusplus
 }

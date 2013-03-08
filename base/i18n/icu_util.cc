@@ -12,12 +12,13 @@
 
 #include <string>
 
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
+#include "base/files/memory_mapped_file.h"
 #include "base/logging.h"
 #include "base/path_service.h"
 #include "base/string_util.h"
-#include "base/sys_string_conversions.h"
+#include "base/strings/sys_string_conversions.h"
 #include "third_party/icu/public/common/unicode/putil.h"
 #include "third_party/icu/public/common/unicode/udata.h"
 
@@ -49,6 +50,8 @@
 #define ICU_UTIL_DATA_SHARED_MODULE_NAME "icudt.dll"
 #endif
 #endif
+
+using base::FilePath;
 
 namespace icu_util {
 
@@ -109,7 +112,7 @@ bool Initialize() {
 
   // Chrome doesn't normally shut down ICU, so the mapped data shouldn't ever
   // be released.
-  static file_util::MemoryMappedFile mapped_file;
+  static base::MemoryMappedFile mapped_file;
   if (!mapped_file.IsValid()) {
     // Assume it is in the framework bundle's Resources directory.
     FilePath data_path =

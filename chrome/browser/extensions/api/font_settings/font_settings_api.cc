@@ -10,13 +10,13 @@
 #include "base/command_line.h"
 #include "base/json/json_writer.h"
 #include "base/lazy_instance.h"
+#include "base/prefs/pref_service.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/api/preference/preference_helpers.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/api/font_settings.h"
@@ -162,7 +162,7 @@ void FontSettingsEventRouter::OnFontNamePrefChanged(
     const std::string& pref_name,
     const std::string& generic_family,
     const std::string& script) {
-  const PrefServiceBase::Preference* pref = registrar_.prefs()->FindPreference(
+  const PrefService::Preference* pref = registrar_.prefs()->FindPreference(
       pref_name.c_str());
   CHECK(pref);
 
@@ -193,7 +193,7 @@ void FontSettingsEventRouter::OnFontPrefChanged(
     const std::string& event_name,
     const std::string& key,
     const std::string& pref_name) {
-  const PrefServiceBase::Preference* pref = registrar_.prefs()->FindPreference(
+  const PrefService::Preference* pref = registrar_.prefs()->FindPreference(
       pref_name.c_str());
   CHECK(pref);
 

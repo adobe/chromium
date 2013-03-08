@@ -9,7 +9,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/posix/eintr_wrapper.h"
 #include "base/threading/thread_restrictions.h"
@@ -158,6 +158,10 @@ PlatformFile CreatePlatformFileUnsafe(const FilePath& name,
   }
 
   return descriptor;
+}
+
+FILE* FdopenPlatformFile(PlatformFile file, const char* mode) {
+  return fdopen(file, mode);
 }
 
 bool ClosePlatformFile(PlatformFile file) {

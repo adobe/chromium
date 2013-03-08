@@ -12,6 +12,8 @@
 #include "base/i18n/time_formatting.h"
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
+#include "base/metrics/histogram.h"
+#include "base/prefs/pref_service.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/app/chrome_command_ids.h"
@@ -21,13 +23,13 @@
 #include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/profiles/profile_metrics.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/signin/signin_manager.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_navigator.h"
+#include "chrome/browser/ui/sync/signin_histogram.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/webui/signin/login_ui_service.h"
 #include "chrome/browser/ui/webui/signin/login_ui_service_factory.h"
@@ -38,6 +40,7 @@
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
+#include "google_apis/gaia/gaia_auth_util.h"
 #include "google_apis/gaia/gaia_constants.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
@@ -70,33 +73,36 @@ SyncConfigInfo::SyncConfigInfo()
 
 SyncConfigInfo::~SyncConfigInfo() {}
 
+// Note: The order of these types must match the ordering of
+// the respective types in ModelType
 const char* kDataTypeNames[] = {
-  "apps",
-  "autofill",
   "bookmarks",
-  "extensions",
-  "passwords",
   "preferences",
-  "sessions",
+  "passwords",
+  "autofill",
   "themes",
-  "typedUrls"
+  "typedUrls",
+  "extensions",
+  "apps",
+  "tabs"
 };
 
-const syncer::ModelType kDataTypes[] = {
-  syncer::APPS,
-  syncer::AUTOFILL,
-  syncer::BOOKMARKS,
-  syncer::EXTENSIONS,
-  syncer::PASSWORDS,
-  syncer::PREFERENCES,
-  syncer::SESSIONS,
-  syncer::THEMES,
-  syncer::TYPED_URLS
-};
+COMPILE_ASSERT(26 == syncer::MODEL_TYPE_COUNT,
+               update_kDataTypeNames_to_match_UserSelectableTypes);
 
-static const size_t kNumDataTypes = arraysize(kDataTypes);
-COMPILE_ASSERT(arraysize(kDataTypeNames) == arraysize(kDataTypes),
-               kDataTypes_does_not_match_kDataTypeNames);
+typedef std::map<syncer::ModelType, const char*> ModelTypeNameMap;
+
+ModelTypeNameMap GetSelectableTypeNameMap() {
+  ModelTypeNameMap type_names;
+  syncer::ModelTypeSet type_set = syncer::UserSelectableTypes();
+  syncer::ModelTypeSet::Iterator it = type_set.First();
+  DCHECK_EQ(arraysize(kDataTypeNames), type_set.Size());
+  for (size_t i = 0; i < arraysize(kDataTypeNames) && it.Good();
+       ++i, it.Inc()) {
+    type_names[it.Get()] = kDataTypeNames[i];
+  }
+  return type_names;
+}
 
 static const char kDefaultSigninDomain[] = "gmail.com";
 
@@ -134,15 +140,18 @@ bool GetConfiguration(const std::string& json, SyncConfigInfo* config) {
     return false;
   }
 
-  for (size_t i = 0; i < arraysize(kDataTypeNames); ++i) {
-    std::string key_name = kDataTypeNames[i] + std::string("Synced");
+  ModelTypeNameMap type_names = GetSelectableTypeNameMap();
+
+  for (ModelTypeNameMap::const_iterator it = type_names.begin();
+       it != type_names.end(); ++it) {
+    std::string key_name = it->second + std::string("Synced");
     bool sync_value;
     if (!result->GetBoolean(key_name, &sync_value)) {
       DLOG(ERROR) << "GetConfiguration() not passed a value for " << key_name;
       return false;
     }
     if (sync_value)
-      config->data_types.Put(kDataTypes[i]);
+      config->data_types.Put(it->first);
   }
 
   // Encryption settings.
@@ -188,6 +197,7 @@ bool IsKeystoreEncryptionEnabled() {
 }
 
 void BringTabToFront(WebContents* web_contents) {
+  DCHECK(web_contents);
   Browser* browser = chrome::FindBrowserWithWebContents(web_contents);
   if (browser) {
     TabStripModel* tab_strip_model = browser->tab_strip_model();
@@ -385,6 +395,7 @@ void SyncSetupHandler::GetStaticLocalizedValues(
 void SyncSetupHandler::DisplayConfigureSync(bool show_advanced,
                                             bool passphrase_failed) {
   ProfileSyncService* service = GetSyncService();
+  DCHECK(service);
   if (!service->sync_initialized()) {
     // When user tries to setup sync while the sync backend is not initialized,
     // kick the sync backend and wait for it to be ready and show spinner until
@@ -426,11 +437,14 @@ void SyncSetupHandler::DisplayConfigureSync(bool show_advanced,
       service->GetRegisteredDataTypes();
   const syncer::ModelTypeSet preferred_types =
       service->GetPreferredDataTypes();
-  for (size_t i = 0; i < kNumDataTypes; ++i) {
-    const std::string key_name = kDataTypeNames[i];
+  ModelTypeNameMap type_names = GetSelectableTypeNameMap();
+  for (ModelTypeNameMap::const_iterator it = type_names.begin();
+       it != type_names.end(); ++it) {
+    syncer::ModelType sync_type = it->first;
+    const std::string key_name = it->second;
     args.SetBoolean(key_name + "Registered",
-                    registered_types.Has(kDataTypes[i]));
-    args.SetBoolean(key_name + "Synced", preferred_types.Has(kDataTypes[i]));
+                    registered_types.Has(sync_type));
+    args.SetBoolean(key_name + "Synced", preferred_types.Has(sync_type));
   }
   browser_sync::SyncPrefs sync_prefs(GetProfile()->GetPrefs());
   args.SetBoolean("passphraseFailed", passphrase_failed);
@@ -518,9 +532,10 @@ void SyncSetupHandler::ConfigureSyncDone() {
   SyncPromoUI::SetUserSkippedSyncPromo(GetProfile());
 
   ProfileSyncService* service = GetSyncService();
+  DCHECK(service);
   if (!service->HasSyncSetupCompleted()) {
     // This is the first time configuring sync, so log it.
-    FilePath profile_file_path = GetProfile()->GetPath();
+    base::FilePath profile_file_path = GetProfile()->GetPath();
     ProfileMetrics::LogProfileSyncSignIn(profile_file_path);
 
     // We're done configuring, so notify ProfileSyncService that it is OK to
@@ -588,7 +603,7 @@ void SyncSetupHandler::DisplayGaiaLogin(bool fatal_error) {
     // configuring sync, CloseSyncSetup() will ensure they are logged out.
     configuring_sync_ = false;
 
-    DisplayGaiaLoginInNewTab();
+    DisplayGaiaLoginInNewTabOrWindow();
     signin_tracker_.reset(
         new SigninTracker(GetProfile(), this,
                           SigninTracker::WAITING_FOR_GAIA_VALIDATION));
@@ -598,16 +613,37 @@ void SyncSetupHandler::DisplayGaiaLogin(bool fatal_error) {
   }
 }
 
-void SyncSetupHandler::DisplayGaiaLoginInNewTab() {
+void SyncSetupHandler::DisplayGaiaLoginInNewTabOrWindow() {
   DCHECK(!active_gaia_signin_tab_);
   GURL url(SyncPromoUI::GetSyncPromoURL(GURL(),
       SyncPromoUI::SOURCE_SETTINGS, false));
   Browser* browser = chrome::FindBrowserWithWebContents(
       web_ui()->GetWebContents());
+  if (!browser) {
+    // Settings is not displayed in a browser window. Open a new window.
+    browser = new Browser(Browser::CreateParams(
+        Browser::TYPE_TABBED, GetProfile(), chrome::GetActiveDesktop()));
+  }
+
+  // If the signin manager already has an authenticated username, this is a
+  // re-auth scenario, and we need to ensure that the user signs in with the
+  // same email address.
+  std::string email = SigninManagerFactory::GetForProfile(
+      browser->profile())->GetAuthenticatedUsername();
+  if (!email.empty()) {
+    UMA_HISTOGRAM_ENUMERATION("Signin.Reauth",
+                              signin::HISTOGRAM_SHOWN,
+                              signin::HISTOGRAM_MAX);
+    std::string fragment("Email=");
+    fragment += email;
+    GURL::Replacements replacements;
+    replacements.SetRefStr(fragment);
+    url = url.ReplaceComponents(replacements);
+  }
+
   active_gaia_signin_tab_ = browser->OpenURL(
       content::OpenURLParams(url, content::Referrer(), SINGLETON_TAB,
-                              content::PAGE_TRANSITION_AUTO_BOOKMARK,
-                              false));
+                             content::PAGE_TRANSITION_AUTO_BOOKMARK, false));
   content::WebContentsObserver::Observe(active_gaia_signin_tab_);
 }
 
@@ -677,15 +713,6 @@ void SyncSetupHandler::DisplayGaiaLoginWithErrorMessage(
 }
 
 bool SyncSetupHandler::PrepareSyncSetup() {
-  ProfileSyncService* service = GetSyncService();
-  if (!service) {
-    // If there's no sync service, the user tried to manually invoke a syncSetup
-    // URL, but sync features are disabled.  We need to close the overlay for
-    // this (rare) case.
-    DLOG(WARNING) << "Closing sync UI because sync is disabled";
-    CloseOverlay();
-    return false;
-  }
 
   // If the wizard is already visible, just focus that one.
   if (FocusExistingWizardIfPresent()) {
@@ -696,7 +723,10 @@ bool SyncSetupHandler::PrepareSyncSetup() {
 
   // Notify services that login UI is now active.
   GetLoginUIService()->SetLoginUI(this);
-  service->SetSetupInProgress(true);
+
+  ProfileSyncService* service = GetSyncService();
+  if (service)
+    service->SetSetupInProgress(true);
 
   return true;
 }
@@ -822,7 +852,9 @@ void SyncSetupHandler::TryLogin(const std::string& username,
   // The user has submitted credentials, which indicates they don't want to
   // suppress start up anymore. We do this before starting the signin process,
   // so the ProfileSyncService knows to listen to the cached password.
-  GetSyncService()->UnsuppressAndStart();
+  ProfileSyncService* service = GetSyncService();
+  if (service)
+    service->UnsuppressAndStart();
 
   // Kick off a sign-in through the signin manager.
   signin->StartSignIn(username, password, current_error.captcha().token,
@@ -853,7 +885,8 @@ void SyncSetupHandler::SigninFailed(const GoogleServiceAuthError& error) {
     // cannot start sync backend.
     // If using web-based sign in flow, don't show the gaia sign in page again
     // since there is no way to show the user an error message.
-    DisplayGaiaLogin(GetSyncService()->HasUnrecoverableError());
+    ProfileSyncService* service = GetSyncService();
+    DisplayGaiaLogin(service && service->HasUnrecoverableError());
   } else {
     // TODO(peria): Show error dialog for prompting sign in and out on
     // Chrome OS. http://crbug.com/128692
@@ -866,18 +899,21 @@ Profile* SyncSetupHandler::GetProfile() const {
 }
 
 ProfileSyncService* SyncSetupHandler::GetSyncService() const {
-  return ProfileSyncServiceFactory::GetForProfile(GetProfile());
+  Profile* profile = GetProfile();
+  return profile->IsSyncAccessible() ?
+      ProfileSyncServiceFactory::GetForProfile(GetProfile()) : NULL;
 }
 
 void SyncSetupHandler::SigninSuccess() {
-  DCHECK(GetSyncService()->sync_initialized());
+  ProfileSyncService* service = GetSyncService();
+  DCHECK(!service || service->sync_initialized());
   // Stop a timer to handle timeout in waiting for checking network connection.
   backend_start_timer_.reset();
 
   // If we have signed in while sync is already setup, it must be due to some
   // kind of re-authentication flow. In that case, just close the signin dialog
   // rather than forcing the user to go through sync configuration.
-  if (GetSyncService()->HasSyncSetupCompleted())
+  if (!service || service->HasSyncSetupCompleted())
     DisplayGaiaSuccessAndClose();
   else
     DisplayConfigureSync(false, false);
@@ -908,7 +944,7 @@ void SyncSetupHandler::HandleConfigure(const ListValue* args) {
 
   // If the sync engine has shutdown for some reason, just close the sync
   // dialog.
-  if (!service->sync_initialized()) {
+  if (!service || !service->sync_initialized()) {
     CloseOverlay();
     return;
   }
@@ -1014,23 +1050,22 @@ void SyncSetupHandler::HandleShowSetupUI(const ListValue* args) {
   OpenSyncSetup(false);
 }
 
+// TODO(atwilson): Remove chrome-os-only API in favor of routing everything
+// through ShowSetupUI.
 void SyncSetupHandler::HandleShowSetupUIWithoutLogin(const ListValue* args) {
   OpenConfigureSync();
 }
 
 void SyncSetupHandler::HandleDoSignOutOnAuthError(const ListValue* args) {
   DLOG(INFO) << "Signing out the user to fix a sync error.";
-  browser::AttemptUserExit();
+  chrome::AttemptUserExit();
 }
 
 void SyncSetupHandler::HandleStopSyncing(const ListValue* args) {
-  ProfileSyncService* service = GetSyncService();
-  DCHECK(service);
-
-  if (ProfileSyncService::IsSyncEnabled()) {
-    service->DisableForUser();
+  if (GetSyncService())
     ProfileSyncService::SyncEvent(ProfileSyncService::STOP_FROM_OPTIONS);
-  }
+
+  GetSignin()->SignOut();
 }
 
 void SyncSetupHandler::HandleCloseTimeout(const ListValue* args) {
@@ -1041,7 +1076,7 @@ void SyncSetupHandler::CloseSyncSetup() {
   // TODO(atwilson): Move UMA tracking of signin events out of sync module.
   ProfileSyncService* sync_service = GetSyncService();
   if (IsActiveLogin()) {
-    if (!sync_service->HasSyncSetupCompleted()) {
+    if (!sync_service || !sync_service->HasSyncSetupCompleted()) {
       if (signin_tracker_.get()) {
         ProfileSyncService::SyncEvent(
             ProfileSyncService::CANCEL_DURING_SIGNON);
@@ -1067,8 +1102,25 @@ void SyncSetupHandler::CloseSyncSetup() {
     // and shut down sync.
     if (!sync_service->HasSyncSetupCompleted()) {
       DVLOG(1) << "Signin aborted by user action";
+      if (signin_tracker_.get() || sync_service->FirstSetupInProgress()) {
+        // User was still in the process of signing in, so sign him out again.
+        // This makes sure that the user isn't left signed in but with sync
+        // un-configured.
+        //
+        // This has the side-effect of signing out the user in the following
+        // scenario:
+        //   * User signs in while sync is disabled by policy.
+        //   * Sync is re-enabled by policy.
+        //   * User brings up sync setup dialog to do initial sync config.
+        //   * User cancels out of the dialog.
+        //
+        // This case is indistinguishable from the "one click signin" case where
+        // the user checks the "advanced setup" checkbox, then cancels out of
+        // the setup box, which is a much more common scenario, so we do the
+        // right thing for the one-click case.
+        GetSignin()->SignOut();
+      }
       sync_service->DisableForUser();
-
       browser_sync::SyncPrefs sync_prefs(GetProfile()->GetPrefs());
       sync_prefs.SetStartSuppressed(true);
     }
@@ -1092,28 +1144,38 @@ void SyncSetupHandler::OpenSyncSetup(bool force_login) {
   if (!PrepareSyncSetup())
     return;
 
-  ProfileSyncService* service = GetSyncService();
-
   // There are several different UI flows that can bring the user here:
   // 1) Signin promo (passes force_login=true)
-  // 2) Normal signin through options page (IsSyncEnabledAndLoggedIn() will
-  //    return false).
-  // 3) Previously working credentials have expired
-  //    (service->GetAuthError() != NONE).
+  // 2) Normal signin through options page (GetAuthenticatedUsername() is
+  //    empty).
+  // 3) Previously working credentials have expired.
   // 4) User is already signed in, but App Notifications needs to force another
   //    login so it can fetch an oauth token (passes force_login=true)
-  // 5) User clicks [Advanced Settings] button on options page while already
+  // 5) User is signed in, but has stopped sync via the google dashboard, and
+  //    signout is prohibited by policy so we need to force a re-auth.
+  // 6) User clicks [Advanced Settings] button on options page while already
   //    logged in.
-  // 6) One-click signin (credentials are already available, so should display
+  // 7) One-click signin (credentials are already available, so should display
   //    sync configure UI, not login UI).
-  // 7) ChromeOS re-enable after disabling sync.
+  // 8) ChromeOS re-enable after disabling sync.
+  SigninManager* signin = GetSignin();
   if (force_login ||
-      !service->IsSyncEnabledAndLoggedIn() ||
-      service->GetAuthError().state() != GoogleServiceAuthError::NONE) {
+      signin->GetAuthenticatedUsername().empty() ||
+#if !defined(OS_CHROMEOS)
+      (GetSyncService() && GetSyncService()->IsStartSuppressed()) ||
+#endif
+      signin->signin_global_error()->HasBadge()) {
     // User is not logged in, or login has been specially requested - need to
     // display login UI (cases 1-4).
     DisplayGaiaLogin(false);
   } else {
+    if (!GetSyncService()) {
+      // This can happen if the user directly navigates to /settings/syncSetup.
+      DLOG(WARNING) << "Cannot display sync UI when sync is disabled";
+      CloseOverlay();
+      return;
+    }
+
     // User is already logged in. They must have brought up the config wizard
     // via the "Advanced..." button or through One-Click signin (cases 5/6), or
     // they are re-enabling sync on Chrome OS.
@@ -1134,7 +1196,9 @@ void SyncSetupHandler::OpenConfigureSync() {
 
 void SyncSetupHandler::FocusUI() {
   DCHECK(IsActiveLogin());
-  if (SyncPromoUI::UseWebBasedSigninFlow() && signin_tracker_) {
+  // Bring the GAIA tab to the foreground if there is one.
+  if (SyncPromoUI::UseWebBasedSigninFlow() && signin_tracker_ &&
+      active_gaia_signin_tab_) {
     BringTabToFront(active_gaia_signin_tab_);
   } else {
     WebContents* web_contents = web_ui()->GetWebContents();
@@ -1147,10 +1211,41 @@ void SyncSetupHandler::CloseUI() {
   CloseOverlay();
 }
 
+void SyncSetupHandler::DidStopLoading(
+    content::RenderViewHost* render_view_host) {
+  DCHECK(active_gaia_signin_tab_);
+
+  // If the user lands on a page outside of Gaia, assume they have navigated
+  // away and are no longer thinking about signing in with this tab.  Treat
+  // this as if the user closed the tab. However, don't actually close the tab
+  // since the user is doing something with it.  Disconnect and forget about it
+  // before closing down the sync setup.
+  // The one exception is the expected continue URL.  If the user lands there,
+  // this means sign in was successful.  Ignore the source parameter in the
+  // continue URL since this user may have changed the state of the
+  // "Let me choose what to sync" checkbox.
+  const GURL& url = active_gaia_signin_tab_->GetURL();
+  const GURL continue_url =
+      SyncPromoUI::GetNextPageURLForSyncPromoURL(
+          SyncPromoUI::GetSyncPromoURL(GURL(),
+                                       SyncPromoUI::SOURCE_SETTINGS,
+                                       false));
+  GURL::Replacements replacements;
+  replacements.ClearQuery();
+
+  if (!gaia::IsGaiaSignonRealm(url.GetOrigin()) &&
+      url.ReplaceComponents(replacements) !=
+          continue_url.ReplaceComponents(replacements)) {
+    content::WebContentsObserver::Observe(NULL);
+    active_gaia_signin_tab_ = NULL;
+    CloseOverlay();
+  }
+}
+
 void SyncSetupHandler::WebContentsDestroyed(
     content::WebContents* web_contents) {
   DCHECK(active_gaia_signin_tab_);
-  CloseSyncSetup();
+  CloseOverlay();
 }
 
 // Private member functions.

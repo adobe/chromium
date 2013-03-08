@@ -136,7 +136,7 @@ void DatabaseMessageFilter::OnDatabaseOpenFile(const string16& vfs_file_name,
                                             &database_name, NULL) &&
              !db_tracker_->IsDatabaseScheduledForDeletion(origin_identifier,
                                                           database_name)) {
-      FilePath db_file =
+      base::FilePath db_file =
           DatabaseUtil::GetFullFilePathForVfsFile(db_tracker_, vfs_file_name);
       if (!db_file.empty()) {
         if (db_tracker_->IsIncognitoProfile()) {
@@ -180,7 +180,7 @@ void DatabaseMessageFilter::DatabaseDeleteFile(const string16& vfs_file_name,
   // Return an error if the file name is invalid or if the file could not
   // be deleted after kNumDeleteRetries attempts.
   int error_code = SQLITE_IOERR_DELETE;
-  FilePath db_file =
+  base::FilePath db_file =
       DatabaseUtil::GetFullFilePathForVfsFile(db_tracker_, vfs_file_name);
   if (!db_file.empty()) {
     // In order to delete a journal file in incognito mode, we only need to
@@ -222,7 +222,7 @@ void DatabaseMessageFilter::OnDatabaseGetFileAttributes(
     IPC::Message* reply_msg) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
   int32 attributes = -1;
-  FilePath db_file =
+  base::FilePath db_file =
       DatabaseUtil::GetFullFilePathForVfsFile(db_tracker_, vfs_file_name);
   if (!db_file.empty())
     attributes = VfsBackend::GetFileAttributes(db_file);
@@ -236,7 +236,7 @@ void DatabaseMessageFilter::OnDatabaseGetFileSize(
     const string16& vfs_file_name, IPC::Message* reply_msg) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
   int64 size = 0;
-  FilePath db_file =
+  base::FilePath db_file =
       DatabaseUtil::GetFullFilePathForVfsFile(db_tracker_, vfs_file_name);
   if (!db_file.empty())
     size = VfsBackend::GetFileSize(db_file);
@@ -284,6 +284,13 @@ void DatabaseMessageFilter::OnDatabaseOpened(const string16& origin_identifier,
                                              const string16& description,
                                              int64 estimated_size) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
+
+  if (!DatabaseUtil::IsValidOriginIdentifier(origin_identifier)) {
+    RecordAction(UserMetricsAction("BadMessageTerminate_DBMF"));
+    BadMessageReceived();
+    return;
+  }
+
   int64 database_size = 0;
   db_tracker_->DatabaseOpened(origin_identifier, database_name, description,
                               estimated_size, &database_size);
@@ -325,6 +332,12 @@ void DatabaseMessageFilter::OnHandleSqliteError(
     const string16& database_name,
     int error) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
+  if (!DatabaseUtil::IsValidOriginIdentifier(origin_identifier)) {
+    RecordAction(UserMetricsAction("BadMessageTerminate_DBMF"));
+    BadMessageReceived();
+    return;
+  }
+
   db_tracker_->HandleSqliteError(origin_identifier, database_name, error);
 }
 

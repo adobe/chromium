@@ -28,7 +28,6 @@
 #include "net/proxy/proxy_resolver.h"
 #include "net/proxy/proxy_script_decider.h"
 #include "net/proxy/proxy_script_fetcher.h"
-#include "net/proxy/sync_host_resolver_bridge.h"
 #include "net/url_request/url_request_context.h"
 
 #if defined(OS_WIN)
@@ -195,12 +194,6 @@ class ProxyResolverNull : public ProxyResolver {
     return LOAD_STATE_IDLE;
   }
 
-  virtual LoadState GetLoadStateThreadSafe(
-      RequestHandle request) const OVERRIDE {
-    NOTREACHED();
-    return LOAD_STATE_IDLE;
-  }
-
   virtual void CancelSetPacScript() OVERRIDE {
     NOTREACHED();
   }
@@ -216,7 +209,7 @@ class ProxyResolverNull : public ProxyResolver {
 // |pac_string| for every single URL.
 class ProxyResolverFromPacString : public ProxyResolver {
  public:
-  ProxyResolverFromPacString(const std::string& pac_string)
+  explicit ProxyResolverFromPacString(const std::string& pac_string)
       : ProxyResolver(false /*expects_pac_bytes*/),
         pac_string_(pac_string) {}
 
@@ -234,12 +227,6 @@ class ProxyResolverFromPacString : public ProxyResolver {
   }
 
   virtual LoadState GetLoadState(RequestHandle request) const OVERRIDE {
-    NOTREACHED();
-    return LOAD_STATE_IDLE;
-  }
-
-  virtual LoadState GetLoadStateThreadSafe(
-      RequestHandle request) const OVERRIDE {
     NOTREACHED();
     return LOAD_STATE_IDLE;
   }
@@ -286,10 +273,11 @@ class ProxyResolverFactoryForSystem : public ProxyResolverFactory {
 };
 
 // Returns NetLog parameters describing a proxy configuration change.
-Value* NetLogProxyConfigChangedCallback(const ProxyConfig* old_config,
-                                        const ProxyConfig* new_config,
-                                        NetLog::LogLevel /* log_level */) {
-  DictionaryValue* dict = new DictionaryValue();
+base::Value* NetLogProxyConfigChangedCallback(
+    const ProxyConfig* old_config,
+    const ProxyConfig* new_config,
+    NetLog::LogLevel /* log_level */) {
+  base::DictionaryValue* dict = new base::DictionaryValue();
   // The "old_config" is optional -- the first notification will not have
   // any "previous" configuration.
   if (old_config->is_valid())
@@ -298,23 +286,24 @@ Value* NetLogProxyConfigChangedCallback(const ProxyConfig* old_config,
   return dict;
 }
 
-Value* NetLogBadProxyListCallback(const ProxyRetryInfoMap* retry_info,
-                                  NetLog::LogLevel /* log_level */) {
-  DictionaryValue* dict = new DictionaryValue();
-  ListValue* list = new ListValue();
+base::Value* NetLogBadProxyListCallback(const ProxyRetryInfoMap* retry_info,
+                                        NetLog::LogLevel /* log_level */) {
+  base::DictionaryValue* dict = new base::DictionaryValue();
+  base::ListValue* list = new base::ListValue();
 
   for (ProxyRetryInfoMap::const_iterator iter = retry_info->begin();
        iter != retry_info->end(); ++iter) {
-    list->Append(Value::CreateStringValue(iter->first));
+    list->Append(new base::StringValue(iter->first));
   }
   dict->Set("bad_proxy_list", list);
   return dict;
 }
 
 // Returns NetLog parameters on a successfuly proxy resolution.
-Value* NetLogFinishedResolvingProxyCallback(ProxyInfo* result,
-                                            NetLog::LogLevel /* log_level */) {
-  DictionaryValue* dict = new DictionaryValue();
+base::Value* NetLogFinishedResolvingProxyCallback(
+    ProxyInfo* result,
+    NetLog::LogLevel /* log_level */) {
+  base::DictionaryValue* dict = new base::DictionaryValue();
   dict->SetString("pac_string", result->ToPacString());
   return dict;
 }
@@ -418,6 +407,15 @@ class ProxyService::InitProxyResolver {
   ProxyResolverScriptData* script_data() {
     DCHECK_EQ(STATE_NONE, next_state_);
     return script_data_.get();
+  }
+
+  LoadState GetLoadState() const {
+    if (next_state_ == STATE_DECIDE_PROXY_SCRIPT_COMPLETE) {
+      // In addition to downloading, this state may also include the stall time
+      // after network change events (kDelayAfterNetworkChangesMs).
+      return LOAD_STATE_DOWNLOADING_PROXY_SCRIPT;
+    }
+    return LOAD_STATE_RESOLVING_PROXY_FOR_URL;
   }
 
  private:
@@ -839,7 +837,7 @@ class ProxyService::PacRequest
 
     // Remove this completed PacRequest from the service's pending list.
     /// (which will probably cause deletion of |this|).
-    if (!user_callback_.is_null()){
+    if (!user_callback_.is_null()) {
       net::CompletionCallback callback = user_callback_;
       service_->RemovePendingRequest(this);
       callback.Run(result_code);
@@ -1220,6 +1218,8 @@ void ProxyService::CancelPacRequest(PacRequest* req) {
 
 LoadState ProxyService::GetLoadState(const PacRequest* req) const {
   CHECK(req);
+  if (current_state_ == STATE_WAITING_FOR_INIT_PROXY_RESOLVER)
+    return init_proxy_resolver_->GetLoadState();
   return req->GetLoadState();
 }
 

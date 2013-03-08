@@ -8,6 +8,7 @@
 #include <map>
 
 #include "ash/launcher/launcher.h"
+#include "ash/screen_ash.h"
 #include "ash/shell.h"
 #include "ash/wm/frame_painter.h"
 #include "ash/wm/property_util.h"
@@ -127,33 +128,26 @@ PanelLayoutManager::PanelLayoutManager(aura::Window* panel_container)
       dragged_panel_(NULL),
       launcher_(NULL),
       last_active_panel_(NULL),
-      callout_widget_(new views::Widget),
       weak_factory_(this) {
   DCHECK(panel_container);
-  views::Widget::InitParams params;
-  params.type = views::Widget::InitParams::TYPE_POPUP;
-  params.transparent = true;
-  params.can_activate = false;
-  params.keep_on_top = true;
-  params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
-  params.parent = panel_container_;
-  params.bounds.set_width(kArrowWidth);
-  params.bounds.set_height(kArrowHeight);
-  // Why do we need this and can_activate = false?
-  callout_widget_->set_focus_on_creation(false);
-  callout_widget_->Init(params);
-  views::View* content_view = new views::View;
-  content_view->set_background(new CalloutWidgetBackground);
-  callout_widget_->SetContentsView(content_view);
   aura::client::GetActivationClient(Shell::GetPrimaryRootWindow())->
       AddObserver(this);
 }
 
 PanelLayoutManager::~PanelLayoutManager() {
+  Shutdown();
   if (launcher_)
     launcher_->RemoveIconObserver(this);
   aura::client::GetActivationClient(Shell::GetPrimaryRootWindow())->
       RemoveObserver(this);
+}
+
+void PanelLayoutManager::Shutdown() {
+  for (PanelList::iterator iter = panel_windows_.begin();
+       iter != panel_windows_.end(); ++iter) {
+    delete iter->callout_widget;
+  }
+  panel_windows_.clear();
 }
 
 void PanelLayoutManager::StartDragging(aura::Window* panel) {
@@ -164,7 +158,8 @@ void PanelLayoutManager::StartDragging(aura::Window* panel) {
 }
 
 void PanelLayoutManager::FinishDragging() {
-  DCHECK(dragged_panel_);
+  // Note, dragged panel may be null if the panel was just attached to the
+  // panel layout.
   dragged_panel_ = NULL;
   Relayout();
 }
@@ -191,18 +186,28 @@ void PanelLayoutManager::OnWindowResized() {
 }
 
 void PanelLayoutManager::OnWindowAddedToLayout(aura::Window* child) {
-  if (child == callout_widget_->GetNativeWindow())
+  if (child->type() == aura::client::WINDOW_TYPE_POPUP)
     return;
-  panel_windows_.push_back(child);
+  PanelInfo panel_info;
+  panel_info.window = child;
+  panel_info.callout_widget = CreateCalloutWidget();
+  panel_windows_.push_back(panel_info);
   child->AddObserver(this);
   Relayout();
 }
 
 void PanelLayoutManager::OnWillRemoveWindowFromLayout(aura::Window* child) {
+}
+
+void PanelLayoutManager::OnWindowRemovedFromLayout(aura::Window* child) {
+  if (child->type() == aura::client::WINDOW_TYPE_POPUP)
+    return;
   PanelList::iterator found =
       std::find(panel_windows_.begin(), panel_windows_.end(), child);
-  if (found != panel_windows_.end())
+  if (found != panel_windows_.end()) {
+    delete found->callout_widget;
     panel_windows_.erase(found);
+  }
   child->RemoveObserver(this);
 
   if (dragged_panel_ == child)
@@ -212,9 +217,6 @@ void PanelLayoutManager::OnWillRemoveWindowFromLayout(aura::Window* child) {
     last_active_panel_ = NULL;
 
   Relayout();
-}
-
-void PanelLayoutManager::OnWindowRemovedFromLayout(aura::Window* child) {
 }
 
 void PanelLayoutManager::OnChildWindowVisibilityChanged(aura::Window* child,
@@ -242,12 +244,13 @@ void PanelLayoutManager::SetChildBounds(aura::Window* child,
     for (new_position = panel_windows_.begin();
          new_position != panel_windows_.end();
          ++new_position) {
-      const gfx::Rect& bounds = (*new_position)->bounds();
+      const gfx::Rect& bounds = (*new_position).window->bounds();
       if (bounds.x() + bounds.width()/2 <= requested_bounds.x()) break;
     }
     if (new_position != dragged_panel_iter) {
+      PanelInfo dragged_panel_info = *dragged_panel_iter;
       panel_windows_.erase(dragged_panel_iter);
-      panel_windows_.insert(new_position, dragged_panel_);
+      panel_windows_.insert(new_position, dragged_panel_info);
     }
   }
 
@@ -281,18 +284,24 @@ void PanelLayoutManager::OnWindowPropertyChanged(aura::Window* window,
     RestorePanel(window);
 }
 
+void PanelLayoutManager::OnWindowVisibilityChanged(
+    aura::Window* window, bool visible) {
+  if (visible)
+    window->SetProperty(aura::client::kShowStateKey, ui::SHOW_STATE_NORMAL);
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // PanelLayoutManager, aura::client::ActivationChangeObserver implementation:
 
 void PanelLayoutManager::OnWindowActivated(aura::Window* gained_active,
                                            aura::Window* lost_active) {
+  // Ignore if the panel that is not managed by this was activated.
   if (gained_active &&
-      gained_active->type() == aura::client::WINDOW_TYPE_PANEL) {
+      gained_active->type() == aura::client::WINDOW_TYPE_PANEL &&
+      gained_active->parent() == panel_container_) {
     UpdateStacking(gained_active);
-    UpdateCallout(gained_active);
-  } else {
-    UpdateCallout(NULL);
   }
+  UpdateCallouts();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -328,7 +337,7 @@ void PanelLayoutManager::Relayout() {
   std::vector<VisiblePanelPositionInfo> visible_panels;
   for (PanelList::iterator iter = panel_windows_.begin();
        iter != panel_windows_.end(); ++iter) {
-    aura::Window* panel = *iter;
+    aura::Window* panel = iter->window;
     if (!panel->IsVisible() || panel == dragged_panel_)
       continue;
 
@@ -348,16 +357,15 @@ void PanelLayoutManager::Relayout() {
       DCHECK(!active_panel);
       active_panel = panel;
     }
-
+    icon_bounds = ScreenAsh::ConvertRectFromScreen(panel_container_,
+                                                   icon_bounds);
     gfx::Point icon_origin = icon_bounds.origin();
-    aura::Window::ConvertPointToTarget(panel_container_->GetRootWindow(),
-                                       panel_container_, &icon_origin);
-
     VisiblePanelPositionInfo position_info;
     position_info.min_x = std::max(panel_left_bounds, icon_origin.x() +
         icon_bounds.width() - panel->bounds().width());
-    position_info.max_x = std::min(icon_origin.x(), panel_right_bounds -
-                                   kPanelIdealSpacing);
+    position_info.max_x = std::min(icon_origin.x(),
+                                   panel_right_bounds - kPanelIdealSpacing -
+                                   panel->bounds().width());
     position_info.x = icon_origin.x() + icon_bounds.width() / 2 -
                       panel->bounds().width() / 2;
     position_info.width = panel->bounds().width();
@@ -391,7 +399,7 @@ void PanelLayoutManager::Relayout() {
   }
 
   UpdateStacking(active_panel);
-  UpdateCallout(active_panel);
+  UpdateCallouts();
 }
 
 void PanelLayoutManager::UpdateStacking(aura::Window* active_panel) {
@@ -413,9 +421,9 @@ void PanelLayoutManager::UpdateStacking(aura::Window* active_panel) {
   std::map<int, aura::Window*> window_ordering;
   for (PanelList::const_iterator it = panel_windows_.begin();
        it != panel_windows_.end(); ++it) {
-    gfx::Rect bounds = (*it)->bounds();
+    gfx::Rect bounds = it->window->bounds();
     window_ordering.insert(std::make_pair(bounds.x() + bounds.width() / 2,
-                                          *it));
+                                          it->window));
   }
 
   aura::Window* previous_panel = NULL;
@@ -440,34 +448,57 @@ void PanelLayoutManager::UpdateStacking(aura::Window* active_panel) {
   last_active_panel_ = active_panel;
 }
 
-void PanelLayoutManager::UpdateCallout(aura::Window* active_panel) {
-  weak_factory_.InvalidateWeakPtrs();
-  // TODO(dcheng): This doesn't account for panels in overflow. They should have
-  // a callout as well.
-  if (!active_panel ||
-      launcher_->GetScreenBoundsOfItemIconForWindow(active_panel).IsEmpty()) {
-    callout_widget_->Hide();
-    return;
+void PanelLayoutManager::UpdateCallouts() {
+  for (PanelList::iterator iter = panel_windows_.begin();
+       iter != panel_windows_.end(); ++iter) {
+    aura::Window* panel = iter->window;
+    views::Widget* callout_widget = iter->callout_widget;
+
+    gfx::Rect bounds = panel->GetBoundsInRootWindow();
+    gfx::Rect icon_bounds =
+        launcher_->GetScreenBoundsOfItemIconForWindow(panel);
+    if (icon_bounds.IsEmpty() || !panel->IsVisible() ||
+        panel == dragged_panel_) {
+      callout_widget->Hide();
+      continue;
+    }
+
+    gfx::Rect callout_bounds = callout_widget->GetWindowBoundsInScreen();
+    callout_bounds.set_x(
+        icon_bounds.x() + (icon_bounds.width() - callout_bounds.width()) / 2);
+    callout_bounds.set_y(bounds.bottom());
+    callout_bounds = ScreenAsh::ConvertRectFromScreen(
+        callout_widget->GetNativeWindow()->parent(),
+        callout_bounds);
+
+    SetChildBoundsDirect(callout_widget->GetNativeWindow(), callout_bounds);
+    panel_container_->StackChildAbove(callout_widget->GetNativeWindow(),
+                                      panel);
+    callout_widget->Show();
   }
-  MessageLoop::current()->PostTask(
-      FROM_HERE,
-      base::Bind(&PanelLayoutManager::ShowCalloutHelper,
-                 weak_factory_.GetWeakPtr(),
-                 active_panel));
 }
 
-void PanelLayoutManager::ShowCalloutHelper(aura::Window* active_panel) {
-  DCHECK(active_panel);
-  gfx::Rect bounds = active_panel->GetBoundsInRootWindow();
-  gfx::Rect icon_bounds =
-      launcher_->GetScreenBoundsOfItemIconForWindow(active_panel);
-  gfx::Rect callout_bounds = callout_widget_->GetWindowBoundsInScreen();
-  callout_bounds.set_x(
-      icon_bounds.x() + (icon_bounds.width() - callout_bounds.width()) / 2);
-  callout_bounds.set_y(bounds.bottom());
-  SetChildBoundsDirect(callout_widget_->GetNativeWindow(), callout_bounds);
-  panel_container_->StackChildAtTop(callout_widget_->GetNativeWindow());
-  callout_widget_->Show();
+views::Widget* PanelLayoutManager::CreateCalloutWidget() {
+  views::Widget* callout_widget = new views::Widget;
+  views::Widget::InitParams params;
+  params.type = views::Widget::InitParams::TYPE_POPUP;
+  params.transparent = true;
+  params.can_activate = false;
+  params.keep_on_top = true;
+  params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
+  params.parent = panel_container_;
+  params.bounds = ScreenAsh::ConvertRectToScreen(panel_container_, gfx::Rect());
+  params.bounds.set_width(kArrowWidth);
+  params.bounds.set_height(kArrowHeight);
+  // Why do we need this and can_activate = false?
+  callout_widget->set_focus_on_creation(false);
+  callout_widget->Init(params);
+  DCHECK_EQ(callout_widget->GetNativeView()->GetRootWindow(),
+            panel_container_->GetRootWindow());
+  views::View* content_view = new views::View;
+  content_view->set_background(new CalloutWidgetBackground);
+  callout_widget->SetContentsView(content_view);
+  return callout_widget;
 }
 
 }  // namespace internal

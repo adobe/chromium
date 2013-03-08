@@ -6,7 +6,7 @@
 
 #include "base/auto_reset.h"
 #include "base/bind.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/location.h"
 #include "base/metrics/histogram.h"
 #include "base/perftimer.h"
@@ -77,7 +77,8 @@ AppNotificationManager::AppNotificationManager(Profile* profile)
 }
 
 void AppNotificationManager::Init() {
-  FilePath storage_path = profile_->GetPath().AppendASCII("App Notifications");
+  base::FilePath storage_path =
+      profile_->GetPath().AppendASCII("App Notifications");
   load_timer_.reset(new PerfTimer());
   BrowserThread::PostTask(
       BrowserThread::FILE,
@@ -370,7 +371,8 @@ AppNotificationManager::~AppNotificationManager() {
                             storage_.release());
 }
 
-void AppNotificationManager::LoadOnFileThread(const FilePath& storage_path) {
+void AppNotificationManager::LoadOnFileThread(
+    const base::FilePath& storage_path) {
   PerfTimer timer;
   CHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
   DCHECK(!loaded());

@@ -22,6 +22,7 @@ void ParamTraits<WebKit::WebFilterOperation>::Write(
     case WebKit::WebFilterOperation::FilterTypeHueRotate:
     case WebKit::WebFilterOperation::FilterTypeInvert:
     case WebKit::WebFilterOperation::FilterTypeBrightness:
+    case WebKit::WebFilterOperation::FilterTypeSaturatingBrightness:
     case WebKit::WebFilterOperation::FilterTypeContrast:
     case WebKit::WebFilterOperation::FilterTypeOpacity:
     case WebKit::WebFilterOperation::FilterTypeBlur:
@@ -66,6 +67,7 @@ bool ParamTraits<WebKit::WebFilterOperation>::Read(
     case WebKit::WebFilterOperation::FilterTypeHueRotate:
     case WebKit::WebFilterOperation::FilterTypeInvert:
     case WebKit::WebFilterOperation::FilterTypeBrightness:
+    case WebKit::WebFilterOperation::FilterTypeSaturatingBrightness:
     case WebKit::WebFilterOperation::FilterTypeContrast:
     case WebKit::WebFilterOperation::FilterTypeOpacity:
     case WebKit::WebFilterOperation::FilterTypeBlur:
@@ -123,6 +125,7 @@ void ParamTraits<WebKit::WebFilterOperation>::Log(
     case WebKit::WebFilterOperation::FilterTypeHueRotate:
     case WebKit::WebFilterOperation::FilterTypeInvert:
     case WebKit::WebFilterOperation::FilterTypeBrightness:
+    case WebKit::WebFilterOperation::FilterTypeSaturatingBrightness:
     case WebKit::WebFilterOperation::FilterTypeContrast:
     case WebKit::WebFilterOperation::FilterTypeOpacity:
     case WebKit::WebFilterOperation::FilterTypeBlur:
@@ -539,28 +542,9 @@ void ParamTraits<cc::RenderPass>::Log(
   l->append("])");
 }
 
-void ParamTraits<cc::Mailbox>::Write(Message* m, const param_type& p) {
-  m->WriteBytes(p.name, sizeof(p.name));
-}
-
-bool ParamTraits<cc::Mailbox>::Read(const Message* m,
-                                    PickleIterator* iter,
-                                    param_type* p) {
-  const char* bytes = NULL;
-  if (!m->ReadBytes(iter, &bytes, sizeof(p->name)))
-    return false;
-  DCHECK(bytes);
-  memcpy(p->name, bytes, sizeof(p->name));
-  return true;
-}
-
-void ParamTraits<cc::Mailbox>::Log(const param_type& p, std::string* l) {
-  for (size_t i = 0; i < sizeof(p.name); ++i)
-    *l += base::StringPrintf("%02x", p.name[i]);
-}
-
 namespace {
   enum CompositorFrameType {
+    NO_FRAME,
     DELEGATED_FRAME,
     GL_FRAME,
   };
@@ -573,10 +557,11 @@ void ParamTraits<cc::CompositorFrame>::Write(Message* m,
     DCHECK(!p.gl_frame_data);
     WriteParam(m, static_cast<int>(DELEGATED_FRAME));
     WriteParam(m, *p.delegated_frame_data);
-  } else {
-    DCHECK(p.gl_frame_data);
+  } else if (p.gl_frame_data) {
     WriteParam(m, static_cast<int>(GL_FRAME));
     WriteParam(m, *p.gl_frame_data);
+  } else {
+    WriteParam(m, static_cast<int>(NO_FRAME));
   }
 }
 
@@ -601,6 +586,8 @@ bool ParamTraits<cc::CompositorFrame>::Read(const Message* m,
       if (!ReadParam(m, iter, p->gl_frame_data.get()))
         return false;
       break;
+    case NO_FRAME:
+      break;
     default:
       return false;
   }
@@ -619,9 +606,53 @@ void ParamTraits<cc::CompositorFrame>::Log(const param_type& p,
   l->append(")");
 }
 
+void ParamTraits<cc::CompositorFrameAck>::Write(Message* m,
+                                                const param_type& p) {
+  WriteParam(m, p.resources);
+  if (p.gl_frame_data) {
+    WriteParam(m, static_cast<int>(GL_FRAME));
+    WriteParam(m, *p.gl_frame_data);
+  } else {
+    WriteParam(m, static_cast<int>(NO_FRAME));
+  }
+}
+
+bool ParamTraits<cc::CompositorFrameAck>::Read(const Message* m,
+                                               PickleIterator* iter,
+                                               param_type* p) {
+  if (!ReadParam(m, iter, &p->resources))
+    return false;
+
+  int compositor_frame_type;
+  if (!ReadParam(m, iter, &compositor_frame_type))
+    return false;
+
+  switch (compositor_frame_type) {
+    case NO_FRAME:
+      break;
+    case GL_FRAME:
+      p->gl_frame_data.reset(new cc::GLFrameData());
+      if (!ReadParam(m, iter, p->gl_frame_data.get()))
+        return false;
+      break;
+    default:
+      return false;
+  }
+  return true;
+}
+
+void ParamTraits<cc::CompositorFrameAck>::Log(const param_type& p,
+                                              std::string* l) {
+  l->append("CompositorFrameAck(");
+  LogParam(p.resources, l);
+  l->append(", ");
+  if (p.gl_frame_data)
+    LogParam(*p.gl_frame_data, l);
+  l->append(")");
+}
+
 void ParamTraits<cc::DelegatedFrameData>::Write(Message* m,
                                                 const param_type& p) {
-  WriteParam(m, p.size);
   WriteParam(m, p.resource_list);
   WriteParam(m, p.render_pass_list.size());
   for (size_t i = 0; i < p.render_pass_list.size(); ++i)
@@ -634,8 +665,7 @@ bool ParamTraits<cc::DelegatedFrameData>::Read(const Message* m,
   const static size_t kMaxRenderPasses = 10000;
 
   size_t num_render_passes;
-  if (!ReadParam(m, iter, &p->size) ||
-      !ReadParam(m, iter, &p->resource_list) ||
+  if (!ReadParam(m, iter, &p->resource_list) ||
       !ReadParam(m, iter, &num_render_passes) ||
       num_render_passes > kMaxRenderPasses)
     return false;
@@ -651,8 +681,6 @@ bool ParamTraits<cc::DelegatedFrameData>::Read(const Message* m,
 void ParamTraits<cc::DelegatedFrameData>::Log(const param_type& p,
                                               std::string* l) {
   l->append("DelegatedFrameData(");
-  LogParam(p.size, l);
-  l->append(", ");
   LogParam(p.resource_list, l);
   l->append(", [");
   for (size_t i = 0; i < p.render_pass_list.size(); ++i) {

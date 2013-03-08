@@ -10,6 +10,7 @@
 #include "base/command_line.h"
 #include "base/file_util.h"
 #include "base/logging.h"
+#include "base/prefs/pref_service.h"
 #include "base/string_util.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/values.h"
@@ -23,7 +24,6 @@
 #include "chrome/browser/policy/browser_policy_connector.h"
 #include "chrome/browser/policy/cloud_policy_constants.h"
 #include "chrome/browser/policy/proto/device_management_backend.pb.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/ui/options/options_util.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/installer/util/google_update_settings.h"
@@ -44,6 +44,7 @@ const char* kKnownSettings[] = {
   kAccountsPrefShowUserNamesOnSignIn,
   kAccountsPrefUsers,
   kAccountsPrefDeviceLocalAccounts,
+  kAllowRedeemChromeOsRegistrationOffers,
   kAppPack,
   kDeviceOwner,
   kIdleLogoutTimeout,
@@ -287,6 +288,16 @@ void DeviceSettingsProvider::SetInPolicy() {
     if (value->GetAsBoolean(&ephemeral_users_enabled_value)) {
       ephemeral_users_enabled->set_ephemeral_users_enabled(
           ephemeral_users_enabled_value);
+    } else {
+      NOTREACHED();
+    }
+  } else if (prop == kAllowRedeemChromeOsRegistrationOffers) {
+    em::AllowRedeemChromeOsRegistrationOffersProto* allow_redeem_offers =
+        device_settings_.mutable_allow_redeem_offers();
+    bool allow_redeem_offers_value = true;
+    if (value->GetAsBoolean(&allow_redeem_offers_value)) {
+      allow_redeem_offers->set_allow_redeem_offers(
+          allow_redeem_offers_value);
     } else {
       NOTREACHED();
     }
@@ -535,6 +546,16 @@ void DeviceSettingsProvider::DecodeGenericPolicies(
           kSystemTimezonePolicy,
           policy.system_timezone().timezone());
     }
+  }
+
+  if (policy.has_allow_redeem_offers()) {
+    new_values_cache->SetBoolean(
+        kAllowRedeemChromeOsRegistrationOffers,
+        policy.allow_redeem_offers().allow_redeem_offers());
+  } else {
+    new_values_cache->SetBoolean(
+        kAllowRedeemChromeOsRegistrationOffers,
+        true);
   }
 }
 

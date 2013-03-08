@@ -13,20 +13,20 @@
 #include "base/command_line.h"
 #include "base/i18n/rtl.h"
 #include "base/memory/singleton.h"
+#include "base/prefs/pref_service.h"
 #include "base/string_piece.h"
-#include "base/string_tokenizer.h"
+#include "base/strings/string_tokenizer.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/managed_mode/managed_mode.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/avatar_menu_model.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/themes/theme_properties.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
-#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/gtk/accelerators_gtk.h"
 #include "chrome/browser/ui/gtk/avatar_menu_button_gtk.h"
 #include "chrome/browser/ui/gtk/browser_window_gtk.h"
@@ -40,6 +40,7 @@
 #include "chrome/browser/ui/gtk/nine_box.h"
 #include "chrome/browser/ui/gtk/tabs/tab_strip_gtk.h"
 #include "chrome/browser/ui/gtk/unity_service.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/toolbar/encoding_menu_controller.h"
 #include "chrome/browser/ui/toolbar/wrench_menu_model.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -406,8 +407,8 @@ void BrowserTitlebar::BuildButtons(const std::string& button_string) {
   top_padding_right_ = NULL;
 
   bool left_side = true;
-  StringTokenizer tokenizer(button_string, ":,");
-  tokenizer.set_options(StringTokenizer::RETURN_DELIMS);
+  base::StringTokenizer tokenizer(button_string, ":,");
+  tokenizer.set_options(base::StringTokenizer::RETURN_DELIMS);
   int left_count = 0;
   int right_count = 0;
   while (tokenizer.GetNext()) {
@@ -549,7 +550,7 @@ void BrowserTitlebar::GetButtonResources(const std::string& button_name,
 
 void BrowserTitlebar::UpdateButtonBackground(CustomDrawButton* button) {
   SkColor color = theme_service_->GetColor(
-      ThemeService::COLOR_BUTTON_BACKGROUND);
+      ThemeProperties::COLOR_BUTTON_BACKGROUND);
   SkBitmap background = theme_service_->GetImageNamed(
       IDR_THEME_WINDOW_CONTROL_BACKGROUND).AsBitmap();
 
@@ -745,10 +746,10 @@ void BrowserTitlebar::UpdateTextColor() {
     GdkColor frame_color;
     if (window_has_focus_) {
       frame_color = theme_service_->GetGdkColor(
-          ThemeService::COLOR_FRAME);
+          ThemeProperties::COLOR_FRAME);
     } else {
       frame_color = theme_service_->GetGdkColor(
-          ThemeService::COLOR_FRAME_INACTIVE);
+          ThemeProperties::COLOR_FRAME_INACTIVE);
     }
     GdkColor text_color = PickLuminosityContrastingColor(
         &frame_color, &ui::kGdkWhite, &ui::kGdkBlack);
@@ -940,7 +941,7 @@ bool BrowserTitlebar::IsCommandIdChecked(int command_id) const {
   EncodingMenuController controller;
   if (controller.DoesCommandBelongToEncodingMenu(command_id)) {
     WebContents* web_contents =
-        chrome::GetActiveWebContents(browser_window_->browser());
+        browser_window_->browser()->tab_strip_model()->GetActiveWebContents();
     if (web_contents) {
       return controller.IsItemChecked(browser_window_->browser()->profile(),
                                       web_contents->GetEncoding(),

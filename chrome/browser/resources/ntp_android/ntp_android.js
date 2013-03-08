@@ -582,7 +582,11 @@ cr.define('ntp', function() {
 
     cell.setAttribute(CONTEXT_MENU_URL_KEY, item.url);
 
-    var iconUrl = item.icon || 'chrome://touch-icon/size/16@1x/' + item.url;
+    var iconUrl = item.icon;
+    if (!iconUrl) {
+      iconUrl = 'chrome://touch-icon/size/16@' + window.devicePixelRatio +
+          'x/' + item.url;
+    }
     var icon = createDiv('icon', iconUrl);
     trackImageLoad(iconUrl);
     cell.appendChild(icon);
@@ -676,7 +680,7 @@ cr.define('ntp', function() {
     if (item.folder) {
       faviconBox.classList.add('folder');
     } else {
-      var iconUrl = item.icon || 'chrome://touch-icon/' + item.url;
+      var iconUrl = item.icon || 'chrome://touch-icon/largest/' + item.url;
       var faviconIcon = createDiv('favicon-icon');
       faviconIcon.style.backgroundImage = 'url(' + iconUrl + ')';
       trackImageLoad(iconUrl);
@@ -686,8 +690,10 @@ cr.define('ntp', function() {
       image.onload = function() {
         var w = image.width;
         var h = image.height;
-        if (w <= 16 || h <= 16) {
-          // it's a standard favicon (or at least it's small)
+        var wDip = w / window.devicePixelRatio;
+        var hDip = h / window.devicePixelRatio;
+        if (Math.floor(wDip) <= 16 || Math.floor(hDip) <= 16) {
+          // it's a standard favicon (or at least it's small).
           faviconBox.classList.add('document');
 
           faviconBox.appendChild(
@@ -704,21 +710,26 @@ cr.define('ntp', function() {
           foldContainer.appendChild(foldDiv);
           faviconBox.appendChild(foldContainer);
 
+          // FaviconWebUIHandler::HandleGetFaviconDominantColor expects
+          // an URL that starts with chrome://favicon/size/.
+          // The handler always loads 16x16 1x favicon and assumes that
+          // the dominant color for all scale factors is the same.
           chrome.send('getFaviconDominantColor',
               [('chrome://favicon/size/16@1x/' + item.url), '' + faviconIndex]);
           faviconIndex++;
         } else if ((w == 57 && h == 57) || (w == 114 && h == 114)) {
-          // it's a touch icon
+          // it's a touch icon for 1x or 2x.
           faviconIcon.classList.add('touch-icon');
         } else {
-          // it's an html5 icon (or at least it's larger)
-          var max = 64;
-          if (w > max || h > max) {
-            var scale = (w > h) ? (max / w) : (max / h);
-            w *= scale;
-            h *= scale;
+          // It's an html5 icon (or at least it's larger).
+          // Rescale it to be no bigger than 64x64 dip.
+          var maxDip = 64; // DIP
+          if (wDip > maxDip || hDip > maxDip) {
+            var scale = (wDip > hDip) ? (maxDip / wDip) : (maxDip / hDip);
+            wDip *= scale;
+            hDip *= scale;
           }
-          faviconIcon.style.backgroundSize = w + 'px ' + h + 'px';
+          faviconIcon.style.backgroundSize = wDip + 'px ' + hDip + 'px';
         }
       };
       faviconBox.appendChild(faviconIcon);
@@ -1821,20 +1832,25 @@ cr.define('ntp', function() {
     var zoom = window.getComputedStyle(fold).zoom;
     var scale = 1 / window.getComputedStyle(fold).zoom;
 
+    // The width/height of the canvas.  Set to 24 so it looks good across all
+    // resolutions.
+    var cw = 24;
+    var ch = 24;
+
     // Get the fold canvas and create a path for the fold shape
     var ctx = document.getCSSCanvasContext(
-        '2d', 'fold_' + index, 12 * scale, 12 * scale);
+        '2d', 'fold_' + index, cw * scale, ch * scale);
     ctx.beginPath();
     ctx.moveTo(0, 0);
-    ctx.lineTo(0, 9 * scale);
+    ctx.lineTo(0, ch * 0.75 * scale);
     ctx.quadraticCurveTo(
-        0, 12 * scale,
-        3 * scale, 12 * scale);
-    ctx.lineTo(12 * scale, 12 * scale);
+        0, ch * scale,
+        cw * .25 * scale, ch * scale);
+    ctx.lineTo(cw * scale, ch * scale);
     ctx.closePath();
 
     // Create a gradient for the fold and fill it
-    var gradient = ctx.createLinearGradient(12 * scale, 0, 0, 12 * scale);
+    var gradient = ctx.createLinearGradient(cw * scale, 0, 0, ch * scale);
     if (color.indexOf('#') == 0) {
       var r = parseInt(color.substring(1, 3), 16);
       var g = parseInt(color.substring(3, 5), 16);

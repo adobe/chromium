@@ -7,11 +7,12 @@
 #include "base/auto_reset.h"
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/mac/foundation_util.h"
 #include "base/mac/mac_util.h"
 #include "base/message_loop.h"
-#include "base/string_number_conversions.h"
+#include "base/prefs/pref_service.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/sys_string_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
@@ -26,7 +27,6 @@
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/first_run/first_run.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/printing/print_dialog_cloud.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/service/service_process_control.h"
@@ -35,13 +35,15 @@
 #include "chrome/browser/sessions/session_service_factory.h"
 #include "chrome/browser/sessions/tab_restore_service.h"
 #include "chrome/browser/sessions/tab_restore_service_factory.h"
+#include "chrome/browser/signin/signin_manager.h"
+#include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/sync_ui_util.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_command_controller.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_finder.h"
-#include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_iterator.h"
 #include "chrome/browser/ui/browser_mac.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/chrome_pages.h"
@@ -119,7 +121,7 @@ Browser* ActivateBrowser(Profile* profile) {
 Browser* CreateBrowser(Profile* profile) {
   {
     base::AutoReset<bool> auto_reset_in_run(&g_is_opening_new_window, true);
-    chrome::NewEmptyWindow(profile);
+    chrome::NewEmptyWindow(profile, chrome::HOST_DESKTOP_TYPE_NATIVE);
   }
 
   Browser* browser = chrome::GetLastActiveBrowser();
@@ -157,7 +159,7 @@ void RecordLastRunAppBundlePath() {
   // real, user-visible app bundle directory. (The alternatives give either the
   // framework's path or the initial app's path, which may be an app mode shim
   // or a unit test.)
-  FilePath appBundlePath =
+  base::FilePath appBundlePath =
       chrome::GetVersionedDirectory().DirName().DirName().DirName();
   CFPreferencesSetAppValue(
       base::mac::NSToCFCast(app_mode::kLastRunAppBundlePathPrefsKey),
@@ -302,16 +304,16 @@ void RecordLastRunAppBundlePath() {
       [self applicationShouldTerminate:app] != NSTerminateNow)
     return NO;
 
-  size_t num_browsers = BrowserList::size();
+  size_t num_browsers = chrome::GetTotalBrowserCount();
 
-  // Initiate a shutdown (via browser::CloseAllBrowsers()) if we aren't
+  // Initiate a shutdown (via chrome::CloseAllBrowsers()) if we aren't
   // already shutting down.
   if (!browser_shutdown::IsTryingToQuit()) {
     content::NotificationService::current()->Notify(
         chrome::NOTIFICATION_CLOSE_ALL_BROWSERS_REQUEST,
         content::NotificationService::AllSources(),
         content::NotificationService::NoDetails());
-    browser::CloseAllBrowsers();
+    chrome::CloseAllBrowsers();
   }
 
   return num_browsers == 0 ? YES : NO;
@@ -351,18 +353,24 @@ void RecordLastRunAppBundlePath() {
 // Called when the app is shutting down. Clean-up as appropriate.
 - (void)applicationWillTerminate:(NSNotification*)aNotification {
   // There better be no browser windows left at this point.
-  CHECK_EQ(0u, BrowserList::size());
+  CHECK_EQ(0u, chrome::GetTotalBrowserCount());
 
   // Tell BrowserList not to keep the browser process alive. Once all the
   // browsers get dealloc'd, it will stop the RunLoop and fall back into main().
-  browser::EndKeepAlive();
+  chrome::EndKeepAlive();
+
+  // Reset all pref watching, as this object outlives the prefs system.
+  profilePrefRegistrar_.reset();
+  localPrefRegistrar_.RemoveAll();
 
   [self unregisterEventHandlers];
 }
 
 - (void)didEndMainMessageLoop {
-  DCHECK_EQ(0u, chrome::GetBrowserCount([self lastProfile]));
-  if (!chrome::GetBrowserCount([self lastProfile])) {
+  DCHECK_EQ(0u, chrome::GetBrowserCount([self lastProfile],
+                                        chrome::HOST_DESKTOP_TYPE_NATIVE));
+  if (!chrome::GetBrowserCount([self lastProfile],
+                               chrome::HOST_DESKTOP_TYPE_NATIVE)) {
     // As we're shutting down, we need to nuke the TabRestoreService, which
     // will start the shutdown of the NavigationControllers and allow for
     // proper shutdown. If we don't do this, Chrome won't shut down cleanly,
@@ -481,7 +489,7 @@ void RecordLastRunAppBundlePath() {
     // If the profile is incognito, use the original profile.
     Profile* newProfile = [windowController profile]->GetOriginalProfile();
     [self windowChangedToProfile:newProfile];
-  } else if (BrowserList::empty()) {
+  } else if (chrome::GetTotalBrowserCount() == 0) {
     [self windowChangedToProfile:
         g_browser_process->profile_manager()->GetLastUsedProfile()];
   }
@@ -572,7 +580,7 @@ void RecordLastRunAppBundlePath() {
 - (void)applicationDidFinishLaunching:(NSNotification*)notify {
   // Notify BrowserList to keep the application running so it doesn't go away
   // when all the browser windows get closed.
-  browser::StartKeepAlive();
+  chrome::StartKeepAlive();
 
   [self setUpdateCheckInterval];
 
@@ -688,7 +696,8 @@ void RecordLastRunAppBundlePath() {
         Browser* browser = chrome::FindBrowserWithProfile(
             profiles[i], chrome::HOST_DESKTOP_TYPE_NATIVE);
         if (!browser) {
-          browser = new Browser(Browser::CreateParams(profiles[i]));
+          browser = new Browser(Browser::CreateParams(
+              profiles[i], chrome::HOST_DESKTOP_TYPE_NATIVE));
           browser->window()->Show();
         }
         DCHECK(browser);
@@ -778,7 +787,9 @@ void RecordLastRunAppBundlePath() {
                 << "NULL lastProfile detected -- not doing anything";
             break;
           }
-          enable = lastProfile->IsSyncAccessible() &&
+          SigninManager* signin = SigninManagerFactory::GetForProfile(
+              lastProfile->GetOriginalProfile());
+          enable = signin->IsSigninAllowed() &&
               ![self keyWindowIsModal];
           [BrowserWindowController updateSigninItem:item
                                          shouldShow:enable
@@ -803,6 +814,8 @@ void RecordLastRunAppBundlePath() {
     enable = YES;
   } else if (action == @selector(toggleConfirmToQuit:)) {
     [self updateConfirmToQuitPrefMenuItem:static_cast<NSMenuItem*>(item)];
+    enable = YES;
+  } else if (action == @selector(executeApplication:)) {
     enable = YES;
   }
   return enable;
@@ -906,7 +919,7 @@ void RecordLastRunAppBundlePath() {
       break;
     case IDC_MANAGE_EXTENSIONS:
       if (Browser* browser = ActivateBrowser(lastProfile))
-        chrome::ShowExtensions(browser);
+        chrome::ShowExtensions(browser, std::string());
       else
         chrome::OpenExtensionsWindow(lastProfile);
       break;
@@ -918,7 +931,7 @@ void RecordLastRunAppBundlePath() {
       break;
     case IDC_SHOW_SYNC_SETUP:
       if (Browser* browser = ActivateBrowser(lastProfile))
-        chrome::ShowSyncSetup(browser, SyncPromoUI::SOURCE_MENU);
+        chrome::ShowBrowserSignin(browser, SyncPromoUI::SOURCE_MENU);
       else
         chrome::OpenSyncSetupWindow(lastProfile, SyncPromoUI::SOURCE_MENU);
       break;
@@ -928,12 +941,6 @@ void RecordLastRunAppBundlePath() {
       break;
     case IDC_OPTIONS:
       [self showPreferences:sender];
-      break;
-    default:
-      // Background Applications use dynamic values that must be less than the
-      // smallest value among the predefined IDC_* labels.
-      if ([sender tag] < IDC_MinimumLabelValue)
-        [self executeApplication:sender];
       break;
   }
 }
@@ -981,8 +988,7 @@ void RecordLastRunAppBundlePath() {
   // visible windows are panels or notifications, we still need to open a new
   // window.
   if (flag) {
-    for (BrowserList::const_iterator iter = BrowserList::begin();
-         iter != BrowserList::end(); ++iter) {
+    for (chrome::BrowserIterator iter; !iter.done(); iter.Next()) {
       Browser* browser = *iter;
       if (browser->is_type_tabbed() || browser->is_type_popup())
         return YES;
@@ -1019,7 +1025,7 @@ void RecordLastRunAppBundlePath() {
     int return_code;
     StartupBrowserCreator browser_creator;
     browser_creator.LaunchBrowser(
-        command_line, [self lastProfile], FilePath(),
+        command_line, [self lastProfile], base::FilePath(),
         chrome::startup::IS_NOT_PROCESS_STARTUP,
         chrome::startup::IS_NOT_FIRST_RUN, &return_code);
   }
@@ -1116,14 +1122,15 @@ void RecordLastRunAppBundlePath() {
   Browser* browser = chrome::GetLastActiveBrowser();
   // if no browser window exists then create one with no tabs to be filled in
   if (!browser) {
-    browser = new Browser(Browser::CreateParams([self lastProfile]));
+    browser = new Browser(Browser::CreateParams(
+        [self lastProfile], chrome::HOST_DESKTOP_TYPE_NATIVE));
     browser->window()->Show();
   }
 
   CommandLine dummy(CommandLine::NO_PROGRAM);
   chrome::startup::IsFirstRun first_run = first_run::IsChromeFirstRun() ?
       chrome::startup::IS_FIRST_RUN : chrome::startup::IS_NOT_FIRST_RUN;
-  StartupBrowserCreatorImpl launch(FilePath(), dummy, first_run);
+  StartupBrowserCreatorImpl launch(base::FilePath(), dummy, first_run);
   launch.OpenURLsInBrowser(browser, false, urls);
 }
 
@@ -1148,7 +1155,7 @@ void RecordLastRunAppBundlePath() {
           stringValue];
 
   ProfileManager* profileManager = g_browser_process->profile_manager();
-  FilePath path = FilePath(base::SysNSStringToUTF8(profileDir));
+  base::FilePath path = base::FilePath(base::SysNSStringToUTF8(profileDir));
   path = profileManager->user_data_dir().Append(path);
   Profile* profile = profileManager->GetProfile(path);
   if (!profile) {
@@ -1167,10 +1174,8 @@ void RecordLastRunAppBundlePath() {
                << base::SysNSStringToUTF8(appId) << "'.";
     return;
   }
-  application_launch::LaunchParams params(profile, extension,
-                                          extension_misc::LAUNCH_NONE,
-                                          NEW_WINDOW);
-  application_launch::OpenApplication(params);
+  chrome::OpenApplication(chrome::AppLaunchParams(
+      profile, extension, extension_misc::LAUNCH_NONE, NEW_WINDOW));
 }
 
 // Apple Event handler that receives print event from service
@@ -1191,7 +1196,7 @@ void RecordLastRunAppBundlePath() {
     string16 printTicket16 = base::SysNSStringToUTF16(printTicket);
     print_dialog_cloud::CreatePrintDialogForFile(
         ProfileManager::GetDefaultProfile(), NULL,
-        FilePath([inputPath UTF8String]), title16,
+        base::FilePath([inputPath UTF8String]), title16,
         printTicket16, [mime UTF8String], /*delete_on_close=*/false);
   }
 }
@@ -1200,7 +1205,8 @@ void RecordLastRunAppBundlePath() {
           openFiles:(NSArray*)filenames {
   std::vector<GURL> gurlVector;
   for (NSString* file in filenames) {
-    GURL gurl = net::FilePathToFileURL(FilePath(base::SysNSStringToUTF8(file)));
+    GURL gurl =
+        net::FilePathToFileURL(base::FilePath(base::SysNSStringToUTF8(file)));
     gurlVector.push_back(gurl);
   }
   if (!gurlVector.empty())
@@ -1286,7 +1292,7 @@ void RecordLastRunAppBundlePath() {
           l10n_util::GetNSStringWithFixup(IDS_BACKGROUND_APPS_MAC);
       scoped_nsobject<NSMenu> appMenu([[NSMenu alloc] initWithTitle:menuStr]);
       for (extensions::ExtensionList::const_iterator cursor =
-            applications.begin();
+               applications.begin();
            cursor != applications.end();
            ++cursor, ++position) {
         DCHECK_EQ(applications.GetPosition(*cursor), position);
@@ -1294,18 +1300,19 @@ void RecordLastRunAppBundlePath() {
             base::SysUTF16ToNSString(UTF8ToUTF16((*cursor)->name()));
         scoped_nsobject<NSMenuItem> appItem([[NSMenuItem alloc]
             initWithTitle:itemStr
-                   action:@selector(commandFromDock:)
+                   action:@selector(executeApplication:)
             keyEquivalent:@""]);
         [appItem setTarget:self];
         [appItem setTag:position];
         [appMenu addItem:appItem];
       }
+
       scoped_nsobject<NSMenuItem> appMenuItem([[NSMenuItem alloc]
           initWithTitle:menuStr
-                 action:@selector(commandFromDock:)
+                 action:@selector(executeApplication:)
           keyEquivalent:@""]);
       [appMenuItem setTarget:self];
-      [appMenuItem setTag:position];
+      [appMenuItem setTag:IDC_VIEW_BACKGROUND_PAGES];
       [appMenuItem setSubmenu:appMenu];
       [dockMenu addItem:appMenuItem];
     }

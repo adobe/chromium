@@ -134,6 +134,7 @@ class MockAudioDecoder : public AudioDecoder {
 class MockVideoRenderer : public VideoRenderer {
  public:
   MockVideoRenderer();
+  virtual ~MockVideoRenderer();
 
   // VideoRenderer implementation.
   MOCK_METHOD10(Initialize, void(const scoped_refptr<DemuxerStream>& stream,
@@ -153,9 +154,6 @@ class MockVideoRenderer : public VideoRenderer {
   MOCK_METHOD1(Stop, void(const base::Closure& callback));
   MOCK_METHOD1(SetPlaybackRate, void(float playback_rate));
 
- protected:
-  virtual ~MockVideoRenderer();
-
  private:
   DISALLOW_COPY_AND_ASSIGN(MockVideoRenderer);
 };
@@ -163,6 +161,7 @@ class MockVideoRenderer : public VideoRenderer {
 class MockAudioRenderer : public AudioRenderer {
  public:
   MockAudioRenderer();
+  virtual ~MockAudioRenderer();
 
   // AudioRenderer implementation.
   MOCK_METHOD9(Initialize, void(const scoped_refptr<DemuxerStream>& stream,
@@ -182,9 +181,6 @@ class MockAudioRenderer : public AudioRenderer {
   MOCK_METHOD2(Preroll, void(base::TimeDelta time, const PipelineStatusCB& cb));
   MOCK_METHOD1(SetVolume, void(float volume));
   MOCK_METHOD1(ResumeAfterUnderflow, void(bool buffer_more_audio));
-
- protected:
-  virtual ~MockAudioRenderer();
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockAudioRenderer);
@@ -238,33 +234,6 @@ class MockDecryptor : public Decryptor {
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockDecryptor);
-};
-
-// FilterFactory that returns canned instances of mock filters.  You can set
-// expectations on the filters and then pass the collection into a pipeline.
-class MockFilterCollection {
- public:
-  MockFilterCollection();
-  virtual ~MockFilterCollection();
-
-  // Mock accessors.
-  MockDemuxer* demuxer() const { return demuxer_; }
-  MockVideoDecoder* video_decoder() const { return video_decoder_; }
-  MockAudioDecoder* audio_decoder() const { return audio_decoder_; }
-  MockVideoRenderer* video_renderer() const { return video_renderer_; }
-  MockAudioRenderer* audio_renderer() const { return audio_renderer_; }
-
-  // Creates the FilterCollection containing the mocks.
-  scoped_ptr<FilterCollection> Create();
-
- private:
-  scoped_refptr<MockDemuxer> demuxer_;
-  scoped_refptr<MockVideoDecoder> video_decoder_;
-  scoped_refptr<MockAudioDecoder> audio_decoder_;
-  scoped_refptr<MockVideoRenderer> video_renderer_;
-  scoped_refptr<MockAudioRenderer> audio_renderer_;
-
-  DISALLOW_COPY_AND_ASSIGN(MockFilterCollection);
 };
 
 // Helper mock statistics callback.

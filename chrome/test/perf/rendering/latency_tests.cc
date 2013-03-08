@@ -6,15 +6,15 @@
 #include "base/file_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
-#include "base/string_number_conversions.h"
 #include "base/stringprintf.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/test/test_switches.h"
 #include "base/test/trace_event_analyzer.h"
 #include "base/threading/platform_thread.h"
 #include "base/timer.h"
 #include "base/version.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_tabstrip.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/tracing.h"
@@ -170,7 +170,7 @@ class LatencyTest
   void PrintEvents(const TraceEventVector& events);
 
   // Path to html file.
-  FilePath test_path_;
+  base::FilePath test_path_;
 
   // Query INSTANT events.
   Query query_instant_;
@@ -647,7 +647,7 @@ void LatencyTest::GetMeanFrameTimeMicros(int* frame_time) const {
 
 void LatencyTest::SendInput() {
   content::RenderViewHost* rvh =
-      chrome::GetActiveWebContents(browser())->GetRenderViewHost();
+      browser()->tab_strip_model()->GetActiveWebContents()->GetRenderViewHost();
   WebKit::WebMouseEvent mouse_event;
   mouse_event.movementX = 1;
   mouse_x_ += mouse_event.movementX;

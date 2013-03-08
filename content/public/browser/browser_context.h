@@ -10,6 +10,17 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/supports_user_data.h"
 #include "content/common/content_export.h"
+#include "ui/base/clipboard/clipboard.h"
+
+class GURL;
+
+namespace base {
+class FilePath;
+}
+
+namespace fileapi {
+class ExternalMountPoints;
+}
 
 namespace net {
 class URLRequestContextGetter;
@@ -18,9 +29,6 @@ class URLRequestContextGetter;
 namespace quota {
 class SpecialStoragePolicy;
 }
-
-class FilePath;
-class GURL;
 
 namespace content {
 
@@ -44,6 +52,11 @@ class CONTENT_EXPORT BrowserContext : public base::SupportsUserData {
 
   static DownloadManager* GetDownloadManager(BrowserContext* browser_context);
 
+  // Returns BrowserContext specific external mount points. It may return NULL
+  // if the context doesn't have any BrowserContext specific external mount
+  // points. Currenty, non-NULL value is returned only on ChromeOS.
+  static fileapi::ExternalMountPoints* GetMountPoints(BrowserContext* context);
+
   static content::StoragePartition* GetStoragePartition(
       BrowserContext* browser_context, SiteInstance* site_instance);
   static content::StoragePartition* GetStoragePartitionForSite(
@@ -60,7 +73,7 @@ class CONTENT_EXPORT BrowserContext : public base::SupportsUserData {
   // ownership of the pointer.
   static void GarbageCollectStoragePartitions(
       BrowserContext* browser_context,
-      scoped_ptr<base::hash_set<FilePath> > active_paths,
+      scoped_ptr<base::hash_set<base::FilePath> > active_paths,
       const base::Closure& done);
 
   // DON'T USE THIS. GetDefaultStoragePartition() is going away.
@@ -82,10 +95,16 @@ class CONTENT_EXPORT BrowserContext : public base::SupportsUserData {
   // Tells the HTML5 objects on this context to purge any uneeded memory.
   static void PurgeMemory(BrowserContext* browser_context);
 
+  // Returns a Clipboard::SourceTag (pointer) if |context| is OffTheRecord
+  // context. Otherwise, NULL. If the clipboard contains that SourceTag at the
+  // time of |context| destruction it will be flushed.
+  static ui::Clipboard::SourceTag GetMarkerForOffTheRecordContext(
+      BrowserContext* context);
+
   virtual ~BrowserContext();
 
   // Returns the path of the directory where this context's data is stored.
-  virtual FilePath GetPath() = 0;
+  virtual base::FilePath GetPath() = 0;
 
   // Return whether this context is incognito. Default is false.
   // This doesn't belong here; http://crbug.com/89628
@@ -104,10 +123,6 @@ class CONTENT_EXPORT BrowserContext : public base::SupportsUserData {
   virtual net::URLRequestContextGetter* GetRequestContextForRenderProcess(
       int renderer_child_id) = 0;
 
-  virtual net::URLRequestContextGetter* GetRequestContextForStoragePartition(
-      const FilePath& partition_path,
-      bool in_memory) = 0;
-
   // Returns the default request context for media resources associated with
   // this context.
   // TODO(creis): Remove this version in favor of the one below.
@@ -119,7 +134,7 @@ class CONTENT_EXPORT BrowserContext : public base::SupportsUserData {
       int renderer_child_id) = 0;
   virtual net::URLRequestContextGetter*
       GetMediaRequestContextForStoragePartition(
-          const FilePath& partition_path,
+          const base::FilePath& partition_path,
           bool in_memory) = 0;
 
   // Returns the resource context.

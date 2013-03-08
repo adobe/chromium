@@ -317,7 +317,7 @@ class MockMediaSource {
   }
 
  private:
-  FilePath file_path_;
+  base::FilePath file_path_;
   scoped_refptr<DecoderBuffer> file_data_;
   int current_position_;
   int initial_append_size_;
@@ -341,7 +341,8 @@ class PipelineIntegrationTest
         base::Bind(&PipelineIntegrationTest::OnError, base::Unretained(this)),
         QuitOnStatusCB(PIPELINE_OK),
         base::Bind(&PipelineIntegrationTest::OnBufferingState,
-                   base::Unretained(this)));
+                   base::Unretained(this)),
+        base::Closure());
 
     message_loop_.Run();
   }
@@ -359,7 +360,8 @@ class PipelineIntegrationTest
         base::Bind(&PipelineIntegrationTest::OnError, base::Unretained(this)),
         QuitOnStatusCB(PIPELINE_OK),
         base::Bind(&PipelineIntegrationTest::OnBufferingState,
-                   base::Unretained(this)));
+                   base::Unretained(this)),
+        base::Closure());
 
     source->set_need_key_cb(base::Bind(&FakeEncryptedMedia::NeedKey,
                                        base::Unretained(encrypted_media)));
@@ -660,6 +662,15 @@ TEST_F(PipelineIntegrationTest,
   EXPECT_EQ(PIPELINE_ERROR_DECODE, WaitUntilEndedOrError());
   source.Abort();
 }
+
+// Verify files which change configuration midstream fail gracefully.
+TEST_F(PipelineIntegrationTest, MidStreamConfigChangesFail) {
+  ASSERT_TRUE(Start(
+      GetTestDataFilePath("midstream_config_change.mp3"), PIPELINE_OK));
+  Play();
+  ASSERT_EQ(WaitUntilEndedOrError(), PIPELINE_ERROR_DECODE);
+}
+
 #endif
 
 TEST_F(PipelineIntegrationTest, BasicPlayback_16x9AspectRatio) {
@@ -844,6 +855,33 @@ TEST_F(PipelineIntegrationTest, ChunkDemuxerAbortRead_VideoOnly) {
                                  base::TimeDelta::FromMilliseconds(200),
                                  base::TimeDelta::FromMilliseconds(1668),
                                  0x1C896, 65536));
+}
+
+// Verify that Opus audio in WebM containers can be played back.
+TEST_F(PipelineIntegrationTest, BasicPlayback_AudioOnly_Opus_WebM) {
+  ASSERT_TRUE(Start(GetTestDataFilePath("bear-opus.webm"),
+                    PIPELINE_OK));
+  Play();
+  ASSERT_TRUE(WaitUntilOnEnded());
+}
+
+// Verify that VP9 video in WebM containers can be played back.
+// Disabled since it might crash or corrupt heap, see http://crbug.com/173333
+TEST_F(PipelineIntegrationTest, DISABLED_BasicPlayback_VideoOnly_VP9_WebM) {
+  ASSERT_TRUE(Start(GetTestDataFilePath("bear-vp9.webm"),
+                    PIPELINE_OK));
+  Play();
+  ASSERT_TRUE(WaitUntilOnEnded());
+}
+
+// Verify that VP9 video and Opus audio in the same WebM container can be played
+// back.
+// Disabled since it might crash or corrupt heap, see http://crbug.com/173333
+TEST_F(PipelineIntegrationTest, DISABLED_BasicPlayback_VP9_Opus_WebM) {
+  ASSERT_TRUE(Start(GetTestDataFilePath("bear-vp9-opus.webm"),
+                    PIPELINE_OK));
+  Play();
+  ASSERT_TRUE(WaitUntilOnEnded());
 }
 
 }  // namespace media

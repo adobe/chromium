@@ -11,7 +11,7 @@
 #include "content/common/content_export.h"
 #include "content/common/drag_event_source_info.h"
 #include "content/port/browser/render_view_host_delegate_view.h"
-#include "content/public/browser/web_contents_view.h"
+#include "content/port/browser/web_contents_view_port.h"
 
 namespace content {
 
@@ -20,47 +20,53 @@ class WebContentsImpl;
 class BrowserPluginGuest;
 
 class CONTENT_EXPORT WebContentsViewGuest
-    : public WebContentsView,
+    : public WebContentsViewPort,
       public RenderViewHostDelegateView {
  public:
   // The corresponding WebContentsImpl is passed in the constructor, and manages
   // our lifetime. This doesn't need to be the case, but is this way currently
-  // because that's what was easiest when they were split. We optionally take
-  // |wrapper| which creates an intermediary widget layer for features from the
-  // Embedding layer that lives with the WebContentsView.
+  // because that's what was easiest when they were split.
+  // WebContentsViewGuest always has a backing platform dependent view,
+  // |platform_view|.
   WebContentsViewGuest(WebContentsImpl* web_contents,
-                       BrowserPluginGuest* guest);
+                       BrowserPluginGuest* guest,
+                       WebContentsViewPort* platform_view);
   virtual ~WebContentsViewGuest();
 
   WebContents* web_contents();
 
   // WebContentsView implementation --------------------------------------------
 
+  virtual gfx::NativeView GetNativeView() const OVERRIDE;
+  virtual gfx::NativeView GetContentNativeView() const OVERRIDE;
+  virtual gfx::NativeWindow GetTopLevelNativeWindow() const OVERRIDE;
+  virtual void GetContainerBounds(gfx::Rect* out) const OVERRIDE;
+  virtual void OnTabCrashed(base::TerminationStatus status,
+                            int error_code) OVERRIDE;
+  virtual void SizeContents(const gfx::Size& size) OVERRIDE;
+  virtual void Focus() OVERRIDE;
+  virtual void SetInitialFocus() OVERRIDE;
+  virtual void StoreFocus() OVERRIDE;
+  virtual void RestoreFocus() OVERRIDE;
+  virtual WebDropData* GetDropData() const OVERRIDE;
+  virtual gfx::Rect GetViewBounds() const OVERRIDE;
+#if defined(OS_MACOSX)
+  virtual void SetAllowOverlappingViews(bool overlapping) OVERRIDE;
+#endif
+
+  // WebContentsViewPort implementation ----------------------------------------
   virtual void CreateView(const gfx::Size& initial_size,
                           gfx::NativeView context) OVERRIDE;
   virtual RenderWidgetHostView* CreateViewForWidget(
       RenderWidgetHost* render_widget_host) OVERRIDE;
   virtual RenderWidgetHostView* CreateViewForPopupWidget(
       RenderWidgetHost* render_widget_host) OVERRIDE;
-  virtual gfx::NativeView GetNativeView() const OVERRIDE;
-  virtual gfx::NativeView GetContentNativeView() const OVERRIDE;
-  virtual gfx::NativeWindow GetTopLevelNativeWindow() const OVERRIDE;
-  virtual void GetContainerBounds(gfx::Rect* out) const OVERRIDE;
   virtual void SetPageTitle(const string16& title) OVERRIDE;
-  virtual void OnTabCrashed(base::TerminationStatus status,
-                            int error_code) OVERRIDE;
-  virtual void SizeContents(const gfx::Size& size) OVERRIDE;
   virtual void RenderViewCreated(RenderViewHost* host) OVERRIDE;
-  virtual void Focus() OVERRIDE;
-  virtual void SetInitialFocus() OVERRIDE;
-  virtual void StoreFocus() OVERRIDE;
-  virtual void RestoreFocus() OVERRIDE;
-  virtual WebDropData* GetDropData() const OVERRIDE;
+  virtual void RenderViewSwappedIn(RenderViewHost* host) OVERRIDE;
+#if defined(OS_MACOSX)
   virtual bool IsEventTracking() const OVERRIDE;
   virtual void CloseTabAfterEventTracking() OVERRIDE;
-  virtual gfx::Rect GetViewBounds() const OVERRIDE;
-#if defined(OS_MACOSX)
-  virtual void SetAllowOverlappingViews(bool overlapping) OVERRIDE;
 #endif
 
   // Backend implementation of RenderViewHostDelegateView.
@@ -84,11 +90,12 @@ class CONTENT_EXPORT WebContentsViewGuest
   virtual void TakeFocus(bool reverse) OVERRIDE;
 
  private:
-
   // The WebContentsImpl whose contents we display.
   WebContentsImpl* web_contents_;
-  gfx::Size requested_size_;
   BrowserPluginGuest* guest_;
+  // The platform dependent view backing this WebContentsView.
+  // Calls to this WebContentsViewGuest are forwarded to |platform_view_|.
+  WebContentsViewPort* platform_view_;
 
   DISALLOW_COPY_AND_ASSIGN(WebContentsViewGuest);
 };

@@ -11,7 +11,6 @@
 #include "cc/direct_renderer.h"
 #include "cc/gl_renderer_draw_cache.h"
 #include "cc/io_surface_draw_quad.h"
-#include "cc/output_surface.h"
 #include "cc/render_pass_draw_quad.h"
 #include "cc/renderer.h"
 #include "cc/solid_color_draw_quad.h"
@@ -23,6 +22,7 @@
 
 namespace cc {
 
+class OutputSurface;
 class ScopedResource;
 class StreamVideoDrawQuad;
 class TextureDrawQuad;
@@ -44,6 +44,8 @@ public:
     WebKit::WebGraphicsContext3D* context();
 
     virtual void viewportChanged() OVERRIDE;
+
+    virtual void receiveCompositorFrameAck(const CompositorFrameAck& ack) OVERRIDE;
 
     // waits for rendering to finish
     virtual void finish() OVERRIDE;
@@ -160,7 +162,7 @@ private:
 
     // Texture shaders.
     typedef ProgramBinding<VertexShaderPosTexTransform, FragmentShaderRGBATexVaryingAlpha> TextureProgram;
-    typedef ProgramBinding<VertexShaderPosTexTransform, FragmentShaderRGBATexFlipVaryingAlpha> TextureProgramFlip;
+    typedef ProgramBinding<VertexShaderPosTexTransformFlip, FragmentShaderRGBATexVaryingAlpha> TextureProgramFlip;
     typedef ProgramBinding<VertexShaderPosTexTransform, FragmentShaderRGBATexRectVaryingAlpha> TextureIOSurfaceProgram;
 
     // Video shaders.
@@ -230,6 +232,8 @@ private:
     TexturedQuadDrawCache m_drawCache;
 
     scoped_ptr<ResourceProvider::ScopedWriteLockGL> m_currentFramebufferLock;
+
+    scoped_refptr<ResourceProvider::Fence> m_lastSwapFence;
 
     DISALLOW_COPY_AND_ASSIGN(GLRenderer);
 };

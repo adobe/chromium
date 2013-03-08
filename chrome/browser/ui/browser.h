@@ -92,10 +92,6 @@ struct SelectedFileInfo;
 class WebDialogDelegate;
 }
 
-namespace webkit_glue {
-struct WebIntentServiceData;
-}
-
 class Browser : public TabStripModelObserver,
                 public content::WebContentsDelegate,
                 public CoreTabHelperDelegate,
@@ -159,10 +155,6 @@ class Browser : public TabStripModelObserver,
   };
 
   struct CreateParams {
-    // Deprecated: please use the form taking |host_desktop_type| below.
-    explicit CreateParams(Profile* profile);
-    CreateParams(Type type, Profile* profile);
-
     CreateParams(Profile* profile, chrome::HostDesktopType host_desktop_type);
     CreateParams(Type type,
                  Profile* profile,
@@ -171,9 +163,12 @@ class Browser : public TabStripModelObserver,
     static CreateParams CreateForApp(Type type,
                                      const std::string& app_name,
                                      const gfx::Rect& window_bounds,
-                                     Profile* profile);
+                                     Profile* profile,
+                                     chrome::HostDesktopType host_desktop_type);
 
-    static CreateParams CreateForDevTools(Profile* profile);
+    static CreateParams CreateForDevTools(
+        Profile* profile,
+        chrome::HostDesktopType host_desktop_type);
 
     // The browser type.
     Type type;
@@ -334,6 +329,9 @@ class Browser : public TabStripModelObserver,
   // fullscreen.
   void WindowFullscreenStateChanged();
 
+  // Invoked when visible SSL state (as defined by SSLStatus) changes.
+  void VisibleSSLStateChanged(content::WebContents* web_contents);
+
   // Assorted browser commands ////////////////////////////////////////////////
 
   // NOTE: Within each of the following sections, the IDs are ordered roughly by
@@ -345,9 +343,6 @@ class Browser : public TabStripModelObserver,
 #if defined(OS_WIN)
   // See the description of FullscreenController::ToggleMetroSnapMode.
   void SetMetroSnapMode(bool enable);
-#endif
-#if defined(OS_MACOSX)
-  void TogglePresentationMode();
 #endif
 
   // Returns true if the Browser supports the specified feature. The value of
@@ -461,11 +456,14 @@ class Browser : public TabStripModelObserver,
   // Show the first run search engine bubble on the location bar.
   void ShowFirstRunBubble();
 
-  // If necessary, update the bookmark bar state according to the instant
-  // preview state: when instant preview shows suggestions and bookmark bar is
-  // still showing attached, start the animation to hide it.
-  void MaybeUpdateBookmarkBarStateForInstantPreview(
+  // If necessary, update the bookmark bar state according to the Instant
+  // overlay state: when Instant overlay shows suggestions and bookmark bar is
+  // still showing attached, hide it.
+  void MaybeUpdateBookmarkBarStateForInstantOverlay(
       const chrome::search::Mode& mode);
+
+  // Show a download on the download shelf.
+  void ShowDownload(content::DownloadItem* download);
 
   FullscreenController* fullscreen_controller() const {
     return fullscreen_controller_.get();
@@ -495,6 +493,8 @@ class Browser : public TabStripModelObserver,
   FRIEND_TEST_ALL_PREFIXES(StartupBrowserCreatorTest,
                            OpenAppShortcutWindowPref);
   FRIEND_TEST_ALL_PREFIXES(StartupBrowserCreatorTest, OpenAppShortcutTabPref);
+
+  class InterstitialObserver;
 
   // Used to describe why a tab is being detached. This is used by
   // TabDetachedAtImpl.
@@ -559,11 +559,11 @@ class Browser : public TabStripModelObserver,
   virtual void BeforeUnloadFired(content::WebContents* source,
                                  bool proceed,
                                  bool* proceed_to_fire_unload) OVERRIDE;
+  virtual bool ShouldFocusLocationBarByDefault(
+      content::WebContents* source) OVERRIDE;
   virtual void SetFocusToLocationBar(bool select_all) OVERRIDE;
   virtual void RenderWidgetShowing() OVERRIDE;
   virtual int GetExtraRenderViewHeight() const OVERRIDE;
-  virtual void OnStartDownload(content::WebContents* source,
-                               content::DownloadItem* download) OVERRIDE;
   virtual void ViewSourceForTab(content::WebContents* source,
                                 const GURL& page_url) OVERRIDE;
   virtual void ViewSourceForFrame(
@@ -591,8 +591,8 @@ class Browser : public TabStripModelObserver,
       content::WebContents* web_contents) OVERRIDE;
   virtual void DidNavigateToPendingEntry(
       content::WebContents* web_contents) OVERRIDE;
-  virtual content::JavaScriptDialogCreator*
-      GetJavaScriptDialogCreator() OVERRIDE;
+  virtual content::JavaScriptDialogManager*
+      GetJavaScriptDialogManager() OVERRIDE;
   virtual content::ColorChooser* OpenColorChooser(
       content::WebContents* web_contents,
       int color_chooser_id,
@@ -603,7 +603,7 @@ class Browser : public TabStripModelObserver,
       const content::FileChooserParams& params) OVERRIDE;
   virtual void EnumerateDirectory(content::WebContents* web_contents,
                                   int request_id,
-                                  const FilePath& path) OVERRIDE;
+                                  const base::FilePath& path) OVERRIDE;
   virtual void ToggleFullscreenModeForTab(content::WebContents* web_contents,
       bool enter_fullscreen) OVERRIDE;
   virtual bool IsFullscreenForTabOrPending(
@@ -614,13 +614,6 @@ class Browser : public TabStripModelObserver,
                                        const GURL& url,
                                        const string16& title,
                                        bool user_gesture) OVERRIDE;
-  virtual void RegisterIntentHandler(
-      content::WebContents* web_contents,
-      const webkit_glue::WebIntentServiceData& data,
-      bool user_gesture) OVERRIDE;
-  virtual void WebIntentDispatch(
-      content::WebContents* web_contents,
-      content::WebIntentsDispatcher* intents_dispatcher) OVERRIDE;
   virtual void UpdatePreferredSize(content::WebContents* source,
                                    const gfx::Size& pref_size) OVERRIDE;
   virtual void ResizeDueToAutoResize(content::WebContents* source,
@@ -642,7 +635,7 @@ class Browser : public TabStripModelObserver,
   virtual bool RequestPpapiBrokerPermission(
       content::WebContents* web_contents,
       const GURL& url,
-      const FilePath& plugin_path,
+      const base::FilePath& plugin_path,
       const base::Callback<void(bool)>& callback) OVERRIDE;
 
   // Overridden from CoreTabHelperDelegate:
@@ -676,7 +669,7 @@ class Browser : public TabStripModelObserver,
                              bool can_show_bubble) OVERRIDE;
 
   // Overridden from SelectFileDialog::Listener:
-  virtual void FileSelected(const FilePath& path,
+  virtual void FileSelected(const base::FilePath& path,
                             int index,
                             void* params) OVERRIDE;
   virtual void FileSelectedWithExtraInfo(
@@ -804,6 +797,8 @@ class Browser : public TabStripModelObserver,
                                      const GURL& target_url);
 
   // Data members /////////////////////////////////////////////////////////////
+
+  std::vector<InterstitialObserver*> interstitial_observers_;
 
   content::NotificationRegistrar registrar_;
 

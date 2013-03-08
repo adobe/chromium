@@ -16,6 +16,7 @@
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "google_apis/gaia/google_service_auth_error.h"
+#include "third_party/skia/include/core/SkBitmap.h"
 
 class ProfileSyncService;
 
@@ -135,6 +136,7 @@ class BeginInstallWithManifestFunction
   std::string icon_data_;
   std::string localized_name_;
   bool use_app_installed_bubble_;
+  bool enable_launcher_;
 
   // The results of parsing manifest_ and icon_data_ go into these two.
   scoped_ptr<base::DictionaryValue> parsed_manifest_;
@@ -155,17 +157,32 @@ class CompleteInstallFunction
   DECLARE_EXTENSION_FUNCTION("webstorePrivate.completeInstall",
                              WEBSTOREPRIVATE_COMPLETEINSTALL)
 
+  CompleteInstallFunction();
+
   // WebstoreInstaller::Delegate:
   virtual void OnExtensionInstallSuccess(const std::string& id) OVERRIDE;
   virtual void OnExtensionInstallFailure(
       const std::string& id,
       const std::string& error,
       WebstoreInstaller::FailureReason reason) OVERRIDE;
+  virtual void OnExtensionDownloadProgress(
+      const std::string& id,
+      content::DownloadItem* item) OVERRIDE;
+
  protected:
-  virtual ~CompleteInstallFunction() {}
+  virtual ~CompleteInstallFunction();
 
   // ExtensionFunction:
   virtual bool RunImpl() OVERRIDE;
+
+ private:
+  void AfterMaybeInstallAppLauncher(bool ok);
+  void OnGetAppLauncherEnabled(std::string id, bool app_launcher_enabled);
+
+  scoped_ptr<WebstoreInstaller::Approval> approval_;
+
+  // True if this install is for an app.
+  bool is_app_;
 };
 
 class GetBrowserLoginFunction : public SyncExtensionFunction {
@@ -223,6 +240,23 @@ class GetWebGLStatusFunction : public AsyncExtensionFunction {
   void CreateResult(bool webgl_allowed);
 
   scoped_refptr<GPUFeatureChecker> feature_checker_;
+};
+
+class GetIsLauncherEnabledFunction : public AsyncExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("webstorePrivate.getIsLauncherEnabled",
+                             WEBSTOREPRIVATE_GETISLAUNCHERENABLED)
+
+  GetIsLauncherEnabledFunction() {}
+
+ protected:
+  virtual ~GetIsLauncherEnabledFunction() {}
+
+  // ExtensionFunction:
+  virtual bool RunImpl() OVERRIDE;
+
+ private:
+  void OnIsLauncherCheckCompleted(bool is_enabled);
 };
 
 }  // namespace extensions

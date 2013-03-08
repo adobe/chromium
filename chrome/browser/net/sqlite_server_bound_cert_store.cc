@@ -9,8 +9,8 @@
 
 #include "base/basictypes.h"
 #include "base/bind.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/metrics/histogram.h"
@@ -33,7 +33,7 @@ using content::BrowserThread;
 class SQLiteServerBoundCertStore::Backend
     : public base::RefCountedThreadSafe<SQLiteServerBoundCertStore::Backend> {
  public:
-  Backend(const FilePath& path, ClearOnExitPolicy* clear_on_exit_policy)
+  Backend(const base::FilePath& path, ClearOnExitPolicy* clear_on_exit_policy)
       : path_(path),
         db_(NULL),
         num_pending_(0),
@@ -41,9 +41,8 @@ class SQLiteServerBoundCertStore::Backend
         clear_on_exit_policy_(clear_on_exit_policy) {
   }
 
-  // Creates or load the SQLite database.
-  bool Load(
-      std::vector<net::DefaultServerBoundCertStore::ServerBoundCert*>* certs);
+  // Creates or loads the SQLite database.
+  void Load(const LoadedCallback& loaded_callback);
 
   // Batch a server bound cert addition.
   void AddServerBoundCert(
@@ -63,6 +62,10 @@ class SQLiteServerBoundCertStore::Backend
   void SetForceKeepSessionState();
 
  private:
+  void LoadOnDBThreadAndNotify(const LoadedCallback& loaded_callback);
+  void LoadOnDBThread(
+      std::vector<net::DefaultServerBoundCertStore::ServerBoundCert*>* certs);
+
   friend class base::RefCountedThreadSafe<SQLiteServerBoundCertStore::Backend>;
 
   // You should call Close() before destructing this object.
@@ -108,7 +111,7 @@ class SQLiteServerBoundCertStore::Backend
 
   void DeleteCertificatesOnShutdown();
 
-  FilePath path_;
+  base::FilePath path_;
   scoped_ptr<sql::Connection> db_;
   sql::MetaTable meta_table_;
 
@@ -155,23 +158,44 @@ bool InitTable(sql::Connection* db) {
 
 }  // namespace
 
-bool SQLiteServerBoundCertStore::Backend::Load(
-    std::vector<net::DefaultServerBoundCertStore::ServerBoundCert*>* certs) {
+void SQLiteServerBoundCertStore::Backend::Load(
+    const LoadedCallback& loaded_callback) {
   // This function should be called only once per instance.
   DCHECK(!db_.get());
 
-  // TODO(paivanof@gmail.com): We do a lot of disk access in this function,
-  // thus we do an exception to allow IO on the UI thread. This code will be
-  // moved to the DB thread as part of http://crbug.com/89665.
-  base::ThreadRestrictions::ScopedAllowIO allow_io;
+  BrowserThread::PostTask(
+      BrowserThread::DB, FROM_HERE,
+      base::Bind(&Backend::LoadOnDBThreadAndNotify, this, loaded_callback));
+}
+
+void SQLiteServerBoundCertStore::Backend::LoadOnDBThreadAndNotify(
+    const LoadedCallback& loaded_callback) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::DB));
+  scoped_ptr<ScopedVector<net::DefaultServerBoundCertStore::ServerBoundCert> >
+      certs(new ScopedVector<net::DefaultServerBoundCertStore::ServerBoundCert>(
+          ));
+
+  LoadOnDBThread(&certs->get());
+
+  BrowserThread::PostTask(
+      BrowserThread::IO, FROM_HERE,
+      base::Bind(loaded_callback, base::Passed(&certs)));
+}
+
+void SQLiteServerBoundCertStore::Backend::LoadOnDBThread(
+    std::vector<net::DefaultServerBoundCertStore::ServerBoundCert*>* certs) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::DB));
+
+  // This method should be called only once per instance.
+  DCHECK(!db_.get());
 
   base::TimeTicks start = base::TimeTicks::Now();
 
   // Ensure the parent directory for storing certs is created before reading
   // from it.
-  const FilePath dir = path_.DirName();
+  const base::FilePath dir = path_.DirName();
   if (!file_util::PathExists(dir) && !file_util::CreateDirectory(dir))
-    return false;
+    return;
 
   int64 db_size = 0;
   if (file_util::GetFileSize(path_, &db_size))
@@ -181,13 +205,13 @@ bool SQLiteServerBoundCertStore::Backend::Load(
   if (!db_->Open(path_)) {
     NOTREACHED() << "Unable to open cert DB.";
     db_.reset();
-    return false;
+    return;
   }
 
   if (!EnsureDatabaseVersion() || !InitTable(db_.get())) {
     NOTREACHED() << "Unable to open cert DB.";
     db_.reset();
-    return false;
+    return;
   }
 
   db_->Preload();
@@ -198,7 +222,7 @@ bool SQLiteServerBoundCertStore::Backend::Load(
       "creation_time FROM origin_bound_certs"));
   if (!smt.is_valid()) {
     db_.reset();
-    return false;
+    return;
   }
 
   while (smt.Step()) {
@@ -218,12 +242,14 @@ bool SQLiteServerBoundCertStore::Backend::Load(
   }
 
   UMA_HISTOGRAM_COUNTS_10000("DomainBoundCerts.DBLoadedCount", certs->size());
+  base::TimeDelta load_time = base::TimeTicks::Now() - start;
   UMA_HISTOGRAM_CUSTOM_TIMES("DomainBoundCerts.DBLoadTime",
-                             base::TimeTicks::Now() - start,
+                             load_time,
                              base::TimeDelta::FromMilliseconds(1),
                              base::TimeDelta::FromMinutes(1),
                              50);
-  return true;
+  DVLOG(1) << "loaded " << certs->size() << " in " << load_time.InMilliseconds()
+           << " ms";
 }
 
 bool SQLiteServerBoundCertStore::Backend::EnsureDatabaseVersion() {
@@ -539,14 +565,14 @@ void SQLiteServerBoundCertStore::Backend::SetForceKeepSessionState() {
 }
 
 SQLiteServerBoundCertStore::SQLiteServerBoundCertStore(
-    const FilePath& path,
+    const base::FilePath& path,
     ClearOnExitPolicy* clear_on_exit_policy)
     : backend_(new Backend(path, clear_on_exit_policy)) {
 }
 
-bool SQLiteServerBoundCertStore::Load(
-    std::vector<net::DefaultServerBoundCertStore::ServerBoundCert*>* certs) {
-  return backend_->Load(certs);
+void SQLiteServerBoundCertStore::Load(
+    const LoadedCallback& loaded_callback) {
+  backend_->Load(loaded_callback);
 }
 
 void SQLiteServerBoundCertStore::AddServerBoundCert(

@@ -29,13 +29,13 @@ class GPU_EXPORT MemoryProgramCache : public ProgramCache {
 
   virtual ProgramLoadResult LoadLinkedProgram(
       GLuint program,
-      ShaderManager::ShaderInfo* shader_a,
-      ShaderManager::ShaderInfo* shader_b,
+      Shader* shader_a,
+      Shader* shader_b,
       const LocationMap* bind_attrib_location_map) const OVERRIDE;
   virtual void SaveLinkedProgram(
       GLuint program,
-      const ShaderManager::ShaderInfo* shader_a,
-      const ShaderManager::ShaderInfo* shader_b,
+      const Shader* shader_a,
+      const Shader* shader_b,
       const LocationMap* bind_attrib_location_map) OVERRIDE;
 
  private:
@@ -62,12 +62,11 @@ class GPU_EXPORT MemoryProgramCache : public ProgramCache {
     const ShaderTranslator::VariableMap attrib_map_1;
     const ShaderTranslator::VariableMap uniform_map_1;
 
-   protected:
+   private:
     friend class base::RefCounted<ProgramCacheValue>;
 
     ~ProgramCacheValue();
 
-   private:
     DISALLOW_COPY_AND_ASSIGN(ProgramCacheValue);
   };
 

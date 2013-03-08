@@ -1,14 +1,13 @@
 # Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
-from telemetry import multi_page_benchmark_unittest_base
-from telemetry import page
 from perf_tools import smoothness_benchmark
-
-from telemetry.page_benchmark_results import PageBenchmarkResults
+from telemetry.page import page_benchmark_unittest_base
+from telemetry.page import page
+from telemetry.page.page_benchmark_results import PageBenchmarkResults
 
 class SmoothnessBenchmarkUnitTest(
-  multi_page_benchmark_unittest_base.MultiPageBenchmarkUnitTestBase):
+  page_benchmark_unittest_base.PageBenchmarkUnitTestBase):
 
   def testFirstPaintTimeMeasurement(self):
     ps = self.CreatePageSetFromFileInUnittestDataDir('scrollable_page.html')
@@ -44,7 +43,7 @@ class SmoothnessBenchmarkUnitTest(
                        'numAnimationFrames': 10,
                        'numFramesSentToScreen': 10}
     res = PageBenchmarkResults()
-    res.WillMeasurePage(page.Page('http://foo.com/'))
+    res.WillMeasurePage(page.Page('http://foo.com/', None))
     smoothness_benchmark.CalcScrollResults(rendering_stats, res)
     res.DidMeasurePage()
     self.assertEquals(50, res.page_results[0]['dropped_percent'].value)
@@ -66,7 +65,7 @@ class SmoothnessBenchmarkUnitTest(
                        'totalRasterizeTimeInSeconds': 0,
                        'totalTimeInSeconds': 1.0}
     res = PageBenchmarkResults()
-    res.WillMeasurePage(page.Page('http://foo.com/'))
+    res.WillMeasurePage(page.Page('http://foo.com/', None))
     smoothness_benchmark.CalcScrollResults(rendering_stats, res)
     res.DidMeasurePage()
     self.assertEquals(0, res.page_results[0]['dropped_percent'].value)

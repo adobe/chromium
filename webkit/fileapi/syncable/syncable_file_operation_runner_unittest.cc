@@ -19,11 +19,13 @@
 #include "webkit/fileapi/syncable/syncable_file_system_operation.h"
 #include "webkit/fileapi/syncable/syncable_file_system_util.h"
 
+using fileapi::FileSystemOperation;
+using fileapi::FileSystemURL;
 using webkit_blob::MockBlobURLRequestContext;
 using webkit_blob::ScopedTextBlob;
 using base::PlatformFileError;
 
-namespace fileapi {
+namespace sync_file_system {
 
 namespace {
 const std::string kServiceName = "test";
@@ -319,4 +321,4 @@ TEST_F(SyncableFileOperationRunnerTest, QueueAndCancel) {
   EXPECT_EQ(2, callback_count_);
 }
 
-}  // namespace fileapi
+}  // namespace sync_file_system

@@ -709,12 +709,15 @@ void SequencedWorkerPool::Inner::ThreadLoop(Worker* this_worker) {
           tracked_objects::ThreadData::TallyRunOnNamedThreadIfTracking(task,
               start_time, tracked_objects::ThreadData::NowForEndOfRun());
 
+          // Make sure our task is erased outside the lock for the
+          // same reason we do this with delete_these_oustide_lock.
+          // Also, do it before calling set_running_task_info() so
+          // that sequence-checking from within the task's destructor
+          // still works.
+          task.task = Closure();
+
           this_worker->set_running_task_info(
               SequenceToken(), CONTINUE_ON_SHUTDOWN);
-
-          // Make sure our task is erased outside the lock for the same reason
-          // we do this with delete_these_oustide_lock.
-          task.task = Closure();
         }
         DidRunWorkerTask(task);  // Must be done inside the lock.
       } else {
@@ -838,13 +841,6 @@ SequencedWorkerPool::Inner::GetWorkStatus SequencedWorkerPool::Inner::GetWork(
       continue;
     }
 
-    if (i->time_to_run > current_time) {
-      // The time to run has not come yet.
-      *wait_time = i->time_to_run - current_time;
-      status = GET_WORK_WAIT;
-      break;
-    }
-
     if (shutdown_called_ && i->shutdown_behavior != BLOCK_SHUTDOWN) {
       // We're shutting down and the task we just found isn't blocking
       // shutdown. Delete it and get more work.
@@ -863,17 +859,25 @@ SequencedWorkerPool::Inner::GetWorkStatus SequencedWorkerPool::Inner::GetWork(
       // happen.
       delete_these_outside_lock->push_back(i->task);
       pending_tasks_.erase(i++);
-    } else {
-      // Found a runnable task.
-      *task = *i;
-      pending_tasks_.erase(i);
-      if (task->shutdown_behavior == BLOCK_SHUTDOWN) {
-        blocking_shutdown_pending_task_count_--;
-      }
+      continue;
+    }
 
-      status = GET_WORK_FOUND;
+    if (i->time_to_run > current_time) {
+      // The time to run has not come yet.
+      *wait_time = i->time_to_run - current_time;
+      status = GET_WORK_WAIT;
       break;
     }
+
+    // Found a runnable task.
+    *task = *i;
+    pending_tasks_.erase(i);
+    if (task->shutdown_behavior == BLOCK_SHUTDOWN) {
+      blocking_shutdown_pending_task_count_--;
+    }
+
+    status = GET_WORK_FOUND;
+    break;
   }
 
   // Track the number of tasks we had to skip over to see if we should be

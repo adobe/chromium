@@ -192,7 +192,7 @@ bool ExtensionApiTest::RunExtensionTestImpl(const char* extension_name,
 
   const extensions::Extension* extension = NULL;
   if (!std::string(extension_name).empty()) {
-    FilePath extension_path = test_data_dir_.AppendASCII(extension_name);
+    base::FilePath extension_path = test_data_dir_.AppendASCII(extension_name);
     if (load_as_component) {
       extension = LoadExtensionAsComponent(extension_path);
     } else {
@@ -235,11 +235,11 @@ bool ExtensionApiTest::RunExtensionTestImpl(const char* extension_name,
       ui_test_utils::NavigateToURL(browser(), url);
 
   } else if (launch_platform_app) {
-    application_launch::LaunchParams params(browser()->profile(), extension,
-                                            extension_misc::LAUNCH_NONE,
-                                            NEW_WINDOW);
+    chrome::AppLaunchParams params(browser()->profile(), extension,
+                                   extension_misc::LAUNCH_NONE,
+                                   NEW_WINDOW);
     params.command_line = CommandLine::ForCurrentProcess();
-    application_launch::OpenApplication(params);
+    chrome::OpenApplication(params);
   }
 
   if (!catcher.GetNextResult()) {
@@ -260,7 +260,7 @@ const extensions::Extension* ExtensionApiTest::GetSingleLoadedExtension() {
        it != service->extensions()->end(); ++it) {
     // Ignore any component extensions. They are automatically loaded into all
     // profiles and aren't the extension we're looking for here.
-    if ((*it)->location() == extensions::Extension::COMPONENT)
+    if ((*it)->location() == extensions::Manifest::COMPONENT)
       continue;
 
     if (extension != NULL) {
@@ -294,7 +294,8 @@ bool ExtensionApiTest::StartTestServer() {
   return true;
 }
 
-bool ExtensionApiTest::StartWebSocketServer(const FilePath& root_directory) {
+bool ExtensionApiTest::StartWebSocketServer(
+    const base::FilePath& root_directory) {
   websocket_server_.reset(new net::TestServer(
       net::TestServer::TYPE_WS,
       net::TestServer::kLocalhost,

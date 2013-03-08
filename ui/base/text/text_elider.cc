@@ -12,7 +12,7 @@
 #include <string>
 #include <vector>
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/i18n/break_iterator.h"
 #include "base/i18n/char_iterator.h"
 #include "base/i18n/rtl.h"
@@ -398,7 +398,7 @@ string16 ElideUrl(const GURL& url,
                    ELIDE_AT_END);
 }
 
-string16 ElideFilename(const FilePath& filename,
+string16 ElideFilename(const base::FilePath& filename,
                        const gfx::Font& font,
                        int available_pixel_width) {
 #if defined(OS_WIN)

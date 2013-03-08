@@ -27,33 +27,42 @@ class FakePluginServiceFilter : public content::PluginServiceFilter {
   FakePluginServiceFilter() {}
   virtual ~FakePluginServiceFilter() {}
 
-  virtual bool ShouldUsePlugin(int render_process_id,
-                               int render_view_id,
-                               const void* context,
-                               const GURL& url,
-                               const GURL& policy_url,
-                               webkit::WebPluginInfo* plugin) OVERRIDE;
+  virtual bool IsPluginAvailable(int render_process_id,
+                                 int render_view_id,
+                                 const void* context,
+                                 const GURL& url,
+                                 const GURL& policy_url,
+                                 webkit::WebPluginInfo* plugin) OVERRIDE;
 
-  void set_plugin_enabled(const FilePath& plugin_path, bool enabled) {
+  virtual bool CanLoadPlugin(int render_process_id,
+                             const base::FilePath& path) OVERRIDE;
+
+  void set_plugin_enabled(const base::FilePath& plugin_path, bool enabled) {
     plugin_state_[plugin_path] = enabled;
   }
 
  private:
-  std::map<FilePath, bool> plugin_state_;
+  std::map<base::FilePath, bool> plugin_state_;
 };
 
-bool FakePluginServiceFilter::ShouldUsePlugin(int render_process_id,
-                                              int render_view_id,
-                                              const void* context,
-                                              const GURL& url,
-                                              const GURL& policy_url,
-                                              webkit::WebPluginInfo* plugin) {
-  std::map<FilePath, bool>::iterator it = plugin_state_.find(plugin->path);
+bool FakePluginServiceFilter::IsPluginAvailable(int render_process_id,
+                                                int render_view_id,
+                                                const void* context,
+                                                const GURL& url,
+                                                const GURL& policy_url,
+                                                webkit::WebPluginInfo* plugin) {
+  std::map<base::FilePath, bool>::iterator it =
+      plugin_state_.find(plugin->path);
   if (it == plugin_state_.end()) {
     ADD_FAILURE() << "No plug-in state for '" << plugin->path.value() << "'";
     return false;
   }
   return it->second;
+}
+
+bool FakePluginServiceFilter::CanLoadPlugin(int render_process_id,
+                                            const base::FilePath& path) {
+  return true;
 }
 
 }  // namespace
@@ -95,8 +104,8 @@ class PluginInfoMessageFilterTest : public ::testing::Test {
   }
 
  protected:
-  FilePath foo_plugin_path_;
-  FilePath bar_plugin_path_;
+  base::FilePath foo_plugin_path_;
+  base::FilePath bar_plugin_path_;
   FakePluginServiceFilter filter_;
   PluginInfoMessageFilter::Context context_;
 

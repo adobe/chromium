@@ -9,14 +9,37 @@
 #include "base/logging.h"
 #include "base/posix/eintr_wrapper.h"
 #include "base/process_util.h"
+#include "chrome/browser/extensions/api/messaging/native_messaging_host_manifest.h"
 
 namespace extensions {
 
+namespace {
+
+const char kNativeMessagingDirectory[] =
+#if defined(OS_MAXOSX)
+    "/Library/Chrome/NativeMessagingHosts";
+#else
+    "/etc/opt/chrome/native-messaging-hosts";
+#endif
+
+}  // namespace
+
+// static
+scoped_ptr<NativeMessagingHostManifest>
+NativeProcessLauncher::FindAndLoadManifest(
+    const std::string& native_host_name,
+    std::string* error_message) {
+  base::FilePath manifest_path =
+      base::FilePath(kNativeMessagingDirectory).Append(
+          native_host_name + ".json");
+  return NativeMessagingHostManifest::Load(manifest_path, error_message);
+}
+
+// static
 bool NativeProcessLauncher::LaunchNativeProcess(
-    const FilePath& path,
-    base::ProcessHandle* native_process_handle,
-    NativeMessageProcessHost::FileHandle* read_file,
-    NativeMessageProcessHost::FileHandle* write_file) const {
+    const CommandLine& command_line,
+    base::PlatformFile* read_file,
+    base::PlatformFile* write_file) {
   base::FileHandleMappingVector fd_map;
 
   int read_pipe_fds[2] = {0};
@@ -37,10 +60,10 @@ bool NativeProcessLauncher::LaunchNativeProcess(
   file_util::ScopedFD write_pipe_write_fd(&write_pipe_fds[1]);
   fd_map.push_back(std::make_pair(*write_pipe_read_fd, STDIN_FILENO));
 
-  CommandLine line(path);
   base::LaunchOptions options;
   options.fds_to_remap = &fd_map;
-  if (!base::LaunchProcess(line, options, native_process_handle)) {
+  int process_id;
+  if (!base::LaunchProcess(command_line, options, &process_id)) {
     LOG(ERROR) << "Error launching process";
     return false;
   }

@@ -22,8 +22,7 @@ class TestPackageExecutable(TestPackage):
   _TEST_RUNNER_RET_VAL_FILE = 'gtest_retval'
 
   def __init__(self, adb, device, test_suite, timeout,
-               cleanup_test_files, tool, dump_debug_info,
-               symbols_dir=None):
+               cleanup_test_files, tool, symbols_dir=None):
     """
     Args:
       adb: ADB interface the tests are using.
@@ -32,11 +31,10 @@ class TestPackageExecutable(TestPackage):
       timeout: Timeout for each test.
       cleanup_test_files: Whether or not to cleanup test files on device.
       tool: Name of the Valgrind tool.
-      dump_debug_info: A debug_info object.
       symbols_dir: Directory to put the stripped binaries.
     """
     TestPackage.__init__(self, adb, device, test_suite, timeout,
-                         cleanup_test_files, tool, dump_debug_info)
+                         cleanup_test_files, tool)
     self.symbols_dir = symbols_dir
 
   def _GetGTestReturnCode(self):
@@ -77,6 +75,10 @@ class TestPackageExecutable(TestPackage):
                      self.adb.GetExternalStorage())
     export_string += 'export GCOV_PREFIX_STRIP=%s\n' % depth
     return export_string
+
+  def ClearApplicationState(self):
+    """Clear the application state."""
+    self.adb.KillAllBlocking(self.test_suite_basename, 30)
 
   def GetAllTests(self):
     """Returns a list of all tests available in the test suite."""

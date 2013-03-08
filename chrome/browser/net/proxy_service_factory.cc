@@ -5,7 +5,7 @@
 #include "chrome/browser/net/proxy_service_factory.h"
 
 #include "base/command_line.h"
-#include "base/string_number_conversions.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/threading/thread.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/io_thread.h"
@@ -117,7 +117,6 @@ net::ProxyService* ProxyServiceFactory::CreateProxyService(
 
     proxy_service = net::CreateProxyServiceUsingV8ProxyResolver(
         proxy_config_service,
-        num_pac_threads,
         new net::ProxyScriptFetcherImpl(context),
         dhcp_factory.Create(context),
         context->host_resolver(),

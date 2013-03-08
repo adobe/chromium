@@ -35,7 +35,8 @@ class MockPluginDelegate : public PluginDelegate {
   virtual scoped_ptr< ::ppapi::thunk::ResourceCreationAPI>
       CreateResourceCreationAPI(PluginInstance* instance);
   virtual SkBitmap* GetSadPluginBitmap();
-  virtual WebKit::WebPlugin* CreatePluginReplacement(const FilePath& file_path);
+  virtual WebKit::WebPlugin* CreatePluginReplacement(
+      const base::FilePath& file_path);
   virtual PlatformImage2D* CreateImage2D(int width, int height);
   virtual PlatformGraphics2D* GetGraphics2D(PluginInstance* instance,
                                             PP_Resource graphics_2d);
@@ -63,7 +64,7 @@ class MockPluginDelegate : public PluginDelegate {
                                           int total,
                                           bool final_result);
   virtual void SelectedFindResultChanged(int identifier, int index);
-  virtual bool AsyncOpenFile(const FilePath& path,
+  virtual bool AsyncOpenFile(const base::FilePath& path,
                              int flags,
                              const AsyncOpenFileCallback& callback);
   virtual bool AsyncOpenFileSystemURL(
@@ -102,7 +103,7 @@ class MockPluginDelegate : public PluginDelegate {
   virtual void WillUpdateFile(const GURL& file_path);
   virtual void DidUpdateFile(const GURL& file_path, int64_t delta);
   virtual void SyncGetFileSystemPlatformPath(const GURL& url,
-                                             FilePath* platform_path);
+                                             base::FilePath* platform_path);
   virtual scoped_refptr<base::MessageLoopProxy>
       GetFileThreadMessageLoopProxy();
   virtual uint32 TCPSocketCreate();
@@ -123,6 +124,9 @@ class MockPluginDelegate : public PluginDelegate {
   virtual void TCPSocketRead(uint32 socket_id, int32_t bytes_to_read);
   virtual void TCPSocketWrite(uint32 socket_id, const std::string& buffer);
   virtual void TCPSocketDisconnect(uint32 socket_id);
+  virtual void TCPSocketSetBoolOption(uint32 socket_id,
+                                      PP_TCPSocketOption_Private name,
+                                      bool value);
   virtual void RegisterTCPSocket(PPB_TCPSocket_Private_Impl* socket,
                                  uint32 socket_id);
   virtual void TCPServerSocketListen(PP_Resource socket_resource,
@@ -131,14 +135,6 @@ class MockPluginDelegate : public PluginDelegate {
   virtual void TCPServerSocketAccept(uint32 server_socket_id);
   virtual void TCPServerSocketStopListening(PP_Resource socket_resource,
                                             uint32 socket_id);
-  virtual void RegisterHostResolver(
-      ::ppapi::PPB_HostResolver_Shared* host_resolver,
-      uint32 host_resolver_id);
-  virtual void HostResolverResolve(
-      uint32 host_resolver_id,
-      const ::ppapi::HostPortPair& host_port,
-      const PP_HostResolver_Private_Hint* hint);
-  virtual void UnregisterHostResolver(uint32 host_resolver_id);
   // Add/remove a network list observer.
   virtual bool AddNetworkListObserver(
       webkit_glue::NetworkListObserver* observer) OVERRIDE;

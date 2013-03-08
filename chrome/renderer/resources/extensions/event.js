@@ -41,44 +41,6 @@
         utils.lookup(eventType.functions, 'name', 'removeRules');
   }
 
-  // Local implementation of JSON.parse & JSON.stringify that protect us
-  // from being clobbered by an extension.
-  //
-  // TODO(aa): This makes me so sad. We shouldn't need it, as we can just pass
-  // Values directly over IPC without serializing to strings and use
-  // JSONValueConverter.
-  chromeHidden.JSON = new (function() {
-    var $Object = Object;
-    var $Array = Array;
-    var $jsonStringify = JSON.stringify;
-    var $jsonParse = JSON.parse;
-
-    this.stringify = function(thing) {
-      var customizedObjectToJSON = $Object.prototype.toJSON;
-      var customizedArrayToJSON = $Array.prototype.toJSON;
-      if (customizedObjectToJSON !== undefined) {
-        $Object.prototype.toJSON = null;
-      }
-      if (customizedArrayToJSON !== undefined) {
-        $Array.prototype.toJSON = null;
-      }
-      try {
-        return $jsonStringify(thing);
-      } finally {
-        if (customizedObjectToJSON !== undefined) {
-          $Object.prototype.toJSON = customizedObjectToJSON;
-        }
-        if (customizedArrayToJSON !== undefined) {
-          $Array.prototype.toJSON = customizedArrayToJSON;
-        }
-      }
-    };
-
-    this.parse = function(thing) {
-      return $jsonParse(thing);
-    };
-  })();
-
   // A map of event names to the event object that is registered to that name.
   var attachedNamedEvents = {};
 
@@ -246,9 +208,10 @@
       return;
 
     var dispatchArgs = function(args) {
-      result = event.dispatch_(args, listenerIDs);
+      var result = event.dispatch_(args, listenerIDs);
       if (result)
         DCHECK(!result.validationErrors, result.validationErrors);
+      return result;
     };
 
     if (eventArgumentMassagers[name])
@@ -495,6 +458,8 @@
 
   chromeHidden.dispatchOnUnload = function() {
     chromeHidden.onUnload.dispatch();
+    chromeHidden.wasUnloaded = true;
+
     for (var i = 0; i < allAttachedEvents.length; ++i) {
       var event = allAttachedEvents[i];
       if (event)

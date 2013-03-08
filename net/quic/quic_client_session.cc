@@ -18,17 +18,29 @@ namespace net {
 
 QuicClientSession::QuicClientSession(QuicConnection* connection,
                                      QuicConnectionHelper* helper,
-                                     QuicStreamFactory* stream_factory)
+                                     QuicStreamFactory* stream_factory,
+                                     const string& server_hostname,
+                                     NetLog* net_log)
     : QuicSession(connection, false),
       ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)),
-      ALLOW_THIS_IN_INITIALIZER_LIST(crypto_stream_(this)),
+      ALLOW_THIS_IN_INITIALIZER_LIST(crypto_stream_(this, server_hostname)),
       helper_(helper),
       stream_factory_(stream_factory),
       read_buffer_(new IOBufferWithSize(kMaxPacketSize)),
-      read_pending_(false) {
+      read_pending_(false),
+      num_total_streams_(0),
+      net_log_(BoundNetLog::Make(net_log, NetLog::SOURCE_QUIC_SESSION)),
+      logger_(net_log_) {
+  connection->set_debug_visitor(&logger_);
+  // TODO(rch): pass in full host port proxy pair
+  net_log_.BeginEvent(
+      NetLog::TYPE_QUIC_SESSION,
+      NetLog::StringCallback("host", &server_hostname));
 }
 
 QuicClientSession::~QuicClientSession() {
+  connection()->set_debug_visitor(NULL);
+  net_log_.EndEvent(NetLog::TYPE_QUIC_SESSION);
 }
 
 QuicReliableClientStream* QuicClientSession::CreateOutgoingReliableStream() {
@@ -41,9 +53,15 @@ QuicReliableClientStream* QuicClientSession::CreateOutgoingReliableStream() {
                << "Already " << GetNumOpenStreams() << " open.";
     return NULL;
   }
+  if (goaway_received()) {
+    DLOG(INFO) << "Failed to create a new outgoing stream. "
+               << "Already received goaway.";
+    return NULL;
+  }
   QuicReliableClientStream* stream =
-       new QuicReliableClientStream(GetNextStreamId(), this);
+      new QuicReliableClientStream(GetNextStreamId(), this, net_log_);
   ActivateStream(stream);
+  ++num_total_streams_;
   return stream;
 }
 
@@ -114,6 +132,10 @@ void QuicClientSession::CloseSessionOnError(int error) {
     static_cast<QuicReliableClientStream*>(stream)->OnError(error);
     CloseStream(id);
   }
+  net_log_.BeginEvent(
+      NetLog::TYPE_QUIC_SESSION,
+      NetLog::IntegerCallback("net_error", error));
+  // Will delete |this|.
   stream_factory_->OnSessionClose(this);
 }
 
@@ -121,6 +143,7 @@ Value* QuicClientSession::GetInfoAsValue(const HostPortPair& pair) const {
   DictionaryValue* dict = new DictionaryValue();
   dict->SetString("host_port_pair", pair.ToString());
   dict->SetInteger("open_streams", GetNumOpenStreams());
+  dict->SetInteger("total_streams", num_total_streams_);
   dict->SetString("peer_address", peer_address().ToString());
   dict->SetString("guid", base::Uint64ToString(guid()));
   return dict;

@@ -11,6 +11,7 @@
 #include "base/message_loop_proxy.h"
 #include "base/rand_util.h"
 #include "base/string_number_conversions.h"
+#include "base/strings/stringize_macros.h"
 #include "base/time.h"
 #include "remoting/base/constants.h"
 #include "remoting/host/server_log_entry.h"
@@ -28,6 +29,7 @@ namespace {
 
 const char kHeartbeatQueryTag[] = "heartbeat";
 const char kHostIdAttr[] = "hostid";
+const char kHostVersionTag[] = "host-version";
 const char kHeartbeatSignatureTag[] = "signature";
 const char kSequenceIdAttr[] = "sequence-id";
 
@@ -49,11 +51,13 @@ HeartbeatSender::HeartbeatSender(
     Listener* listener,
     const std::string& host_id,
     SignalStrategy* signal_strategy,
-    HostKeyPair* key_pair)
+    HostKeyPair* key_pair,
+    const std::string& directory_bot_jid)
     : listener_(listener),
       host_id_(host_id),
       signal_strategy_(signal_strategy),
       key_pair_(key_pair),
+      directory_bot_jid_(directory_bot_jid),
       interval_ms_(kDefaultHeartbeatIntervalMs),
       sequence_id_(0),
       sequence_id_was_set_(false),
@@ -107,9 +111,9 @@ void HeartbeatSender::ResendStanza() {
 }
 
 void HeartbeatSender::DoSendStanza() {
-  VLOG(1) << "Sending heartbeat stanza to " << kChromotingBotJid;
+  VLOG(1) << "Sending heartbeat stanza to " << directory_bot_jid_;
   request_ = iq_sender_->SendIq(
-      buzz::STR_SET, kChromotingBotJid, CreateHeartbeatMessage(),
+      buzz::STR_SET, directory_bot_jid_, CreateHeartbeatMessage(),
       base::Bind(&HeartbeatSender::ProcessResponse,
                  base::Unretained(this)));
   ++sequence_id_;
@@ -234,19 +238,24 @@ void HeartbeatSender::SetSequenceId(int sequence_id) {
 
 scoped_ptr<XmlElement> HeartbeatSender::CreateHeartbeatMessage() {
   // Create heartbeat stanza.
-  scoped_ptr<XmlElement> query(new XmlElement(
+  scoped_ptr<XmlElement> heartbeat(new XmlElement(
       QName(kChromotingXmlNamespace, kHeartbeatQueryTag)));
-  query->AddAttr(QName(kChromotingXmlNamespace, kHostIdAttr), host_id_);
-  query->AddAttr(QName(kChromotingXmlNamespace, kSequenceIdAttr),
+  heartbeat->AddAttr(QName(kChromotingXmlNamespace, kHostIdAttr), host_id_);
+  heartbeat->AddAttr(QName(kChromotingXmlNamespace, kSequenceIdAttr),
                  base::IntToString(sequence_id_));
-  query->AddElement(CreateSignature().release());
+  heartbeat->AddElement(CreateSignature().release());
+  // Append host version.
+  scoped_ptr<XmlElement> version_tag(new XmlElement(
+      QName(kChromotingXmlNamespace, kHostVersionTag)));
+  version_tag->AddText(STRINGIZE(VERSION));
+  heartbeat->AddElement(version_tag.release());
   // Append log message (which isn't signed).
   scoped_ptr<XmlElement> log(ServerLogEntry::MakeStanza());
   scoped_ptr<ServerLogEntry> log_entry(ServerLogEntry::MakeForHeartbeat());
   log_entry->AddHostFields();
   log->AddElement(log_entry->ToStanza().release());
-  query->AddElement(log.release());
-  return query.Pass();
+  heartbeat->AddElement(log.release());
+  return heartbeat.Pass();
 }
 
 scoped_ptr<XmlElement> HeartbeatSender::CreateSignature() {

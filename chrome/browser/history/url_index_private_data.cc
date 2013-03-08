@@ -9,6 +9,7 @@
 #include <iterator>
 #include <limits>
 #include <numeric>
+#include <string>
 #include <vector>
 
 #include "base/basictypes.h"
@@ -19,6 +20,7 @@
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/api/bookmarks/bookmark_service.h"
+#include "chrome/browser/autocomplete/autocomplete_field_trial.h"
 #include "chrome/browser/autocomplete/autocomplete_provider.h"
 #include "chrome/browser/autocomplete/url_prefix.h"
 #include "chrome/browser/history/history_database.h"
@@ -68,7 +70,11 @@ bool LengthGreater(const string16& string_a, const string16& string_b) {
 // Public Functions ------------------------------------------------------------
 
 URLIndexPrivateData::URLIndexPrivateData()
-    : restored_cache_version_(0),
+    : use_cursor_position_(
+          AutocompleteFieldTrial::InHQPUseCursorPositionFieldTrial() &&
+          AutocompleteFieldTrial::
+              InHQPUseCursorPositionFieldTrialExperimentGroup()),
+      restored_cache_version_(0),
       saved_cache_version_(kCurrentCacheFileVersion),
       pre_filter_item_count_(0),
       post_filter_item_count_(0),
@@ -76,8 +82,20 @@ URLIndexPrivateData::URLIndexPrivateData()
 }
 
 ScoredHistoryMatches URLIndexPrivateData::HistoryItemsForTerms(
-    const string16& search_string,
+    string16 search_string,
+    size_t cursor_position,
+    const std::string& languages,
     BookmarkService* bookmark_service) {
+  // If we're allowed to use the cursor position, then if cursor
+  // position is set and useful (not at either end of the string),
+  // allow the search string to be broken at cursor position.  We do
+  // this by pretending there's a space where the cursor is.
+  // TODO(figure out highlighting).
+  if (use_cursor_position_ && (cursor_position != string16::npos) &&
+      (cursor_position < search_string.length()) &&
+      (cursor_position > 0)) {
+    search_string.insert(cursor_position, ASCIIToUTF16(" "));
+  }
   pre_filter_item_count_ = 0;
   post_filter_item_count_ = 0;
   post_scoring_item_count_ = 0;
@@ -151,7 +169,7 @@ ScoredHistoryMatches URLIndexPrivateData::HistoryItemsForTerms(
   history::String16Vector lower_raw_terms;
   Tokenize(lower_raw_string, kWhitespaceUTF16, &lower_raw_terms);
   scored_items = std::for_each(history_id_set.begin(), history_id_set.end(),
-      AddHistoryMatch(*this, bookmark_service, lower_raw_string,
+      AddHistoryMatch(*this, languages, bookmark_service, lower_raw_string,
                       lower_raw_terms, base::Time::Now())).ScoredMatches();
 
   // Select and sort only the top kMaxMatches results.
@@ -265,7 +283,7 @@ bool URLIndexPrivateData::DeleteURL(const GURL& url) {
 
 // static
 void URLIndexPrivateData::RestoreFromFileTask(
-    const FilePath& file_path,
+    const base::FilePath& file_path,
     scoped_refptr<URLIndexPrivateData> private_data,
     const std::string& languages) {
   private_data = URLIndexPrivateData::RestoreFromFile(file_path, languages);
@@ -303,7 +321,7 @@ scoped_refptr<URLIndexPrivateData> URLIndexPrivateData::RebuildFromHistory(
 // static
 bool URLIndexPrivateData::WritePrivateDataToCacheFileTask(
     scoped_refptr<URLIndexPrivateData> private_data,
-    const FilePath& file_path) {
+    const base::FilePath& file_path) {
   DCHECK(private_data.get());
   DCHECK(!file_path.empty());
   return private_data->SaveToFile(file_path);
@@ -364,11 +382,13 @@ URLIndexPrivateData::SearchTermCacheItem::~SearchTermCacheItem() {}
 
 URLIndexPrivateData::AddHistoryMatch::AddHistoryMatch(
     const URLIndexPrivateData& private_data,
+    const std::string& languages,
     BookmarkService* bookmark_service,
     const string16& lower_string,
     const String16Vector& lower_terms,
     const base::Time now)
   : private_data_(private_data),
+    languages_(languages),
     bookmark_service_(bookmark_service),
     lower_string_(lower_string),
     lower_terms_(lower_terms),
@@ -385,7 +405,7 @@ void URLIndexPrivateData::AddHistoryMatch::operator()(
     WordStartsMap::const_iterator starts_pos =
         private_data_.word_starts_map_.find(history_id);
     DCHECK(starts_pos != private_data_.word_starts_map_.end());
-    ScoredHistoryMatch match(hist_item, lower_string_, lower_terms_,
+    ScoredHistoryMatch match(hist_item, languages_, lower_string_, lower_terms_,
                              starts_pos->second, now_, bookmark_service_);
     if (match.raw_score > 0)
       scored_matches_.push_back(match);
@@ -623,7 +643,7 @@ bool URLIndexPrivateData::IndexRow(
   // Strip out username and password before saving and indexing.
   string16 url(net::FormatUrl(gurl, languages,
       net::kFormatUrlOmitUsernamePassword,
-      net::UnescapeRule::SPACES | net::UnescapeRule::URL_SPECIAL_CHARS,
+      net::UnescapeRule::NONE,
       NULL, NULL, NULL));
 
   HistoryID history_id = static_cast<HistoryID>(row_id);
@@ -650,14 +670,11 @@ void URLIndexPrivateData::AddRowWordsToIndex(const URLRow& row,
   HistoryID history_id = static_cast<HistoryID>(row.id());
   // Split URL into individual, unique words then add in the title words.
   const GURL& gurl(row.url());
-  string16 url(net::FormatUrl(gurl, languages,
-      net::kFormatUrlOmitUsernamePassword,
-      net::UnescapeRule::SPACES | net::UnescapeRule::URL_SPECIAL_CHARS,
-      NULL, NULL, NULL));
-  url = base::i18n::ToLower(url);
+  const string16& url = CleanUpUrlForMatching(gurl, languages);
   String16Set url_words = String16SetFromString16(url,
       word_starts ? &word_starts->url_word_starts_ : NULL);
-  String16Set title_words = String16SetFromString16(row.title(),
+  const string16& title = CleanUpTitleForMatching(row.title());
+  String16Set title_words = String16SetFromString16(title,
       word_starts ? &word_starts->title_word_starts_ : NULL);
   String16Set words;
   std::set_union(url_words.begin(), url_words.end(),
@@ -787,7 +804,7 @@ void URLIndexPrivateData::ResetSearchTermCache() {
 
 // Cache Saving ----------------------------------------------------------------
 
-bool URLIndexPrivateData::SaveToFile(const FilePath& file_path) {
+bool URLIndexPrivateData::SaveToFile(const base::FilePath& file_path) {
   base::TimeTicks beginning_time = base::TimeTicks::Now();
   InMemoryURLIndexCacheItem index_cache;
   SavePrivateData(&index_cache);
@@ -936,7 +953,7 @@ void URLIndexPrivateData::SaveWordStartsMap(
 
 // static
 scoped_refptr<URLIndexPrivateData> URLIndexPrivateData::RestoreFromFile(
-    const FilePath& file_path,
+    const base::FilePath& file_path,
     const std::string& languages) {
   base::TimeTicks beginning_time = base::TimeTicks::Now();
   if (!file_util::PathExists(file_path))
@@ -1137,14 +1154,10 @@ bool URLIndexPrivateData::RestoreWordStartsMap(
          iter != history_info_map_.end(); ++iter) {
       RowWordStarts word_starts;
       const URLRow& row(iter->second);
-      string16 url(net::FormatUrl(row.url(), languages,
-          net::kFormatUrlOmitUsernamePassword,
-          net::UnescapeRule::SPACES | net::UnescapeRule::URL_SPECIAL_CHARS,
-          NULL, NULL, NULL));
-      url = base::i18n::ToLower(url);
+      const string16& url = CleanUpUrlForMatching(row.url(), languages);
       String16VectorFromString16(url, false, &word_starts.url_word_starts_);
-      String16VectorFromString16(
-          row.title(), false, &word_starts.title_word_starts_);
+      const string16& title = CleanUpTitleForMatching(row.title());
+      String16VectorFromString16(title, false, &word_starts.title_word_starts_);
       word_starts_map_[iter->first] = word_starts;
     }
   }

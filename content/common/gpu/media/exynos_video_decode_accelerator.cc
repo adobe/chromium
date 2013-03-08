@@ -213,20 +213,17 @@ ExynosVideoDecodeAccelerator::ExynosVideoDecodeAccelerator(
       decoder_decode_buffer_tasks_scheduled_(0),
       decoder_frames_at_client_(0),
       decoder_flushing_(false),
+      decoder_partial_frame_pending_(false),
       mfc_fd_(-1),
       mfc_input_streamon_(false),
-      mfc_input_buffer_count_(0),
       mfc_input_buffer_queued_count_(0),
       mfc_output_streamon_(false),
-      mfc_output_buffer_count_(0),
       mfc_output_buffer_queued_count_(0),
       mfc_output_buffer_pixelformat_(0),
       gsc_fd_(-1),
       gsc_input_streamon_(false),
-      gsc_input_buffer_count_(0),
       gsc_input_buffer_queued_count_(0),
       gsc_output_streamon_(false),
-      gsc_output_buffer_count_(0),
       gsc_output_buffer_queued_count_(0),
       device_poll_thread_("ExynosDevicePollThread"),
       device_poll_interrupt_fd_(-1),
@@ -372,13 +369,6 @@ bool ExynosVideoDecodeAccelerator::Initialize(
     return false;
   }
 
-  // Some random ioctls that Exynos requires.
-  struct v4l2_control control;
-  memset(&control, 0, sizeof(control));
-  control.id = V4L2_CID_MPEG_MFC51_VIDEO_DECODER_H264_DISPLAY_DELAY; // also VP8
-  control.value = 8; // Magic number from Samsung folks.
-  IOCTL_OR_ERROR_RETURN_FALSE(mfc_fd_, VIDIOC_S_CTRL, &control);
-
   if (!CreateMfcInputBuffers())
     return false;
 
@@ -436,7 +426,7 @@ void ExynosVideoDecodeAccelerator::AssignPictureBuffers(
   DVLOG(3) << "AssignPictureBuffers(): buffer_count=" << buffers.size();
   DCHECK(child_message_loop_proxy_->BelongsToCurrentThread());
 
-  if (static_cast<int>(buffers.size()) != gsc_output_buffer_count_) {
+  if (buffers.size() != gsc_output_buffer_map_.size()) {
     DLOG(ERROR) << "AssignPictureBuffers(): invalid buffer_count";
     NOTIFY_ERROR(INVALID_ARGUMENT);
     return;
@@ -655,7 +645,9 @@ void ExynosVideoDecodeAccelerator::DecodeBufferTask() {
     decoder_input_queue_.pop_front();
     DVLOG(3) << "DecodeBufferTask(): reading input_id="
              << decoder_current_bitstream_buffer_->input_id
-             << ", addr=" << decoder_current_bitstream_buffer_->shm->memory()
+             << ", addr=" << (decoder_current_bitstream_buffer_->shm ?
+                              decoder_current_bitstream_buffer_->shm->memory() :
+                              NULL)
              << ", size=" << decoder_current_bitstream_buffer_->size;
   }
   bool schedule_task = false;
@@ -680,6 +672,7 @@ void ExynosVideoDecodeAccelerator::DecodeBufferTask() {
 
       if (schedule_task && AppendToInputFrame(NULL, 0) && FlushInputFrame()) {
         DVLOG(2) << "DecodeBufferTask(): enqueued flush buffer";
+        decoder_partial_frame_pending_ = false;
         schedule_task = true;
       } else {
         // If we failed to enqueue the empty buffer (due to pipeline
@@ -698,12 +691,12 @@ void ExynosVideoDecodeAccelerator::DecodeBufferTask() {
     const size_t data_size =
         decoder_current_bitstream_buffer_->size -
         decoder_current_bitstream_buffer_->bytes_used;
-    if (!FindFrameFragment(data, data_size, &decoded_size)) {
+    if (!AdvanceFrameFragment(data, data_size, &decoded_size)) {
       NOTIFY_ERROR(UNREADABLE_INPUT);
       return;
     }
-    // FindFrameFragment should not return a size larger than the buffer size,
-    // even on invalid data.
+    // AdvanceFrameFragment should not return a size larger than the buffer
+    // size, even on invalid data.
     CHECK_LE(decoded_size, data_size);
 
     switch (decoder_state_) {
@@ -738,7 +731,7 @@ void ExynosVideoDecodeAccelerator::DecodeBufferTask() {
   }
 }
 
-bool ExynosVideoDecodeAccelerator::FindFrameFragment(
+bool ExynosVideoDecodeAccelerator::AdvanceFrameFragment(
     const uint8* data,
     size_t size,
     size_t* endpos) {
@@ -749,25 +742,21 @@ bool ExynosVideoDecodeAccelerator::FindFrameFragment(
     decoder_h264_parser_->SetStream(data, size);
     content::H264NALU nalu;
     content::H264Parser::Result result;
-
-    // Find the first NAL.
-    result = decoder_h264_parser_->AdvanceToNextNALU(&nalu);
-    if (result == content::H264Parser::kInvalidStream ||
-        result == content::H264Parser::kUnsupportedStream)
-      return false;
-    *endpos = (nalu.data + nalu.size) - data;
-    if (result == content::H264Parser::kEOStream)
-      return true;
+    *endpos = 0;
 
     // Keep on peeking the next NALs while they don't indicate a frame
     // boundary.
     for (;;) {
+      bool end_of_frame = false;
       result = decoder_h264_parser_->AdvanceToNextNALU(&nalu);
       if (result == content::H264Parser::kInvalidStream ||
           result == content::H264Parser::kUnsupportedStream)
         return false;
-      if (result == content::H264Parser::kEOStream)
+      if (result == content::H264Parser::kEOStream) {
+        // We've reached the end of the buffer before finding a frame boundary.
+        decoder_partial_frame_pending_ = true;
         return true;
+      }
       switch (nalu.nal_unit_type) {
         case content::H264NALU::kNonIDRSlice:
         case content::H264NALU::kIDRSlice:
@@ -778,18 +767,34 @@ bool ExynosVideoDecodeAccelerator::FindFrameFragment(
           // the eighth data bit of the NAL; a zero value is encoded with a
           // leading '1' bit in the byte, which we can detect as the byte being
           // (unsigned) greater than or equal to 0x80.
-          if (nalu.data[1] >= 0x80)
-            return true;
+          if (nalu.data[1] >= 0x80) {
+            end_of_frame = true;
+            break;
+          }
           break;
         case content::H264NALU::kSPS:
         case content::H264NALU::kPPS:
         case content::H264NALU::kEOSeq:
         case content::H264NALU::kEOStream:
           // These unconditionally signal a frame boundary.
-          return true;
+          end_of_frame = true;
+          break;
         default:
           // For all others, keep going.
           break;
+      }
+      if (end_of_frame) {
+        if (!decoder_partial_frame_pending_ && *endpos == 0) {
+          // The frame was previously restarted, and we haven't filled the
+          // current frame with any contents yet.  Start the new frame here and
+          // continue parsing NALs.
+        } else {
+          // The frame wasn't previously restarted and/or we have contents for
+          // the current frame; signal the start of a new frame here: we don't
+          // have a partial frame anymore.
+          decoder_partial_frame_pending_ = false;
+          return true;
+        }
       }
       *endpos = (nalu.data + nalu.size) - data;
     }
@@ -798,8 +803,10 @@ bool ExynosVideoDecodeAccelerator::FindFrameFragment(
   } else {
     DCHECK_GE(video_profile_, media::VP8PROFILE_MIN);
     DCHECK_LE(video_profile_, media::VP8PROFILE_MAX);
-    // For VP8, we can just dump the entire buffer.  No fragmentation needed.
+    // For VP8, we can just dump the entire buffer.  No fragmentation needed,
+    // and we never return a partial frame.
     *endpos = size;
+    decoder_partial_frame_pending_ = false;
     return true;
   }
 }
@@ -830,7 +837,14 @@ bool ExynosVideoDecodeAccelerator::DecodeBufferInitial(
   // Get it, and start decoding.
 
   // Copy in and send to HW.
-  if (!AppendToInputFrame(data, size) || !FlushInputFrame())
+  if (!AppendToInputFrame(data, size))
+    return false;
+
+  // If we only have a partial frame, don't flush and process yet.
+  if (decoder_partial_frame_pending_)
+    return true;
+
+  if (!FlushInputFrame())
     return false;
 
   // Recycle buffers.
@@ -894,7 +908,9 @@ bool ExynosVideoDecodeAccelerator::DecodeBufferContinue(
   DCHECK_EQ(decoder_state_, kDecoding);
 
   // Both of these calls will set kError state if they fail.
-  return (AppendToInputFrame(data, size) && FlushInputFrame());
+  // Only flush the frame if it's complete.
+  return (AppendToInputFrame(data, size) &&
+          (decoder_partial_frame_pending_ || FlushInputFrame()));
 }
 
 bool ExynosVideoDecodeAccelerator::AppendToInputFrame(
@@ -939,7 +955,7 @@ bool ExynosVideoDecodeAccelerator::AppendToInputFrame(
     input_record.input_id = decoder_current_bitstream_buffer_->input_id;
   }
 
-  DCHECK_EQ(data == NULL, size == 0);
+  DCHECK(data != NULL || size == 0);
   if (size == 0) {
     // If we asked for an empty buffer, return now.  We return only after
     // getting the next input buffer, since we might actually want an empty
@@ -977,8 +993,8 @@ bool ExynosVideoDecodeAccelerator::FlushInputFrame() {
   MfcInputRecord& input_record =
       mfc_input_buffer_map_[decoder_current_input_buffer_];
   DCHECK_NE(input_record.input_id, -1);
-  DCHECK_EQ(input_record.input_id == kFlushBufferId,
-            input_record.bytes_used == 0);
+  DCHECK(input_record.input_id != kFlushBufferId ||
+         input_record.bytes_used == 0);
   // * if input_id >= 0, this input buffer was prompted by a bitstream buffer we
   //   got from the client.  We can skip it if it is empty.
   // * if input_id < 0 (should be kFlushBufferId in this case), this input
@@ -1093,17 +1109,17 @@ void ExynosVideoDecodeAccelerator::ServiceDeviceTask() {
            << mfc_input_ready_queue_.size() << "] => MFC["
            << mfc_free_input_buffers_.size() << "+"
            << mfc_input_buffer_queued_count_ << "/"
-           << mfc_input_buffer_count_ << "->"
+           << mfc_input_buffer_map_.size() << "->"
            << mfc_free_output_buffers_.size() << "+"
            << mfc_output_buffer_queued_count_ << "/"
-           << mfc_output_buffer_count_ << "] => "
+           << mfc_output_buffer_map_.size() << "] => "
            << mfc_output_gsc_input_queue_.size() << " => GSC["
            << gsc_free_input_buffers_.size() << "+"
            << gsc_input_buffer_queued_count_ << "/"
-           << gsc_input_buffer_count_ << "->"
+           << gsc_input_buffer_map_.size() << "->"
            << gsc_free_output_buffers_.size() << "+"
            << gsc_output_buffer_queued_count_ << "/"
-           << gsc_output_buffer_count_ << "] => VDA["
+           << gsc_output_buffer_map_.size()  << "] => VDA["
            << decoder_frames_at_client_ << "]";
 
   ScheduleDecodeBufferTaskIfNeeded();
@@ -1346,6 +1362,8 @@ void ExynosVideoDecodeAccelerator::DequeueGsc() {
     output_record.at_device = false;
     output_record.at_client = true;
     gsc_output_buffer_queued_count_--;
+    DVLOG(3) << "DequeueGsc(): returning input_id=" << dqbuf.timestamp.tv_sec
+             << " as picture_id=" << output_record.picture_id;
     child_message_loop_proxy_->PostTask(FROM_HERE, base::Bind(
         &Client::PictureReady, client_, media::Picture(
             output_record.picture_id, dqbuf.timestamp.tv_sec)));
@@ -1538,6 +1556,7 @@ void ExynosVideoDecodeAccelerator::FlushTask() {
   // Flush outstanding buffers.
   if (decoder_state_ == kInitialized || decoder_state_ == kAfterReset) {
     // There's nothing in the pipe, so return done immediately.
+    DVLOG(3) << "FlushTask(): returning flush";
     child_message_loop_proxy_->PostTask(FROM_HERE, base::Bind(
       &Client::NotifyFlushDone, client_));
     return;
@@ -1577,12 +1596,13 @@ void ExynosVideoDecodeAccelerator::NotifyFlushDoneIfNeeded() {
   if (decoder_current_input_buffer_ != -1)
     return;
   if ((mfc_input_ready_queue_.size() +
-      mfc_input_buffer_queued_count_ + mfc_output_gsc_input_queue_.size() +
-      gsc_input_buffer_queued_count_ + gsc_output_buffer_queued_count_ ) != 0)
+       mfc_input_buffer_queued_count_ + mfc_output_gsc_input_queue_.size() +
+       gsc_input_buffer_queued_count_ + gsc_output_buffer_queued_count_ ) != 0)
     return;
 
   decoder_delay_bitstream_buffer_id_ = -1;
   decoder_flushing_ = false;
+  DVLOG(3) << "NotifyFlushDoneIfNeeded(): returning flush";
   child_message_loop_proxy_->PostTask(FROM_HERE, base::Bind(
     &Client::NotifyFlushDone, client_));
 
@@ -1639,6 +1659,7 @@ void ExynosVideoDecodeAccelerator::ResetDoneTask() {
   // Jobs drained, we're finished resetting.
   DCHECK_EQ(decoder_state_, kResetting);
   decoder_state_ = kAfterReset;
+  decoder_partial_frame_pending_ = false;
   decoder_delay_bitstream_buffer_id_ = -1;
   child_message_loop_proxy_->PostTask(FROM_HERE, base::Bind(
       &Client::NotifyResetDone, client_));
@@ -1723,8 +1744,6 @@ bool ExynosVideoDecodeAccelerator::StopDevicePoll() {
   // Reset all our accounting info.
   mfc_input_ready_queue_.clear();
   mfc_free_input_buffers_.clear();
-  DCHECK_EQ(mfc_input_buffer_count_,
-      static_cast<int>(mfc_input_buffer_map_.size()));
   for (size_t i = 0; i < mfc_input_buffer_map_.size(); ++i) {
     mfc_free_input_buffers_.push_back(i);
     mfc_input_buffer_map_[i].at_device = false;
@@ -1733,8 +1752,6 @@ bool ExynosVideoDecodeAccelerator::StopDevicePoll() {
   }
   mfc_input_buffer_queued_count_ = 0;
   mfc_free_output_buffers_.clear();
-  DCHECK_EQ(mfc_output_buffer_count_,
-     static_cast<int>(mfc_output_buffer_map_.size()));
   for (size_t i = 0; i < mfc_output_buffer_map_.size(); ++i) {
     mfc_free_output_buffers_.push_back(i);
     mfc_output_buffer_map_[i].at_device = false;
@@ -1743,8 +1760,6 @@ bool ExynosVideoDecodeAccelerator::StopDevicePoll() {
   mfc_output_buffer_queued_count_ = 0;
   mfc_output_gsc_input_queue_.clear();
   gsc_free_input_buffers_.clear();
-  DCHECK_EQ(gsc_input_buffer_count_,
-      static_cast<int>(gsc_input_buffer_map_.size()));
   for (size_t i = 0; i < gsc_input_buffer_map_.size(); ++i) {
     gsc_free_input_buffers_.push_back(i);
     gsc_input_buffer_map_[i].at_device = false;
@@ -1752,8 +1767,6 @@ bool ExynosVideoDecodeAccelerator::StopDevicePoll() {
   }
   gsc_input_buffer_queued_count_ = 0;
   gsc_free_output_buffers_.clear();
-  DCHECK_EQ(gsc_output_buffer_count_,
-      static_cast<int>(gsc_output_buffer_map_.size()));
   for (size_t i = 0; i < gsc_output_buffer_map_.size(); ++i) {
     // Only mark those free that aren't being held by the VDA.
     if (!gsc_output_buffer_map_[i].at_client) {
@@ -1860,7 +1873,7 @@ void ExynosVideoDecodeAccelerator::NotifyError(Error error) {
 }
 
 void ExynosVideoDecodeAccelerator::SetDecoderState(State state) {
-  DVLOG(3) << "SetDecoderState(): state=%d" << state;
+  DVLOG(3) << "SetDecoderState(): state=" << state;
 
   // We can touch decoder_state_ only if this is the decoder thread or the
   // decoder thread isn't running.
@@ -1879,7 +1892,7 @@ bool ExynosVideoDecodeAccelerator::CreateMfcInputBuffers() {
   // We always run this as we prepare to initialize.
   DCHECK_EQ(decoder_state_, kUninitialized);
   DCHECK(!mfc_input_streamon_);
-  DCHECK_EQ(mfc_input_buffer_count_, 0);
+  DCHECK(mfc_input_buffer_map_.empty());
 
   __u32 pixelformat = 0;
   if (video_profile_ >= media::H264PROFILE_MIN &&
@@ -1906,9 +1919,8 @@ bool ExynosVideoDecodeAccelerator::CreateMfcInputBuffers() {
   reqbufs.type   = V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE;
   reqbufs.memory = V4L2_MEMORY_MMAP;
   IOCTL_OR_ERROR_RETURN_FALSE(mfc_fd_, VIDIOC_REQBUFS, &reqbufs);
-  mfc_input_buffer_count_ = reqbufs.count;
-  mfc_input_buffer_map_.resize(mfc_input_buffer_count_);
-  for (int i = 0; i < mfc_input_buffer_count_; ++i) {
+  mfc_input_buffer_map_.resize(reqbufs.count);
+  for (size_t i = 0; i < mfc_input_buffer_map_.size(); ++i) {
     mfc_free_input_buffers_.push_back(i);
 
     // Query for the MEMORY_MMAP pointer.
@@ -1940,7 +1952,7 @@ bool ExynosVideoDecodeAccelerator::CreateMfcOutputBuffers() {
   DVLOG(3) << "CreateMfcOutputBuffers()";
   DCHECK_EQ(decoder_state_, kInitialized);
   DCHECK(!mfc_output_streamon_);
-  DCHECK_EQ(mfc_output_buffer_count_, 0);
+  DCHECK(mfc_output_buffer_map_.empty());
 
   // Number of MFC output buffers we need.
   struct v4l2_control ctrl;
@@ -1959,9 +1971,8 @@ bool ExynosVideoDecodeAccelerator::CreateMfcOutputBuffers() {
   IOCTL_OR_ERROR_RETURN_FALSE(mfc_fd_, VIDIOC_REQBUFS, &reqbufs);
 
   // Fill our free-buffers list, and create DMABUFs from them.
-  mfc_output_buffer_count_ = reqbufs.count;
-  mfc_output_buffer_map_.resize(mfc_output_buffer_count_);
-  for (int i = 0; i < mfc_output_buffer_count_; ++i) {
+  mfc_output_buffer_map_.resize(reqbufs.count);
+  for (size_t i = 0; i < mfc_output_buffer_map_.size(); ++i) {
     mfc_free_output_buffers_.push_back(i);
 
     // Query for the MEMORY_MMAP pointer.
@@ -1997,7 +2008,7 @@ bool ExynosVideoDecodeAccelerator::CreateGscInputBuffers() {
   DVLOG(3) << "CreateGscInputBuffers()";
   DCHECK_EQ(decoder_state_, kInitialized);
   DCHECK(!gsc_input_streamon_);
-  DCHECK_EQ(gsc_input_buffer_count_, 0);
+  DCHECK(gsc_input_buffer_map_.empty());
 
   struct v4l2_format format;
   memset(&format, 0, sizeof(format));
@@ -2042,9 +2053,8 @@ bool ExynosVideoDecodeAccelerator::CreateGscInputBuffers() {
   reqbufs.memory = V4L2_MEMORY_USERPTR;
   IOCTL_OR_ERROR_RETURN_FALSE(gsc_fd_, VIDIOC_REQBUFS, &reqbufs);
 
-  gsc_input_buffer_count_ = reqbufs.count;
-  gsc_input_buffer_map_.resize(gsc_input_buffer_count_);
-  for (int i = 0; i < gsc_input_buffer_count_; ++i) {
+  gsc_input_buffer_map_.resize(reqbufs.count);
+  for (size_t i = 0; i < gsc_input_buffer_map_.size(); ++i) {
     gsc_free_input_buffers_.push_back(i);
     gsc_input_buffer_map_[i].mfc_output = -1;
   }
@@ -2056,7 +2066,7 @@ bool ExynosVideoDecodeAccelerator::CreateGscOutputBuffers() {
   DVLOG(3) << "CreateGscOutputBuffers()";
   DCHECK_EQ(decoder_state_, kInitialized);
   DCHECK(!gsc_output_streamon_);
-  DCHECK_EQ(gsc_output_buffer_count_, 0);
+  DCHECK(gsc_output_buffer_map_.empty());
 
   // GSC outputs into the EGLImages we create from the textures we are
   // assigned.  Assume RGBA8888 format.
@@ -2081,15 +2091,14 @@ bool ExynosVideoDecodeAccelerator::CreateGscOutputBuffers() {
 
   // We don't actually fill in the freelist or the map here.  That happens once
   // we have actual usable buffers, after AssignPictureBuffers();
-  gsc_output_buffer_count_ = reqbufs.count;
-  gsc_output_buffer_map_.resize(gsc_output_buffer_count_);
+  gsc_output_buffer_map_.resize(reqbufs.count);
 
   DVLOG(3) << "CreateGscOutputBuffers(): ProvidePictureBuffers(): "
-           << "buffer_count=" << gsc_output_buffer_count_
+           << "buffer_count=" << gsc_output_buffer_map_.size()
            << ", width=" << frame_buffer_size_.width()
            << ", height=" << frame_buffer_size_.height();
   child_message_loop_proxy_->PostTask(FROM_HERE, base::Bind(
-      &Client::ProvidePictureBuffers, client_, gsc_output_buffer_count_,
+      &Client::ProvidePictureBuffers, client_, gsc_output_buffer_map_.size(),
       gfx::Size(frame_buffer_size_.width(), frame_buffer_size_.height()),
       GL_TEXTURE_2D));
 
@@ -2118,7 +2127,6 @@ void ExynosVideoDecodeAccelerator::DestroyMfcInputBuffers() {
 
   mfc_input_buffer_map_.clear();
   mfc_free_input_buffers_.clear();
-  mfc_input_buffer_count_ = 0;
 }
 
 void ExynosVideoDecodeAccelerator::DestroyMfcOutputBuffers() {
@@ -2145,7 +2153,6 @@ void ExynosVideoDecodeAccelerator::DestroyMfcOutputBuffers() {
 
   mfc_output_buffer_map_.clear();
   mfc_free_output_buffers_.clear();
-  mfc_output_buffer_count_ = 0;
 }
 
 void ExynosVideoDecodeAccelerator::DestroyGscInputBuffers() {
@@ -2163,7 +2170,6 @@ void ExynosVideoDecodeAccelerator::DestroyGscInputBuffers() {
 
   gsc_input_buffer_map_.clear();
   gsc_free_input_buffers_.clear();
-  gsc_input_buffer_count_ = 0;
 }
 
 void ExynosVideoDecodeAccelerator::DestroyGscOutputBuffers() {
@@ -2201,7 +2207,6 @@ void ExynosVideoDecodeAccelerator::DestroyGscOutputBuffers() {
 
   gsc_output_buffer_map_.clear();
   gsc_free_output_buffers_.clear();
-  gsc_output_buffer_count_ = 0;
 }
 
 }  // namespace content

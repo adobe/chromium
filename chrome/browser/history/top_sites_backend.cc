@@ -6,8 +6,8 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/memory/ref_counted.h"
 #include "chrome/browser/history/top_sites_database.h"
 #include "chrome/common/cancelable_task_tracker.h"
@@ -21,7 +21,7 @@ TopSitesBackend::TopSitesBackend()
     : db_(new TopSitesDatabase()) {
 }
 
-void TopSitesBackend::Init(const FilePath& path) {
+void TopSitesBackend::Init(const base::FilePath& path) {
   db_path_ = path;
   BrowserThread::PostTask(
       BrowserThread::DB, FROM_HERE,
@@ -83,7 +83,7 @@ TopSitesBackend::~TopSitesBackend() {
                        // nulling out db).
 }
 
-void TopSitesBackend::InitDBOnDBThread(const FilePath& path) {
+void TopSitesBackend::InitDBOnDBThread(const base::FilePath& path) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::DB));
   if (!db_->Init(path)) {
     NOTREACHED() << "Failed to initialize database.";
@@ -132,7 +132,7 @@ void TopSitesBackend::SetPageThumbnailOnDBThread(const MostVisitedURL& url,
   db_->SetPageThumbnail(url, url_rank, thumbnail);
 }
 
-void TopSitesBackend::ResetDatabaseOnDBThread(const FilePath& file_path) {
+void TopSitesBackend::ResetDatabaseOnDBThread(const base::FilePath& file_path) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::DB));
   db_.reset(NULL);
   file_util::Delete(db_path_, false);

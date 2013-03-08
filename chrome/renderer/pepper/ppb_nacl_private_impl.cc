@@ -121,7 +121,7 @@ PP_NaClResult LaunchSelLdr(PP_Instance instance,
   if (!invalid_handle)
     g_instance_info.Get()[instance] = instance_info;
 
-  *(static_cast<nacl::Handle*>(imc_handle)) =
+  *(static_cast<NaClHandle*>(imc_handle)) =
       nacl::ToNativeHandle(result_socket);
 
   return PP_NACL_OK;
@@ -156,7 +156,7 @@ PP_NaClResult StartPpapiProxy(PP_Instance instance) {
       content::RendererPpapiHost::CreateExternalPluginModule(
           nacl_plugin_module,
           plugin_instance,
-          FilePath().AppendASCII(instance_info.url.spec()),
+          base::FilePath().AppendASCII(instance_info.url.spec()),
           instance_info.permissions,
           instance_info.channel_handle,
           instance_info.plugin_pid,

@@ -4,196 +4,57 @@
 
 #include "cc/raster_worker_pool.h"
 
-#include <algorithm>
-
-#include "base/bind.h"
-#include "base/debug/trace_event.h"
-#include "base/stl_util.h"
-#include "base/stringprintf.h"
 #include "cc/picture_pile_impl.h"
-#include "third_party/skia/include/core/SkDevice.h"
-
-#if defined(OS_ANDROID)
-// TODO(epenner): Move thread priorities to base. (crbug.com/170549)
-#include <sys/resource.h>
-#endif
 
 namespace cc {
 
 namespace {
 
-void RunRasterTask(PicturePileImpl* picture_pile,
-                   uint8* buffer,
-                   const gfx::Rect& rect,
-                   float contents_scale,
-                   RenderingStats* stats) {
-  TRACE_EVENT0("cc", "RunRasterTask");
-  DCHECK(picture_pile);
-  DCHECK(buffer);
-  SkBitmap bitmap;
-  bitmap.setConfig(SkBitmap::kARGB_8888_Config, rect.width(), rect.height());
-  bitmap.setPixels(buffer);
-  SkDevice device(bitmap);
-  SkCanvas canvas(&device);
-  picture_pile->Raster(&canvas, rect, contents_scale, stats);
-}
+class RasterWorkerPoolTaskImpl : public internal::WorkerPoolTask {
+ public:
+  RasterWorkerPoolTaskImpl(PicturePileImpl* picture_pile,
+                           const RasterWorkerPool::RasterCallback& task,
+                           const base::Closure& reply)
+      : internal::WorkerPoolTask(reply),
+        picture_pile_(picture_pile),
+        task_(task) {
+    DCHECK(picture_pile_);
+  }
 
-void RunImageDecodeTask(skia::LazyPixelRef* pixel_ref, RenderingStats* stats) {
-  TRACE_EVENT0("cc", "RunImageDecodeTask");
-  base::TimeTicks decode_begin_time = base::TimeTicks::Now();
-  pixel_ref->Decode();
-  stats->totalDeferredImageDecodeCount++;
-  stats->totalDeferredImageDecodeTime +=
-      base::TimeTicks::Now() - decode_begin_time;
-}
+  virtual void WillRunOnThread(unsigned thread_index) OVERRIDE {
+    picture_pile_ = picture_pile_->GetCloneForDrawingOnThread(thread_index);
+  }
 
-const char* kRasterThreadNamePrefix = "CompositorRaster";
+  virtual void Run(RenderingStats* rendering_stats) OVERRIDE {
+    task_.Run(picture_pile_.get(), rendering_stats);
+    base::subtle::Release_Store(&completed_, 1);
+  }
 
-// Allow two pending raster tasks per thread. This keeps resource usage
-// low while making sure raster threads aren't unnecessarily idle.
-const int kNumPendingRasterTasksPerThread = 2;
+ private:
+  scoped_refptr<PicturePileImpl> picture_pile_;
+  RasterWorkerPool::RasterCallback task_;
+};
 
 }  // namespace
 
-RasterWorkerPool::Thread::Task::Task(Thread* thread) : thread_(thread) {
-  thread_->num_pending_tasks_++;
-}
-
-RasterWorkerPool::Thread::Task::~Task() {
-  thread_->rendering_stats_.totalRasterizeTime +=
-      rendering_stats_.totalRasterizeTime;
-  thread_->rendering_stats_.totalPixelsRasterized +=
-      rendering_stats_.totalPixelsRasterized;
-  thread_->rendering_stats_.totalDeferredImageDecodeTime +=
-      rendering_stats_.totalDeferredImageDecodeTime;
-  thread_->rendering_stats_.totalDeferredImageDecodeCount +=
-      rendering_stats_.totalDeferredImageDecodeCount;
-
-  thread_->num_pending_tasks_--;
-}
-
-RasterWorkerPool::Thread::Thread(const std::string name)
-    : base::Thread(name.c_str()),
-      num_pending_tasks_(0) {
-  Start();
-}
-
-RasterWorkerPool::Thread::~Thread() {
-  Stop();
-}
-
-void RasterWorkerPool::Thread::Init() {
-#if defined(OS_ANDROID)
-  // TODO(epenner): Move thread priorities to base. (crbug.com/170549)
-  int nice_value = 10; // Idle priority.
-  setpriority(PRIO_PROCESS, base::PlatformThread::CurrentId(), nice_value);
-#endif
-}
-
-RasterWorkerPool::RasterWorkerPool(size_t num_raster_threads) {
-  const std::string thread_name_prefix = kRasterThreadNamePrefix;
-  while (raster_threads_.size() < num_raster_threads) {
-    int thread_number = raster_threads_.size() + 1;
-    raster_threads_.push_back(
-        new Thread(thread_name_prefix +
-                   StringPrintf("Worker%d", thread_number).c_str()));
-  }
+RasterWorkerPool::RasterWorkerPool(
+    WorkerPoolClient* client, size_t num_threads)
+    : WorkerPool(client, num_threads) {
 }
 
 RasterWorkerPool::~RasterWorkerPool() {
-  STLDeleteElements(&raster_threads_);
-}
-
-bool RasterWorkerPool::IsBusy() {
-  Thread* thread = raster_threads_.front();
-  return thread->num_pending_tasks() >= kNumPendingRasterTasksPerThread;
 }
 
 void RasterWorkerPool::PostRasterTaskAndReply(PicturePileImpl* picture_pile,
-                                              uint8* buffer,
-                                              const gfx::Rect& rect,
-                                              float contents_scale,
+                                              bool is_cheap,
+                                              const RasterCallback& task,
                                               const base::Closure& reply) {
-  Thread::Task* task = CreateTask();
-
-  scoped_refptr<PicturePileImpl> picture_pile_clone =
-      picture_pile->GetCloneForDrawingOnThread(task->thread_);
-
-  task->thread_->message_loop_proxy()->PostTaskAndReply(
-      FROM_HERE,
-      base::Bind(&RunRasterTask,
-                 base::Unretained(picture_pile_clone.get()),
-                 buffer,
-                 rect,
-                 contents_scale,
-                 &task->rendering_stats_),
-      base::Bind(&RasterWorkerPool::OnRasterTaskCompleted,
-                 base::Unretained(this),
-                 base::Unretained(task),
-                 picture_pile_clone,
-                 reply));
-}
-
-void RasterWorkerPool::PostImageDecodeTaskAndReply(
-    skia::LazyPixelRef* pixel_ref,
-    const base::Closure& reply) {
-  Thread::Task* task = CreateTask();
-
-  task->thread_->message_loop_proxy()->PostTaskAndReply(
-      FROM_HERE,
-      base::Bind(&RunImageDecodeTask, pixel_ref, &task->rendering_stats_),
-      base::Bind(&RasterWorkerPool::OnTaskCompleted,
-                 base::Unretained(this),
-                 base::Unretained(task),
-                 reply));
-}
-
-void RasterWorkerPool::GetRenderingStats(RenderingStats* stats) {
-  stats->totalRasterizeTime = base::TimeDelta();
-  stats->totalPixelsRasterized = 0;
-  stats->totalDeferredImageDecodeCount = 0;
-  stats->totalDeferredImageDecodeTime = base::TimeDelta();
-  for (ThreadVector::iterator it = raster_threads_.begin();
-       it != raster_threads_.end(); ++it) {
-    Thread* thread = *it;
-    stats->totalRasterizeTime +=
-        thread->rendering_stats().totalRasterizeTime;
-    stats->totalPixelsRasterized +=
-        thread->rendering_stats().totalPixelsRasterized;
-    stats->totalDeferredImageDecodeCount +=
-        thread->rendering_stats().totalDeferredImageDecodeCount;
-    stats->totalDeferredImageDecodeTime +=
-        thread->rendering_stats().totalDeferredImageDecodeTime;
-  }
-}
-
-RasterWorkerPool::Thread::Task* RasterWorkerPool::CreateTask() {
-  Thread* thread = raster_threads_.front();
-  DCHECK(thread->num_pending_tasks() < kNumPendingRasterTasksPerThread);
-
-  scoped_ptr<Thread::Task> task(new Thread::Task(thread));
-  std::sort(raster_threads_.begin(), raster_threads_.end(),
-            PendingTaskComparator());
-  return task.release();
-}
-
-void RasterWorkerPool::DestroyTask(Thread::Task* task) {
-  delete task;
-  std::sort(raster_threads_.begin(), raster_threads_.end(),
-            PendingTaskComparator());
-}
-
-void RasterWorkerPool::OnTaskCompleted(
-    Thread::Task* task, const base::Closure& reply) {
-  DestroyTask(task);
-  reply.Run();
-}
-
-void RasterWorkerPool::OnRasterTaskCompleted(
-    Thread::Task* task,
-    scoped_refptr<PicturePileImpl> picture_pile,
-    const base::Closure& reply) {
-  OnTaskCompleted(task, reply);
+  PostTask(
+      make_scoped_ptr(new RasterWorkerPoolTaskImpl(
+                          picture_pile,
+                          task,
+                          reply)).PassAs<internal::WorkerPoolTask>(),
+                      is_cheap);
 }
 
 }  // namespace cc

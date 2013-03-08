@@ -13,6 +13,7 @@
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/metrics/histogram.h"
+#include "base/prefs/pref_service.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
@@ -22,7 +23,6 @@
 #include "chrome/browser/chromeos/accessibility/accessibility_util.h"
 #include "chrome/browser/chromeos/boot_times_loader.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
-#include "chrome/browser/chromeos/cros/network_library.h"
 #include "chrome/browser/chromeos/customization_document.h"
 #include "chrome/browser/chromeos/kiosk_mode/kiosk_mode_settings.h"
 #include "chrome/browser/chromeos/login/helper.h"
@@ -30,17 +30,16 @@
 #include "chrome/browser/chromeos/login/login_utils.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
+#include "chrome/browser/chromeos/net/connectivity_state_helper.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/chromeos/system/statistics_provider.h"
 #include "chrome/browser/google/google_util.h"
 #include "chrome/browser/policy/policy_service.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prefs/session_startup_pref.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
-#include "chrome/common/net/url_util.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
@@ -152,7 +151,7 @@ ExistingUserController::ExistingUserController(LoginDisplayHost* host)
                  chrome::NOTIFICATION_LOGIN_USER_IMAGE_CHANGED,
                  content::NotificationService::AllSources());
   registrar_.Add(this,
-                 chrome::NOTIFICATION_POLICY_USER_LIST_CHANGED,
+                 chrome::NOTIFICATION_USER_LIST_CHANGED,
                  content::NotificationService::AllSources());
   registrar_.Add(this,
                  chrome::NOTIFICATION_AUTH_SUPPLIED,
@@ -213,6 +212,15 @@ void ExistingUserController::ResumeLogin() {
   resume_login_callback_.Run();
 }
 
+void ExistingUserController::OnKioskAppLaunchStarted() {
+  login_display_->SetUIEnabled(false);
+}
+
+void ExistingUserController::OnKioskAppLaunchFailed() {
+  login_display_->SetUIEnabled(true);
+  // TODO(xiyuan): Show some error message.
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // ExistingUserController, content::NotificationObserver implementation:
 //
@@ -230,7 +238,7 @@ void ExistingUserController::Observe(
     return;
   }
   if (type == chrome::NOTIFICATION_SYSTEM_SETTING_CHANGED ||
-      type == chrome::NOTIFICATION_POLICY_USER_LIST_CHANGED) {
+      type == chrome::NOTIFICATION_USER_LIST_CHANGED) {
     if (host_ != NULL) {
       // Signed settings or user list changed. Notify views and update them.
       UpdateLoginDisplay(chromeos::UserManager::Get()->GetUsers());
@@ -495,7 +503,9 @@ void ExistingUserController::LoginAsGuest() {
 }
 
 void ExistingUserController::MigrateUserData(const std::string& old_password) {
-  RecoverEncryptedData(old_password);
+  // LoginPerformer instance has state of the user so it should exist.
+  if (login_performer_.get())
+    login_performer_->RecoverEncryptedData(old_password);
 }
 
 void ExistingUserController::LoginAsPublicAccount(
@@ -564,6 +574,11 @@ void ExistingUserController::ResyncUserData() {
 
 void ExistingUserController::SetDisplayEmail(const std::string& email) {
   display_email_ = email;
+}
+
+void ExistingUserController::ShowWrongHWIDScreen() {
+  host_->StartWizard(WizardController::kWrongHWIDScreenName, NULL);
+  login_display_->OnFadeOut();
 }
 
 void ExistingUserController::Signout() {
@@ -651,10 +666,7 @@ void ExistingUserController::OnLoginFailure(const LoginFailure& failure) {
     // cached locally or the local admin account.
     bool is_known_user =
         UserManager::Get()->IsKnownUser(last_login_attempt_username_);
-    NetworkLibrary* network = CrosLibrary::Get()->GetNetworkLibrary();
-    if (!network) {
-      ShowError(IDS_LOGIN_ERROR_NO_NETWORK_LIBRARY, error);
-    } else if (!network->Connected()) {
+    if (!ConnectivityStateHelper::Get()->IsConnected()) {
       if (is_known_user)
         ShowError(IDS_LOGIN_ERROR_AUTHENTICATING, error);
       else
@@ -675,6 +687,10 @@ void ExistingUserController::OnLoginFailure(const LoginFailure& failure) {
     // Reenable clicking on other windows and status area.
     login_display_->SetUIEnabled(true);
   }
+
+  // Reset user flow to default, so that special flow will not affect next
+  // attempt.
+  UserManager::Get()->ResetUserFlow(last_login_attempt_username_);
 
   if (login_status_consumer_)
     login_status_consumer_->OnLoginFailure(failure);
@@ -721,17 +737,14 @@ void ExistingUserController::OnLoginSuccess(
 }
 
 void ExistingUserController::OnProfilePrepared(Profile* profile) {
-  bool known_user = !UserManager::Get()->IsCurrentUserNew();
-  bool skip_image_screen =
-      WizardController::default_controller()->skip_user_image_selection();
-  ready_for_browser_launch_ = known_user || skip_image_screen;
-
   OptionallyShowReleaseNotes(profile);
 
   // Reenable clicking on other windows and status area.
   login_display_->SetUIEnabled(true);
 
-  if (!ready_for_browser_launch_) {
+  if (UserManager::Get()->IsCurrentUserNew() &&
+      !UserManager::Get()->GetCurrentUserFlow()->ShouldSkipPostLoginScreens() &&
+      !WizardController::default_controller()->skip_post_login_screens()) {
     // Don't specify start URLs if the administrator has configured the start
     // URLs via policy.
     if (!SessionStartupPref::TypeIsManaged(profile->GetPrefs()))
@@ -739,13 +752,12 @@ void ExistingUserController::OnProfilePrepared(Profile* profile) {
 #ifndef NDEBUG
     if (CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kOobeSkipPostLogin)) {
-      ready_for_browser_launch_ = true;
       LoginUtils::Get()->DoBrowserLaunch(profile, host_);
       host_ = NULL;
     } else {
 #endif
       ActivateWizard(WizardController::IsDeviceRegistered() ?
-          WizardController::kUserImageScreenName :
+          WizardController::kTermsOfServiceScreenName :
           WizardController::kRegistrationScreenName);
 #ifndef NDEBUG
     }
@@ -794,24 +806,12 @@ void ExistingUserController::OnPasswordChangeDetected() {
   bool show_invalid_old_password_error =
       login_performer_->password_changed_callback_count() > 1;
 
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kDisableNewPasswordChangedDialog)) {
-    // Passing 'false' here enables "full sync" mode in the dialog,
-    // which disables the requirement for the old owner password,
-    // allowing us to recover from a lost owner password/homedir.
-    // TODO(gspencer): We shouldn't have to erase stateful data when
-    // doing this.  See http://crosbug.com/9115 http://crosbug.com/7792
-    PasswordChangedView* view = new PasswordChangedView(
-        this,
-        false,  // Allow removal of existing cryptohome, perform full migration.
-        show_invalid_old_password_error);
-    views::Widget* window = views::Widget::CreateWindowWithParent(
-        view, GetNativeWindow());
-    window->SetAlwaysOnTop(true);
-    window->Show();
-  } else {
-    login_display_->ShowPasswordChangedDialog(show_invalid_old_password_error);
-  }
+  // Note: We allow owner using "full sync" mode which will recreate
+  // cryptohome and deal with owner private key being lost. This also allows
+  // us to recover from a lost owner password/homedir.
+  // TODO(gspencer): We shouldn't have to erase stateful data when
+  // doing this.  See http://crosbug.com/9115 http://crosbug.com/7792
+  login_display_->ShowPasswordChangedDialog(show_invalid_old_password_error);
 
   if (login_status_consumer_)
     login_status_consumer_->OnPasswordChangeDetected();
@@ -824,6 +824,7 @@ void ExistingUserController::WhiteListCheckFailed(const std::string& email) {
 
   // Reenable clicking on other windows and status area.
   login_display_->SetUIEnabled(true);
+  login_display_->ShowSigninUI(email);
 
   if (login_status_consumer_) {
     login_status_consumer_->OnLoginFailure(LoginFailure(
@@ -850,23 +851,6 @@ void ExistingUserController::OnOnlineChecked(const std::string& username,
     if (offline_failed_ && !is_login_in_progress_)
       ShowGaiaPasswordChanged(username);
   }
-}
-
-////////////////////////////////////////////////////////////////////////////////
-// ExistingUserController, PasswordChangedView::Delegate implementation:
-//
-
-void ExistingUserController::RecoverEncryptedData(
-    const std::string& old_password) {
-  // LoginPerformer instance has state of the user so it should exist.
-  if (login_performer_.get())
-    login_performer_->RecoverEncryptedData(old_password);
-}
-
-void ExistingUserController::ResyncEncryptedData() {
-  // LoginPerformer instance has state of the user so it should exist.
-  if (login_performer_.get())
-    login_performer_->ResyncEncryptedData();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -902,7 +886,8 @@ void ExistingUserController::InitializeStartUrls() const {
           start_urls.push_back(url);
       }
     }
-  } else {
+  // Skip the default first-run behavior for public accounts.
+  } else if (!UserManager::Get()->IsLoggedInAsPublicAccount()) {
     if (prefs->GetBoolean(prefs::kSpokenFeedbackEnabled)) {
       const char* url = kChromeVoxTutorialURLPattern;
       const std::string current_locale =
@@ -939,6 +924,8 @@ void ExistingUserController::OptionallyShowReleaseNotes(
     Profile* profile) const {
   // TODO(nkostylev): Fix WizardControllerFlowTest case.
   if (!profile || KioskModeSettings::Get()->IsKioskModeEnabled())
+    return;
+  if (UserManager::Get()->GetCurrentUserFlow()->ShouldSkipPostLoginScreens())
     return;
   PrefService* prefs = profile->GetPrefs();
   chrome::VersionInfo version_info;
@@ -990,8 +977,7 @@ void ExistingUserController::ShowError(int error_id,
   // for end users, developers can see details string in Chrome logs.
   VLOG(1) << details;
   HelpAppLauncher::HelpTopic help_topic_id;
-  NetworkLibrary* network_library = CrosLibrary::Get()->GetNetworkLibrary();
-  bool is_offline = !network_library || !network_library->Connected();
+  bool is_offline = !ConnectivityStateHelper::Get()->IsConnected();
   switch (login_performer_->error().state()) {
     case GoogleServiceAuthError::CONNECTION_FAILED:
       help_topic_id = HelpAppLauncher::HELP_CANT_ACCESS_ACCOUNT_OFFLINE;
@@ -1018,9 +1004,7 @@ void ExistingUserController::ShowGaiaPasswordChanged(
   // changed.
   UserManager::Get()->SaveUserOAuthStatus(
       username,
-      CommandLine::ForCurrentProcess()->HasSwitch(switches::kForceOAuth1) ?
-          User::OAUTH1_TOKEN_STATUS_INVALID :
-          User::OAUTH2_TOKEN_STATUS_INVALID);
+      User::OAUTH2_TOKEN_STATUS_INVALID);
 
   login_display_->SetUIEnabled(true);
   login_display_->ShowGaiaPasswordChanged(username);

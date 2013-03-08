@@ -13,7 +13,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/tab_contents/render_view_context_menu.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_tabstrip.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/common/context_menu_params.h"
@@ -71,13 +71,14 @@ class TestRenderViewContextMenu : public RenderViewContextMenu {
  protected:
   // These two functions implement pure virtual methods of
   // RenderViewContextMenu.
-  virtual bool GetAcceleratorForCommandId(int command_id,
-                                          ui::Accelerator* accelerator) {
+  virtual bool GetAcceleratorForCommandId(
+      int command_id,
+      ui::Accelerator* accelerator) OVERRIDE {
     // None of our commands have accelerators, so always return false.
     return false;
   }
-  virtual void PlatformInit() {}
-  virtual void PlatformCancel() {}
+  virtual void PlatformInit() OVERRIDE {}
+  virtual void PlatformCancel() OVERRIDE {}
 };
 
 }  // namespace
@@ -88,14 +89,14 @@ class ExtensionContextMenuBrowserTest : public ExtensionBrowserTest {
   // extensions test data dir.
   const extensions::Extension* LoadContextMenuExtension(
       std::string subdirectory) {
-    FilePath extension_dir =
+    base::FilePath extension_dir =
         test_data_dir_.AppendASCII("context_menus").AppendASCII(subdirectory);
     return LoadExtension(extension_dir);
   }
 
   const extensions::Extension* LoadContextMenuExtensionIncognito(
       std::string subdirectory) {
-    FilePath extension_dir =
+    base::FilePath extension_dir =
         test_data_dir_.AppendASCII("context_menus").AppendASCII(subdirectory);
     return LoadExtensionIncognito(extension_dir);
   }
@@ -104,7 +105,8 @@ class ExtensionContextMenuBrowserTest : public ExtensionBrowserTest {
                                         const GURL& page_url,
                                         const GURL& link_url,
                                         const GURL& frame_url) {
-    WebContents* web_contents = chrome::GetActiveWebContents(browser);
+    WebContents* web_contents =
+        browser->tab_strip_model()->GetActiveWebContents();
     WebContextMenuData data;
     content::ContextMenuParams params(data);
     params.page_url = page_url;
@@ -526,11 +528,11 @@ IN_PROC_BROWSER_TEST_F(ExtensionContextMenuBrowserTest, Enabled) {
 
 class ExtensionContextMenuBrowserLazyTest :
     public ExtensionContextMenuBrowserTest {
-  void SetUpCommandLine(CommandLine* command_line) {
+  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
     ExtensionContextMenuBrowserTest::SetUpCommandLine(command_line);
     // Set shorter delays to prevent test timeouts.
     command_line->AppendSwitchASCII(switches::kEventPageIdleTime, "0");
-    command_line->AppendSwitchASCII(switches::kEventPageUnloadingTime, "0");
+    command_line->AppendSwitchASCII(switches::kEventPageSuspendingTime, "0");
   }
 };
 

@@ -9,6 +9,16 @@
     # something reasonably current; the "77.34.5" is a hint that this isn't a
     # standard Chrome.
     'content_shell_version': '19.77.34.5',
+    'conditions': [
+      # TODO(glider): enable the custom freetype under ASan once we figure out
+      # how to use it with non-instrumented Python.
+      # See http://crbug.com/179814.
+      ['OS=="linux" and asan==0', {
+       'use_custom_freetype%': 1,
+      }, {
+       'use_custom_freetype%': 0,
+      }],
+    ],
   },
   'targets': [
     {
@@ -53,6 +63,10 @@
         '..',
       ],
       'sources': [
+        'shell/android/shell_jni_registrar.cc',
+        'shell/android/shell_jni_registrar.h',
+        'shell/android/shell_manager.cc',
+        'shell/android/shell_manager.h',
         'shell/geolocation/shell_access_token_store.cc',
         'shell/geolocation/shell_access_token_store.h',
         'shell/minimal_ash.cc',
@@ -83,10 +97,12 @@
         'shell/shell_content_renderer_client.h',
         'shell/shell_devtools_delegate.cc',
         'shell/shell_devtools_delegate.h',
+        'shell/shell_devtools_frontend.cc',
+        'shell/shell_devtools_frontend.h',
         'shell/shell_download_manager_delegate.cc',
         'shell/shell_download_manager_delegate.h',
-        'shell/shell_javascript_dialog_creator.cc',
-        'shell/shell_javascript_dialog_creator.h',
+        'shell/shell_javascript_dialog_manager.cc',
+        'shell/shell_javascript_dialog_manager.h',
         'shell/shell_javascript_dialog_gtk.cc',
         'shell/shell_javascript_dialog_mac.mm',
         'shell/shell_javascript_dialog_win.cc',
@@ -105,14 +121,13 @@
         'shell/shell_network_delegate.h',
         'shell/shell_render_process_observer.cc',
         'shell/shell_render_process_observer.h',
-        'shell/shell_resource_context.cc',
-        'shell/shell_resource_context.h',
         'shell/shell_resource_dispatcher_host_delegate.cc',
         'shell/shell_resource_dispatcher_host_delegate.h',
         'shell/shell_switches.cc',
         'shell/shell_switches.h',
         'shell/shell_url_request_context_getter.cc',
         'shell/shell_url_request_context_getter.h',
+        'shell/shell_web_contents_view_delegate_android.cc',
         'shell/shell_web_contents_view_delegate_creator.h',
         'shell/shell_web_contents_view_delegate_gtk.cc',
         'shell/shell_web_contents_view_delegate_mac.mm',
@@ -129,8 +144,6 @@
         'shell/webkit_test_platform_support_win.cc',
         'shell/webkit_test_runner.cc',
         'shell/webkit_test_runner.h',
-        'shell/webkit_test_runner_bindings.cc',
-        'shell/webkit_test_runner_bindings.h',
       ],
       'msvs_settings': {
         'VCLinkerTool': {
@@ -159,6 +172,8 @@
               },
             },
           },
+          # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
+          'msvs_disabled_warnings': [ 4267, ],
         }],  # OS=="win"
         ['OS=="linux"', {
           'dependencies': [
@@ -202,6 +217,11 @@
             '../chromeos/chromeos.gyp:chromeos',
            ],
         }], # chromeos==1
+        ['use_custom_freetype==1', {
+          'dependencies': [
+             '../third_party/freetype2/freetype2.gyp:freetype2',
+          ],
+        }],
       ],
     },
     {
@@ -262,6 +282,7 @@
               '<(SHARED_INTERMEDIATE_DIR)/net/net_resources.pak',
               '<(SHARED_INTERMEDIATE_DIR)/ui/app_locale_settings/app_locale_settings_en-US.pak',
               '<(SHARED_INTERMEDIATE_DIR)/ui/ui_resources/ui_resources_100_percent.pak',
+              '<(SHARED_INTERMEDIATE_DIR)/ui/ui_resources/webui_resources.pak',
               '<(SHARED_INTERMEDIATE_DIR)/ui/ui_strings/ui_strings_en-US.pak',
               '<(SHARED_INTERMEDIATE_DIR)/webkit/devtools_resources.pak',
               '<(SHARED_INTERMEDIATE_DIR)/webkit/webkit_chromium_resources.pak',
@@ -556,6 +577,8 @@
           'target_name': 'content_shell_jni_headers',
           'type': 'none',
           'sources': [
+            'shell/android/browsertests_apk/src/org/chromium/content_browsertests_apk/BrowserTestSystemMessageHandler.java',
+            'shell/android/browsertests_apk/src/org/chromium/content_browsertests_apk/ContentBrowserTestsActivity.java',
             'shell/android/java/src/org/chromium/content_shell/ShellManager.java',
             'shell/android/java/src/org/chromium/content_shell/Shell.java',
           ],
@@ -584,12 +607,6 @@
           'sources': [
             'shell/android/shell_library_loader.cc',
             'shell/android/shell_library_loader.h',
-            'shell/android/shell_manager.cc',
-            'shell/android/shell_manager.h',
-          ],
-          'sources!': [
-            'shell/shell_main.cc',
-            'shell/shell_main.h',
           ],
           'conditions': [
             ['android_build_type==1', {
@@ -600,11 +617,26 @@
           ],
         },
         {
+          'target_name': 'content_shell_java',
+          'type': 'none',
+          'dependencies': [
+            'content_java',
+          ],
+          'variables': {
+            'java_in_dir': '../content/shell/android/java',
+            'has_java_resources': 1,
+            'R_package': 'org.chromium.content_shell',
+            'R_package_relpath': 'org/chromium/content_shell',
+          },
+          'includes': [ '../build/java.gypi' ],
+        },
+        {
           # content_shell_apk creates a .jar as a side effect. Any java targets
           # that need that .jar in their classpath should depend on this target,
-          # content_shell_java. Dependents of content_shell_apk receive its jar
-          # path in the variable 'apk_output_jar_path'.
-          'target_name': 'content_shell_java',
+          # content_shell_apk_java. Dependents of content_shell_apk receive its
+          # jar path in the variable 'apk_output_jar_path'. This target should
+          # only be used by targets which instrument content_shell_apk.
+          'target_name': 'content_shell_apk_java',
           'type': 'none',
           'dependencies': [
             'content_shell_apk',
@@ -633,21 +665,21 @@
           'type': 'none',
           'dependencies': [
             'content_java',
+            'content_shell_java',
+            'libcontent_shell_content_view',
             '../base/base.gyp:base_java',
             '../media/media.gyp:media_java',
             '../net/net.gyp:net_java',
             '../ui/ui.gyp:ui_java',
           ],
           'variables': {
-            'package_name': 'content_shell',
             'apk_name': 'ContentShell',
-            'manifest_package_name': 'org.chromium.content_shell',
-            'java_in_dir': 'shell/android/java',
-            # TODO(cjhopman): The resource directory of all apks should be in
-            # <java_in_dir>/res.
-            'resource_dir': '../res',
+            'manifest_package_name': 'org.chromium.content_shell_apk',
+            'java_in_dir': 'shell/android/shell_apk',
+            'resource_dir': 'res',
             'native_libs_paths': ['<(SHARED_LIB_DIR)/libcontent_shell_content_view.so'],
             'additional_input_paths': ['<(PRODUCT_DIR)/content_shell/assets/content_shell.pak'],
+            'asset_location': '<(ant_build_out)/content_shell/assets',
           },
           'includes': [ '../build/java_apk.gypi' ],
         },

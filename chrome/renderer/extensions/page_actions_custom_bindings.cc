@@ -6,6 +6,8 @@
 
 #include <string>
 
+#include "chrome/common/extensions/api/extension_action/action_info.h"
+#include "chrome/common/extensions/extension.h"
 #include "chrome/renderer/extensions/dispatcher.h"
 #include "grit/renderer_resources.h"
 #include "v8/include/v8.h"
@@ -30,8 +32,8 @@ v8::Handle<v8::Value> PageActionsCustomBindings::GetCurrentPageActions(
   CHECK(extension);
 
   v8::Local<v8::Array> page_action_vector = v8::Array::New();
-  if (extension->page_action_info()) {
-    std::string id = extension->page_action_info()->id;
+  if (ActionInfo::GetPageActionInfo(extension)) {
+    std::string id = ActionInfo::GetPageActionInfo(extension)->id;
     page_action_vector->Set(v8::Integer::New(0),
                             v8::String::New(id.c_str(), id.size()));
   }

@@ -168,6 +168,18 @@ Press any key to continue exploring.
   <message name="IDS_NETWORK_CONNECTION_ERROR_MESSAGE_WITH_DETAILS" desc="Message for network connection error notification with details">
     Failed to connect to network '<ph name="name">$1<ex>GoogleGuest</ex></ph>': <ph name="details">$2<ex>Unrecognized error</ex></ph>
   </message>
+  <message name="IDS_NETWORK_ACTIVATION_ERROR_TITLE" desc="Title for network connection error notification">
+    Network Activation Error
+  </message>
+  <message name="IDS_NETWORK_ACTIVATION_NEEDS_CONNECTION" desc="Message when attempting to activate a mobile network that requries a connection">
+    Activation of '<ph name="name">$1<ex>Generic Wireless</ex></ph>' requires a network connection.
+  </message>
+  <message name="IDS_NETWORK_CELLULAR_ACTIVATED_TITLE" desc="Title for cellular activated notification">
+    Cellular Activated
+  </message>
+  <message name="IDS_NETWORK_CELLULAR_ACTIVATED" desc="Text of the cellular activated notification">
+    Congratulations! Your '<ph name="name">$1<ex>Generic Wireless</ex></ph>' data service has been activated and is ready to go.
+  </message>
   <message name="IDS_LOW_BATTERY_TITLE" desc="Title for low battery notification">
     Battery Low
   </message>
@@ -318,14 +330,14 @@ Press any key to continue exploring.
   <message name="IDS_ENTER_GUEST_SESSION_BUTTON_ACCESSIBLE_NAME">
     Browse as guest
   </message>
-  <message name="IDS_LOGIN_REMOVE">
-    Remove
-  </message>
   <message name="IDS_DISABLED_ADD_USER_TOOLTIP" desc="Tooltip over disabled Add user button">
     The owner of this device has disabled new users from being added
   </message>
   <message name="IDS_DISABLED_ADD_USER_TOOLTIP_ENTERPRISE" desc="Tooltip over disabled Add user button">
     The administrator of this device has disabled new users from being added
+  </message>
+  <message name="IDS_APP_START_MESSAGE" desc="Message displayed while installing and/or launching web application in kiosk mode.">
+    Installing application...
   </message>
   <message name="IDS_KIOSK_MODE_LOGIN_MESSAGE">
     Click to start
@@ -430,6 +442,12 @@ Press any key to continue exploring.
   <message name="IDS_CREATE_LOCALLY_MANAGED_USER_CREATE_PASSWORD_CONFIRM_HINT" desc="Text shown as a hint in the password confirmation field in locally managed user creation dialog.">
     Confirm password
   </message>
+  <message name="IDS_CREATE_LOCALLY_MANAGED_USER_CREATE_SELECT_MANAGER_TEXT" desc="Text shown as a title for list of possible managers (existing accounts) for locally managed user.">
+    Choose the manager for this user
+  </message>
+  <message name="IDS_CREATE_LOCALLY_MANAGED_USER_CREATE_MANAGER_PASSWORD_HINT" desc="Text shown as a hint in the user password field when this user is selected as a manager for locally managed user.">
+    Manager's password
+  </message>
   <message name="IDS_CREATE_LOCALLY_MANAGED_USER_CREATE_CONTINUE_BUTTON_TEXT" desc="Text shown on continue button in locally managed user creation dialog.">
     Continue
   </message>
@@ -442,6 +460,18 @@ Press any key to continue exploring.
   <message name="IDS_CREATE_LOCALLY_MANAGED_USER_CREATE_PASSWORD_TOO_SHORT" desc="Error text shown in locally managed user creation dialog when typed password is too short.">
     Password is too short.
   </message>
+  <message name="IDS_CREATE_LOCALLY_MANAGED_USER_CREATION_SUCCESS_MESSAGE" desc="Text shown when locally managed user was successfully created">
+    Locally managed user is successfully created.
+  </message>
+  <message name="IDS_CREATE_LOCALLY_MANAGED_USER_CREATION_SUCCESS_BUTTON_TITLE" desc="Text for button on a screen with successful locally managed user creation text">
+    Finish
+  </message>
+  <message name="IDS_CREATE_LOCALLY_MANAGED_USER_CREATION_ERROR_TITLE" desc="Text shown in a title when locally managed user creation has failed for some reason">
+    Locally managed user creation failed.
+  </message>
+  <message name="IDS_CREATE_LOCALLY_MANAGED_USER_CREATION_ERROR_CANCEL_BUTTON_TITLE" desc="Text for button on an error reporting screen for locally managed user creation, that is used to abort whole operation">
+    Cancel
+  </message>
   <message name="IDS_OFFLINE_LOGIN_HTML" desc="Text which suggests enter as an existing user when valid network isn't presented.">
     If you've already registered on this device, you can <ph name="LINK2_START">$1<ex>&gt;a&lt;</ex></ph>sign in as an existing user<ph name="LINK2_END">$2<ex>&gt;/a&lt;</ex></ph>.
   </message>
@@ -450,6 +480,9 @@ Press any key to continue exploring.
   </message>
   <message name="IDS_ADD_USER_BUTTON" desc="Text shown on an add user button on login/locker screen">
     Add user
+  </message>
+  <message name="IDS_KIOSK_APPS_BUTTON" desc="Text shown on a button that brings up the kiosk apps menu on login screen">
+    Apps
   </message>
   <message name="IDS_LOGIN_OOBE_HELP_DIALOG_TITLE" desc="Default title for help dialogs during OOBE/login">
     Help
@@ -778,11 +811,23 @@ Press any key to continue exploring.
   <message name="IDS_OPTIONS_SETTINGS_DISPLAY_OPTIONS_START_CALIBRATING_OVERSCAN" desc="Label to start calibrating the overscan preference.">
     TV alignment
   </message>
-  <message name="IDS_OPTIONS_SETTINGS_DISPLAY_OPTIONS_FINISH_CALIBRATING_OVERSCAN" desc="Label to finish calibrating the overscan preference.">
-    Finish alignment
+  <message name="IDS_OPTIONS_SETTINGS_DISPLAY_OVERSCAN_TAB_TITLE" desc="Title for the display overscan calibration tab.">
+    TV alignment
   </message>
-  <message name="IDS_OPTIONS_SETTINGS_DISPLAY_OPTIONS_CLEAR_CALIBRATING_OVERSCAN" desc="Label to clear the current overscan preference.">
-    Clear
+  <message name="IDS_OPTIONS_SETTINGS_DISPLAY_OVERSCAN_SHRINK_EXPAND" desc="Lable to describe the overscan calibration operation, to shrink or expand the region.">
+    Shrink/Expand
+  </message>
+  <message name="IDS_OPTIONS_SETTINGS_DISPLAY_OVERSCAN_MOVE" desc="Lable to describe the overscan calibration operation, to move the region.">
+    Move
+  </message>
+  <message name="IDS_OPTIONS_SETTINGS_DISPLAY_OVERSCAN_RESET_BUTTON_LABEL" desc="Button label to reset the display overscan settings.">
+    Reset
+  </message>
+  <message name="IDS_OPTIONS_SETTINGS_DISPLAY_OVERSCAN_OK_BUTTON_LABEL" desc="Button label to finish the display overscan settings.">
+    OK
+  </message>
+  <message name="IDS_OPTIONS_SETTINGS_DISPLAY_OVERSCAN_CANCEL_BUTTON_LABEL" desc="Button label to cancel the display overscan settings.">
+    Cancel
   </message>
   <message name="IDS_OPTIONS_SETTINGS_KEYBOARD_LAYOUT_TEXT" desc="In the settings tab, the text of the keyboard layout label.">
     Keyboard layout:
@@ -1448,6 +1493,41 @@ Press any key to continue exploring.
     Reset
   </message>
 
+  <message name="IDS_WRONG_HWID_SCREEN_HEADER" desc="Header of message shown on screen notifying about malformed hardware ID.">
+    A factory error has been detected
+  </message>
+  <message name="IDS_WRONG_HWID_SCREEN_MESSAGE_FIRST_PART" desc="Warning message shown on screen notifying about malformed hardware ID. First paragraph.">
+    Unfortunately, your computer is configured with a malformed hardware ID. This prevents Chrome OS from updating with the latest security fixes and your computer <ph name="BEGIN_BOLD">$1</ph>may be vulnerable to malicious attacks<ph name="END_BOLD">$2</ph>.
+  </message>
+  <message name="IDS_WRONG_HWID_SCREEN_MESSAGE_SECOND_PART" desc="Warning message shown on screen notifying about malformed hardware ID. Second paragraph.">
+    Please contact your hardware manufacturer immediately to send your computer to a repair facility.
+  </message>
+  <message name="IDS_WRONG_HWID_SCREEN_SKIP_LINK" desc="Text on link that skips warning about malformed hardware ID.">
+    Skip for now
+  </message>
+
+  <message name="IDS_TERMS_OF_SERVICE_SCREEN_HEADING" desc="Heading at the top of the Terms of Service screen.">
+    <ph name="DOMAIN">$1<ex>example.com</ex></ph> Terms of Service
+  </message>
+  <message name="IDS_TERMS_OF_SERVICE_SCREEN_CONTENT_HEADING" desc="Heading at the start of the the Terms of Service text.">
+    <ph name="DOMAIN">$1<ex>example.com</ex></ph> Terms
+  </message>
+  <message name="IDS_TERMS_OF_SERVICE_SCREEN_LOADING" desc="Message shown while the Terms of Service are being downloaded.">
+    Loading...
+  </message>
+  <message name="IDS_TERMS_OF_SERVICE_SCREEN_ERROR" desc="Error message shown when the Terms of Service could not be loaded.">
+    Oops, something went wrong.
+  </message>
+  <message name="IDS_TERMS_OF_SERVICE_SCREEN_TRY_AGAIN" desc="Message telling the user to try again later. Shown beneath the error message when the Terms of Service could not be loaded.">
+    Please try again later.
+  </message>
+  <message name="IDS_TERMS_OF_SERVICE_SCREEN_BACK_BUTTON" desc="Text of the back button on Terms of Service screen.">
+    Back
+  </message>
+  <message name="IDS_TERMS_OF_SERVICE_SCREEN_ACCEPT_BUTTON" desc="Text of the accept button on the Terms of Service screen.">
+    Accept and continue
+  </message>
+
   <message name="IDS_OPTION_DISABLED_BY_POLICY" desc="Tooltip for options managed by enterprise policy">
     This option is controlled by enterprise policy. Please contact your administrator for more information.
   </message>
@@ -2050,6 +2130,10 @@ Press any key to continue exploring.
            desc="The label for 'Customize modifier keys' overlay">
     Caps Lock
   </message>
+  <message name="IDS_OPTIONS_SETTINGS_LANGUAGES_KEY_DIAMOND_KEY_LABEL"
+           desc="The label for 'Customize modifier keys' overlay">
+    Diamond
+  </message>
   <message name="IDS_OPTIONS_SETTINGS_LANGUAGES_KEY_SEARCH"
            desc="The dropdown list item for 'Customize modifier keys' overlay">
     Search
@@ -2197,12 +2281,6 @@ Calculating remaining time
   </message>
   <message name="IDS_STATUSBAR_BATTERY_IS_CHARGED" desc="In the power menu button, the battery is charged message.">
 Battery full
-  </message>
-  <message name="IDS_STATUSBAR_NETWORK_NO_NETWORK_TOOLTIP" desc="Tooltip for the network menu status bar icon when no network is connected.">
-    No network
-  </message>
-  <message name="IDS_ASH_STATUS_TRAY_VPN_DISCONNECTED" desc="The label used in system tray bubble to display vpn is disconnected.">
-    VPN disconnected
   </message>
   <message name="IDS_STATUSBAR_NETWORK_CONNECTING_TOOLTIP" desc="Tooltip for the network menu status bar icon when connecting to a network.">
     Connecting to <ph name="NAME">$1<ex>GoogleGuest</ex></ph>
@@ -2369,7 +2447,7 @@ Battery full
     Entering Demo.
   </message>
   <message name="IDS_CHROMEOS_ACC_LOGIN_SIGNIN_PUBLIC_ACCOUNT" desc="Status when signing in into a public account.">
-    Entering public account.
+    Entering public session.
   </message>
   <message name="IDS_CHROMEOS_ACC_ACCOUNT_PICTURE" desc="Tooltip for the take account picture button.">
     Take picture.
@@ -2435,7 +2513,7 @@ Battery full
     Formatting finished successfully!
   </message>
   <message name="IDS_FORMATTING_FINISHED_FAILURE_MESSAGE" desc="Text of notification message which is shown when there are some errors while formatting.">
-    Aw, Snap! There've been some errors while formatting...
+    Aw, Snap! There was an error during formatting.
   </message>
 
   <!-- ChromeOS GData synchronization notifications -->
@@ -2497,20 +2575,23 @@ Battery full
   </message>
 
   <!-- Captive Portal state strings for ChromeOS -->
-  <message name="IDS_CHROMEOS_CAPTIVE_PORTAL_STATE_UNKNOWN" desc="Captive Portal state in about:network: Unknown">
-    Unknown state
+  <message name="IDS_CHROMEOS_CAPTIVE_PORTAL_STATUS_UNKNOWN" desc="Captive Portal status in about:network: Unknown">
+    Unknown
   </message>
-  <message name="IDS_CHROMEOS_CAPTIVE_PORTAL_STATE_OFFLINE" desc="Captive Portal state in about:network: Offline">
-    Offline state
+  <message name="IDS_CHROMEOS_CAPTIVE_PORTAL_STATUS_OFFLINE" desc="Captive Portal status in about:network: Offline">
+    Offline
   </message>
-  <message name="IDS_CHROMEOS_CAPTIVE_PORTAL_STATE_ONLINE" desc="Captive Portal state in about:network: Online">
-    Online state
+  <message name="IDS_CHROMEOS_CAPTIVE_PORTAL_STATUS_ONLINE" desc="Captive Portal status in about:network: Online">
+    Online
   </message>
-  <message name="IDS_CHROMEOS_CAPTIVE_PORTAL_STATE_PORTAL" desc="Captive Portal state in about:network: Portal">
-    Portal state
+  <message name="IDS_CHROMEOS_CAPTIVE_PORTAL_STATUS_PORTAL" desc="Captive Portal status in about:network: Portal">
+    Portal
   </message>
-  <message name="IDS_CHROMEOS_CAPTIVE_PORTAL_STATE_UNRECOGNIZED" desc="Captive Portal state in about:network: Unrecognized">
-    Unrecognized state
+  <message name="IDS_CHROMEOS_CAPTIVE_PORTAL_STATUS_PROXY_AUTH_REQUIRED" desc="Proxy authentication required for the active network">
+    Proxy authentication required
+  </message>
+  <message name="IDS_CHROMEOS_CAPTIVE_PORTAL_STATUS_UNRECOGNIZED" desc="Captive Portal status in about:network: Unrecognized">
+    Unrecognized
   </message>
 
   <!-- Network error strings for ChromeOS -->
@@ -2645,6 +2726,33 @@ Battery full
   <message name="IDS_OPTIONS_SETTINGS_INTERNET_CELLULAR_PRL_VERSION" desc="Label for cellular network modem PRL (Preferred Roaming List) version under chrome://options/internet">
     PRL version:
   </message>
+  <message name="IDS_OPTIONS_KIOSK" desc="Name of the kiosk management section on chrome settings page.">
+    Kiosk
+  </message>
+  <message name="IDS_OPTIONS_KIOSK_MANAGE_BUTTON" desc="Label of the button to bring up kiosk management overlay in the kiosk management section on chrome settings page.">
+    Manage kiosk applications
+  </message>
+  <message name="IDS_OPTIONS_KIOSK_OVERLAY_TITLE" desc="The title text of the kiosk settings overlay.">
+    Kiosk
+  </message>
+  <message name="IDS_OPTIONS_KIOSK_ADD_APP" desc="Label above the application id text input in the kiosk settings overlay.">
+    Add kiosk application:
+  </message>
+  <message name="IDS_OPTIONS_KIOSK_ADD_APP_HINT" desc="Placeholder hint in  the application id text input in the kiosk settings overlay.">
+    Enter application id or webstore URL.
+  </message>
+  <message name="IDS_OPTIONS_KIOSK_ENABLE_AUTO_LAUNCH" desc="Text for a button that enables an application to auto launch on startup in the kiosk settings overlay.">
+    Enable Auto Launch
+  </message>
+  <message name="IDS_OPTIONS_KIOSK_DISABLE_AUTO_LAUNCH" desc="Text for a button that disables an application to auto launch on startup in the kiosk settings overlay.">
+    Disable Auto Launch
+  </message>
+  <message name="IDS_OPTIONS_KIOSK_AUTO_LAUNCH" desc="Text shows besides an application that is set to auto launch on start up in the kiosk settings overlay.">
+    Auto Launch
+  </message>
+  <message name="IDS_OPTIONS_KIOSK_INVALID_APP" desc="Text shows besides an application that is not valid in the kiosk settings overlay.">
+    Invalid application.
+  </message>
   <message name="IDS_KEYBOARD_OVERLAY_LEARN_MORE" desc="The text of the learn more link on the keyboard overlay.">
     Learn more
   </message>
@@ -2766,8 +2874,8 @@ Battery full
   <message name="IDS_KEYBOARD_OVERLAY_BOOKMARK_CURRENT_PAGE" desc="The text in the keyboard overlay to explain the shortcut.">
     Bookmark current page
   </message>
-  <message name="IDS_KEYBOARD_OVERLAY_BOOKMARK_MANAGER" desc="The text in the keyboard overlay to explain the shortcut (open the Bookmark Manager).">
-    Bookmark Manager
+  <message name="IDS_KEYBOARD_OVERLAY_BOOKMARK_MANAGER" desc="The text in the keyboard overlay to explain the shortcut (open the bookmark manager).">
+    Bookmark manager
   </message>
   <message name="IDS_KEYBOARD_OVERLAY_CENTER_WINDOW" desc="The text in the keyboard overlay to explain the shortcut (center the window).">
     Center window
@@ -2800,7 +2908,7 @@ Battery full
     Delete word
   </message>
   <message name="IDS_KEYBOARD_OVERLAY_DEVELOPER_TOOLS" desc="The text in the keyboard overlay to explain the shortcut.">
-    Developer Tools
+    Developer tools
   </message>
   <message name="IDS_KEYBOARD_OVERLAY_DOCK_WINDOW_LEFT" desc="The text in the keyboard overlay to explain the shortcut (dock the window to the left).">
     Dock window left
@@ -2809,7 +2917,7 @@ Battery full
     Dock window right
   </message>
   <message name="IDS_KEYBOARD_OVERLAY_DOM_INSPECTOR" desc="The text in the keyboard overlay to explain the shortcut.">
-    DOM Inspector
+    DOM inspector
   </message>
   <message name="IDS_KEYBOARD_OVERLAY_DOWNLOADS" desc="The text in the keyboard overlay to explain the shortcut.">
     Downloads
@@ -2872,7 +2980,7 @@ Battery full
     Input Unicode characters
   </message>
   <message name="IDS_KEYBOARD_OVERLAY_JAVASCRIPT_CONSOLE" desc="The text in the keyboard overlay to explain the shortcut.">
-    JavaScript Console
+    JavaScript console
   </message>
   <message name="IDS_KEYBOARD_OVERLAY_LOCK_SCREEN" desc="The text in the keyboard overlay to explain the shortcut (lock the screen).">
     Lock screen
@@ -2913,17 +3021,17 @@ Battery full
   <message name="IDS_KEYBOARD_OVERLAY_NEXT_WORD" desc="The text in the keyboard overlay to explain the shortcut (move the text cursor to the end of the next word).">
     Next word
   </message>
+  <message name="IDS_KEYBOARD_OVERLAY_OPEN" desc="The text in the keyboard overlay to explain the shortcut (open a file).">
+    Open
+  </message>
   <message name="IDS_KEYBOARD_OVERLAY_OPEN_ADDRESS_IN_NEW_TAB" desc="The text in the keyboard overlay to explain the shortcut.">
     Open address in new tab
   </message>
-  <message name="IDS_KEYBOARD_OVERLAY_OPEN_DIALOG" desc="The text in the keyboard overlay to explain the shortcut (open a dialog to select file).">
-    Open dialog
-  </message>
   <message name="IDS_KEYBOARD_OVERLAY_PAGE_DOWN" desc="The text in the keyboard overlay to explain the shortcut.">
-    Page Down
+    Page down
   </message>
   <message name="IDS_KEYBOARD_OVERLAY_PAGE_UP" desc="The text in the keyboard overlay to explain the shortcut.">
-    Page Up
+    Page up
   </message>
   <message name="IDS_KEYBOARD_OVERLAY_PASTE" desc="The text in the keyboard overlay to explain the shortcut.">
     Paste
@@ -2955,7 +3063,7 @@ Battery full
   <message name="IDS_KEYBOARD_OVERLAY_RESET_ZOOM" desc="The text in the keyboard overlay to explain the shortcut.">
     Reset zoom
   </message>
-  <message name="IDS_KEYBOARD_OVERLAY_SAVE" desc="The text in the keyboard overlay to explain the shortcut.">
+  <message name="IDS_KEYBOARD_OVERLAY_SAVE" desc="The text in the keyboard overlay to explain the shortcut (save page as a file).">
     Save
   </message>
   <message name="IDS_KEYBOARD_OVERLAY_SCREENSHOT_REGION" desc="The text in the keyboard overlay to explain the shortcut (take a screenshot of the selected region).">
@@ -2973,6 +3081,9 @@ Battery full
   <message name="IDS_KEYBOARD_OVERLAY_SELECT_WORD_AT_A_TIME" desc="The text in the keyboard overlay to explain the shortcut.">
     Select "word at a time"
   </message>
+  <message name="IDS_KEYBOARD_OVERLAY_SHOW_MESSAGE_CENTER" desc="The text in the keyboard overlay to explain the shortcut (Show the message center).">
+    Show message center
+  </message>
   <message name="IDS_KEYBOARD_OVERLAY_SHOW_STATUS_MENU" desc="The text in the keyboard overlay to explain the shortcut (show the status menu).">
     Show status menu
   </message>
@@ -2986,7 +3097,7 @@ Battery full
     Take screenshot
   </message>
   <message name="IDS_KEYBOARD_OVERLAY_TASK_MANAGER" desc="The text in the keyboard overlay to explain the shortcut.">
-    Task Manager
+    Task manager
   </message>
   <message name="IDS_KEYBOARD_OVERLAY_TOGGLE_BOOKMARK_BAR" desc="The text in the keyboard overlay to explain the shortcut.">
     Toggle bookmark bar
@@ -3428,8 +3539,8 @@ Battery full
   <message name="IDS_LOGIN_ERROR_OWNER_REQUIRED" desc="Couldn't sign in because the machine is in policy safe mode and needs owner login">
     Login has been resticted to the owner account only. Please reboot and sign in with the owner account. The machine will auto reboot in 30 seconds.
   </message>
-  <message name="IDS_LOGIN_ERROR_OWNER_KEY_LOST" desc="Couldn't sign in because the owner key has been lost">
-    Sign-in has been canceled because some of the device settings have been corrupted.
+  <message name="IDS_LOGIN_ERROR_OWNER_KEY_LOST" desc="Couldn't sign in because the owner key has been lost, device settings corruption or incorrect local time.">
+    Login failed, please connect to the internet and try again.
   </message>
   <message name="IDS_LOGIN_ERROR_TPM_FAILURE" desc="Couldn't sign in because of the critical TPM error.">
     Oops, something went wrong with signing in.
@@ -3441,7 +3552,7 @@ Battery full
     Enter as Guest
   </message>
   <message name="IDS_LOGIN_PROXY_ERROR_MESSAGE" desc="An offline message shown when a proxy error has appeared.">
-    The sign-in page failed to load using the current proxy settings. Please <ph name="LINK_START">$1<ex>&gt;a&lt;</ex></ph>try to sign in again<ph name="LINK_END">$2<ex>&gt;/a&lt;</ex></ph> or use different proxy settings.
+    The sign-in page failed to load using the current proxy settings. Please <ph name="GAIA_RELOAD_LINK_START">$1<ex>&gt;a&lt;</ex></ph>try to sign in again<ph name="GAIA_RELOAD_LINK_END">$2<ex>&gt;/a&lt;</ex></ph> or use different <ph name="PROXY_SETTINGS_LINK_START">$3<ex>&gt;a&lt;</ex></ph>proxy settings<ph name="PROXY_SETTINGS_LINK_END">$4<ex>&gt;/a&lt;</ex></ph>.
   </message>
   <message name="IDS_LOGIN_CAPTIVE_PORTAL_WINDOW_TITLE" desc="Title of the window which is opened to sign in to the captive portal.">
     To use the network <ph name="NETWORK_ID">$1<ex>Adelaide Airport Wireless</ex></ph>, first complete your connection to the Internet below.
@@ -3471,7 +3582,7 @@ Battery full
     You are currently offline
   </message>
   <message name="IDS_LOGIN_OFFLINE_MESSAGE" desc="An offline message that shows up in OOBE sign-in screen.">
-    Please connect to the Internet to complete setup of your Chromebook.
+    Please connect to the Internet to signin into your Chromebook.
   </message>
   <message name="IDS_GUEST" desc="Shown in login panel for users that would like to browse without signing in.">
     Guest
@@ -3488,8 +3599,17 @@ Battery full
   <message name="IDS_LOGIN_POD_PASSWORD_FIELD_ACCESSIBLE_NAME" desc="Text to be spoken when the focus is set to the password field of a user pod on the login screen.">
     Password for <ph name="USER_EMAIL_ADDRESS">$1<ex>john.doe@example.com</ex></ph>
   </message>
-  <message name="IDS_LOGIN_POD_REMOVE_BUTTON_ACCESSIBLE_NAME" desc="Text to be spoken when the focus is set to the remove button of a user pod on the login screen.">
-    Remove user <ph name="USER_EMAIL_ADDRESS">$1<ex>john.doe@example.com</ex></ph>
+  <message name="IDS_LOGIN_POD_MENU_BUTTON_ACCESSIBLE_NAME" desc="Text to be spoken when the focus is set to the menu button of the user pod on the login screen.">
+    Options menu for <ph name="USER_EMAIL_ADDRESS">$1<ex>john.doe@example.com</ex></ph>
+  </message>
+  <message name="IDS_LOGIN_POD_MENU_REMOVE_ITEM_ACCESSIBLE_NAME" desc="Text to be spoken when 'Remove user' item is selected on the pod menu.">
+    Remove this user
+  </message>
+  <message name="IDS_LOGIN_POD_OWNER_USER" desc="Login screen user pod menu title for a user who owns the device.">
+    <ph name="USER_NAME">$1<ex>Ivan Arbuzov</ex></ph> (owner)
+  </message>
+  <message name="IDS_LOGIN_POD_REMOVE_USER" desc="Login screen user pod menu item text.">
+    Remove this user
   </message>
   <message name="IDS_LOGIN_VERSION_LABEL_FORMAT" desc="Login screen version text format.">
     <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> <ph name="PRODUCT_VERSION">$2<ex>15.0.0.0</ex></ph> (Platform <ph name="PLATFORM_VERSION">$3<ex>900.0-11.09.01</ex></ph>)
@@ -3498,12 +3618,15 @@ Battery full
     This device is owned by <ph name="DOMAIN">$1<ex>acmecorp.com</ex></ph>.
   </message>
   <message name="IDS_LOGIN_PUBLIC_ACCOUNT_INFO_FORMAT" desc="Template for text shown in the public account user pod, informing the user that this is a public, managed account.">
-    This device is owned by <ph name="DOMAIN">$1<ex>yourdomain.com</ex></ph> and will be used by others after you.
+    This device is owned by <ph name="DOMAIN">$1<ex>yourdomain.com</ex></ph>.
   </message>
   <message name="IDS_LOGIN_PUBLIC_ACCOUNT_SIGNOUT_REMINDER" desc="Text shown in the public account user pod, reminding the user to log out.">
-    Please remember to sign out when you're done.
+    Your information will be removed when you sign out.
   </message>
   <message name="IDS_LOGIN_PUBLIC_ACCOUNT_ENTER" desc="Label text for the sign-in button in the public account user pod.">
     Enter
+  </message>
+  <message name="IDS_LOGIN_PUBLIC_ACCOUNT_ENTER_ACCESSIBLE_NAME" desc="Text to be spoken when focus is set to the sign-in button in the public account user pod.">
+    Enter public session
   </message>
 </grit-part>

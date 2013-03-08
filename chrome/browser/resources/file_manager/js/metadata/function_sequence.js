@@ -3,13 +3,14 @@
 // found in the LICENSE file.
 
 /**
- * @constructor
  * @class FunctionSequence to invoke steps in sequence
  *
- * @param {Array} steps                array of functions to invoke in sequence
- * @param {Object} logger              logger
- * @param {Function} [callback]        callback to invoke on success
- * @param {Function} [failureCallback] callback to invoke on failure
+ * @param {string} name                // TODO(JSDOC).
+ * @param {Array} steps                array of functions to invoke in sequence.
+ * @param {Object} logger              logger.
+ * @param {function} callback          callback to invoke on success.
+ * @param {function} failureCallback   callback to invoke on failure.
+ * @constructor
  */
 function FunctionSequence(name, steps, logger, callback, failureCallback) {
   // Private variables hidden in closure
@@ -30,7 +31,7 @@ function FunctionSequence(name, steps, logger, callback, failureCallback) {
 /**
  * Sets new callback
  *
- * @param {Function} callback new callback to call on succeed
+ * @param {function} callback new callback to call on succeed.
  */
 FunctionSequence.prototype.setCallback = function(callback) {
     this.callback_ = callback;
@@ -39,7 +40,7 @@ FunctionSequence.prototype.setCallback = function(callback) {
 /**
  * Sets new error callback
  *
- * @param {Function} failureCallback new callback to call on failure
+ * @param {function} failureCallback new callback to call on failure.
  */
 FunctionSequence.prototype.setFailureCallback = function(failureCallback) {
     this.failureCallback_ = failureCallback;
@@ -50,12 +51,12 @@ FunctionSequence.prototype.setFailureCallback = function(failureCallback) {
  * Error handling function, which traces current error step, stops sequence
  * advancing and fires error callback.
  *
- * @param err error message
+ * @param {string} err Error message.
+ * @private
  */
 FunctionSequence.prototype.onError_ = function(err) {
-  this.logger.vlog('Failed step: ' + this.steps_[this.currentStepIdx_].name
-      + ': '
-      + err);
+  this.logger.vlog('Failed step: ' + this.steps_[this.currentStepIdx_].name +
+                   ': ' + err);
   if (!this.failed_) {
     this.failed_ = true;
     this.failureCallback_(err);
@@ -67,6 +68,7 @@ FunctionSequence.prototype.onError_ = function(err) {
  * This method should not be used externally. In external
  * cases should be used finish function, which is defined in closure and thus
  * has access to internal variables of functionsequence.
+ * @private
  */
 FunctionSequence.prototype.finish_ = function() {
   if (!this.failed_ && this.currentStepIdx_ < this.steps_.length) {
@@ -80,6 +82,8 @@ FunctionSequence.prototype.finish_ = function() {
  * This method should not be used externally. In external
  * cases should be used nextStep function, which is defined in closure and thus
  * has access to internal variables of functionsequence.
+ * @private
+ * @param {...} var_args  // TODO(JSDOC).
  */
 FunctionSequence.prototype.nextStep_ = function(var_args) {
   if (this.failed_) {
@@ -90,12 +94,12 @@ FunctionSequence.prototype.nextStep_ = function(var_args) {
     this.logger.vlog('Sequence ended');
     this.callback_.apply(this, arguments);
   } else {
-    this.logger.vlog('Attempting to start step ['
-                      + this.steps_[this.currentStepIdx_].name
-                      + ']');
+    this.logger.vlog('Attempting to start step [' +
+                     this.steps_[this.currentStepIdx_].name +
+                     ']');
     try {
       this.steps_[this.currentStepIdx_].apply(this, arguments);
-    } catch(e) {
+    } catch (e) {
       this.onError(e.toString());
     }
   }
@@ -103,13 +107,14 @@ FunctionSequence.prototype.nextStep_ = function(var_args) {
 
 /**
  * This function should be called only once on start, so start sequence pipeline
+ * @param {...} var_args  // TODO(JSDOC).
  */
 FunctionSequence.prototype.start = function(var_args) {
   if (this.started) {
     throw new Error('"Start" method of FunctionSequence was called twice');
   }
 
-  this.logger.log("Starting sequence with " + arguments.length + " arguments");
+  this.logger.log('Starting sequence with ' + arguments.length + ' arguments');
 
   this.started = true;
   this.nextStep.apply(this, arguments);
@@ -117,8 +122,10 @@ FunctionSequence.prototype.start = function(var_args) {
 
 /**
  * Add Function object mimics to FunctionSequence
+ * @private
+ * @param {*} obj  // TODO(JSDOC).
+ * @param {Array.*} args  // TODO(JSDOC).
  */
 FunctionSequence.prototype.apply_ = function(obj, args) {
   this.start.apply(this, args);
 };
-

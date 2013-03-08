@@ -12,6 +12,8 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebScreenInfo.h"
 #include "ui/gfx/display.h"
 #include "ui/gfx/screen.h"
+#include "ui/gfx/size_conversions.h"
+#include "ui/gfx/size_f.h"
 
 #if defined(OS_WIN)
 #include "base/command_line.h"
@@ -243,8 +245,8 @@ void RenderWidgetHostViewBase::MovePluginWindowsHelper(
         // PluginProcessHost to destroy the intermediate HWNDs.
         cur_parent = ReparentWindow(window, parent);
         ::ShowWindow(window, SW_SHOW);  // Window was created hidden.
-      } else {
-        CHECK(IsPluginWrapperWindow(cur_parent));
+      } else if (!IsPluginWrapperWindow(cur_parent)) {
+        continue;  // Race if plugin process is shutting down.
       }
 
       // We move the intermediate parent window which doesn't result in cross-
@@ -353,12 +355,24 @@ RenderWidgetHostViewBase::~RenderWidgetHostViewBase() {
   DCHECK(!mouse_locked_);
 }
 
+bool RenderWidgetHostViewBase::OnMessageReceived(const IPC::Message& msg){
+  return false;
+}
+
 void RenderWidgetHostViewBase::SetBackground(const SkBitmap& background) {
   background_ = background;
 }
 
 const SkBitmap& RenderWidgetHostViewBase::GetBackground() {
   return background_;
+}
+
+gfx::Size RenderWidgetHostViewBase::GetPhysicalBackingSize() const {
+  gfx::Display display =
+      gfx::Screen::GetNativeScreen()->GetDisplayNearestPoint(
+          GetViewBounds().origin());
+  return gfx::ToCeiledSize(gfx::ScaleSize(GetViewBounds().size(),
+                                          display.device_scale_factor()));
 }
 
 void RenderWidgetHostViewBase::SelectionChanged(const string16& text,
@@ -377,6 +391,14 @@ bool RenderWidgetHostViewBase::IsShowingContextMenu() const {
 void RenderWidgetHostViewBase::SetShowingContextMenu(bool showing) {
   DCHECK_NE(showing_context_menu_, showing);
   showing_context_menu_ = showing;
+}
+
+string16 RenderWidgetHostViewBase::GetSelectedText() const {
+  if (!selection_range_.IsValid())
+    return string16();
+  return selection_text_.substr(
+      selection_range_.GetMin() - selection_text_offset_,
+      selection_range_.length());
 }
 
 bool RenderWidgetHostViewBase::IsMouseLocked() {
@@ -420,11 +442,17 @@ void RenderWidgetHostViewBase::UpdateScreenInfo(gfx::NativeView view) {
   if (current_display_area_ == display.work_area() &&
       current_device_scale_factor_ == display.device_scale_factor())
     return;
+
+  bool device_scale_factor_changed =
+      current_device_scale_factor_ != display.device_scale_factor();
   current_display_area_ = display.work_area();
   current_device_scale_factor_ = display.device_scale_factor();
-  if (impl)
+  if (impl) {
+    if (device_scale_factor_changed)
+        impl->WasResized();
     impl->NotifyScreenInfoChanged();
   }
+}
 
 SmoothScrollGesture* RenderWidgetHostViewBase::CreateSmoothScrollGesture(
     bool scroll_down, int pixels_to_scroll, int mouse_event_x,
@@ -435,6 +463,20 @@ SmoothScrollGesture* RenderWidgetHostViewBase::CreateSmoothScrollGesture(
 
 void RenderWidgetHostViewBase::ProcessAckedTouchEvent(
     const WebKit::WebTouchEvent& touch, InputEventAckState ack_result) {
+}
+
+bool RenderWidgetHostViewBase::CanSubscribeFrame() const {
+  NOTIMPLEMENTED();
+  return false;
+}
+
+void RenderWidgetHostViewBase::BeginFrameSubscription(
+    RenderWidgetHostViewFrameSubscriber* subscriber) {
+  NOTIMPLEMENTED();
+}
+
+void RenderWidgetHostViewBase::EndFrameSubscription() {
+  NOTIMPLEMENTED();
 }
 
 }  // namespace content

@@ -10,11 +10,13 @@
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/ref_counted.h"
 
+namespace base {
 class FilePath;
+}
 
 namespace crypto {
 class RSAPrivateKey;
@@ -55,11 +57,7 @@ class OwnerKeyUtil : public base::RefCountedThreadSafe<OwnerKeyUtil> {
 // Implementation of OwnerKeyUtil that is used in production code.
 class OwnerKeyUtilImpl : public OwnerKeyUtil {
  public:
-  // The file outside the owner's encrypted home directory where her
-  // key will live.
-  static const char kOwnerKeyFile[];
-
-  explicit OwnerKeyUtilImpl(const FilePath& public_key_file);
+  explicit OwnerKeyUtilImpl(const base::FilePath& public_key_file);
 
   // OwnerKeyUtil:
   virtual bool ImportPublicKey(std::vector<uint8>* output) OVERRIDE;
@@ -72,7 +70,7 @@ class OwnerKeyUtilImpl : public OwnerKeyUtil {
 
  private:
   // The file that holds the public key.
-  FilePath key_file_;
+  base::FilePath key_file_;
 
   DISALLOW_COPY_AND_ASSIGN(OwnerKeyUtilImpl);
 };

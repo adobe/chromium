@@ -16,11 +16,11 @@
 #include "googleurl/src/gurl.h"
 #include "net/url_request/url_fetcher_delegate.h"
 
-class FilePath;
-class PrefServiceSimple;
+class PrefRegistrySimple;
 
 namespace base {
 class DictionaryValue;
+class FilePath;
 }
 
 namespace net {
@@ -44,7 +44,7 @@ class CustomizationDocument {
  protected:
   explicit CustomizationDocument(const std::string& accepted_version);
 
-  virtual bool LoadManifestFromFile(const FilePath& manifest_path);
+  virtual bool LoadManifestFromFile(const base::FilePath& manifest_path);
   virtual bool LoadManifestFromString(const std::string& manifest);
 
   std::string GetLocaleSpecificString(const std::string& locale,
@@ -119,7 +119,7 @@ class ServicesCustomizationDocument : public CustomizationDocument,
   static ServicesCustomizationDocument* GetInstance();
 
   // Registers preferences.
-  static void RegisterPrefs(PrefServiceSimple* local_state);
+  static void RegisterPrefs(PrefRegistrySimple* registry);
 
   // Return true if the customization was applied. Customization is applied only
   // once per machine.
@@ -158,7 +158,7 @@ class ServicesCustomizationDocument : public CustomizationDocument,
   void StartFileFetch();
 
   // Executes on FILE thread and reads file to string.
-  void ReadFileInBackground(const FilePath& file);
+  void ReadFileInBackground(const base::FilePath& file);
 
   // Services customization manifest URL.
   GURL url_;

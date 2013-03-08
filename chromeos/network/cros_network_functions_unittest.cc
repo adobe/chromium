@@ -185,6 +185,15 @@ TEST_F(CrosNetworkFunctionsTest, CrosActivateCellularModem) {
   EXPECT_TRUE(CrosActivateCellularModem(service_path, carrier));
 }
 
+TEST_F(CrosNetworkFunctionsTest, CrosCompleteCellularActivation) {
+  const std::string service_path = "/";
+  EXPECT_CALL(*mock_service_client_,
+              CompleteCellularActivation(dbus::ObjectPath(service_path), _, _))
+      .Times(1);
+
+  CrosCompleteCellularActivation(service_path);
+}
+
 TEST_F(CrosNetworkFunctionsTest, CrosSetNetworkServiceProperty) {
   const std::string service_path = "/";
   const std::string property = "property";
@@ -597,7 +606,7 @@ TEST_F(CrosNetworkFunctionsTest, CrosRequestVirtualNetworkProperties) {
   result.SetWithoutPathExpansion(key1, new base::StringValue(value1));
   result.SetWithoutPathExpansion(key2, new base::StringValue(value2));
   dictionary_value_result_ = &result;
-  // Create expected argument to ShillManagerClient::GetService.
+  // Create expected argument to ShillManagerClient::ConfigureService.
   base::DictionaryValue properties;
   properties.SetWithoutPathExpansion(
       flimflam::kTypeProperty, new base::StringValue("vpn"));
@@ -617,7 +626,8 @@ TEST_F(CrosNetworkFunctionsTest, CrosRequestVirtualNetworkProperties) {
   // Set expectations.
   const dbus::ObjectPath service_path("/service/path");
   ObjectPathCallback callback;
-  EXPECT_CALL(*mock_manager_client_, GetService(IsEqualTo(&properties), _, _))
+  EXPECT_CALL(*mock_manager_client_,
+              ConfigureService(IsEqualTo(&properties), _, _))
       .WillOnce(SaveArg<1>(&callback));
   EXPECT_CALL(*mock_service_client_,
               GetProperties(service_path, _)).WillOnce(

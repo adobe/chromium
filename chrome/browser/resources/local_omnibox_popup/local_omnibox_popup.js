@@ -2,6 +2,31 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+/**
+ * @fileoverview Support for omnibox behavior in offline mode or when API
+ * features are not supported on the server.
+ */
+
+// ==========================================================
+//  Enums.
+// ==========================================================
+
+/**
+ * Possible behaviors for navigateContentWindow.
+ * @enum {number}
+ */
+var WindowOpenDisposition = {
+  CURRENT_TAB: 1,
+  NEW_BACKGROUND_TAB: 2
+};
+
+/**
+ * The JavaScript button event value for a middle click.
+ * @type {number}
+ * @const
+ */
+var MIDDLE_MOUSE_BUTTON = 1;
+
 // =============================================================================
 //                               Util functions
 // =============================================================================
@@ -53,8 +78,8 @@ function addSuggestionToBox(suggestion, box, select) {
   contentsContainer.appendChild(contents);
   suggestionDiv.appendChild(contentsContainer);
   var restrictedId = suggestion.rid;
-  suggestionDiv.onclick = function() {
-    handleSuggestionClick(restrictedId);
+  suggestionDiv.onclick = function(event) {
+    handleSuggestionClick(restrictedId, event);
   };
 
   restrictedIds.push(restrictedId);
@@ -134,10 +159,12 @@ function updateSelectedSuggestion(increment) {
  function getApiObjectHandle() {
   if (window.cideb)
     return window.cideb;
-  if (window.navigator && window.navigator.searchBox)
-    return window.navigator.searchBox;
-  if (window.chrome && window.chrome.searchBox)
-    return window.chrome.searchBox;
+  if (window.navigator && window.navigator.embeddedSearch &&
+      window.navigator.embeddedSearch.searchBox)
+    return window.navigator.embeddedSearch.searchBox;
+  if (window.chrome && window.chrome.embeddedSearch &&
+      window.chrome.embeddedSearch.searchBox)
+    return window.chrome.embeddedSearch.searchBox;
   return null;
 }
 
@@ -145,12 +172,6 @@ function updateSelectedSuggestion(increment) {
  * chrome.searchBox.onnativesuggestions implementation.
  */
 function handleNativeSuggestions() {
-  // This can't be done in setUpApi(), because apiHandle.font/fontSize
-  // isn't available yet.
-  var suggestionStyleNode = $('suggestionStyle');
-  if (!suggestionStyleNode)
-    appendSuggestionStyles();
-
   var apiHandle = getApiObjectHandle();
 
   // Used to workaround repeated undesired asynchronous onnativesuggestions
@@ -175,7 +196,8 @@ function handleNativeSuggestions() {
   }
 
   var height = getDropdownHeight();
-  apiHandle.show(2, height);
+  // TODO(jered): Remove deprecated "reason" argument.
+  apiHandle.showOverlay(2, height);
 }
 
 /**
@@ -196,13 +218,27 @@ function appendSuggestionStyles() {
 }
 
 /**
+ * Extract the desired navigation behavior from a click event.
+ * @param {Event} event The click event.
+ * @return {WindowOpenDisposition} The desired behavior for
+ *     navigateContentWindow.
+ */
+function getDispositionFromClick(event) {
+  if (event.button == MIDDLE_MOUSE_BUTTON)
+    return WindowOpenDisposition.NEW_BACKGROUND_TAB;
+  return WindowOpenDisposition.CURRENT_TAB;
+}
+
+/**
  * Handles suggestion clicks.
  * @param {integer} restrictedId The restricted id of the suggestion being
  *     clicked.
+ * @param {Event} event The click event.
  */
-function handleSuggestionClick(restrictedId) {
+function handleSuggestionClick(restrictedId, event) {
   clearSuggestions();
-  getApiObjectHandle().navigateContentWindow(restrictedId);
+  getApiObjectHandle().navigateContentWindow(restrictedId,
+                                             getDispositionFromClick(event));
 }
 
 /**
@@ -234,6 +270,10 @@ function setUpApi() {
   apiHandle.onnativesuggestions = handleNativeSuggestions;
   apiHandle.onkeypress = handleKeyPress;
   apiHandle.onsubmit = onSubmit;
+  appendSuggestionStyles();
+
+  if (apiHandle.nativeSuggestions.length)
+    handleNativeSuggestions();
 }
 
 document.addEventListener('DOMContentLoaded', setUpApi);

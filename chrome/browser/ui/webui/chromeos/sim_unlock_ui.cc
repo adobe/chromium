@@ -683,7 +683,7 @@ SimUnlockUI::SimUnlockUI(content::WebUI* web_ui) : WebUIController(web_ui) {
 
   // Set up the chrome://sim-unlock/ source.
   Profile* profile = Profile::FromWebUI(web_ui);
-  ChromeURLDataManager::AddDataSource(profile, html_source);
+  content::URLDataSource::Add(profile, html_source);
 }
 
 }  // namespace chromeos

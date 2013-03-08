@@ -4,22 +4,24 @@
 
 #include "ash/wm/workspace/workspace_cycler.h"
 
+#include <cmath>
+
 #include "ash/shell.h"
+#include "ash/wm/workspace/workspace_cycler_configuration.h"
 #include "ash/wm/workspace/workspace_manager.h"
 #include "ui/base/events/event.h"
 #include "ui/base/events/event_utils.h"
+
+typedef ash::WorkspaceCyclerConfiguration Config;
 
 namespace ash {
 namespace internal {
 
 namespace {
 
-// The required vertical distance to scrub to the next workspace.
-const int kWorkspaceStepSize = 10;
-
-// Returns true is scrubbing is enabled.
-bool IsScrubbingEnabled() {
-  // Scrubbing is disabled if the screen is locked or a modal dialog is open.
+// Returns true if cycling is allowed.
+bool IsCyclingAllowed() {
+  // Cycling is disabled if the screen is locked or a modal dialog is open.
   return !Shell::GetInstance()->IsScreenLocked() &&
          !Shell::GetInstance()->IsSystemModalWindowOpen();
 }
@@ -28,34 +30,103 @@ bool IsScrubbingEnabled() {
 
 WorkspaceCycler::WorkspaceCycler(WorkspaceManager* workspace_manager)
     : workspace_manager_(workspace_manager),
-      scrubbing_(false),
-      scroll_x_(0),
-      scroll_y_(0) {
+      animator_(NULL),
+      state_(NOT_CYCLING),
+      scroll_x_(0.0f),
+      scroll_y_(0.0f) {
   ash::Shell::GetInstance()->AddPreTargetHandler(this);
 }
 
 WorkspaceCycler::~WorkspaceCycler() {
-  scrubbing_ = false;
+  SetState(NOT_CYCLING);
   ash::Shell::GetInstance()->RemovePreTargetHandler(this);
+}
+
+void WorkspaceCycler::AbortCycling() {
+  SetState(NOT_CYCLING);
+}
+
+void WorkspaceCycler::SetState(State new_state) {
+  if (state_ == NOT_CYCLING_TRACKING_SCROLL && new_state == STOPPING_CYCLING)
+    new_state = NOT_CYCLING;
+
+  if (state_ == new_state || !IsValidNextState(new_state))
+    return;
+
+  state_ = new_state;
+
+  if (new_state == STARTING_CYCLING) {
+    animator_.reset(new WorkspaceCyclerAnimator(this));
+    workspace_manager_->InitWorkspaceCyclerAnimatorWithCurrentState(
+        animator_.get());
+    animator_->AnimateStartingCycler();
+  } else if (new_state == STOPPING_CYCLING) {
+    if (animator_.get())
+      animator_->AnimateStoppingCycler();
+  } else if (new_state == NOT_CYCLING) {
+    scroll_x_ = 0.0f;
+    scroll_y_ = 0.0f;
+    if (animator_.get()) {
+      animator_->AbortAnimations();
+      animator_.reset();
+    }
+  }
+}
+
+bool WorkspaceCycler::IsValidNextState(State next_state) const {
+  if (state_ == next_state)
+    return true;
+
+  switch (next_state) {
+    case NOT_CYCLING:
+      return true;
+    case NOT_CYCLING_TRACKING_SCROLL:
+      return state_ == NOT_CYCLING;
+    case STARTING_CYCLING:
+      return state_ == NOT_CYCLING_TRACKING_SCROLL;
+    case CYCLING:
+      return state_ == STARTING_CYCLING;
+    case STOPPING_CYCLING:
+      return (state_ == STARTING_CYCLING || state_ == CYCLING);
+  }
+
+  NOTREACHED();
+  return false;
+}
+
+void WorkspaceCycler::OnEvent(ui::Event* event) {
+  if (!IsCyclingAllowed())
+    SetState(NOT_CYCLING);
+
+  if (state_ != NOT_CYCLING) {
+    if (event->type() == ui::ET_SCROLL_FLING_START ||
+        event->type() == ui::ET_MOUSE_PRESSED ||
+        event->type() == ui::ET_MOUSE_RELEASED ||
+        event->IsKeyEvent()) {
+      SetState(STOPPING_CYCLING);
+      event->StopPropagation();
+      return;
+    }
+  }
+  ui::EventHandler::OnEvent(event);
 }
 
 void WorkspaceCycler::OnScrollEvent(ui::ScrollEvent* event) {
   if (event->finger_count() != 3 ||
       event->type() != ui::ET_SCROLL) {
-    scrubbing_ = false;
+    if (state_ != NOT_CYCLING)
+      event->StopPropagation();
     return;
   }
 
-  if (!IsScrubbingEnabled()) {
-    scrubbing_ = false;
+  if (!IsCyclingAllowed() ||
+      !workspace_manager_->CanStartCyclingThroughWorkspaces()) {
+    DCHECK_EQ(NOT_CYCLING, state_);
     return;
   }
 
-  if (!scrubbing_) {
-    scrubbing_ = true;
-    scroll_x_ = 0;
-    scroll_y_ = 0;
-  }
+  if (state_ == NOT_CYCLING)
+    SetState(NOT_CYCLING_TRACKING_SCROLL);
 
   if (ui::IsNaturalScrollEnabled()) {
     scroll_x_ += event->x_offset();
@@ -65,28 +136,43 @@ void WorkspaceCycler::OnScrollEvent(ui::ScrollEvent* event) {
     scroll_y_ -= event->y_offset();
   }
 
-  // TODO(pkotwicz): Implement scrubbing through several workspaces as the
-  // result of a single scroll event.
-  if (std::abs(scroll_y_) > kWorkspaceStepSize) {
-    workspace_manager_->CycleToWorkspace(scroll_y_ > 0 ?
-        WorkspaceManager::CYCLE_NEXT : WorkspaceManager::CYCLE_PREVIOUS);
+  if (state_ == NOT_CYCLING_TRACKING_SCROLL) {
+    double distance_to_initiate_cycling = Config::GetDouble(
+        Config::DISTANCE_TO_INITIATE_CYCLING);
 
-    scroll_x_ = 0;
-    scroll_y_ = 0;
+    if (fabs(scroll_x_) > distance_to_initiate_cycling) {
+      // Only initiate workspace cycling if there recently was a significant
+      // amount of vertical movement as opposed to vertical movement
+      // accumulated over a long horizontal three finger scroll.
+      scroll_x_ = 0.0f;
+      scroll_y_ = 0.0f;
+    }
+
+    if (fabs(scroll_y_) >= distance_to_initiate_cycling)
+      SetState(STARTING_CYCLING);
+  }
+
+  if (state_ == CYCLING && event->y_offset() != 0.0f) {
+    DCHECK(animator_.get());
+    animator_->AnimateCyclingByScrollDelta(event->y_offset());
     event->SetHandled();
-    return;
   }
+}
 
-  if (std::abs(scroll_x_) > kWorkspaceStepSize) {
-    // Update |scroll_x_| and |scroll_y_| such that workspaces are only cycled
-    // through when there recently was a significant amount of vertical movement
-    // as opposed to vertical movement accumulated over a long horizontal three
-    // finger scroll.
-    scroll_x_ = 0;
-    scroll_y_ = 0;
-  }
+void WorkspaceCycler::StartWorkspaceCyclerAnimationFinished() {
+  DCHECK_EQ(STARTING_CYCLING, state_);
+  SetState(CYCLING);
+}
 
-  // The active workspace was not changed, do not consume the event.
+void WorkspaceCycler::StopWorkspaceCyclerAnimationFinished() {
+  DCHECK_EQ(STOPPING_CYCLING, state_);
+  Workspace* workspace_to_activate = animator_->get_selected_workspace();
+  animator_.reset();
+  SetState(NOT_CYCLING);
+
+  // Activate the workspace after updating the state so that a call to
+  // AbortCycling() as a result of SetActiveWorkspaceFromCycler() is a noop.
+  workspace_manager_->SetActiveWorkspaceFromCycler(workspace_to_activate);
 }
 
 }  // namespace internal

@@ -14,8 +14,10 @@
 #if defined(OS_WIN)
 #include "base/shared_memory.h"
 #endif
+#include "content/common/browser_plugin/browser_plugin_message_enums.h"
 #include "content/renderer/browser_plugin/browser_plugin_backing_store.h"
 #include "content/renderer/browser_plugin/browser_plugin_bindings.h"
+#include "content/renderer/mouse_lock_dispatcher.h"
 #include "content/renderer/render_view_impl.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDragStatus.h"
 
@@ -31,7 +33,8 @@ class BrowserPluginManager;
 class MockBrowserPlugin;
 
 class CONTENT_EXPORT BrowserPlugin :
-    NON_EXPORTED_BASE(public WebKit::WebPlugin) {
+    NON_EXPORTED_BASE(public WebKit::WebPlugin),
+    public MouseLockDispatcher::LockTarget {
  public:
   RenderViewImpl* render_view() const { return render_view_.get(); }
   int render_view_routing_id() const { return render_view_routing_id_; }
@@ -42,35 +45,44 @@ class CONTENT_EXPORT BrowserPlugin :
   // |attribute_value|.
   void UpdateDOMAttribute(const std::string& attribute_name,
                           const std::string& attribute_value);
+  // Remove the DOM Node attribute with the name |attribute_name|.
+  void RemoveDOMAttribute(const std::string& attribute_name);
+  // Get Browser Plugin's DOM Node attribute |attribute_name|'s value.
+  std::string GetDOMAttributeValue(const std::string& attribute_name) const;
+  // Checks if the attribute |attribute_name| exists in the DOM.
+  bool HasDOMAttribute(const std::string& attribute_name) const;
 
   // Get the name attribute value.
-  std::string name_attribute() const { return name_; }
-  // Set the name attribute value.
-  void SetNameAttribute(const std::string& name);
+  std::string GetNameAttribute() const;
+  // Parse the name attribute value.
+  void ParseNameAttribute();
   // Get the src attribute value of the BrowserPlugin instance.
-  std::string src_attribute() const { return src_; }
-  // Set the src attribute value of the BrowserPlugin instance.
-  bool SetSrcAttribute(const std::string& src, std::string* error_message);
+  std::string GetSrcAttribute() const;
+  // Parse the src attribute value of the BrowserPlugin instance.
+  bool ParseSrcAttribute(std::string* error_message);
   // Get the autosize attribute value.
-  bool auto_size_attribute() const { return auto_size_; }
-  // Sets the autosize attribute value.
-  void SetAutoSizeAttribute(bool auto_size);
+  bool GetAutoSizeAttribute() const;
+  // Parses the autosize attribute value.
+  void ParseAutoSizeAttribute();
   // Get the maxheight attribute value.
-  int max_height_attribute() const { return max_height_; }
-  // Set the maxheight attribute value.
-  void SetMaxHeightAttribute(int maxheight);
+  int GetMaxHeightAttribute() const;
   // Get the maxwidth attribute value.
-  int max_width_attribute() const { return max_width_; }
-  // Set the maxwidth attribute value.
-  void SetMaxWidthAttribute(int max_width);
+  int GetMaxWidthAttribute() const;
   // Get the minheight attribute value.
-  int min_height_attribute() const { return min_height_; }
-  // Set the minheight attribute value.
-  void SetMinHeightAttribute(int minheight);
+  int GetMinHeightAttribute() const;
   // Get the minwidth attribute value.
-  int min_width_attribute() const { return min_width_; }
-  // Set the minwidth attribute value.
-  void SetMinWidthAttribute(int minwidth);
+  int GetMinWidthAttribute() const;
+  // Parse the minwidth, maxwidth, minheight, and maxheight attribute values.
+  void ParseSizeContraintsChanged();
+  // The partition identifier string is stored as UTF-8.
+  std::string GetPartitionAttribute() const;
+  // This method can be successfully called only before the first navigation for
+  // this instance of BrowserPlugin. If an error occurs, the |error_message| is
+  // set appropriately to indicate the failure reason.
+  bool ParsePartitionAttribute(std::string* error_message);
+  // True if the partition attribute can be removed.
+  bool CanRemovePartitionAttribute(std::string* error_message);
+
   bool InAutoSizeBounds(const gfx::Size& size) const;
 
   // Get the guest's DOMWindow proxy.
@@ -80,18 +92,13 @@ class CONTENT_EXPORT BrowserPlugin :
   int guest_process_id() const { return guest_process_id_; }
   // Returns Chrome's route ID for the current guest.
   int guest_route_id() const { return guest_route_id_; }
+  // Returns whether the guest process has crashed.
+  bool guest_crashed() const { return guest_crashed_; }
 
-  // The partition identifier string is stored as UTF-8.
-  std::string GetPartitionAttribute() const;
   // Query whether the guest can navigate back to the previous entry.
   bool CanGoBack() const;
   // Query whether the guest can navigation forward to the next entry.
   bool CanGoForward() const;
-  // This method can be successfully called only before the first navigation for
-  // this instance of BrowserPlugin. If an error occurs, the |error_message| is
-  // set appropriately to indicate the failure reason.
-  bool SetPartitionAttribute(const std::string& partition_id,
-                             std::string* error_message);
 
   // Informs the guest of an updated focus state.
   void UpdateGuestFocusState();
@@ -110,12 +117,18 @@ class CONTENT_EXPORT BrowserPlugin :
   // Tells the BrowserPlugin to terminate the guest process.
   void TerminateGuest();
 
-  // A request from Javascript has been made to stop the loading of the page.
+  // A request from JavaScript has been made to stop the loading of the page.
   void Stop();
-  // A request from Javascript has been made to reload the page.
+  // A request from JavaScript has been made to reload the page.
   void Reload();
   // A request to enable hardware compositing.
   void EnableCompositing(bool enable);
+  // A request from content client to track lifetime of a JavaScript object
+  // related to a permission request object.
+  // This is used to clean up hanging permission request objects.
+  void PersistRequestObject(const NPVariant* request,
+                            const std::string& type,
+                            int id);
 
   // Returns true if |point| lies within the bounds of the plugin rectangle.
   // Not OK to use this function for making security-sensitive decision since it
@@ -124,6 +137,12 @@ class CONTENT_EXPORT BrowserPlugin :
   bool InBounds(const gfx::Point& point) const;
 
   gfx::Point ToLocalCoordinates(const gfx::Point& point) const;
+  // Called by browser plugin binding.
+  void OnEmbedderDecidedPermission(int request_id, bool allow);
+
+
+  // Returns whether a message should be forwarded to BrowserPlugin.
+  static bool ShouldForwardToBrowserPlugin(const IPC::Message& message);
 
   // WebKit::WebPlugin implementation.
   virtual WebKit::WebPluginContainer* container() const OVERRIDE;
@@ -163,6 +182,13 @@ class CONTENT_EXPORT BrowserPlugin :
       const WebKit::WebURL& url,
       void* notify_data,
       const WebKit::WebURLError& error) OVERRIDE;
+
+  // MouseLockDispatcher::LockTarget implementation.
+  virtual void OnLockMouseACK(bool succeeded) OVERRIDE;
+  virtual void OnMouseLockLost() OVERRIDE;
+  virtual bool HandleMouseLockedInputEvent(
+          const WebKit::WebMouseEvent& event) OVERRIDE;
+
  private:
   friend class base::DeleteHelper<BrowserPlugin>;
   // Only the manager is allowed to create a BrowserPlugin.
@@ -188,6 +214,14 @@ class CONTENT_EXPORT BrowserPlugin :
   int width() const { return plugin_rect_.width(); }
   int height() const { return plugin_rect_.height(); }
   int instance_id() const { return instance_id_; }
+  // Gets the Max Height value used for auto size.
+  int GetAdjustedMaxHeight() const;
+  // Gets the Max Width value used for auto size.
+  int GetAdjustedMaxWidth() const;
+  // Gets the Min Height value used for auto size.
+  int GetAdjustedMinHeight() const;
+  // Gets the Min Width value used for auto size.
+  int GetAdjustedMinWidth() const;
   BrowserPluginManager* browser_plugin_manager() const {
     return browser_plugin_manager_;
   }
@@ -197,7 +231,7 @@ class CONTENT_EXPORT BrowserPlugin :
 
   // Parses the attributes of the browser plugin from the element's attributes
   // and sets them appropriately.
-  void ParseAttributes(const WebKit::WebPluginParams& params);
+  void ParseAttributes();
 
   // Triggers the event-listeners for |event_name|. Note that the function
   // frees all the values in |props|.
@@ -219,7 +253,7 @@ class CONTENT_EXPORT BrowserPlugin :
 
   // Populates BrowserPluginHostMsg_AutoSize_Params object with autosize state.
   void PopulateAutoSizeParameters(
-      BrowserPluginHostMsg_AutoSize_Params* params);
+      BrowserPluginHostMsg_AutoSize_Params* params, bool current_auto_size);
 
   // Populates both AutoSize and ResizeGuest parameters based on the current
   // autosize state.
@@ -228,10 +262,12 @@ class CONTENT_EXPORT BrowserPlugin :
       BrowserPluginHostMsg_ResizeGuest_Params* resize_guest_params);
 
   // Informs the guest of an updated autosize state.
-  void UpdateGuestAutoSizeState();
+  void UpdateGuestAutoSizeState(bool current_auto_size);
 
   // Informs the BrowserPlugin that guest has changed its size in autosize mode.
   void SizeChangedDueToAutoSize(const gfx::Size& old_view_size);
+
+  bool HasEventListeners(const std::string& event_name);
 
   // Indicates whether a damage buffer was used by the guest process for the
   // provided |params|.
@@ -246,6 +282,27 @@ class CONTENT_EXPORT BrowserPlugin :
   // Sets the instance ID of the BrowserPlugin and requests a guest from the
   // browser process.
   void SetInstanceID(int instance_id);
+
+  // Requests media access permission from the embedder.
+  void RequestMediaPermission(int request_id,
+                              const base::DictionaryValue& request_info);
+  // Informs the BrowserPlugin that the guest's permission request has been
+  // allowed or denied by the embedder.
+  void RespondPermission(BrowserPluginPermissionType permission_type,
+                         int request_id,
+                         bool allow);
+
+  // If the request with id |request_id| is pending then informs the
+  // BrowserPlugin that the guest's permission request has been allowed or
+  // denied by the embedder.
+  void RespondPermissionIfRequestIsPending(int request_id, bool allow);
+  // Cleans up pending permission request once the associated event.request
+  // object goes out of scope in JavaScript.
+  void OnRequestObjectGarbageCollected(int request_id);
+  // V8 garbage collection callback for |object|.
+  static void WeakCallbackForPersistObject(v8::Isolate* isolate,
+                                           v8::Persistent<v8::Value> object,
+                                           void* param);
 
   // IPC message handlers.
   // Please keep in alphabetical order.
@@ -272,8 +329,16 @@ class CONTENT_EXPORT BrowserPlugin :
                       bool is_top_level);
   void OnLoadStart(int instance_id, const GURL& url, bool is_top_level);
   void OnLoadStop(int instance_id);
+  void OnLockMouse(int instance_id, bool user_gesture,
+      bool last_unlocked_by_target, bool privileged);
+  // Requests permission from the embedder.
+  void OnRequestPermission(int instance_id,
+                           BrowserPluginPermissionType permission_type,
+                           int request_id,
+                           const base::DictionaryValue& request_info);
   void OnSetCursor(int instance_id, const WebCursor& cursor);
   void OnShouldAcceptTouchEvents(int instance_id, bool accept);
+  void OnUnlockMouse(int instance_id);
   void OnUpdatedName(int instance_id, const std::string& name);
   void OnUpdateRect(int instance_id,
                     const BrowserPluginMsg_UpdateRect_Params& params);
@@ -298,13 +363,7 @@ class CONTENT_EXPORT BrowserPlugin :
   scoped_ptr<BrowserPluginHostMsg_ResizeGuest_Params> pending_resize_params_;
   // True if we have ever sent a NavigateGuest message to the embedder.
   bool navigate_src_sent_;
-  std::string src_;
-  bool auto_size_;
   bool auto_size_ack_pending_;
-  int max_height_;
-  int max_width_;
-  int min_height_;
-  int min_width_;
   int guest_process_id_;
   int guest_route_id_;
   std::string storage_partition_id_;
@@ -315,13 +374,23 @@ class CONTENT_EXPORT BrowserPlugin :
   // Tracks the visibility of the browser plugin regardless of the whole
   // embedder RenderView's visibility.
   bool visible_;
-  std::string name_;
 
   WebCursor cursor_;
 
   gfx::Size last_view_size_;
   bool size_changed_in_flight_;
   bool allocate_instance_id_sent_;
+
+  // Each permission request item in the map is a pair of request id and
+  // permission type.
+  typedef std::map<int, std::pair<int, BrowserPluginPermissionType> >
+      PendingPermissionRequests;
+  PendingPermissionRequests pending_permission_requests_;
+
+  typedef std::pair<int, base::WeakPtr<BrowserPlugin> >
+      AliveV8PermissionRequestItem;
+  std::map<int, AliveV8PermissionRequestItem*>
+      alive_v8_permission_request_objects_;
 
   // BrowserPlugin outlives RenderViewImpl in Chrome Apps and so we need to
   // store the BrowserPlugin's BrowserPluginManager in a member variable to
@@ -344,6 +413,10 @@ class CONTENT_EXPORT BrowserPlugin :
   // Used for HW compositing.
   bool compositing_enabled_;
   scoped_refptr<BrowserPluginCompositingHelper> compositing_helper_;
+
+  // Weak factory used in v8 |MakeWeak| callback, since the v8 callback might
+  // get called after BrowserPlugin has been destroyed.
+  base::WeakPtrFactory<BrowserPlugin> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(BrowserPlugin);
 };

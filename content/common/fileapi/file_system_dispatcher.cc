@@ -33,6 +33,8 @@ bool FileSystemDispatcher::OnMessageReceived(const IPC::Message& msg) {
     IPC_MESSAGE_HANDLER(FileSystemMsg_DidSucceed, OnDidSucceed)
     IPC_MESSAGE_HANDLER(FileSystemMsg_DidReadDirectory, OnDidReadDirectory)
     IPC_MESSAGE_HANDLER(FileSystemMsg_DidReadMetadata, OnDidReadMetadata)
+    IPC_MESSAGE_HANDLER(FileSystemMsg_DidCreateSnapshotFile,
+                        OnDidCreateSnapshotFile)
     IPC_MESSAGE_HANDLER(FileSystemMsg_DidFail, OnDidFail)
     IPC_MESSAGE_HANDLER(FileSystemMsg_DidWrite, OnDidWrite)
     IPC_MESSAGE_HANDLER(FileSystemMsg_DidOpenFile, OnDidOpenFile)
@@ -251,12 +253,25 @@ bool FileSystemDispatcher::NotifyCloseFile(const GURL& file_path) {
 }
 
 bool FileSystemDispatcher::CreateSnapshotFile(
-    const GURL& blob_url,
     const GURL& file_path,
     fileapi::FileSystemCallbackDispatcher* dispatcher) {
   int request_id = dispatchers_.Add(dispatcher);
   if (!ChildThread::current()->Send(
           new FileSystemHostMsg_CreateSnapshotFile(
+              request_id, file_path))) {
+    dispatchers_.Remove(request_id);  // destroys |dispatcher|
+    return false;
+  }
+  return true;
+}
+
+bool FileSystemDispatcher::CreateSnapshotFile_Deprecated(
+    const GURL& blob_url,
+    const GURL& file_path,
+    fileapi::FileSystemCallbackDispatcher* dispatcher) {
+  int request_id = dispatchers_.Add(dispatcher);
+  if (!ChildThread::current()->Send(
+          new FileSystemHostMsg_CreateSnapshotFile_Deprecated(
               request_id, blob_url, file_path))) {
     dispatchers_.Remove(request_id); // destroys |dispatcher|
     return false;
@@ -285,12 +300,24 @@ void FileSystemDispatcher::OnDidSucceed(int request_id) {
 
 void FileSystemDispatcher::OnDidReadMetadata(
     int request_id, const base::PlatformFileInfo& file_info,
-    const FilePath& platform_path) {
+    const base::FilePath& platform_path) {
   fileapi::FileSystemCallbackDispatcher* dispatcher =
       dispatchers_.Lookup(request_id);
   DCHECK(dispatcher);
   dispatcher->DidReadMetadata(file_info, platform_path);
   dispatchers_.Remove(request_id);
+}
+
+void FileSystemDispatcher::OnDidCreateSnapshotFile(
+    int request_id, const base::PlatformFileInfo& file_info,
+    const base::FilePath& platform_path) {
+  fileapi::FileSystemCallbackDispatcher* dispatcher =
+      dispatchers_.Lookup(request_id);
+  DCHECK(dispatcher);
+  dispatcher->DidCreateSnapshotFile(file_info, platform_path);
+  dispatchers_.Remove(request_id);
+  ChildThread::current()->Send(
+      new FileSystemHostMsg_DidReceiveSnapshotFile(request_id));
 }
 
 void FileSystemDispatcher::OnDidReadDirectory(

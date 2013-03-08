@@ -9,7 +9,9 @@
  * Operates on a list of objects representing albums: { name, url, create }.
  * If user chooses to create a new album, result will be a fake album with
  * |create == true|.
+ *
  * @param {HTMLElement} parentNode Node to be parent for this dialog.
+ * @constructor
  */
 function SelectAlbumDialog(parentNode) {
   this.parentNode_ = parentNode;
@@ -110,7 +112,7 @@ SelectAlbumDialog.prototype.renderItem = function(item) {
   cr.defineProperty(result, 'lead', cr.PropertyKind.BOOL_ATTR);
   cr.defineProperty(result, 'selected', cr.PropertyKind.BOOL_ATTR);
 
-  new ThumbnailLoader(item.url).load(box, true /* fill */);
+  new ThumbnailLoader(item.url).load(box, ThumbnailLoader.FillMode.FILL);
 
   return result;
 };
@@ -119,7 +121,7 @@ SelectAlbumDialog.prototype.renderItem = function(item) {
  * Shows dialog.
  *
  * @param {string} message Message in dialog caption.
- * @param {Array} items Albums to render in list
+ * @param {Array} items Albums to render in list.
  * @param {string} defaultNewName Default name of the new album.
  * @param {string} okCaption Text on the ok button.
  * @param {function} onOk Callback function.
@@ -160,7 +162,7 @@ SelectAlbumDialog.prototype.hide = function() {
 /**
  * List activation handler. Closes dialog and calls 'ok' callback.
  *
- * @param {int} index Activated index.
+ * @param {number} index Activated index.
  * @private
  */
 SelectAlbumDialog.prototype.activateItemAtIndex_ = function(index) {

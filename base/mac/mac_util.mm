@@ -12,7 +12,7 @@
 #include <sys/utsname.h>
 #include <sys/xattr.h>
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/mac/bundle_locations.h"
 #include "base/mac/foundation_util.h"
@@ -20,9 +20,9 @@
 #include "base/mac/scoped_cftyperef.h"
 #include "base/memory/scoped_generic_obj.h"
 #include "base/memory/scoped_nsobject.h"
-#include "base/string_number_conversions.h"
 #include "base/string_piece.h"
-#include "base/sys_string_conversions.h"
+#include "base/strings/string_number_conversions.h"
+#include "base/strings/sys_string_conversions.h"
 
 namespace base {
 namespace mac {

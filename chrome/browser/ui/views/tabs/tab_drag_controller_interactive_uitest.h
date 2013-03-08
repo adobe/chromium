@@ -10,6 +10,7 @@
 #include "chrome/test/base/in_process_browser_test.h"
 
 class Browser;
+class BrowserList;
 class TabStrip;
 class TabStripModel;
 
@@ -42,6 +43,10 @@ class TabDragControllerTest : public InProcessBrowserTest {
   // Creates a new Browser and resizes |browser()| and the new browser to be
   // side by side.
   Browser* CreateAnotherWindowBrowserAndRelayout();
+
+  // The tab drag controller interactive ui tests only use the native desktop
+  // for now.
+  const BrowserList* native_browser_list;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(TabDragControllerTest);

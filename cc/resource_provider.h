@@ -6,6 +6,7 @@
 #define CC_RESOURCE_PROVIDER_H_
 
 #include <deque>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -35,6 +36,7 @@ class Vector2d;
 
 namespace cc {
 
+class ContextProvider;
 class TextureUploader;
 
 // This class is not thread-safe and can only be called from the thread it was
@@ -43,6 +45,7 @@ class CC_EXPORT ResourceProvider {
 public:
     typedef unsigned ResourceId;
     typedef std::vector<ResourceId> ResourceIdArray;
+    typedef std::set<ResourceId> ResourceIdSet;
     typedef base::hash_map<ResourceId, ResourceId> ResourceIdMap;
     enum TextureUsageHint {
         TextureUsageAny,
@@ -99,6 +102,7 @@ public:
     void markPendingUploadsAsNonBlocking();
     double estimatedUploadsPerSecond();
     void flushUploads();
+    void releaseCachedData();
 
     // Flush all context operations, kicking uploads and ensuring ordering with
     // respect to other contexts.
@@ -121,27 +125,27 @@ public:
     // mailboxes and serializing meta-data into TransferableResources.
     // Resources are not removed from the ResourceProvider, but are marked as
     // "in use".
-    void prepareSendToParent(const ResourceIdArray&, TransferableResourceList*);
+    void prepareSendToParent(const ResourceIdArray& resources, TransferableResourceArray* transferableResources);
 
     // Prepares resources to be transfered back to the child, moving them to
     // mailboxes and serializing meta-data into TransferableResources.
     // Resources are removed from the ResourceProvider. Note: the resource IDs
     // passed are in the parent namespace and will be translated to the child
     // namespace when returned.
-    void prepareSendToChild(int child, const ResourceIdArray&, TransferableResourceList*);
+    void prepareSendToChild(int child, const ResourceIdArray& resources, TransferableResourceArray* transferableResources);
 
     // Receives resources from a child, moving them from mailboxes. Resource IDs
     // passed are in the child namespace, and will be translated to the parent
     // namespace, added to the child->parent map.
-    // NOTE: if the syncPoint filed in TransferableResourceList is set, this
-    // will wait on it.
-    void receiveFromChild(int child, const TransferableResourceList&);
+    // NOTE: if the sync_point is set on any TransferableResource, this will
+    // wait on it.
+    void receiveFromChild(int child, const TransferableResourceArray& transferableResources);
 
     // Receives resources from the parent, moving them from mailboxes. Resource IDs
     // passed are in the child namespace.
-    // NOTE: if the syncPoint filed in TransferableResourceList is set, this
-    // will wait on it.
-    void receiveFromParent(const TransferableResourceList&);
+    // NOTE: if the sync_point is set on any TransferableResource, this will
+    // wait on it.
+    void receiveFromParent(const TransferableResourceArray& transferableResources);
 
     // Bind the given GL resource to a texture target for sampling using the
     // specified filter for both minification and magnification. The resource
@@ -221,6 +225,14 @@ public:
         DISALLOW_COPY_AND_ASSIGN(ScopedWriteLockSoftware);
     };
 
+    class Fence : public base::RefCounted<Fence> {
+    public:
+        virtual bool hasPassed() = 0;
+    protected:
+        friend class base::RefCounted<Fence>;
+        virtual ~Fence() {}
+    };
+
     // Acquire pixel buffer for resource. The pixel buffer can be used to
     // set resource pixels without performing unnecessary copying.
     void acquirePixelBuffer(ResourceId id);
@@ -236,10 +248,29 @@ public:
     // Asynchronously update pixels from acquired pixel buffer.
     void beginSetPixels(ResourceId id);
     bool didSetPixelsComplete(ResourceId id);
+    void abortSetPixels(ResourceId id);
 
     // For tests only! This prevents detecting uninitialized reads.
     // Use setPixels or lockForWrite to allocate implicitly.
     void allocateForTesting(ResourceId id);
+
+    // Sets the current read fence. If a resource is locked for read
+    // and has read fences enabled, the resource will not allow writes
+    // until this fence has passed.
+    void setReadLockFence(scoped_refptr<Fence> fence) { m_currentReadLockFence = fence; }
+    Fence* getReadLockFence() { return m_currentReadLockFence; }
+
+    // Enable read lock fences for a specific resource.
+    void enableReadLockFences(ResourceProvider::ResourceId, bool enable);
+
+    // Indicates if we can currently lock this resource for write.
+    bool canLockForWrite(ResourceId);
+
+    cc::ContextProvider* offscreenContextProvider() { return m_offscreenContextProvider.get(); }
+    void setOffscreenContextProvider(scoped_refptr<cc::ContextProvider> offscreenContextProvider);
+
+    cc::ContextProvider* customFilterContextProvider() { return m_customFilterContextProvider.get(); }
+    void setCustomFilterContextProvider(scoped_refptr<cc::ContextProvider> customFilterContextProvider);
 
 private:
     struct Resource {
@@ -263,6 +294,8 @@ private:
         bool markedForDeletion;
         bool pendingSetPixels;
         bool allocated;
+        bool enableReadLockFences;
+        scoped_refptr<Fence> readLockFence;
         gfx::Size size;
         GLenum format;
         // TODO(skyostil): Use a separate sampler object for filter state.
@@ -278,6 +311,9 @@ private:
         ResourceIdMap parentToChildMap;
     };
     typedef base::hash_map<int, Child> ChildMap;
+
+    bool readLockFenceHasPassed(Resource* resource) { return !resource->readLockFence ||
+                                                              resource->readLockFence->hasPassed(); }
 
     explicit ResourceProvider(OutputSurface*);
     bool initialize();
@@ -307,7 +343,12 @@ private:
     int m_maxTextureSize;
     GLenum m_bestTextureFormat;
 
+    scoped_refptr<cc::ContextProvider> m_offscreenContextProvider;
+    scoped_refptr<cc::ContextProvider> m_customFilterContextProvider;
+
     base::ThreadChecker m_threadChecker;
+
+    scoped_refptr<Fence> m_currentReadLockFence;
 
     DISALLOW_COPY_AND_ASSIGN(ResourceProvider);
 };

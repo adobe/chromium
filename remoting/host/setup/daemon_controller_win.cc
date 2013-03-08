@@ -10,8 +10,8 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/compiler_specific.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
 #include "base/logging.h"
@@ -26,11 +26,10 @@
 #include "base/win/windows_version.h"
 #include "remoting/base/scoped_sc_handle_win.h"
 #include "remoting/host/branding.h"
+// chromoting_lib.h contains MIDL-generated declarations.
+#include "remoting/host/chromoting_lib.h"
 #include "remoting/host/setup/daemon_installer_win.h"
 #include "remoting/host/usage_stats_consent.h"
-
-// MIDL-generated declarations and definitions.
-#include "remoting/host/elevated_controller.h"
 
 using base::win::ScopedBstr;
 using base::win::ScopedComPtr;

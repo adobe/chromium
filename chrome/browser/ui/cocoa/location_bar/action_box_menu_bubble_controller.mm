@@ -8,16 +8,24 @@
 #include "base/mac/foundation_util.h"
 #include "base/mac/mac_util.h"
 #include "base/sys_string_conversions.h"
+#include "chrome/browser/extensions/extension_icon_image.h"
 #import "chrome/browser/ui/cocoa/browser_window_utils.h"
 #import "chrome/browser/ui/cocoa/event_utils.h"
 #import "chrome/browser/ui/cocoa/info_bubble_view.h"
 #import "chrome/browser/ui/cocoa/info_bubble_window.h"
+#include "chrome/browser/ui/toolbar/action_box_menu_model.h"
+#include "chrome/common/extensions/api/extension_action/action_info.h"
+#include "chrome/common/extensions/api/icons/icons_handler.h"
+#include "chrome/common/extensions/extension.h"
+#include "chrome/common/extensions/extension_constants.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
+#include "skia/ext/skia_utils_mac.h"
 #import "third_party/GTM/AppKit/GTMUILocalizerAndLayoutTweaker.h"
-#include "ui/base/models/simple_menu_model.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image.h"
+#include "ui/gfx/image/image_skia_util_mac.h"
+#include "ui/native_theme/native_theme.h"
 
 @interface ActionBoxMenuBubbleController (Private)
 - (id)highlightedItem;
@@ -26,6 +34,10 @@
 - (void)moveUp:(id)sender;
 - (void)highlightNextItemByDelta:(NSInteger)delta;
 - (void)highlightItem:(ActionBoxMenuItemController*)newItem;
+@end
+
+@interface ActionBoxMenuItemView (Private)
+- (NSColor*)highlightedMenuItemBackgroundColor;
 @end
 
 namespace {
@@ -45,11 +57,46 @@ const CGFloat kSelectionAlpha = 0.06;
 
 }  // namespace
 
+// extension Icon Loader Bridge ////////////////////////////////////////////////
+
+class ExtensionIconLoaderBridge : public extensions::IconImage::Observer {
+ public:
+  ExtensionIconLoaderBridge(Profile* profile,
+                            const extensions::Extension* extension,
+                            ActionBoxMenuItemController* controller)
+      : controller_(controller) {
+    const extensions::ActionInfo* page_launcher_info =
+        extensions::ActionInfo::GetPageLauncherInfo(extension);
+    DCHECK(page_launcher_info);
+    icon_loader_.reset(new extensions::IconImage(
+        profile,
+        extension,
+        page_launcher_info->default_icon,
+        extension_misc::EXTENSION_ICON_ACTION,
+        extensions::IconsInfo::GetDefaultAppIcon(),
+        this));
+    OnExtensionIconImageChanged(icon_loader_.get());
+  }
+
+ private:
+  virtual void OnExtensionIconImageChanged(
+      extensions::IconImage* image) OVERRIDE {
+    [controller_ onExtensionIconImageChanged:
+        gfx::NSImageFromImageSkia(image->image_skia())];
+  }
+
+  scoped_ptr<extensions::IconImage> icon_loader_;
+  ActionBoxMenuItemController* controller_;  // Weak.
+
+  DISALLOW_COPY_AND_ASSIGN(ExtensionIconLoaderBridge);
+};
+
 @implementation ActionBoxMenuBubbleController
 
-- (id)initWithModel:(scoped_ptr<ui::MenuModel>)model
+- (id)initWithModel:(scoped_ptr<ActionBoxMenuModel>)model
        parentWindow:(NSWindow*)parent
-         anchoredAt:(NSPoint)point {
+         anchoredAt:(NSPoint)point
+            profile:(Profile*)profile {
   // Use an arbitrary height because it will reflect the size of the content.
   NSRect contentRect = NSMakeRect(0, 0, kBubbleMinWidth, 150);
   // Create an empty window into which content is placed.
@@ -58,23 +105,30 @@ const CGFloat kSelectionAlpha = 0.06;
                                           styleMask:NSBorderlessWindowMask
                                             backing:NSBackingStoreBuffered
                                               defer:NO]);
+  [window setAllowedAnimations:info_bubble::kAnimateNone];
   if (self = [super initWithWindow:window
                       parentWindow:parent
                         anchoredAt:point]) {
+    profile_ = profile;
     model_.reset(model.release());
 
     [[self bubble] setAlignment:info_bubble::kAlignRightEdgeToAnchorEdge];
     [[self bubble] setArrowLocation:info_bubble::kNoArrow];
+    ui::NativeTheme* nativeTheme = ui::NativeTheme::instance();
     [[self bubble] setBackgroundColor:
-        [NSColor colorWithDeviceWhite:(251.0f/255.0f)
-                                alpha:1.0]];
+        gfx::SkColorToCalibratedNSColor(nativeTheme->GetSystemColor(
+            ui::NativeTheme::kColorId_DialogBackground))];
     [self performLayout];
   }
   return self;
 }
 
-- (ui::MenuModel*)model {
+- (ActionBoxMenuModel*)model {
   return model_.get();
+}
+
+- (NSMutableArray*)items {
+  return items_;
 }
 
 - (IBAction)itemSelected:(id)sender {
@@ -105,30 +159,51 @@ const CGFloat kSelectionAlpha = 0.06;
   // Leave some space at the bottom of the menu.
   CGFloat yOffset = kVerticalPadding;
 
+  // Keep track of a potential separator to resize it when we know the width.
+  scoped_nsobject<NSBox> separatorView;
+
   // Loop over the items in reverse, constructing the menu items.
   CGFloat width = kBubbleMinWidth;
   CGFloat minX = NSMinX([contentView bounds]);
   for (int i = model_->GetItemCount() - 1; i >= 0; --i) {
-    // Create the item controller. Autorelease it because it will be owned
-    // by the |items_| array.
-    scoped_nsobject<ActionBoxMenuItemController> itemController(
-        [[ActionBoxMenuItemController alloc] initWithModelIndex:i
-                                                 menuController:self]);
+    if (model_->GetTypeAt(i) == ui::MenuModel::TYPE_SEPARATOR) {
+      const CGFloat kSeparatorHeight = 1.0;
+      // Only supports one separator.
+      DCHECK(!separatorView);
+      yOffset += kVerticalPadding + kSeparatorHeight;
+      separatorView.reset([[NSBox alloc]
+          initWithFrame:NSMakeRect(0, yOffset, width, kSeparatorHeight)]);
+      [separatorView setBoxType:NSBoxCustom];
+      ui::NativeTheme* nativeTheme = ui::NativeTheme::instance();
+      [separatorView setBorderColor:
+          gfx::SkColorToCalibratedNSColor(nativeTheme->GetSystemColor(
+              ui::NativeTheme::kColorId_MenuSeparatorColor))];
+      [contentView addSubview:separatorView];
+      yOffset += kVerticalPadding;
+    } else {
+      // Create the item controller. Autorelease it because it will be owned
+      // by the |items_| array.
+      scoped_nsobject<ActionBoxMenuItemController> itemController(
+          [[ActionBoxMenuItemController alloc]
+              initWithModelIndex:i
+                  menuController:self
+                         profile:profile_]);
 
-    // Adjust the name field to fit the string.
-    [GTMUILocalizerAndLayoutTweaker sizeToFitView:[itemController nameField]];
+      // Adjust the name field to fit the string.
+      [GTMUILocalizerAndLayoutTweaker sizeToFitView:[itemController nameField]];
 
-    // Expand the size of the window if required to fit the menu item.
-    width = std::max(width,
-        NSMaxX([[itemController nameField] frame]) - minX + kRightMargin);
+      // Expand the size of the window if required to fit the menu item.
+      width = std::max(width,
+          NSMaxX([[itemController nameField] frame]) - minX + kRightMargin);
 
-    // Add the item to the content view.
-    [[itemController view] setFrameOrigin:NSMakePoint(0, yOffset)];
-    [contentView addSubview:[itemController view]];
-    yOffset += NSHeight([[itemController view] frame]);
+      // Add the item to the content view.
+      [[itemController view] setFrameOrigin:NSMakePoint(0, yOffset)];
+      [contentView addSubview:[itemController view]];
+      yOffset += NSHeight([[itemController view] frame]);
 
-    // Keep track of the view controller.
-    [items_ addObject:itemController.get()];
+      // Keep track of the view controller.
+      [items_ addObject:itemController.get()];
+    }
   }
 
   // Leave some space at the top of the menu.
@@ -138,6 +213,14 @@ const CGFloat kSelectionAlpha = 0.06;
   NSRect frame = [[self window] frame];
   frame.size.height = yOffset;
   frame.size.width = std::min(width, kBubbleMaxWidth);
+
+  // Resize the separator to full width.
+  if (separatorView) {
+    NSRect separatorFrame = [separatorView frame];
+    separatorFrame.size.width = width;
+    [separatorView setFrame:separatorFrame];
+  }
+
   [[self window] setFrame:frame display:YES];
 }
 
@@ -208,10 +291,12 @@ const CGFloat kSelectionAlpha = 0.06;
 
 @synthesize modelIndex = modelIndex_;
 @synthesize isHighlighted = isHighlighted_;
+@synthesize iconView = iconView_;
 @synthesize nameField = nameField_;
 
 - (id)initWithModelIndex:(size_t)modelIndex
-          menuController:(ActionBoxMenuBubbleController*)controller {
+          menuController:(ActionBoxMenuBubbleController*)controller
+                profile:(Profile*)profile {
   if ((self = [super initWithNibName:@"ActionBoxMenuItem"
                               bundle:base::mac::FrameworkBundle()])) {
     modelIndex_ = modelIndex;
@@ -220,11 +305,24 @@ const CGFloat kSelectionAlpha = 0.06;
     [self loadView];
 
     gfx::Image icon = gfx::Image();
+    ActionBoxMenuModel* model = [controller model];
+    if (model->GetIconAt(modelIndex_, &icon)) {
+      extensionIconLoaderBridge_.reset();
+      [iconView_ setImage:icon.ToNSImage()];
+    } else if (model->GetTypeAt(modelIndex_) == ui::MenuModel::TYPE_COMMAND &&
+               model->IsItemExtension(modelIndex_)) {
+      // Creating an ExtensionIconLoaderBridge will call
+      // onExtensionIconImageChanged and set the |iconView_|.
+      [iconView_ setImage:nil];
+      extensionIconLoaderBridge_.reset(new ExtensionIconLoaderBridge(
+          profile,
+          model->GetExtensionAt(modelIndex_),
+          self));
+    } else {
+      extensionIconLoaderBridge_.reset();
+      [iconView_ setImage:nil];
+    }
 
-    if (controller.model->GetIconAt(modelIndex_, &icon))
-      iconView_.image = icon.ToNSImage();
-    else
-      iconView_.image = nil;
     nameField_.stringValue = base::SysUTF16ToNSString(
         controller.model->GetLabelAt(modelIndex_));
   }
@@ -262,6 +360,10 @@ const CGFloat kSelectionAlpha = 0.06;
 
   isHighlighted_ = isHighlighted;
   [[self view] setNeedsDisplay:YES];
+}
+
+- (void)onExtensionIconImageChanged:(NSImage*)image {
+  [iconView_ setImage:image];
 }
 
 @end
@@ -306,7 +408,10 @@ const CGFloat kSelectionAlpha = 0.06;
 - (void)drawRect:(NSRect)dirtyRect {
   NSColor* backgroundColor = nil;
   if ([viewController_ isHighlighted]) {
-    backgroundColor = [NSColor colorWithDeviceWhite:0.0 alpha:kSelectionAlpha];
+    ui::NativeTheme* nativeTheme = ui::NativeTheme::instance();
+    backgroundColor = gfx::SkColorToCalibratedNSColor(
+        nativeTheme->GetSystemColor(
+            ui::NativeTheme::kColorId_FocusedMenuItemBackgroundColor));
   } else {
     backgroundColor = [NSColor clearColor];
   }
@@ -358,6 +463,12 @@ const CGFloat kSelectionAlpha = 0.06;
   }
 
   [super accessibilityPerformAction:action];
+}
+
+- (NSColor*)highlightedMenuItemBackgroundColor {
+  ui::NativeTheme* nativeTheme = ui::NativeTheme::instance();
+  return gfx::SkColorToCalibratedNSColor(nativeTheme->GetSystemColor(
+      ui::NativeTheme::kColorId_FocusedMenuItemBackgroundColor));
 }
 
 @end

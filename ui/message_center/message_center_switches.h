@@ -10,8 +10,8 @@
 namespace message_center {
 namespace switches {
 
-// Disables the new design of message center, which shows each notification as a
-// card.
+// Enables rich templated notifications and NotificationCenter. In ChromeOS,
+// this flag also means the new design of message center bubble and popups.
 // TODO(mukai): Remove this flag when we don't need to provide both of designs
 // anymore (i.e. the new design becomes default and no one complains about it).
 // Note that some classes should be removed and renamed as the result of
@@ -19,7 +19,15 @@ namespace switches {
 // Affected class list:
 //  - WebNotificationButtonView2: remove '2' suffix and replace the old one.
 //  - WebNotificationButtonViewBase: merge into WebNotificationButtonView.
-MESSAGE_CENTER_EXPORT extern const char kDisableNewMessageCenterBubble[];
+MESSAGE_CENTER_EXPORT extern const char kEnableRichNotifications[];
+
+// Enables simple notifications with the new templates defined as part of rich
+// notifications. When kEnableRichNotifications is set those templates will be
+// used regardless of whether this flag is set, but this flag allows us to get
+// the new templates even when kEnableRichNotifications is not set. This is
+// useful for now because the kEnableRichNotifications functionality isn't
+// complete. TODO(dharcourt): Remove when kEnableRichNotifications is ready.
+MESSAGE_CENTER_EXPORT extern const char kEnableNewSimpleNotifications[];
 
 }  // namespace switches
 }  // namespace message_center

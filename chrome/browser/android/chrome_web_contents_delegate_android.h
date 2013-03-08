@@ -7,6 +7,7 @@
 
 #include <jni.h>
 
+#include "base/files/file_path.h"
 #include "base/time.h"
 #include "components/web_contents_delegate_android/web_contents_delegate_android.h"
 #include "content/public/browser/notification_observer.h"
@@ -51,16 +52,23 @@ class ChromeWebContentsDelegateAndroid
                                    int version,
                                    const std::vector<gfx::RectF>& rects,
                                    const gfx::RectF& active_rect) OVERRIDE;
-  virtual content::JavaScriptDialogCreator*
-  GetJavaScriptDialogCreator() OVERRIDE;
+  virtual content::JavaScriptDialogManager*
+  GetJavaScriptDialogManager() OVERRIDE;
   virtual bool CanDownload(content::RenderViewHost* source,
                            int request_id,
                            const std::string& request_method) OVERRIDE;
-  virtual void OnStartDownload(content::WebContents* source,
-                               content::DownloadItem* download) OVERRIDE;
   virtual void DidNavigateToPendingEntry(content::WebContents* source) OVERRIDE;
   virtual void DidNavigateMainFramePostCommit(
       content::WebContents* source) OVERRIDE;
+  virtual void RequestMediaAccessPermission(
+      content::WebContents* web_contents,
+      const content::MediaStreamRequest& request,
+      const content::MediaResponseCallback& callback) OVERRIDE;
+  virtual bool RequestPpapiBrokerPermission(
+      content::WebContents* web_contents,
+      const GURL& url,
+      const base::FilePath& plugin_path,
+      const base::Callback<void(bool)>& callback) OVERRIDE;
 
  private:
   // NotificationObserver implementation.

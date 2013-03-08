@@ -5,10 +5,13 @@
 #ifndef UI_COMPOSITOR_COMPOSITOR_H_
 #define UI_COMPOSITOR_COMPOSITOR_H_
 
+#include <string>
+
 #include "base/hash_tables.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/observer_list.h"
+#include "base/time.h"
 #include "cc/layer_tree_host_client.h"
 #include "ui/compositor/compositor_export.h"
 #include "ui/gfx/native_widget_types.h"
@@ -19,7 +22,7 @@
 class SkBitmap;
 
 namespace cc {
-class FontAtlas;
+class ContextProvider;
 class Layer;
 class LayerTreeHost;
 }
@@ -67,6 +70,11 @@ class COMPOSITOR_EXPORT ContextFactory {
   // with all compositors.
   virtual WebKit::WebGraphicsContext3D* CreateOffscreenContext() = 0;
 
+  virtual scoped_refptr<cc::ContextProvider>
+      OffscreenContextProviderForMainThread() = 0;
+  virtual scoped_refptr<cc::ContextProvider>
+      OffscreenContextProviderForCompositorThread() = 0;
+
   // Destroys per-compositor data.
   virtual void RemoveCompositor(Compositor* compositor) = 0;
 };
@@ -81,6 +89,10 @@ class COMPOSITOR_EXPORT DefaultContextFactory : public ContextFactory {
   virtual cc::OutputSurface* CreateOutputSurface(
       Compositor* compositor) OVERRIDE;
   virtual WebKit::WebGraphicsContext3D* CreateOffscreenContext() OVERRIDE;
+  virtual scoped_refptr<cc::ContextProvider>
+      OffscreenContextProviderForMainThread() OVERRIDE;
+  virtual scoped_refptr<cc::ContextProvider>
+      OffscreenContextProviderForCompositorThread() OVERRIDE;
   virtual void RemoveCompositor(Compositor* compositor) OVERRIDE;
 
   bool Initialize();
@@ -95,6 +107,9 @@ class COMPOSITOR_EXPORT DefaultContextFactory : public ContextFactory {
       bool offscreen);
 
   scoped_refptr<gfx::GLShareGroup> share_group_;
+  class DefaultContextProvider;
+  scoped_refptr<DefaultContextProvider> offscreen_contexts_main_thread_;
+  scoped_refptr<DefaultContextProvider> offscreen_contexts_compositor_thread_;
 
   DISALLOW_COPY_AND_ASSIGN(DefaultContextFactory);
 };
@@ -175,7 +190,8 @@ class COMPOSITOR_EXPORT CompositorLock
 // appropriately transformed texture for each transformed view in the widget's
 // view hierarchy.
 class COMPOSITOR_EXPORT Compositor
-    : NON_EXPORTED_BASE(public cc::LayerTreeHostClient) {
+    : NON_EXPORTED_BASE(public cc::LayerTreeHostClient),
+      public base::SupportsWeakPtr<Compositor> {
  public:
   Compositor(CompositorDelegate* delegate,
              gfx::AcceleratedWidget widget);
@@ -251,6 +267,9 @@ class COMPOSITOR_EXPORT Compositor
   // Signals swap has aborted (e.g. lost context).
   void OnSwapBuffersAborted();
 
+  void OnUpdateVSyncParameters(base::TimeTicks timebase,
+                               base::TimeDelta interval);
+
   // LayerTreeHostClient implementation.
   virtual void willBeginFrame() OVERRIDE;
   virtual void didBeginFrame() OVERRIDE;
@@ -267,8 +286,10 @@ class COMPOSITOR_EXPORT Compositor
   virtual void didCommitAndDrawFrame() OVERRIDE;
   virtual void didCompleteSwapBuffers() OVERRIDE;
   virtual void scheduleComposite() OVERRIDE;
-  virtual scoped_ptr<cc::FontAtlas> createFontAtlas() OVERRIDE;
-
+  virtual scoped_refptr<cc::ContextProvider>
+      OffscreenContextProviderForMainThread() OVERRIDE;
+  virtual scoped_refptr<cc::ContextProvider>
+      OffscreenContextProviderForCompositorThread() OVERRIDE;
 
   int last_started_frame() { return last_started_frame_; }
   int last_ended_frame() { return last_ended_frame_; }

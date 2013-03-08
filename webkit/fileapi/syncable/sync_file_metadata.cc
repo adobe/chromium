@@ -4,10 +4,12 @@
 
 #include "webkit/fileapi/syncable/sync_file_metadata.h"
 
-namespace fileapi {
+using sync_file_system::SyncFileType;
+
+namespace sync_file_system {
 
 SyncFileMetadata::SyncFileMetadata()
-    : file_type(SYNC_FILE_TYPE_UNKNOWN),
+    : file_type(sync_file_system::SYNC_FILE_TYPE_UNKNOWN),
       size(-1) {
 }
 
@@ -28,10 +30,7 @@ bool SyncFileMetadata::operator==(const SyncFileMetadata& that) const {
          last_modified == that.last_modified;
 }
 
-ConflictFileInfo::ConflictFileInfo() {}
-ConflictFileInfo::~ConflictFileInfo() {}
-
 LocalFileSyncInfo::LocalFileSyncInfo() {}
 LocalFileSyncInfo::~LocalFileSyncInfo() {}
 
-}  // namespace fileapi
+}  // namespace sync_file_system

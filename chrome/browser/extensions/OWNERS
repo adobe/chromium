@@ -7,15 +7,18 @@
 # chrome/common/extensions/OWNERS
 # chrome/renderer/extensions/OWNERS
 # chrome/renderer/resources/extensions/OWNERS
+# extensions/OWNERS
 aa@chromium.org
 asargent@chromium.org
 benwells@chromium.org
 erikkay@chromium.org
 finnur@chromium.org
 jeremya@chromium.org
+jyasskin@chromium.org
 kalman@chromium.org
 koz@chromium.org
-mihaip@chromium.org
 miket@chromium.org
 mpcomplete@chromium.org
 yoz@chromium.org
+
+per-file web_view_browsertest.cc=fsamuel@chromium.org

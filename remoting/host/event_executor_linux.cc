@@ -58,24 +58,22 @@ class EventExecutorLinux : public EventExecutor {
       scoped_ptr<protocol::ClipboardStub> client_clipboard) OVERRIDE;
 
  private:
-  // The actual implementation resides in EventExecutorWin::Core class.
-  class Core : public base::RefCountedThreadSafe<Core>, public EventExecutor {
+  // The actual implementation resides in EventExecutorLinux::Core class.
+  class Core : public base::RefCountedThreadSafe<Core> {
    public:
     explicit Core(scoped_refptr<base::SingleThreadTaskRunner> task_runner);
 
     bool Init();
 
-    // Clipboard stub interface.
-    virtual void InjectClipboardEvent(const ClipboardEvent& event)
-        OVERRIDE;
+    // Mirrors the ClipboardStub interface.
+    void InjectClipboardEvent(const ClipboardEvent& event);
 
-    // InputStub interface.
-    virtual void InjectKeyEvent(const KeyEvent& event) OVERRIDE;
-    virtual void InjectMouseEvent(const MouseEvent& event) OVERRIDE;
+    // Mirrors the InputStub interface.
+    void InjectKeyEvent(const KeyEvent& event);
+    void InjectMouseEvent(const MouseEvent& event);
 
-    // EventExecutor interface.
-    virtual void Start(
-        scoped_ptr<protocol::ClipboardStub> client_clipboard) OVERRIDE;
+    // Mirrors the EventExecutor interface.
+    void Start(scoped_ptr<protocol::ClipboardStub> client_clipboard);
 
     void Stop();
 
@@ -198,13 +196,14 @@ void EventExecutorLinux::Core::InjectClipboardEvent(
     return;
   }
 
+  // |clipboard_| will ignore unknown MIME-types, and verify the data's format.
   clipboard_->InjectClipboardEvent(event);
 }
 
 void EventExecutorLinux::Core::InjectKeyEvent(const KeyEvent& event) {
   // HostEventDispatcher should filter events missing the pressed field.
-  DCHECK(event.has_pressed());
-  DCHECK(event.has_usb_keycode());
+  if (!event.has_pressed() || !event.has_usb_keycode())
+    return;
 
   if (!task_runner_->BelongsToCurrentThread()) {
     task_runner_->PostTask(FROM_HERE,
@@ -213,11 +212,12 @@ void EventExecutorLinux::Core::InjectKeyEvent(const KeyEvent& event) {
   }
 
   int keycode = UsbKeycodeToNativeKeycode(event.usb_keycode());
+
   VLOG(3) << "Converting USB keycode: " << std::hex << event.usb_keycode()
           << " to keycode: " << keycode << std::dec;
 
   // Ignore events which can't be mapped.
-  if (keycode == kInvalidKeycode)
+  if (keycode == InvalidNativeKeycode())
     return;
 
   if (event.pressed()) {
@@ -292,13 +292,16 @@ void EventExecutorLinux::Core::InjectMouseEvent(const MouseEvent& event) {
         inject_motion = false;
     }
 
-    latest_mouse_position_ = new_mouse_position;
-
     if (inject_motion) {
-      VLOG(3) << "Moving mouse to " << event.x()
-              << "," << event.y();
+      latest_mouse_position_ =
+          SkIPoint::Make(std::max(0, new_mouse_position.x()),
+                         std::max(0, new_mouse_position.y()));
+
+      VLOG(3) << "Moving mouse to " << latest_mouse_position_.x()
+              << "," << latest_mouse_position_.y();
       XTestFakeMotionEvent(display_, DefaultScreen(display_),
-                           event.x(), event.y(),
+                           latest_mouse_position_.x(),
+                           latest_mouse_position_.y(),
                            CurrentTime);
     }
   }
@@ -360,9 +363,8 @@ void EventExecutorLinux::Core::InitMouseButtonMap() {
   }
   for (int i = 0; i < num_buttons; i++) {
     // Reverse the mapping.
-    if (pointer_mapping[i] > 0 && pointer_mapping[i] <= kNumPointerButtons) {
+    if (pointer_mapping[i] > 0 && pointer_mapping[i] <= kNumPointerButtons)
       pointer_button_map_[pointer_mapping[i] - 1] = i + 1;
-    }
   }
   for (int i = 0; i < kNumPointerButtons; i++) {
     if (pointer_button_map_[i] == -1)

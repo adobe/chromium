@@ -7,11 +7,8 @@
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
-#include "base/memory/weak_ptr.h"
 #include "content/public/renderer/render_view_observer.h"
-#include "skia/ext/refptr.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPermissionClient.h"
-#include "third_party/skia/include/core/SkPicture.h"
 
 namespace WebKit {
 
@@ -44,14 +41,20 @@ class AwRenderViewExt : public content::RenderViewObserver,
 
   void OnDoHitTest(int view_x, int view_y);
 
-  void OnEnableCapturePictureCallback(bool enable);
+  void OnSetEnableFixedLayoutMode(bool enabled);
 
-  void OnPictureUpdate(skia::RefPtr<SkPicture> picture);
+  void OnSetTextZoomLevel(double zoom_level);
+
+  void OnResetScrollAndScaleState();
+
+  void OnSetInitialPageScale(double page_scale_factor);
 
   // WebKit::WebPermissionClient implementation.
   virtual bool allowImage(WebKit::WebFrame* frame,
                           bool enabledPerSettings,
                           const WebKit::WebURL& imageURL) OVERRIDE;
+
+  bool capture_picture_enabled_;
 
   DISALLOW_COPY_AND_ASSIGN(AwRenderViewExt);
 };

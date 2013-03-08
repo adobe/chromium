@@ -11,8 +11,6 @@
 #include "base/threading/platform_thread.h"
 #include "sql/meta_table.h"
 
-class FilePath;
-
 namespace sql {
 class Connection;
 }
@@ -68,6 +66,10 @@ class DownloadDatabase {
   // |state| field from 3 to 4. Returns false if there was an error fixing the
   // database. See http://crbug.com/140687
   bool MigrateDownloadsState();
+
+  // Returns true if able to successfully add the last interrupt reason and the
+  // two target paths to downloads.
+  bool MigrateDownloadsReasonPathsAndDangerType();
 
   // Creates the downloads table if needed.
   bool InitDownloadTable();

@@ -10,8 +10,12 @@
 #include "base/compiler_specific.h"
 #include "content/public/browser/gpu_data_manager_observer.h"
 
+class PrefRegistrySimple;
+
 class GLStringManager : public content::GpuDataManagerObserver {
  public:
+  static void RegisterPrefs(PrefRegistrySimple* registry);
+
   GLStringManager();
   virtual ~GLStringManager();
 
@@ -20,9 +24,6 @@ class GLStringManager : public content::GpuDataManagerObserver {
 
   // content::GpuDataManagerObserver
   virtual void OnGpuInfoUpdate() OVERRIDE;
-  virtual void OnVideoMemoryUsageStatsUpdate(
-      const content::GPUVideoMemoryUsageStats& video_memory_usage_stats)
-          OVERRIDE {}
 
  private:
   std::string gl_vendor_;

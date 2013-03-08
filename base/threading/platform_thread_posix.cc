@@ -11,7 +11,7 @@
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/safe_strerror_posix.h"
-#include "base/threading/thread_local.h"
+#include "base/threading/thread_id_name_manager.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/tracked_objects.h"
 
@@ -30,7 +30,8 @@
 
 #if defined(OS_ANDROID)
 #include <sys/resource.h>
-#include "base/android/jni_android.h"
+#include "base/android/thread_utils.h"
+#include "jni/ThreadUtils_jni.h"
 #endif
 
 // TODO(bbudge) Use time.h when NaCl toolchain supports _POSIX_TIMERS
@@ -46,16 +47,37 @@ void InitThreading();
 
 namespace {
 
-#if !defined(OS_MACOSX)
-// Mac name code is in in platform_thread_mac.mm.
-LazyInstance<ThreadLocalPointer<char> >::Leaky
-    current_thread_name = LAZY_INSTANCE_INITIALIZER;
-#endif
-
 struct ThreadParams {
   PlatformThread::Delegate* delegate;
   bool joinable;
+  ThreadPriority priority;
 };
+
+void SetCurrentThreadPriority(ThreadPriority priority) {
+#if defined(OS_LINUX) || defined(OS_ANDROID)
+  switch (priority) {
+    case kThreadPriority_Normal:
+      NOTREACHED() << "Don't reset priority as not all processes can.";
+      break;
+    case kThreadPriority_RealtimeAudio:
+#if defined(OS_LINUX)
+      const int kNiceSetting = -10;
+      // Linux isn't posix compliant with setpriority(2), it will set a thread
+      // priority if it is passed a tid, not affecting the rest of the threads
+      // in the process.  Setting this priority will only succeed if the user
+      // has been granted permission to adjust nice values on the system.
+      if (setpriority(PRIO_PROCESS, PlatformThread::CurrentId(), kNiceSetting))
+        DVLOG(1) << "Failed to set nice value of thread to " << kNiceSetting;
+#elif defined(OS_ANDROID)
+      JNIEnv* env = base::android::AttachCurrentThread();
+      Java_ThreadUtils_setThreadPriorityAudio(env, PlatformThread::CurrentId());
+#endif  // defined(OS_LINUX)
+      break;
+  }
+#else  // !defined(OS_LINUX) && !defined(OS_ANDROID)
+  PlatformThread::SetThreadPriority(pthread_self(), priority);
+#endif
+}
 
 void* ThreadFunc(void* params) {
 #if defined(OS_ANDROID)
@@ -69,6 +91,11 @@ void* ThreadFunc(void* params) {
   PlatformThread::Delegate* delegate = thread_params->delegate;
   if (!thread_params->joinable)
     base::ThreadRestrictions::SetSingletonAllowed(false);
+
+  // If there is a non-default priority for this thread, set it now.
+  if (thread_params->priority != kThreadPriority_Normal)
+    SetCurrentThreadPriority(thread_params->priority);
+
   delete thread_params;
   delegate->ThreadMain();
 #if defined(OS_ANDROID)
@@ -132,25 +159,9 @@ bool CreateThread(size_t stack_size, bool joinable,
   ThreadParams* params = new ThreadParams;
   params->delegate = delegate;
   params->joinable = joinable;
-  success = !pthread_create(thread_handle, &attributes, ThreadFunc, params);
+  params->priority = priority;
 
-  if (priority != kThreadPriority_Normal) {
-#if defined(OS_LINUX)
-    if (priority == kThreadPriority_RealtimeAudio) {
-      // Linux isn't posix compliant with setpriority(2), it will set a thread
-      // priority if it is passed a tid, not affecting the rest of the threads
-      // in the process.  Setting this priority will only succeed if the user
-      // has been granted permission to adjust nice values on the system.
-      const int kNiceSetting = -10;
-      if (setpriority(PRIO_PROCESS, PlatformThread::CurrentId(), kNiceSetting))
-        DVLOG(1) << "Failed to set nice value of thread to " << kNiceSetting;
-    } else {
-      NOTREACHED() << "Unknown thread priority.";
-    }
-#else
-    PlatformThread::SetThreadPriority(*thread_handle, priority);
-#endif
-  }
+  success = !pthread_create(thread_handle, &attributes, ThreadFunc, params);
 
   pthread_attr_destroy(&attributes);
   if (!success)
@@ -164,7 +175,9 @@ bool CreateThread(size_t stack_size, bool joinable,
 PlatformThreadId PlatformThread::CurrentId() {
   // Pthreads doesn't have the concept of a thread ID, so we have to reach down
   // into the kernel.
-#if defined(OS_LINUX)
+#if defined(OS_MACOSX)
+  return pthread_mach_thread_np(pthread_self());
+#elif defined(OS_LINUX)
   return syscall(__NR_gettid);
 #elif defined(OS_ANDROID)
   return gettid();
@@ -203,9 +216,7 @@ void PlatformThread::Sleep(TimeDelta duration) {
 #if defined(OS_LINUX)
 // static
 void PlatformThread::SetName(const char* name) {
-  // have to cast away const because ThreadLocalPointer does not support const
-  // void*
-  current_thread_name.Pointer()->Set(const_cast<char*>(name));
+  ThreadIdNameManager::GetInstance()->SetName(CurrentId(), name);
   tracked_objects::ThreadData::InitializeThreadContext(name);
 
   // On linux we can get the thread names to show up in the debugger by setting
@@ -230,9 +241,7 @@ void PlatformThread::SetName(const char* name) {
 #else
 // static
 void PlatformThread::SetName(const char* name) {
-  // have to cast away const because ThreadLocalPointer does not support const
-  // void*
-  current_thread_name.Pointer()->Set(const_cast<char*>(name));
+  ThreadIdNameManager::GetInstance()->SetName(CurrentId(), name);
   tracked_objects::ThreadData::InitializeThreadContext(name);
 
   // (This should be relatively simple to implement for the BSDs; I
@@ -240,14 +249,10 @@ void PlatformThread::SetName(const char* name) {
 }
 #endif  // defined(OS_LINUX)
 
-
-#if !defined(OS_MACOSX)
-// Mac is implemented in platform_thread_mac.mm.
 // static
 const char* PlatformThread::GetName() {
-  return current_thread_name.Pointer()->Get();
+  return ThreadIdNameManager::GetInstance()->GetName(CurrentId());
 }
-#endif
 
 // static
 bool PlatformThread::Create(size_t stack_size, Delegate* delegate,
@@ -282,13 +287,18 @@ void PlatformThread::Join(PlatformThreadHandle thread_handle) {
   pthread_join(thread_handle, NULL);
 }
 
-#if !defined(OS_MACOSX)
-// Mac OS X uses lower-level mach APIs.
-
+#if !defined(OS_MACOSX) && !defined(OS_ANDROID)
+// Mac OS X uses lower-level mach APIs and Android uses Java APIs.
 // static
 void PlatformThread::SetThreadPriority(PlatformThreadHandle, ThreadPriority) {
   // TODO(crogers): Implement, see http://crbug.com/116172
 }
 #endif
+
+#if defined(OS_ANDROID)
+bool RegisterThreadUtils(JNIEnv* env) {
+  return RegisterNativesImpl(env);
+}
+#endif  // defined(OS_ANDROID)
 
 }  // namespace base

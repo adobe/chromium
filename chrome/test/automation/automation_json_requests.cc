@@ -5,7 +5,7 @@
 #include "chrome/test/automation/automation_json_requests.h"
 
 #include "base/basictypes.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/format_macros.h"
 #include "base/json/json_reader.h"
 #include "base/json/json_string_value_serializer.h"
@@ -351,7 +351,7 @@ bool SendReloadJSONRequest(
 bool SendCaptureEntirePageJSONRequest(
     AutomationMessageSender* sender,
     const WebViewLocator& locator,
-    const FilePath& path,
+    const base::FilePath& path,
     Error* error) {
   DictionaryValue dict;
   dict.SetString("command", "CaptureEntirePage");
@@ -677,7 +677,7 @@ bool SendDragAndDropFilePathsJSONRequest(
     const WebViewLocator& locator,
     int x,
     int y,
-    const std::vector<FilePath::StringType>& paths,
+    const std::vector<base::FilePath::StringType>& paths,
     Error* error) {
   DictionaryValue dict;
   dict.SetString("command", "DragAndDropFilePaths");
@@ -687,7 +687,7 @@ bool SendDragAndDropFilePathsJSONRequest(
 
   ListValue* list_value = new ListValue();
   for (size_t path_index = 0; path_index < paths.size(); ++path_index) {
-    list_value->Append(Value::CreateStringValue(paths[path_index]));
+    list_value->Append(new base::StringValue(paths[path_index]));
   }
   dict.Set("paths", list_value);
 
@@ -785,7 +785,7 @@ bool SendGetChromeDriverAutomationVersion(
 
 bool SendInstallExtensionJSONRequest(
     AutomationMessageSender* sender,
-    const FilePath& path,
+    const base::FilePath& path,
     bool with_ui,
     std::string* extension_id,
     Error* error) {

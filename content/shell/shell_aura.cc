@@ -7,6 +7,7 @@
 #include "base/command_line.h"
 #include "base/utf_string_conversions.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_view.h"
 #include "ui/aura/env.h"
 #include "ui/aura/root_window.h"
 #include "ui/aura/window.h"
@@ -87,7 +88,7 @@ class ShellWindowDelegateView : public WidgetDelegateView,
     contents_view_->SetLayoutManager(new FillLayout());
     web_view_ = new WebView(web_contents->GetBrowserContext());
     web_view_->SetWebContents(web_contents);
-    web_contents->Focus();
+    web_contents->GetView()->Focus();
     contents_view_->AddChildView(web_view_);
     Layout();
   }
@@ -278,14 +279,12 @@ MinimalAsh* Shell::minimal_ash_ = NULL;
 views::ViewsDelegate* Shell::views_delegate_ = NULL;
 
 // static
-void Shell::PlatformInitialize() {
+void Shell::PlatformInitialize(const gfx::Size& default_window_size) {
 #if defined(OS_CHROMEOS)
   chromeos::DBusThreadManager::Initialize();
-#endif
-#if defined(OS_CHROMEOS)
   gfx::Screen::SetScreenInstance(
-      gfx::SCREEN_TYPE_NATIVE, new aura::TestScreen);
-  minimal_ash_ = new content::MinimalAsh();
+      gfx::SCREEN_TYPE_NATIVE, aura::TestScreen::Create());
+  minimal_ash_ = new content::MinimalAsh(default_window_size);
 #else
   gfx::Screen::SetScreenInstance(
       gfx::SCREEN_TYPE_NATIVE, views::CreateDesktopScreen());
@@ -347,6 +346,9 @@ void Shell::PlatformCreateWindow(int width, int height) {
 #endif
 
   window_ = window_widget_->GetNativeWindow();
+  // Call ShowRootWindow on RootWindow created by MinimalAsh without
+  // which XWindow owned by RootWindow doesn't get mapped.
+  window_->GetRootWindow()->ShowRootWindow();
   window_widget_->Show();
 }
 

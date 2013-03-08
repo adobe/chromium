@@ -96,15 +96,15 @@ class Launcher::DelegateView : public views::WidgetDelegate,
 // Class used to slightly dim shelf items when maximized and visible. It also
 // makes sure the widget changes size to always be of the same size as the
 // shelf.
-class Launcher::DimmerView : public views::WidgetDelegateView,
-                   public aura::WindowObserver {
+class Launcher::DimmerView : public views::View,
+                             public aura::WindowObserver {
  public:
   explicit DimmerView(Launcher* launcher)
       : launcher_(launcher) {
     launcher_->widget()->GetNativeWindow()->AddObserver(this);
   }
 
-  ~DimmerView() {
+  virtual ~DimmerView() {
     if (launcher_)
       launcher_->widget()->GetNativeWindow()->RemoveObserver(this);
   }
@@ -158,6 +158,9 @@ Launcher::DelegateView::DelegateView(Launcher* launcher)
     : launcher_(launcher),
       focus_cycler_(NULL),
       alpha_(0) {
+  // Allow the launcher to surrender the focus to another window upon
+  // navigation completion by the user.
+  set_allow_deactivate_on_esc(true);
 }
 
 Launcher::DelegateView::~DelegateView() {
@@ -361,7 +364,11 @@ gfx::Rect Launcher::GetScreenBoundsOfItemIconForWindow(aura::Window* window) {
 void Launcher::ActivateLauncherItem(int index) {
   const ash::LauncherItems& items =
       launcher_view_->model()->items();
-  delegate_->ItemClicked(items[index], ui::EF_NONE);
+  ui::MouseEvent event(ui::ET_MOUSE_PRESSED,
+                       gfx::Point(),
+                       gfx::Point(),
+                       ui::EF_NONE);
+  delegate_->ItemClicked(items[index], event);
 }
 
 void Launcher::CycleWindowLinear(CycleDirection direction) {

@@ -8,39 +8,41 @@
 
 namespace sync_file_system {
 
-fileapi::SyncStatusCode GDataErrorCodeToSyncStatusCode(
+SyncStatusCode GDataErrorCodeToSyncStatusCode(
     google_apis::GDataErrorCode error) {
   // NOTE: Please update DriveFileSyncService::UpdateServiceState when you add
   // more error code mapping.
   switch (error) {
     case google_apis::HTTP_SUCCESS:
     case google_apis::HTTP_CREATED:
+    case google_apis::HTTP_NO_CONTENT:
     case google_apis::HTTP_FOUND:
-      return fileapi::SYNC_STATUS_OK;
+      return SYNC_STATUS_OK;
 
     case google_apis::HTTP_NOT_MODIFIED:
-      return fileapi::SYNC_STATUS_NOT_MODIFIED;
+      return SYNC_STATUS_NOT_MODIFIED;
 
     case google_apis::HTTP_CONFLICT:
-      return fileapi::SYNC_STATUS_HAS_CONFLICT;
+      return SYNC_STATUS_HAS_CONFLICT;
 
     case google_apis::HTTP_UNAUTHORIZED:
-      return fileapi::SYNC_STATUS_AUTHENTICATION_FAILED;
+      return SYNC_STATUS_AUTHENTICATION_FAILED;
 
     case google_apis::GDATA_NO_CONNECTION:
-      return fileapi::SYNC_STATUS_NETWORK_ERROR;
+      return SYNC_STATUS_NETWORK_ERROR;
 
     case google_apis::HTTP_INTERNAL_SERVER_ERROR:
+    case google_apis::HTTP_BAD_GATEWAY:
     case google_apis::HTTP_SERVICE_UNAVAILABLE:
     case google_apis::GDATA_CANCELLED:
     case google_apis::GDATA_NOT_READY:
-      return fileapi::SYNC_STATUS_RETRY;
+      return SYNC_STATUS_RETRY;
 
     case google_apis::HTTP_NOT_FOUND:
-      return fileapi::SYNC_FILE_ERROR_NOT_FOUND;
+      return SYNC_FILE_ERROR_NOT_FOUND;
 
     case google_apis::GDATA_FILE_ERROR:
-      return fileapi::SYNC_FILE_ERROR_FAILED;
+      return SYNC_FILE_ERROR_FAILED;
 
     case google_apis::HTTP_RESUME_INCOMPLETE:
     case google_apis::HTTP_BAD_REQUEST:
@@ -49,13 +51,31 @@ fileapi::SyncStatusCode GDataErrorCodeToSyncStatusCode(
     case google_apis::HTTP_PRECONDITION:
     case google_apis::GDATA_PARSE_ERROR:
     case google_apis::GDATA_OTHER_ERROR:
-      return fileapi::SYNC_STATUS_FAILED;
+      return SYNC_STATUS_FAILED;
 
     case google_apis::GDATA_NO_SPACE:
-      return fileapi::SYNC_FILE_ERROR_NO_SPACE;
+      return SYNC_FILE_ERROR_NO_SPACE;
   }
   NOTREACHED();
-  return fileapi::SYNC_STATUS_FAILED;
+  return SYNC_STATUS_FAILED;
+}
+
+google_apis::GDataErrorCode DriveUploadErrorToGDataErrorCode(
+    google_apis::DriveUploadError error) {
+  switch (error) {
+    case google_apis::DRIVE_UPLOAD_OK:
+       return google_apis::HTTP_SUCCESS;
+    case google_apis::DRIVE_UPLOAD_ERROR_NOT_FOUND:
+      return google_apis::HTTP_NOT_FOUND;
+    case google_apis::DRIVE_UPLOAD_ERROR_NO_SPACE:
+      return google_apis::GDATA_NO_SPACE;
+    case google_apis::DRIVE_UPLOAD_ERROR_CONFLICT:
+      return google_apis::HTTP_CONFLICT;
+    case google_apis::DRIVE_UPLOAD_ERROR_ABORT:
+      return google_apis::GDATA_OTHER_ERROR;
+  }
+  NOTREACHED();
+  return google_apis::GDATA_OTHER_ERROR;
 }
 
 }  // namespace sync_file_system

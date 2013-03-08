@@ -11,8 +11,8 @@
 #include "base/bind.h"
 #include "base/chromeos/chromeos_version.h"
 #include "base/command_line.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/message_loop.h"
 #include "base/process_util.h"
 #include "base/stringprintf.h"
@@ -28,7 +28,7 @@ const char kMouseControl[] = "/opt/google/mouse/mousecontrol";
 
 bool ScriptExists(const std::string& script) {
   DCHECK(content::BrowserThread::GetBlockingPool()->RunsTasksOnCurrentThread());
-  return file_util::PathExists(FilePath(script));
+  return file_util::PathExists(base::FilePath(script));
 }
 
 // Executes the input control script asynchronously, if it exists.

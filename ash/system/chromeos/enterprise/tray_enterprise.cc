@@ -4,6 +4,7 @@
 
 #include "ash/system/chromeos/enterprise/tray_enterprise.h"
 
+#include "ash/system/tray/hover_highlight_view.h"
 #include "ash/system/tray/system_tray_notifier.h"
 #include "ash/system/tray/tray_constants.h"
 #include "ash/system/tray/tray_views.h"
@@ -72,7 +73,7 @@ views::View* EnterpriseDefaultView::CreateChildView(
 }
 
 TrayEnterprise::TrayEnterprise(SystemTray* system_tray)
-    : TrayImageItem(system_tray, IDR_AURA_UBER_TRAY_ENTERPRISE_LIGHT),
+    : SystemTrayItem(system_tray),
       default_view_(NULL) {
   Shell::GetInstance()->system_tray_notifier()->
       AddEnterpriseDomainObserver(this);
@@ -105,18 +106,11 @@ void TrayEnterprise::DestroyDefaultView() {
   default_view_ = NULL;
 }
 
-bool TrayEnterprise::GetInitialVisibility() {
-  return !Shell::GetInstance()->system_tray_delegate()->
-      GetEnterpriseMessage().empty();
-}
-
 void TrayEnterprise::OnEnterpriseDomainChanged() {
   UpdateEnterpriseMessage();
-  if (tray_view())
-    tray_view()->SetVisible(GetInitialVisibility());
 }
 
-void TrayEnterprise::ClickedOn(views::View* sender) {
+void TrayEnterprise::OnViewClicked(views::View* sender) {
   Shell::GetInstance()->system_tray_delegate()->ShowEnterpriseInfo();
 }
 

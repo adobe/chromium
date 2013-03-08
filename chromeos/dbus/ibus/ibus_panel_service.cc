@@ -19,8 +19,6 @@
 #include "dbus/object_proxy.h"
 
 namespace chromeos {
-// TODO(nona): Remove ibus namespace after complete libibus removal.
-namespace ibus {
 
 class IBusPanelServiceImpl : public IBusPanelService {
  public:
@@ -139,14 +137,14 @@ class IBusPanelServiceImpl : public IBusPanelService {
 
   // IBusPanelService override.
   virtual void SetUpCandidateWindowHandler(
-      IBusPanelCandidateWindowHandlerInterface* handler) {
+      IBusPanelCandidateWindowHandlerInterface* handler) OVERRIDE {
     DCHECK(handler);
     candidate_window_handler_ = handler;
   }
 
   // IBusPanelService override.
   virtual void SetUpPropertyHandler(
-      IBusPanelPropertyHandlerInterface* handler) {
+      IBusPanelPropertyHandlerInterface* handler) OVERRIDE {
     DCHECK(handler);
     property_handler_ = handler;
   }
@@ -200,8 +198,8 @@ class IBusPanelServiceImpl : public IBusPanelService {
       return;
 
     dbus::MessageReader reader(method_call);
-    ibus::IBusLookupTable table;
-    if (!ibus::PopIBusLookupTable(&reader, &table)) {
+    IBusLookupTable table;
+    if (!PopIBusLookupTable(&reader, &table)) {
       LOG(WARNING) << "UpdateLookupTable called with incorrect parameters: "
                    << method_call->ToString();
       return;
@@ -213,8 +211,7 @@ class IBusPanelServiceImpl : public IBusPanelService {
       return;
     }
     candidate_window_handler_->UpdateLookupTable(table, visible);
-    dbus::Response* response = dbus::Response::FromMethodCall(method_call);
-    response_sender.Run(response);
+    response_sender.Run(dbus::Response::FromMethodCall(method_call));
   }
 
   // Handles HideLookupTable method call from ibus-daemon.
@@ -224,8 +221,7 @@ class IBusPanelServiceImpl : public IBusPanelService {
       return;
 
     candidate_window_handler_->HideLookupTable();
-    dbus::Response* response = dbus::Response::FromMethodCall(method_call);
-    response_sender.Run(response);
+    response_sender.Run(dbus::Response::FromMethodCall(method_call));
   }
 
   // Handles UpdateAuxiliaryText method call from ibus-daemon.
@@ -237,7 +233,7 @@ class IBusPanelServiceImpl : public IBusPanelService {
 
     dbus::MessageReader reader(method_call);
     std::string text;
-    if (!ibus::PopStringFromIBusText(&reader, &text)) {
+    if (!PopStringFromIBusText(&reader, &text)) {
       LOG(WARNING) << "UpdateAuxiliaryText called with incorrect parameters: "
                    << method_call->ToString();
       return;
@@ -249,8 +245,7 @@ class IBusPanelServiceImpl : public IBusPanelService {
       return;
     }
     candidate_window_handler_->UpdateAuxiliaryText(text, visible);
-    dbus::Response* response = dbus::Response::FromMethodCall(method_call);
-    response_sender.Run(response);
+    response_sender.Run(dbus::Response::FromMethodCall(method_call));
   }
 
   // Handles HideAuxiliaryText method call from ibus-daemon.
@@ -260,8 +255,7 @@ class IBusPanelServiceImpl : public IBusPanelService {
       return;
 
     candidate_window_handler_->HideAuxiliaryText();
-    dbus::Response* response = dbus::Response::FromMethodCall(method_call);
-    response_sender.Run(response);
+    response_sender.Run(dbus::Response::FromMethodCall(method_call));
   }
 
   // Handles UpdatePreeditText method call from ibus-daemon.
@@ -272,7 +266,7 @@ class IBusPanelServiceImpl : public IBusPanelService {
 
     dbus::MessageReader reader(method_call);
     std::string text;
-    if (!ibus::PopStringFromIBusText(&reader, &text)) {
+    if (!PopStringFromIBusText(&reader, &text)) {
       LOG(WARNING) << "UpdatePreeditText called with incorrect parameters: "
                    << method_call->ToString();
       return;
@@ -290,8 +284,7 @@ class IBusPanelServiceImpl : public IBusPanelService {
       return;
     }
     candidate_window_handler_->UpdatePreeditText(text, cursor_pos, visible);
-    dbus::Response* response = dbus::Response::FromMethodCall(method_call);
-    response_sender.Run(response);
+    response_sender.Run(dbus::Response::FromMethodCall(method_call));
   }
 
   // Handles HidePreeditText method call from ibus-daemon.
@@ -301,8 +294,7 @@ class IBusPanelServiceImpl : public IBusPanelService {
       return;
 
     candidate_window_handler_->HidePreeditText();
-    dbus::Response* response = dbus::Response::FromMethodCall(method_call);
-    response_sender.Run(response);
+    response_sender.Run(dbus::Response::FromMethodCall(method_call));
   }
 
   // Handles RegisterProperties method call from ibus-daemon.
@@ -313,16 +305,15 @@ class IBusPanelServiceImpl : public IBusPanelService {
       return;
 
     dbus::MessageReader reader(method_call);
-    ibus::IBusPropertyList properties;
-    if (!ibus::PopIBusPropertyList(&reader, &properties)) {
+    IBusPropertyList properties;
+    if (!PopIBusPropertyList(&reader, &properties)) {
       DLOG(WARNING) << "RegisterProperties called with incorrect parameters:"
                     << method_call->ToString();
       return;
     }
     property_handler_->RegisterProperties(properties);
 
-    dbus::Response* response = dbus::Response::FromMethodCall(method_call);
-    response_sender.Run(response);
+    response_sender.Run(dbus::Response::FromMethodCall(method_call));
   }
 
   // Handles UpdateProperty method call from ibus-daemon.
@@ -332,21 +323,22 @@ class IBusPanelServiceImpl : public IBusPanelService {
       return;
 
     dbus::MessageReader reader(method_call);
-    ibus::IBusProperty property;
-    if (!ibus::PopIBusProperty(&reader, &property)) {
+    IBusProperty property;
+    if (!PopIBusProperty(&reader, &property)) {
       DLOG(WARNING) << "RegisterProperties called with incorrect parameters:"
                     << method_call->ToString();
       return;
     }
     property_handler_->UpdateProperty(property);
 
-    dbus::Response* response = dbus::Response::FromMethodCall(method_call);
-    response_sender.Run(response);
+    response_sender.Run(dbus::Response::FromMethodCall(method_call));
   }
 
   void SetCursorLocation(const ibus::Rect& cursor_location,
                          const ibus::Rect& composition_head) {
-    // TODO(nona): implement this function.
+    if (candidate_window_handler_)
+      candidate_window_handler_->SetCursorLocation(cursor_location,
+                                                   composition_head);
   }
 
   // Handles FocusIn, FocusOut, StateChanged method calls from IBus, and ignores
@@ -356,8 +348,7 @@ class IBusPanelServiceImpl : public IBusPanelService {
     if (!property_handler_)
       return;
 
-    dbus::Response* response = dbus::Response::FromMethodCall(method_call);
-    response_sender.Run(response);
+    response_sender.Run(dbus::Response::FromMethodCall(method_call));
   }
 
   // Called when the method call is exported.
@@ -399,13 +390,13 @@ class IBusPanelServiceDaemonlessImpl : public IBusPanelService {
 
   // IBusPanelService override.
   virtual void SetUpCandidateWindowHandler(
-      IBusPanelCandidateWindowHandlerInterface* handler) {
+      IBusPanelCandidateWindowHandlerInterface* handler) OVERRIDE {
     // TODO(nona): Implement this.
   }
 
   // IBusPanelService override.
   virtual void SetUpPropertyHandler(
-      IBusPanelPropertyHandlerInterface* handler) {
+      IBusPanelPropertyHandlerInterface* handler) OVERRIDE {
     // TODO(nona): Implement this.
   }
 
@@ -458,5 +449,4 @@ IBusPanelService* IBusPanelService::Create(
   }
 }
 
-}  // namespace ibus
 }  // namespace chromeos

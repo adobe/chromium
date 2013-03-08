@@ -4,12 +4,12 @@
 
 #include "base/file_util.h"
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/path_service.h"
 
 namespace file_util {
 
-bool GetShmemTempDir(FilePath* path, bool executable) {
+bool GetShmemTempDir(base::FilePath* path, bool executable) {
   return PathService::Get(base::DIR_CACHE, path);
 }
 

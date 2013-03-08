@@ -7,22 +7,22 @@
 #include <windows.h>
 #include <string>
 
+#include "base/files/file_path.h"
 #include "base/logging.h"
-#include "base/file_path.h"
 #include "base/path_service.h"
 #include "base/scoped_native_library.h"
 #include "base/utf_string_conversions.h"
 #include "base/win/registry.h"
 #include "base/win/windows_version.h"
-#include "remoting/capturer/win/desktop.h"
-#include "remoting/capturer/win/scoped_thread_desktop.h"
+#include "media/video/capture/screen/win/desktop.h"
+#include "media/video/capture/screen/win/scoped_thread_desktop.h"
 
 namespace remoting {
 
 namespace {
 
 // Names of the API and library implementing software SAS generation.
-const FilePath::CharType kSasDllFileName[] = FILE_PATH_LITERAL("sas.dll");
+const base::FilePath::CharType kSasDllFileName[] = FILE_PATH_LITERAL("sas.dll");
 const char kSendSasName[] = "SendSAS";
 
 // The prototype of SendSAS().
@@ -144,7 +144,7 @@ bool SasInjectorWin::InjectSas() {
   // Load sas.dll. The library is expected to be in the same folder as this
   // binary.
   if (!sas_dll_.is_valid()) {
-    FilePath dir_path;
+    base::FilePath dir_path;
     if (!PathService::Get(base::DIR_EXE, &dir_path)) {
       LOG(ERROR) << "Failed to get the executable file name.";
       return false;
@@ -190,15 +190,15 @@ bool SasInjectorXp::InjectSas() {
   const wchar_t kSasWindowClassName[] = L"SAS window class";
   const wchar_t kSasWindowTitle[] = L"SAS window";
 
-  scoped_ptr<remoting::Desktop> winlogon_desktop(
-      remoting::Desktop::GetDesktop(kWinlogonDesktopName));
+  scoped_ptr<media::Desktop> winlogon_desktop(
+      media::Desktop::GetDesktop(kWinlogonDesktopName));
   if (!winlogon_desktop.get()) {
     LOG_GETLASTERROR(ERROR)
         << "Failed to open '" << kWinlogonDesktopName << "' desktop";
     return false;
   }
 
-  remoting::ScopedThreadDesktop desktop;
+  media::ScopedThreadDesktop desktop;
   if (!desktop.SetThreadDesktop(winlogon_desktop.Pass())) {
     LOG_GETLASTERROR(ERROR)
         << "Failed to switch to '" << kWinlogonDesktopName << "' desktop";

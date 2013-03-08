@@ -8,19 +8,55 @@
 #include "base/process.h"
 #include "chrome/browser/extensions/api/messaging/native_message_process_host.h"
 
+class CommandLine;
+class GURL;
+
+namespace base {
 class FilePath;
+}
 
 namespace extensions {
 
+class NativeMessagingHostManifest;
+
 class NativeProcessLauncher {
  public:
+  // Callback that's called after the process has been launched. |result| is
+  // set to false in case of a failure. Handler must take ownership of the IO
+  // handles.
+  typedef base::Callback<void (bool result,
+                               base::PlatformFile read_file,
+                               base::PlatformFile write_file)> LaunchedCallback;
+
+  static scoped_ptr<NativeProcessLauncher> CreateDefault();
+
   NativeProcessLauncher() {}
   virtual ~NativeProcessLauncher() {}
-  virtual bool LaunchNativeProcess(
-      const FilePath& path,
-      base::ProcessHandle* native_process_handle,
-      NativeMessageProcessHost::FileHandle* read_file,
-      NativeMessageProcessHost::FileHandle* write_file) const;
+
+  // Finds native messaging host with the specified name and launches it
+  // asynchronously. Also checks that the specified |origin| is permitted to
+  // access the host. |callback| is called after the process has been started.
+  // If the launcher is destroyed before the callback is called then the call is
+  // canceled and the process is stopped if it has been started already (by
+  // closing IO pipes).
+  virtual void Launch(const GURL& origin,
+                      const std::string& native_host_name,
+                      LaunchedCallback callback) const = 0;
+
+ protected:
+  // The following two methods are platform specific and are implemented in
+  // platform-specific .cc files.
+
+  // Loads manifest for the native messaging host |name|.
+  static scoped_ptr<NativeMessagingHostManifest> FindAndLoadManifest(
+      const std::string& native_host_name,
+      std::string* error_message);
+
+  // Launches native messaging process.
+  static bool LaunchNativeProcess(
+      const CommandLine& command_line,
+      base::PlatformFile* read_file,
+      base::PlatformFile* write_file);
 
  private:
   DISALLOW_COPY_AND_ASSIGN(NativeProcessLauncher);

@@ -5,6 +5,7 @@
 #include "ash/magnifier/magnification_controller.h"
 #include "ash/shell.h"
 #include "base/command_line.h"
+#include "base/prefs/pref_service.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/accessibility/accessibility_util.h"
 #include "chrome/browser/chromeos/accessibility/magnification_manager.h"
@@ -13,13 +14,13 @@
 #include "chrome/browser/chromeos/login/login_utils.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/login/user_manager_impl.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_profile.h"
+#include "components/user_prefs/user_prefs.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace chromeos {
@@ -65,8 +66,8 @@ Profile* profile() {
   return profile;
 }
 
-PrefServiceBase* prefs() {
-  return PrefServiceBase::FromBrowserContext(profile());
+PrefService* prefs() {
+  return components::UserPrefs::Get(profile());
 }
 
 void EnableScreenManagnifierToPref(bool enabled) {

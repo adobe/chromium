@@ -26,6 +26,7 @@ class InputMethodEngine {
 
     std::string type;
     std::string key;
+    std::string code;
     bool alt_key;
     bool ctrl_key;
     bool shift_key;
@@ -133,6 +134,12 @@ class InputMethodEngine {
     // Called when a menu item for this IME is interacted with.
     virtual void OnMenuItemActivated(const std::string& engine_id,
                                      const std::string& menu_id) = 0;
+
+    // Called when a surrounding text is changed.
+    virtual void OnSurroundingTextChanged(const std::string& engine_id,
+                                          const std::string& text,
+                                          int cursor_pos,
+                                          int anchor_pos) = 0;
   };
 
   virtual ~InputMethodEngine() {}
@@ -194,6 +201,18 @@ class InputMethodEngine {
   // Inform the engine that a key event has been processed.
   virtual void KeyEventDone(input_method::KeyEventHandle* key_data,
                             bool handled) = 0;
+
+  // Deletes |number_of_chars| unicode characters as the basis of |offset| from
+  // the surrounding text. The |offset| is relative position based on current
+  // caret.
+  // NOTE: Currently we are falling back to backspace forwarding workaround,
+  // because delete_surrounding_text is not supported in Chrome. So this
+  // function is restricted for only preceding text.
+  // TODO(nona): Support full spec delete surrounding text.
+  virtual bool DeleteSurroundingText(int context_id,
+                                     int offset,
+                                     size_t number_of_chars,
+                                     std::string* error) = 0;
 
   // Create an IME engine.
   static InputMethodEngine* CreateEngine(

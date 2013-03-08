@@ -138,6 +138,11 @@ TEST_F(DiskCacheBackendTest, AppCacheBasics) {
   BackendBasics();
 }
 
+TEST_F(DiskCacheBackendTest, ShaderCacheBasics) {
+  SetCacheType(net::SHADER_CACHE);
+  BackendBasics();
+}
+
 void DiskCacheBackendTest::BackendKeying() {
   InitCache();
   const char* kName1 = "the first key";
@@ -198,6 +203,11 @@ TEST_F(DiskCacheBackendTest, AppCacheKeying) {
   BackendKeying();
 }
 
+TEST_F(DiskCacheBackendTest, ShaderCacheKeying) {
+  SetCacheType(net::SHADER_CACHE);
+  BackendKeying();
+}
+
 TEST_F(DiskCacheTest, CreateBackend) {
   net::TestCompletionCallback cb;
 
@@ -230,8 +240,9 @@ TEST_F(DiskCacheTest, CreateBackend) {
     delete cache;
     cache = NULL;
 
-    rv = disk_cache::CreateCacheBackend(net::MEMORY_CACHE, FilePath(), 0, false,
-                                        NULL, NULL, &cache, cb.callback());
+    rv = disk_cache::CreateCacheBackend(net::MEMORY_CACHE, base::FilePath(), 0,
+                                        false, NULL, NULL, &cache,
+                                        cb.callback());
     ASSERT_EQ(net::OK, cb.GetResult(rv));
     ASSERT_TRUE(cache);
     delete cache;
@@ -243,7 +254,7 @@ TEST_F(DiskCacheTest, CreateBackend) {
 // Testst that re-creating the cache performs the expected cleanup.
 TEST_F(DiskCacheBackendTest, CreateBackend_MissingFile) {
   ASSERT_TRUE(CopyTestCache("bad_entry"));
-  FilePath filename = cache_path_.AppendASCII("data_1");
+  base::FilePath filename = cache_path_.AppendASCII("data_1");
   file_util::Delete(filename, false);
   DisableFirstCleanup();
   SetForceCreation();
@@ -256,7 +267,7 @@ TEST_F(DiskCacheBackendTest, CreateBackend_MissingFile) {
 TEST_F(DiskCacheBackendTest, ExternalFiles) {
   InitCache();
   // First, let's create a file on the folder.
-  FilePath filename = cache_path_.AppendASCII("f_000001");
+  base::FilePath filename = cache_path_.AppendASCII("f_000001");
 
   const int kSize = 50;
   scoped_refptr<net::IOBuffer> buffer1(new net::IOBuffer(kSize));
@@ -441,7 +452,7 @@ TEST_F(DiskCacheBackendTest, ShutdownWithPendingCreate_Fast) {
 
 TEST_F(DiskCacheTest, TruncatedIndex) {
   ASSERT_TRUE(CleanupCacheDir());
-  FilePath index = cache_path_.AppendASCII("index");
+  base::FilePath index = cache_path_.AppendASCII("index");
   ASSERT_EQ(5, file_util::WriteFile(index, "hello", 5));
 
   base::Thread cache_thread("CacheThread");
@@ -591,6 +602,14 @@ TEST_F(DiskCacheBackendTest, AppCacheLoad) {
   BackendLoad();
 }
 
+TEST_F(DiskCacheBackendTest, ShaderCacheLoad) {
+  SetCacheType(net::SHADER_CACHE);
+  // Work with a tiny index table (16 entries)
+  SetMask(0xf);
+  SetMaxSize(0x100000);
+  BackendLoad();
+}
+
 // Tests the chaining of an entry to the current head.
 void DiskCacheBackendTest::BackendChain() {
   SetMask(0x1);  // 2-entry table.
@@ -615,6 +634,11 @@ TEST_F(DiskCacheBackendTest, NewEvictionChain) {
 
 TEST_F(DiskCacheBackendTest, AppCacheChain) {
   SetCacheType(net::APP_CACHE);
+  BackendChain();
+}
+
+TEST_F(DiskCacheBackendTest, ShaderCacheChain) {
+  SetCacheType(net::SHADER_CACHE);
   BackendChain();
 }
 
@@ -728,6 +752,12 @@ TEST_F(DiskCacheBackendTest, AppCacheInvalidEntry) {
   BackendInvalidEntry();
 }
 
+// We'll be leaking memory from this test.
+TEST_F(DiskCacheBackendTest, ShaderCacheInvalidEntry) {
+  SetCacheType(net::SHADER_CACHE);
+  BackendInvalidEntry();
+}
+
 // Almost the same test, but this time crash the cache after reading an entry.
 // We'll be leaking memory from this test.
 void DiskCacheBackendTest::BackendInvalidEntryRead() {
@@ -775,6 +805,12 @@ TEST_F(DiskCacheBackendTest, NewEvictionInvalidEntryRead) {
 // We'll be leaking memory from this test.
 TEST_F(DiskCacheBackendTest, AppCacheInvalidEntryRead) {
   SetCacheType(net::APP_CACHE);
+  BackendInvalidEntryRead();
+}
+
+// We'll be leaking memory from this test.
+TEST_F(DiskCacheBackendTest, ShaderCacheInvalidEntryRead) {
+  SetCacheType(net::SHADER_CACHE);
   BackendInvalidEntryRead();
 }
 
@@ -841,6 +877,12 @@ TEST_F(DiskCacheBackendTest, NewEvictionInvalidEntryWithLoad) {
 // We'll be leaking memory from this test.
 TEST_F(DiskCacheBackendTest, AppCacheInvalidEntryWithLoad) {
   SetCacheType(net::APP_CACHE);
+  BackendInvalidEntryWithLoad();
+}
+
+// We'll be leaking memory from this test.
+TEST_F(DiskCacheBackendTest, ShaderCacheInvalidEntryWithLoad) {
+  SetCacheType(net::SHADER_CACHE);
   BackendInvalidEntryWithLoad();
 }
 
@@ -1027,6 +1069,11 @@ TEST_F(DiskCacheBackendTest, MemoryOnlyEnumerations) {
   BackendEnumerations();
 }
 
+TEST_F(DiskCacheBackendTest, ShaderCacheEnumerations) {
+  SetCacheType(net::SHADER_CACHE);
+  BackendEnumerations();
+}
+
 TEST_F(DiskCacheBackendTest, AppCacheEnumerations) {
   SetCacheType(net::APP_CACHE);
   BackendEnumerations();
@@ -1094,6 +1141,46 @@ TEST_F(DiskCacheBackendTest, MemoryOnlyEnumerations2) {
 TEST_F(DiskCacheBackendTest, AppCacheEnumerations2) {
   SetCacheType(net::APP_CACHE);
   BackendEnumerations2();
+}
+
+TEST_F(DiskCacheBackendTest, ShaderCacheEnumerations2) {
+  SetCacheType(net::SHADER_CACHE);
+  BackendEnumerations2();
+}
+
+// Verify that ReadData calls do not update the LRU cache
+// when using the SHADER_CACHE type.
+TEST_F(DiskCacheBackendTest, ShaderCacheEnumerationReadData) {
+  SetCacheType(net::SHADER_CACHE);
+  InitCache();
+  const std::string first("first");
+  const std::string second("second");
+  disk_cache::Entry *entry1, *entry2;
+  const int kSize = 50;
+  scoped_refptr<net::IOBuffer> buffer1(new net::IOBuffer(kSize));
+
+  ASSERT_EQ(net::OK, CreateEntry(first, &entry1));
+  memset(buffer1->data(), 0, kSize);
+  base::strlcpy(buffer1->data(), "And the data to save", kSize);
+  EXPECT_EQ(kSize, WriteData(entry1, 0, 0, buffer1, kSize, false));
+
+  ASSERT_EQ(net::OK, CreateEntry(second, &entry2));
+  entry2->Close();
+
+  FlushQueueForTest();
+
+  // Make sure that the timestamp is not the same.
+  AddDelay();
+
+  // Read from the last item in the LRU.
+  EXPECT_EQ(kSize, ReadData(entry1, 0, 0, buffer1, kSize));
+  entry1->Close();
+
+  void* iter = NULL;
+  ASSERT_EQ(net::OK, OpenNextEntry(&iter, &entry2));
+  EXPECT_EQ(entry2->GetKey(), second);
+  entry2->Close();
+  cache_->EndEnumeration(&iter);
 }
 
 // Verify handling of invalid entries while doing enumerations.
@@ -2324,6 +2411,11 @@ TEST_F(DiskCacheBackendTest, AppCacheOnlyDoomAll) {
   BackendDoomAll();
 }
 
+TEST_F(DiskCacheBackendTest, ShaderCacheOnlyDoomAll) {
+  SetCacheType(net::SHADER_CACHE);
+  BackendDoomAll();
+}
+
 // If the index size changes when we doom the cache, we should not crash.
 void DiskCacheBackendTest::BackendDoomAll2() {
   EXPECT_EQ(2, cache_->GetEntryCount());
@@ -2520,7 +2612,7 @@ TEST_F(DiskCacheBackendTest, FileSharing) {
 
   disk_cache::Addr address(0x80000001);
   ASSERT_TRUE(cache_impl_->CreateExternalFile(&address));
-  FilePath name = cache_impl_->GetFileName(address);
+  base::FilePath name = cache_impl_->GetFileName(address);
 
   scoped_refptr<disk_cache::File> file(new disk_cache::File(false));
   file->Init(name);
@@ -2554,6 +2646,30 @@ TEST_F(DiskCacheBackendTest, FileSharing) {
 }
 
 TEST_F(DiskCacheBackendTest, UpdateRankForExternalCacheHit) {
+  SetDirectMode();
+  InitCache();
+
+  disk_cache::Entry* entry;
+
+  for (int i = 0; i < 2; ++i) {
+    std::string key = StringPrintf("key%d", i);
+    ASSERT_EQ(net::OK, CreateEntry(key, &entry));
+    entry->Close();
+  }
+
+  // Ping the oldest entry.
+  cache_->OnExternalCacheHit("key0");
+
+  TrimForTest(false);
+
+  // Make sure the older key remains.
+  EXPECT_EQ(1, cache_->GetEntryCount());
+  ASSERT_EQ(net::OK, OpenEntry("key0", &entry));
+  entry->Close();
+}
+
+TEST_F(DiskCacheBackendTest, ShaderCacheUpdateRankForExternalCacheHit) {
+  SetCacheType(net::SHADER_CACHE);
   SetDirectMode();
   InitCache();
 

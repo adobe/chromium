@@ -35,6 +35,7 @@
 #include "chrome/browser/ui/webui/options/language_dictionary_overlay_handler.h"
 #include "chrome/browser/ui/webui/options/language_options_handler.h"
 #include "chrome/browser/ui/webui/options/manage_profile_handler.h"
+#include "chrome/browser/ui/webui/options/managed_user_passphrase_handler.h"
 #include "chrome/browser/ui/webui/options/managed_user_settings_handler.h"
 #include "chrome/browser/ui/webui/options/media_devices_selection_handler.h"
 #include "chrome/browser/ui/webui/options/media_galleries_handler.h"
@@ -69,8 +70,10 @@
 #include "chrome/browser/ui/webui/options/chromeos/core_chromeos_options_handler.h"
 #include "chrome/browser/ui/webui/options/chromeos/cros_language_options_handler.h"
 #include "chrome/browser/ui/webui/options/chromeos/display_options_handler.h"
+#include "chrome/browser/ui/webui/options/chromeos/display_overscan_handler.h"
 #include "chrome/browser/ui/webui/options/chromeos/internet_options_handler.h"
 #include "chrome/browser/ui/webui/options/chromeos/keyboard_handler.h"
+#include "chrome/browser/ui/webui/options/chromeos/kiosk_apps_handler.h"
 #include "chrome/browser/ui/webui/options/chromeos/language_chewing_handler.h"
 #include "chrome/browser/ui/webui/options/chromeos/language_hangul_handler.h"
 #include "chrome/browser/ui/webui/options/chromeos/language_mozc_handler.h"
@@ -264,6 +267,8 @@ OptionsUI::OptionsUI(content::WebUI* web_ui)
   AddOptionsPageUIHandler(localized_strings,
                           new LanguageDictionaryOverlayHandler());
   AddOptionsPageUIHandler(localized_strings, new ManageProfileHandler());
+  AddOptionsPageUIHandler(localized_strings,
+                          new ManagedUserPassphraseHandler());
   AddOptionsPageUIHandler(localized_strings, new ManagedUserSettingsHandler());
   AddOptionsPageUIHandler(localized_strings, new PasswordManagerHandler());
   AddOptionsPageUIHandler(localized_strings, new SearchEngineManagerHandler());
@@ -278,11 +283,15 @@ OptionsUI::OptionsUI(content::WebUI* web_ui)
                           new chromeos::options::BluetoothOptionsHandler());
   AddOptionsPageUIHandler(localized_strings,
                           new chromeos::options::DisplayOptionsHandler());
+  AddOptionsPageUIHandler(localized_strings,
+                          new chromeos::options::DisplayOverscanHandler());
   AddOptionsPageUIHandler(localized_strings, new InternetOptionsHandler());
   AddOptionsPageUIHandler(localized_strings,
                           new chromeos::options::LanguageChewingHandler());
   AddOptionsPageUIHandler(localized_strings,
                           new chromeos::options::KeyboardHandler());
+  AddOptionsPageUIHandler(localized_strings,
+                          new chromeos::options::KioskAppsHandler());
   AddOptionsPageUIHandler(localized_strings,
                           new chromeos::options::LanguageHangulHandler());
   AddOptionsPageUIHandler(localized_strings,
@@ -313,17 +322,17 @@ OptionsUI::OptionsUI(content::WebUI* web_ui)
 
   // Set up the chrome://settings-frame/ source.
   Profile* profile = Profile::FromWebUI(web_ui);
-  ChromeURLDataManager::AddDataSource(profile, html_source);
+  content::URLDataSource::Add(profile, html_source);
 
   // Set up the chrome://theme/ source.
   ThemeSource* theme = new ThemeSource(profile);
-  ChromeURLDataManager::AddDataSource(profile, theme);
+  content::URLDataSource::Add(profile, theme);
 
 #if defined(OS_CHROMEOS)
   // Set up the chrome://userimage/ source.
   chromeos::options::UserImageSource* user_image_source =
       new chromeos::options::UserImageSource();
-  ChromeURLDataManager::AddDataSource(profile, user_image_source);
+  content::URLDataSource::Add(profile, user_image_source);
 
   pointer_device_observer_.reset(
       new chromeos::system::PointerDeviceObserver());

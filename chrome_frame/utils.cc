@@ -17,9 +17,9 @@
 #include "base/path_service.h"
 #include "base/string_number_conversions.h"
 #include "base/string_piece.h"
-#include "base/string_tokenizer.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
+#include "base/strings/string_tokenizer.h"
 #include "base/threading/thread_local.h"
 #include "base/utf_string_conversions.h"
 #include "base/win/registry.h"
@@ -353,7 +353,7 @@ const char kIEImageName[] = "iexplore.exe";
 }  // namespace
 
 std::wstring GetHostProcessName(bool include_extension) {
-  FilePath exe;
+  base::FilePath exe;
   if (PathService::Get(base::FILE_EXE, &exe))
     exe = exe.BaseName();
   if (!include_extension) {
@@ -390,7 +390,7 @@ uint32 GetIEMajorVersion() {
     wchar_t exe_path[MAX_PATH];
     HMODULE mod = GetModuleHandle(NULL);
     GetModuleFileName(mod, exe_path, arraysize(exe_path) - 1);
-    std::wstring exe_name = FilePath(exe_path).BaseName().value();
+    std::wstring exe_name = base::FilePath(exe_path).BaseName().value();
     if (!LowerCaseEqualsASCII(exe_name, kIEImageName)) {
       ie_major_version = 0;
     } else {
@@ -437,7 +437,7 @@ IEVersion GetIEVersion() {
   return ie_version;
 }
 
-FilePath GetIETemporaryFilesFolder() {
+base::FilePath GetIETemporaryFilesFolder() {
   LPITEMIDLIST tif_pidl = NULL;
   HRESULT hr = SHGetFolderLocation(NULL, CSIDL_INTERNET_CACHE, NULL,
                                    SHGFP_TYPE_CURRENT, &tif_pidl);
@@ -455,7 +455,8 @@ FilePath GetIETemporaryFilesFolder() {
       DCHECK(SUCCEEDED(hr));
       base::win::ScopedBstr temp_internet_files_bstr;
       StrRetToBSTR(&path, relative_pidl, temp_internet_files_bstr.Receive());
-      FilePath temp_internet_files(static_cast<BSTR>(temp_internet_files_bstr));
+      base::FilePath temp_internet_files(
+          static_cast<BSTR>(temp_internet_files_bstr));
       ILFree(tif_pidl);
       return temp_internet_files;
     } else {
@@ -472,12 +473,12 @@ FilePath GetIETemporaryFilesFolder() {
   hr = SHGetFolderPath(NULL, CSIDL_INTERNET_CACHE, NULL, SHGFP_TYPE_CURRENT,
                        path);
   if (SUCCEEDED(hr)) {
-    return FilePath(path);
+    return base::FilePath(path);
   } else {
     NOTREACHED() << "SHGetFolderPath for internet cache failed. Error:"
                  << hr;
   }
-  return FilePath();
+  return base::FilePath();
 }
 
 bool IsIEInPrivate() {
@@ -1401,7 +1402,7 @@ bool ChromeFrameUrl::ParseAttachExternalTabUrl() {
   }
 
   attach_to_external_tab_ = true;
-  StringTokenizer tokenizer(query, "&");
+  base::StringTokenizer tokenizer(query, "&");
   // Skip over kChromeAttachExternalTabPrefix
   tokenizer.GetNext();
   // Read the following items in order.
@@ -1673,7 +1674,7 @@ bool IncreaseWinInetConnections(DWORD connections) {
 }
 
 void GetChromeFrameProfilePath(const string16& profile_name,
-                               FilePath* profile_path) {
+                               base::FilePath* profile_path) {
   chrome::GetChromeFrameUserDataDirectory(profile_path);
   *profile_path = profile_path->Append(profile_name);
   DVLOG(1) << __FUNCTION__ << ": " << profile_path->value();

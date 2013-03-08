@@ -4,7 +4,6 @@
 
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_manifest_constants.h"
-#include "chrome/common/extensions/manifest_handler.h"
 #include "chrome/common/extensions/manifest_tests/extension_manifest_test.h"
 #include "chrome/common/extensions/manifest_url_handler.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -15,10 +14,8 @@ namespace errors = extension_manifest_errors;
 class HomepageURLManifestTest : public ExtensionManifestTest {
   virtual void SetUp() OVERRIDE {
     ExtensionManifestTest::SetUp();
-    extensions::ManifestHandler::Register(extension_manifest_keys::kHomepageURL,
-                                          new extensions::HomepageURLHandler);
-    extensions::ManifestHandler::Register(extension_manifest_keys::kUpdateURL,
-                                          new extensions::UpdateURLHandler);
+    (new extensions::HomepageURLHandler)->Register();
+    (new extensions::UpdateURLHandler)->Register();
   }
 };
 

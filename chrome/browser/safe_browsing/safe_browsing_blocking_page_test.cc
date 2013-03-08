@@ -8,10 +8,10 @@
 // they work.
 
 #include "base/bind.h"
+#include "base/prefs/pref_service.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/safe_browsing/database_manager.h"
 #include "chrome/browser/safe_browsing/malware_details.h"
@@ -46,6 +46,31 @@ const char kEmptyPage[] = "files/empty.html";
 const char kMalwarePage[] = "files/safe_browsing/malware.html";
 const char kMalwareIframe[] = "files/safe_browsing/malware_iframe.html";
 
+class InterstitialObserver : public content::WebContentsObserver {
+ public:
+  InterstitialObserver(content::WebContents* web_contents,
+                       const base::Closure& attach_callback,
+                       const base::Closure& detach_callback)
+      : WebContentsObserver(web_contents),
+        attach_callback_(attach_callback),
+        detach_callback_(detach_callback) {
+  }
+
+  virtual void DidAttachInterstitialPage() OVERRIDE {
+    attach_callback_.Run();
+  }
+
+  virtual void DidDetachInterstitialPage() OVERRIDE {
+    detach_callback_.Run();
+  }
+
+ private:
+  base::Closure attach_callback_;
+  base::Closure detach_callback_;
+
+  DISALLOW_COPY_AND_ASSIGN(InterstitialObserver);
+};
+
 // A SafeBrowsingDatabaseManager class that allows us to inject the malicious
 // URLs.
 class FakeSafeBrowsingDatabaseManager :  public SafeBrowsingDatabaseManager {
@@ -58,7 +83,7 @@ class FakeSafeBrowsingDatabaseManager :  public SafeBrowsingDatabaseManager {
   // Otherwise it returns false, and "client" is called asynchronously with the
   // result when it is ready.
   // Overrides SafeBrowsingDatabaseManager::CheckBrowseUrl.
-  virtual bool CheckBrowseUrl(const GURL& gurl, Client* client) {
+  virtual bool CheckBrowseUrl(const GURL& gurl, Client* client) OVERRIDE {
     if (badurls[gurl.spec()] == SB_THREAT_TYPE_SAFE)
       return true;
 
@@ -97,7 +122,8 @@ class FakeSafeBrowsingUIManager :  public SafeBrowsingUIManager {
       SafeBrowsingUIManager(service) { }
 
   // Overrides SafeBrowsingUIManager
-  virtual void SendSerializedMalwareDetails(const std::string& serialized) {
+  virtual void SendSerializedMalwareDetails(
+      const std::string& serialized) OVERRIDE {
     reports_.push_back(serialized);
     // Notify the UI thread that we got a report.
     BrowserThread::PostTask(
@@ -265,7 +291,7 @@ class TestSafeBrowsingBlockingPage : public SafeBrowsingBlockingPageV2 {
     malware_details_proceed_delay_ms_ = 100;
   }
 
-  ~TestSafeBrowsingBlockingPage() {
+  virtual ~TestSafeBrowsingBlockingPage() {
     if (!wait_for_delete_)
       return;
 
@@ -287,7 +313,7 @@ class TestSafeBrowsingBlockingPageFactory
     : public SafeBrowsingBlockingPageFactory {
  public:
   TestSafeBrowsingBlockingPageFactory() { }
-  ~TestSafeBrowsingBlockingPageFactory() { }
+  virtual ~TestSafeBrowsingBlockingPageFactory() { }
 
   virtual SafeBrowsingBlockingPage* CreateSafeBrowsingPage(
       SafeBrowsingUIManager* delegate,
@@ -426,11 +452,13 @@ class SafeBrowsingBlockingPageTest : public InProcessBrowserTest {
   void WaitForInterstitial() {
     WebContents* contents =
         browser()->tab_strip_model()->GetActiveWebContents();
-    content::WindowedNotificationObserver interstitial_observer(
-        content::NOTIFICATION_INTERSTITIAL_ATTACHED,
-        content::Source<WebContents>(contents));
+    scoped_refptr<content::MessageLoopRunner> loop_runner(
+        new content::MessageLoopRunner);
+    InterstitialObserver observer(contents,
+                                  loop_runner->QuitClosure(),
+                                  base::Closure());
     if (!InterstitialPage::GetInterstitialPage(contents))
-      interstitial_observer.Wait();
+      loop_runner->Run();
   }
 
   void AssertReportSent() {
@@ -540,13 +568,15 @@ class SafeBrowsingBlockingPageTest : public InProcessBrowserTest {
     // We wait for interstitial_detached rather than nav_entry_committed, as
     // going back from a main-frame malware interstitial page will not cause a
     // nav entry committed event.
-    content::WindowedNotificationObserver observer(
-        content::NOTIFICATION_INTERSTITIAL_DETACHED,
-        content::Source<WebContents>(
-            browser()->tab_strip_model()->GetActiveWebContents()));
+    scoped_refptr<content::MessageLoopRunner> loop_runner(
+        new content::MessageLoopRunner);
+    InterstitialObserver observer(
+        browser()->tab_strip_model()->GetActiveWebContents(),
+        base::Closure(),
+        loop_runner->QuitClosure());
     if (!Click(node_id))
       return false;
-    observer.Wait();
+    loop_runner->Run();
     return true;
   }
 
@@ -560,8 +590,14 @@ class SafeBrowsingBlockingPageTest : public InProcessBrowserTest {
   DISALLOW_COPY_AND_ASSIGN(SafeBrowsingBlockingPageTest);
 };
 
+// TODO(linux_aura) http://crbug.com/163931
+#if defined(OS_LINUX) && !defined(OS_CHROMEOS) && defined(USE_AURA)
+#define MAYBE_MalwareRedirectInIFrameCanceled DISABLED_MalwareRedirectInIFrameCanceled
+#else
+#define MAYBE_MalwareRedirectInIFrameCanceled MalwareRedirectInIFrameCanceled
+#endif
 IN_PROC_BROWSER_TEST_F(SafeBrowsingBlockingPageTest,
-                       MalwareRedirectInIFrameCanceled) {
+                       MAYBE_MalwareRedirectInIFrameCanceled) {
   // 1. Test the case that redirect is a subresource.
   MalwareRedirectCancelAndProceed("openWinIFrame");
   // If the redirect was from subresource but canceled, "proceed" will continue
@@ -710,9 +746,9 @@ IN_PROC_BROWSER_TEST_F(SafeBrowsingBlockingPageTest, ReportingDisabled) {
   browser()->profile()->GetPrefs()->SetBoolean(
       prefs::kSafeBrowsingReportingEnabled, true);
 
-  net::TestServer https_server(net::TestServer::TYPE_HTTPS,
-                               net::TestServer::kLocalhost,
-                               FilePath(FILE_PATH_LITERAL("chrome/test/data")));
+  net::TestServer https_server(
+      net::TestServer::TYPE_HTTPS, net::TestServer::kLocalhost,
+      base::FilePath(FILE_PATH_LITERAL("chrome/test/data")));
   ASSERT_TRUE(https_server.Start());
   GURL url = https_server.GetURL(kEmptyPage);
   SetURLThreatType(url, SB_THREAT_TYPE_URL_MALWARE);

@@ -7,7 +7,7 @@
 
 #include <windows.h>
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "chrome/installer/util/work_item.h"
 
 // A WorkItem subclass that creates a directory with the specified path.
@@ -27,7 +27,7 @@ class CreateDirWorkItem : public WorkItem {
  private:
   friend class WorkItem;
 
-  explicit CreateDirWorkItem(const FilePath& path);
+  explicit CreateDirWorkItem(const base::FilePath& path);
 
   // Get the top most directory that needs to be created in order to create
   // "path_", and set "top_path_" accordingly. if "path_" already exists,
@@ -35,10 +35,10 @@ class CreateDirWorkItem : public WorkItem {
   void GetTopDirToCreate();
 
   // Path of the directory to be created.
-  FilePath path_;
+  base::FilePath path_;
 
   // The top most directory that needs to be created.
-  FilePath top_path_;
+  base::FilePath top_path_;
 
   bool rollback_needed_;
 };

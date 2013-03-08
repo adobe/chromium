@@ -18,6 +18,7 @@
 #include "ui/aura/window_tracker.h"
 #include "ui/base/events/event.h"
 #include "ui/base/events/event_handler.h"
+#include "ui/base/events/event_utils.h"
 #include "ui/base/gestures/gesture_configuration.h"
 #include "ui/base/hit_test.h"
 #include "ui/base/keycodes/keyboard_codes.h"
@@ -370,6 +371,7 @@ TEST_F(RootWindowTest, TouchEventsOutsideBounds) {
 
 // Tests that scroll events are dispatched correctly.
 TEST_F(RootWindowTest, ScrollEventDispatch) {
+  base::TimeDelta now = ui::EventTimeForNow();
   test::TestEventHandler* filter = new test::TestEventHandler;
   root_window()->SetEventFilter(filter);
 
@@ -377,15 +379,27 @@ TEST_F(RootWindowTest, ScrollEventDispatch) {
   scoped_ptr<Window> w1(CreateWindow(1, root_window(), &delegate));
   w1->SetBounds(gfx::Rect(20, 20, 40, 40));
 
-  // A scroll event on the root-window itself is not dispatched.
-  ui::ScrollEvent scroll1(ui::ET_SCROLL, gfx::Point(10, 10), 0, 0, -10);
+  // A scroll event on the root-window itself is dispatched.
+  ui::ScrollEvent scroll1(ui::ET_SCROLL,
+                          gfx::Point(10, 10),
+                          now,
+                          0,
+                          0, -10,
+                          0, -10,
+                          2);
   root_window()->AsRootWindowHostDelegate()->OnHostScrollEvent(&scroll1);
-  EXPECT_EQ(0, filter->num_scroll_events());
+  EXPECT_EQ(1, filter->num_scroll_events());
 
   // Scroll event on a window should be dispatched properly.
-  ui::ScrollEvent scroll2(ui::ET_SCROLL, gfx::Point(25, 30), 0, -10, 0);
+  ui::ScrollEvent scroll2(ui::ET_SCROLL,
+                          gfx::Point(25, 30),
+                          now,
+                          0,
+                          -10, 0,
+                          -10, 0,
+                          2);
   root_window()->AsRootWindowHostDelegate()->OnHostScrollEvent(&scroll2);
-  EXPECT_EQ(1, filter->num_scroll_events());
+  EXPECT_EQ(2, filter->num_scroll_events());
 }
 
 namespace {
@@ -725,6 +739,67 @@ TEST_F(RootWindowTest, GestureRecognizerResetsTargetWhenParentHides) {
   Window* child = CreateWindow(11, parent.get(), &delegate);
   test::EventGenerator generator(root_window(), child);
   generator.GestureTapAt(gfx::Point(40, 40));
+}
+
+namespace {
+
+// A window delegate that processes nested gestures on tap.
+class NestedGestureDelegate : public test::TestWindowDelegate {
+ public:
+  NestedGestureDelegate(test::EventGenerator* generator,
+                        const gfx::Point tap_location)
+      : generator_(generator),
+        tap_location_(tap_location),
+        gesture_end_count_(0) {}
+  virtual ~NestedGestureDelegate() {}
+
+  int gesture_end_count() const { return gesture_end_count_; }
+
+ private:
+  virtual void OnGestureEvent(ui::GestureEvent* event) OVERRIDE {
+    switch (event->type()) {
+      case ui::ET_GESTURE_TAP_DOWN:
+        event->SetHandled();
+        break;
+      case ui::ET_GESTURE_TAP:
+        if (generator_)
+          generator_->GestureTapAt(tap_location_);
+        event->SetHandled();
+        break;
+      case ui::ET_GESTURE_END:
+        ++gesture_end_count_;
+        break;
+      default:
+        break;
+    }
+  }
+
+  test::EventGenerator* generator_;
+  const gfx::Point tap_location_;
+  int gesture_end_count_;
+  DISALLOW_COPY_AND_ASSIGN(NestedGestureDelegate);
+};
+
+}  // namespace
+
+// Tests that gesture end is delivered after nested gesture processing.
+TEST_F(RootWindowTest, GestureEndDeliveredAfterNestedGestures) {
+  NestedGestureDelegate d1(NULL, gfx::Point());
+  scoped_ptr<Window> w1(CreateWindow(1, root_window(), &d1));
+  w1->SetBounds(gfx::Rect(0, 0, 100, 100));
+
+  test::EventGenerator nested_generator(root_window(), w1.get());
+  NestedGestureDelegate d2(&nested_generator, w1->bounds().CenterPoint());
+  scoped_ptr<Window> w2(CreateWindow(1, root_window(), &d2));
+  w2->SetBounds(gfx::Rect(100, 0, 100, 100));
+
+  // Tap on w2 which triggers nested gestures for w1.
+  test::EventGenerator generator(root_window(), w2.get());
+  generator.GestureTapAt(w2->bounds().CenterPoint());
+
+  // Both windows should get their gesture end events.
+  EXPECT_EQ(1, d1.gesture_end_count());
+  EXPECT_EQ(1, d2.gesture_end_count());
 }
 
 }  // namespace aura

@@ -4,13 +4,16 @@
 
 #include "content/gpu/gpu_info_collector.h"
 
+#include "base/android/build_info.h"
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/string_number_conversions.h"
 #include "base/string_piece.h"
-#include "base/string_split.h"
 #include "base/string_util.h"
+#include "base/strings/string_split.h"
+#include "cc/switches.h"
 #include "content/public/common/content_switches.h"
+#include "ui/gfx/android/device_display_info.h"
 
 namespace {
 
@@ -52,6 +55,13 @@ bool CollectContextGraphicsInfo(content::GPUInfo* gpu_info) {
   return CollectGraphicsInfoGL(gpu_info);
 }
 
+bool CollectGpuID(uint32* vendor_id, uint32* device_id) {
+  DCHECK(vendor_id && device_id);
+  *vendor_id = 0;
+  *device_id = 0;
+  return false;
+}
+
 bool CollectBasicGraphicsInfo(content::GPUInfo* gpu_info) {
   gpu_info->can_lose_context = false;
   // Create a short-lived context on the UI thread to collect the GL strings.
@@ -65,13 +75,64 @@ bool CollectBasicGraphicsInfo(content::GPUInfo* gpu_info) {
   bool is_qualcomm = vendor.find("qualcomm") != std::string::npos;
   bool is_mali_t604 = is_arm && renderer.find("mali-t604") != std::string::npos;
 
+  base::android::BuildInfo* build_info =
+      base::android::BuildInfo::GetInstance();
+  std::string model = build_info->model();
+  model = StringToLowerASCII(model);
+  bool is_nexus7 = model.find("nexus 7") != std::string::npos;
+  bool is_nexus10 = model.find("nexus 10") != std::string::npos;
+
   // IMG: avoid context switching perf problems, crashes with share groups
   // Mali-T604: http://crbug.com/154715
-  // QualComm: Crashes with share groups
-  if (is_img || is_mali_t604 || is_qualcomm) {
+  // QualComm, NVIDIA: Crashes with share groups
+  if (is_img || is_mali_t604 || is_qualcomm || is_nexus7) {
     CommandLine::ForCurrentProcess()->AppendSwitch(
         switches::kEnableVirtualGLContexts);
   }
+
+  gfx::DeviceDisplayInfo info;
+  int default_tile_size = 256;
+
+  // For very high resolution displays (eg. Nexus 10), set the default
+  // tile size to be 512. This should be removed in favour of a generic
+  // hueristic that works across all platforms and devices, once that
+  // exists: http://crbug.com/159524. This switches to 512 for screens
+  // containing 40 or more 256x256 tiles, such that 1080p devices do
+  // not use 512x512 tiles (eg. 1920x1280 requires 37.5 tiles)
+  int numTiles = (info.GetDisplayWidth() *
+                  info.GetDisplayHeight()) / (256 * 256);
+  if (numTiles >= 40)
+    default_tile_size = 512;
+
+  // IMG: Fast async texture uploads only work with non-power-of-two,
+  // but still multiple-of-eight sizes.
+  // http://crbug.com/168099
+  if (is_img)
+    default_tile_size -= 8;
+
+  // Set the command line if it isn't already set and we changed
+  // the default tile size.
+  if (default_tile_size != 256 &&
+      !CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kDefaultTileWidth) &&
+      !CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kDefaultTileHeight)) {
+    std::stringstream size;
+    size << default_tile_size;
+    CommandLine::ForCurrentProcess()->AppendSwitchASCII(
+        switches::kDefaultTileWidth, size.str());
+    CommandLine::ForCurrentProcess()->AppendSwitchASCII(
+        switches::kDefaultTileHeight, size.str());
+  }
+
+  // Increase the resolution of low resolution tiles for Nexus 10.
+  if (is_nexus10 &&
+      !CommandLine::ForCurrentProcess()->HasSwitch(
+          cc::switches::kLowResolutionContentsScaleFactor)) {
+    CommandLine::ForCurrentProcess()->AppendSwitchASCII(
+        cc::switches::kLowResolutionContentsScaleFactor, "0.25");
+  }
+
   return true;
 }
 

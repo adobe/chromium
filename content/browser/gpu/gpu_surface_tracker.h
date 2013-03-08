@@ -29,7 +29,7 @@ class GpuSurfaceTracker : public GpuSurfaceLookup {
  public:
   // GpuSurfaceLookup implementation:
   // Returns the native widget associated with a given surface_id.
-  virtual gfx::AcceleratedWidget GetNativeWidget(int surface_id) OVERRIDE;
+  virtual gfx::AcceleratedWidget AcquireNativeWidget(int surface_id) OVERRIDE;
 
   // Gets the global instance of the surface tracker.
   static GpuSurfaceTracker* Get() { return GetInstance(); }
@@ -67,10 +67,6 @@ class GpuSurfaceTracker : public GpuSurfaceLookup {
   // Gets the native handle for the given surface.
   // Note: This is an O(log N) lookup.
   gfx::GLSurfaceHandle GetSurfaceHandle(int surface_id);
-
-  // Gets the native window handle for the given surface or NULL if the surface
-  // does not exist. This is an O(log N) lookup.
-  gfx::PluginWindowHandle GetSurfaceWindowHandle(int surface_id);
 
   // Returns the number of surfaces currently registered with the tracker.
   std::size_t GetSurfaceCount();

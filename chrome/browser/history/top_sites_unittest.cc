@@ -14,6 +14,7 @@
 #include "base/values.h"
 #include "chrome/browser/history/history_backend.h"
 #include "chrome/browser/history/history_database.h"
+#include "chrome/browser/history/history_db_task.h"
 #include "chrome/browser/history/history_marshaling.h"
 #include "chrome/browser/history/history_notifications.h"
 #include "chrome/browser/history/history_service_factory.h"
@@ -52,11 +53,12 @@ class WaitForHistoryTask : public HistoryDBTask {
  public:
   WaitForHistoryTask() {}
 
-  virtual bool RunOnDBThread(HistoryBackend* backend, HistoryDatabase* db) {
+  virtual bool RunOnDBThread(HistoryBackend* backend,
+                             HistoryDatabase* db) OVERRIDE {
     return true;
   }
 
-  virtual void DoneRunOnMainThread() {
+  virtual void DoneRunOnMainThread() OVERRIDE {
     MessageLoop::current()->Quit();
   }
 
@@ -344,7 +346,7 @@ class TopSitesMigrationTest : public TopSitesTest {
   virtual void SetUp() {
     TopSitesTest::SetUp();
 
-    FilePath data_path;
+    base::FilePath data_path;
     ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &data_path));
     data_path = data_path.AppendASCII("top_sites");
 
@@ -362,7 +364,7 @@ class TopSitesMigrationTest : public TopSitesTest {
   }
 
   // Returns true if history and top sites should be created in SetUp.
-  virtual bool CreateHistoryAndTopSites() {
+  virtual bool CreateHistoryAndTopSites() OVERRIDE {
     return false;
   }
 
@@ -1235,7 +1237,7 @@ TEST_F(TopSitesUnloadTest, UnloadHistoryTest) {
 // loaded we don't hit any assertions.
 TEST_F(TopSitesUnloadTest, UnloadWithMigration) {
   // Set up history and thumbnails as they would be before migration.
-  FilePath data_path;
+  base::FilePath data_path;
   ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &data_path));
   data_path = data_path.AppendASCII("top_sites");
   ASSERT_NO_FATAL_FAILURE(ExecuteSQLScript(

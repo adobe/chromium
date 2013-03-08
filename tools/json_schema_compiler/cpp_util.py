@@ -5,9 +5,11 @@
 """Utilies and constants specific to Chromium C++ code.
 """
 
+from code import Code
 from datetime import datetime
 from model import Property, PropertyType, Type
 import os
+import re
 
 CHROMIUM_LICENSE = (
 """// Copyright (c) %d The Chromium Authors. All rights reserved.
@@ -30,7 +32,7 @@ def Classname(s):
   eg experimental.downloads -> Experimental_Downloads
   updateAll -> UpdateAll.
   """
-  return '_'.join([x[0].upper() + x[1:] for x in s.split('.')])
+  return '_'.join([x[0].upper() + x[1:] for x in re.split('\W', s)])
 
 def GetAsFundamentalValue(type_, src, dst):
   """Returns the C++ code for retrieving a fundamental type from a
@@ -91,3 +93,19 @@ def PadForGenerics(var):
   within generic types.
   """
   return ('%s ' % var) if var.endswith('>') else var
+
+def OpenNamespace(namespace):
+  """Get opening root namespace declarations.
+  """
+  c = Code()
+  for component in namespace.split('::'):
+    c.Append('namespace %s {' % component)
+  return c
+
+def CloseNamespace(namespace):
+  """Get closing root namespace declarations.
+  """
+  c = Code()
+  for component in reversed(namespace.split('::')):
+    c.Append('}  // namespace %s' % component)
+  return c

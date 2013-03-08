@@ -148,6 +148,12 @@ class GoogleUpdateSettings {
   // active users. Returns false if writting to the registry failed.
   static bool UpdateDidRunState(bool did_run, bool system_level);
 
+  // Set did_run "dr" in the client state value for |dist|. This is used to
+  // measure active users. Returns false if writting to the registry failed.
+  static bool UpdateDidRunStateForDistribution(BrowserDistribution* dist,
+                                               bool did_run,
+                                               bool system_level);
+
   // Returns only the channel name: "" (stable), "dev", "beta", "canary", or
   // "unknown" if unknown. This value will not be modified by "-m" for a
   // multi-install. See kChromeChannel* in util_constants.h
@@ -248,8 +254,8 @@ class GoogleUpdateSettings {
   // GetUpdateDetailForApp with the app guid stored in BrowserDistribution.)
   static bool GetUpdateDetail(bool system_install, ProductData* data);
 
-  // Sets |experiment_labels| as the Omaha experiment_labels value in the
-  // ClientState key for this Chrome product, if appropriate. If
+  // Sets |experiment_labels| as the Google Update experiment_labels value in
+  // the ClientState key for this Chrome product, if appropriate. If
   // |experiment_labels| is empty, this will delete the value instead. This will
   // return true if the label was successfully set (or deleted), false otherwise
   // (even if the label does not need to be set for this particular distribution
@@ -257,14 +263,18 @@ class GoogleUpdateSettings {
   static bool SetExperimentLabels(bool system_install,
                                   const string16& experiment_labels);
 
-  // Reads the Omaha experiment_labels value in the ClientState key for this
-  // Chrome product and writes it into |experiment_labels|. If the key or value
-  // does not exist, |experiment_labels| will be set to the empty string.
+  // Reads the Google Update experiment_labels value in the ClientState key for
+  // this Chrome product and writes it into |experiment_labels|. If the key or
+  // value does not exist, |experiment_labels| will be set to the empty string.
   // If this distribution of Chrome does not set the experiment_labels value,
   // this will do nothing to |experiment_labels|. This will return true if the
   // label did not exist, or was successfully read.
   static bool ReadExperimentLabels(bool system_install,
                                    string16* experiment_labels);
+
+  // Constructs a date string in the format understood by Google Update for the
+  // current time plus one year.
+  static string16 BuildExperimentDateString();
 
  private:
   DISALLOW_IMPLICIT_CONSTRUCTORS(GoogleUpdateSettings);

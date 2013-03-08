@@ -5,6 +5,8 @@
 #include "chrome/browser/autofill/validation.h"
 
 #include "base/string_util.h"
+#include "base/utf_string_conversions.h"
+#include "chrome/browser/autofill/autofill_regexes.h"
 #include "chrome/browser/autofill/credit_card.h"
 
 namespace autofill {
@@ -43,6 +45,32 @@ bool IsValidCreditCardNumber(const string16& text) {
   }
 
   return (sum % 10) == 0;
+}
+
+bool IsValidCreditCardSecurityCode(const string16& text) {
+  if (text.size() < 3U || text.size() > 4U)
+    return false;
+
+  for (string16::const_iterator iter = text.begin();
+       iter != text.end();
+       ++iter) {
+    if (!IsAsciiDigit(*iter))
+      return false;
+  }
+  return true;
+}
+
+bool IsValidEmailAddress(const string16& text) {
+  // E-Mail pattern as defined by the WhatWG. (4.10.7.1.5 E-Mail state)
+  const string16 kEmailPattern = ASCIIToUTF16(
+      "^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@"
+      "[a-zA-Z0-9-]+(?:\\.[a-zA-Z0-9-]+)*$");
+  return MatchesPattern(text, kEmailPattern);
+}
+
+bool IsValidZip(const string16& value) {
+  const string16 kZipPattern = ASCIIToUTF16("^\\d{5}(-\\d{4})?$");
+  return MatchesPattern(value, kZipPattern);
 }
 
 }  // namespace autofill

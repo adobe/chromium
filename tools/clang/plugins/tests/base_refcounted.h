@@ -11,6 +11,7 @@ template <typename T>
 class RefCounted {
  public:
   RefCounted() {}
+ protected:
   ~RefCounted() {}
 };
 
@@ -18,6 +19,7 @@ template <typename T>
 class RefCountedThreadSafe {
  public:
   RefCountedThreadSafe() {}
+ protected:
   ~RefCountedThreadSafe() {}
 };
 
@@ -61,7 +63,7 @@ class PublicRefCountedThreadSafeDtorInHeader
       PublicRefCountedThreadSafeDtorInHeader>;
 };
 
-// Safe; should not have errors.
+// Unsafe; should error.
 class ProtectedRefCountedDtorInHeader
     : public base::RefCounted<ProtectedRefCountedDtorInHeader> {
  public:
@@ -73,6 +75,20 @@ class ProtectedRefCountedDtorInHeader
  private:
   friend class base::RefCounted<ProtectedRefCountedDtorInHeader>;
 };
+
+// Safe; should not have errors
+class ProtectedRefCountedVirtualDtorInHeader
+    : public base::RefCounted<ProtectedRefCountedVirtualDtorInHeader> {
+ public:
+  ProtectedRefCountedVirtualDtorInHeader() {}
+
+ protected:
+  virtual ~ProtectedRefCountedVirtualDtorInHeader() {}
+
+ private:
+  friend class base::RefCounted<ProtectedRefCountedVirtualDtorInHeader>;
+};
+
 
 // Safe; should not have errors.
 class PrivateRefCountedDtorInHeader
@@ -88,16 +104,16 @@ class PrivateRefCountedDtorInHeader
 // Unsafe; A grandchild class ends up exposing their parent and grandparent's
 // destructors.
 class DerivedProtectedToPublicInHeader
-    : public ProtectedRefCountedDtorInHeader {
+    : public ProtectedRefCountedVirtualDtorInHeader {
  public:
   DerivedProtectedToPublicInHeader() {}
-  ~DerivedProtectedToPublicInHeader() {}
+  virtual ~DerivedProtectedToPublicInHeader() {}
 };
 
 // Unsafe; A grandchild ends up implicitly exposing their parent and
 // grantparent's destructors.
 class ImplicitDerivedProtectedToPublicInHeader
-    : public ProtectedRefCountedDtorInHeader {
+    : public ProtectedRefCountedVirtualDtorInHeader {
  public:
   ImplicitDerivedProtectedToPublicInHeader() {}
 };
@@ -116,6 +132,92 @@ class WebKitDerivedPublicDtorInHeader
  public:
   WebKitDerivedPublicDtorInHeader() {}
   ~WebKitDerivedPublicDtorInHeader() {}
+};
+
+class APublicInterface {
+ public:
+  virtual ~APublicInterface() {}
+  virtual void DoFoo() = 0;
+};
+
+// Unsafe. "ImplementsAPublicInterface* foo" can be deleted via
+// "delete (APublicInterface*)foo;".
+class ImplementsAPublicInterface
+    : public APublicInterface,
+      public base::RefCounted<ImplementsAPublicInterface> {
+ public:
+  virtual void DoFoo() override {}
+
+ protected:
+  virtual ~ImplementsAPublicInterface() {}
+
+ private:
+  friend class base::RefCounted<ImplementsAPublicInterface>;
+};
+
+class AnImplicitInterface {
+ public:
+  virtual void DoBar() {}
+};
+
+// Unsafe.
+class ImplementsAnImplicitInterface
+    : public AnImplicitInterface,
+      public base::RefCounted<ImplementsAnImplicitInterface> {
+ public:
+  virtual void DoBar() override {}
+
+ private:
+  friend class base::RefCounted<ImplementsAnImplicitInterface>;
+  ~ImplementsAnImplicitInterface() {}
+};
+
+// Safe. Private inheritance does not expose the base destructor.
+class PrivatelyImplementsAPublicInterface
+    : private APublicInterface,
+      public base::RefCounted<PrivatelyImplementsAPublicInterface> {
+ public:
+  virtual void DoFoo() override {}
+
+ private:
+  friend class base::RefCounted<PrivatelyImplementsAPublicInterface>;
+  virtual ~PrivatelyImplementsAPublicInterface() {}
+};
+
+// Unsafe.
+class BaseInterface {
+ public:
+  virtual ~BaseInterface() {}
+  virtual void DoFoo() {}
+};
+class DerivedInterface : public BaseInterface {
+ protected:
+  virtual ~DerivedInterface() {}
+};
+class SomeOtherInterface {
+ public:
+  virtual ~SomeOtherInterface() {}
+  virtual void DoBar() {}
+};
+class RefcountedType : public base::RefCounted<RefcountedType> {
+ protected:
+  ~RefcountedType() {}
+ private:
+  friend class base::RefCounted<RefcountedType>;
+};
+class UnsafeInheritanceChain
+    : public DerivedInterface,
+      public SomeOtherInterface,
+      public RefcountedType {
+ public:
+  // DerivedInterface
+  virtual void DoFoo() override {}
+
+  // SomeOtherInterface
+  virtual void DoBar() override {}
+
+ protected:
+  virtual ~UnsafeInheritanceChain() {}
 };
 
 #endif  // BASE_REFCOUNTED_H_

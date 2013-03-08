@@ -32,7 +32,7 @@
 
 #include "base/basictypes.h"
 #include "base/callback.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/gtest_prod_util.h"
 #include "base/sequenced_task_runner_helpers.h"
 #include "base/time.h"
@@ -82,6 +82,10 @@ class CONTENT_EXPORT DownloadManager
     // When we've fully specified the possible states of the DownloadItem in
     // download_item.h, we should remove the caveat above.
     virtual void OnDownloadCreated(
+        DownloadManager* manager, DownloadItem* item) {}
+
+    // A SavePackage has successfully finished.
+    virtual void OnSavePackageSuccessfullyFinished(
         DownloadManager* manager, DownloadItem* item) {}
 
     // Called when the DownloadManager is being destroyed to prevent Observers
@@ -140,14 +144,17 @@ class CONTENT_EXPORT DownloadManager
   // Called by the embedder, after creating the download manager, to let it know
   // about downloads from previous runs of the browser.
   virtual DownloadItem* CreateDownloadItem(
-      const FilePath& path,
-      const GURL& url,
+      const base::FilePath& current_path,
+      const base::FilePath& target_path,
+      const std::vector<GURL>& url_chain,
       const GURL& referrer_url,
       const base::Time& start_time,
       const base::Time& end_time,
       int64 received_bytes,
       int64 total_bytes,
       DownloadItem::DownloadState state,
+      DownloadDangerType danger_type,
+      DownloadInterruptReason interrupt_reason,
       bool opened) = 0;
 
   // The number of in progress (including paused) downloads.
@@ -165,9 +172,6 @@ class CONTENT_EXPORT DownloadManager
   // Get the download item for |id| if present, no matter what type of download
   // it is or state it's in.
   virtual DownloadItem* GetDownload(int id) = 0;
-
-  // Prohibits OpenDownload() from actually opening downloads for testing.
-  virtual void MockDownloadOpenForTesting() = 0;
 
  protected:
   virtual ~DownloadManager() {}

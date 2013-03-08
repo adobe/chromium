@@ -10,7 +10,7 @@
 
 #include "base/allocator/allocator_extension.h"
 #include "base/bind.h"
-#include "base/debug/trace_event.h"
+#include "base/memory/discardable_memory.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/singleton.h"
 #include "base/message_loop.h"
@@ -30,6 +30,7 @@
 #include "grit/webkit_strings.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebCookie.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebData.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebDiscardableMemory.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebGestureCurve.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebString.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebURL.h"
@@ -41,7 +42,9 @@
 #include "ui/base/layout.h"
 #include "webkit/base/file_path_string_conversions.h"
 #include "webkit/compositor_bindings/web_compositor_support_impl.h"
+#include "webkit/glue/fling_curve_configuration.h"
 #include "webkit/glue/touch_fling_gesture_curve.h"
+#include "webkit/glue/web_discardable_memory_impl.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/glue/websocketstreamhandle_impl.h"
 #include "webkit/glue/webthread_impl.h"
@@ -356,12 +359,20 @@ WebKitPlatformSupportImpl::WebKitPlatformSupportImpl()
     : main_loop_(MessageLoop::current()),
       shared_timer_func_(NULL),
       shared_timer_fire_time_(0.0),
+      shared_timer_fire_time_was_set_while_suspended_(false),
       shared_timer_suspended_(0),
       current_thread_slot_(&DestroyCurrentThread),
-      compositor_support_(new webkit::WebCompositorSupportImpl) {
+      compositor_support_(new webkit::WebCompositorSupportImpl),
+      fling_curve_configuration_(new FlingCurveConfiguration) {
 }
 
 WebKitPlatformSupportImpl::~WebKitPlatformSupportImpl() {
+}
+
+void WebKitPlatformSupportImpl::SetFlingCurveParameters(
+    const std::vector<float>& new_touchpad,
+    const std::vector<float>& new_touchscreen) {
+  fling_curve_configuration_->SetCurveParameters(new_touchpad, new_touchscreen);
 }
 
 WebThemeEngine* WebKitPlatformSupportImpl::themeEngine() {
@@ -439,6 +450,21 @@ void WebKitPlatformSupportImpl::histogramEnumeration(
 const unsigned char* WebKitPlatformSupportImpl::getTraceCategoryEnabledFlag(
     const char* category_name) {
   return TRACE_EVENT_API_GET_CATEGORY_ENABLED(category_name);
+}
+
+long* WebKitPlatformSupportImpl::getTraceSamplingState(
+    const unsigned thread_bucket) {
+  switch(thread_bucket) {
+  case 0:
+    return reinterpret_cast<long*>(&TRACE_EVENT_API_THREAD_BUCKET(0));
+  case 1:
+    return reinterpret_cast<long*>(&TRACE_EVENT_API_THREAD_BUCKET(1));
+  case 2:
+    return reinterpret_cast<long*>(&TRACE_EVENT_API_THREAD_BUCKET(2));
+  default:
+    NOTREACHED() << "Unknown thread bucket type.";
+  }
+  return NULL;
 }
 
 void WebKitPlatformSupportImpl::addTraceEvent(
@@ -519,16 +545,6 @@ struct DataResource {
 const DataResource kDataResources[] = {
   { "missingImage", IDR_BROKENIMAGE, ui::SCALE_FACTOR_100P },
   { "missingImage@2x", IDR_BROKENIMAGE, ui::SCALE_FACTOR_200P },
-  { "mediaPause", IDR_MEDIA_PAUSE_BUTTON, ui::SCALE_FACTOR_100P },
-  { "mediaPlay", IDR_MEDIA_PLAY_BUTTON, ui::SCALE_FACTOR_100P },
-  { "mediaPlayDisabled",
-    IDR_MEDIA_PLAY_BUTTON_DISABLED, ui::SCALE_FACTOR_100P },
-  { "mediaSoundDisabled", IDR_MEDIA_SOUND_DISABLED, ui::SCALE_FACTOR_100P },
-  { "mediaSoundFull", IDR_MEDIA_SOUND_FULL_BUTTON, ui::SCALE_FACTOR_100P },
-  { "mediaSoundNone", IDR_MEDIA_SOUND_NONE_BUTTON, ui::SCALE_FACTOR_100P },
-  { "mediaSliderThumb", IDR_MEDIA_SLIDER_THUMB, ui::SCALE_FACTOR_100P },
-  { "mediaVolumeSliderThumb",
-    IDR_MEDIA_VOLUME_SLIDER_THUMB, ui::SCALE_FACTOR_100P },
   { "mediaplayerPause", IDR_MEDIAPLAYER_PAUSE_BUTTON, ui::SCALE_FACTOR_100P },
   { "mediaplayerPauseHover",
     IDR_MEDIAPLAYER_PAUSE_BUTTON_HOVER, ui::SCALE_FACTOR_100P },
@@ -722,8 +738,10 @@ void WebKitPlatformSupportImpl::setSharedTimerFiredFunction(void (*func)()) {
 void WebKitPlatformSupportImpl::setSharedTimerFireInterval(
     double interval_seconds) {
   shared_timer_fire_time_ = interval_seconds + monotonicallyIncreasingTime();
-  if (shared_timer_suspended_)
+  if (shared_timer_suspended_) {
+    shared_timer_fire_time_was_set_while_suspended_ = true;
     return;
+  }
 
   // By converting between double and int64 representation, we run the risk
   // of losing precision due to rounding errors. Performing computations in
@@ -886,7 +904,10 @@ void WebKitPlatformSupportImpl::SuspendSharedTimer() {
 
 void WebKitPlatformSupportImpl::ResumeSharedTimer() {
   // The shared timer may have fired or been adjusted while we were suspended.
-  if (--shared_timer_suspended_ == 0 && !shared_timer_.IsRunning()) {
+  if (--shared_timer_suspended_ == 0 &&
+      (!shared_timer_.IsRunning() ||
+       shared_timer_fire_time_was_set_while_suspended_)) {
+    shared_timer_fire_time_was_set_while_suspended_ = false;
     setSharedTimerFireInterval(
         shared_timer_fire_time_ - monotonicallyIncreasingTime());
   }
@@ -922,10 +943,23 @@ WebKit::WebGestureCurve* WebKitPlatformSupportImpl::createFlingAnimationCurve(
 #endif
 
   if (device_source == WebKit::WebGestureEvent::Touchscreen)
-    return TouchFlingGestureCurve::CreateForTouchScreen(velocity,
-                                                        cumulative_scroll);
+    return fling_curve_configuration_->CreateForTouchScreen(velocity,
+                                                            cumulative_scroll);
 
-  return TouchFlingGestureCurve::CreateForTouchPad(velocity, cumulative_scroll);
+  return fling_curve_configuration_->CreateForTouchPad(velocity,
+                                                       cumulative_scroll);
 }
+
+WebKit::WebDiscardableMemory*
+    WebKitPlatformSupportImpl::allocateAndLockDiscardableMemory(size_t bytes) {
+  if (!base::DiscardableMemory::Supported())
+    return NULL;
+  scoped_ptr<WebDiscardableMemoryImpl> discardable(
+      new WebDiscardableMemoryImpl());
+  if (discardable->InitializeAndLock(bytes))
+    return discardable.release();
+  return NULL;
+}
+
 
 }  // namespace webkit_glue

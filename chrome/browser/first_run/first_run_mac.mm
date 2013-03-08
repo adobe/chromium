@@ -4,18 +4,18 @@
 
 #include "chrome/browser/first_run/first_run.h"
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/string_util.h"
 #include "chrome/browser/first_run/first_run_internal.h"
-#include "chrome/browser/importer/importer_host.h"
 #include "chrome/browser/importer/external_process_importer_host.h"
+#include "chrome/browser/importer/importer_host.h"
 #include "chrome/browser/mac/master_prefs.h"
 #include "chrome/browser/process_singleton.h"
 
 namespace first_run {
 namespace internal {
 
-bool ImportBookmarks(const FilePath& import_bookmarks_path) {
+bool ImportBookmarks(const base::FilePath& import_bookmarks_path) {
   // http://crbug.com/48880
   return false;
 }
@@ -25,7 +25,7 @@ bool ImportBookmarks(const FilePath& import_bookmarks_path) {
 
 namespace first_run {
 
-FilePath MasterPrefsPath() {
+base::FilePath MasterPrefsPath() {
   return master_prefs::MasterPrefsPath();
 }
 

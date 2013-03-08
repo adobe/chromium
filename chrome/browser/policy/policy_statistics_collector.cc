@@ -10,9 +10,10 @@
 #include "base/bind.h"
 #include "base/location.h"
 #include "base/metrics/histogram.h"
+#include "base/prefs/pref_registry_simple.h"
+#include "base/prefs/pref_service.h"
 #include "base/task_runner.h"
 #include "chrome/browser/policy/policy_service.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/common/pref_names.h"
 #include "policy/policy_constants.h"
 
@@ -49,8 +50,8 @@ void PolicyStatisticsCollector::Initialize() {
 }
 
 // static
-void PolicyStatisticsCollector::RegisterPrefs(PrefServiceSimple* prefs) {
-  prefs->RegisterInt64Pref(prefs::kLastPolicyStatisticsUpdate, 0);
+void PolicyStatisticsCollector::RegisterPrefs(PrefRegistrySimple* registry) {
+  registry->RegisterInt64Pref(prefs::kLastPolicyStatisticsUpdate, 0);
 }
 
 void PolicyStatisticsCollector::RecordPolicyUse(int id) {
@@ -74,8 +75,8 @@ void PolicyStatisticsCollector::RecordPolicyUse(int id) {
 void PolicyStatisticsCollector::CollectStatistics() {
   const policy::PolicyDefinitionList* policy_list =
       policy::GetChromePolicyDefinitionList();
-  const PolicyMap& policies = policy_service_->GetPolicies(POLICY_DOMAIN_CHROME,
-                                                           std::string());
+  const PolicyMap& policies = policy_service_->GetPolicies(
+      PolicyNamespace(POLICY_DOMAIN_CHROME, std::string()));
 
   // Collect statistics.
   for (const policy::PolicyDefinitionList::Entry* policy = policy_list->begin;

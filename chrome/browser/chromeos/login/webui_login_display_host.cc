@@ -26,6 +26,7 @@
 #include "chrome/common/chrome_switches.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_view.h"
 #include "content/public/browser/web_ui.h"
 #include "ui/aura/env.h"
 #include "ui/aura/root_window.h"
@@ -76,11 +77,8 @@ WebUILoginDisplayHost::WebUILoginDisplayHost(const gfx::Rect& background_bounds)
       HasSwitch(switches::kDisableBootAnimation);
   bool disable_oobe_animation = CommandLine::ForCurrentProcess()->
       HasSwitch(switches::kDisableOobeAnimation);
-  bool new_oobe_ui = !CommandLine::ForCurrentProcess()->
-      HasSwitch(switches::kDisableNewOobe);
 
   waiting_for_wallpaper_load_ =
-      new_oobe_ui &&
       !zero_delay_enabled &&
       (is_registered || !disable_oobe_animation) &&
       (!is_registered || !disable_boot_animation);
@@ -88,11 +86,10 @@ WebUILoginDisplayHost::WebUILoginDisplayHost(const gfx::Rect& background_bounds)
   // For slower hardware we have boot animation disabled so
   // we'll be initializing WebUI hidden, waiting for user pods to load and then
   // show WebUI at once.
-  waiting_for_user_pods_ =
-      new_oobe_ui && !zero_delay_enabled && !waiting_for_wallpaper_load_;
+  waiting_for_user_pods_ = !zero_delay_enabled && !waiting_for_wallpaper_load_;
 
-  initialize_webui_hidden_ = kHiddenWebUIInitializationDefault &&
-      (waiting_for_user_pods_ || waiting_for_wallpaper_load_);
+  initialize_webui_hidden_ =
+      kHiddenWebUIInitializationDefault && !zero_delay_enabled;
 
   is_boot_animation2_enabled_ = waiting_for_wallpaper_load_ &&
       !CommandLine::ForCurrentProcess()->HasSwitch(
@@ -326,9 +323,11 @@ void WebUILoginDisplayHost::ShowWebUI() {
   }
   LOG(INFO) << "Login WebUI >> Show already initialized UI";
   login_window_->Show();
-  login_view_->GetWebContents()->Focus();
+  login_view_->GetWebContents()->GetView()->Focus();
   login_view_->SetStatusAreaVisible(status_area_saved_visibility_);
   login_view_->OnPostponedShow();
+  // We should reset this flag to allow changing of status area visibility.
+  initialize_webui_hidden_ = false;
 }
 
 void WebUILoginDisplayHost::StartPostponedWebUI() {
@@ -368,8 +367,7 @@ void WebUILoginDisplayHost::InitLoginWindowAndView() {
       views::Widget::InitParams::TYPE_WINDOW_FRAMELESS);
   params.bounds = background_bounds();
   params.show_state = ui::SHOW_STATE_FULLSCREEN;
-  if (!CommandLine::ForCurrentProcess()->HasSwitch(switches::kDisableNewOobe))
-    params.transparent = true;
+  params.transparent = true;
   params.parent =
       ash::Shell::GetContainer(
           ash::Shell::GetPrimaryRootWindow(),

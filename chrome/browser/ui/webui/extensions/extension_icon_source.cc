@@ -8,10 +8,10 @@
 #include "base/bind_helpers.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/stl_util.h"
-#include "base/string_number_conversions.h"
-#include "base/string_split.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
+#include "base/strings/string_number_conversions.h"
+#include "base/strings/string_split.h"
 #include "base/threading/thread.h"
 #include "chrome/browser/extensions/extension_prefs.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -19,6 +19,7 @@
 #include "chrome/browser/extensions/image_loader.h"
 #include "chrome/browser/favicon/favicon_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/common/extensions/api/icons/icons_handler.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_resource.h"
@@ -77,8 +78,10 @@ GURL ExtensionIconSource::GetIconURL(const extensions::Extension* extension,
                                      bool* exists) {
   if (exists)
     *exists = true;
-  if (exists && extension->GetIconURL(icon_size, match) == GURL())
+  if (exists && extensions::IconsInfo::GetIconURL(
+          extension, icon_size, match) == GURL()) {
     *exists = false;
+  }
 
   GURL icon_url(base::StringPrintf("%s%s/%d/%d%s",
                                    chrome::kChromeUIExtensionIconURL,
@@ -120,13 +123,17 @@ void ExtensionIconSource::StartDataRequest(
   // the request data available for later.
   static int next_id = 0;
   if (!ParseData(path, ++next_id, callback)) {
-    SendDefaultResponse(next_id);
+    // If the request data cannot be parsed, request parameters will not be
+    // added to |request_map_|.
+    // Send back the default application icon (not resized or desaturated) as
+    // the default response.
+    callback.Run(BitmapToMemory(GetDefaultAppImage()));
     return;
   }
 
   ExtensionIconRequest* request = GetData(next_id);
-  ExtensionResource icon =
-      request->extension->GetIconResource(request->size, request->match);
+  ExtensionResource icon = extensions::IconsInfo::GetIconResource(
+      request->extension, request->size, request->match);
 
   if (icon.relative_path().empty()) {
     LoadIconFailed(next_id);
@@ -251,8 +258,8 @@ void ExtensionIconSource::OnImageLoaded(int request_id,
 
 void ExtensionIconSource::LoadIconFailed(int request_id) {
   ExtensionIconRequest* request = GetData(request_id);
-  ExtensionResource icon =
-      request->extension->GetIconResource(request->size, request->match);
+  ExtensionResource icon = extensions::IconsInfo::GetIconResource(
+      request->extension, request->size, request->match);
 
   if (request->size == extension_misc::EXTENSION_ICON_BITTY)
     LoadFaviconImage(request_id);
@@ -304,14 +311,6 @@ bool ExtensionIconSource::ParseData(
   SetData(request_id, callback, extension, grayscale, size, match_type);
 
   return true;
-}
-
-void ExtensionIconSource::SendDefaultResponse(int request_id) {
-  // We send back the default application icon (not resized or desaturated)
-  // as the default response, like when there is no data.
-  ExtensionIconRequest* request = GetData(request_id);
-  request->callback.Run(BitmapToMemory(GetDefaultAppImage()));
-  ClearData(request_id);
 }
 
 void ExtensionIconSource::SetData(

@@ -59,9 +59,7 @@ MockWrite* ChopWriteFrame(const char* data, int length, int num_chunks) {
 // |frame| is the frame to chop.
 // |num_chunks| is the number of chunks to create.
 MockWrite* ChopWriteFrame(const SpdyFrame& frame, int num_chunks) {
-  return ChopWriteFrame(frame.data(),
-                        frame.length() + SpdyFrame::kHeaderSize,
-                        num_chunks);
+  return ChopWriteFrame(frame.data(), frame.size(), num_chunks);
 }
 
 // Chop a frame into an array of MockReads.
@@ -84,9 +82,7 @@ MockRead* ChopReadFrame(const char* data, int length, int num_chunks) {
 // |frame| is the frame to chop.
 // |num_chunks| is the number of chunks to create.
 MockRead* ChopReadFrame(const SpdyFrame& frame, int num_chunks) {
-  return ChopReadFrame(frame.data(),
-                       frame.length() + SpdyFrame::kHeaderSize,
-                       num_chunks);
+  return ChopReadFrame(frame.data(), frame.size(), num_chunks);
 }
 
 // Adds headers and values to a map.
@@ -251,7 +247,7 @@ SpdyFrame* ConstructSpdyWindowUpdate(
 // Construct a SPDY RST_STREAM frame.
 // Returns the constructed frame.  The caller takes ownership of the frame.
 SpdyFrame* ConstructSpdyRstStream(SpdyStreamId stream_id,
-                                  SpdyStatusCodes status) {
+                                  SpdyRstStreamStatus status) {
   BufferedSpdyFramer framer(2, false);
   return framer.CreateRstStream(stream_id, status);
 }
@@ -335,7 +331,7 @@ SpdyFrame* ConstructSpdyControlFrame(const char* const extra_headers[],
                                   // Priority
     flags,                        // Control Flags
     compressed,                   // Compressed
-    INVALID,                      // Status
+    RST_STREAM_INVALID,           // Status
     NULL,                         // Data
     0,                            // Length
     DATA_FLAG_NONE                // Data Flags
@@ -364,7 +360,7 @@ SpdyFrame* ConstructSpdyGet(const char* const url,
                             // Priority
     CONTROL_FLAG_FIN,       // Control Flags
     compressed,             // Compressed
-    INVALID,                // Status
+    RST_STREAM_INVALID,     // Status
     NULL,                   // Data
     0,                      // Length
     DATA_FLAG_NONE          // Data Flags
@@ -718,8 +714,7 @@ SpdyFrame* ConstructSpdyBodyFrame(int stream_id, const char* data,
 SpdyFrame* ConstructWrappedSpdyFrame(const scoped_ptr<SpdyFrame>& frame,
                                      int stream_id) {
   return ConstructSpdyBodyFrame(stream_id, frame->data(),
-                                frame->length() + SpdyFrame::kHeaderSize,
-                                false);
+                                frame->size(), false);
 }
 
 // Construct an expected SPDY reply string.
@@ -800,8 +795,7 @@ int ConstructSpdyReplyString(const char* const extra_headers[],
 
 // Create a MockWrite from the given SpdyFrame.
 MockWrite CreateMockWrite(const SpdyFrame& req) {
-  return MockWrite(
-      ASYNC, req.data(), req.length() + SpdyFrame::kHeaderSize);
+  return MockWrite(ASYNC, req.data(), req.size());
 }
 
 // Create a MockWrite from the given SpdyFrame and sequence number.
@@ -811,14 +805,12 @@ MockWrite CreateMockWrite(const SpdyFrame& req, int seq) {
 
 // Create a MockWrite from the given SpdyFrame and sequence number.
 MockWrite CreateMockWrite(const SpdyFrame& req, int seq, IoMode mode) {
-  return MockWrite(
-      mode, req.data(), req.length() + SpdyFrame::kHeaderSize, seq);
+  return MockWrite(mode, req.data(), req.size(), seq);
 }
 
 // Create a MockRead from the given SpdyFrame.
 MockRead CreateMockRead(const SpdyFrame& resp) {
-  return MockRead(
-      ASYNC, resp.data(), resp.length() + SpdyFrame::kHeaderSize);
+  return MockRead(ASYNC, resp.data(), resp.size());
 }
 
 // Create a MockRead from the given SpdyFrame and sequence number.
@@ -828,8 +820,7 @@ MockRead CreateMockRead(const SpdyFrame& resp, int seq) {
 
 // Create a MockRead from the given SpdyFrame and sequence number.
 MockRead CreateMockRead(const SpdyFrame& resp, int seq, IoMode mode) {
-  return MockRead(
-      mode, resp.data(), resp.length() + SpdyFrame::kHeaderSize, seq);
+  return MockRead(mode, resp.data(), resp.size(), seq);
 }
 
 // Combines the given SpdyFrames into the given char array and returns
@@ -838,12 +829,12 @@ int CombineFrames(const SpdyFrame** frames, int num_frames,
                   char* buff, int buff_len) {
   int total_len = 0;
   for (int i = 0; i < num_frames; ++i) {
-    total_len += frames[i]->length() + SpdyFrame::kHeaderSize;
+    total_len += frames[i]->size();
   }
   DCHECK_LE(total_len, buff_len);
   char* ptr = buff;
   for (int i = 0; i < num_frames; ++i) {
-    int len = frames[i]->length() + SpdyFrame::kHeaderSize;
+    int len = frames[i]->size();
     memcpy(ptr, frames[i]->data(), len);
     ptr += len;
   }
@@ -862,6 +853,7 @@ SpdySessionDependencies::SpdySessionDependencies()
       enable_ip_pooling(true),
       enable_compression(false),
       enable_ping(false),
+      enable_user_alternate_protocol_ports(false),
       time_func(&base::TimeTicks::Now),
       net_log(NULL) {
   // Note: The CancelledTransaction test does cleanup by running all
@@ -885,6 +877,7 @@ SpdySessionDependencies::SpdySessionDependencies(ProxyService* proxy_service)
       enable_ip_pooling(true),
       enable_compression(false),
       enable_ping(false),
+      enable_user_alternate_protocol_ports(false),
       time_func(&base::TimeTicks::Now),
       net_log(NULL) {}
 
@@ -927,6 +920,8 @@ net::HttpNetworkSession::Params SpdySessionDependencies::CreateSessionParams(
   params.enable_spdy_ip_pooling = session_deps->enable_ip_pooling;
   params.enable_spdy_compression = session_deps->enable_compression;
   params.enable_spdy_ping_based_connection_checking = session_deps->enable_ping;
+  params.enable_user_alternate_protocol_ports =
+      session_deps->enable_user_alternate_protocol_ports;
   params.spdy_default_protocol = kProtoSPDY2;
   params.time_func = session_deps->time_func;
   params.trusted_spdy_proxy = session_deps->trusted_spdy_proxy;
@@ -975,7 +970,7 @@ const SpdyHeaderInfo MakeSpdyHeader(SpdyControlType type) {
     ConvertRequestPriorityToSpdyPriority(LOWEST, 2),  // Priority
     CONTROL_FLAG_FIN,       // Control Flags
     false,                        // Compressed
-    INVALID,                // Status
+    RST_STREAM_INVALID,           // Status
     NULL,                         // Data
     0,                            // Length
     DATA_FLAG_NONE          // Data Flags

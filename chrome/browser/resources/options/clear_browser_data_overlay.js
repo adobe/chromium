@@ -22,6 +22,9 @@ cr.define('options', function() {
     // Inherit ClearBrowserDataOverlay from OptionsPage.
     __proto__: OptionsPage.prototype,
 
+    // Whether deleting history and downloads is allowed.
+    allowDeletingHistory_: true,
+
     /**
      * Initialize the page.
      */
@@ -71,11 +74,36 @@ cr.define('options', function() {
       }
       $('clear-browser-data-commit').disabled = !isChecked;
     },
+
+    setAllowDeletingHistory: function(allowed) {
+      this.allowDeletingHistory_ = allowed;
+    },
+
+    /** @override */
+    didShowPage: function() {
+      var allowed = ClearBrowserDataOverlay.getInstance().allowDeletingHistory_;
+      ClearBrowserDataOverlay.updateHistoryCheckboxes(allowed);
+    },
   };
 
   //
   // Chrome callbacks
   //
+  /**
+   * Updates the disabled status of the browsing-history and downloads
+   * checkboxes, also unchecking them if they are disabled. This is called in
+   * response to a change in the corresponding preference.
+   */
+  ClearBrowserDataOverlay.updateHistoryCheckboxes = function(allowed) {
+    $('delete-browsing-history-checkbox').disabled = !allowed;
+    $('delete-download-history-checkbox').disabled = !allowed;
+    if (!allowed) {
+      $('delete-browsing-history-checkbox').checked = false;
+      $('delete-download-history-checkbox').checked = false;
+    }
+    ClearBrowserDataOverlay.getInstance().setAllowDeletingHistory(allowed);
+  };
+
   ClearBrowserDataOverlay.setClearingState = function(state) {
     $('delete-browsing-history-checkbox').disabled = state;
     $('delete-download-history-checkbox').disabled = state;
@@ -93,6 +121,11 @@ cr.define('options', function() {
       $('clear-browser-data-commit').disabled = true;
     else
       ClearBrowserDataOverlay.getInstance().updateCommitButtonState_();
+  };
+
+  ClearBrowserDataOverlay.setBannerVisibility = function(args) {
+    var visible = args[0];
+    $('info-banner').hidden = !visible;
   };
 
   ClearBrowserDataOverlay.doneClearing = function() {

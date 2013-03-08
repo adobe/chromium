@@ -7,7 +7,7 @@
 #include <string>
 
 #include "base/command_line.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "remoting/host/config_file_watcher.h"
 #include "remoting/host/json_host_config.h"
@@ -23,7 +23,7 @@ bool GetUsageStatsConsent(bool* allowed, bool* set_by_policy) {
   // which itself should happen as early as possible during startup.
   CommandLine* command_line = CommandLine::ForCurrentProcess();
   if (command_line->HasSwitch(kHostConfigSwitchName)) {
-    FilePath config_file_path =
+    base::FilePath config_file_path =
         command_line->GetSwitchValuePath(kHostConfigSwitchName);
     JsonHostConfig host_config(config_file_path);
     if (host_config.Read()) {

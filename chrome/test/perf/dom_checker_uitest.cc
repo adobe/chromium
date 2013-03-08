@@ -3,13 +3,13 @@
 // found in the LICENSE file.
 
 #include "base/command_line.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/json/json_string_value_serializer.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
-#include "base/string_split.h"
 #include "base/string_util.h"
+#include "base/strings/string_split.h"
 #include "base/test/test_timeouts.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
@@ -22,13 +22,13 @@
 
 namespace {
 
-static const FilePath::CharType kBaseUrl[] =
+static const base::FilePath::CharType kBaseUrl[] =
     FILE_PATH_LITERAL("http://localhost:8000/");
 
-static const FilePath::CharType kTestDirectory[] =
+static const base::FilePath::CharType kTestDirectory[] =
     FILE_PATH_LITERAL("dom_checker/");
 
-static const FilePath::CharType kStartFile[] =
+static const base::FilePath::CharType kStartFile[] =
     FILE_PATH_LITERAL("dom_checker.html");
 
 const char kRunDomCheckerTest[] = "run-dom-checker-test";
@@ -103,15 +103,15 @@ class DomCheckerTest : public UITest {
   }
 
   // Return the path to the DOM checker directory on the local filesystem.
-  FilePath GetDomCheckerDir() {
-    FilePath test_dir;
+  base::FilePath GetDomCheckerDir() {
+    base::FilePath test_dir;
     PathService::Get(chrome::DIR_TEST_DATA, &test_dir);
     return test_dir.AppendASCII("dom_checker");
   }
 
   bool ReadExpectedResults(const std::string& failures_file,
                            std::string* results) {
-    FilePath results_path = GetDomCheckerDir();
+    base::FilePath results_path = GetDomCheckerDir();
     results_path = results_path.AppendASCII(failures_file);
     return file_util::ReadFileToString(results_path, results);
   }
@@ -200,15 +200,15 @@ class DomCheckerTest : public UITest {
 
   void RunDomChecker(bool use_http, int* test_count, ResultsSet* tests_failed) {
     GURL test_url;
-    FilePath::StringType start_file(kStartFile);
+    base::FilePath::StringType start_file(kStartFile);
     if (use_http) {
-      FilePath::StringType test_directory(kTestDirectory);
-      FilePath::StringType url_string(kBaseUrl);
+      base::FilePath::StringType test_directory(kTestDirectory);
+      base::FilePath::StringType url_string(kBaseUrl);
       url_string.append(test_directory);
       url_string.append(start_file);
       test_url = GURL(url_string);
     } else {
-      FilePath test_path = GetDomCheckerDir();
+      base::FilePath test_path = GetDomCheckerDir();
       test_path = test_path.Append(start_file);
       test_url = net::FilePathToFileURL(test_path);
     }

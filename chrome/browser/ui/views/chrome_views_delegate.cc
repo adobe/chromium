@@ -6,10 +6,10 @@
 
 #include "base/command_line.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/prefs/pref_service.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/views/accessibility/accessibility_event_router_views.h"
@@ -184,7 +184,13 @@ void ChromeViewsDelegate::OnBeforeWidgetInit(
 #if defined(OS_CHROMEOS)
   // When we are doing straight chromeos builds, we still need to handle the
   // toplevel window case.
-  if (params->parent == NULL && params->context == NULL && params->top_level)
+  // There may be a few remaining widgets in Chrome OS that are not top level,
+  // but have neither a context nor a parent. Provide a fallback context so
+  // users don't crash. Developers will hit the DCHECK and should provide a
+  // context.
+  DCHECK(params->parent || params->context || params->top_level)
+      << "Please provide a parent or context for this widget.";
+  if (!params->parent && !params->context)
     params->context = ash::Shell::GetPrimaryRootWindow();
 #elif defined(USE_AURA)
   // While the majority of the time, context wasn't plumbed through due to the
@@ -211,7 +217,7 @@ void ChromeViewsDelegate::OnBeforeWidgetInit(
   } else if (params->parent &&
              params->type != views::Widget::InitParams::TYPE_MENU) {
     params->native_widget = new views::NativeWidgetAura(delegate);
-  } else {
+  } else if (params->type != views::Widget::InitParams::TYPE_TOOLTIP) {
     // TODO(erg): Once we've threaded context to everywhere that needs it, we
     // should remove this check here.
     gfx::NativeView to_check =

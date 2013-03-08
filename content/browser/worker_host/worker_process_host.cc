@@ -69,7 +69,7 @@ class URLRequestContextSelector
   virtual ~URLRequestContextSelector() {}
 
   virtual net::URLRequestContext* GetRequestContext(
-      ResourceType::Type resource_type) {
+      ResourceType::Type resource_type) OVERRIDE {
     if (resource_type == ResourceType::MEDIA)
       return media_url_request_context_->GetURLRequestContext();
     return url_request_context_->GetURLRequestContext();
@@ -136,7 +136,7 @@ bool WorkerProcessHost::Init(int render_process_id) {
   int flags = ChildProcessHost::CHILD_NORMAL;
 #endif
 
-  FilePath exe_path = ChildProcessHost::GetChildPath(flags);
+  base::FilePath exe_path = ChildProcessHost::GetChildPath(flags);
   if (exe_path.empty())
     return false;
 
@@ -191,7 +191,7 @@ bool WorkerProcessHost::Init(int render_process_id) {
 
   process_->Launch(
 #if defined(OS_WIN)
-      FilePath(),
+      base::FilePath(),
 #elif defined(OS_POSIX)
       use_zygote,
       base::EnvironmentVector(),

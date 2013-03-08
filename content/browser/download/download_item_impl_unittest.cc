@@ -35,7 +35,7 @@ namespace {
 const int kDownloadChunkSize = 1000;
 const int kDownloadSpeed = 1000;
 const int kDummyDBHandle = 10;
-const FilePath::CharType kDummyPath[] = FILE_PATH_LITERAL("/testpath");
+const base::FilePath::CharType kDummyPath[] = FILE_PATH_LITERAL("/testpath");
 
 } // namespace
 
@@ -57,7 +57,7 @@ class MockDelegate : public DownloadItemImplDelegate {
                bool(DownloadItemImpl*, const base::Closure&));
   MOCK_METHOD2(ShouldOpenDownload,
                bool(DownloadItemImpl*, const ShouldOpenDownloadCallback&));
-  MOCK_METHOD1(ShouldOpenFileBasedOnExtension, bool(const FilePath&));
+  MOCK_METHOD1(ShouldOpenFileBasedOnExtension, bool(const base::FilePath&));
   MOCK_METHOD1(CheckForFileRemoval, void(DownloadItemImpl*));
 
   virtual void ResumeInterruptedDownload(
@@ -71,7 +71,6 @@ class MockDelegate : public DownloadItemImplDelegate {
   MOCK_METHOD1(UpdatePersistence, void(DownloadItemImpl*));
   MOCK_METHOD1(DownloadOpened, void(DownloadItemImpl*));
   MOCK_METHOD1(DownloadRemoved, void(DownloadItemImpl*));
-  MOCK_METHOD1(ShowDownloadInBrowser, void(DownloadItemImpl*));
   MOCK_CONST_METHOD1(AssertStateConsistent, void(DownloadItemImpl*));
 
   void VerifyAndClearExpectations() {
@@ -133,13 +132,13 @@ class DownloadItemTest : public testing::Test {
       if (item_) item_->RemoveObserver(this);
     }
 
-    virtual void OnDownloadRemoved(DownloadItem* download) {
+    virtual void OnDownloadRemoved(DownloadItem* download) OVERRIDE {
       DVLOG(20) << " " << __FUNCTION__
                 << " download = " << download->DebugString(false);
       removed_ = true;
     }
 
-    virtual void OnDownloadUpdated(DownloadItem* download) {
+    virtual void OnDownloadUpdated(DownloadItem* download) OVERRIDE {
       DVLOG(20) << " " << __FUNCTION__
                 << " download = " << download->DebugString(false);
       updated_ = true;
@@ -155,12 +154,12 @@ class DownloadItemTest : public testing::Test {
       last_state_ = new_state;
     }
 
-    virtual void OnDownloadOpened(DownloadItem* download) {
+    virtual void OnDownloadOpened(DownloadItem* download) OVERRIDE {
       DVLOG(20) << " " << __FUNCTION__
                 << " download = " << download->DebugString(false);
     }
 
-    virtual void OnDownloadDestroyed(DownloadItem* download) {
+    virtual void OnDownloadDestroyed(DownloadItem* download) OVERRIDE {
       DVLOG(20) << " " << __FUNCTION__
                 << " download = " << download->DebugString(false);
       destroyed_ = true;
@@ -283,12 +282,12 @@ class DownloadItemTest : public testing::Test {
     DownloadItemImplDelegate::DownloadTargetCallback callback;
     MockDownloadFile* download_file =
         AddDownloadFileToDownloadItem(item, &callback);
-    FilePath target_path(kDummyPath);
-    FilePath intermediate_path(target_path.InsertBeforeExtensionASCII("x"));
+    base::FilePath target_path(kDummyPath);
+    base::FilePath intermediate_path(
+        target_path.InsertBeforeExtensionASCII("x"));
     EXPECT_CALL(*download_file, RenameAndUniquify(intermediate_path, _))
         .WillOnce(ScheduleRenameCallback(DOWNLOAD_INTERRUPT_REASON_NONE,
                                          intermediate_path));
-    EXPECT_CALL(*mock_delegate(), ShowDownloadInBrowser(_));
     callback.Run(target_path, DownloadItem::TARGET_DISPOSITION_OVERWRITE,
                  DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS, intermediate_path);
     RunAllPendingInMessageLoops();
@@ -564,13 +563,13 @@ TEST_F(DownloadItemTest, NotificationAfterOnDownloadTargetDetermined) {
   MockDownloadFile* download_file =
       AddDownloadFileToDownloadItem(item, &callback);
   MockObserver observer(item);
-  FilePath target_path(kDummyPath);
-  FilePath intermediate_path(target_path.InsertBeforeExtensionASCII("x"));
-  FilePath new_intermediate_path(target_path.InsertBeforeExtensionASCII("y"));
+  base::FilePath target_path(kDummyPath);
+  base::FilePath intermediate_path(target_path.InsertBeforeExtensionASCII("x"));
+  base::FilePath new_intermediate_path(
+      target_path.InsertBeforeExtensionASCII("y"));
   EXPECT_CALL(*download_file, RenameAndUniquify(intermediate_path, _))
       .WillOnce(ScheduleRenameCallback(DOWNLOAD_INTERRUPT_REASON_NONE,
                                        new_intermediate_path));
-  EXPECT_CALL(*mock_delegate(), ShowDownloadInBrowser(_));
 
   // Currently, a notification would be generated if the danger type is anything
   // other than NOT_DANGEROUS.
@@ -614,8 +613,8 @@ TEST_F(DownloadItemTest, DisplayName) {
   DownloadItemImplDelegate::DownloadTargetCallback callback;
   MockDownloadFile* download_file =
       AddDownloadFileToDownloadItem(item, &callback);
-  FilePath target_path(FilePath(kDummyPath).AppendASCII("foo.bar"));
-  FilePath intermediate_path(target_path.InsertBeforeExtensionASCII("x"));
+  base::FilePath target_path(base::FilePath(kDummyPath).AppendASCII("foo.bar"));
+  base::FilePath intermediate_path(target_path.InsertBeforeExtensionASCII("x"));
   EXPECT_EQ(FILE_PATH_LITERAL(""),
             item->GetFileNameToReportUser().value());
   EXPECT_CALL(*download_file, RenameAndUniquify(_, _))
@@ -623,11 +622,10 @@ TEST_F(DownloadItemTest, DisplayName) {
                                        intermediate_path));
   callback.Run(target_path, DownloadItem::TARGET_DISPOSITION_OVERWRITE,
                DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS, intermediate_path);
-  EXPECT_CALL(*mock_delegate(), ShowDownloadInBrowser(_));
   RunAllPendingInMessageLoops();
   EXPECT_EQ(FILE_PATH_LITERAL("foo.bar"),
             item->GetFileNameToReportUser().value());
-  item->SetDisplayName(FilePath(FILE_PATH_LITERAL("new.name")));
+  item->SetDisplayName(base::FilePath(FILE_PATH_LITERAL("new.name")));
   EXPECT_EQ(FILE_PATH_LITERAL("new.name"),
             item->GetFileNameToReportUser().value());
   CleanupItem(item, download_file, DownloadItem::IN_PROGRESS);
@@ -653,14 +651,13 @@ TEST_F(DownloadItemTest, CallbackAfterRename) {
   DownloadItemImplDelegate::DownloadTargetCallback callback;
   MockDownloadFile* download_file =
       AddDownloadFileToDownloadItem(item, &callback);
-  FilePath final_path(FilePath(kDummyPath).AppendASCII("foo.bar"));
-  FilePath intermediate_path(final_path.InsertBeforeExtensionASCII("x"));
-  FilePath new_intermediate_path(final_path.InsertBeforeExtensionASCII("y"));
+  base::FilePath final_path(base::FilePath(kDummyPath).AppendASCII("foo.bar"));
+  base::FilePath intermediate_path(final_path.InsertBeforeExtensionASCII("x"));
+  base::FilePath new_intermediate_path(
+      final_path.InsertBeforeExtensionASCII("y"));
   EXPECT_CALL(*download_file, RenameAndUniquify(intermediate_path, _))
       .WillOnce(ScheduleRenameCallback(DOWNLOAD_INTERRUPT_REASON_NONE,
                                        new_intermediate_path));
-  EXPECT_CALL(*mock_delegate(), ShowDownloadInBrowser(item))
-      .Times(1);
 
   callback.Run(final_path, DownloadItem::TARGET_DISPOSITION_OVERWRITE,
                DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS, intermediate_path);
@@ -688,15 +685,14 @@ TEST_F(DownloadItemTest, CallbackAfterInterruptedRename) {
   DownloadItemImplDelegate::DownloadTargetCallback callback;
   MockDownloadFile* download_file =
       AddDownloadFileToDownloadItem(item, &callback);
-  FilePath final_path(FilePath(kDummyPath).AppendASCII("foo.bar"));
-  FilePath intermediate_path(final_path.InsertBeforeExtensionASCII("x"));
-  FilePath new_intermediate_path(final_path.InsertBeforeExtensionASCII("y"));
+  base::FilePath final_path(base::FilePath(kDummyPath).AppendASCII("foo.bar"));
+  base::FilePath intermediate_path(final_path.InsertBeforeExtensionASCII("x"));
+  base::FilePath new_intermediate_path(
+      final_path.InsertBeforeExtensionASCII("y"));
   EXPECT_CALL(*download_file, RenameAndUniquify(intermediate_path, _))
       .WillOnce(ScheduleRenameCallback(DOWNLOAD_INTERRUPT_REASON_FILE_FAILED,
                                        new_intermediate_path));
   EXPECT_CALL(*download_file, Cancel())
-      .Times(1);
-  EXPECT_CALL(*mock_delegate(), ShowDownloadInBrowser(item))
       .Times(1);
 
   callback.Run(final_path, DownloadItem::TARGET_DISPOSITION_OVERWRITE,
@@ -837,7 +833,7 @@ TEST_F(DownloadItemTest, EnabledActionsForNormalDownload) {
   // Complete
   EXPECT_CALL(*download_file, RenameAndAnnotate(_, _))
       .WillOnce(ScheduleRenameCallback(DOWNLOAD_INTERRUPT_REASON_NONE,
-                                       FilePath(kDummyPath)));
+                                       base::FilePath(kDummyPath)));
   EXPECT_CALL(*mock_delegate(), ShouldCompleteDownload(item, _))
       .WillOnce(Return(true));
   EXPECT_CALL(*download_file, Detach());
@@ -866,7 +862,7 @@ TEST_F(DownloadItemTest, EnabledActionsForTemporaryDownload) {
       .WillOnce(Return(true));
   EXPECT_CALL(*download_file, RenameAndAnnotate(_, _))
       .WillOnce(ScheduleRenameCallback(DOWNLOAD_INTERRUPT_REASON_NONE,
-                                       FilePath(kDummyPath)));
+                                       base::FilePath(kDummyPath)));
   EXPECT_CALL(*download_file, Detach());
   item->DestinationObserverAsWeakPtr()->DestinationCompleted("");
   RunAllPendingInMessageLoops();
@@ -921,9 +917,9 @@ TEST_F(DownloadItemTest, CompleteDelegate_ReturnTrue) {
   EXPECT_FALSE(item->IsDangerous());
 
   // Make sure the download can complete.
-  EXPECT_CALL(*download_file, RenameAndAnnotate(FilePath(kDummyPath), _))
+  EXPECT_CALL(*download_file, RenameAndAnnotate(base::FilePath(kDummyPath), _))
       .WillOnce(ScheduleRenameCallback(DOWNLOAD_INTERRUPT_REASON_NONE,
-                                       FilePath(kDummyPath)));
+                                       base::FilePath(kDummyPath)));
   EXPECT_CALL(*mock_delegate(), ShouldOpenDownload(item, _))
       .WillOnce(Return(true));
   EXPECT_CALL(*download_file, Detach());
@@ -956,9 +952,9 @@ TEST_F(DownloadItemTest, CompleteDelegate_BlockOnce) {
   EXPECT_FALSE(item->IsDangerous());
 
   // Make sure the download can complete.
-  EXPECT_CALL(*download_file, RenameAndAnnotate(FilePath(kDummyPath), _))
+  EXPECT_CALL(*download_file, RenameAndAnnotate(base::FilePath(kDummyPath), _))
       .WillOnce(ScheduleRenameCallback(DOWNLOAD_INTERRUPT_REASON_NONE,
-                                       FilePath(kDummyPath)));
+                                       base::FilePath(kDummyPath)));
   EXPECT_CALL(*mock_delegate(), ShouldOpenDownload(item, _))
       .WillOnce(Return(true));
   EXPECT_CALL(*download_file, Detach());
@@ -994,9 +990,9 @@ TEST_F(DownloadItemTest, CompleteDelegate_SetDanger) {
   EXPECT_TRUE(item->IsDangerous());
 
   // Make sure the download doesn't complete until we've validated it.
-  EXPECT_CALL(*download_file, RenameAndAnnotate(FilePath(kDummyPath), _))
+  EXPECT_CALL(*download_file, RenameAndAnnotate(base::FilePath(kDummyPath), _))
       .WillOnce(ScheduleRenameCallback(DOWNLOAD_INTERRUPT_REASON_NONE,
-                                       FilePath(kDummyPath)));
+                                       base::FilePath(kDummyPath)));
   EXPECT_CALL(*mock_delegate(), ShouldOpenDownload(item, _))
       .WillOnce(Return(true));
   EXPECT_CALL(*download_file, Detach());
@@ -1042,9 +1038,9 @@ TEST_F(DownloadItemTest, CompleteDelegate_BlockTwice) {
   EXPECT_FALSE(item->IsDangerous());
 
   // Make sure the download can complete.
-  EXPECT_CALL(*download_file, RenameAndAnnotate(FilePath(kDummyPath), _))
+  EXPECT_CALL(*download_file, RenameAndAnnotate(base::FilePath(kDummyPath), _))
       .WillOnce(ScheduleRenameCallback(DOWNLOAD_INTERRUPT_REASON_NONE,
-                                       FilePath(kDummyPath)));
+                                       base::FilePath(kDummyPath)));
   EXPECT_CALL(*mock_delegate(), ShouldOpenDownload(item, _))
       .WillOnce(Return(true));
   EXPECT_CALL(*download_file, Detach());

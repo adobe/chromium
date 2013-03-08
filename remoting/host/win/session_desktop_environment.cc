@@ -6,7 +6,7 @@
 
 #include "base/logging.h"
 #include "base/single_thread_task_runner.h"
-#include "remoting/capturer/video_frame_capturer.h"
+#include "media/video/capture/screen/screen_capturer.h"
 #include "remoting/host/audio_capturer.h"
 #include "remoting/host/event_executor.h"
 #include "remoting/host/win/session_event_executor.h"
@@ -15,7 +15,8 @@ namespace remoting {
 
 SessionDesktopEnvironment::SessionDesktopEnvironment(
     const base::Closure& inject_sas)
-    : inject_sas_(inject_sas){
+    : BasicDesktopEnvironment(true),
+      inject_sas_(inject_sas){
 }
 
 SessionDesktopEnvironment::~SessionDesktopEnvironment() {
@@ -35,7 +36,8 @@ scoped_ptr<EventExecutor> SessionDesktopEnvironment::CreateEventExecutor(
 
 SessionDesktopEnvironmentFactory::SessionDesktopEnvironmentFactory(
     const base::Closure& inject_sas)
-    : inject_sas_(inject_sas) {
+    : BasicDesktopEnvironmentFactory(true),
+      inject_sas_(inject_sas) {
 }
 
 SessionDesktopEnvironmentFactory::~SessionDesktopEnvironmentFactory() {

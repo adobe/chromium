@@ -5,7 +5,8 @@
 #include "ui/views/examples/widget_example.h"
 
 #include "base/utf_string_conversions.h"
-#include "ui/views/controls/button/text_button.h"
+#include "ui/views/controls/button/label_button.h"
+#include "ui/views/controls/label.h"
 #include "ui/views/layout/box_layout.h"
 #include "ui/views/view.h"
 #include "ui/views/widget/widget.h"
@@ -18,11 +19,34 @@ namespace {
 
 class DialogExample : public DialogDelegateView {
  public:
+  DialogExample();
+  virtual ~DialogExample();
   virtual string16 GetWindowTitle() const OVERRIDE;
+  virtual View* CreateExtraView() OVERRIDE;
+  virtual View* CreateFootnoteView() OVERRIDE;
 };
+
+DialogExample::DialogExample() {
+  set_background(Background::CreateSolidBackground(SK_ColorGRAY));
+  SetLayoutManager(new BoxLayout(BoxLayout::kVertical, 10, 10, 10));
+  AddChildView(new Label(ASCIIToUTF16("Dialog contents label!")));
+}
+
+DialogExample::~DialogExample() {
+}
 
 string16 DialogExample::GetWindowTitle() const {
   return ASCIIToUTF16("Dialog Widget Example");
+}
+
+View* DialogExample::CreateExtraView() {
+  LabelButton* button = new LabelButton(NULL, ASCIIToUTF16("Extra button!"));
+  button->SetStyle(Button::STYLE_NATIVE_TEXTBUTTON);
+  return button;
+}
+
+View* DialogExample::CreateFootnoteView() {
+  return new Label(ASCIIToUTF16("Footnote label!"));
 }
 
 }  // namespace
@@ -34,7 +58,7 @@ WidgetExample::~WidgetExample() {
 }
 
 void WidgetExample::CreateExampleView(View* container) {
-  container->SetLayoutManager(new BoxLayout(BoxLayout::kHorizontal, 0, 0, 2));
+  container->SetLayoutManager(new BoxLayout(BoxLayout::kHorizontal, 0, 0, 10));
   BuildButton(container, "Popup widget", POPUP);
   BuildButton(container, "Dialog widget", DIALOG);
 #if defined(OS_LINUX)
@@ -46,7 +70,7 @@ void WidgetExample::CreateExampleView(View* container) {
 void WidgetExample::BuildButton(View* container,
                                 const std::string& label,
                                 int tag) {
-  TextButton* button = new TextButton(this, ASCIIToUTF16(label));
+  LabelButton* button = new LabelButton(this, ASCIIToUTF16(label));
   button->set_focusable(true);
   button->set_tag(tag);
   container->AddChildView(button);
@@ -79,11 +103,8 @@ void WidgetExample::ButtonPressed(Button* sender, const ui::Event& event) {
       ShowWidget(sender, Widget::InitParams(Widget::InitParams::TYPE_POPUP));
       break;
     case DIALOG: {
-      Widget::InitParams params(Widget::InitParams::TYPE_WINDOW);
-      params.delegate = new DialogExample();
-      params.remove_standard_frame = true;
-      params.transparent = true;
-      ShowWidget(sender, params);
+      DialogDelegateView::CreateDialogWidget(new DialogExample(), NULL,
+          sender->GetWidget()->GetNativeView())->Show();
       break;
     }
     case CHILD:

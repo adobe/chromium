@@ -5,10 +5,11 @@
 #include "chrome/common/extensions/web_accessible_resources_handler.h"
 
 #include "base/memory/scoped_ptr.h"
-#include "base/string_number_conversions.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/common/extensions/extension_manifest_constants.h"
+#include "chrome/common/extensions/manifest.h"
 #include "extensions/common/error_utils.h"
 
 namespace extensions {
@@ -60,12 +61,12 @@ WebAccessibleResourcesHandler::WebAccessibleResourcesHandler() {
 WebAccessibleResourcesHandler::~WebAccessibleResourcesHandler() {
 }
 
-bool WebAccessibleResourcesHandler::Parse(const base::Value* value,
-                                          Extension* extension,
+bool WebAccessibleResourcesHandler::Parse(Extension* extension,
                                           string16* error) {
   scoped_ptr<WebAccessibleResourcesInfo> info(new WebAccessibleResourcesInfo);
   const ListValue* list_value = NULL;
-  if (!value->GetAsList(&list_value)) {
+  if (!extension->manifest()->GetList(keys::kWebAccessibleResources,
+                                      &list_value)) {
     *error = ASCIIToUTF16(errors::kInvalidWebAccessibleResourcesList);
     return false;
   }
@@ -89,6 +90,10 @@ bool WebAccessibleResourcesHandler::Parse(const base::Value* value,
   }
   extension->SetManifestData(keys::kWebAccessibleResources, info.release());
   return true;
+}
+
+const std::vector<std::string> WebAccessibleResourcesHandler::Keys() const {
+  return SingleKey(keys::kWebAccessibleResources);
 }
 
 }  // namespace extensions

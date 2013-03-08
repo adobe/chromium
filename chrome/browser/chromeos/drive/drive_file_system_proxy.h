@@ -25,6 +25,11 @@ class DriveFileSystemProxy : public fileapi::RemoteFileSystemProxyInterface {
   // |file_system| is the DriveFileSystem instance owned by DriveSystemService.
   explicit DriveFileSystemProxy(DriveFileSystemInterface* file_system);
 
+  // Detaches this instance from |file_system_|.
+  // Method calls may result in no-op after calling this method.
+  // This method must be called on UI thread.
+  void DetachFromFileSystem();
+
   // fileapi::RemoteFileSystemProxyInterface overrides.
   virtual void GetFileInfo(
       const fileapi::FileSystemURL& url,
@@ -91,7 +96,15 @@ class DriveFileSystemProxy : public fileapi::RemoteFileSystemProxyInterface {
   // the call will return true and fill in |file_path| with a file path of
   // a corresponding element within this file system.
   static bool ValidateUrl(const fileapi::FileSystemURL& url,
-                          FilePath* file_path);
+                          base::FilePath* file_path);
+
+  // Helper method to call methods of DriveFilesSystem. This method aborts
+  // method calls in case DetachFromFileSystem() has been called.
+  void CallDriveFileSystemMethodOnUIThread(const base::Closure& method_call);
+
+  // Used to implement CallDriveFileSystemMethodOnUIThread.
+  void CallDriveFileSystemMethodOnUIThreadInternal(
+      const base::Closure& method_call);
 
   // Helper callback for relaying reply for status callbacks to the
   // calling thread.
@@ -102,7 +115,7 @@ class DriveFileSystemProxy : public fileapi::RemoteFileSystemProxyInterface {
   // Helper callback for relaying reply for metadata retrieval request to the
   // calling thread.
   void OnGetMetadata(
-      const FilePath& file_path,
+      const base::FilePath& file_path,
       const fileapi::FileSystemOperation::GetMetadataCallback&
           callback,
       DriveFileError error,
@@ -111,7 +124,7 @@ class DriveFileSystemProxy : public fileapi::RemoteFileSystemProxyInterface {
   // Helper callback for relaying reply for GetEntryInfoByPath() to the
   // calling thread.
   void OnGetEntryInfoByPath(
-      const FilePath& entry_path,
+      const base::FilePath& entry_path,
       const fileapi::FileSystemOperation::SnapshotFileCallback&
           callback,
       DriveFileError error,
@@ -129,31 +142,31 @@ class DriveFileSystemProxy : public fileapi::RemoteFileSystemProxyInterface {
   // Helper callback for relaying reply for CreateWritableSnapshotFile() to
   // the calling thread.
   void OnCreateWritableSnapshotFile(
-      const FilePath& virtual_path,
+      const base::FilePath& virtual_path,
       const fileapi::WritableSnapshotFile& callback,
       DriveFileError result,
-      const FilePath& local_path);
+      const base::FilePath& local_path);
 
   // Helper callback for closing the local cache file and committing the dirty
   // flag. This is triggered when the callback for CreateWritableSnapshotFile
   // released the refcounted reference to the file.
   void CloseWritableSnapshotFile(
-      const FilePath& virtual_path,
-      const FilePath& local_path);
+      const base::FilePath& virtual_path,
+      const base::FilePath& local_path);
 
   // Invoked during Truncate() operation. This is called when a local modifiable
   // cache is ready for truncation.
   void OnFileOpenedForTruncate(
-      const FilePath& virtual_path,
+      const base::FilePath& virtual_path,
       int64 length,
       const fileapi::FileSystemOperation::StatusCallback& callback,
       DriveFileError open_result,
-      const FilePath& local_cache_path);
+      const base::FilePath& local_cache_path);
 
   // Invoked during Truncate() operation. This is called when the truncation of
   // a local cache file is finished on FILE thread.
   void DidTruncate(
-      const FilePath& virtual_path,
+      const base::FilePath& virtual_path,
       const fileapi::FileSystemOperation::StatusCallback& callback,
       base::PlatformFileError truncate_result);
 
@@ -165,11 +178,11 @@ class DriveFileSystemProxy : public fileapi::RemoteFileSystemProxyInterface {
       base::ProcessHandle peer_handle,
       const fileapi::FileSystemOperation::OpenFileCallback& callback,
       DriveFileError file_error,
-      const FilePath& local_cache_path);
+      const base::FilePath& local_cache_path);
 
   // Invoked during OpenFile() operation when file create flags are set.
   void OnCreateFileForOpen(
-      const FilePath& file_path,
+      const base::FilePath& file_path,
       int file_flags,
       base::ProcessHandle peer_handle,
       const fileapi::FileSystemOperation::OpenFileCallback& callback,
@@ -184,10 +197,6 @@ class DriveFileSystemProxy : public fileapi::RemoteFileSystemProxyInterface {
       base::PlatformFile* platform_file,
       base::PlatformFileError* truncate_result);
 
-  // DriveFileSystem is owned by Profile, which outlives DriveFileSystemProxy,
-  // which is owned by CrosMountPointProvider (i.e. by the time Profile is
-  // removed, the file manager is already gone). Hence it's safe to use this as
-  // a raw pointer.
   DriveFileSystemInterface* file_system_;
 };
 

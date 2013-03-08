@@ -8,6 +8,7 @@
  * @param {HTMLElement} parentNode Node to be parent for this dialog.
  * @param {FileCopyManager} copyManager Copy manager isntance.
  * @param {MetadataCache} metadataCache Metadata cache.
+ * @constructor
  */
 function ImportingDialog(parentNode, copyManager, metadataCache) {
   cr.ui.dialogs.BaseDialog.call(this, parentNode);
@@ -37,7 +38,7 @@ ImportingDialog.prototype.initDom_ = function() {
   progressContainer.appendChild(this.text_);
 
   this.progress_ = util.createChild(progressContainer, 'progress-bar');
-  util.createChild(this.progress_, 'progress-track');
+  util.createChild(this.progress_, 'progress-track smoothed');
 
   this.cancelButton_.textContent =
       loadTimeData.getString('PHOTO_IMPORT_CANCEL_BUTTON');
@@ -54,8 +55,7 @@ ImportingDialog.prototype.initDom_ = function() {
  * @param {boolean} move Whether to move files instead of copying them.
  */
 ImportingDialog.prototype.show = function(entries, dir, move) {
-  var message = loadTimeData.getStringF(
-      'PHOTO_IMPORT_IMPORTING', entries.length);
+  var message = loadTimeData.getString('PHOTO_IMPORT_IMPORTING');
   cr.ui.dialogs.BaseDialog.prototype.show.call(this, message, null, null, null);
 
   this.error_ = false;
@@ -88,8 +88,10 @@ ImportingDialog.prototype.previewEntry_ = function(index) {
   var entry = this.entries_[index];
   this.metadataCache_.get(entry, 'thumbnail|filesystem',
       function(metadata) {
-        new ThumbnailLoader(entry.toURL(), metadata).
-            load(box, true /* fill, not fit */);
+        new ThumbnailLoader(entry.toURL(),
+                            ThumbnailLoader.LoaderType.IMAGE,
+                            metadata).
+            load(box, ThumbnailLoader.FillMode.FILL);
       });
 };
 

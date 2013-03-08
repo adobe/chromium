@@ -38,15 +38,17 @@ class FileCallbacks : public fileapi::FileSystemCallbackDispatcher {
   FileCallbacks(::ppapi::Resource* resource,
                 scoped_refptr< ::ppapi::TrackedCallback> callback,
                 PP_FileInfo* info,
-                scoped_refptr<PPB_FileSystem_Impl> file_system,
-                scoped_refptr<PPB_DirectoryReader_Impl> directory_reader);
+                scoped_refptr<PPB_FileSystem_Impl> file_system);
   virtual ~FileCallbacks();
 
   // FileSystemCallbackDispatcher implementation.
   virtual void DidSucceed();
   virtual void DidReadMetadata(
       const base::PlatformFileInfo& file_info,
-      const FilePath& unused);
+      const base::FilePath& unused);
+  virtual void DidCreateSnapshotFile(
+      const base::PlatformFileInfo& file_info,
+      const base::FilePath& path);
   virtual void DidReadDirectory(
       const std::vector<base::FileUtilProxy::Entry>& entries, bool has_more);
   virtual void DidOpenFileSystem(const std::string&,
@@ -62,7 +64,6 @@ class FileCallbacks : public fileapi::FileSystemCallbackDispatcher {
   scoped_refptr< ::ppapi::TrackedCallback> callback_;
   PP_FileInfo* info_;
   scoped_refptr<PPB_FileSystem_Impl> file_system_;
-  scoped_refptr<PPB_DirectoryReader_Impl> directory_reader_;
 };
 
 }  // namespace ppapi

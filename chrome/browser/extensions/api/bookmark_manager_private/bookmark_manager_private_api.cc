@@ -7,8 +7,8 @@
 #include <vector>
 
 #include "base/json/json_writer.h"
-#include "base/prefs/public/pref_service_base.h"
-#include "base/string_number_conversions.h"
+#include "base/prefs/pref_service.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
@@ -24,8 +24,10 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/view_type_utils.h"
 #include "chrome/common/pref_names.h"
+#include "components/user_prefs/user_prefs.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_view.h"
 #include "content/public/browser/web_ui.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -240,17 +242,17 @@ bool ClipboardBookmarkManagerFunction::CopyOrCut(bool cut) {
   return true;
 }
 
-bool CopyBookmarkManagerFunction::RunImpl() {
+bool BookmarkManagerPrivateCopyFunction::RunImpl() {
   return CopyOrCut(false);
 }
 
-bool CutBookmarkManagerFunction::RunImpl() {
+bool BookmarkManagerPrivateCutFunction::RunImpl() {
   if (!EditBookmarksEnabled())
     return false;
   return CopyOrCut(true);
 }
 
-bool PasteBookmarkManagerFunction::RunImpl() {
+bool BookmarkManagerPrivatePasteFunction::RunImpl() {
   if (!EditBookmarksEnabled())
     return false;
   BookmarkModel* model = BookmarkModelFactory::GetForProfile(profile());
@@ -268,18 +270,18 @@ bool PasteBookmarkManagerFunction::RunImpl() {
   // No need to test return value, if we got an empty list, we insert at end.
   GetNodesFromArguments(model, args_.get(), 1, &nodes);
   int highest_index = -1;  // -1 means insert at end of list.
-  for (size_t node = 0; node < nodes.size(); ++node) {
+  for (size_t i = 0; i < nodes.size(); ++i) {
     // + 1 so that we insert after the selection.
-    int this_node_index = parent_node->GetIndexOf(nodes[node]) + 1;
-    if (this_node_index > highest_index)
-      highest_index = this_node_index;
+    int index = parent_node->GetIndexOf(nodes[i]) + 1;
+    if (index > highest_index)
+      highest_index = index;
   }
 
   bookmark_utils::PasteFromClipboard(model, parent_node, highest_index);
   return true;
 }
 
-bool CanPasteBookmarkManagerFunction::RunImpl() {
+bool BookmarkManagerPrivateCanPasteFunction::RunImpl() {
   if (!EditBookmarksEnabled())
     return false;
   BookmarkModel* model = BookmarkModelFactory::GetForProfile(profile());
@@ -293,7 +295,7 @@ bool CanPasteBookmarkManagerFunction::RunImpl() {
   return true;
 }
 
-bool SortChildrenBookmarkManagerFunction::RunImpl() {
+bool BookmarkManagerPrivateSortChildrenFunction::RunImpl() {
   if (!EditBookmarksEnabled())
     return false;
   BookmarkModel* model = BookmarkModelFactory::GetForProfile(profile());
@@ -306,7 +308,7 @@ bool SortChildrenBookmarkManagerFunction::RunImpl() {
   return true;
 }
 
-bool BookmarkManagerGetStringsFunction::RunImpl() {
+bool BookmarkManagerPrivateGetStringsFunction::RunImpl() {
   DictionaryValue* localized_strings = new DictionaryValue();
 
   localized_strings->SetString("title",
@@ -389,7 +391,7 @@ bool BookmarkManagerGetStringsFunction::RunImpl() {
   return true;
 }
 
-bool StartDragBookmarkManagerFunction::RunImpl() {
+bool BookmarkManagerPrivateStartDragFunction::RunImpl() {
   if (!EditBookmarksEnabled())
     return false;
   BookmarkModel* model = BookmarkModelFactory::GetForProfile(profile());
@@ -404,7 +406,7 @@ bool StartDragBookmarkManagerFunction::RunImpl() {
         dispatcher()->delegate()->GetAssociatedWebContents();
     CHECK(web_contents);
     bookmark_utils::DragBookmarks(profile(), nodes,
-                                  web_contents->GetNativeView());
+                                  web_contents->GetView()->GetNativeView());
 
     return true;
   } else {
@@ -413,7 +415,7 @@ bool StartDragBookmarkManagerFunction::RunImpl() {
   }
 }
 
-bool DropBookmarkManagerFunction::RunImpl() {
+bool BookmarkManagerPrivateDropFunction::RunImpl() {
   if (!EditBookmarksEnabled())
     return false;
 
@@ -470,7 +472,7 @@ bool DropBookmarkManagerFunction::RunImpl() {
   }
 }
 
-bool GetSubtreeBookmarkManagerFunction::RunImpl() {
+bool BookmarkManagerPrivateGetSubtreeFunction::RunImpl() {
   BookmarkModel* model = BookmarkModelFactory::GetForProfile(profile());
   const BookmarkNode* node;
   int64 id;
@@ -500,19 +502,19 @@ bool GetSubtreeBookmarkManagerFunction::RunImpl() {
   return true;
 }
 
-bool CanEditBookmarkManagerFunction::RunImpl() {
-  PrefServiceBase* prefs = PrefServiceBase::FromBrowserContext(profile_);
+bool BookmarkManagerPrivateCanEditFunction::RunImpl() {
+  PrefService* prefs = components::UserPrefs::Get(profile_);
   SetResult(new base::FundamentalValue(
       prefs->GetBoolean(prefs::kEditBookmarksEnabled)));
   return true;
 }
 
-bool RecordLaunchBookmarkFunction::RunImpl() {
+bool BookmarkManagerPrivateRecordLaunchFunction::RunImpl() {
   bookmark_utils::RecordBookmarkLaunch(bookmark_utils::LAUNCH_MANAGER);
   return true;
 }
 
-bool CanOpenNewWindowsBookmarkFunction::RunImpl() {
+bool BookmarkManagerPrivateCanOpenNewWindowsFunction::RunImpl() {
   bool can_open_new_windows = true;
 
 #if defined(OS_WIN)

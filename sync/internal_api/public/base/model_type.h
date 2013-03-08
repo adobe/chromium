@@ -49,31 +49,35 @@ enum ModelType {
   // can be represented in the protocol using a specific Message type in the
   // EntitySpecifics protocol buffer.
   //
+  // WARNING: Modifying the order of these types or inserting a new type above
+  // these will affect numerous histograms that rely on the enum values being
+  // consistent. When adding a new type, add it to the end of the user model
+  // types section, but before the proxy types.
+  //
   // A bookmark folder or a bookmark URL object.
   BOOKMARKS,
   FIRST_USER_MODEL_TYPE = BOOKMARKS,  // Declared 2nd, for debugger prettiness.
   FIRST_REAL_MODEL_TYPE = FIRST_USER_MODEL_TYPE,
 
-  // A preference folder or a preference object.
+  // A preference object.
   PREFERENCES,
-  // A password folder or password object.
+  // A password object.
   PASSWORDS,
-    // An AutofillProfile Object
+  // An AutofillProfile Object
   AUTOFILL_PROFILE,
-  // An autofill folder or an autofill object.
+  // An autofill object.
   AUTOFILL,
-
-  // A themes folder or a themes object.
+  // A themes object.
   THEMES,
-  // A typed_url folder or a typed_url object.
+  // A typed_url object.
   TYPED_URLS,
-  // An extension folder or an extension object.
+  // An extension object.
   EXTENSIONS,
   // An object representing a custom search engine.
   SEARCH_ENGINES,
   // An object representing a browser session.
   SESSIONS,
-  // An app folder or an app object.
+  // An app object.
   APPS,
   // An app setting from the extension settings API.
   APP_SETTINGS,
@@ -87,8 +91,26 @@ enum ModelType {
   SYNCED_NOTIFICATIONS,
   // Custom spelling dictionary.
   DICTIONARY,
-  LAST_USER_MODEL_TYPE = DICTIONARY,
+  // Favicon images.
+  FAVICON_IMAGES,
+  // Favicon tracking information.
+  FAVICON_TRACKING,
 
+  // ---- Proxy types ----
+  // Proxy types are excluded from the sync protocol, but are still considered
+  // real user types. By convention, we prefix them with 'PROXY_' to distinguish
+  // them from normal protocol types.
+
+  // Tab sync. This is a placeholder type, so that Sessions can be implicitly
+  // enabled for history sync and tabs sync.
+  PROXY_TABS,
+
+  FIRST_PROXY_TYPE = PROXY_TABS,
+  LAST_PROXY_TYPE = PROXY_TABS,
+
+  LAST_USER_MODEL_TYPE = PROXY_TABS,
+
+  // ---- Control Types ----
   // An object representing a set of Nigori keys.
   NIGORI,
   FIRST_CONTROL_MODEL_TYPE = NIGORI,
@@ -107,6 +129,8 @@ enum ModelType {
   // sync preferences UI, be sure to update the list in
   // chrome/browser/sync/user_selectable_sync_type.h so that the UMA histograms
   // for sync include your new type.
+  // In this case, be sure to also update the UserSelectableTypes() definition
+  // in sync/syncable/model_type.cc.
 
   MODEL_TYPE_COUNT,
 };
@@ -143,12 +167,27 @@ SYNC_EXPORT ModelType GetModelTypeFromSpecifics(
 // value (sibling ordering) for this item.
 bool ShouldMaintainPosition(ModelType model_type);
 
-// These are the user-selectable data types.  Note that some of these share a
+// Protocol types are those types that have actual protocol buffer
+// representations. This distinguishes them from Proxy types, which have no
+// protocol representation and are never sent to the server.
+SYNC_EXPORT ModelTypeSet ProtocolTypes();
+
+// These are the normal user-controlled types. This is to distinguish from
+// ControlTypes which are always enabled.  Note that some of these share a
 // preference flag, so not all of them are individually user-selectable.
 SYNC_EXPORT ModelTypeSet UserTypes();
 
+// These are the user-selectable data types.
+SYNC_EXPORT ModelTypeSet UserSelectableTypes();
+SYNC_EXPORT bool IsUserSelectableType(ModelType model_type);
+
 // This is the subset of UserTypes() that can be encrypted.
 SYNC_EXPORT_PRIVATE ModelTypeSet EncryptableUserTypes();
+
+// Proxy types are placeholder types for handling implicitly enabling real
+// types. They do not exist at the server, and are simply used for
+// UI/Configuration logic.
+SYNC_EXPORT ModelTypeSet ProxyTypes();
 
 // Returns a list of all control types.
 //
@@ -242,6 +281,12 @@ bool NotificationTypeToRealModelType(const std::string& notification_type,
 
 // Returns true if |model_type| is a real datatype
 SYNC_EXPORT bool IsRealDataType(ModelType model_type);
+
+// Returns true if |model_type| is an act-once type. Act once types drop
+// entities after applying them. Drops are deletes that are not synced to other
+// clients.
+// TODO(haitaol): Make entries of act-once data types immutable.
+SYNC_EXPORT bool IsActOnceDataType(ModelType model_type);
 
 }  // namespace syncer
 

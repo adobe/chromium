@@ -12,7 +12,7 @@
 #include <string>
 
 #include "base/callback.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/observer_list.h"
@@ -62,9 +62,9 @@ class SafeBrowsingService
     factory_ = factory;
   }
 
-  static FilePath GetCookieFilePathForTesting();
+  static base::FilePath GetCookieFilePathForTesting();
 
-  static FilePath GetBaseFilename();
+  static base::FilePath GetBaseFilename();
 
   // Create an instance of the safe browsing service.
   static SafeBrowsingService* CreateSafeBrowsingService();

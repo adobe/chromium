@@ -5,7 +5,7 @@
 #include "webkit/blob/local_file_stream_reader.h"
 
 #include "base/file_util.h"
-#include "base/file_util_proxy.h"
+#include "base/files/file_util_proxy.h"
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/platform_file.h"
@@ -34,7 +34,7 @@ bool VerifySnapshotTime(const base::Time& expected_modification_time,
 
 LocalFileStreamReader::LocalFileStreamReader(
     base::TaskRunner* task_runner,
-    const FilePath& file_path,
+    const base::FilePath& file_path,
     int64 initial_offset,
     const base::Time& expected_modification_time)
     : task_runner_(task_runner),

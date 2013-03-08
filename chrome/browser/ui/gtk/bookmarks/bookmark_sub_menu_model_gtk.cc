@@ -15,8 +15,10 @@
 #include "chrome/browser/ui/gtk/bookmarks/bookmark_utils_gtk.h"
 #include "chrome/browser/ui/gtk/menu_gtk.h"
 #include "grit/generated_resources.h"
+#include "grit/theme_resources.h"
 #include "ui/base/gtk/menu_label_accelerator_util.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/resource/resource_bundle.h"
 #include "ui/base/window_open_disposition.h"
 
 using content::OpenURLParams;
@@ -101,6 +103,9 @@ void BookmarkNodeMenuModel::AddSubMenuForNode(const BookmarkNode* node) {
       new BookmarkNodeMenuModel(NULL, model_, node, page_navigator_);
   // No command id. Nothing happens if you click on the submenu itself.
   AddSubMenu(kBookmarkItemCommandId, label, submenu);
+  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
+  const gfx::Image& folder_icon = rb.GetImageNamed(IDR_BOOKMARK_BAR_FOLDER);
+  SetIcon(GetItemCount() - 1, folder_icon);
   submenus_.push_back(submenu);
 }
 
@@ -156,6 +161,8 @@ void BookmarkSubMenuModel::MenuWillShow() {
   AddCheckItemWithStringId(IDC_SHOW_BOOKMARK_BAR, IDS_SHOW_BOOKMARK_BAR);
   AddItemWithStringId(IDC_SHOW_BOOKMARK_MANAGER, IDS_BOOKMARK_MANAGER);
   AddItemWithStringId(IDC_IMPORT_SETTINGS, IDS_IMPORT_SETTINGS_MENU_LABEL);
+  AddSeparator(ui::NORMAL_SEPARATOR);
+  AddItemWithStringId(IDC_BOOKMARK_PAGE, IDS_BOOKMARK_STAR);
   fixed_items_ = bookmark_end_ = GetItemCount();
   if (!model()) {
     set_model(BookmarkModelFactory::GetForProfile(browser_->profile()));
@@ -176,19 +183,15 @@ void BookmarkSubMenuModel::MenuWillShow() {
     PopulateMenu();
   }
   bookmark_end_ = GetItemCount();
+
   // We want only one separator after the top-level bookmarks and before the
-  // other node and/or mobile node. Keep track of whether we've added it yet.
-  bool added_separator = false;
-  if (model()->other_node()->GetTotalNodeCount() > 1) {
-    AddSeparator(ui::NORMAL_SEPARATOR);
-    added_separator = true;
+  // other node and/or mobile node.
+  AddSeparator(ui::NORMAL_SEPARATOR);
+  if (model()->other_node()->GetTotalNodeCount() > 1)
     AddSubMenuForNode(model()->other_node());
-  }
-  if (model()->mobile_node()->GetTotalNodeCount() > 1) {
-    if (!added_separator)
-      AddSeparator(ui::NORMAL_SEPARATOR);
+  if (model()->mobile_node()->GetTotalNodeCount() > 1)
     AddSubMenuForNode(model()->mobile_node());
-  }
+  RemoveTrailingSeparators();
 }
 
 void BookmarkSubMenuModel::MenuClosed() {

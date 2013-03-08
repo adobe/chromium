@@ -266,7 +266,7 @@ class SafeBrowsingDatabaseTest : public PlatformTest {
   void PopulateDatabaseForCacheTest();
 
   scoped_ptr<SafeBrowsingDatabaseNew> database_;
-  FilePath database_filename_;
+  base::FilePath database_filename_;
   base::ScopedTempDir temp_dir_;
 };
 
@@ -368,10 +368,13 @@ TEST_F(SafeBrowsingDatabaseTest, ListNameForBrowseAndDownload) {
   SafeBrowsingStoreFile* download_store = new SafeBrowsingStoreFile();
   SafeBrowsingStoreFile* csd_whitelist_store = new SafeBrowsingStoreFile();
   SafeBrowsingStoreFile* download_whitelist_store = new SafeBrowsingStoreFile();
+  SafeBrowsingStoreFile* extension_blacklist_store =
+      new SafeBrowsingStoreFile();
   database_.reset(new SafeBrowsingDatabaseNew(browse_store,
                                               download_store,
                                               csd_whitelist_store,
-                                              download_whitelist_store));
+                                              download_whitelist_store,
+                                              extension_blacklist_store));
   database_->Init(database_filename_);
 
   SBChunkList chunks;
@@ -421,10 +424,20 @@ TEST_F(SafeBrowsingDatabaseTest, ListNameForBrowseAndDownload) {
   chunks.push_back(chunk);
   database_->InsertChunks(safe_browsing_util::kDownloadWhiteList, chunks);
 
+
+  chunk.hosts.clear();
+  InsertAddChunkHostFullHashes(&chunk, 8,
+                               "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                               "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+
+  chunks.clear();
+  chunks.push_back(chunk);
+  database_->InsertChunks(safe_browsing_util::kExtensionBlacklist, chunks);
+
   database_->UpdateFinished(true);
 
   GetListsInfo(&lists);
-  ASSERT_EQ(5U, lists.size());
+  ASSERT_EQ(6U, lists.size());
   EXPECT_TRUE(lists[0].name == safe_browsing_util::kMalwareList);
   EXPECT_EQ(lists[0].adds, "1");
   EXPECT_TRUE(lists[0].subs.empty());
@@ -441,6 +454,9 @@ TEST_F(SafeBrowsingDatabaseTest, ListNameForBrowseAndDownload) {
   EXPECT_TRUE(lists[4].name == safe_browsing_util::kDownloadWhiteList);
   EXPECT_EQ(lists[4].adds, "6");
   EXPECT_TRUE(lists[4].subs.empty());
+  EXPECT_TRUE(lists[5].name == safe_browsing_util::kExtensionBlacklist);
+  EXPECT_EQ(lists[5].adds, "8");
+  EXPECT_TRUE(lists[5].subs.empty());
   database_.reset();
 }
 
@@ -1064,7 +1080,7 @@ TEST_F(SafeBrowsingDatabaseTest, DISABLED_FileCorruptionHandling) {
   database_.reset();
   MessageLoop loop(MessageLoop::TYPE_DEFAULT);
   SafeBrowsingStoreFile* store = new SafeBrowsingStoreFile();
-  database_.reset(new SafeBrowsingDatabaseNew(store, NULL, NULL, NULL));
+  database_.reset(new SafeBrowsingDatabaseNew(store, NULL, NULL, NULL, NULL));
   database_->Init(database_filename_);
 
   // This will cause an empty database to be created.
@@ -1137,6 +1153,7 @@ TEST_F(SafeBrowsingDatabaseTest, ContainsDownloadUrl) {
   database_.reset(new SafeBrowsingDatabaseNew(browse_store,
                                               download_store,
                                               csd_whitelist_store,
+                                              NULL,
                                               NULL));
   database_->Init(database_filename_);
 
@@ -1239,7 +1256,7 @@ TEST_F(SafeBrowsingDatabaseTest, Whitelists) {
 
   // If the whitelist is disabled everything should match the whitelist.
   database_.reset(new SafeBrowsingDatabaseNew(new SafeBrowsingStoreFile(),
-                                              NULL, NULL, NULL));
+                                              NULL, NULL, NULL, NULL));
   database_->Init(database_filename_);
   EXPECT_TRUE(database_->ContainsDownloadWhitelistedUrl(
       GURL(std::string("http://www.phishing.com/"))));
@@ -1250,9 +1267,12 @@ TEST_F(SafeBrowsingDatabaseTest, Whitelists) {
   SafeBrowsingStoreFile* browse_store = new SafeBrowsingStoreFile();
   SafeBrowsingStoreFile* csd_whitelist_store = new SafeBrowsingStoreFile();
   SafeBrowsingStoreFile* download_whitelist_store = new SafeBrowsingStoreFile();
+  SafeBrowsingStoreFile* extension_blacklist_store =
+      new SafeBrowsingStoreFile();
   database_.reset(new SafeBrowsingDatabaseNew(browse_store, NULL,
                                               csd_whitelist_store,
-                                              download_whitelist_store));
+                                              download_whitelist_store,
+                                              extension_blacklist_store));
   database_->Init(database_filename_);
 
   const char kGood1Host[] = "www.good1.com/";
@@ -1531,7 +1551,7 @@ TEST_F(SafeBrowsingDatabaseTest, EmptyUpdate) {
   SBChunkList chunks;
   SBChunk chunk;
 
-  FilePath filename = database_->BrowseDBFilename(database_filename_);
+  base::FilePath filename = database_->BrowseDBFilename(database_filename_);
 
   // Prime the database.
   std::vector<SBListChunkRanges> lists;
@@ -1618,7 +1638,7 @@ TEST_F(SafeBrowsingDatabaseTest, FilterFile) {
       GURL("http://www.good.com/goodware.html"),
       &matching_list, &prefix_hits, &full_hashes, now));
 
-  FilePath filter_file = database_->PrefixSetForFilename(
+  base::FilePath filter_file = database_->PrefixSetForFilename(
       database_->BrowseDBFilename(database_filename_));
 
   // After re-creating the database, it should have a filter read from

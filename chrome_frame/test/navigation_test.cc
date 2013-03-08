@@ -4,6 +4,7 @@
 
 #include <string>
 
+#include "base/file_util.h"
 #include "base/test/test_file_util.h"
 #include "base/win/scoped_comptr.h"
 #include "base/win/windows_version.h"
@@ -835,7 +836,7 @@ TEST_F(FullTabDownloadTest, CF_DownloadFileFromPost) {
   EXPECT_CALL(download_window_mock, OnLoad(false, _));
   EXPECT_CALL(download_window_mock, OnQuit()).Times(testing::AtMost(1));
 
-  FilePath temp_file_path;
+  base::FilePath temp_file_path;
   ASSERT_TRUE(file_util::CreateTemporaryFile(&temp_file_path));
   file_util::DieFileDie(temp_file_path, false);
 

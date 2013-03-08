@@ -5,16 +5,17 @@
 #ifndef UI_MESSAGE_CENTER_NOTIFICATION_LIST_H_
 #define UI_MESSAGE_CENTER_NOTIFICATION_LIST_H_
 
-#include <list>
-#include <map>
+#include <set>
 #include <string>
 
 #include "base/string16.h"
 #include "base/time.h"
 #include "base/timer.h"
 #include "ui/gfx/image/image_skia.h"
+#include "ui/gfx/native_widget_types.h"
 #include "ui/message_center/message_center_export.h"
-#include "ui/notifications/notification_types.h"
+#include "ui/message_center/notification.h"
+#include "ui/message_center/notification_types.h"
 
 namespace base {
 class DictionaryValue;
@@ -22,47 +23,25 @@ class DictionaryValue;
 
 namespace message_center {
 
+// Comparers used to auto-sort the lists of Notifications.
+struct ComparePriorityTimestampSerial {
+  bool operator()(Notification* n1, Notification* n2);
+};
+
+struct CompareTimestampSerial {
+  bool operator()(Notification* n1, Notification* n2);
+};
+
 // A helper class to manage the list of notifications.
 class MESSAGE_CENTER_EXPORT NotificationList {
  public:
-  struct MESSAGE_CENTER_EXPORT NotificationItem {
-    string16 title;
-    string16 message;
-    NotificationItem(string16 title, string16 message)
-        : title(title),
-          message(message) {}
-  };
+  // Auto-sorted set. Matches the order in which Notifications are shown in
+  // Notification Center.
+  typedef std::set<Notification*, ComparePriorityTimestampSerial> Notifications;
 
-  struct MESSAGE_CENTER_EXPORT Notification {
-    Notification();
-    virtual ~Notification();
-
-    ui::notifications::NotificationType type;
-    std::string id;
-    string16 title;
-    string16 message;
-    string16 display_source;
-    std::string extension_id;
-
-    // Begin unpacked values from optional_fields
-    int priority;
-    base::Time timestamp;
-    int unread_count;
-    std::vector<string16> button_titles;
-    string16 expanded_message;
-    std::vector<NotificationItem> items;
-    // End unpacked values
-
-    // Images fetched asynchronously
-    gfx::ImageSkia primary_icon;
-    gfx::ImageSkia image;
-    std::vector<gfx::ImageSkia> button_icons;
-
-    bool is_read;  // True if this has been seen in the message center
-    bool shown_as_popup;  // True if this has been shown as a popup notification
-  };
-
-  typedef std::list<Notification> Notifications;
+  // Auto-sorted set used to return the Notifications to be shown as popup
+  // toasts.
+  typedef std::set<Notification*, CompareTimestampSerial> PopupNotifications;
 
   class MESSAGE_CENTER_EXPORT Delegate {
    public:
@@ -70,15 +49,19 @@ class MESSAGE_CENTER_EXPORT NotificationList {
     virtual ~Delegate() {}
 
     // Removes notifications
-    virtual void SendRemoveNotification(const std::string& id) = 0;
-    virtual void SendRemoveAllNotifications() = 0;
+    virtual void SendRemoveNotification(const std::string& id,
+                                        bool by_user) = 0;
+    virtual void SendRemoveAllNotifications(bool by_user) = 0;
 
     // Disables notifications
     virtual void DisableNotificationByExtension(const std::string& id) = 0;
     virtual void DisableNotificationByUrl(const std::string& id) = 0;
 
-    // Requests the Delegate to the settings dialog.
+    // Requests the Delegate to show the settings page.
     virtual void ShowNotificationSettings(const std::string& id) = 0;
+
+    // Requests the Delegate to show the settings dialog.
+    virtual void ShowNotificationSettingsDialog(gfx::NativeView context) = 0;
 
     // Called when a notification is clicked on.
     virtual void OnNotificationClicked(const std::string& id) = 0;
@@ -101,7 +84,7 @@ class MESSAGE_CENTER_EXPORT NotificationList {
   // Affects whether or not a message has been "read".
   void SetMessageCenterVisible(bool visible);
 
-  void AddNotification(ui::notifications::NotificationType type,
+  void AddNotification(NotificationType type,
                        const std::string& id,
                        const string16& title,
                        const string16& message,
@@ -115,8 +98,7 @@ class MESSAGE_CENTER_EXPORT NotificationList {
                                  const string16& message,
                                  const base::DictionaryValue* optional_fields);
 
-  // Returns true if the notification was removed.
-  bool RemoveNotification(const std::string& id);
+  void RemoveNotification(const std::string& id);
 
   void RemoveAllNotifications();
 
@@ -143,9 +125,11 @@ class MESSAGE_CENTER_EXPORT NotificationList {
   // means that all notifications have been shown).
   bool HasPopupNotifications();
 
-  // Modifies |notifications| to contain the |kMaxVisiblePopupNotifications|
-  // least recent notifications that have not been shown as a popup.
-  void GetPopupNotifications(Notifications* notifications);
+  // Returns the recent notifications of the priority higher then LOW,
+  // that have not been shown as a popup. kMaxVisiblePopupNotifications are
+  // used to limit the number of notifications for the DEFAULT priority.
+  // The returned list is sorted by timestamp, newer first.
+  PopupNotifications GetPopupNotifications();
 
   // Marks the popups for the |priority| as shown.
   void MarkPopupsAsShown(int priority);
@@ -165,7 +149,9 @@ class MESSAGE_CENTER_EXPORT NotificationList {
   // specified time-delta from now.
   void EnterQuietModeWithExpire(const base::TimeDelta& expires_in);
 
-  void GetNotifications(Notifications* notifications) const;
+  // Returns all notifications, in a (priority-timestamp) order. Suitable for
+  // rendering notifications in a NotificationCenter.
+  const Notifications& GetNotifications();
   size_t NotificationCount() const;
   size_t unread_count() const { return unread_count_; }
 
@@ -173,35 +159,18 @@ class MESSAGE_CENTER_EXPORT NotificationList {
   static const size_t kMaxVisibleMessageCenterNotifications;
 
  private:
-  typedef std::map<int, Notifications> NotificationMap;
-
-  // Iterates through the list and stores the first notification matching |id|
-  // (should always be unique) to |iter|. Returns true if it's found.
-  bool GetNotification(const std::string& id, Notifications::iterator* iter);
+  // Iterates through the list and returns the first notification matching |id|.
+  Notifications::iterator GetNotification(const std::string& id);
 
   void EraseNotification(Notifications::iterator iter);
 
-  void PushNotification(Notification& notification);
-
-  // Returns the recent notifications of the |priority| that have not been shown
-  // as a popup. kMaxVisiblePopupNotifications are used to limit the number of
-  // notifications for the default priority.
-  void GetPopupIterators(int priority,
-                         Notifications::iterator* first,
-                         Notifications::iterator* last);
-
-  // Given a dictionary of optional notification fields (or NULL), unpacks all
-  // recognized values into the given Notification struct. We assume prior
-  // proper initialization of |notification| fields that correspond to
-  // |optional_fields|.
-  void UnpackOptionalFields(const base::DictionaryValue* optional_fields,
-                            Notification* notification);
+  void PushNotification(scoped_ptr<Notification> notification);
 
   // Sets the current quiet mode status to |quiet_mode|.
   void SetQuietModeInternal(bool quiet_mode);
 
   Delegate* delegate_;
-  NotificationMap notifications_;
+  Notifications notifications_;
   bool message_center_visible_;
   size_t unread_count_;
   bool quiet_mode_;

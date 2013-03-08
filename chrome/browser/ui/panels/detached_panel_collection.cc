@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include "base/logging.h"
+#include "chrome/browser/ui/panels/display_settings_provider.h"
 #include "chrome/browser/ui/panels/panel_drag_controller.h"
 #include "chrome/browser/ui/panels/panel_manager.h"
 
@@ -24,31 +25,34 @@ DetachedPanelCollection::~DetachedPanelCollection() {
   DCHECK(panels_.empty());
 }
 
-void DetachedPanelCollection::OnDisplayAreaChanged(
-    const gfx::Rect& old_display_area) {
-  const gfx::Rect display_area = panel_manager_->display_area();
+void DetachedPanelCollection::OnDisplayChanged() {
+  DisplaySettingsProvider* display_settings_provider =
+      panel_manager_->display_settings_provider();
 
   for (Panels::const_iterator iter = panels_.begin();
        iter != panels_.end(); ++iter) {
     Panel* panel = *iter;
-
-    // If the detached panel is outside the main display area, don't change it.
-    if (!old_display_area.Intersects(panel->GetBounds()))
-      continue;
+    gfx::Rect work_area =
+        display_settings_provider->GetWorkAreaMatching(panel->GetBounds());
 
     // Update size if needed.
-    panel->LimitSizeToDisplayArea(display_area);
+    panel->LimitSizeToWorkArea(work_area);
 
-    // Update bounds if needed.
+    // Update bounds to make sure the panel falls completely within the work
+    // area. Note that the origin of the work area might also change.
     gfx::Rect bounds = panel->GetBounds();
     if (panel->full_size() != bounds.size()) {
       bounds.set_size(panel->full_size());
-      if (bounds.right() > display_area.right())
-        bounds.set_x(display_area.right() - bounds.width());
-      if (bounds.bottom() > display_area.bottom())
-        bounds.set_y(display_area.bottom() - bounds.height());
-      panel->SetPanelBoundsInstantly(bounds);
+      if (bounds.right() > work_area.right())
+        bounds.set_x(work_area.right() - bounds.width());
+      if (bounds.bottom() > work_area.bottom())
+        bounds.set_y(work_area.bottom() - bounds.height());
     }
+    if (bounds.x() < work_area.x())
+      bounds.set_x(work_area.x());
+    if (bounds.y() < work_area.y())
+      bounds.set_y(work_area.y());
+    panel->SetPanelBoundsInstantly(bounds);
   }
 }
 
@@ -74,7 +78,7 @@ void DetachedPanelCollection::AddPanel(Panel* panel,
   // positioning_mask is ignored since the detached panel is free-floating.
   DCHECK_NE(this, panel->collection());
   panel->set_collection(this);
-  panels_.insert(panel);
+  panels_.push_back(panel);
 
   // Offset the default position of the next detached panel if the current
   // default position is used.
@@ -82,10 +86,10 @@ void DetachedPanelCollection::AddPanel(Panel* panel,
     ComputeNextDefaultPanelOrigin();
 }
 
-void DetachedPanelCollection::RemovePanel(Panel* panel) {
+void DetachedPanelCollection::RemovePanel(Panel* panel, RemovalReason reason) {
   DCHECK_EQ(this, panel->collection());
   panel->set_collection(NULL);
-  panels_.erase(panel);
+  panels_.remove(panel);
 }
 
 void DetachedPanelCollection::CloseAll() {
@@ -152,23 +156,24 @@ void DetachedPanelCollection::RestorePanel(Panel* panel) {
 
 void DetachedPanelCollection::OnMinimizeButtonClicked(
     Panel* panel, panel::ClickModifier modifier) {
-  // Detached panels do not minimize.
-  NOTREACHED();
+  panel->MinimizeBySystem();
 }
 
 void DetachedPanelCollection::OnRestoreButtonClicked(
     Panel* panel, panel::ClickModifier modifier) {
-  // Detached panels do not minimize.
+  // No restore button is present.
   NOTREACHED();
 }
 
 bool DetachedPanelCollection::CanShowMinimizeButton(const Panel* panel) const {
-  // Detached panels do not minimize.
-  return false;
+  // We also show minimize button for detached panel when stacking mode is
+  // enabled.
+  return PanelManager::IsPanelStackingEnabled();
 }
 
 bool DetachedPanelCollection::CanShowRestoreButton(const Panel* panel) const {
-  // Detached panels do not minimize.
+  // The minimize button is used for system minimize and thus there is no
+  // restore button.
   return false;
 }
 
@@ -201,19 +206,21 @@ void DetachedPanelCollection::DiscardSavedPanelPlacement() {
 
 panel::Resizability DetachedPanelCollection::GetPanelResizability(
     const Panel* panel) const {
-  return panel::RESIZABLE_ALL_SIDES;
+  return panel::RESIZABLE_ALL;
 }
 
-void DetachedPanelCollection::OnPanelResizedByMouse(Panel* panel,
-                                               const gfx::Rect& new_bounds) {
+void DetachedPanelCollection::OnPanelResizedByMouse(
+    Panel* panel, const gfx::Rect& new_bounds) {
   DCHECK_EQ(this, panel->collection());
   panel->set_full_size(new_bounds.size());
-
-  panel->SetPanelBoundsInstantly(new_bounds);
 }
 
 bool DetachedPanelCollection::HasPanel(Panel* panel) const {
-  return panels_.find(panel) != panels_.end();
+  return std::find(panels_.begin(), panels_.end(), panel) != panels_.end();
+}
+
+void DetachedPanelCollection::SortPanels(PanelsComparer comparer) {
+  panels_.sort(comparer);
 }
 
 void DetachedPanelCollection::UpdatePanelOnCollectionChange(Panel* panel) {
@@ -223,6 +230,7 @@ void DetachedPanelCollection::UpdatePanelOnCollectionChange(Panel* panel) {
   panel->SetAlwaysOnTop(false);
   panel->EnableResizeByMouse(true);
   panel->UpdateMinimizeRestoreButtonVisibility();
+  panel->SetWindowCornerStyle(panel::ALL_ROUNDED);
 }
 
 void DetachedPanelCollection::OnPanelExpansionStateChanged(Panel* panel) {
@@ -241,20 +249,20 @@ void DetachedPanelCollection::OnPanelActiveStateChanged(Panel* panel) {
 
 gfx::Point DetachedPanelCollection::GetDefaultPanelOrigin() {
   if (!default_panel_origin_.x() && !default_panel_origin_.y()) {
-    gfx::Rect display_area =
-        panel_manager_->display_settings_provider()->GetDisplayArea();
-    default_panel_origin_.SetPoint(kPanelTilePixels + display_area.x(),
-                                   kPanelTilePixels + display_area.y());
+    gfx::Rect work_area =
+        panel_manager_->display_settings_provider()->GetPrimaryWorkArea();
+    default_panel_origin_.SetPoint(kPanelTilePixels + work_area.x(),
+                                   kPanelTilePixels + work_area.y());
   }
   return default_panel_origin_;
 }
 
 void DetachedPanelCollection::ComputeNextDefaultPanelOrigin() {
   default_panel_origin_.Offset(kPanelTilePixels, kPanelTilePixels);
-  gfx::Rect display_area =
-      panel_manager_->display_settings_provider()->GetDisplayArea();
-  if (!display_area.Contains(default_panel_origin_)) {
-    default_panel_origin_.SetPoint(kPanelTilePixels + display_area.x(),
-                                   kPanelTilePixels + display_area.y());
+  gfx::Rect work_area =
+      panel_manager_->display_settings_provider()->GetPrimaryWorkArea();
+  if (!work_area.Contains(default_panel_origin_)) {
+    default_panel_origin_.SetPoint(kPanelTilePixels + work_area.x(),
+                                   kPanelTilePixels + work_area.y());
   }
 }

@@ -8,8 +8,8 @@
 
 #include "ash/shell.h"
 #include "base/logging.h"
+#include "base/prefs/pref_service.h"
 #include "base/string_util.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "ui/aura/root_window.h"
 #include "ui/base/events/event.h"
@@ -85,6 +85,7 @@ const struct ModifierFlagToPrefName {
   { Mod4Mask, 0, prefs::kLanguageRemapSearchKeyTo },
   { ControlMask, ui::EF_CONTROL_DOWN, prefs::kLanguageRemapControlKeyTo },
   { Mod1Mask, ui::EF_ALT_DOWN, prefs::kLanguageRemapAltKeyTo },
+  { Mod2Mask, 0, prefs::kLanguageRemapDiamondKeyTo },
 };
 
 // Gets a remapped key for |pref_name| key. For example, to find out which
@@ -120,6 +121,11 @@ bool IsRight(KeySym native_keysym) {
 bool HasChromeOSKeyboard() {
   return CommandLine::ForCurrentProcess()->HasSwitch(
       switches::kHasChromeOSKeyboard);
+}
+
+bool HasDiamondKey() {
+  return CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kHasChromeOSDiamondKey);
 }
 
 bool IsMod3UsedByCurrentInputMethod() {
@@ -391,6 +397,10 @@ void EventRewriter::GetRemappedModifierMasks(
   if (!pref_service)
     return;
 
+  // When a diamond key is not available, a Mod2Mask should not treated as a
+  // configurable modifier because Mod2Mask may be worked as NumLock mask.
+  // (cf. http://crbug.com/173956)
+  const bool skip_mod2 = !HasDiamondKey();
   // When a Chrome OS keyboard is available, the configuration UI for Caps Lock
   // is not shown. Therefore, ignore the kLanguageRemapCapsLockKeyTo syncable
   // pref. If Mod3 is in use, don't check the pref either.
@@ -398,8 +408,8 @@ void EventRewriter::GetRemappedModifierMasks(
     HasChromeOSKeyboard() || IsMod3UsedByCurrentInputMethod();
 
   for (size_t i = 0; i < arraysize(kModifierFlagToPrefName); ++i) {
-    if (skip_mod3 &&
-        (kModifierFlagToPrefName[i].native_modifier == Mod3Mask)) {
+    if ((skip_mod2 && kModifierFlagToPrefName[i].native_modifier == Mod2Mask) ||
+        (skip_mod3 && kModifierFlagToPrefName[i].native_modifier == Mod3Mask)) {
       continue;
     }
     if (original_native_modifiers &
@@ -427,6 +437,8 @@ void EventRewriter::GetRemappedModifierMasks(
       *remapped_flags;
 
   unsigned int native_mask = Mod4Mask | ControlMask | Mod1Mask;
+  if (!skip_mod2)
+    native_mask |= Mod2Mask;
   if (!skip_mod3)
     native_mask |= Mod3Mask;
   *remapped_native_modifiers =
@@ -467,6 +479,19 @@ bool EventRewriter::RewriteModifiers(ui::KeyEvent* event) {
   // First, remap |keysym|.
   const ModifierRemapping* remapped_key = NULL;
   switch (keysym) {
+    // On Chrome OS, XF86XK_Launch6 (F15) with Mod2Mask is sent when Diamond
+    // key is pressed.
+    case XF86XK_Launch6:
+      // When diamond key is not available, the configuration UI for Diamond
+      // key is not shown. Therefore, ignore the kLanguageRemapDiamondKeyTo
+      // syncable pref.
+      if (HasDiamondKey())
+        remapped_key =
+            GetRemappedKey(prefs::kLanguageRemapDiamondKeyTo, *pref_service);
+      // Default behavior is Ctrl key.
+      if (!remapped_key)
+        remapped_key = kModifierRemappingCtrl;
+      break;
     // On Chrome OS, XF86XK_Launch7 (F16) with Mod3Mask is sent when Caps Lock
     // is pressed (with one exception: when IsMod3UsedByCurrentInputMethod() is
     // true, the key generates XK_ISO_Level3_Shift with Mod3Mask, not
@@ -475,11 +500,12 @@ bool EventRewriter::RewriteModifiers(ui::KeyEvent* event) {
       // When a Chrome OS keyboard is available, the configuration UI for Caps
       // Lock is not shown. Therefore, ignore the kLanguageRemapCapsLockKeyTo
       // syncable pref.
-      if (HasChromeOSKeyboard())
-        remapped_key = kModifierRemappingCapsLock;
-      else
+      if (!HasChromeOSKeyboard())
         remapped_key =
             GetRemappedKey(prefs::kLanguageRemapCapsLockKeyTo, *pref_service);
+      // Default behavior is Caps Lock key.
+      if (!remapped_key)
+        remapped_key = kModifierRemappingCapsLock;
       break;
     case XK_Super_L:
     case XK_Super_R:
@@ -489,6 +515,8 @@ bool EventRewriter::RewriteModifiers(ui::KeyEvent* event) {
       else
         remapped_key =
             GetRemappedKey(prefs::kLanguageRemapSearchKeyTo, *pref_service);
+      // Default behavior is Super key, hence don't remap the event if the pref
+      // is unavailable.
       break;
     case XK_Control_L:
     case XK_Control_R:

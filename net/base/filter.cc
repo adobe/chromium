@@ -4,7 +4,7 @@
 
 #include "net/base/filter.h"
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/string_util.h"
 #include "net/base/gzip_filter.h"
 #include "net/base/io_buffer.h"
@@ -178,8 +178,9 @@ void Filter::FixupEncodingTypes(
     GURL url;
     success = filter_context.GetURL(&url);
     DCHECK(success);
-    FilePath filename = FilePath().AppendASCII(url.ExtractFileName());
-    FilePath::StringType extension = filename.Extension();
+    base::FilePath filename =
+        base::FilePath().AppendASCII(url.ExtractFileName());
+    base::FilePath::StringType extension = filename.Extension();
 
     if (filter_context.IsDownload()) {
       // We don't want to decompress gzipped files when the user explicitly

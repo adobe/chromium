@@ -125,7 +125,8 @@ void AppListController::SetVisible(bool visible, aura::Window* window) {
         pagination_model_.get(),
         Launcher::ForWindow(container)->GetAppListButtonView(),
         gfx::Point(),
-        GetBubbleArrowLocation(container));
+        GetBubbleArrowLocation(container),
+        true /* border_accepts_events */);
     SetView(view);
   }
 }
@@ -276,7 +277,7 @@ void AppListController::OnImplicitAnimationsCompleted() {
 ////////////////////////////////////////////////////////////////////////////////
 // AppListController, views::WidgetObserver implementation:
 
-void AppListController::OnWidgetClosing(views::Widget* widget) {
+void AppListController::OnWidgetDestroying(views::Widget* widget) {
   DCHECK(view_->GetWidget() == widget);
   if (is_visible_)
     SetVisible(false, widget->GetNativeView());

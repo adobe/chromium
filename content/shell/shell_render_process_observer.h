@@ -7,9 +7,10 @@
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/memory/scoped_ptr.h"
 #include "content/public/renderer/render_process_observer.h"
+#include "ipc/ipc_platform_file.h"
 
 namespace WebKit {
 class WebFrame;
@@ -32,9 +33,8 @@ class ShellRenderProcessObserver : public RenderProcessObserver {
   ShellRenderProcessObserver();
   virtual ~ShellRenderProcessObserver();
 
-  void SetMainWindow(RenderView* view,
-                     WebKitTestRunner* test_runner,
-                     WebTestRunner::WebTestDelegate* delegate);
+  void SetTestDelegate(WebTestRunner::WebTestDelegate* delegate);
+  void SetMainWindow(RenderView* view);
   void BindTestRunnersToWindow(WebKit::WebFrame* frame);
 
   // RenderProcessObserver implementation.
@@ -48,19 +48,20 @@ class ShellRenderProcessObserver : public RenderProcessObserver {
     return test_interfaces_.get();
   }
   WebKitTestRunner* main_test_runner() const { return main_test_runner_; }
-  const FilePath& webkit_source_dir() const { return webkit_source_dir_; }
+  const base::FilePath& webkit_source_dir() const { return webkit_source_dir_; }
 
  private:
   // Message handlers.
   void OnResetAll();
-  void OnSetWebKitSourceDir(const FilePath& webkit_source_dir);
+  void OnSetWebKitSourceDir(const base::FilePath& webkit_source_dir);
+  void OnLoadHyphenDictionary(const IPC::PlatformFileForTransit& dict_file);
 
-  scoped_ptr<WebTestRunner::WebTestInterfaces> test_interfaces_;
   RenderView* main_render_view_;
   WebKitTestRunner* main_test_runner_;
   WebTestRunner::WebTestDelegate* test_delegate_;
+  scoped_ptr<WebTestRunner::WebTestInterfaces> test_interfaces_;
 
-  FilePath webkit_source_dir_;
+  base::FilePath webkit_source_dir_;
 
   DISALLOW_COPY_AND_ASSIGN(ShellRenderProcessObserver);
 };

@@ -24,7 +24,7 @@ class ActivityLogTest : public ChromeRenderViewHostTestHarness {
  public:
   ActivityLogTest()
       : ui_thread_(BrowserThread::UI, MessageLoop::current()),
-        db_thread_(BrowserThread::DB),
+        db_thread_(BrowserThread::DB, MessageLoop::current()),
         file_thread_(BrowserThread::FILE, MessageLoop::current()) {}
 
   virtual void SetUp() OVERRIDE {
@@ -34,20 +34,20 @@ class ActivityLogTest : public ChromeRenderViewHostTestHarness {
         Profile::FromBrowserContext(web_contents()->GetBrowserContext());
     extension_service_ = static_cast<TestExtensionSystem*>(
         ExtensionSystem::Get(profile_))->CreateExtensionService(
-            &command_line, FilePath(), false);
+            &command_line, base::FilePath(), false);
     CommandLine::ForCurrentProcess()->AppendSwitch(
         switches::kEnableExtensionActivityUI);
-    db_thread_.Start();
+    ActivityLog::RecomputeLoggingIsEnabled();
   }
 
-  ~ActivityLogTest() {
-    base::WaitableEvent done(false, false);
-    BrowserThread::PostTask(BrowserThread::DB, FROM_HERE,
-        base::Bind(&base::WaitableEvent::Signal, base::Unretained(&done)));
-    done.Wait();
-    db_thread_.Stop();
+  virtual ~ActivityLogTest() {
     MessageLoop::current()->PostTask(FROM_HERE, MessageLoop::QuitClosure());
     MessageLoop::current()->Run();
+  }
+
+  static void RetrieveActions_LogAndFetchActions(
+      scoped_ptr<std::vector<scoped_refptr<Action> > > i) {
+    ASSERT_EQ(2, static_cast<int>(i->size()));
   }
 
  protected:
@@ -61,11 +61,10 @@ class ActivityLogTest : public ChromeRenderViewHostTestHarness {
 };
 
 TEST_F(ActivityLogTest, Enabled) {
-  ActivityLog* activity_log = ActivityLog::GetInstance(profile_);
-  ASSERT_TRUE(activity_log->IsLoggingEnabled());
+  ASSERT_TRUE(ActivityLog::IsLogEnabled());
 }
 
-TEST_F(ActivityLogTest, ConstructAndLog) {
+TEST_F(ActivityLogTest, Construct) {
   ActivityLog* activity_log = ActivityLog::GetInstance(profile_);
   scoped_refptr<const Extension> extension =
       ExtensionBuilder()
@@ -76,28 +75,41 @@ TEST_F(ActivityLogTest, ConstructAndLog) {
           .Build();
   extension_service_->AddExtension(extension);
   scoped_ptr<ListValue> args(new ListValue());
-  for (int i = 0; i < 30; i++) {
-    // Run this a bunch of times and hope that if something goes wrong with
-    // threading, 30 times is enough to cause it to fail.
-    ASSERT_TRUE(activity_log->IsLoggingEnabled());
-    activity_log->LogAPIAction(extension,
-                               std::string("tabs.testMethod"),
-                               args.get(),
-                               "");
-  }
-  // Need to ensure the writes were completed.
-  base::PlatformThread::Sleep(base::TimeDelta::FromSeconds(3));
-  FilePath db_file = profile_->GetPath().Append(
-      chrome::kExtensionActivityLogFilename);
-  sql::Connection db;
-  ASSERT_TRUE(db.Open(db_file));
-  std::string sql_str = "SELECT * FROM " +
-      std::string(APIAction::kTableName);
-  sql::Statement statement(db.GetUniqueStatement(sql_str.c_str()));
-  ASSERT_TRUE(statement.Step());
-  ASSERT_EQ("UNKNOWN_ACTION", statement.ColumnString(2));
-  ASSERT_EQ("TABS", statement.ColumnString(3));
-  ASSERT_EQ("tabs.testMethod()", statement.ColumnString(4));
+  ASSERT_TRUE(ActivityLog::IsLogEnabled());
+  activity_log->LogAPIAction(extension,
+                             std::string("tabs.testMethod"),
+                             args.get(),
+                             "");
+}
+
+TEST_F(ActivityLogTest, LogAndFetchActions) {
+  ActivityLog* activity_log = ActivityLog::GetInstance(profile_);
+  scoped_refptr<const Extension> extension =
+      ExtensionBuilder()
+          .SetManifest(DictionaryBuilder()
+                       .Set("name", "Test extension")
+                       .Set("version", "1.0.0")
+                       .Set("manifest_version", 2))
+          .Build();
+  extension_service_->AddExtension(extension);
+  scoped_ptr<ListValue> args(new ListValue());
+  ASSERT_TRUE(ActivityLog::IsLogEnabled());
+
+  // Write some API calls
+  activity_log->LogAPIAction(extension,
+                             std::string("tabs.testMethod"),
+                             args.get(),
+                             "");
+  activity_log->LogDOMAction(extension,
+                             GURL("http://www.google.com"),
+                             string16(),
+                             std::string("document.write"),
+                             args.get(),
+                             std::string("extra"));
+  activity_log->GetActions(
+      extension->id(),
+      0,
+      base::Bind(ActivityLogTest::RetrieveActions_LogAndFetchActions));
 }
 
 }  // namespace extensions

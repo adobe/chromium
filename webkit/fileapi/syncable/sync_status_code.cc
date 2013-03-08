@@ -7,7 +7,7 @@
 #include "base/logging.h"
 #include "third_party/leveldatabase/src/include/leveldb/db.h"
 
-namespace fileapi {
+namespace sync_file_system {
 
 std::string SyncStatusCodeToString(SyncStatusCode status) {
   switch (status) {
@@ -82,6 +82,8 @@ std::string SyncStatusCodeToString(SyncStatusCode status) {
       return "Sync: not initialized.";
     case SYNC_STATUS_NOT_MODIFIED:
       return "Sync: file not modified.";
+    case SYNC_STATUS_SYNC_DISABLED:
+      return "Sync: sync is disabled.";
   }
   NOTREACHED();
   return "Unknown error.";
@@ -140,4 +142,4 @@ SyncStatusCode PlatformFileErrorToSyncStatusCode(
   }
 }
 
-}  // namespace fileapi
+}  // namespace sync_file_system

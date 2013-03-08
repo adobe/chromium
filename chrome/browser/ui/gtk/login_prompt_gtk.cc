@@ -41,12 +41,13 @@ class LoginHandlerGtk : public LoginHandler,
       : LoginHandler(auth_info, request),
         username_entry_(NULL),
         password_entry_(NULL),
-        ok_(NULL) {
+        ok_(NULL),
+        dialog_(NULL) {
   }
 
   // LoginModelObserver implementation.
   virtual void OnAutofillDataAvailable(const string16& username,
-                                       const string16& password) {
+                                       const string16& password) OVERRIDE {
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
     // NOTE: Would be nice to use gtk_entry_get_text_length, but it is fairly
@@ -61,8 +62,9 @@ class LoginHandlerGtk : public LoginHandler,
   }
 
   // LoginHandler:
-  virtual void BuildViewForPasswordManager(PasswordManager* manager,
-                                           const string16& explanation) {
+  virtual void BuildViewForPasswordManager(
+      PasswordManager* manager,
+      const string16& explanation) OVERRIDE {
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
     root_.Own(gtk_vbox_new(FALSE, ui::kContentAreaBorder));
@@ -112,24 +114,30 @@ class LoginHandlerGtk : public LoginHandler,
     WebContents* requesting_contents = GetWebContentsForLogin();
     DCHECK(requesting_contents);
 
-    SetDialog(new ConstrainedWindowGtk(requesting_contents, this));
+    dialog_ = new ConstrainedWindowGtk(requesting_contents, this);
     NotifyAuthNeeded();
   }
 
+  virtual void CloseDialog() OVERRIDE {
+    // The hosting ConstrainedWindowGtk may have been freed.
+    if (dialog_)
+      dialog_->CloseWebContentsModalDialog();
+  }
+
   // Overridden from ConstrainedWindowGtkDelegate:
-  virtual GtkWidget* GetWidgetRoot() {
+  virtual GtkWidget* GetWidgetRoot() OVERRIDE {
     return root_.get();
   }
 
-  virtual GtkWidget* GetFocusWidget() {
+  virtual GtkWidget* GetFocusWidget() OVERRIDE {
     return username_entry_;
   }
 
-  virtual void DeleteDelegate() {
+  virtual void DeleteDelegate() OVERRIDE {
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
     // The constrained window is going to delete itself; clear our pointer.
-    SetDialog(NULL);
+    dialog_ = NULL;
     SetModel(NULL);
 
     ReleaseSoon();
@@ -156,6 +164,8 @@ class LoginHandlerGtk : public LoginHandler,
   GtkWidget* username_entry_;
   GtkWidget* password_entry_;
   GtkWidget* ok_;
+
+  ConstrainedWindowGtk* dialog_;
 
   DISALLOW_COPY_AND_ASSIGN(LoginHandlerGtk);
 };

@@ -8,12 +8,13 @@
 #include "base/base_paths.h"
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/native_library.h"
 #include "base/path_service.h"
 #include "base/stringprintf.h"
 #include "base/threading/thread_restrictions.h"
+#include "base/win/windows_version.h"
 #include "ui/gl/gl_bindings.h"
 #include "ui/gl/gl_egl_api_implementation.h"
 #include "ui/gl/gl_gl_api_implementation.h"
@@ -29,10 +30,10 @@ namespace gfx {
 
 namespace {
 
-// This is the D3DX_SDK_VERSION for the last 'separate' DirectX SDK which
-// is from June 2010. Since June 2012 Microsoft includes DirectX in the regular
-// Windows SDK and the D3DX library has been deprecated.
-const int kPinnedD3DXVersion = 43;
+// Version 43 is the latest version of D3DCompiler_nn.dll that works prior to
+// Windows Vista.
+const wchar_t kPreVistaD3DCompiler[] = L"D3DCompiler_43.dll";
+const wchar_t kPostVistaD3DCompiler[] = L"D3DCompiler_46.dll";
 
 void GL_BINDING_CALL MarshalClearDepthToClearDepthf(GLclampd depth) {
   glClearDepthf(static_cast<GLclampf>(depth));
@@ -43,9 +44,10 @@ void GL_BINDING_CALL MarshalDepthRangeToDepthRangef(GLclampd z_near,
   glDepthRangef(static_cast<GLclampf>(z_near), static_cast<GLclampf>(z_far));
 }
 
-bool LoadD3DXLibrary(const FilePath& module_path,
-                     const FilePath::StringType& name) {
-  base::NativeLibrary library = base::LoadNativeLibrary(FilePath(name), NULL);
+bool LoadD3DXLibrary(const base::FilePath& module_path,
+                     const base::FilePath::StringType& name) {
+  base::NativeLibrary library =
+      base::LoadNativeLibrary(base::FilePath(name), NULL);
   if (!library) {
     library = base::LoadNativeLibrary(module_path.Append(name), NULL);
     if (!library) {
@@ -79,7 +81,7 @@ bool InitializeGLBindings(GLImplementation implementation) {
 
   switch (implementation) {
     case kGLImplementationOSMesaGL: {
-      FilePath module_path;
+      base::FilePath module_path;
       if (!PathService::Get(base::DIR_MODULE, &module_path)) {
         LOG(ERROR) << "PathService::Get failed.";
         return false;
@@ -111,18 +113,20 @@ bool InitializeGLBindings(GLImplementation implementation) {
       break;
     }
     case kGLImplementationEGLGLES2: {
-      FilePath module_path;
+      base::FilePath module_path;
       if (!PathService::Get(base::DIR_MODULE, &module_path))
         return false;
 
       // Attempt to load the D3DX shader compiler using the default search path
       // and if that fails, using an absolute path. This is to ensure these DLLs
       // are loaded before ANGLE is loaded in case they are not in the default
-      // search path.
-      LoadD3DXLibrary(module_path, base::StringPrintf(L"d3dcompiler_%d.dll",
-                                                      kPinnedD3DXVersion));
+      // search path. Prefer the post vista version.
+      if (base::win::GetVersion() < base::win::VERSION_VISTA ||
+          !LoadD3DXLibrary(module_path, kPostVistaD3DCompiler)) {
+        LoadD3DXLibrary(module_path, kPreVistaD3DCompiler);
+      }
 
-      FilePath gles_path;
+      base::FilePath gles_path;
       const CommandLine* command_line = CommandLine::ForCurrentProcess();
       bool using_swift_shader =
           command_line->GetSwitchValueASCII(switches::kUseGL) == "swiftshader";
@@ -192,7 +196,7 @@ bool InitializeGLBindings(GLImplementation implementation) {
       // When using Windows OpenGL, first try wglGetProcAddress and then
       // Windows GetProcAddress.
       base::NativeLibrary library = base::LoadNativeLibrary(
-          FilePath(L"opengl32.dll"), NULL);
+          base::FilePath(L"opengl32.dll"), NULL);
       if (!library) {
         DVLOG(1) << "opengl32.dll not found";
         return false;

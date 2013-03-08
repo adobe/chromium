@@ -9,12 +9,12 @@
 #ifndef CHROME_INSTALLER_UTIL_INSTALL_UTIL_H_
 #define CHROME_INSTALLER_UTIL_INSTALL_UTIL_H_
 
-#include <tchar.h>
 #include <windows.h>
+#include <tchar.h>
 
 #include "base/basictypes.h"
 #include "base/command_line.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/string16.h"
 #include "base/win/scoped_handle.h"
 #include "chrome/installer/util/browser_distribution.h"
@@ -105,9 +105,9 @@ class InstallUtil {
   // Populates |path| with the path to |file| in the sentinel directory. This is
   // the application directory for user-level installs, and the default user
   // data dir for system-level installs. Returns false on error.
-  static bool GetSentinelFilePath(const FilePath::CharType* file,
+  static bool GetSentinelFilePath(const base::FilePath::CharType* file,
                                   BrowserDistribution* dist,
-                                  FilePath* path);
+                                  base::FilePath* path);
 
   // Deletes the registry key at path key_path under the key given by root_key.
   static bool DeleteRegistryKey(HKEY root_key, const string16& key_path);
@@ -181,18 +181,18 @@ class InstallUtil {
   // the same file.
   class ProgramCompare : public RegistryValuePredicate {
    public:
-    explicit ProgramCompare(const FilePath& path_to_match);
+    explicit ProgramCompare(const base::FilePath& path_to_match);
     virtual ~ProgramCompare();
     virtual bool Evaluate(const string16& value) const OVERRIDE;
-    bool EvaluatePath(const FilePath& path) const;
+    bool EvaluatePath(const base::FilePath& path) const;
 
    protected:
-    static bool OpenForInfo(const FilePath& path,
+    static bool OpenForInfo(const base::FilePath& path,
                             base::win::ScopedHandle* handle);
     static bool GetInfo(const base::win::ScopedHandle& handle,
                         BY_HANDLE_FILE_INFORMATION* info);
 
-    FilePath path_to_match_;
+    base::FilePath path_to_match_;
     base::win::ScopedHandle file_handle_;
     BY_HANDLE_FILE_INFORMATION file_info_;
 

@@ -44,7 +44,7 @@ class NetworkManagerPropertiesWatcher
   }
 
   virtual void OnPropertyChanged(const std::string& name,
-                                 const base::Value& value) {
+                                 const base::Value& value) OVERRIDE {
     callback_.Run(flimflam::kFlimflamServicePath, name, value);
   }
  private:
@@ -70,7 +70,7 @@ class NetworkServicePropertiesWatcher
   }
 
   virtual void OnPropertyChanged(const std::string& name,
-                                 const base::Value& value) {
+                                 const base::Value& value) OVERRIDE {
     callback_.Run(service_path_, name, value);
   }
 
@@ -98,7 +98,7 @@ class NetworkDevicePropertiesWatcher
   }
 
   virtual void OnPropertyChanged(const std::string& name,
-                                 const base::Value& value) {
+                                 const base::Value& value) OVERRIDE {
     callback_.Run(device_path_, name, value);
   }
 
@@ -144,6 +144,9 @@ bool GetTimeProperty(const base::DictionaryValue& dictionary,
 
 // Does nothing. Used as a callback.
 void DoNothingWithCallStatus(DBusMethodCallStatus call_status) {}
+
+// Does nothing. Used as a callback.
+void DoNothingWithObjectPath(const dbus::ObjectPath& object_path) {}
 
 // Ignores errors.
 void IgnoreErrors(const std::string& error_name,
@@ -313,6 +316,13 @@ bool CrosActivateCellularModem(const std::string& service_path,
   return DBusThreadManager::Get()->GetShillServiceClient()->
       CallActivateCellularModemAndBlock(dbus::ObjectPath(service_path),
                                         carrier);
+}
+
+void CrosCompleteCellularActivation(const std::string& service_path) {
+  return DBusThreadManager::Get()->GetShillServiceClient()->
+      CompleteCellularActivation(dbus::ObjectPath(service_path),
+                                 base::Bind(&DoNothing),
+                                 base::Bind(&IgnoreErrors));
 }
 
 void CrosSetNetworkServiceProperty(const std::string& service_path,
@@ -492,10 +502,10 @@ void CrosRequestVirtualNetworkProperties(
       flimflam::kVPNDomainProperty,
       new base::StringValue(service_name));
 
-  // shill.Manger.GetService() will apply the property changes in
+  // shill.Manger.ConfigureService() will apply the property changes in
   // |properties| and pass a new or existing service to OnGetService().
   // OnGetService will then call GetProperties which will then call callback.
-  DBusThreadManager::Get()->GetShillManagerClient()->GetService(
+  DBusThreadManager::Get()->GetShillManagerClient()->ConfigureService(
       properties, base::Bind(&OnGetService, callback),
       base::Bind(&IgnoreErrors));
 }
@@ -651,7 +661,7 @@ void CrosRequestIPConfigRefresh(const std::string& ipconfig_path) {
 
 void CrosConfigureService(const base::DictionaryValue& properties) {
   DBusThreadManager::Get()->GetShillManagerClient()->ConfigureService(
-      properties, base::Bind(&DoNothing),
+      properties, base::Bind(&DoNothingWithObjectPath),
       base::Bind(&IgnoreErrors));
 }
 
@@ -664,6 +674,14 @@ void CrosSetCarrier(const std::string& device_path,
       base::Bind(callback, device_path, NETWORK_METHOD_ERROR_NONE,
                  std::string()),
       base::Bind(&OnNetworkActionError, callback, device_path));
+}
+
+// Resets the device.
+void CrosReset(const std::string& device_path) {
+  DBusThreadManager::Get()->GetShillDeviceClient()->Reset(
+      dbus::ObjectPath(device_path),
+      base::Bind(&DoNothing),
+      base::Bind(&IgnoreErrors));
 }
 
 }  // namespace chromeos

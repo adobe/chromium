@@ -12,6 +12,7 @@
 #include "base/i18n/rtl.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram.h"
+#include "base/prefs/pref_service.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/app_notification.h"
@@ -23,7 +24,6 @@
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/management_policy.h"
 #include "chrome/browser/favicon/favicon_service_factory.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_finder.h"
@@ -42,6 +42,7 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/common/web_apps.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/common/favicon_url.h"
@@ -53,12 +54,24 @@
 #include "ui/gfx/favicon_size.h"
 #include "ui/webui/web_ui_util.h"
 
-using application_launch::LaunchParams;
-using application_launch::OpenApplication;
+using chrome::AppLaunchParams;
+using chrome::OpenApplication;
 using content::WebContents;
 using extensions::CrxInstaller;
 using extensions::Extension;
 using extensions::ExtensionPrefs;
+
+namespace {
+
+bool ShouldDisplayInNewTabPage(const Extension* app, PrefService* prefs) {
+  bool blocked_by_policy =
+    (app->id() == extension_misc::kWebStoreAppId ||
+     app->id() == extension_misc::kEnterpriseWebStoreAppId) &&
+    prefs->GetBoolean(prefs::kHideWebStoreIcon);
+  return app->ShouldDisplayInNewTabPage() && !blocked_by_policy;
+}
+
+}  // namespace
 
 const net::UnescapeRule::Type kUnescapeRules =
     net::UnescapeRule::NORMAL | net::UnescapeRule::URL_SPECIAL_CHARS;
@@ -134,7 +147,7 @@ void AppLauncherHandler::CreateAppInfo(
       prefs->GetLaunchType(extension,
                            ExtensionPrefs::LAUNCH_DEFAULT));
   value->SetBoolean("is_component",
-      extension->location() == Extension::COMPONENT);
+                    extension->location() == extensions::Manifest::COMPONENT);
   value->SetBoolean("is_webstore",
       extension->id() == extension_misc::kWebStoreAppId);
 
@@ -336,11 +349,12 @@ void AppLauncherHandler::FillAppDictionary(DictionaryValue* dictionary) {
   base::AutoReset<bool> auto_reset(&ignore_changes_, true);
 
   ListValue* list = new ListValue();
+  PrefService* prefs = Profile::FromWebUI(web_ui())->GetPrefs();
 
   for (std::set<std::string>::iterator it = visible_apps_.begin();
        it != visible_apps_.end(); ++it) {
     const Extension* extension = extension_service_->GetInstalledExtension(*it);
-    if (extension && extension->ShouldDisplayInNewTabPage()) {
+    if (extension && ShouldDisplayInNewTabPage(extension, prefs)) {
       DictionaryValue* app_info = GetAppInfo(extension);
       list->Append(app_info);
     }
@@ -362,7 +376,6 @@ void AppLauncherHandler::FillAppDictionary(DictionaryValue* dictionary) {
   dictionary->SetBoolean("disableCreateAppShortcut", true);
 #endif
 
-  PrefService* prefs = Profile::FromWebUI(web_ui())->GetPrefs();
   const ListValue* app_page_names = prefs->GetList(prefs::kNtpAppPageNames);
   if (!app_page_names || !app_page_names->GetSize()) {
     ListPrefUpdate update(prefs, prefs::kNtpAppPageNames);
@@ -497,11 +510,11 @@ void AppLauncherHandler::HandleLaunchApp(const ListValue* args) {
   if (disposition == NEW_FOREGROUND_TAB || disposition == NEW_BACKGROUND_TAB ||
       disposition == NEW_WINDOW) {
     // TODO(jamescook): Proper support for background tabs.
-    LaunchParams params(profile, extension,
-                        disposition == NEW_WINDOW ?
-                            extension_misc::LAUNCH_WINDOW :
-                            extension_misc::LAUNCH_TAB,
-                        disposition);
+    AppLaunchParams params(profile, extension,
+                           disposition == NEW_WINDOW ?
+                               extension_misc::LAUNCH_WINDOW :
+                               extension_misc::LAUNCH_TAB,
+                           disposition);
     params.override_url = GURL(url);
     OpenApplication(params);
   } else {
@@ -511,10 +524,10 @@ void AppLauncherHandler::HandleLaunchApp(const ListValue* args) {
         web_ui()->GetWebContents());
     WebContents* old_contents = NULL;
     if (browser)
-      old_contents = chrome::GetActiveWebContents(browser);
+      old_contents = browser->tab_strip_model()->GetActiveWebContents();
 
-    LaunchParams params(profile, extension,
-                        old_contents ? CURRENT_TAB : NEW_FOREGROUND_TAB);
+    AppLaunchParams params(profile, extension,
+                           old_contents ? CURRENT_TAB : NEW_FOREGROUND_TAB);
     params.override_url = GURL(url);
     WebContents* new_contents = OpenApplication(params);
 
@@ -776,9 +789,9 @@ void AppLauncherHandler::OnPreferenceChanged() {
 }
 
 // static
-void AppLauncherHandler::RegisterUserPrefs(PrefServiceSyncable* pref_service) {
-  pref_service->RegisterListPref(prefs::kNtpAppPageNames,
-                                 PrefServiceSyncable::SYNCABLE_PREF);
+void AppLauncherHandler::RegisterUserPrefs(PrefRegistrySyncable* registry) {
+  registry->RegisterListPref(prefs::kNtpAppPageNames,
+                             PrefRegistrySyncable::SYNCABLE_PREF);
 }
 
 void AppLauncherHandler::CleanupAfterUninstall() {

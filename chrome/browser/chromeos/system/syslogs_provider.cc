@@ -4,12 +4,14 @@
 
 #include "chrome/browser/chromeos/system/syslogs_provider.h"
 
+#include "ash/shell.h"
+#include "ash/touch/touch_observer_hud.h"
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/singleton.h"
@@ -17,6 +19,7 @@
 #include "base/string_util.h"
 #include "base/task_runner.h"
 #include "base/threading/sequenced_worker_pool.h"
+#include "chrome/browser/feedback/feedback_util.h"
 #include "chrome/browser/memory_details.h"
 #include "chrome/common/chrome_switches.h"
 #include "chromeos/network/network_event_log.h"
@@ -115,10 +118,10 @@ std::string ReadValue(std::string* data) {
 //                values are "sysinfo" or "feedback"; in case of an invalid
 //                value, the script will currently default to "sysinfo"
 
-LogDictionaryType* GetSystemLogs(FilePath* zip_file_name,
+LogDictionaryType* GetSystemLogs(base::FilePath* zip_file_name,
                                  const std::string& context) {
   // Create the temp file, logs will go here
-  FilePath temp_filename;
+  base::FilePath temp_filename;
 
   if (!file_util::CreateTemporaryFile(&temp_filename))
     return NULL;
@@ -200,7 +203,7 @@ class SyslogsProviderImpl : public SyslogsProvider {
       const ReadCompleteCallback& callback);
 
   // Loads compressed logs and writes into |zip_content|.
-  void LoadCompressedLogs(const FilePath& zip_file,
+  void LoadCompressedLogs(const base::FilePath& zip_file,
                           std::string* zip_content);
 
   SyslogsProviderImpl();
@@ -303,7 +306,7 @@ void SyslogsProviderImpl::ReadSyslogs(
     return;
 
   // Create temp file.
-  FilePath zip_file;
+  base::FilePath zip_file;
   if (compress_logs && !file_util::CreateTemporaryFile(&zip_file)) {
     LOG(ERROR) << "Cannot create temp file";
     compress_logs = false;
@@ -332,6 +335,11 @@ void SyslogsProviderImpl::ReadSyslogs(
       chromeos::network_event_log::OLDEST_FIRST,
       chromeos::system::kFeedbackMaxLineCount);
 
+  if (ash::Shell::GetInstance()->touch_observer_hud()) {
+    (*logs)[kHUDLogDataKey] =
+        ash::Shell::GetInstance()->touch_observer_hud()->GetLogAsString();
+  }
+
   // SyslogsMemoryHandler will clean itself up.
   // SyslogsMemoryHandler::OnDetailsAvailable() will modify |logs| and call
   // request->ForwardResult(logs, zip_content).
@@ -341,7 +349,7 @@ void SyslogsProviderImpl::ReadSyslogs(
   handler->StartFetch(MemoryDetails::UPDATE_USER_METRICS);
 }
 
-void SyslogsProviderImpl::LoadCompressedLogs(const FilePath& zip_file,
+void SyslogsProviderImpl::LoadCompressedLogs(const base::FilePath& zip_file,
                                             std::string* zip_content) {
   DCHECK(zip_content);
   if (!file_util::ReadFileToString(zip_file, zip_content)) {

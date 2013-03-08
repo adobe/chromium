@@ -7,11 +7,13 @@
 
 #include <vector>
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/synchronization/lock.h"
 #include "webkit/storage/webkit_storage_export.h"
 
+namespace base {
 class FilePath;
+}
 
 namespace fileapi {
 
@@ -21,10 +23,10 @@ class WEBKIT_STORAGE_EXPORT MediaPathFilter {
  public:
   MediaPathFilter();
   ~MediaPathFilter();
-  bool Match(const FilePath& path);
+  bool Match(const base::FilePath& path);
 
  private:
-  typedef std::vector<FilePath::StringType> MediaFileExtensionList;
+  typedef std::vector<base::FilePath::StringType> MediaFileExtensionList;
 
   void EnsureInitialized();
 

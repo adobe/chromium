@@ -29,7 +29,7 @@ ConstrainedWindowMac::ConstrainedWindowMac(
   DCHECK(sheet_.get());
   WebContentsModalDialogManager* web_contents_modal_dialog_manager =
       WebContentsModalDialogManager::FromWebContents(web_contents);
-  web_contents_modal_dialog_manager->AddDialog(this);
+  web_contents_modal_dialog_manager->ShowDialog(this);
 
   registrar_.Add(this,
                  content::NOTIFICATION_WEB_CONTENTS_VISIBILITY_CHANGED,
@@ -76,9 +76,11 @@ void ConstrainedWindowMac::PulseWebContentsModalDialog() {
       pulseSheet:sheet_];
 }
 
-gfx::NativeWindow ConstrainedWindowMac::GetNativeWindow() {
-  NOTREACHED();
-  return nil;
+NativeWebContentsModalDialog ConstrainedWindowMac::GetNativeDialog() {
+  // TODO(wittman): Ultimately this should be changed to the
+  // ConstrainedWindowSheet pointer, in conjunction with the corresponding
+  // changes to NativeWebContentsModalDialogManagerCocoa.
+  return this;
 }
 
 void ConstrainedWindowMac::Observe(

@@ -7,6 +7,7 @@
 #include "base/command_line.h"
 #include "base/time.h"
 #include "base/values.h"
+#include "chrome/browser/app_mode/app_mode_utils.h"
 #include "chrome/browser/devtools/devtools_window.h"
 #include "chrome/browser/extensions/shell_window_registry.h"
 #include "chrome/browser/extensions/window_controller.h"
@@ -88,7 +89,7 @@ bool AppWindowCreateFunction::RunImpl() {
   GURL url = GetExtension()->GetResourceURL(params->url);
   // Allow absolute URLs for component apps, otherwise prepend the extension
   // path.
-  if (GetExtension()->location() == extensions::Extension::COMPONENT) {
+  if (GetExtension()->location() == extensions::Manifest::COMPONENT) {
     GURL absolute = GURL(params->url);
     if (absolute.has_scheme())
       url = absolute;
@@ -209,6 +210,9 @@ bool AppWindowCreateFunction::RunImpl() {
 
     if (options->hidden.get())
       create_params.hidden = *options->hidden.get();
+
+    if (options->resizable.get())
+      create_params.resizable = *options->resizable.get();
   }
 
   create_params.creator_process_id =
@@ -216,6 +220,9 @@ bool AppWindowCreateFunction::RunImpl() {
 
   ShellWindow* shell_window =
       ShellWindow::Create(profile(), GetExtension(), url, create_params);
+
+  if (chrome::ShouldForceFullscreenApp())
+    shell_window->GetBaseWindow()->SetFullscreen(true);
 
   content::RenderViewHost* created_view =
       shell_window->web_contents()->GetRenderViewHost();
@@ -229,7 +236,7 @@ bool AppWindowCreateFunction::RunImpl() {
       base::Value::CreateBooleanValue(inject_html_titlebar));
   result->Set("id", base::Value::CreateStringValue(shell_window->window_key()));
   DictionaryValue* boundsValue = new DictionaryValue();
-  gfx::Rect bounds = shell_window->GetBaseWindow()->GetBounds();
+  gfx::Rect bounds = shell_window->GetClientBounds();
   boundsValue->SetInteger("left", bounds.x());
   boundsValue->SetInteger("top", bounds.y());
   boundsValue->SetInteger("width", bounds.width());

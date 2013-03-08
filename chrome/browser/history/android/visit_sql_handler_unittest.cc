@@ -6,8 +6,8 @@
 
 #include "chrome/browser/history/android/visit_sql_handler.h"
 
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
@@ -34,7 +34,7 @@ class VisitSQLHandlerTest : public testing::Test {
   virtual void SetUp() {
     // Get a temporary directory for the test DB files.
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
-    FilePath history_db_name = temp_dir_.path().AppendASCII(
+    base::FilePath history_db_name = temp_dir_.path().AppendASCII(
         chrome::kHistoryFilename);
     ASSERT_EQ(sql::INIT_OK, history_db_.Init(history_db_name, NULL));
   }

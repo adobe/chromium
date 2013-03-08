@@ -46,15 +46,56 @@ remoting.OAuth2.prototype.SCOPE_ =
       'https://www.googleapis.com/auth/chromoting ' +
       'https://www.googleapis.com/auth/googletalk ' +
       'https://www.googleapis.com/auth/userinfo#email';
-/** @private */
-remoting.OAuth2.prototype.OAUTH2_TOKEN_ENDPOINT_ =
-    'https://accounts.google.com/o/oauth2/token';
-/** @private */
-remoting.OAuth2.prototype.OAUTH2_VALIDATE_TOKEN_ENDPOINT_ =
-    'https://www.googleapis.com/oauth2/v1/tokeninfo';
-/** @private */
-remoting.OAuth2.prototype.OAUTH2_REVOKE_TOKEN_ENDPOINT_ =
-    'https://accounts.google.com/o/oauth2/revoke';
+
+// Configurable URLs/strings.
+/** @private
+ *  @return {string} OAuth2 redirect URI.
+ */
+remoting.OAuth2.prototype.getRedirectUri_ = function() {
+  return remoting.settings.OAUTH2_REDIRECT_URL;
+};
+
+/** @private
+ *  @return {string} API client ID.
+ */
+remoting.OAuth2.prototype.getClientId_ = function() {
+  return remoting.settings.OAUTH2_CLIENT_ID;
+};
+
+/** @private
+ *  @return {string} API client secret.
+ */
+remoting.OAuth2.prototype.getClientSecret_ = function() {
+  return remoting.settings.OAUTH2_CLIENT_SECRET;
+};
+
+/** @private
+ *  @return {string} OAuth2 authentication URL.
+ */
+remoting.OAuth2.prototype.getOAuth2AuthEndpoint_ = function() {
+  return remoting.settings.OAUTH2_BASE_URL + '/auth';
+};
+
+/** @private
+ *  @return {string} OAuth2 token URL.
+ */
+remoting.OAuth2.prototype.getOAuth2TokenEndpoint_ = function() {
+  return remoting.settings.OAUTH2_BASE_URL + '/token';
+};
+
+/** @private
+ *  @return {string} OAuth token revocation URL.
+ */
+remoting.OAuth2.prototype.getOAuth2RevokeTokenEndpoint_ = function() {
+  return remoting.settings.OAUTH2_BASE_URL + '/revoke';
+};
+
+/** @private
+ *  @return {string} OAuth2 userinfo API URL.
+ */
+remoting.OAuth2.prototype.getOAuth2ApiUserInfoEndpoint_ = function() {
+  return remoting.settings.OAUTH2_API_BASE_URL + '/v1/userinfo';
+};
 
 /** @return {boolean} True if the app is already authenticated. */
 remoting.OAuth2.prototype.isAuthenticated = function() {
@@ -255,13 +296,13 @@ remoting.OAuth2.prototype.refreshAccessToken_ = function(onDone) {
   }
 
   var parameters = {
-    'client_id': this.CLIENT_ID_,
-    'client_secret': this.CLIENT_SECRET_,
+    'client_id': this.getClientId_(),
+    'client_secret': this.getClientSecret_(),
     'refresh_token': this.getRefreshToken_(),
     'grant_type': 'refresh_token'
   };
 
-  remoting.xhr.post(this.OAUTH2_TOKEN_ENDPOINT_,
+  remoting.xhr.post(this.getOAuth2TokenEndpoint_(),
                     this.processTokenResponse_.bind(this, onDone),
                     parameters);
 };
@@ -284,10 +325,10 @@ remoting.OAuth2.prototype.generateXsrfToken_ = function() {
 remoting.OAuth2.prototype.doAuthRedirect = function() {
   var xsrf_token = this.generateXsrfToken_();
   window.localStorage.setItem(this.KEY_XSRF_TOKEN_, xsrf_token);
-  var GET_CODE_URL = 'https://accounts.google.com/o/oauth2/auth?' +
+  var GET_CODE_URL = this.getOAuth2AuthEndpoint_() + '?' +
     remoting.xhr.urlencodeParamHash({
-          'client_id': this.CLIENT_ID_,
-          'redirect_uri': this.REDIRECT_URI_,
+          'client_id': this.getClientId_(),
+          'redirect_uri': this.getRedirectUri_(),
           'scope': this.SCOPE_,
           'state': xsrf_token,
           'response_type': 'code',
@@ -314,13 +355,13 @@ remoting.OAuth2.prototype.exchangeCodeForToken = function(code, state, onDone) {
     onDone(null);
   }
   var parameters = {
-    'client_id': this.CLIENT_ID_,
-    'client_secret': this.CLIENT_SECRET_,
-    'redirect_uri': this.REDIRECT_URI_,
+    'client_id': this.getClientId_(),
+    'client_secret': this.getClientSecret_(),
+    'redirect_uri': this.getRedirectUri_(),
     'code': code,
     'grant_type': 'authorization_code'
   };
-  remoting.xhr.post(this.OAUTH2_TOKEN_ENDPOINT_,
+  remoting.xhr.post(this.getOAuth2TokenEndpoint_(),
                     this.processTokenResponse_.bind(this, onDone),
                     parameters);
 };
@@ -349,77 +390,6 @@ remoting.OAuth2.prototype.interpretUnexpectedXhrStatus_ = function(xhrStatus) {
 };
 
 /**
- * Asynchronously validates an access token.
- *
- * @param {string} token The access token.
- * @param {function():void} onOk Callback to invoke if the token is valid.
- * @param {function(remoting.Error):void} onError Function to invoke with an
- *     error code on failure.
- * @return {void} Nothing.
- */
-remoting.OAuth2.prototype.validateToken = function(token, onOk, onError) {
-  var parameters = {
-    'access_token': token
-  };
-  remoting.xhr.get(this.OAUTH2_VALIDATE_TOKEN_ENDPOINT_,
-                   this.processValidateTokenResponse_.bind(this, onOk, onError),
-                   parameters);
-};
-
-/**
- * Sorts the URLs in an OAuth2 scope string.
- *
- * @private
- * @param {string} scope The scope to be sorted (URLs separated by spaces).
- * @return {string} A string with the URLs in {@code scope} sorted.
- */
-remoting.OAuth2.prototype.sortScope_ = function(scope) {
-  return (/** @type {[string]} */ (scope.split(' ').sort()).join(' '));
-};
-
-/**
- * Processes token validation results and notifies caller.
- *
- * @private
- * @param {function():void} onOk Callback to invoke if the token is valid.
- * @param {function(remoting.Error):void} onError Function to invoke with an
- *     error code on failure.
- * @param {XMLHttpRequest} xhr The XHR object for this request.
- * @return {void} Nothing.
- */
-remoting.OAuth2.prototype.processValidateTokenResponse_ = function(
-    onOk, onError, xhr) {
-  /** @type {remoting.Error} */
-  var error = remoting.Error.UNEXPECTED;
-  if (xhr.status == 200) {
-    var result = jsonParseSafe(xhr.responseText);
-    // Double check that the token is valid for what we requested.
-    if (result && result['audience'] == this.CLIENT_ID_ &&
-        // Compare the (unordered) set of URLs in each scope.
-        this.sortScope_(result['scope']) == this.sortScope_(this.SCOPE_)) {
-      onOk();
-      return;
-    } else {
-      console.warn('Token is valid, but has unexpected audience or scope: ' +
-                   xhr.responseText);
-      error = remoting.Error.AUTHENTICATION_FAILED;
-    }
-  } else if (xhr.status == 400) {
-    var result =
-        /** @type {{error: string}} */ (jsonParseSafe(xhr.responseText));
-    if (result && result.error == 'invalid_token') {
-      error = remoting.Error.AUTHENTICATION_FAILED;
-    }
-  } else {
-    error = this.interpretUnexpectedXhrStatus_(xhr.status);
-  }
-  // Note that AUTHENTICATION_FAILED will force a new sign-in if bubbled all the
-  // way up. The code protects against trying to use expired access tokens, so
-  // if they're invalid, we can assume that simply refreshing won't work.
-  onError(error);
-};
-
-/**
  * Revokes a refresh or an access token.
  *
  * @param {string?} token An access or refresh token.
@@ -439,7 +409,7 @@ remoting.OAuth2.prototype.revokeToken_ = function(token) {
                   ' ; response: ' + xhr.responseText + ' ; xhr: ', xhr);
     }
   };
-  remoting.xhr.post(this.OAUTH2_REVOKE_TOKEN_ENDPOINT_,
+  remoting.xhr.post(this.getOAuth2RevokeTokenEndpoint_(),
                     processResponse,
                     parameters);
 };
@@ -540,7 +510,7 @@ remoting.OAuth2.prototype.getEmail = function(onOk, onError) {
   /** @param {string} token The access token. */
   var getEmailFromToken = function(token) {
     var headers = { 'Authorization': 'OAuth ' + token };
-    remoting.xhr.get('https://www.googleapis.com/oauth2/v1/userinfo',
+    remoting.xhr.get(that.getOAuth2ApiUserInfoEndpoint_(),
                      onResponse, '', headers);
   };
 

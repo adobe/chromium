@@ -6,10 +6,10 @@
 
 #include "base/json/json_writer.h"
 #include "base/memory/singleton.h"
+#include "base/prefs/pref_service.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/printing/cloud_print/cloud_print_proxy_service.h"
 #include "chrome/browser/printing/cloud_print/cloud_print_proxy_service_factory.h"
 #include "chrome/browser/printing/cloud_print/cloud_print_setup_message_handler.h"
@@ -22,10 +22,10 @@
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/host_desktop.h"
-#include "chrome/browser/ui/webui/chrome_url_data_manager.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/service_messages.h"
 #include "content/public/browser/render_view_host.h"
+#include "content/public/browser/url_data_source.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
 #include "google_apis/gaia/gaia_auth_fetcher.h"
@@ -104,8 +104,7 @@ CloudPrintSetupFlow::CloudPrintSetupFlow(
       delegate_(delegate) {
   // TODO(hclam): The data source should be added once.
   profile_ = profile;
-  ChromeURLDataManager::AddDataSource(profile,
-      new CloudPrintSetupSource());
+  content::URLDataSource::Add(profile, new CloudPrintSetupSource());
 }
 
 CloudPrintSetupFlow::~CloudPrintSetupFlow() {

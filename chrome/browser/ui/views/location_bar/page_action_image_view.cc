@@ -27,6 +27,7 @@
 #include "ui/base/accessibility/accessible_view_state.h"
 #include "ui/base/events/event.h"
 #include "ui/gfx/canvas.h"
+#include "ui/gfx/image/image.h"
 #include "ui/views/controls/menu/menu_item_view.h"
 #include "ui/views/controls/menu/menu_model_adapter.h"
 #include "ui/views/controls/menu/menu_runner.h"
@@ -53,7 +54,8 @@ PageActionImageView::PageActionImageView(LocationBarView* owner,
   DCHECK(extension);
 
   icon_factory_.reset(
-      new ExtensionActionIconFactory(extension, page_action, this));
+      new ExtensionActionIconFactory(
+          owner_->profile(), extension, page_action, this));
 
   set_accessibility_focusable(true);
   set_context_menu_controller(this);
@@ -238,7 +240,7 @@ void PageActionImageView::InspectPopup(ExtensionAction* action) {
   ExecuteAction(ExtensionPopup::SHOW_AND_INSPECT);
 }
 
-void PageActionImageView::OnWidgetClosing(views::Widget* widget) {
+void PageActionImageView::OnWidgetDestroying(views::Widget* widget) {
   DCHECK_EQ(popup_->GetWidget(), widget);
   popup_->GetWidget()->RemoveObserver(this);
   popup_ = NULL;

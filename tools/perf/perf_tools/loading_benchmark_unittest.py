@@ -1,11 +1,11 @@
 # Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
-from telemetry import multi_page_benchmark_unittest_base
 from perf_tools import loading_benchmark
+from telemetry.page import page_benchmark_unittest_base
 
 class SmoothnessBenchmarkUnitTest(
-  multi_page_benchmark_unittest_base.MultiPageBenchmarkUnitTestBase):
+  page_benchmark_unittest_base.PageBenchmarkUnitTestBase):
 
   def testBasicFunctionality(self):
     ps = self.CreatePageSetFromFileInUnittestDataDir('blank.html')

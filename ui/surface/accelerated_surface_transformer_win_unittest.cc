@@ -69,7 +69,7 @@ SkBitmap ToSkBitmap(IDirect3DSurface9* surface, bool is_single_channel) {
   return result;
 }
 
-bool WritePNGFile(const SkBitmap& bitmap, const FilePath& file_path) {
+bool WritePNGFile(const SkBitmap& bitmap, const base::FilePath& file_path) {
   std::vector<unsigned char> png_data;
   const bool discard_transparency = true;
   if (gfx::PNGCodec::EncodeBGRASkBitmap(bitmap,
@@ -355,7 +355,8 @@ bool AssertSameColor(uint8 color_a, uint8 color_b) {
 
     FillSymmetricRandomCheckerboard(src, src_size, checkerboard_size);
 
-    ASSERT_TRUE(gpu_ops->ResizeBilinear(src, gfx::Rect(src_size), dst));
+    ASSERT_TRUE(gpu_ops->ResizeBilinear(src, gfx::Rect(src_size), dst,
+                                        gfx::Rect(dst_size)));
 
     AssertSymmetry(dst, dst_size);
   }
@@ -552,15 +553,16 @@ bool AssertSameColor(uint8 color_a, uint8 color_b) {
       // extra columns added due to packing. That means up to 7 extra
       // columns for uv, and up to 3 extra columns for y.
       WritePNGFile(reference_rgb,
-                   FilePath(FILE_PATH_LITERAL("test_fail_src.png")));
+                   base::FilePath(FILE_PATH_LITERAL("test_fail_src.png")));
       WritePNGFile(reference_rgb_scaled,
-                   FilePath(FILE_PATH_LITERAL("test_fail_src_scaled.png")));
+                   base::FilePath(
+                       FILE_PATH_LITERAL("test_fail_src_scaled.png")));
       WritePNGFile(ToSkBitmap(dst_y, true),
-                   FilePath(FILE_PATH_LITERAL("test_fail_y.png")));
+                   base::FilePath(FILE_PATH_LITERAL("test_fail_y.png")));
       WritePNGFile(ToSkBitmap(dst_u, true),
-                   FilePath(FILE_PATH_LITERAL("test_fail_u.png")));
+                   base::FilePath(FILE_PATH_LITERAL("test_fail_u.png")));
       WritePNGFile(ToSkBitmap(dst_v, true),
-                   FilePath(FILE_PATH_LITERAL("test_fail_v.png")));
+                   base::FilePath(FILE_PATH_LITERAL("test_fail_v.png")));
     }
   }
 

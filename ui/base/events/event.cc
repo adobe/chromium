@@ -95,6 +95,7 @@ std::string EventTypeName(ui::EventType type) {
     CASE_TYPE(ET_SCROLL);
     CASE_TYPE(ET_SCROLL_FLING_START);
     CASE_TYPE(ET_SCROLL_FLING_CANCEL);
+    CASE_TYPE(ET_CANCEL_MODE);
     case ui::ET_LAST: NOTREACHED(); return std::string();
     // Don't include default, so that we get an error when new type is added.
   }
@@ -102,6 +103,14 @@ std::string EventTypeName(ui::EventType type) {
 
   NOTREACHED();
   return std::string();
+}
+
+bool IsX11SendEventTrue(const base::NativeEvent& event) {
+#if defined(USE_X11)
+  if (event && event->xany.send_event)
+    return true;
+#endif
+  return false;
 }
 
 }  // namespace
@@ -175,13 +184,13 @@ Event::Event(const base::NativeEvent& native_event,
   std::string name_for_event =
       base::StringPrintf("Event.Latency.Browser.%s", name_.c_str());
   base::HistogramBase* counter_for_type =
-      base::Histogram::FactoryTimeGet(
+      base::Histogram::FactoryGet(
           name_for_event,
-          base::TimeDelta::FromMilliseconds(0),
-          base::TimeDelta::FromMilliseconds(1000000),
+          0,
+          1000000,
           100,
           base::HistogramBase::kUmaTargetedHistogramFlag);
-  counter_for_type->AddTime(delta);
+  counter_for_type->Add(delta.InMicroseconds());
   InitWithNativeEvent(native_event);
 }
 
@@ -218,6 +227,17 @@ void Event::Init() {
 
 void Event::InitWithNativeEvent(const base::NativeEvent& native_event) {
   native_event_ = native_event;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// CancelModeEvent
+
+CancelModeEvent::CancelModeEvent()
+    : Event(ui::ET_CANCEL_MODE, base::TimeDelta(), 0) {
+  set_cancelable(false);
+}
+
+CancelModeEvent::~CancelModeEvent() {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -317,7 +337,9 @@ bool MouseEvent::IsRepeatedClickEvent(
 int MouseEvent::GetRepeatCount(const MouseEvent& event) {
   int click_count = 1;
   if (last_click_event_) {
-    if (IsRepeatedClickEvent(*last_click_event_, event))
+    if (IsX11SendEventTrue(event.native_event()))
+      click_count = last_click_event_->GetClickCount();
+    else if (IsRepeatedClickEvent(*last_click_event_, event))
       click_count = last_click_event_->GetClickCount() + 1;
     delete last_click_event_;
   }
@@ -615,13 +637,16 @@ DropTargetEvent::DropTargetEvent(const OSExchangeData& data,
 ScrollEvent::ScrollEvent(const base::NativeEvent& native_event)
     : MouseEvent(native_event) {
   if (type() == ET_SCROLL) {
-    GetScrollOffsets(native_event, &x_offset_, &y_offset_, &finger_count_);
-    double start, end;
-    GetGestureTimes(native_event, &start, &end);
+    GetScrollOffsets(native_event,
+                     &x_offset_, &y_offset_,
+                     &x_offset_ordinal_, &y_offset_ordinal_,
+                     &finger_count_);
   } else if (type() == ET_SCROLL_FLING_START ||
              type() == ET_SCROLL_FLING_CANCEL) {
-    bool is_cancel;
-    GetFlingData(native_event, &x_offset_, &y_offset_, &is_cancel);
+    GetFlingData(native_event,
+                 &x_offset_, &y_offset_,
+                 &x_offset_ordinal_, &y_offset_ordinal_,
+                 NULL);
   } else {
     NOTREACHED() << "Unexpected event type " << type()
         << " when constructing a ScrollEvent.";
@@ -630,18 +655,39 @@ ScrollEvent::ScrollEvent(const base::NativeEvent& native_event)
 
 ScrollEvent::ScrollEvent(EventType type,
                          const gfx::Point& location,
+                         base::TimeDelta time_stamp,
                          int flags,
                          float x_offset,
-                         float y_offset)
+                         float y_offset,
+                         float x_offset_ordinal,
+                         float y_offset_ordinal,
+                         int finger_count)
     : MouseEvent(type, location, location, flags),
       x_offset_(x_offset),
-      y_offset_(y_offset) {
+      y_offset_(y_offset),
+      x_offset_ordinal_(x_offset_ordinal),
+      y_offset_ordinal_(y_offset_ordinal),
+      finger_count_(finger_count) {
+  set_time_stamp(time_stamp);
   CHECK(IsScrollEvent());
 }
 
 void ScrollEvent::Scale(const float factor) {
   x_offset_ *= factor;
   y_offset_ *= factor;
+  x_offset_ordinal_ *= factor;
+  y_offset_ordinal_ *= factor;
+}
+
+void ScrollEvent::UpdateForRootTransform(const gfx::Transform& root_transform) {
+  LocatedEvent::UpdateForRootTransform(root_transform);
+  gfx::DecomposedTransform decomp;
+  bool success = gfx::DecomposeTransform(&decomp, root_transform);
+  DCHECK(success);
+  if (decomp.scale[0])
+    x_offset_ordinal_ /= decomp.scale[0];
+  if (decomp.scale[1])
+    y_offset_ordinal_ /= decomp.scale[1];
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -654,7 +700,11 @@ GestureEvent::GestureEvent(EventType type,
                            base::TimeDelta time_stamp,
                            const GestureEventDetails& details,
                            unsigned int touch_ids_bitfield)
-    : LocatedEvent(type, gfx::Point(x, y), gfx::Point(x, y), time_stamp, flags),
+    : LocatedEvent(type,
+                   gfx::Point(x, y),
+                   gfx::Point(x, y),
+                   time_stamp,
+                   flags | EF_FROM_TOUCH),
       details_(details),
       touch_ids_bitfield_(touch_ids_bitfield) {
 }

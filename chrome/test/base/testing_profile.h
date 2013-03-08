@@ -79,7 +79,7 @@ class TestingProfile : public Profile {
         scoped_refptr<ExtensionSpecialStoragePolicy> policy);
 
     // Sets the path to the directory to be used to hold profile data.
-    void SetPath(const FilePath& path);
+    void SetPath(const base::FilePath& path);
 
     // Sets the PrefService to be used by this profile.
     void SetPrefService(scoped_ptr<PrefServiceSyncable> prefs);
@@ -94,7 +94,7 @@ class TestingProfile : public Profile {
     // Various staging variables where values are held until Build() is invoked.
     scoped_ptr<PrefServiceSyncable> pref_service_;
     scoped_refptr<ExtensionSpecialStoragePolicy> extension_policy_;
-    FilePath path_;
+    base::FilePath path_;
     Delegate* delegate_;
 
     DISALLOW_COPY_AND_ASSIGN(Builder);
@@ -106,16 +106,16 @@ class TestingProfile : public Profile {
   // profile profiles, use that factory method instead of this directly.
   // Exception: if you need to create multi-profile profiles for testing the
   // ProfileManager, then use the constructor below instead.
-  explicit TestingProfile(const FilePath& path);
+  explicit TestingProfile(const base::FilePath& path);
 
   // Multi-profile aware constructor that takes the path to a directory managed
   // for this profile and a delegate. This constructor is meant to be used
   // for unittesting the ProfileManager.
-  TestingProfile(const FilePath& path, Delegate* delegate);
+  TestingProfile(const base::FilePath& path, Delegate* delegate);
 
   // Full constructor allowing the setting of all possible instance data.
   // Callers should use Builder::Build() instead of invoking this constructor.
-  TestingProfile(const FilePath& path,
+  TestingProfile(const base::FilePath& path,
                  Delegate* delegate,
                  scoped_refptr<ExtensionSpecialStoragePolicy> extension_policy,
                  scoped_ptr<PrefServiceSyncable> prefs);
@@ -171,7 +171,7 @@ class TestingProfile : public Profile {
   TestingPrefServiceSyncable* GetTestingPrefService();
 
   // content::BrowserContext
-  virtual FilePath GetPath() OVERRIDE;
+  virtual base::FilePath GetPath() OVERRIDE;
   virtual scoped_refptr<base::SequencedTaskRunner> GetIOTaskRunner() OVERRIDE;
   virtual bool IsOffTheRecord() const OVERRIDE;
   virtual content::DownloadManagerDelegate*
@@ -185,6 +185,17 @@ class TestingProfile : public Profile {
   // getter is currently only capable of returning a Context that helps test
   // the CookieMonster. See implementation comments for more details.
   virtual net::URLRequestContextGetter* GetRequestContext() OVERRIDE;
+  virtual net::URLRequestContextGetter* CreateRequestContext(
+      scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+          blob_protocol_handler,
+      scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+          file_system_protocol_handler,
+      scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+          developer_protocol_handler,
+      scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+          chrome_protocol_handler,
+      scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+          chrome_devtools_protocol_handler) OVERRIDE;
   virtual net::URLRequestContextGetter* GetRequestContextForRenderProcess(
       int renderer_child_id) OVERRIDE;
   virtual content::ResourceContext* GetResourceContext() OVERRIDE;
@@ -199,6 +210,7 @@ class TestingProfile : public Profile {
   void set_incognito(bool incognito) { incognito_ = incognito; }
   // Assumes ownership.
   virtual void SetOffTheRecordProfile(Profile* profile);
+  virtual void SetOriginalProfile(Profile* profile);
   virtual Profile* GetOffTheRecordProfile() OVERRIDE;
   virtual void DestroyOffTheRecordProfile() OVERRIDE {}
   virtual bool HasOffTheRecordProfile() OVERRIDE;
@@ -216,12 +228,9 @@ class TestingProfile : public Profile {
   virtual policy::ManagedModePolicyProvider*
       GetManagedModePolicyProvider() OVERRIDE;
   virtual policy::PolicyService* GetPolicyService() OVERRIDE;
-  // Sets the profile's PrefService. If a pref service hasn't been explicitly
-  // set GetPrefs creates one, so normally you need not invoke this. If you need
-  // to set a pref service you must invoke this before GetPrefs.
-  // TestingPrefService takes ownership of |prefs|.
-  void SetPrefService(PrefServiceSyncable* prefs);
-  virtual PrefServiceSyncable* GetPrefs() OVERRIDE;
+
+  virtual PrefService* GetPrefs() OVERRIDE;
+
   virtual history::TopSites* GetTopSites() OVERRIDE;
   virtual history::TopSites* GetTopSitesWithoutCreating() OVERRIDE;
 
@@ -237,11 +246,21 @@ class TestingProfile : public Profile {
       GetRequestContextForExtensions() OVERRIDE;
   virtual net::URLRequestContextGetter*
       GetMediaRequestContextForStoragePartition(
-          const FilePath& partition_path,
+          const base::FilePath& partition_path,
           bool in_memory) OVERRIDE;
-  virtual net::URLRequestContextGetter* GetRequestContextForStoragePartition(
-      const FilePath& partition_path,
-      bool in_memory) OVERRIDE;
+  virtual net::URLRequestContextGetter* CreateRequestContextForStoragePartition(
+      const base::FilePath& partition_path,
+      bool in_memory,
+      scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+          blob_protocol_handler,
+      scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+          file_system_protocol_handler,
+      scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+          developer_protocol_handler,
+      scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+          chrome_protocol_handler,
+      scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+          chrome_devtools_protocol_handler) OVERRIDE;
   virtual net::SSLConfigService* GetSSLConfigService() OVERRIDE;
   virtual HostContentSettingsMap* GetHostContentSettingsMap() OVERRIDE;
   virtual std::wstring GetName();
@@ -259,8 +278,8 @@ class TestingProfile : public Profile {
   virtual base::Time GetStartTime() const OVERRIDE;
   virtual ProtocolHandlerRegistry* GetProtocolHandlerRegistry() OVERRIDE;
 
-  virtual FilePath last_selected_directory() OVERRIDE;
-  virtual void set_last_selected_directory(const FilePath& path) OVERRIDE;
+  virtual base::FilePath last_selected_directory() OVERRIDE;
+  virtual void set_last_selected_directory(const base::FilePath& path) OVERRIDE;
   virtual bool WasCreatedByVersionOrLater(const std::string& version) OVERRIDE;
   virtual void SetExitType(ExitType exit_type) OVERRIDE {}
   virtual ExitType GetLastSessionExitType() OVERRIDE;
@@ -289,7 +308,7 @@ class TestingProfile : public Profile {
       const base::Closure& completion) OVERRIDE;
   virtual GURL GetHomePage() OVERRIDE;
 
-  virtual PrefServiceSyncable* GetOffTheRecordPrefs() OVERRIDE;
+  virtual PrefService* GetOffTheRecordPrefs() OVERRIDE;
 
  protected:
   base::Time start_time_;
@@ -310,9 +329,6 @@ class TestingProfile : public Profile {
   // Creates a TestingPrefService and associates it with the TestingProfile.
   void CreateTestingPrefService();
 
-  virtual base::Callback<ChromeURLDataManagerBackend*(void)>
-      GetChromeURLDataManagerBackendGetter() const OVERRIDE;
-
   // The policy service. Lazily created as a stub.
   scoped_ptr<policy::PolicyService> policy_service_;
 
@@ -325,13 +341,14 @@ class TestingProfile : public Profile {
 
   bool incognito_;
   scoped_ptr<Profile> incognito_profile_;
+  Profile* original_profile_;
 
   // Did the last session exit cleanly? Default is true.
   bool last_session_exited_cleanly_;
 
   scoped_refptr<HostContentSettingsMap> host_content_settings_map_;
 
-  FilePath last_selected_directory_;
+  base::FilePath last_selected_directory_;
   scoped_refptr<history::TopSites> top_sites_;  // For history and thumbnails.
 
   scoped_refptr<ExtensionSpecialStoragePolicy>
@@ -346,7 +363,7 @@ class TestingProfile : public Profile {
   base::ScopedTempDir temp_dir_;
   // The path to this profile. This will be valid in either of the two above
   // cases.
-  FilePath profile_path_;
+  base::FilePath profile_path_;
 
   // We keep a weak pointer to the dependency manager we want to notify on our
   // death. Defaults to the Singleton implementation but overridable for

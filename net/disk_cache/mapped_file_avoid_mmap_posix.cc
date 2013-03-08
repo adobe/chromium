@@ -6,12 +6,12 @@
 
 #include <stdlib.h>
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
 
 namespace disk_cache {
 
-void* MappedFile::Init(const FilePath& name, size_t size) {
+void* MappedFile::Init(const base::FilePath& name, size_t size) {
   DCHECK(!init_);
   if (init_ || !File::Init(name))
     return NULL;

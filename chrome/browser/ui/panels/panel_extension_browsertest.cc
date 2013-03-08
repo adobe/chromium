@@ -90,17 +90,26 @@ IN_PROC_BROWSER_TEST_F(PanelExtensionBrowserTest, PanelAppIcon) {
   EXPECT_EQ(panel::kPanelAppIconSize, app_icon.height());
 
   // Then verify on the native panel level.
+#if !defined(OS_WIN) || !defined(USE_AURA)
   scoped_ptr<NativePanelTesting> native_panel_testing(
       CreateNativePanelTesting(panel));
   EXPECT_TRUE(native_panel_testing->VerifyAppIcon());
+#endif
 
   panel->Close();
 }
 
 // Tests that icon loading might not be completed when the panel is closed.
 // (crbug.com/151484)
+//
+// TODO(linux_aura) http://crbug.com/163931
+#if defined(OS_LINUX) && !defined(OS_CHROMEOS) && defined(USE_AURA)
+#define MAYBE_ClosePanelBeforeIconLoadingCompleted DISABLED_ClosePanelBeforeIconLoadingCompleted
+#else
+#define MAYBE_ClosePanelBeforeIconLoadingCompleted ClosePanelBeforeIconLoadingCompleted
+#endif
 IN_PROC_BROWSER_TEST_F(PanelExtensionBrowserTest,
-                       ClosePanelBeforeIconLoadingCompleted) {
+                       MAYBE_ClosePanelBeforeIconLoadingCompleted) {
   const Extension* extension =
       LoadExtension(test_data_dir_.AppendASCII("test_extension"));
   Panel* panel = CreatePanelFromExtension(extension);

@@ -8,6 +8,7 @@
 #include "ash/desktop_background/desktop_background_view.h"
 #include "ash/desktop_background/desktop_background_widget_controller.h"
 #include "ash/desktop_background/user_wallpaper_delegate.h"
+#include "ash/desktop_background/wallpaper_resizer.h"
 #include "ash/root_window_controller.h"
 #include "ash/shell.h"
 #include "ash/shell_factory.h"
@@ -21,7 +22,6 @@
 #include "grit/ash_wallpaper_resources.h"
 #include "ui/aura/root_window.h"
 #include "ui/aura/window.h"
-#include "ui/base/resource/resource_bundle.h"
 #include "ui/compositor/layer.h"
 #include "ui/gfx/rect.h"
 #include "ui/gfx/image/image.h"
@@ -66,21 +66,8 @@ const int kSmallWallpaperMaxWidth = 1366;
 const int kSmallWallpaperMaxHeight = 800;
 const int kLargeWallpaperMaxWidth = 2560;
 const int kLargeWallpaperMaxHeight = 1700;
-
-// Stores the current wallpaper data.
-struct DesktopBackgroundController::WallpaperData {
-  explicit WallpaperData(const WallpaperInfo& info)
-      : wallpaper_info(info),
-        wallpaper_image(*(ui::ResourceBundle::GetSharedInstance().GetImageNamed(
-            info.idr).ToImageSkia())) {
-  }
-  WallpaperData(const WallpaperInfo& info, const gfx::ImageSkia& image)
-      : wallpaper_info(info),
-        wallpaper_image(image) {
-  }
-  const WallpaperInfo wallpaper_info;
-  const gfx::ImageSkia wallpaper_image;
-};
+const int kWallpaperThumbnailWidth = 108;
+const int kWallpaperThumbnailHeight = 68;
 
 // DesktopBackgroundController::WallpaperLoader wraps background wallpaper
 // loading.
@@ -105,8 +92,8 @@ class DesktopBackgroundController::WallpaperLoader
     return info_.idr;
   }
 
-  WallpaperData* ReleaseWallpaperData() {
-    return wallpaper_data_.release();
+  WallpaperResizer* ReleaseWallpaperResizer() {
+    return wallpaper_resizer_.release();
   }
 
  private:
@@ -116,14 +103,14 @@ class DesktopBackgroundController::WallpaperLoader
   void LoadingWallpaper() {
     if (cancel_flag_.IsSet())
       return;
-    wallpaper_data_.reset(new WallpaperData(info_));
+    wallpaper_resizer_.reset(new WallpaperResizer(info_));
   }
 
   ~WallpaperLoader() {}
 
   base::CancellationFlag cancel_flag_;
 
-  scoped_ptr<WallpaperData> wallpaper_data_;
+  scoped_ptr<WallpaperResizer> wallpaper_resizer_;
 
   const WallpaperInfo info_;
 
@@ -132,7 +119,7 @@ class DesktopBackgroundController::WallpaperLoader
 
 DesktopBackgroundController::DesktopBackgroundController()
     : locked_(false),
-      desktop_background_mode_(BACKGROUND_SOLID_COLOR),
+      desktop_background_mode_(BACKGROUND_NONE),
       background_color_(kTransparentColor),
       weak_ptr_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)) {
 }
@@ -143,7 +130,7 @@ DesktopBackgroundController::~DesktopBackgroundController() {
 
 gfx::ImageSkia DesktopBackgroundController::GetWallpaper() const {
   if (current_wallpaper_.get())
-    return current_wallpaper_->wallpaper_image;
+    return current_wallpaper_->wallpaper_image();
   return gfx::ImageSkia();
 }
 
@@ -159,7 +146,7 @@ void DesktopBackgroundController::RemoveObserver(
 
 WallpaperLayout DesktopBackgroundController::GetWallpaperLayout() const {
   if (current_wallpaper_.get())
-    return current_wallpaper_->wallpaper_info.layout;
+    return current_wallpaper_->wallpaper_info().layout;
   return WALLPAPER_LAYOUT_CENTER_CROPPED;
 }
 
@@ -173,21 +160,27 @@ int DesktopBackgroundController::GetWallpaperIDR() const {
   if (wallpaper_loader_.get())
     return wallpaper_loader_->idr();
   else if (current_wallpaper_.get())
-    return current_wallpaper_->wallpaper_info.idr;
+    return current_wallpaper_->wallpaper_info().idr;
   else
     return -1;
 }
 
 void DesktopBackgroundController::OnRootWindowAdded(
     aura::RootWindow* root_window) {
+  // The background hasn't been set yet.
+  if (desktop_background_mode_ == BACKGROUND_NONE)
+    return;
+
   // Handle resolution change for "built-in" images.
   if (BACKGROUND_IMAGE == desktop_background_mode_ &&
       current_wallpaper_.get()) {
     gfx::Size root_window_size = root_window->GetHostSize();
-    // Loads a higher resolution wallpaper if new root window is larger than
-    // small screen.
-    if (kSmallWallpaperMaxWidth < root_window_size.width() ||
-        kSmallWallpaperMaxHeight < root_window_size.height()) {
+    int width = current_wallpaper_->wallpaper_image().width();
+    int height = current_wallpaper_->wallpaper_image().height();
+    // Reloads wallpaper if current wallpaper is smaller than the new added root
+    // window.
+    if (width < root_window_size.width() ||
+        height < root_window_size.height()) {
       current_wallpaper_.reset(NULL);
       ash::Shell::GetInstance()->user_wallpaper_delegate()->
           UpdateWallpaper();
@@ -217,12 +210,13 @@ void DesktopBackgroundController::SetCustomWallpaper(
     WallpaperLayout layout) {
   CancelPendingWallpaperOperation();
   if (current_wallpaper_.get() &&
-      current_wallpaper_->wallpaper_image.BackedBySameObjectAs(wallpaper)) {
+      current_wallpaper_->wallpaper_image().BackedBySameObjectAs(wallpaper)) {
     return;
   }
 
   WallpaperInfo info = { -1, layout };
-  current_wallpaper_.reset(new WallpaperData(info, wallpaper));
+  current_wallpaper_.reset(new WallpaperResizer(info, wallpaper));
+  current_wallpaper_->StartResize();
   FOR_EACH_OBSERVER(DesktopBackgroundControllerObserver, observers_,
                     OnWallpaperDataChanged());
   SetDesktopBackgroundImageMode();
@@ -295,7 +289,7 @@ void DesktopBackgroundController::SetDesktopBackgroundImageMode() {
 
 void DesktopBackgroundController::OnWallpaperLoadCompleted(
     scoped_refptr<WallpaperLoader> wl) {
-  current_wallpaper_.reset(wl->ReleaseWallpaperData());
+  current_wallpaper_.reset(wl->ReleaseWallpaperResizer());
   FOR_EACH_OBSERVER(DesktopBackgroundControllerObserver, observers_,
                     OnWallpaperDataChanged());
 
@@ -347,9 +341,9 @@ void DesktopBackgroundController::InstallDesktopController(
       component = new internal::DesktopBackgroundWidgetController(layer);
       break;
     }
-    default: {
+    case BACKGROUND_NONE:
       NOTREACHED();
-    }
+      return;
   }
   // Ensure we're only observing the root window once. Don't rely on a window
   // property check as those can be cleared by tests resetting the background.

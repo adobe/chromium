@@ -5,25 +5,10 @@
 #ifndef CHROME_BROWSER_CHROMEOS_LOGIN_OAUTH_LOGIN_MANAGER_H_
 #define CHROME_BROWSER_CHROMEOS_LOGIN_OAUTH_LOGIN_MANAGER_H_
 
-#include <string>
-
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
-#include "chrome/browser/chromeos/cros/cert_library.h"
-#include "chrome/browser/chromeos/cros/cros_library.h"
-#include "chrome/browser/chromeos/login/oauth1_login_verifier.h"
-#include "chrome/browser/chromeos/login/oauth1_token_fetcher.h"
-#include "chrome/browser/chromeos/login/oauth2_login_verifier.h"
-#include "chrome/browser/chromeos/login/oauth2_policy_fetcher.h"
-#include "chrome/browser/chromeos/login/oauth2_token_fetcher.h"
-#include "chrome/browser/chromeos/login/policy_oauth_fetcher.h"
-#include "content/public/browser/notification_observer.h"
-#include "content/public/browser/notification_registrar.h"
 #include "net/url_request/url_request_context_getter.h"
 
-class GoogleServiceAuthError;
 class Profile;
-class TokenService;
 
 namespace chromeos {
 
@@ -44,6 +29,9 @@ class OAuthLoginManager {
   class Delegate {
    public:
     virtual ~Delegate() {}
+
+    // Raised when merge session is completed.
+    virtual void OnCompletedMergeSession() = 0;
 
     // Raised when cookie jar authentication is successfully completed.
     virtual void OnCompletedAuthentication(Profile* user_profile) = 0;

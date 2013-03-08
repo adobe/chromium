@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/mac/mac_util.h"
 #include "base/memory/scoped_nsobject.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/string_util.h"
@@ -14,7 +15,7 @@
 #include "content/public/browser/notification_details.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #import "third_party/ocmock/gtest_support.h"
-#import "third_party/ocmock/ocmock/OCMock.h"
+#import "third_party/ocmock/OCMock/OCMock.h"
 
 // Main test class.
 class BrowserWindowCocoaTest : public CocoaProfileTest {
@@ -48,20 +49,29 @@ TEST_F(BrowserWindowCocoaTest, TestBookmarkBarVisible) {
 }
 
 @interface FakeController : NSWindowController {
-  BOOL fullscreen_;
+  enum { kNormal, kFullscreen, kPresentation } windowState_;
 }
 @end
 
 @implementation FakeController
-- (void)enterFullscreenForURL:(const GURL&)url
-                   bubbleType:(FullscreenExitBubbleType)bubbleType {
-  fullscreen_ = YES;
+- (void)enterFullscreen {
+  windowState_ = kFullscreen;
 }
 - (void)exitFullscreen {
-  fullscreen_ = NO;
+  windowState_ = kNormal;
 }
 - (BOOL)isFullscreen {
-  return fullscreen_;
+  return windowState_ != kNormal;
+}
+- (void)enterPresentationModeForURL:(const GURL&)url
+                         bubbleType:(FullscreenExitBubbleType)bubbleType {
+  windowState_ = kPresentation;
+}
+- (void)exitPresentationMode {
+  windowState_ = kNormal;
+}
+- (BOOL)inPresentationMode {
+  return windowState_ == kPresentation;
 }
 @end
 
@@ -76,7 +86,28 @@ TEST_F(BrowserWindowCocoaTest, TestFullscreen) {
 
   EXPECT_FALSE(bwc->IsFullscreen());
   bwc->EnterFullscreen(GURL(), FEB_TYPE_BROWSER_FULLSCREEN_EXIT_INSTRUCTION);
-  EXPECT_TRUE(bwc->IsFullscreen());
+  EXPECT_FALSE(bwc->IsFullscreenWithChrome());
+  EXPECT_TRUE(bwc->IsFullscreenWithoutChrome());
+  bwc->ExitFullscreen();
+  EXPECT_FALSE(bwc->IsFullscreen());
+  [fake_controller close];
+}
+
+TEST_F(BrowserWindowCocoaTest, TestFullscreenWithChrome) {
+  if (!base::mac::IsOSLionOrLater())
+    return;
+  // Wrap the FakeController in a scoped_nsobject instead of autoreleasing in
+  // windowWillClose: because we never actually open a window in this test (so
+  // windowWillClose: never gets called).
+  scoped_nsobject<FakeController> fake_controller(
+      [[FakeController alloc] init]);
+  scoped_ptr<BrowserWindowCocoa> bwc(new BrowserWindowCocoa(
+      browser(), static_cast<BrowserWindowController*>(fake_controller.get())));
+
+  EXPECT_FALSE(bwc->IsFullscreen());
+  bwc->EnterFullscreenWithChrome();
+  EXPECT_TRUE(bwc->IsFullscreenWithChrome());
+  EXPECT_FALSE(bwc->IsFullscreenWithoutChrome());
   bwc->ExitFullscreen();
   EXPECT_FALSE(bwc->IsFullscreen());
   [fake_controller close];

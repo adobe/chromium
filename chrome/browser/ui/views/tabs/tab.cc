@@ -10,12 +10,13 @@
 #include "base/debug/alias.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/defaults.h"
-#include "chrome/browser/themes/theme_service.h"
+#include "chrome/browser/themes/theme_properties.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tab_contents/core_tab_helper.h"
 #include "chrome/browser/ui/tabs/tab_resources.h"
 #include "chrome/browser/ui/view_ids.h"
 #include "chrome/browser/ui/views/tabs/tab_controller.h"
+#include "chrome/browser/ui/views/theme_image_mapper.h"
 #include "chrome/common/chrome_switches.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
@@ -59,7 +60,6 @@ int left_padding() {
   static int value = -1;
   if (value == -1) {
     switch (ui::GetDisplayLayout()) {
-      case ui::LAYOUT_ASH:
       case ui::LAYOUT_DESKTOP:
         value = 22;
         break;
@@ -77,7 +77,6 @@ int top_padding() {
   static int value = -1;
   if (value == -1) {
     switch (ui::GetDisplayLayout()) {
-      case ui::LAYOUT_ASH:
       case ui::LAYOUT_DESKTOP:
         value = 7;
         break;
@@ -95,12 +94,11 @@ int right_padding() {
   static int value = -1;
   if (value == -1) {
     switch (ui::GetDisplayLayout()) {
-      case ui::LAYOUT_ASH:
       case ui::LAYOUT_DESKTOP:
-        value = 19;
+        value = 17;
         break;
       case ui::LAYOUT_TOUCH:
-        value = 23;
+        value = 21;
         break;
       default:
         NOTREACHED();
@@ -113,7 +111,6 @@ int bottom_padding() {
   static int value = -1;
   if (value == -1) {
     switch (ui::GetDisplayLayout()) {
-      case ui::LAYOUT_ASH:
       case ui::LAYOUT_DESKTOP:
         value = 5;
         break;
@@ -132,7 +129,6 @@ int drop_shadow_height() {
   static int value = -1;
   if (value == -1) {
     switch (ui::GetDisplayLayout()) {
-      case ui::LAYOUT_ASH:
       case ui::LAYOUT_DESKTOP:
         value = 4;
         break;
@@ -151,7 +147,6 @@ int tab_icon_size() {
   static int value = -1;
   if (value == -1) {
     switch (ui::GetDisplayLayout()) {
-      case ui::LAYOUT_ASH:
       case ui::LAYOUT_DESKTOP:
         value = gfx::kFaviconSize;
         break;
@@ -176,23 +171,16 @@ static const int kTouchWidth = 120;
 
 static const int kToolbarOverlap = 1;
 static const int kFaviconTitleSpacing = 4;
-#if defined(USE_ASH)
 // Additional vertical offset for title text relative to top of tab.
 // Ash text rendering may be different than Windows.
-// TODO(jamescook): Make this Chrome OS or Linux only?
-static const int kTitleTextOffsetY = 1;
-#else
+static const int kTitleTextOffsetYAsh = 1;
 static const int kTitleTextOffsetY = 0;
-#endif
 static const int kTitleCloseButtonSpacing = 3;
 static const int kStandardTitleWidth = 175;
-#if defined(USE_ASH)
 // Additional vertical offset for close button relative to top of tab.
 // Ash needs this to match the text vertical position.
-static const int kCloseButtonVertFuzz = 1;
-#else
+static const int kCloseButtonVertFuzzAsh = 1;
 static const int kCloseButtonVertFuzz = 0;
-#endif
 // Additional horizontal offset for close button relative to title text.
 static const int kCloseButtonHorzFuzz = 3;
 
@@ -249,11 +237,33 @@ const int kImmersiveBarHeight = 2;
 const SkColor kImmersiveActiveTabColor = SkColorSetRGB(235, 235, 235);
 const SkColor kImmersiveInactiveTabColor = SkColorSetRGB(190, 190, 190);
 
+// Number of steps in the immersive mode loading animation.
+const int kImmersiveLoadingStepCount = 32;
+
 // Scale to resize the current favicon by when projecting.
 const double kProjectingFaviconResizeScale = 0.75;
 
 // Scale to resize the projection sheet glow by.
 const double kProjectingGlowResizeScale = 2.0;
+
+void DrawIconAtLocation(gfx::Canvas* canvas,
+                        const gfx::ImageSkia& image,
+                        int image_offset,
+                        int dst_x,
+                        int dst_y,
+                        int icon_width,
+                        int icon_height,
+                        bool filter,
+                        const SkPaint& paint) {
+  // NOTE: the clipping is a work around for 69528, it shouldn't be necessary.
+  canvas->Save();
+  canvas->ClipRect(gfx::Rect(dst_x, dst_y, icon_width, icon_height));
+  canvas->DrawImageInt(image,
+                       image_offset, 0, icon_width, icon_height,
+                       dst_x, dst_y, icon_width, icon_height,
+                       filter, paint);
+  canvas->Restore();
+}
 
 // Draws the icon image at the center of |bounds|.
 void DrawIconCenter(gfx::Canvas* canvas,
@@ -267,14 +277,30 @@ void DrawIconCenter(gfx::Canvas* canvas,
   // Center the image within bounds.
   int dst_x = bounds.x() - (icon_width - bounds.width()) / 2;
   int dst_y = bounds.y() - (icon_height - bounds.height()) / 2;
-  // NOTE: the clipping is a work around for 69528, it shouldn't be necessary.
-  canvas->Save();
-  canvas->ClipRect(gfx::Rect(dst_x, dst_y, icon_width, icon_height));
-  canvas->DrawImageInt(image,
-                       image_offset, 0, icon_width, icon_height,
-                       dst_x, dst_y, icon_width, icon_height,
-                       filter, paint);
-  canvas->Restore();
+  DrawIconAtLocation(canvas, image, image_offset, dst_x, dst_y, icon_width,
+                     icon_height, filter, paint);
+}
+
+// Draws the icon image at the bottom right corner of |bounds|.
+void DrawIconBottomRight(gfx::Canvas* canvas,
+                         const gfx::ImageSkia& image,
+                         int image_offset,
+                         int icon_width,
+                         int icon_height,
+                         const gfx::Rect& bounds,
+                         bool filter,
+                         const SkPaint& paint) {
+  int dst_x = bounds.x() + bounds.width() - icon_width;
+  int dst_y = bounds.y() + bounds.height() - icon_height;
+  DrawIconAtLocation(canvas, image, image_offset, dst_x, dst_y, icon_width,
+                     icon_height, filter, paint);
+}
+
+chrome::HostDesktopType GetHostDesktopType(views::View* view) {
+  // Widget is NULL when tabs are detached.
+  views::Widget* widget = view->GetWidget();
+  return chrome::GetHostDesktopTypeForNativeView(
+      widget ? widget->GetNativeView() : NULL);
 }
 
 }  // namespace
@@ -293,7 +319,7 @@ class Tab::FaviconCrashAnimation : public ui::LinearAnimation,
   virtual ~FaviconCrashAnimation() {}
 
   // ui::Animation overrides:
-  virtual void AnimateToState(double state) {
+  virtual void AnimateToState(double state) OVERRIDE {
     const double kHidingOffset = 27;
 
     if (state < .5) {
@@ -308,7 +334,7 @@ class Tab::FaviconCrashAnimation : public ui::LinearAnimation,
   }
 
   // ui::AnimationDelegate overrides:
-  virtual void AnimationCanceled(const ui::Animation* animation) {
+  virtual void AnimationCanceled(const ui::Animation* animation) OVERRIDE {
     target_->SetFaviconHidingOffset(0);
   }
 
@@ -416,6 +442,7 @@ Tab::Tab(TabController* controller)
       dragging_(false),
       favicon_hiding_offset_(0),
       loading_animation_frame_(0),
+      immersive_loading_step_(0),
       should_display_crashed_favicon_(false),
       theme_provider_(NULL),
       ALLOW_THIS_IN_INITIALIZER_LIST(hover_controller_(this)),
@@ -475,6 +502,11 @@ void Tab::SetData(const TabRendererData& data) {
 
   if (data_.IsCrashed()) {
     if (!should_display_crashed_favicon_ && !IsPerformingCrashAnimation()) {
+      // Crash animation overrides the other icon animations.
+      old.audio_state = TabRendererData::AUDIO_STATE_NONE;
+      data_.audio_state = TabRendererData::AUDIO_STATE_NONE;
+      data_.capture_state = TabRendererData::CAPTURE_STATE_NONE;
+      old.capture_state = TabRendererData::CAPTURE_STATE_NONE;
 #if defined(OS_CHROMEOS)
       // On Chrome OS, we reload killed tabs automatically when the user
       // switches to them.  Don't display animations for these unless they're
@@ -487,18 +519,25 @@ void Tab::SetData(const TabRendererData& data) {
       StartCrashAnimation();
 #endif
     }
-
-  } else if ((data_.capture_state == TabRendererData::CAPTURE_STATE_NONE) &&
-             (old.capture_state != TabRendererData::CAPTURE_STATE_NONE)) {
-    StopRecordingAnimation();
-
-  } else if ((data_.capture_state != TabRendererData::CAPTURE_STATE_NONE) &&
-             (old.capture_state == TabRendererData::CAPTURE_STATE_NONE)) {
+  } else if (!data_.CaptureActive() && old.CaptureActive()) {
+    StopIconAnimation();
+    if (data_.AudioActive())
+      StartAudioPlayingAnimation();
+  } else if (data_.CaptureActive() && !old.CaptureActive()) {
+    // Capture indicator overrides the audio indicator if presently shown.
+    old.audio_state = TabRendererData::AUDIO_STATE_NONE;
+    data_.audio_state = TabRendererData::AUDIO_STATE_NONE;
     StartRecordingAnimation();
-
+  } else if (!data_.CaptureActive()) {
+    // Start or stop the audio indicator only if not capturing.
+    if (!data_.AudioActive() && old.AudioActive()) {
+      StopIconAnimation();
+    } else if (data_.AudioActive() && !old.AudioActive()) {
+      StartAudioPlayingAnimation();
+    }
   } else {
     if (IsPerformingCrashAnimation())
-      StopCrashAnimation();
+      StopIconAnimation();
     ResetCrashedFavicon();
   }
 
@@ -701,7 +740,7 @@ void Tab::OnPaint(gfx::Canvas* canvas) {
   }
 
   if (controller() && controller()->IsImmersiveStyle())
-    PaintTabImmersive(canvas);
+    PaintImmersiveTab(canvas);
   else
     PaintTab(canvas);
 
@@ -750,8 +789,12 @@ void Tab::Layout() {
 
   // Size the Close button.
   showing_close_button_ = ShouldShowCloseBox();
+  const bool is_host_desktop_type_ash =
+      GetHostDesktopType(this) == chrome::HOST_DESKTOP_TYPE_ASH;
   if (showing_close_button_) {
-    int close_button_top = top_padding() + kCloseButtonVertFuzz +
+    const int close_button_vert_fuzz = is_host_desktop_type_ash ?
+        kCloseButtonVertFuzzAsh : kCloseButtonVertFuzz;
+    int close_button_top = top_padding() + close_button_vert_fuzz +
         (content_height - close_button_size.height()) / 2;
     // If the ratio of the close button size to tab width exceeds the maximum.
     // The close button should be as large as possible so that there is a larger
@@ -777,8 +820,10 @@ void Tab::Layout() {
     close_button_->SetVisible(false);
   }
 
+  const int title_text_offset = is_host_desktop_type_ash ?
+      kTitleTextOffsetYAsh : kTitleTextOffsetY;
   int title_left = favicon_bounds_.right() + kFaviconTitleSpacing;
-  int title_top = top_padding() + kTitleTextOffsetY +
+  int title_top = top_padding() + title_text_offset +
       (content_height - font_height_) / 2;
   // Size the Title text to fill the remaining space.
   if (!data().mini || width() >= kMiniTabRendererAsNormalTabWidth) {
@@ -831,8 +876,10 @@ bool Tab::HasHitTestMask() const {
 void Tab::GetHitTestMask(gfx::Path* path) const {
   // When the window is maximized we don't want to shave off the edges or top
   // shadow of the tab, such that the user can click anywhere along the top
-  // edge of the screen to select a tab.
-  bool include_top_shadow = GetWidget() && GetWidget()->IsMaximized();
+  // edge of the screen to select a tab. Ditto for immersive fullscreen.
+  const views::Widget* widget = GetWidget();
+  bool include_top_shadow =
+      widget && (widget->IsMaximized() || widget->IsFullscreen());
   TabResources::GetHitTestMask(width(), height(), include_top_shadow, path);
 }
 
@@ -901,7 +948,7 @@ bool Tab::OnMousePressed(const ui::MouseEvent& event) {
 
 bool Tab::OnMouseDragged(const ui::MouseEvent& event) {
   if (controller())
-    controller()->ContinueDrag(this, event.location());
+    controller()->ContinueDrag(this, event);
   return true;
 }
 
@@ -949,7 +996,7 @@ void Tab::OnMouseCaptureLost() {
 }
 
 void Tab::OnMouseEntered(const ui::MouseEvent& event) {
-  hover_controller_.Show();
+  hover_controller_.Show(views::GlowHoverController::SUBTLE);
 }
 
 void Tab::OnMouseMoved(const ui::MouseEvent& event) {
@@ -993,7 +1040,7 @@ void Tab::OnGestureEvent(ui::GestureEvent* event) {
       break;
 
     case ui::ET_GESTURE_SCROLL_UPDATE:
-      controller()->ContinueDrag(this, event->location());
+      controller()->ContinueDrag(this, *event);
       break;
 
     default:
@@ -1039,8 +1086,8 @@ void Tab::PaintTab(gfx::Canvas* canvas) {
 
   SkColor title_color = GetThemeProvider()->
       GetColor(IsSelected() ?
-          ThemeService::COLOR_TAB_TEXT :
-          ThemeService::COLOR_BACKGROUND_TAB_TEXT);
+          ThemeProperties::COLOR_TAB_TEXT :
+          ThemeProperties::COLOR_BACKGROUND_TAB_TEXT);
 
   if (!data().mini || width() > kMiniTabRendererAsNormalTabWidth)
     PaintTitle(canvas, title_color);
@@ -1058,21 +1105,41 @@ void Tab::PaintTab(gfx::Canvas* canvas) {
   }
 }
 
-void Tab::PaintTabImmersive(gfx::Canvas* canvas) {
-  // The main bar is as wide as the normal tab's horizontal top line.
-  // This top line of the tab extends a few pixels left and right of the
-  // center image due to pixels in the rounded corner images.
-  const int kBarPadding = 1;
-  int main_bar_left = tab_active_.l_width - kBarPadding;
-  int main_bar_right = width() - tab_active_.r_width + kBarPadding;
-
+void Tab::PaintImmersiveTab(gfx::Canvas* canvas) {
   // Draw a gray rectangle to represent the tab. This works for mini-tabs as
   // well as regular ones. The active tab has a brigher bar.
   SkColor color =
       IsActive() ? kImmersiveActiveTabColor : kImmersiveInactiveTabColor;
-  gfx::Rect main_bar_rect(
-      main_bar_left, 0, main_bar_right - main_bar_left, kImmersiveBarHeight);
-  canvas->FillRect(main_bar_rect, color);
+  gfx::Rect bar_rect = GetImmersiveBarRect();
+  canvas->FillRect(bar_rect, color);
+
+  // Paint network activity indicator.
+  // TODO(jamescook): Replace this placeholder animation with a real one.
+  // For now, let's go with a Cylon eye effect, but in blue.
+  if (data().network_state != TabRendererData::NETWORK_STATE_NONE) {
+    const SkColor kEyeColor = SkColorSetRGB(71, 138, 217);
+    int eye_width = bar_rect.width() / 3;
+    int eye_offset = bar_rect.width() * immersive_loading_step_ /
+        kImmersiveLoadingStepCount;
+    if (eye_offset + eye_width < bar_rect.width()) {
+      // Draw a single indicator strip because it fits inside |bar_rect|.
+      gfx::Rect eye_rect(
+          bar_rect.x() + eye_offset, 0, eye_width, kImmersiveBarHeight);
+      canvas->FillRect(eye_rect, kEyeColor);
+    } else {
+      // Draw two indicators to simulate the eye "wrapping around" to the left
+      // side. The first part fills the remainder of the bar.
+      int right_eye_width = bar_rect.width() - eye_offset;
+      gfx::Rect right_eye_rect(
+          bar_rect.x() + eye_offset, 0, right_eye_width, kImmersiveBarHeight);
+      canvas->FillRect(right_eye_rect, kEyeColor);
+      // The second part parts the remaining |eye_width| on the left.
+      int left_eye_width = eye_offset + eye_width - bar_rect.width();
+      gfx::Rect left_eye_rect(
+          bar_rect.x(), 0, left_eye_width, kImmersiveBarHeight);
+      canvas->FillRect(left_eye_rect, kEyeColor);
+    }
+  }
 }
 
 void Tab::PaintTabBackground(gfx::Canvas* canvas) {
@@ -1153,19 +1220,35 @@ void Tab::PaintInactiveTabBackgroundWithTitleChange(
 
 void Tab::PaintInactiveTabBackground(gfx::Canvas* canvas) {
   int tab_id;
-  if (GetWidget() && GetWidget()->GetTopLevelWidget()->ShouldUseNativeFrame()) {
+  int frame_id;
+  views::Widget* widget = GetWidget();
+  if (widget && widget->GetTopLevelWidget()->ShouldUseNativeFrame()) {
     tab_id = IDR_THEME_TAB_BACKGROUND_V;
+    frame_id = 0;
   } else if (data().incognito) {
     tab_id = IDR_THEME_TAB_BACKGROUND_INCOGNITO;
+    frame_id = IDR_THEME_FRAME_INCOGNITO;
 #if defined(OS_WIN)
   } else if (win8::IsSingleWindowMetroMode()) {
     tab_id = IDR_THEME_TAB_BACKGROUND_V;
+    frame_id = 0;
 #endif
   } else {
     tab_id = IDR_THEME_TAB_BACKGROUND;
+    frame_id = IDR_THEME_FRAME;
   }
+  // Explicitly map the id so we cache correctly.
+  const chrome::HostDesktopType host_desktop_type = GetHostDesktopType(this);
+  tab_id = chrome::MapThemeImage(host_desktop_type, tab_id);
 
-  const bool can_cache = !GetThemeProvider()->HasCustomImage(tab_id) &&
+  // HasCustomImage() is only true if the theme provides the image. However,
+  // even if the theme does not provide a tab background, the theme machinery
+  // will make one if given a frame image.
+  ui::ThemeProvider* theme_provider = GetThemeProvider();
+  const bool theme_provided_image = theme_provider->HasCustomImage(tab_id) ||
+      (frame_id != 0 && theme_provider->HasCustomImage(frame_id));
+
+  const bool can_cache = !theme_provided_image &&
       !hover_controller_.ShouldDraw();
 
   if (can_cache) {
@@ -1320,7 +1403,8 @@ void Tab::PaintIcon(gfx::Canvas* canvas) {
     int icon_size = frames.height();
     int image_offset = loading_animation_frame_ * icon_size;
     DrawIconCenter(canvas, frames, image_offset,
-                   icon_size, icon_size, bounds, false, SkPaint());
+                   icon_size, icon_size,
+                   bounds, false, SkPaint());
     return;
   }
 
@@ -1333,7 +1417,8 @@ void Tab::PaintIcon(gfx::Canvas* canvas) {
     bounds.set_y(bounds.y() + favicon_hiding_offset_);
     DrawIconCenter(canvas, crashed_favicon, 0,
                     crashed_favicon.width(),
-                    crashed_favicon.height(), bounds, true, SkPaint());
+                    crashed_favicon.height(),
+                    bounds, true, SkPaint());
   } else {
     if (!data().favicon.isNull()) {
       if (data().capture_state == TabRendererData::CAPTURE_STATE_PROJECTING) {
@@ -1353,25 +1438,38 @@ void Tab::PaintIcon(gfx::Canvas* canvas) {
         resized_bounds.set_y(resized_bounds.y() - 1);
 
         DrawIconCenter(canvas, resized_icon, 0,
-                        resized_icon.width(),
-                        resized_icon.height(),
-                        resized_bounds, true, SkPaint());
+                       resized_icon.width(),
+                       resized_icon.height(),
+                       resized_bounds, true, SkPaint());
 
         ui::ThemeProvider* tp = GetThemeProvider();
         gfx::ImageSkia projection_screen(
             *tp->GetImageSkiaNamed(IDR_TAB_CAPTURE));
-
         DrawIconCenter(canvas, projection_screen, 0,
-                        data().favicon.width(),
-                        data().favicon.height(),
-                        bounds, true, SkPaint());
+                       data().favicon.width(),
+                       data().favicon.height(),
+                       bounds, true, SkPaint());
       } else {
-        // TODO(pkasting): Use code in tab_icon_view.cc:PaintIcon() (or switch
-        // to using that class to render the favicon).
         DrawIconCenter(canvas, data().favicon, 0,
-                        data().favicon.width(),
-                        data().favicon.height(),
-                        bounds, true, SkPaint());
+                       data().favicon.width(),
+                       data().favicon.height(),
+                       bounds, true, SkPaint());
+
+        if (data().audio_state == TabRendererData::AUDIO_STATE_PLAYING) {
+          // If audio is playing, we draw on top of the icon the
+          // current equalizer animiation frame.
+          ui::ThemeProvider* tp = GetThemeProvider();
+          gfx::ImageSkia equalizer(*tp->GetImageSkiaNamed(IDR_AUDIO_ANIMATION));
+          int icon_size = equalizer.height();
+          int number_of_frames = equalizer.width() / icon_size;
+          int frame = static_cast<int>(
+              icon_animation_->GetCurrentValue() * number_of_frames);
+          int image_offset = frame * icon_size;
+          DrawIconAtLocation(canvas, equalizer, image_offset,
+                             bounds.x(), bounds.y() + 1,
+                             icon_size, icon_size,
+                             false, SkPaint());
+        }
       }
     }
   }
@@ -1404,9 +1502,9 @@ void Tab::PaintIcon(gfx::Canvas* canvas) {
                 TabRendererData::CAPTURE_STATE_RECORDING) {
       // If recording, fade the recording icon on top of the favicon.
       gfx::ImageSkia recording_dot(*tp->GetImageSkiaNamed(IDR_TAB_RECORDING));
-      DrawIconCenter(canvas, recording_dot, 0,
-                      recording_dot.width(), recording_dot.height(),
-                      bounds, false, paint);
+      DrawIconBottomRight(canvas, recording_dot, 0,
+                          recording_dot.width(), recording_dot.height(),
+                          bounds, false, paint);
     } else {
       NOTREACHED();
     }
@@ -1431,7 +1529,7 @@ void Tab::PaintTitle(gfx::Canvas* canvas, SkColor title_color) {
 }
 
 void Tab::AdvanceLoadingAnimation(TabRendererData::NetworkState old_state,
-                                      TabRendererData::NetworkState state) {
+                                  TabRendererData::NetworkState state) {
   static bool initialized = false;
   static int loading_animation_frame_count = 0;
   static int waiting_animation_frame_count = 0;
@@ -1467,14 +1565,26 @@ void Tab::AdvanceLoadingAnimation(TabRendererData::NetworkState old_state,
         (loading_animation_frame_ / waiting_to_loading_frame_count_ratio);
   }
 
-  if (state != TabRendererData::NETWORK_STATE_NONE) {
+  if (state == TabRendererData::NETWORK_STATE_WAITING) {
     loading_animation_frame_ = (loading_animation_frame_ + 1) %
-        ((state == TabRendererData::NETWORK_STATE_WAITING) ?
-            waiting_animation_frame_count : loading_animation_frame_count);
+        waiting_animation_frame_count;
+    // Waiting steps backwards.
+    immersive_loading_step_ =
+        (immersive_loading_step_ - 1 + kImmersiveLoadingStepCount) %
+            kImmersiveLoadingStepCount;
+  } else if (state == TabRendererData::NETWORK_STATE_LOADING) {
+    loading_animation_frame_ = (loading_animation_frame_ + 1) %
+        loading_animation_frame_count;
+    immersive_loading_step_ = (immersive_loading_step_ + 1) %
+        kImmersiveLoadingStepCount;
   } else {
     loading_animation_frame_ = 0;
+    immersive_loading_step_ = 0;
   }
-  ScheduleIconPaint();
+  if (controller() && controller()->IsImmersiveStyle())
+    SchedulePaintInRect(GetImmersiveBarRect());
+  else
+    ScheduleIconPaint();
 }
 
 int Tab::IconCapacity() const {
@@ -1532,15 +1642,16 @@ void Tab::ResetCrashedFavicon() {
   should_display_crashed_favicon_ = false;
 }
 
+void Tab::StopIconAnimation() {
+  if (!icon_animation_.get())
+    return;
+  icon_animation_->Stop();
+  icon_animation_.reset();
+}
+
 void Tab::StartCrashAnimation() {
   icon_animation_.reset(new FaviconCrashAnimation(this));
   icon_animation_->Start();
-}
-
-void Tab::StopCrashAnimation() {
-  if (!icon_animation_.get())
-    return;
-  icon_animation_.reset();
 }
 
 void Tab::StartRecordingAnimation() {
@@ -1551,11 +1662,12 @@ void Tab::StartRecordingAnimation() {
   icon_animation_.reset(animation);
 }
 
-void Tab::StopRecordingAnimation() {
-  if (!icon_animation_.get())
-    return;
-  icon_animation_->Stop();
-  icon_animation_.reset();
+void Tab::StartAudioPlayingAnimation() {
+  ui::ThrobAnimation* animation = new ui::ThrobAnimation(this);
+  animation->SetTweenType(ui::Tween::LINEAR);
+  animation->SetThrobDuration(2000);
+  animation->StartThrobbing(-1);
+  icon_animation_.reset(animation);
 }
 
 bool Tab::IsPerformingCrashAnimation() const {
@@ -1573,6 +1685,17 @@ void Tab::ScheduleIconPaint() {
     bounds.set_height(height() - bounds.y());
   bounds.set_x(GetMirroredXForRect(bounds));
   SchedulePaintInRect(bounds);
+}
+
+gfx::Rect Tab::GetImmersiveBarRect() const {
+  // The main bar is as wide as the normal tab's horizontal top line.
+  // This top line of the tab extends a few pixels left and right of the
+  // center image due to pixels in the rounded corner images.
+  const int kBarPadding = 1;
+  int main_bar_left = tab_active_.l_width - kBarPadding;
+  int main_bar_right = width() - tab_active_.r_width + kBarPadding;
+  return gfx::Rect(
+      main_bar_left, 0, main_bar_right - main_bar_left, kImmersiveBarHeight);
 }
 
 ////////////////////////////////////////////////////////////////////////////////

@@ -13,8 +13,9 @@
 #include "chrome/browser/extensions/external_provider_impl.h"
 #include "chrome/browser/extensions/external_provider_interface.h"
 #include "chrome/common/extensions/extension.h"
+#include "chrome/common/extensions/manifest.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/test/base/testing_pref_service.h"
+#include "chrome/test/base/testing_pref_service_syncable.h"
 #include "chrome/test/base/testing_profile.h"
 #include "content/public/test/test_browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -56,8 +57,8 @@ class MockExternalPolicyProviderVisitor
     provider_.reset(new ExternalProviderImpl(
         this,
         new ExternalPolicyLoader(profile_.get()),
-        Extension::INVALID,
-        Extension::EXTERNAL_POLICY_DOWNLOAD,
+        Manifest::INVALID_LOCATION,
+        Manifest::EXTERNAL_POLICY_DOWNLOAD,
         Extension::NO_FLAGS));
 
     // Extensions will be removed from this list as they visited,
@@ -69,25 +70,25 @@ class MockExternalPolicyProviderVisitor
 
   virtual bool OnExternalExtensionFileFound(const std::string& id,
                                             const Version* version,
-                                            const FilePath& path,
-                                            Extension::Location unused,
+                                            const base::FilePath& path,
+                                            Manifest::Location unused,
                                             int unused2,
-                                            bool unused3) {
+                                            bool unused3) OVERRIDE {
     ADD_FAILURE() << "There should be no external extensions from files.";
     return false;
   }
 
   virtual bool OnExternalExtensionUpdateUrlFound(
       const std::string& id, const GURL& update_url,
-      Extension::Location location) {
+      Manifest::Location location) OVERRIDE {
     // Extension has the correct location.
-    EXPECT_EQ(Extension::EXTERNAL_POLICY_DOWNLOAD, location);
+    EXPECT_EQ(Manifest::EXTERNAL_POLICY_DOWNLOAD, location);
 
     // Provider returns the correct location when asked.
-    Extension::Location location1;
+    Manifest::Location location1;
     scoped_ptr<Version> version1;
     provider_->GetExtensionDetails(id, &location1, &version1);
-    EXPECT_EQ(Extension::EXTERNAL_POLICY_DOWNLOAD, location1);
+    EXPECT_EQ(Manifest::EXTERNAL_POLICY_DOWNLOAD, location1);
     EXPECT_FALSE(version1.get());
 
     // Remove the extension from our list.
@@ -96,7 +97,7 @@ class MockExternalPolicyProviderVisitor
   }
 
   virtual void OnExternalProviderReady(
-      const ExternalProviderInterface* provider) {
+      const ExternalProviderInterface* provider) OVERRIDE {
     EXPECT_EQ(provider, provider_.get());
     EXPECT_TRUE(provider->IsReady());
   }

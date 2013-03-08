@@ -3,11 +3,11 @@
 // found in the LICENSE file.
 
 #include "base/bind.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/path_service.h"
-#include "base/stringprintf.h"
 #include "base/string_util.h"
+#include "base/stringprintf.h"
 #include "base/sys_info.h"
 #include "base/test/test_timeouts.h"
 #include "base/utf_string_conversions.h"
@@ -31,7 +31,8 @@ namespace content {
 class WorkerLayoutTest : public InProcessBrowserLayoutTest {
  public:
   WorkerLayoutTest() : InProcessBrowserLayoutTest(
-      FilePath(), FilePath().AppendASCII("fast").AppendASCII("workers")) {
+      base::FilePath(),
+      base::FilePath().AppendASCII("fast").AppendASCII("workers")) {
   }
 };
 
@@ -126,7 +127,8 @@ IN_PROC_BROWSER_TEST_F(WorkerLayoutTest, SharedWorkerFastSimple) {
 class MessagePortTest : public InProcessBrowserLayoutTest {
  public:
   MessagePortTest() : InProcessBrowserLayoutTest(
-      FilePath(), FilePath().AppendASCII("fast").AppendASCII("events")) {
+      base::FilePath(),
+      base::FilePath().AppendASCII("fast").AppendASCII("events")) {
   }
 };
 
@@ -160,8 +162,8 @@ class WorkerHttpLayoutTest : public InProcessBrowserLayoutTest {
   // multiple tests which use it run in parallel, then the test will fail but
   // it'll run again at the end in serial and pass.
   WorkerHttpLayoutTest() : InProcessBrowserLayoutTest(
-      FilePath().AppendASCII("http").AppendASCII("tests"),
-      FilePath().AppendASCII("workers"),
+      base::FilePath().AppendASCII("http").AppendASCII("tests"),
+      base::FilePath().AppendASCII("workers"),
       8000) {
   }
 };
@@ -187,13 +189,19 @@ IN_PROC_BROWSER_TEST_F(WorkerHttpLayoutTest, DISABLED_Tests) {
 class WorkerXHRHttpLayoutTest : public InProcessBrowserLayoutTest {
  public:
   WorkerXHRHttpLayoutTest() : InProcessBrowserLayoutTest(
-      FilePath().AppendASCII("http").AppendASCII("tests"),
-      FilePath().AppendASCII("xmlhttprequest").AppendASCII("workers"),
+      base::FilePath().AppendASCII("http").AppendASCII("tests"),
+      base::FilePath().AppendASCII("xmlhttprequest").AppendASCII("workers"),
       -1) {
   }
 };
 
-IN_PROC_BROWSER_TEST_F(WorkerXHRHttpLayoutTest, Tests) {
+// TestRunner appears to be broken on Windows. See http://crbug.com/177798
+#if defined(OS_WIN)
+#define MAYBE_Tests DISABLED_Tests
+#else
+#define MAYBE_Tests Tests
+#endif
+IN_PROC_BROWSER_TEST_F(WorkerXHRHttpLayoutTest, MAYBE_Tests) {
   static const char* kLayoutTestFiles[] = {
     // worker thread count never drops to zero.
     // http://crbug.com/150565
@@ -227,7 +235,7 @@ class WorkerTest : public ContentBrowserTest {
   WorkerTest() {}
 
   GURL GetTestURL(const std::string& test_case, const std::string& query) {
-    FilePath test_file_path = GetTestFilePath(
+    base::FilePath test_file_path = GetTestFilePath(
         "workers", test_case.c_str());
     return GetFileUrlWithQuery(test_file_path, query);
   }

@@ -4,7 +4,7 @@
 
 #include "content/browser/pepper_flash_settings_helper_impl.h"
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "content/browser/plugin_service_impl.h"
 #include "content/public/browser/browser_thread.h"
 #include "ipc/ipc_channel_handle.h"
@@ -23,7 +23,7 @@ PepperFlashSettingsHelperImpl::~PepperFlashSettingsHelperImpl() {
 }
 
 void PepperFlashSettingsHelperImpl::OpenChannelToBroker(
-    const FilePath& path,
+    const base::FilePath& path,
     const OpenChannelCallback& callback) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
@@ -38,7 +38,7 @@ void PepperFlashSettingsHelperImpl::OpenChannelToBroker(
 
   callback_ = callback;
   PluginServiceImpl* plugin_service = PluginServiceImpl::GetInstance();
-  plugin_service->OpenChannelToPpapiBroker(path, this);
+  plugin_service->OpenChannelToPpapiBroker(0, path, this);
 }
 
 void PepperFlashSettingsHelperImpl::GetPpapiChannelInfo(

@@ -15,6 +15,8 @@
 #include "chrome/browser/chromeos/input_method/input_method_engine_ibus.h"
 #include "chrome/browser/chromeos/input_method/xkeyboard.h"
 #include "chrome/browser/chromeos/language_preferences.h"
+#include "chromeos/dbus/dbus_thread_manager.h"
+#include "chromeos/dbus/ibus/ibus_input_context_client.h"
 #include "third_party/icu/public/common/unicode/uloc.h"
 #include "ui/base/accelerators/accelerator.h"
 
@@ -36,11 +38,13 @@ InputMethodManagerImpl::InputMethodManagerImpl(
     : delegate_(delegate.Pass()),
       state_(STATE_LOGIN_SCREEN),
       util_(delegate_.get(), GetSupportedInputMethods()) {
+  IBusDaemonController::GetInstance()->AddObserver(this);
 }
 
 InputMethodManagerImpl::~InputMethodManagerImpl() {
   if (ibus_controller_.get())
     ibus_controller_->RemoveObserver(this);
+  IBusDaemonController::GetInstance()->RemoveObserver(this);
   if (candidate_window_controller_.get()) {
     candidate_window_controller_->RemoveObserver(this);
     candidate_window_controller_->Shutdown(ibus_controller_.get());
@@ -81,7 +85,7 @@ void InputMethodManagerImpl::SetState(State new_state) {
       OnScreenLocked();
       break;
     case STATE_TERMINATING: {
-      ibus_controller_->Stop();
+      IBusDaemonController::GetInstance()->Stop();
       if (candidate_window_controller_.get()) {
         candidate_window_controller_->Shutdown(ibus_controller_.get());
         candidate_window_controller_.reset();
@@ -205,7 +209,7 @@ bool InputMethodManagerImpl::EnableInputMethods(
     // is implemented.
   } else {
     MaybeInitializeCandidateWindowController();
-    ibus_controller_->Start();
+    IBusDaemonController::GetInstance()->Start();
   }
 
   // If |current_input_method| is no longer in |active_input_method_ids_|,
@@ -251,6 +255,8 @@ void InputMethodManagerImpl::ChangeInputMethodInternal(
     }
   }
 
+  IBusInputContextClient* input_context =
+      chromeos::DBusThreadManager::Get()->GetIBusInputContextClient();
   if (InputMethodUtil::IsKeyboardLayout(input_method_id_to_switch)) {
     FOR_EACH_OBSERVER(InputMethodManager::Observer,
                       observers_,
@@ -262,12 +268,18 @@ void InputMethodManagerImpl::ChangeInputMethodInternal(
     const std::string current_input_method_id = current_input_method_.id();
     if (current_input_method_id.empty() ||
         InputMethodUtil::IsKeyboardLayout(current_input_method_id)) {
-      ibus_controller_->Reset();
+      if (DBusThreadManager::Get() &&
+          DBusThreadManager::Get()->GetIBusInputContextClient())
+        DBusThreadManager::Get()->GetIBusInputContextClient()->Reset();
     } else {
       ibus_controller_->ChangeInputMethod(current_input_method_id);
     }
+    if (input_context)
+      input_context->SetIsXKBLayout(true);
   } else {
     ibus_controller_->ChangeInputMethod(input_method_id_to_switch);
+    if (input_context)
+      input_context->SetIsXKBLayout(false);
   }
 
   if (current_input_method_.id() != input_method_id_to_switch) {
@@ -334,7 +346,7 @@ void InputMethodManagerImpl::AddInputMethodExtension(
 
     // Ensure that the input method daemon is running.
     MaybeInitializeCandidateWindowController();
-    ibus_controller_->Start();
+    IBusDaemonController::GetInstance()->Start();
   }
 
   extra_input_method_instances_[id] =
@@ -415,7 +427,7 @@ void InputMethodManagerImpl::SetFilteredExtensionImes(
 
   if (active_imes_changed) {
     MaybeInitializeCandidateWindowController();
-    ibus_controller_->Start();
+    IBusDaemonController::GetInstance()->Start();
 
     // If |current_input_method| is no longer in |active_input_method_ids_|,
     // switch to the first one in |active_input_method_ids_|.
@@ -564,6 +576,13 @@ void InputMethodManagerImpl::OnConnected() {
     if (!Contains(filtered_extension_imes_, ite->first))
       ite->second->OnConnected();
   }
+
+  const bool is_xkb_layout =
+      InputMethodUtil::IsKeyboardLayout(current_input_method_.id());
+  IBusInputContextClient* input_context =
+      chromeos::DBusThreadManager::Get()->GetIBusInputContextClient();
+  DCHECK(input_context);
+  input_context->SetIsXKBLayout(is_xkb_layout);
 }
 
 void InputMethodManagerImpl::OnDisconnected() {

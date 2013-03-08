@@ -12,7 +12,6 @@ namespace WebKit {
 class WebIDBCallbacks;
 class WebIDBDatabaseCallbacks;
 class WebString;
-class WebIDBTransaction;
 }
 
 namespace content {
@@ -23,7 +22,6 @@ class RendererWebIDBDatabaseImpl : public WebKit::WebIDBDatabase {
   virtual ~RendererWebIDBDatabaseImpl();
 
   // WebKit::WebIDBDatabase
-  virtual WebKit::WebIDBMetadata metadata() const;
   virtual void createObjectStore(
       long long transaction_id,
       long long objectstore_id,
@@ -33,10 +31,6 @@ class RendererWebIDBDatabaseImpl : public WebKit::WebIDBDatabase {
   virtual void deleteObjectStore(
       long long transaction_id,
       long long object_store_id);
-  virtual WebKit::WebIDBTransaction* createTransaction(
-      long long transaction_id,
-      const WebKit::WebVector<long long>& scope,
-      unsigned short mode);
   virtual void createTransaction(
       long long transaction_id,
       WebKit::WebIDBDatabaseCallbacks* callbacks,
@@ -51,7 +45,7 @@ class RendererWebIDBDatabaseImpl : public WebKit::WebIDBDatabase {
                    WebKit::WebIDBCallbacks*);
   virtual void put(long long transactionId,
                    long long objectStoreId,
-                   WebKit::WebVector<unsigned char>* value,
+                   const WebKit::WebData& value,
                    const WebKit::WebIDBKey&,
                    PutMode,
                    WebKit::WebIDBCallbacks*,

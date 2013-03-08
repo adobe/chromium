@@ -30,13 +30,23 @@ static const uint64 MAX_ADDRESS = kuint64max;
 
 // Tag strings in heap profile dumps.
 static const char kProfileHeader[] = "heap profile: ";
-static const char kProfileVersion[] = "DUMP_DEEP_5";
+static const char kProfileVersion[] = "DUMP_DEEP_6";
+static const char kMMapListHeader[] = "MMAP_LIST:\n";
 static const char kGlobalStatsHeader[] = "GLOBAL_STATS:\n";
 static const char kStacktraceHeader[] = "STACKTRACES:\n";
 static const char kProcSelfMapsHeader[] = "\nMAPPED_LIBRARIES:\n";
 
 static const char kVirtualLabel[] = "virtual";
 static const char kCommittedLabel[] = "committed";
+
+const char* DeepHeapProfile::kMapsRegionTypeDict[] = {
+  "absent",
+  "anonymous",
+  "file-exec",
+  "file-nonexec",
+  "stack",
+  "other",
+};
 
 namespace {
 
@@ -233,12 +243,8 @@ int DeepHeapProfile::FillOrderedProfile(char raw_buffer[], int buffer_size) {
     deep_table_.ResetIsLogged();
 
     // Write maps into "|filename_prefix_|.<pid>.maps".
-    WriteProcMaps(filename_prefix_, 0,
-                  kProfilerBufferSize, profiler_buffer_);
+    WriteProcMaps(filename_prefix_, kProfilerBufferSize, profiler_buffer_);
   }
-  // Write maps into "|filename_prefix_|.<pid>.|dump_count_|.maps".
-  WriteProcMaps(filename_prefix_, dump_count_,
-                kProfilerBufferSize, profiler_buffer_);
 
   // Reset committed sizes of buckets.
   deep_table_.ResetCommittedSize();
@@ -261,7 +267,7 @@ int DeepHeapProfile::FillOrderedProfile(char raw_buffer[], int buffer_size) {
     mmap_list_[num_mmap_allocations_ - 1].last_address = 0;
   }
 
-  stats_.SnapshotProcMaps(memory_residence_info_getter_, NULL, 0);
+  stats_.SnapshotProcMaps(memory_residence_info_getter_, NULL, 0, NULL);
 
   // TODO(dmikurube): Eliminate dynamic memory allocation caused by snprintf.
   // glibc's snprintf internally allocates memory by alloca normally, but it
@@ -270,13 +276,18 @@ int DeepHeapProfile::FillOrderedProfile(char raw_buffer[], int buffer_size) {
   // Record committed sizes.
   stats_.SnapshotAllocations(this);
 
-  // Check if committed bytes changed during SnapshotAllocations.
-  stats_.SnapshotProcMaps(
-      memory_residence_info_getter_, mmap_list_, mmap_list_length_);
-
   buffer.AppendString(kProfileHeader, 0);
   buffer.AppendString(kProfileVersion, 0);
   buffer.AppendString("\n", 0);
+
+  // Fill buffer with the global stats.
+  buffer.AppendString(kMMapListHeader, 0);
+
+  // Check if committed bytes changed during SnapshotAllocations.
+  stats_.SnapshotProcMaps(memory_residence_info_getter_,
+                          mmap_list_,
+                          mmap_list_length_,
+                          &buffer);
 
   // Fill buffer with the global stats.
   buffer.AppendString(kGlobalStatsHeader, 0);
@@ -594,13 +605,16 @@ void DeepHeapProfile::RegionStats::Initialize() {
   committed_bytes_ = 0;
 }
 
-void DeepHeapProfile::RegionStats::Record(
+uint64 DeepHeapProfile::RegionStats::Record(
     const MemoryResidenceInfoGetterInterface* memory_residence_info_getter,
     uint64 first_address,
     uint64 last_address) {
+  uint64 committed;
   virtual_bytes_ += static_cast<size_t>(last_address - first_address + 1);
-  committed_bytes_ += memory_residence_info_getter->CommittedSize(first_address,
-                                                                  last_address);
+  committed = memory_residence_info_getter->CommittedSize(first_address,
+                                                          last_address);
+  committed_bytes_ += committed;
+  return committed;
 }
 
 void DeepHeapProfile::RegionStats::Unparse(const char* name,
@@ -617,11 +631,12 @@ void DeepHeapProfile::RegionStats::Unparse(const char* name,
 void DeepHeapProfile::GlobalStats::SnapshotProcMaps(
     const MemoryResidenceInfoGetterInterface* memory_residence_info_getter,
     MMapListEntry* mmap_list,
-    int mmap_list_length) {
+    int mmap_list_length,
+    TextBuffer* mmap_dump_buffer) {
   ProcMapsIterator::Buffer iterator_buffer;
   ProcMapsIterator iterator(0, &iterator_buffer);
   uint64 first_address, last_address, offset;
-  int64 unused_inode;
+  int64 inode;
   char* flags;
   char* filename;
   int mmap_list_index = 0;
@@ -629,11 +644,19 @@ void DeepHeapProfile::GlobalStats::SnapshotProcMaps(
 
   for (int i = 0; i < NUMBER_OF_MAPS_REGION_TYPES; ++i) {
     all_[i].Initialize();
-    nonprofiled_[i].Initialize();
+    unhooked_[i].Initialize();
   }
 
   while (iterator.Next(&first_address, &last_address,
-                       &flags, &offset, &unused_inode, &filename)) {
+                       &flags, &offset, &inode, &filename)) {
+    if (mmap_dump_buffer) {
+      char buffer[1024];
+      int written = iterator.FormatLine(buffer, sizeof(buffer),
+                                        first_address, last_address, flags,
+                                        offset, inode, filename, 0);
+      mmap_dump_buffer->AppendString(buffer, 0);
+    }
+
     // 'last_address' should be the last inclusive address of the region.
     last_address -= 1;
     if (strcmp("[vsyscall]", filename) == 0) {
@@ -657,7 +680,7 @@ void DeepHeapProfile::GlobalStats::SnapshotProcMaps(
         memory_residence_info_getter, first_address, last_address);
 
     // TODO(dmikurube): Stop double-counting pagemap.
-    // Counts nonprofiled memory regions in /proc/<pid>/maps.
+    // Counts unhooked memory regions in /proc/<pid>/maps.
     if (mmap_list != NULL) {
       // It assumes that every mmap'ed region is included in one maps line.
       uint64 cursor = first_address;
@@ -671,22 +694,57 @@ void DeepHeapProfile::GlobalStats::SnapshotProcMaps(
         }
         first = false;
 
-        uint64 last_address_of_nonprofiled;
+        uint64 last_address_of_unhooked;
         // If the next mmap entry is away from the current maps line.
         if (mmap_list_index >= mmap_list_length ||
             mmap_list[mmap_list_index].first_address > last_address) {
-          last_address_of_nonprofiled = last_address;
+          last_address_of_unhooked = last_address;
         } else {
-          last_address_of_nonprofiled =
+          last_address_of_unhooked =
               mmap_list[mmap_list_index].first_address - 1;
         }
 
-        if (last_address_of_nonprofiled + 1 > cursor) {
-          nonprofiled_[type].Record(
+        if (last_address_of_unhooked + 1 > cursor) {
+          uint64 committed_size = unhooked_[type].Record(
               memory_residence_info_getter,
               cursor,
-              last_address_of_nonprofiled);
-          cursor = last_address_of_nonprofiled + 1;
+              last_address_of_unhooked);
+          if (mmap_dump_buffer) {
+            mmap_dump_buffer->AppendString("  ", 0);
+            mmap_dump_buffer->AppendPtr(cursor, 0);
+            mmap_dump_buffer->AppendString(" - ", 0);
+            mmap_dump_buffer->AppendPtr(last_address_of_unhooked + 1, 0);
+            mmap_dump_buffer->AppendString("  unhooked ", 0);
+            mmap_dump_buffer->AppendString(kMapsRegionTypeDict[type], 0);
+            mmap_dump_buffer->AppendString(" ", 0);
+            mmap_dump_buffer->AppendInt64(committed_size, 0);
+            mmap_dump_buffer->AppendString("\n", 0);
+          }
+          cursor = last_address_of_unhooked + 1;
+        }
+
+        if (mmap_list_index < mmap_list_length &&
+            mmap_list[mmap_list_index].first_address <= last_address &&
+            mmap_dump_buffer) {
+          bool trailing =
+            mmap_list[mmap_list_index].first_address < first_address;
+          bool continued =
+            mmap_list[mmap_list_index].last_address > last_address;
+          mmap_dump_buffer->AppendString(trailing ? " (" : "  ", 0);
+          mmap_dump_buffer->AppendPtr(
+              mmap_list[mmap_list_index].first_address, 0);
+          mmap_dump_buffer->AppendString(trailing ? ")" : " ", 0);
+          mmap_dump_buffer->AppendString("-", 0);
+          mmap_dump_buffer->AppendString(continued ? "(" : " ", 0);
+          mmap_dump_buffer->AppendPtr(
+              mmap_list[mmap_list_index].last_address + 1, 0);
+          mmap_dump_buffer->AppendString(continued ? ")" : " ", 0);
+          mmap_dump_buffer->AppendString(" hooked ", 0);
+          mmap_dump_buffer->AppendString(kMapsRegionTypeDict[type], 0);
+          mmap_dump_buffer->AppendString(" @ ", 0);
+          mmap_dump_buffer->AppendInt(
+              mmap_list[mmap_list_index].deep_bucket->id, 0);
+          mmap_dump_buffer->AppendString("\n", 0);
         }
       } while (mmap_list_index < mmap_list_length &&
                mmap_list[mmap_list_index].last_address <= last_address);
@@ -715,10 +773,10 @@ void DeepHeapProfile::GlobalStats::SnapshotAllocations(
 
 void DeepHeapProfile::GlobalStats::Unparse(TextBuffer* buffer) {
   RegionStats all_total;
-  RegionStats nonprofiled_total;
+  RegionStats unhooked_total;
   for (int i = 0; i < NUMBER_OF_MAPS_REGION_TYPES; ++i) {
     all_total.AddAnotherRegionStat(all_[i]);
-    nonprofiled_total.AddAnotherRegionStat(nonprofiled_[i]);
+    unhooked_total.AddAnotherRegionStat(unhooked_[i]);
   }
 
   // "# total (%lu) %c= profiled-mmap (%lu) + nonprofiled-* (%lu)\n"
@@ -727,11 +785,11 @@ void DeepHeapProfile::GlobalStats::Unparse(TextBuffer* buffer) {
   buffer->AppendString(") ", 0);
   buffer->AppendChar(all_total.committed_bytes() ==
                      profiled_mmap_.committed_bytes() +
-                     nonprofiled_total.committed_bytes() ? '=' : '!');
+                     unhooked_total.committed_bytes() ? '=' : '!');
   buffer->AppendString("= profiled-mmap (", 0);
   buffer->AppendUnsignedLong(profiled_mmap_.committed_bytes(), 0);
   buffer->AppendString(") + nonprofiled-* (", 0);
-  buffer->AppendUnsignedLong(nonprofiled_total.committed_bytes(), 0);
+  buffer->AppendUnsignedLong(unhooked_total.committed_bytes(), 0);
   buffer->AppendString(")\n", 0);
 
   // "                               virtual    committed"
@@ -747,13 +805,13 @@ void DeepHeapProfile::GlobalStats::Unparse(TextBuffer* buffer) {
   all_[ANONYMOUS].Unparse("anonymous", buffer);
   all_[STACK].Unparse("stack", buffer);
   all_[OTHER].Unparse("other", buffer);
-  nonprofiled_total.Unparse("nonprofiled-total", buffer);
-  nonprofiled_[ABSENT].Unparse("nonprofiled-absent", buffer);
-  nonprofiled_[ANONYMOUS].Unparse("nonprofiled-anonymous", buffer);
-  nonprofiled_[FILE_EXEC].Unparse("nonprofiled-file-exec", buffer);
-  nonprofiled_[FILE_NONEXEC].Unparse("nonprofiled-file-nonexec", buffer);
-  nonprofiled_[STACK].Unparse("nonprofiled-stack", buffer);
-  nonprofiled_[OTHER].Unparse("nonprofiled-other", buffer);
+  unhooked_total.Unparse("nonprofiled-total", buffer);
+  unhooked_[ABSENT].Unparse("nonprofiled-absent", buffer);
+  unhooked_[ANONYMOUS].Unparse("nonprofiled-anonymous", buffer);
+  unhooked_[FILE_EXEC].Unparse("nonprofiled-file-exec", buffer);
+  unhooked_[FILE_NONEXEC].Unparse("nonprofiled-file-nonexec", buffer);
+  unhooked_[STACK].Unparse("nonprofiled-stack", buffer);
+  unhooked_[OTHER].Unparse("nonprofiled-other", buffer);
   profiled_mmap_.Unparse("profiled-mmap", buffer);
   profiled_malloc_.Unparse("profiled-malloc", buffer);
 }
@@ -807,6 +865,8 @@ void DeepHeapProfile::GlobalStats::RecordMMap(const void* pointer,
     deep_profile->mmap_list_[deep_profile->mmap_list_length_].last_address =
         address - 1 + alloc_value->bytes;
     deep_profile->mmap_list_[deep_profile->mmap_list_length_].type = ABSENT;
+    deep_profile->mmap_list_[deep_profile->mmap_list_length_].deep_bucket =
+        deep_bucket;
     ++deep_profile->mmap_list_length_;
   } else {
     RAW_LOG(0, "Unexpected number of mmap entries: %d/%d",
@@ -817,18 +877,11 @@ void DeepHeapProfile::GlobalStats::RecordMMap(const void* pointer,
 
 // static
 void DeepHeapProfile::WriteProcMaps(const char* prefix,
-                                    unsigned count,
                                     int buffer_size,
                                     char raw_buffer[]) {
   char filename[100];
-  if (count > 0) {
-    snprintf(filename, sizeof(filename),
-             "%s.%05d.%04d.maps", prefix, static_cast<int>(getpid()),
-             count);
-  } else {
-    snprintf(filename, sizeof(filename),
-             "%s.%05d.maps", prefix, static_cast<int>(getpid()));
-  }
+  snprintf(filename, sizeof(filename),
+           "%s.%05d.maps", prefix, static_cast<int>(getpid()));
 
   RawFD fd = RawOpenForWriting(filename);
   RAW_DCHECK(fd != kIllegalRawFD, "");

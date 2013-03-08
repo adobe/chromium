@@ -3,12 +3,11 @@
 // found in the LICENSE file.
 
 namespace syncFileSystem {
-
-  enum SyncOperationResult {
-    added, updated, deleted, conflicted
+  enum SyncAction {
+    added, updated, deleted
   };
 
-  enum SyncStateStatus {
+  enum ServiceStatus {
     // The sync service is being initialized (e.g. restoring data from the
     // database, checking connectivity and authenticating to the service etc).
     initializing,
@@ -24,7 +23,7 @@ namespace syncFileSystem {
     // is (temporarily) unavailable due to some recoverable errors, e.g.
     // network is offline, the remote service is down or not
     // reachable etc. More details should be given by |description| parameter
-    // in OnSyncStateUpdated (which could contain service-specific details).
+    // in OnServiceInfoUpdated (which could contain service-specific details).
     temporary_unavailable,
 
     // The sync service is disabled and the content will never sync.
@@ -34,7 +33,7 @@ namespace syncFileSystem {
     disabled
   };
 
-  enum FileSyncStatus {
+  enum FileStatus {
     // Not conflicting and has no pending local changes.
     synced,
 
@@ -45,38 +44,70 @@ namespace syncFileSystem {
     conflicting
   };
 
-  dictionary StorageInfo {
-    long usage_bytes;
-    long quota_bytes;
+  enum SyncDirection {
+    local_to_remote, remote_to_local
   };
 
-  dictionary SyncState {
-    DOMString service_name;  // i.e. ‘drive’
-    SyncStateStatus state;
+  dictionary FileInfo {
+    // <code>fileEntry</code> for the target file whose status has changed.
+    // Contains name and path information of synchronized file.
+    // On file deletion,
+    // <code>fileEntry</code> information will still be available
+    // but file will no longer exist.
+    [instanceOf=FileEntry] object fileEntry;
+    
+    // Resulting file status after $ref:onFileStatusChanged event.
+    // The status value can be <code>'synced'</code>, 
+    // <code>'pending'</code> or <code>'conflicting'</code>.
+    FileStatus status;
+    
+    // Sync action taken to fire $ref:onFileStatusChanged event.
+    // The action value can be
+    // <code>'added'</code>, <code>'updated'</code> or <code>'deleted'</code>.
+    // Only applies if status is <code>'synced'</code>.
+    SyncAction? action;
+    
+    // Sync direction for the $ref:onFileStatusChanged event.
+    // Sync direction value can be
+    // <code>'local_to_remote'</code> or <code>'remote_to_local'</code>.
+    // Only applies if status is <code>'synced'</code>.
+    SyncDirection? direction;
+  };
+
+  dictionary StorageInfo {
+    long usageBytes;
+    long quotaBytes;
+  };
+
+  dictionary ServiceInfo {
+    ServiceStatus state;
     DOMString description;
   };
 
-  // [nodoc] A callback type for requestFileSystem.
+  // A callback type for requestFileSystem.
   callback GetFileSystemCallback =
       void ([instanceOf=DOMFileSystem] object fileSystem);
 
-  // [nodoc] A callback type for getUsageAndQuota.
+  // A callback type for getUsageAndQuota.
   callback QuotaAndUsageCallback = void (StorageInfo info);
 
   // Returns true if operation was successful.
   callback DeleteFileSystemCallback = void (boolean result);
 
-  // [nodoc] A callback type for getFileSyncStatus.
-  callback GetFileSyncStatusCallback = void (FileSyncStatus status);
+  // A callback type for getFileStatus.
+  callback GetFileStatusCallback = void (FileStatus status);
 
   interface Functions {
-    // Get a sync file system backed by |serviceName|.
-    // Calling this multiple times from the same app with the same |serviceName|
-    // will return the same handle to the same file system.
-    static void requestFileSystem(DOMString serviceName,
-                                  GetFileSystemCallback callback);
+    // Returns a syncable filesystem backed by Google Drive. 
+    // The returned <code>DOMFileSystem</code> instance can be operated on
+    // in the same way as the Temporary and Persistant file systems (see
+    // <a href="http://www.w3.org/TR/file-system-api/">http://www.w3.org/TR/file-system-api/</a>).
+    // Calling this multiple times from
+    // the same app will return the same handle to the same file system. 
+    static void requestFileSystem(GetFileSystemCallback callback);
 
-    // Get usage and quota in bytes for sync file system with |serviceName|.
+    // Returns the current usage and quota in bytes
+    // for the <code>'syncable'</code> file storage for the app.
     static void getUsageAndQuota([instanceOf=DOMFileSystem] object fileSystem,
                                  QuotaAndUsageCallback callback);
 
@@ -84,21 +115,21 @@ namespace syncFileSystem {
     static void deleteFileSystem([instanceOf=DOMFileSystem] object fileSystem,
                                  DeleteFileSystemCallback callback);
 
-    // Get the FileSyncStatus for the given |fileEntry|.
-    static void getFileSyncStatus([instanceOf=FileEntry] object fileEntry,
-                                  GetFileSyncStatusCallback callback);
+    // Returns the $ref:FileStatus for the given <code>fileEntry</code>.
+    // The status value can be <code>'synced'</code>,
+    // <code>'pending'</code> or <code>'conflicting'</code>.
+    static void getFileStatus([instanceOf=FileEntry] object fileEntry,
+                              GetFileStatusCallback callback);
   };
 
   interface Events {
-    // Fired when an error or other state change has happened in the
-    // sync backend. (e.g. the sync is temporarily disabled due to
-    // network or authentication error etc).
-    static void onSyncStateChanged(SyncState detail);
+    // Fired when an error or other status change has happened in the
+    // sync backend (for example, when the sync is temporarily disabled due to
+    // network or authentication error).
+    static void onServiceStatusChanged(ServiceInfo detail);
 
     // Fired when a file has been updated by the background sync service.
-    // TODO(calvinlo): Convert |file_entry_path| from to Webkit FileEntry.
-    static void onFileSynced(DOMString file_entry_path,
-                             SyncOperationResult result);
+    static void onFileStatusChanged(FileInfo detail);
   };
 
 };

@@ -11,7 +11,7 @@
 #include "webkit/fileapi/syncable/file_change.h"
 #include "webkit/storage/webkit_storage_export.h"
 
-namespace fileapi {
+namespace sync_file_system {
 
 class WEBKIT_STORAGE_EXPORT SyncFileMetadata {
  public:
@@ -28,26 +28,16 @@ class WEBKIT_STORAGE_EXPORT SyncFileMetadata {
   bool operator==(const SyncFileMetadata& that) const;
 };
 
-class WEBKIT_STORAGE_EXPORT ConflictFileInfo {
- public:
-  ConflictFileInfo();
-  ~ConflictFileInfo();
-
-  FileSystemURL url;
-  SyncFileMetadata local_metadata;
-  SyncFileMetadata remote_metadata;
-};
-
 struct WEBKIT_STORAGE_EXPORT LocalFileSyncInfo {
   LocalFileSyncInfo();
   ~LocalFileSyncInfo();
 
-  FileSystemURL url;
-  FilePath local_file_path;
+  fileapi::FileSystemURL url;
+  base::FilePath local_file_path;
   SyncFileMetadata metadata;
   FileChangeList changes;
 };
 
-}  // namespace fileapi
+}  // namespace sync_file_system
 
 #endif  // WEBKIT_FILEAPI_SYNCABLE_SYNC_FILE_METADATA_H_

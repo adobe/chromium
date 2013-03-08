@@ -5,7 +5,7 @@
 #include "chrome/browser/spellchecker/spellcheck_message_filter.h"
 
 #include "base/bind.h"
-#include "chrome/browser/prefs/pref_service.h"
+#include "base/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/spellchecker/spellcheck_factory.h"
 #include "chrome/browser/spellchecker/spellcheck_host_metrics.h"
@@ -19,7 +19,8 @@
 using content::BrowserThread;
 
 SpellCheckMessageFilter::SpellCheckMessageFilter(int render_process_id)
-    : render_process_id_(render_process_id)
+    : render_process_id_(render_process_id),
+      client_(new SpellingServiceClient)
 #if !defined(OS_MACOSX)
       ,
       route_id_(0),
@@ -103,18 +104,9 @@ void SpellCheckMessageFilter::OnCallSpellingService(
     const string16& text) {
   DCHECK(!text.empty());
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
-  if (!CallSpellingService(route_id, identifier, document_tag, text)) {
-    std::vector<SpellCheckResult> results;
-    Send(new SpellCheckMsg_RespondSpellingService(route_id,
-                                                  identifier,
-                                                  document_tag,
-                                                  false,
-                                                  text,
-                                                  results));
-    return;
-  }
   route_id_ = route_id;
   identifier_ = identifier;
+  CallSpellingService(document_tag, text);
 }
 
 void SpellCheckMessageFilter::OnTextCheckComplete(
@@ -128,23 +120,19 @@ void SpellCheckMessageFilter::OnTextCheckComplete(
                                                 success,
                                                 text,
                                                 results));
-  client_.reset();
 }
 
-bool SpellCheckMessageFilter::CallSpellingService(
-    int route_id,
-    int identifier,
-    int document_tag,
-    const string16& text) {
+// CallSpellingService always executes the callback OnTextCheckComplete.
+// (Which, in turn, sends a SpellCheckMsg_RespondSpellingService)
+void SpellCheckMessageFilter::CallSpellingService(int document_tag,
+                                                  const string16& text) {
+  Profile* profile = NULL;
   content::RenderProcessHost* host =
       content::RenderProcessHost::FromID(render_process_id_);
-  if (!host)
-    return false;
-  Profile* profile = Profile::FromBrowserContext(host->GetBrowserContext());
-  if (!profile->GetPrefs()->GetBoolean(prefs::kSpellCheckUseSpellingService))
-    return false;
-  client_.reset(new SpellingServiceClient);
-  return client_->RequestTextCheck(
+  if (host)
+    profile = Profile::FromBrowserContext(host->GetBrowserContext());
+
+  client_->RequestTextCheck(
     profile, SpellingServiceClient::SPELLCHECK, text,
     base::Bind(&SpellCheckMessageFilter::OnTextCheckComplete,
                base::Unretained(this), document_tag));

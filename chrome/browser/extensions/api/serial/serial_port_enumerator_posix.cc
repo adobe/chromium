@@ -4,8 +4,8 @@
 
 #include "chrome/browser/extensions/api/serial/serial_port_enumerator.h"
 
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/string_util.h"
 #include "content/public/browser/browser_thread.h"
 
@@ -65,7 +65,7 @@ SerialPortEnumerator::StringSet SerialPortEnumerator::GenerateValidPatterns() {
 SerialPortEnumerator::StringSet
 SerialPortEnumerator::GenerateValidSerialPortNames() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
-  const FilePath kDevRoot("/dev");
+  const base::FilePath kDevRoot("/dev");
   const int kFilesAndSymLinks =
       file_util::FileEnumerator::FILES |
       file_util::FileEnumerator::SHOW_SYM_LINKS;
@@ -75,7 +75,7 @@ SerialPortEnumerator::GenerateValidSerialPortNames() {
   file_util::FileEnumerator enumerator(
       kDevRoot, false, kFilesAndSymLinks);
   do {
-    const FilePath next_device_path(enumerator.Next());
+    const base::FilePath next_device_path(enumerator.Next());
     const std::string next_device = next_device_path.value();
     if (next_device.empty())
       break;

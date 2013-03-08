@@ -6,6 +6,7 @@
 
 #include "base/auto_reset.h"
 #include "base/debug/trace_event.h"
+#include "cc/context_provider.h"
 #include "cc/draw_quad.h"
 #include "cc/layer_tree_host.h"
 #include "cc/layer_tree_impl.h"
@@ -25,6 +26,8 @@ SingleThreadProxy::SingleThreadProxy(LayerTreeHost* layerTreeHost)
     : Proxy(scoped_ptr<Thread>(NULL))
     , m_layerTreeHost(layerTreeHost)
     , m_outputSurfaceLost(false)
+    , m_createdOffscreenContextProvider(false)
+    , m_createdCustomFilterContextProvider(false)
     , m_rendererInitialized(false)
     , m_nextFrameIsNewlyCommittedFrame(false)
     , m_insideDraw(false)
@@ -139,6 +142,18 @@ bool SingleThreadProxy::recreateOutputSurface()
     scoped_ptr<OutputSurface> outputSurface = m_layerTreeHost->createOutputSurface();
     if (!outputSurface.get())
         return false;
+    scoped_refptr<cc::ContextProvider> offscreenContextProvider;
+    if (m_createdOffscreenContextProvider) {
+        offscreenContextProvider = m_layerTreeHost->client()->OffscreenContextProviderForMainThread();
+        if (!offscreenContextProvider->InitializeOnMainThread())
+            return false;
+    }
+    scoped_refptr<cc::ContextProvider> customFilterContextProvider;
+    if (m_createdCustomFilterContextProvider) {
+        customFilterContextProvider = m_layerTreeHost->client()->CustomFilterContextProviderForMainThread();
+        if (!customFilterContextProvider->InitializeOnMainThread())
+            return false;
+    }
 
     bool initialized;
     {
@@ -148,6 +163,13 @@ bool SingleThreadProxy::recreateOutputSurface()
         initialized = m_layerTreeHostImpl->initializeRenderer(outputSurface.Pass());
         if (initialized) {
             m_RendererCapabilitiesForMainThread = m_layerTreeHostImpl->rendererCapabilities();
+            m_layerTreeHostImpl->resourceProvider()->setOffscreenContextProvider(offscreenContextProvider);
+            m_layerTreeHostImpl->resourceProvider()->setCustomFilterContextProvider(customFilterContextProvider);
+        } else {
+            if (offscreenContextProvider)
+                offscreenContextProvider->VerifyContexts();
+            if (customFilterContextProvider)
+                customFilterContextProvider->VerifyContexts();
         }
     }
 
@@ -196,8 +218,7 @@ void SingleThreadProxy::doCommit(scoped_ptr<ResourceUpdateQueue> queue)
                 NULL,
                 Proxy::mainThread(),
                 queue.Pass(),
-                m_layerTreeHostImpl->resourceProvider(),
-                hasImplThread());
+                m_layerTreeHostImpl->resourceProvider());
         updateController->finalize();
 
         m_layerTreeHost->finishCommitOnImplThread(m_layerTreeHostImpl.get());
@@ -263,8 +284,7 @@ void SingleThreadProxy::stop()
         DebugScopedSetMainThreadBlocked mainThreadBlocked(this);
         DebugScopedSetImplThread impl(this);
 
-        if (!m_layerTreeHostImpl->activeTree()->ContentsTexturesPurged())
-            m_layerTreeHost->deleteContentsTexturesOnImplThread(m_layerTreeHostImpl->resourceProvider());
+        m_layerTreeHost->deleteContentsTexturesOnImplThread(m_layerTreeHostImpl->resourceProvider());
         m_layerTreeHostImpl.reset();
     }
     m_layerTreeHost = 0;
@@ -273,12 +293,6 @@ void SingleThreadProxy::stop()
 void SingleThreadProxy::setNeedsRedrawOnImplThread()
 {
     m_layerTreeHost->scheduleComposite();
-}
-
-void SingleThreadProxy::didSwapUseIncompleteTileOnImplThread()
-{
-    // implSidePainting only.
-    NOTREACHED();
 }
 
 void SingleThreadProxy::didUploadVisibleHighResolutionTileOnImplThread()
@@ -311,6 +325,12 @@ bool SingleThreadProxy::reduceContentsTextureMemoryOnImplThread(size_t limitByte
         return false;
 
     return m_layerTreeHost->contentsTextureManager()->reduceMemoryOnImplThread(limitBytes, priorityCutoff, m_layerTreeHostImpl->resourceProvider());
+}
+
+void SingleThreadProxy::reduceWastedContentsTextureMemoryOnImplThread()
+{
+    // implSidePainting only.
+    NOTREACHED();
 }
 
 void SingleThreadProxy::sendManagedMemoryStats()
@@ -347,6 +367,20 @@ void SingleThreadProxy::compositeImmediately()
     }
 }
 
+scoped_ptr<base::Value> SingleThreadProxy::asValue() const
+{
+    scoped_ptr<base::DictionaryValue> state(new base::DictionaryValue());
+    {
+        // The following line casts away const modifiers because it is just
+        // setting debug state. We still want the asValue() function and its
+        // call chain to be const throughout.
+        DebugScopedSetImplThread impl(const_cast<SingleThreadProxy*>(this));
+
+        state->Set("layer_tree_host_impl", m_layerTreeHostImpl->asValue().release());
+    }
+    return state.PassAs<base::Value>();
+}
+
 void SingleThreadProxy::forceSerializeOnSwapBuffers()
 {
     {
@@ -368,6 +402,21 @@ bool SingleThreadProxy::commitAndComposite()
     if (!m_layerTreeHost->initializeRendererIfNeeded())
         return false;
 
+    scoped_refptr<cc::ContextProvider> offscreenContextProvider;
+    scoped_refptr<cc::ContextProvider> customFilterContextProvider;
+    if (m_RendererCapabilitiesForMainThread.usingOffscreenContext3d && m_layerTreeHost->needsOffscreenContext()) {
+        offscreenContextProvider = m_layerTreeHost->client()->OffscreenContextProviderForMainThread();
+        if (offscreenContextProvider->InitializeOnMainThread())
+            m_createdOffscreenContextProvider = true;
+        else
+            offscreenContextProvider = NULL;
+        customFilterContextProvider = m_layerTreeHost->client()->CustomFilterContextProviderForMainThread();
+        if (customFilterContextProvider->InitializeOnMainThread())
+            m_createdCustomFilterContextProvider = true;
+        else
+            customFilterContextProvider = NULL;
+    }
+
     m_layerTreeHost->contentsTextureManager()->unlinkAndClearEvictedBackings();
 
     scoped_ptr<ResourceUpdateQueue> queue = make_scoped_ptr(new ResourceUpdateQueue);
@@ -375,17 +424,20 @@ bool SingleThreadProxy::commitAndComposite()
 
     m_layerTreeHost->willCommit();
     doCommit(queue.Pass());
-    bool result = doComposite();
+    bool result = doComposite(offscreenContextProvider, customFilterContextProvider);
     m_layerTreeHost->didBeginFrame();
     return result;
 }
 
-bool SingleThreadProxy::doComposite()
+bool SingleThreadProxy::doComposite(scoped_refptr<cc::ContextProvider> offscreenContextProvider, scoped_refptr<cc::ContextProvider> customFilterContextProvider)
 {
     DCHECK(!m_outputSurfaceLost);
     {
         DebugScopedSetImplThread impl(this);
         base::AutoReset<bool> markInside(&m_insideDraw, true);
+
+        m_layerTreeHostImpl->resourceProvider()->setOffscreenContextProvider(offscreenContextProvider);
+        m_layerTreeHostImpl->resourceProvider()->setCustomFilterContextProvider(customFilterContextProvider);
 
         if (!m_layerTreeHostImpl->visible())
             return false;
@@ -403,9 +455,13 @@ bool SingleThreadProxy::doComposite()
         m_layerTreeHostImpl->drawLayers(frame);
         m_layerTreeHostImpl->didDrawAllLayers(frame);
         m_outputSurfaceLost = m_layerTreeHostImpl->isContextLost();
+
+        m_layerTreeHostImpl->beginNextFrame();
     }
 
     if (m_outputSurfaceLost) {
+        if (cc::ContextProvider* offscreenContexts = m_layerTreeHostImpl->resourceProvider()->offscreenContextProvider())
+            offscreenContexts->VerifyContexts();
         m_layerTreeHost->didLoseOutputSurface();
         return false;
     }

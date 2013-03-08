@@ -26,7 +26,7 @@ function Viewport() {
  */
 
 /**
- * @param {object} scaleControl The UI object responsible for scaling.
+ * @param {Object} scaleControl The UI object responsible for scaling.
  */
 Viewport.prototype.setScaleControl = function(scaleControl) {
   this.scaleControl_ = scaleControl;
@@ -77,7 +77,7 @@ Viewport.prototype.sizeByFrameAndFit = function(frame) {
 };
 
 /**
- * @return {number} Scale
+ * @return {number} Scale.
  */
 Viewport.prototype.getScale = function() { return this.scale_ };
 
@@ -198,7 +198,7 @@ Viewport.prototype.getScreenClipped = function() { return this.screenClipped_ };
  * A counter that is incremented with each viewport state change.
  * Clients that cache anything that depends on the viewport state should keep
  * track of this counter.
- * @return {number} counter
+ * @return {number} counter.
  */
 Viewport.prototype.getCacheGeneration = function() { return this.generation_ };
 

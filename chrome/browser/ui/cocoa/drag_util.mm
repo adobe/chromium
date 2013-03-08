@@ -4,7 +4,7 @@
 
 #import "chrome/browser/ui/cocoa/drag_util.h"
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "chrome/browser/profiles/profile.h"
 #include "content/public/browser/plugin_service.h"
 #include "content/public/common/url_constants.h"
@@ -23,7 +23,7 @@ namespace drag_util {
 namespace {
 
 BOOL IsSupportedFileURL(Profile* profile, const GURL& url) {
-  FilePath full_path;
+  base::FilePath full_path;
   net::FileURLToFilePath(url, &full_path);
 
   std::string mime_type;

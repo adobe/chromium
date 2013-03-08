@@ -8,7 +8,7 @@
 #include <string>
 #include <vector>
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/gtest_prod_util.h"
 #include "chrome/browser/ui/startup/startup_tab.h"
 #include "chrome/browser/ui/startup/startup_types.h"
@@ -16,9 +16,12 @@
 
 class Browser;
 class CommandLine;
-class FilePath;
 class Profile;
 class StartupBrowserCreator;
+
+namespace base {
+class FilePath;
+}
 
 namespace content {
 class WebContents;
@@ -40,10 +43,10 @@ class StartupBrowserCreatorImpl {
   // and thus no access to distribution-specific first-run behaviors. The
   // second one is always called when the browser starts even if it is not
   // the first run.  |is_first_run| indicates that this is a new profile.
-  StartupBrowserCreatorImpl(const FilePath& cur_dir,
+  StartupBrowserCreatorImpl(const base::FilePath& cur_dir,
                             const CommandLine& command_line,
                             chrome::startup::IsFirstRun is_first_run);
-  StartupBrowserCreatorImpl(const FilePath& cur_dir,
+  StartupBrowserCreatorImpl(const base::FilePath& cur_dir,
                             const CommandLine& command_line,
                             StartupBrowserCreator* browser_creator,
                             chrome::startup::IsFirstRun is_first_run);
@@ -82,7 +85,7 @@ class StartupBrowserCreatorImpl {
   // If the process was launched with the web application command line flags,
   // e.g. --app=http://www.google.com/ or --app_id=... return true.
   // In this case |app_url| or |app_id| are populated if they're non-null.
-  bool IsAppLaunch(Profile* profile, std::string* app_url, std::string* app_id);
+  bool IsAppLaunch(std::string* app_url, std::string* app_id);
 
   // If IsAppLaunch is true, tries to open an application window.
   // If the app is specified to start in a tab, or IsAppLaunch is false,
@@ -148,7 +151,7 @@ class StartupBrowserCreatorImpl {
       Profile* profile,
       const std::vector<GURL>& startup_urls);
 
-  const FilePath cur_dir_;
+  const base::FilePath cur_dir_;
   const CommandLine& command_line_;
   Profile* profile_;
   StartupBrowserCreator* browser_creator_;

@@ -7,7 +7,9 @@
 #include "android_webview/common/aw_resource.h"
 #include "android_webview/common/url_constants.h"
 #include "android_webview/renderer/aw_render_view_ext.h"
+#include "android_webview/renderer/view_renderer.h"
 #include "base/utf_string_conversions.h"
+#include "components/visitedlink/renderer/visitedlink_slave.h"
 #include "content/public/renderer/render_thread.h"
 #include "googleurl/src/gurl.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebString.h"
@@ -29,14 +31,19 @@ void AwContentRendererClient::RenderThreadStarted() {
       ASCIIToUTF16(android_webview::kContentScheme));
   WebKit::WebSecurityPolicy::registerURLSchemeAsLocal(content_scheme);
 
+  content::RenderThread* thread = content::RenderThread::Get();
+
   aw_render_process_observer_.reset(new AwRenderProcessObserver);
-  content::RenderThread::Get()->AddObserver(
-      aw_render_process_observer_.get());
+  thread->AddObserver(aw_render_process_observer_.get());
+
+  visited_link_slave_.reset(new components::VisitedLinkSlave);
+  thread->AddObserver(visited_link_slave_.get());
 }
 
 void AwContentRendererClient::RenderViewCreated(
     content::RenderView* render_view) {
   AwRenderViewExt::RenderViewCreated(render_view);
+  ViewRenderer::RenderViewCreated(render_view);
 }
 
 std::string AwContentRendererClient::GetDefaultEncoding() {
@@ -73,15 +80,11 @@ void AwContentRendererClient::GetNavigationErrorStrings(
 unsigned long long AwContentRendererClient::VisitedLinkHash(
     const char* canonical_url,
     size_t length) {
-  // TODO(boliu): Implement a visited link solution for Android WebView.
-  // Perhaps componentize chrome implementation or move to content/?
-  return 0LL;
+  return visited_link_slave_->ComputeURLFingerprint(canonical_url, length);
 }
 
 bool AwContentRendererClient::IsLinkVisited(unsigned long long link_hash) {
-  // TODO(boliu): Implement a visited link solution for Android WebView.
-  // Perhaps componentize chrome implementation or move to content/?
-  return false;
+  return visited_link_slave_->IsVisited(link_hash);
 }
 
 void AwContentRendererClient::PrefetchHostName(const char* hostname,

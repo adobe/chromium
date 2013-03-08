@@ -5,7 +5,7 @@
 #ifndef CHROME_BROWSER_PROFILES_PROFILE_INFO_INTERFACE_H_
 #define CHROME_BROWSER_PROFILES_PROFILE_INFO_INTERFACE_H_
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/string16.h"
 
 namespace gfx {
@@ -20,13 +20,13 @@ class ProfileInfoInterface {
   virtual size_t GetNumberOfProfiles() const = 0;
 
   virtual size_t GetIndexOfProfileWithPath(
-      const FilePath& profile_path) const = 0;
+      const base::FilePath& profile_path) const = 0;
 
   virtual string16 GetNameOfProfileAtIndex(size_t index) const = 0;
 
   virtual string16 GetShortcutNameOfProfileAtIndex(size_t index) const = 0;
 
-  virtual FilePath GetPathOfProfileAtIndex(size_t index) const = 0;
+  virtual base::FilePath GetPathOfProfileAtIndex(size_t index) const = 0;
 
   virtual string16 GetUserNameOfProfileAtIndex(size_t index) const = 0;
 

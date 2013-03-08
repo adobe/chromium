@@ -23,7 +23,7 @@ class MockOperation : public OperationRegistry::Operation,
  public:
   MockOperation(OperationRegistry* registry,
                 OperationType type,
-                const FilePath& path)
+                const base::FilePath& path)
       : OperationRegistry::Operation(registry, type, path) {}
 
   MOCK_METHOD0(DoCancel, void());
@@ -32,6 +32,8 @@ class MockOperation : public OperationRegistry::Operation,
   using OperationRegistry::Operation::NotifyStart;
   using OperationRegistry::Operation::NotifyProgress;
   using OperationRegistry::Operation::NotifyFinish;
+  using OperationRegistry::Operation::NotifySuspend;
+  using OperationRegistry::Operation::NotifyResume;
 };
 
 class MockUploadOperation : public MockOperation {
@@ -39,7 +41,7 @@ class MockUploadOperation : public MockOperation {
   explicit MockUploadOperation(OperationRegistry* registry)
       : MockOperation(registry,
                       OPERATION_UPLOAD,
-                      FilePath(FILE_PATH_LITERAL("/dummy/upload"))) {}
+                      base::FilePath(FILE_PATH_LITERAL("/dummy/upload"))) {}
 };
 
 class MockDownloadOperation : public MockOperation {
@@ -47,7 +49,7 @@ class MockDownloadOperation : public MockOperation {
   explicit MockDownloadOperation(OperationRegistry* registry)
       : MockOperation(registry,
                       OPERATION_DOWNLOAD,
-                      FilePath(FILE_PATH_LITERAL("/dummy/download"))) {}
+                      base::FilePath(FILE_PATH_LITERAL("/dummy/download"))) {}
 };
 
 class MockOtherOperation : public MockOperation {
@@ -55,7 +57,7 @@ class MockOtherOperation : public MockOperation {
   explicit MockOtherOperation(OperationRegistry* registry)
       : MockOperation(registry,
                       OPERATION_OTHER,
-                      FilePath(FILE_PATH_LITERAL("/dummy/other"))) {}
+                      base::FilePath(FILE_PATH_LITERAL("/dummy/other"))) {}
 };
 
 class TestObserver : public OperationRegistryObserver {
@@ -252,6 +254,40 @@ TEST_F(OperationRegistryTest, RestartOperation) {
   op1->NotifyFinish(OPERATION_COMPLETED);
   EXPECT_EQ(0U, registry.GetProgressStatusList().size());
   EXPECT_EQ(NULL, op1.get());  // deleted
+}
+
+
+TEST_F(OperationRegistryTest, SuspendCancel) {
+  TestObserver observer;
+  OperationRegistry registry;
+  registry.DisableNotificationFrequencyControlForTest();
+  registry.AddObserver(&observer);
+
+  // Suspend-then-resume is a hack in OperationRegistry to tie physically
+  // split but logically single operation (= chunked uploading split into
+  // multiple HTTP requests). When the "logically-single" operation is
+  // canceled between the two physical operations,
+  //    |----op1----| CANCEL! |----op2----|
+  // the cancellation is notified to the callback function associated with
+  // op2, not op1. This is because, op1's callback is already invoked at this
+  // point to notify the completion of the physical operation. Completion
+  // callback must not be called more than once.
+
+  base::WeakPtr<MockOperation> op1 =
+      (new MockUploadOperation(&registry))->AsWeakPtr();
+  EXPECT_CALL(*op1, DoCancel()).Times(0);
+
+  op1->NotifyStart();
+  op1->NotifySuspend();
+  registry.CancelAll();
+  EXPECT_EQ(NULL, op1.get());  // deleted
+
+  base::WeakPtr<MockOperation> op2 =
+      (new MockUploadOperation(&registry))->AsWeakPtr();
+  EXPECT_CALL(*op2, DoCancel()).Times(1);
+
+  op2->NotifyResume();
+  EXPECT_EQ(NULL, op2.get());  // deleted
 }
 
 }  // namespace google_apis

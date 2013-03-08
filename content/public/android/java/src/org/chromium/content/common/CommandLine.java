@@ -36,11 +36,6 @@ public abstract class CommandLine {
     // Enables test intent handling.
     public static final String ENABLE_TEST_INTENTS = "enable-test-intents";
 
-    // Sets the max number of sandboxed service processes to use.
-    // Unlike renderer-process-limit, this is a hard limit on the number of
-    // concurrent sandboxed processes.
-    public static final String SANDBOXED_SERVICE_LIMIT = "sandboxed-service-limit";
-
     // Dump frames-per-second to the log
     public static final String LOG_FPS = "log-fps";
 
@@ -59,17 +54,18 @@ public abstract class CommandLine {
     // Sets the ISO country code that will be used for phone number detection.
     public static final String NETWORK_COUNTRY_ISO = "network-country-iso";
 
-    // Sets the default tile width/height. We use this for very high-res
-    // displays until Chrome can detect and do this correctly for all platforms.
-    public static final String DEFAULT_TILE_WIDTH = "default-tile-width";
-    public static final String DEFAULT_TILE_HEIGHT = "default-tile-height";
-
     // Whether to enable the auto-hiding top controls.
     public static final String ENABLE_TOP_CONTROLS_POSITION_CALCULATION
             = "enable-top-controls-position-calculation";
 
     // The height of the movable top controls.
     public static final String TOP_CONTROLS_HEIGHT = "top-controls-height";
+
+    // How much of the top controls need to be shown before they will auto show.
+    public static final String TOP_CONTROLS_SHOW_THRESHOLD = "top-controls-show-threshold";
+
+    // How much of the top controls need to be hidden before they will auto hide.
+    public static final String TOP_CONTROLS_HIDE_THRESHOLD = "top-controls-hide-threshold";
 
     // Public abstract interface, implemented in derived classes.
     // All these methods reflect their native-side counterparts.

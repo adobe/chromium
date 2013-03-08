@@ -31,6 +31,10 @@ int main(int argc, const char** argv) {
   // Do the delegate work in shell_content_main to avoid having to export the
   // delegate types.
   return ::ContentMain(argc, argv);
+#elif defined(OS_ANDROID)
+  content::ShellMainDelegate delegate;
+  content::SetContentMainDelegate(&delegate);
+  return 0;
 #else
   content::ShellMainDelegate delegate;
   return content::ContentMain(argc, argv, &delegate);

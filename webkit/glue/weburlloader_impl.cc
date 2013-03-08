@@ -7,7 +7,7 @@
 #include "webkit/glue/weburlloader_impl.h"
 
 #include "base/bind.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "base/process_util.h"
@@ -24,8 +24,8 @@
 #include "third_party/WebKit/Source/Platform/chromium/public/WebHTTPLoadInfo.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebURL.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebURLError.h"
-#include "third_party/WebKit/Source/Platform/chromium/public/WebURLLoadTiming.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebURLLoaderClient.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebURLLoadTiming.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebURLRequest.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebURLResponse.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSecurityPolicy.h"
@@ -164,11 +164,6 @@ void PopulateURLResponse(
   response->setAppCacheManifestURL(info.appcache_manifest_url);
   response->setWasCached(!info.load_timing.base_time.is_null() &&
       info.response_time < info.load_timing.base_time);
-  response->setWasFetchedViaSPDY(info.was_fetched_via_spdy);
-  response->setWasNpnNegotiated(info.was_npn_negotiated);
-  response->setWasAlternateProtocolAvailable(
-      info.was_alternate_protocol_available);
-  response->setWasFetchedViaProxy(info.was_fetched_via_proxy);
   response->setRemoteIPAddress(
       WebString::fromUTF8(info.socket_address.host()));
   response->setRemotePort(info.socket_address.port());
@@ -176,8 +171,14 @@ void PopulateURLResponse(
   response->setConnectionReused(info.connection_reused);
   response->setDownloadFilePath(
       webkit_base::FilePathToWebString(info.download_file_path));
-  response->setExtraData(new WebURLResponseExtraDataImpl(
-      info.npn_negotiated_protocol));
+  WebURLResponseExtraDataImpl* extra_data =
+      new WebURLResponseExtraDataImpl(info.npn_negotiated_protocol);
+  response->setExtraData(extra_data);
+  extra_data->set_was_fetched_via_spdy(info.was_fetched_via_spdy);
+  extra_data->set_was_npn_negotiated(info.was_npn_negotiated);
+  extra_data->set_was_alternate_protocol_available(
+      info.was_alternate_protocol_available);
+  extra_data->set_was_fetched_via_proxy(info.was_fetched_via_proxy);
 
   const ResourceLoadTimingInfo& timing_info = info.load_timing;
   if (!timing_info.base_time.is_null()) {
@@ -268,6 +269,31 @@ void PopulateURLResponse(
   }
 }
 
+net::RequestPriority ConvertWebKitPriorityToNetPriority(
+    const WebURLRequest::Priority& priority) {
+  switch (priority) {
+    case WebURLRequest::PriorityVeryHigh:
+      return net::HIGHEST;
+
+    case WebURLRequest::PriorityHigh:
+      return net::MEDIUM;
+
+    case WebURLRequest::PriorityMedium:
+      return net::LOW;
+
+    case WebURLRequest::PriorityLow:
+      return net::LOWEST;
+
+    case WebURLRequest::PriorityVeryLow:
+      return net::IDLE;
+
+    case WebURLRequest::PriorityUnresolved:
+    default:
+      NOTREACHED();
+      return net::LOW;
+  }
+}
+
 }  // namespace
 
 // WebURLLoaderImpl::Context --------------------------------------------------
@@ -285,32 +311,34 @@ class WebURLLoaderImpl::Context : public base::RefCounted<Context>,
 
   void Cancel();
   void SetDefersLoading(bool value);
+  void DidChangePriority(WebURLRequest::Priority new_priority);
   void Start(
       const WebURLRequest& request,
       ResourceLoaderBridge::SyncLoadResponse* sync_load_response,
       WebKitPlatformSupportImpl* platform);
 
   // ResourceLoaderBridge::Peer methods:
-  virtual void OnUploadProgress(uint64 position, uint64 size);
+  virtual void OnUploadProgress(uint64 position, uint64 size) OVERRIDE;
   virtual bool OnReceivedRedirect(
       const GURL& new_url,
       const ResourceResponseInfo& info,
       bool* has_new_first_party_for_cookies,
-      GURL* new_first_party_for_cookies);
-  virtual void OnReceivedResponse(const ResourceResponseInfo& info);
-  virtual void OnDownloadedData(int len);
+      GURL* new_first_party_for_cookies) OVERRIDE;
+  virtual void OnReceivedResponse(const ResourceResponseInfo& info) OVERRIDE;
+  virtual void OnDownloadedData(int len) OVERRIDE;
   virtual void OnReceivedData(const char* data,
                               int data_length,
-                              int encoded_data_length);
-  virtual void OnReceivedCachedMetadata(const char* data, int len);
-  virtual void OnCompletedRequest(int error_code,
-                                  bool was_ignored_by_handler,
-                                  const std::string& security_info,
-                                  const base::TimeTicks& completion_time);
+                              int encoded_data_length) OVERRIDE;
+  virtual void OnReceivedCachedMetadata(const char* data, int len) OVERRIDE;
+  virtual void OnCompletedRequest(
+      int error_code,
+      bool was_ignored_by_handler,
+      const std::string& security_info,
+      const base::TimeTicks& completion_time) OVERRIDE;
 
  private:
   friend class base::RefCounted<Context>;
-  ~Context() {}
+  virtual ~Context() {}
 
   // We can optimize the handling of data URLs in most cases.
   bool CanHandleDataURL(const GURL& url) const;
@@ -351,6 +379,13 @@ void WebURLLoaderImpl::Context::Cancel() {
 void WebURLLoaderImpl::Context::SetDefersLoading(bool value) {
   if (bridge_.get())
     bridge_->SetDefersLoading(value);
+}
+
+void WebURLLoaderImpl::Context::DidChangePriority(
+    WebURLRequest::Priority new_priority) {
+  if (bridge_.get())
+    bridge_->DidChangePriority(
+        ConvertWebKitPriorityToNetPriority(new_priority));
 }
 
 void WebURLLoaderImpl::Context::Start(
@@ -432,6 +467,8 @@ void WebURLLoaderImpl::Context::Start(
   request_info.requestor_pid = request.requestorProcessID();
   request_info.request_type =
       ResourceType::FromTargetType(request.targetType());
+  request_info.priority =
+      ConvertWebKitPriorityToNetPriority(request.priority());
   request_info.appcache_host_id = request.appCacheHostID();
   request_info.routing_id = request.requestorID();
   request_info.download_to_file = request.downloadToFile();
@@ -780,6 +817,10 @@ void WebURLLoaderImpl::cancel() {
 
 void WebURLLoaderImpl::setDefersLoading(bool value) {
   context_->SetDefersLoading(value);
+}
+
+void WebURLLoaderImpl::didChangePriority(WebURLRequest::Priority new_priority) {
+  context_->DidChangePriority(new_priority);
 }
 
 }  // namespace webkit_glue

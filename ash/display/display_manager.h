@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "ash/ash_export.h"
+#include "ash/display/display_info.h"
 #include "base/compiler_specific.h"
 #include "base/gtest_prod_util.h"
 #include "ui/aura/root_window_observer.h"
@@ -51,6 +52,9 @@ class ASH_EXPORT DisplayManager : public aura::RootWindowObserver {
     force_bounds_changed_ = force_bounds_changed;
   }
 
+  // Returns the display id of the first display in the outupt list.
+  int64 first_display_id() const { return first_display_id_; }
+
   // True if the given |display| is currently connected.
   bool IsActiveDisplay(const gfx::Display& display) const;
 
@@ -76,6 +80,9 @@ class ASH_EXPORT DisplayManager : public aura::RootWindowObserver {
   // display's bounds change.
   void SetOverscanInsets(int64 display_id, const gfx::Insets& insets_in_dip);
 
+  // Clears the overscan insets
+  void ClearCustomOverscanInsets(int64 display_id);
+
   // Returns the current overscan insets for the specified |display_id|.
   // Returns an empty insets (0, 0, 0, 0) if no insets are specified for
   // the display.
@@ -84,10 +91,11 @@ class ASH_EXPORT DisplayManager : public aura::RootWindowObserver {
   // Called when display configuration has changed. The new display
   // configurations is passed as a vector of Display object, which
   // contains each display's new infomration.
-  void OnNativeDisplaysChanged(const std::vector<gfx::Display>& displays);
+  void OnNativeDisplaysChanged(
+      const std::vector<DisplayInfo>& display_info_list);
 
   // Updates the internal display data and notifies observers about the changes.
-  void UpdateDisplays(const std::vector<gfx::Display>& displays);
+  void UpdateDisplays(const std::vector<DisplayInfo>& display_info_list);
 
   // Create a root window for given |display|.
   aura::RootWindow* CreateRootWindowForDisplay(const gfx::Display& display);
@@ -96,6 +104,8 @@ class ASH_EXPORT DisplayManager : public aura::RootWindowObserver {
   // Returns the display at |index|. The display at 0 is
   // no longer considered "primary".
   gfx::Display* GetDisplayAt(size_t index);
+
+  const gfx::Display* GetPrimaryDisplayCandidate() const;
 
   size_t GetNumDisplays() const;
 
@@ -110,6 +120,9 @@ class ASH_EXPORT DisplayManager : public aura::RootWindowObserver {
   // Returns the display that most closely intersects |match_rect|.
   const gfx::Display& GetDisplayMatching(
       const gfx::Rect& match_rect)const;
+
+  // Retuns the display info associated with |display|.
+  const DisplayInfo& GetDisplayInfo(const gfx::Display& display) const;
 
   // Returns the human-readable name for the display specified by |display|.
   std::string GetDisplayNameFor(const gfx::Display& display);
@@ -131,29 +144,6 @@ class ASH_EXPORT DisplayManager : public aura::RootWindowObserver {
 
   typedef std::vector<gfx::Display> DisplayList;
 
-  // Metadata for each display.
-  struct DisplayInfo {
-    DisplayInfo();
-
-    // The cached name of the display.
-    std::string name;
-
-    // The original bounds_in_pixel for the display.  This can be different from
-    // the current one in case of overscan insets.
-    gfx::Rect original_bounds_in_pixel;
-
-    // The overscan insets for the display.
-    gfx::Insets overscan_insets_in_dip;
-
-    // True if we detect that the display has overscan area. False if the
-    // display doesn't have it, or failed to detect it.
-    bool has_overscan;
-
-    // True if the |overscan_insets_in_dip| is specified. This is set because
-    // the user may specify an empty inset intentionally.
-    bool has_custom_overscan_insets;
-  };
-
   void Init();
   void CycleDisplayImpl();
   void ScaleDisplayImpl();
@@ -161,36 +151,31 @@ class ASH_EXPORT DisplayManager : public aura::RootWindowObserver {
   gfx::Display& FindDisplayForRootWindow(const aura::RootWindow* root);
   gfx::Display& FindDisplayForId(int64 id);
 
-  // Refer to |aura::DisplayManager::CreateDisplayFromSpec| API for
-  // the format of |spec|.
+  // Refer to |CreateDisplayFromSpec| API for the format of |spec|.
   void AddDisplayFromSpec(const std::string& spec);
-
-  // Set the 1st display as an internal display and returns the display Id for
-  // the internal display.
-  int64 SetFirstDisplayAsInternalDisplayForTest();
 
   // Checks if the mouse pointer is on one of displays, and moves to
   // the center of the nearest display if it's outside of all displays.
   void EnsurePointerInDisplays();
 
-  // Updates |display_info_| by calling platform-dependent functions.
-  void RefreshDisplayInfo();
+  // Inserts and update the DisplayInfo according to the overscan
+  // state. Note that The DisplayInfo stored in the |internal_display_info_|
+  // can be different from |new_info| (due to overscan state), so
+  // you must use |GetDisplayInfo| to get the correct DisplayInfo for
+  // a display.
+  void InsertAndUpdateDisplayInfo(const DisplayInfo& new_info,
+                                  bool can_overscan);
 
-  // Update the display's id in the |display_list| to match the ones
-  // stored in this display manager's |displays_|. This is used to
-  // emulate display change behavior during the test byn creating the
-  // display list with the same display ids but with different bounds
-  void SetDisplayIdsForTest(DisplayList* display_list) const;
+  // Creates a display object from the DisplayInfo for |display_id|.
+  gfx::Display CreateDisplayFromDisplayInfoById(int64 display_id);
 
-  // Forcibly specify 'has_overscan' flag of the DisplayInfo for specified |id|.
-  void SetHasOverscanFlagForTest(int64 id, bool has_overscan);
+  int64 first_display_id_;
 
   DisplayList displays_;
 
-  int64 internal_display_id_;
-
-  // An internal display cache used when the internal display is disconnectd.
-  scoped_ptr<gfx::Display> internal_display_;
+  // An internal display info cache used when the internal display is
+  // disconnectd.
+  scoped_ptr<DisplayInfo> internal_display_info_;
 
   bool force_bounds_changed_;
 

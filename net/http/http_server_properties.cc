@@ -10,10 +10,14 @@
 namespace net {
 
 const char kAlternateProtocolHeader[] = "Alternate-Protocol";
+// The order of these strings much match the order of the enum definition
+// for AlternateProtocol.
 const char* const kAlternateProtocolStrings[] = {
   "npn-spdy/1",
   "npn-spdy/2",
   "npn-spdy/3",
+  "npn-spdy/3.1",
+  "quic/1"
 };
 const char kBrokenAlternateProtocol[] = "Broken";
 
@@ -22,6 +26,9 @@ const char* AlternateProtocolToString(AlternateProtocol protocol) {
     case NPN_SPDY_1:
     case NPN_SPDY_2:
     case NPN_SPDY_3:
+    case QUIC_1:
+      DCHECK_LT(static_cast<size_t>(protocol),
+                arraysize(kAlternateProtocolStrings));
       return kAlternateProtocolStrings[protocol];
     case ALTERNATE_PROTOCOL_BROKEN:
       return kBrokenAlternateProtocol;

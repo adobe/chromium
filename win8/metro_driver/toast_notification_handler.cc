@@ -7,7 +7,7 @@
 #include "win8/metro_driver/stdafx.h"
 #include "win8/metro_driver/toast_notification_handler.h"
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/path_service.h"
 #include "base/utf_string_conversions.h"
@@ -196,7 +196,7 @@ void ToastNotificationHandler::DisplayNotification(
       toast_xml.Get(), &notification_);
   CheckHR(hr);
 
-  FilePath chrome_path;
+  base::FilePath chrome_path;
   if (!PathService::Get(base::FILE_EXE, &chrome_path)) {
     NOTREACHED() << "Failed to get chrome exe path";
     return;

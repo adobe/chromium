@@ -5,15 +5,16 @@
 #include "chrome/browser/managed_mode/managed_mode.h"
 
 #include "base/command_line.h"
+#include "base/prefs/pref_registry_simple.h"
+#include "base/prefs/pref_service.h"
 #include "base/prefs/public/pref_change_registrar.h"
 #include "base/sequenced_task_runner.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/managed_mode/managed_mode_site_list.h"
-#include "chrome/browser/managed_mode/managed_mode_url_filter.h"
 #include "chrome/browser/policy/url_blacklist_manager.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_iterator.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -21,9 +22,11 @@
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/user_metrics.h"
 #include "grit/generated_resources.h"
 
 using content::BrowserThread;
+using content::UserMetricsAction;
 
 // static
 ManagedMode* ManagedMode::GetInstance() {
@@ -31,8 +34,8 @@ ManagedMode* ManagedMode::GetInstance() {
 }
 
 // static
-void ManagedMode::RegisterPrefs(PrefServiceSimple* prefs) {
-  prefs->RegisterBooleanPref(prefs::kInManagedMode, false);
+void ManagedMode::RegisterPrefs(PrefRegistrySimple* registry) {
+  registry->RegisterBooleanPref(prefs::kInManagedMode, false);
 }
 
 // static
@@ -49,9 +52,13 @@ void ManagedMode::InitImpl(Profile* profile) {
   // CommandLinePrefStore so we can change it at runtime.
   if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kNoManaged)) {
     SetInManagedMode(NULL);
+    content::RecordAction(
+        UserMetricsAction("ManagedMode_StartupNoManagedSwitch"));
   } else if (IsInManagedModeImpl() ||
       CommandLine::ForCurrentProcess()->HasSwitch(switches::kManaged)) {
     SetInManagedMode(original_profile);
+    content::RecordAction(
+        UserMetricsAction("ManagedMode_StartupManagedSwitch"));
   }
 }
 
@@ -101,10 +108,9 @@ void ManagedMode::EnterManagedModeImpl(Profile* profile,
   // Close all other profiles.
   // At this point, we shouldn't be waiting for other browsers to close (yet).
   DCHECK_EQ(0u, browsers_to_close_.size());
-  for (BrowserList::const_iterator i = BrowserList::begin();
-       i != BrowserList::end(); ++i) {
-    if ((*i)->profile()->GetOriginalProfile() != original_profile)
-      browsers_to_close_.insert(*i);
+  for (chrome::BrowserIterator it; !it.done(); it.Next()) {
+    if (it->profile()->GetOriginalProfile() != original_profile)
+      browsers_to_close_.insert(*it);
   }
 
   if (browsers_to_close_.empty()) {

@@ -4,165 +4,378 @@
 
 #include "chrome/test/chromedriver/chrome_impl.h"
 
+#include <algorithm>
+#include <list>
+
+#include "base/bind.h"
 #include "base/json/json_reader.h"
-#include "base/json/json_writer.h"
-#include "base/logging.h"
-#include "base/process_util.h"
+#include "base/string_split.h"
 #include "base/stringprintf.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/threading/platform_thread.h"
 #include "base/time.h"
 #include "base/values.h"
 #include "chrome/test/chromedriver/devtools_client_impl.h"
-#include "chrome/test/chromedriver/dom_tracker.h"
-#include "chrome/test/chromedriver/js.h"
+#include "chrome/test/chromedriver/javascript_dialog_manager.h"
 #include "chrome/test/chromedriver/net/net_util.h"
 #include "chrome/test/chromedriver/net/sync_websocket_impl.h"
 #include "chrome/test/chromedriver/net/url_request_context_getter.h"
 #include "chrome/test/chromedriver/status.h"
+#include "chrome/test/chromedriver/version.h"
+#include "chrome/test/chromedriver/web_view_impl.h"
 #include "googleurl/src/gurl.h"
 
 namespace {
 
-Status FetchPagesInfo(URLRequestContextGetter* context_getter,
-                      int port,
-                      std::list<std::string>* debugger_urls) {
+typedef std::list<internal::WebViewInfo> WebViewInfoList;
+
+Status FetchVersionInfo(URLRequestContextGetter* context_getter,
+                        int port,
+                        std::string* version) {
   std::string url = base::StringPrintf(
-      "http://127.0.0.1:%d/json", port);
+      "http://127.0.0.1:%d/json/version", port);
   std::string data;
   if (!FetchUrl(GURL(url), context_getter, &data))
     return Status(kChromeNotReachable);
-  return internal::ParsePagesInfo(data, debugger_urls);
+  return internal::ParseVersionInfo(data, version);
 }
 
-Status GetContextIdForFrame(DomTracker* tracker,
-                            const std::string& frame,
-                            int* context_id) {
-  if (frame.empty()) {
-    *context_id = 0;
-    return Status(kOk);
+Status FetchWebViewsInfo(URLRequestContextGetter* context_getter,
+                         int port,
+                         WebViewInfoList* info_list) {
+  std::string url = base::StringPrintf("http://127.0.0.1:%d/json", port);
+  std::string data;
+  if (!FetchUrl(GURL(url), context_getter, &data))
+    return Status(kChromeNotReachable);
+
+  return internal::ParsePagesInfo(data, info_list);
+}
+
+const internal::WebViewInfo* GetWebViewFromList(
+    const std::string& id,
+    const WebViewInfoList& info_list) {
+  for (WebViewInfoList::const_iterator it = info_list.begin();
+       it != info_list.end(); ++it) {
+    if (it->id == id)
+      return &(*it);
   }
-  Status status = tracker->GetContextIdForFrame(frame, context_id);
+  return NULL;
+}
+
+Status CloseWebView(URLRequestContextGetter* context_getter,
+                    int port,
+                    const std::string& web_view_id) {
+  WebViewInfoList info_list;
+  Status status = FetchWebViewsInfo(context_getter, port, &info_list);
   if (status.IsError())
     return status;
+  if (!GetWebViewFromList(web_view_id, info_list))
+    return Status(kOk);
+
+  bool is_last_web_view = info_list.size() == 1u;
+
+  std::string url = base::StringPrintf(
+      "http://127.0.0.1:%d/json/close/%s", port, web_view_id.c_str());
+  std::string data;
+  if (!FetchUrl(GURL(url), context_getter, &data))
+    return is_last_web_view ? Status(kOk) : Status(kChromeNotReachable);
+  if (data != "Target is closing")
+    return Status(kOk);
+
+  // Wait for the target window to be completely closed.
+  base::Time deadline = base::Time::Now() + base::TimeDelta::FromSeconds(20);
+  while (base::Time::Now() < deadline) {
+    info_list.clear();
+    status = FetchWebViewsInfo(context_getter, port, &info_list);
+    if (is_last_web_view && status.code() == kChromeNotReachable)
+      return Status(kOk);  // Closing the last web view leads chrome to quit.
+    if (status.IsError())
+      return status;
+    if (!GetWebViewFromList(web_view_id, info_list))
+      return Status(kOk);
+    base::PlatformThread::Sleep(base::TimeDelta::FromMilliseconds(50));
+  }
+
+  return Status(kUnknownError, "failed to close window in 20 seconds");
+}
+
+Status FakeCloseWebView() {
+  // This is for the docked DevTools frontend only.
+  return Status(kUnknownError,
+                "docked DevTools frontend should be closed by Javascript");
+}
+
+Status FakeCloseDevToolsFrontend() {
+  // This is for the docked DevTools frontend only.
   return Status(kOk);
+}
+
+Status CloseDevToolsFrontend(ChromeImpl* chrome,
+                             const SyncWebSocketFactory& socket_factory,
+                             URLRequestContextGetter* context_getter,
+                             int port,
+                             const std::string& web_view_id) {
+  WebViewInfoList info_list;
+  Status status = FetchWebViewsInfo(context_getter, port, &info_list);
+  if (status.IsError())
+    return status;
+
+  std::list<std::string> tab_frontend_ids;
+  std::list<std::string> docked_frontend_ids;
+  // Filter out DevTools frontend.
+  for (WebViewInfoList::const_iterator it = info_list.begin();
+       it != info_list.end(); ++it) {
+    if (it->IsFrontend()) {
+      if (it->type == internal::WebViewInfo::kPage)
+        tab_frontend_ids.push_back(it->id);
+      else if (it->type == internal::WebViewInfo::kOther)
+        docked_frontend_ids.push_back(it->id);
+      else
+        return Status(kUnknownError, "unknown type of DevTools frontend");
+    }
+  }
+
+  // Close tab DevTools frontend as if closing a normal web view.
+  for (std::list<std::string>::const_iterator it = tab_frontend_ids.begin();
+       it != tab_frontend_ids.end(); ++it) {
+    status = CloseWebView(context_getter, port, *it);
+    if (status.IsError())
+      return status;
+  }
+
+  // Close docked DevTools frontend by Javascript.
+  for (std::list<std::string>::const_iterator it = docked_frontend_ids.begin();
+       it != docked_frontend_ids.end(); ++it) {
+    std::string ws_url = base::StringPrintf(
+        "ws://127.0.0.1:%d/devtools/page/%s", port, it->c_str());
+    scoped_ptr<WebViewImpl> web_view(new WebViewImpl(
+        *it,
+        new DevToolsClientImpl(socket_factory, ws_url,
+                               base::Bind(&FakeCloseDevToolsFrontend)),
+        chrome, base::Bind(&FakeCloseWebView)));
+
+    status = web_view->ConnectIfNecessary();
+    if (status.IsError())
+      return status;
+
+    scoped_ptr<base::Value> result;
+    status = web_view->EvaluateScript(
+        "", "document.getElementById('close-button-right').click();", &result);
+    // Ignore disconnected error, because the DevTools frontend is closed.
+    if (status.IsError() && status.code() != kDisconnected)
+      return status;
+  }
+
+  // Wait until DevTools UI disconnects from the given web view.
+  base::Time deadline = base::Time::Now() + base::TimeDelta::FromSeconds(20);
+  bool web_view_still_open = false;
+  while (base::Time::Now() < deadline) {
+    info_list.clear();
+    status = FetchWebViewsInfo(context_getter, port, &info_list);
+    if (status.IsError())
+      return status;
+
+    web_view_still_open = false;
+    for (WebViewInfoList::const_iterator it = info_list.begin();
+         it != info_list.end(); ++it) {
+      if (it->id == web_view_id) {
+        if (!it->debugger_url.empty())
+          return Status(kOk);
+        web_view_still_open = true;
+        break;
+      }
+    }
+    if (!web_view_still_open)
+      return Status(kUnknownError, "window closed while closing devtools");
+
+    base::PlatformThread::Sleep(base::TimeDelta::FromMilliseconds(50));
+  }
+
+  return Status(kUnknownError, "failed to close DevTools frontend");
 }
 
 }  // namespace
 
-ChromeImpl::ChromeImpl(base::ProcessHandle process,
-                       URLRequestContextGetter* context_getter,
-                       base::ScopedTempDir* user_data_dir,
+ChromeImpl::ChromeImpl(URLRequestContextGetter* context_getter,
                        int port,
                        const SyncWebSocketFactory& socket_factory)
-    : process_(process),
-      context_getter_(context_getter),
+    : context_getter_(context_getter),
       port_(port),
       socket_factory_(socket_factory),
-      dom_tracker_(new DomTracker()) {
-  if (user_data_dir->IsValid()) {
-    CHECK(user_data_dir_.Set(user_data_dir->Take()));
-  }
-}
+      version_("unknown version"),
+      build_no_(0) {}
 
 ChromeImpl::~ChromeImpl() {
-  base::CloseProcessHandle(process_);
+  web_view_map_.clear();
+}
+
+std::string ChromeImpl::GetVersion() {
+  return version_;
+}
+
+Status ChromeImpl::GetWebViews(std::list<WebView*>* web_views) {
+  WebViewInfoList info_list;
+  Status status = FetchWebViewsInfo(
+      context_getter_, port_, &info_list);
+  if (status.IsError())
+    return status;
+
+  std::list<WebView*> internal_web_views;
+  for (WebViewInfoList::const_iterator it = info_list.begin();
+       it != info_list.end(); ++it) {
+    WebViewMap::const_iterator found = web_view_map_.find(it->id);
+    if (found != web_view_map_.end()) {
+      internal_web_views.push_back(found->second.get());
+      continue;
+    }
+
+    std::string ws_url = base::StringPrintf(
+        "ws://127.0.0.1:%d/devtools/page/%s", port_, it->id.c_str());
+    DevToolsClientImpl::FrontendCloserFunc frontend_closer_func = base::Bind(
+        &CloseDevToolsFrontend, this, socket_factory_,
+        context_getter_, port_, it->id);
+    web_view_map_[it->id] = make_linked_ptr(new WebViewImpl(
+        it->id,
+        new DevToolsClientImpl(socket_factory_, ws_url, frontend_closer_func),
+        this,
+        base::Bind(&CloseWebView, context_getter_, port_, it->id)));
+    internal_web_views.push_back(web_view_map_[it->id].get());
+  }
+
+  web_views->swap(internal_web_views);
+  return Status(kOk);
+}
+
+Status ChromeImpl::IsJavaScriptDialogOpen(bool* is_open) {
+  JavaScriptDialogManager* manager;
+  Status status = GetDialogManagerForOpenDialog(&manager);
+  if (status.IsError())
+    return status;
+  *is_open = manager != NULL;
+  return Status(kOk);
+}
+
+Status ChromeImpl::GetJavaScriptDialogMessage(std::string* message) {
+  JavaScriptDialogManager* manager;
+  Status status = GetDialogManagerForOpenDialog(&manager);
+  if (status.IsError())
+    return status;
+  if (!manager)
+    return Status(kNoAlertOpen);
+
+  return manager->GetDialogMessage(message);
+}
+
+Status ChromeImpl::HandleJavaScriptDialog(bool accept,
+                                          const std::string& prompt_text) {
+  JavaScriptDialogManager* manager;
+  Status status = GetDialogManagerForOpenDialog(&manager);
+  if (status.IsError())
+    return status;
+  if (!manager)
+    return Status(kNoAlertOpen);
+
+  return manager->HandleDialog(accept, prompt_text);
+}
+
+void ChromeImpl::OnWebViewClose(WebView* web_view) {
+  web_view_map_.erase(web_view->GetId());
 }
 
 Status ChromeImpl::Init() {
   base::Time deadline = base::Time::Now() + base::TimeDelta::FromSeconds(20);
-  std::list<std::string> debugger_urls;
+  std::string version;
+  Status status(kOk);
   while (base::Time::Now() < deadline) {
-    FetchPagesInfo(context_getter_, port_, &debugger_urls);
-    if (debugger_urls.empty())
+    status = FetchVersionInfo(context_getter_, port_, &version);
+    if (status.IsOk())
+      break;
+    if (status.code() != kChromeNotReachable)
+      return status;
+  }
+  if (status.IsError())
+    return status;
+  status = ParseAndCheckVersion(version);
+  if (status.IsError())
+    return status;
+
+  WebViewInfoList info_list;
+  while (base::Time::Now() < deadline) {
+    FetchWebViewsInfo(context_getter_, port_, &info_list);
+    if (info_list.empty())
       base::PlatformThread::Sleep(base::TimeDelta::FromMilliseconds(100));
     else
-      break;
+      return Status(kOk);
   }
-  if (debugger_urls.empty())
-    return Status(kUnknownError, "unable to discover open pages");
-  client_.reset(new DevToolsClientImpl(
-      socket_factory_, debugger_urls.front()));
-  client_->AddListener(dom_tracker_.get());
-
-  // Perform necessary configuration of the DevTools client.
-  // Fetch the root document node so that Inspector will push DOM node
-  // information to the client.
-  base::DictionaryValue params;
-  Status status = client_->SendCommand("DOM.getDocument", params);
-  if (status.IsError())
-    return status;
-  // Enable runtime events to allow tracking execution context creation.
-  return client_->SendCommand("Runtime.enable", params);
+  return Status(kUnknownError, "unable to discover open pages");
 }
 
-Status ChromeImpl::Load(const std::string& url) {
-  base::DictionaryValue params;
-  params.SetString("url", url);
-  return client_->SendCommand("Page.navigate", params);
+int ChromeImpl::GetPort() const {
+  return port_;
 }
 
-Status ChromeImpl::Reload() {
-  base::DictionaryValue params;
-  params.SetBoolean("ignoreCache", false);
-  return client_->SendCommand("Page.reload", params);
-}
-
-Status ChromeImpl::EvaluateScript(const std::string& frame,
-                                  const std::string& expression,
-                                  scoped_ptr<base::Value>* result) {
-  int context_id;
-  Status status = GetContextIdForFrame(dom_tracker_.get(), frame, &context_id);
-  if (status.IsError())
-    return status;
-  return internal::EvaluateScriptAndGetValue(
-      client_.get(), context_id, expression, result);
-}
-
-Status ChromeImpl::CallFunction(const std::string& frame,
-                                const std::string& function,
-                                const base::ListValue& args,
-                                scoped_ptr<base::Value>* result) {
-  std::string json;
-  base::JSONWriter::Write(&args, &json);
-  std::string expression = base::StringPrintf(
-      "(%s).apply(null, [%s, %s])",
-      kCallFunctionScript,
-      function.c_str(),
-      json.c_str());
-  scoped_ptr<base::Value> temp_result;
-  Status status = EvaluateScript(frame, expression, &temp_result);
+Status ChromeImpl::GetDialogManagerForOpenDialog(
+    JavaScriptDialogManager** manager) {
+  std::list<WebView*> web_views;
+  Status status = GetWebViews(&web_views);
   if (status.IsError())
     return status;
 
-  return internal::ParseCallFunctionResult(*temp_result, result);
+  for (std::list<WebView*>::const_iterator it = web_views.begin();
+       it != web_views.end(); ++it) {
+    if ((*it)->GetJavaScriptDialogManager()->IsDialogOpen()) {
+      *manager = (*it)->GetJavaScriptDialogManager();
+      return Status(kOk);
+    }
+  }
+  *manager = NULL;
+  return Status(kOk);
 }
 
-Status ChromeImpl::GetFrameByFunction(const std::string& frame,
-                                      const std::string& function,
-                                      const base::ListValue& args,
-                                      std::string* out_frame) {
-  int context_id;
-  Status status = GetContextIdForFrame(dom_tracker_.get(), frame, &context_id);
-  if (status.IsError())
-    return status;
-  int node_id;
-  status = internal::GetNodeIdFromFunction(
-      client_.get(), context_id, function, args, &node_id);
-  if (status.IsError())
-    return status;
-  return dom_tracker_->GetFrameIdForNode(node_id, out_frame);
-}
+Status ChromeImpl::ParseAndCheckVersion(const std::string& version) {
+  if (version.empty()) {
+    // Content Shell has an empty product version and a fake user agent.
+    // There's no way to detect the actual version, so assume it is tip of tree.
+    version_ = "content shell";
+    build_no_ = 9999;
+    return Status(kOk);
+  }
+  std::string prefix = "Chrome/";
+  if (version.find(prefix) != 0u)
+    return Status(kUnknownError, "unrecognized Chrome version: " + version);
 
-Status ChromeImpl::Quit() {
-  if (!base::KillProcess(process_, 0, true))
-    return Status(kUnknownError, "cannot kill Chrome");
+  std::string stripped_version = version.substr(prefix.length());
+  int build_no;
+  std::vector<std::string> version_parts;
+  base::SplitString(stripped_version, '.', &version_parts);
+  if (version_parts.size() != 4 ||
+      !base::StringToInt(version_parts[2], &build_no)) {
+    return Status(kUnknownError, "unrecognized Chrome version: " + version);
+  }
+
+  if (build_no < kMinimumSupportedChromeBuildNo) {
+    return Status(kUnknownError, "Chrome version must be >= " +
+        GetMinimumSupportedChromeVersion());
+  }
+  version_ = stripped_version;
+  build_no_ = build_no;
   return Status(kOk);
 }
 
 namespace internal {
 
+WebViewInfo::WebViewInfo(const std::string& id,
+                         const std::string& debugger_url,
+                         const std::string& url,
+                         Type type)
+    : id(id), debugger_url(debugger_url), url(url), type(type) {}
+
+bool WebViewInfo::IsFrontend() const {
+  return url.find("chrome-devtools://") == 0u;
+}
+
 Status ParsePagesInfo(const std::string& data,
-                      std::list<std::string>* debugger_urls) {
+                      std::list<WebViewInfo>* info_list) {
   scoped_ptr<base::Value> value(base::JSONReader::Read(data));
   if (!value.get())
     return Status(kUnknownError, "DevTools returned invalid JSON");
@@ -170,155 +383,48 @@ Status ParsePagesInfo(const std::string& data,
   if (!value->GetAsList(&list))
     return Status(kUnknownError, "DevTools did not return list");
 
-  std::list<std::string> internal_urls;
+  std::list<WebViewInfo> info_list_tmp;
   for (size_t i = 0; i < list->GetSize(); ++i) {
     base::DictionaryValue* info;
     if (!list->GetDictionary(i, &info))
       return Status(kUnknownError, "DevTools contains non-dictionary item");
+    std::string id;
+    if (!info->GetString("id", &id))
+      return Status(kUnknownError, "DevTools did not include id");
+    std::string type;
+    if (!info->GetString("type", &type))
+      return Status(kUnknownError, "DevTools did not include type");
+    std::string url;
+    if (!info->GetString("url", &url))
+      return Status(kUnknownError, "DevTools did not include url");
     std::string debugger_url;
-    if (!info->GetString("webSocketDebuggerUrl", &debugger_url))
-      return Status(kUnknownError, "DevTools did not include debugger URL");
-    internal_urls.push_back(debugger_url);
+    info->GetString("webSocketDebuggerUrl", &debugger_url);
+    if (type == "page")
+      info_list_tmp.push_back(
+          WebViewInfo(id, debugger_url, url, internal::WebViewInfo::kPage));
+    else if (type == "other")
+      info_list_tmp.push_back(
+          WebViewInfo(id, debugger_url, url, internal::WebViewInfo::kOther));
+    else
+      return Status(kUnknownError, "DevTools returned unknown type:" + type);
   }
-  debugger_urls->swap(internal_urls);
+  info_list->swap(info_list_tmp);
   return Status(kOk);
 }
 
-Status EvaluateScript(DevToolsClient* client,
-                      int context_id,
-                      const std::string& expression,
-                      EvaluateScriptReturnType return_type,
-                      scoped_ptr<base::DictionaryValue>* result) {
-  base::DictionaryValue params;
-  params.SetString("expression", expression);
-  if (context_id)
-    params.SetInteger("contextId", context_id);
-  params.SetBoolean("returnByValue", return_type == ReturnByValue);
-  scoped_ptr<base::DictionaryValue> cmd_result;
-  Status status = client->SendCommandAndGetResult(
-      "Runtime.evaluate", params, &cmd_result);
-  if (status.IsError())
-    return status;
-
-  bool was_thrown;
-  if (!cmd_result->GetBoolean("wasThrown", &was_thrown))
-    return Status(kUnknownError, "Runtime.evaluate missing 'wasThrown'");
-  if (was_thrown) {
-    std::string description = "unknown";
-    cmd_result->GetString("result.description", &description);
-    return Status(kUnknownError,
-                  "Runtime.evaluate threw exception: " + description);
+Status ParseVersionInfo(const std::string& data,
+                        std::string* version) {
+  scoped_ptr<base::Value> value(base::JSONReader::Read(data));
+  if (!value.get())
+    return Status(kUnknownError, "version info not in JSON");
+  base::DictionaryValue* dict;
+  if (!value->GetAsDictionary(&dict))
+    return Status(kUnknownError, "version info not a dictionary");
+  if (!dict->GetString("Browser", version)) {
+    return Status(
+        kUnknownError, "Chrome version must be >= 26",
+        Status(kUnknownError, "version info doesn't include string 'Browser'"));
   }
-
-  base::DictionaryValue* unscoped_result;
-  if (!cmd_result->GetDictionary("result", &unscoped_result))
-    return Status(kUnknownError, "evaluate missing dictionary 'result'");
-  result->reset(unscoped_result->DeepCopy());
-  return Status(kOk);
-}
-
-Status EvaluateScriptAndGetObject(DevToolsClient* client,
-                                  int context_id,
-                                  const std::string& expression,
-                                  std::string* object_id) {
-  scoped_ptr<base::DictionaryValue> result;
-  Status status = EvaluateScript(client, context_id, expression, ReturnByObject,
-                                 &result);
-  if (status.IsError())
-    return status;
-  if (!result->GetString("objectId", object_id))
-    return Status(kUnknownError, "evaluate missing string 'objectId'");
-  return Status(kOk);
-}
-
-Status EvaluateScriptAndGetValue(DevToolsClient* client,
-                                 int context_id,
-                                 const std::string& expression,
-                                 scoped_ptr<base::Value>* result) {
-  scoped_ptr<base::DictionaryValue> temp_result;
-  Status status = EvaluateScript(client, context_id, expression, ReturnByValue,
-                                 &temp_result);
-  if (status.IsError())
-    return status;
-
-  std::string type;
-  if (!temp_result->GetString("type", &type))
-    return Status(kUnknownError, "Runtime.evaluate missing string 'type'");
-
-  if (type == "undefined") {
-    result->reset(base::Value::CreateNullValue());
-  } else {
-    base::Value* value;
-    if (!temp_result->Get("value", &value))
-      return Status(kUnknownError, "Runtime.evaluate missing 'value'");
-    result->reset(value->DeepCopy());
-  }
-  return Status(kOk);
-}
-
-Status ParseCallFunctionResult(const base::Value& temp_result,
-                               scoped_ptr<base::Value>* result) {
-  const base::DictionaryValue* dict;
-  if (!temp_result.GetAsDictionary(&dict))
-    return Status(kUnknownError, "call function result must be a dictionary");
-  int status_code;
-  if (!dict->GetInteger("status", &status_code)) {
-    return Status(kUnknownError,
-                  "call function result missing int 'status'");
-  }
-  if (status_code != kOk)
-    return Status(static_cast<StatusCode>(status_code));
-  const base::Value* unscoped_value;
-  if (!dict->Get("value", &unscoped_value)) {
-    return Status(kUnknownError,
-                  "call function result missing 'value'");
-  }
-  result->reset(unscoped_value->DeepCopy());
-  return Status(kOk);
-}
-
-Status GetNodeIdFromFunction(DevToolsClient* client,
-                             int context_id,
-                             const std::string& function,
-                             const base::ListValue& args,
-                             int* node_id) {
-  std::string json;
-  base::JSONWriter::Write(&args, &json);
-  std::string expression = base::StringPrintf(
-      "(%s).apply(null, [%s, %s, true])",
-      kCallFunctionScript,
-      function.c_str(),
-      json.c_str());
-
-  std::string element_id;
-  Status status = internal::EvaluateScriptAndGetObject(
-      client, context_id, expression, &element_id);
-  if (status.IsError())
-    return status;
-
-  scoped_ptr<base::DictionaryValue> cmd_result;
-  {
-    base::DictionaryValue params;
-    params.SetString("objectId", element_id);
-    status = client->SendCommandAndGetResult(
-        "DOM.requestNode", params, &cmd_result);
-  }
-  {
-    // Release the remote object before doing anything else.
-    base::DictionaryValue params;
-    params.SetString("objectId", element_id);
-    Status release_status =
-        client->SendCommand("Runtime.releaseObject", params);
-    if (release_status.IsError()) {
-      LOG(ERROR) << "Failed to release remote object: "
-                 << release_status.message();
-    }
-  }
-  if (status.IsError())
-    return status;
-
-  if (!cmd_result->GetInteger("nodeId", node_id))
-    return Status(kUnknownError, "DOM.requestNode missing int 'nodeId'");
   return Status(kOk);
 }
 

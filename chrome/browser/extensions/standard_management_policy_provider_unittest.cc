@@ -3,7 +3,7 @@
 // found in the LICENSE file.
 
 #include "base/message_loop.h"
-#include "base/string_number_conversions.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/blacklist.h"
 #include "chrome/browser/extensions/extension_prefs.h"
@@ -29,14 +29,14 @@ class StandardManagementPolicyProviderTest : public testing::Test {
     return prefs_.prefs();
   }
 
-  scoped_refptr<const Extension> CreateExtension(Extension::Location location,
+  scoped_refptr<const Extension> CreateExtension(Manifest::Location location,
                                                  bool required) {
     base::DictionaryValue values;
     values.SetString(extension_manifest_keys::kName, "test");
     values.SetString(extension_manifest_keys::kVersion, "0.1");
     std::string error;
     scoped_refptr<const Extension> extension = Extension::Create(
-        FilePath(), location, values, Extension::NO_FLAGS, &error);
+        base::FilePath(), location, values, Extension::NO_FLAGS, &error);
     CHECK(extension.get()) << error;
     return extension;
   }
@@ -54,7 +54,7 @@ class StandardManagementPolicyProviderTest : public testing::Test {
 // extension required by policy.
 TEST_F(StandardManagementPolicyProviderTest, RequiredExtension) {
   scoped_refptr<const Extension> extension =
-      CreateExtension(Extension::EXTERNAL_POLICY_DOWNLOAD, true);
+      CreateExtension(Manifest::EXTERNAL_POLICY_DOWNLOAD, true);
 
   string16 error16;
   EXPECT_TRUE(provider_.UserMayLoad(extension.get(), &error16));
@@ -72,7 +72,7 @@ TEST_F(StandardManagementPolicyProviderTest, RequiredExtension) {
 // extension required by policy.
 TEST_F(StandardManagementPolicyProviderTest, NotRequiredExtension) {
   scoped_refptr<const Extension> extension =
-      CreateExtension(Extension::INTERNAL, false);
+      CreateExtension(Manifest::INTERNAL, false);
 
   string16 error16;
   EXPECT_TRUE(provider_.UserMayLoad(extension.get(), &error16));

@@ -3,9 +3,16 @@
 // found in the LICENSE file.
 
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
+#include "base/prefs/testing_pref_service.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/autofill/autofill_external_delegate.h"
+#include "chrome/browser/autofill/autofill_manager.h"
 #include "chrome/browser/autofill/test_autofill_external_delegate.h"
+#include "chrome/browser/autofill/test_autofill_manager_delegate.h"
 #include "chrome/browser/ui/autofill/autofill_popup_controller_impl.h"
+#include "chrome/test/base/chrome_render_view_host_test_harness.h"
+#include "chrome/test/base/testing_profile.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebAutofillClient.h"
@@ -14,29 +21,44 @@
 
 using ::testing::_;
 using ::testing::AtLeast;
+using ::testing::NiceMock;
+using base::WeakPtr;
 using WebKit::WebAutofillClient;
 
 namespace {
 
-class MockAutofillExternalDelegate :
-      public autofill::TestAutofillExternalDelegate {
+class MockAutofillExternalDelegate : public AutofillExternalDelegate {
  public:
-  MockAutofillExternalDelegate() : TestAutofillExternalDelegate(NULL, NULL) {};
-  virtual ~MockAutofillExternalDelegate() {};
+  MockAutofillExternalDelegate(content::WebContents* web_contents,
+                               AutofillManager* autofill_manager)
+      : AutofillExternalDelegate(web_contents, autofill_manager) {}
+  virtual ~MockAutofillExternalDelegate() {}
 
   virtual void DidSelectSuggestion(int identifier) OVERRIDE {}
   virtual void RemoveSuggestion(const string16& value, int identifier) OVERRIDE
       {}
   virtual void ClearPreviewedForm() OVERRIDE {}
+};
 
-  MOCK_METHOD0(ControllerDestroyed, void());
+class MockAutofillManagerDelegate
+    : public autofill::TestAutofillManagerDelegate {
+ public:
+  MockAutofillManagerDelegate() {}
+  virtual ~MockAutofillManagerDelegate() {}
+
+  virtual PrefService* GetPrefs() { return &prefs_; }
+
+ private:
+  TestingPrefServiceSimple prefs_;
+
+  DISALLOW_COPY_AND_ASSIGN(MockAutofillManagerDelegate);
 };
 
 class TestAutofillPopupController : public AutofillPopupControllerImpl {
  public:
   explicit TestAutofillPopupController(
       AutofillExternalDelegate* external_delegate,
-      const gfx::Rect& element_bounds)
+      const gfx::RectF& element_bounds)
       : AutofillPopupControllerImpl(external_delegate, NULL, element_bounds) {}
   virtual ~TestAutofillPopupController() {}
 
@@ -76,12 +98,12 @@ class TestAutofillPopupController : public AutofillPopupControllerImpl {
   const gfx::Rect& popup_bounds() const {
     return AutofillPopupControllerImpl::popup_bounds();
   }
-  const gfx::Rect& element_bounds() const {
+  const gfx::RectF& element_bounds() const {
     return AutofillPopupControllerImpl::element_bounds();
   }
 #if !defined(OS_ANDROID)
-  const gfx::Font& name_font() const {
-    return AutofillPopupControllerImpl::name_font();
+  const gfx::Font& GetNameFontForRow(size_t index) const {
+    return AutofillPopupControllerImpl::GetNameFontForRow(index);
   }
   const gfx::Font& subtext_font() const {
     return AutofillPopupControllerImpl::subtext_font();
@@ -92,6 +114,10 @@ class TestAutofillPopupController : public AutofillPopupControllerImpl {
   }
   int GetDesiredPopupHeight() const {
     return AutofillPopupControllerImpl::GetDesiredPopupHeight();
+  }
+
+  WeakPtr<AutofillPopupControllerImpl> GetWeakPtr() {
+    return AutofillPopupControllerImpl::GetWeakPtr();
   }
 
   MOCK_METHOD1(InvalidateRow, void(size_t));
@@ -106,17 +132,35 @@ class TestAutofillPopupController : public AutofillPopupControllerImpl {
 
 }  // namespace
 
-class AutofillPopupControllerUnitTest : public ::testing::Test {
+class AutofillPopupControllerUnitTest : public ChromeRenderViewHostTestHarness {
  public:
   AutofillPopupControllerUnitTest()
-    : autofill_popup_controller_(
-          new testing::NiceMock<TestAutofillPopupController>(
-              &external_delegate_, gfx::Rect())) {}
-  virtual ~AutofillPopupControllerUnitTest() {
+      : manager_delegate_(new MockAutofillManagerDelegate()),
+        autofill_popup_controller_(NULL) {}
+  virtual ~AutofillPopupControllerUnitTest() {}
+
+  virtual void SetUp() OVERRIDE {
+    ChromeRenderViewHostTestHarness::SetUp();
+
+    AutofillManager::CreateForWebContentsAndDelegate(
+        web_contents(), manager_delegate_.get());
+    external_delegate_.reset(
+        new NiceMock<MockAutofillExternalDelegate>(
+            web_contents(), AutofillManager::FromWebContents(web_contents())));
+
+    autofill_popup_controller_ =
+        new testing::NiceMock<TestAutofillPopupController>(
+            external_delegate_.get(), gfx::Rect());
+  }
+
+  virtual void TearDown() OVERRIDE {
     // This will make sure the controller and the view (if any) are both
     // cleaned up.
     if (autofill_popup_controller_)
       autofill_popup_controller_->DoHide();
+
+    external_delegate_.reset();
+    ChromeRenderViewHostTestHarness::TearDown();
   }
 
   AutofillPopupController* popup_controller() {
@@ -124,7 +168,8 @@ class AutofillPopupControllerUnitTest : public ::testing::Test {
   }
 
  protected:
-  testing::NiceMock<MockAutofillExternalDelegate> external_delegate_;
+  scoped_ptr<MockAutofillManagerDelegate> manager_delegate_;
+  scoped_ptr<NiceMock<MockAutofillExternalDelegate> > external_delegate_;
   testing::NiceMock<TestAutofillPopupController>* autofill_popup_controller_;
 };
 
@@ -197,7 +242,7 @@ TEST_F(AutofillPopupControllerUnitTest, RemoveLine) {
   // Generate a popup, so it can be hidden later. It doesn't matter what the
   // external_delegate thinks is being shown in the process, since we are just
   // testing the popup here.
-  autofill::GenerateTestAutofillPopup(&external_delegate_);
+  autofill::GenerateTestAutofillPopup(external_delegate_.get());
 
   // No line is selected so the removal should fail.
   EXPECT_FALSE(autofill_popup_controller_->RemoveSelectedLine());
@@ -216,12 +261,8 @@ TEST_F(AutofillPopupControllerUnitTest, RemoveLine) {
 
   // Remove the last entry. The popup should then be hidden since there are
   // no Autofill entries left.
-  EXPECT_CALL(external_delegate_, ControllerDestroyed());
-
   autofill_popup_controller_->SetSelectedLine(0);
-  // The controller self-deletes here, don't double delete.
   EXPECT_TRUE(autofill_popup_controller_->RemoveSelectedLine());
-  autofill_popup_controller_ = NULL;
 }
 
 TEST_F(AutofillPopupControllerUnitTest, SkipSeparator) {
@@ -245,34 +286,24 @@ TEST_F(AutofillPopupControllerUnitTest, SkipSeparator) {
 }
 
 TEST_F(AutofillPopupControllerUnitTest, GetOrCreate) {
-  MockAutofillExternalDelegate delegate;
+  MockAutofillExternalDelegate delegate(
+      web_contents(), AutofillManager::FromWebContents(web_contents()));
 
-  AutofillPopupControllerImpl* controller =
+  WeakPtr<AutofillPopupControllerImpl> controller =
       AutofillPopupControllerImpl::GetOrCreate(
-          NULL,
-          &delegate,
-          NULL,
-          gfx::Rect());
+          WeakPtr<AutofillPopupControllerImpl>(), &delegate, NULL, gfx::Rect());
   EXPECT_TRUE(controller);
 
-  // This should not inform |delegate| of its destruction.
-  EXPECT_CALL(delegate, ControllerDestroyed()).Times(0);
   controller->Hide();
 
-  controller =
-      AutofillPopupControllerImpl::GetOrCreate(
-          NULL,
-          &delegate,
-          NULL,
-          gfx::Rect());
+  controller = AutofillPopupControllerImpl::GetOrCreate(
+      WeakPtr<AutofillPopupControllerImpl>(), &delegate, NULL, gfx::Rect());
   EXPECT_TRUE(controller);
-  AutofillPopupControllerImpl* controller2 =
-      AutofillPopupControllerImpl::GetOrCreate(
-          controller,
-          &delegate,
-          NULL,
-          gfx::Rect());
-  EXPECT_EQ(controller, controller2);
+
+  WeakPtr<AutofillPopupControllerImpl> controller2 =
+      AutofillPopupControllerImpl::GetOrCreate(controller, &delegate, NULL,
+                                               gfx::Rect());
+  EXPECT_EQ(controller.get(), controller2.get());
   controller->Hide();
 
   testing::NiceMock<TestAutofillPopupController>* test_controller =
@@ -280,10 +311,10 @@ TEST_F(AutofillPopupControllerUnitTest, GetOrCreate) {
                                                          gfx::Rect());
   EXPECT_CALL(*test_controller, Hide());
 
-  gfx::Rect bounds(0, 0, 1, 2);
+  gfx::RectF bounds(0.f, 0.f, 1.f, 2.f);
   AutofillPopupControllerImpl* controller3 =
       AutofillPopupControllerImpl::GetOrCreate(
-          test_controller,
+          test_controller->GetWeakPtr(),
           &delegate,
           NULL,
           bounds);
@@ -292,7 +323,6 @@ TEST_F(AutofillPopupControllerUnitTest, GetOrCreate) {
       static_cast<AutofillPopupController*>(controller3)->element_bounds());
   controller3->Hide();
 
-  EXPECT_CALL(delegate, ControllerDestroyed());
   delete test_controller;
 }
 
@@ -309,9 +339,13 @@ TEST_F(AutofillPopupControllerUnitTest, ElideText) {
   std::vector<string16> icons(2, string16());
   std::vector<int> autofill_ids(2, 0);
 
+  // Show the popup once so we can easily generate the size it needs.
+  autofill_popup_controller_->Show(names, subtexts, icons, autofill_ids);
+
   // Ensure the popup will be too small to display all of the first row.
   int popup_max_width =
-      autofill_popup_controller_->name_font().GetStringWidth(names[0]) +
+      autofill_popup_controller_->GetNameFontForRow(0).GetStringWidth(
+          names[0]) +
       autofill_popup_controller_->subtext_font().GetStringWidth(subtexts[0]) -
       25;
   gfx::Rect popup_bounds = gfx::Rect(0, 0, popup_max_width, 0);
@@ -338,58 +372,64 @@ TEST_F(AutofillPopupControllerUnitTest, GrowPopupInSpace) {
   int desired_width = autofill_popup_controller_->GetDesiredPopupWidth();
   int desired_height = autofill_popup_controller_->GetDesiredPopupHeight();
 
-  // Setup the visible screen space.
-  gfx::Display display(0, gfx::Rect(0, 0,
-                                    desired_width * 2, desired_height * 2));
+  // Set up the visible screen space.
+  gfx::Display display(0,
+                       gfx::Rect(0, 0, desired_width * 2, desired_height * 2));
 
   // Store the possible element bounds and the popup bounds they should result
   // in.
-  std::vector<gfx::Rect> element_bounds;
+  std::vector<gfx::RectF> element_bounds;
   std::vector<gfx::Rect> expected_popup_bounds;
 
   // The popup grows down and to the right.
-  element_bounds.push_back(gfx::Rect(0, 0, 0, 0));
+  element_bounds.push_back(gfx::RectF(0, 0, 0, 0));
   expected_popup_bounds.push_back(
       gfx::Rect(0, 0, desired_width, desired_height));
 
   // The popup grows down and to the left.
-  element_bounds.push_back(gfx::Rect(2 * desired_width, 0, 0, 0));
+  element_bounds.push_back(gfx::RectF(2 * desired_width, 0, 0, 0));
   expected_popup_bounds.push_back(
       gfx::Rect(desired_width, 0, desired_width, desired_height));
 
   // The popup grows up and to the right.
-  element_bounds.push_back(gfx::Rect(0, 2 * desired_height, 0, 0));
+  element_bounds.push_back(gfx::RectF(0, 2 * desired_height, 0, 0));
   expected_popup_bounds.push_back(
       gfx::Rect(0, desired_height, desired_width, desired_height));
 
   // The popup grows up and to the left.
   element_bounds.push_back(
-      gfx::Rect(2 * desired_width, 2 * desired_height, 0, 0));
+      gfx::RectF(2 * desired_width, 2 * desired_height, 0, 0));
   expected_popup_bounds.push_back(
       gfx::Rect(desired_width, desired_height, desired_width, desired_height));
 
   // The popup would be partial off the top and left side of the screen.
   element_bounds.push_back(
-      gfx::Rect(-desired_width / 2, -desired_height / 2, 0, 0));
+      gfx::RectF(-desired_width / 2, -desired_height / 2, 0, 0));
   expected_popup_bounds.push_back(
       gfx::Rect(0, 0, desired_width, desired_height));
 
   // The popup would be partially off the bottom and the right side of
   // the screen.
   element_bounds.push_back(
-      gfx::Rect(desired_width * 1.5, desired_height * 1.5, 0, 0));
-  expected_popup_bounds.push_back(gfx::Rect(
-          desired_width / 2, desired_height /2, desired_width, desired_height));
+      gfx::RectF(desired_width * 1.5, desired_height * 1.5, 0, 0));
+  expected_popup_bounds.push_back(
+      gfx::Rect((desired_width + 1) / 2, (desired_height + 1) / 2,
+                desired_width, desired_height));
 
   for (size_t i = 0; i < element_bounds.size(); ++i) {
-    autofill_popup_controller_ =
-        new testing::NiceMock<TestAutofillPopupController>(&external_delegate_,
-                                                           element_bounds[i]);
-    autofill_popup_controller_->set_display(display);
-    autofill_popup_controller_->Show(names, names, names, autofill_ids);
+    NiceMock<MockAutofillExternalDelegate> external_delegate(
+        web_contents(), AutofillManager::FromWebContents(web_contents()));
+    TestAutofillPopupController* autofill_popup_controller =
+        new TestAutofillPopupController(&external_delegate, element_bounds[i]);
+
+    autofill_popup_controller->set_display(display);
+    autofill_popup_controller->Show(names, names, names, autofill_ids);
 
     EXPECT_EQ(expected_popup_bounds[i].ToString(),
-              autofill_popup_controller_->popup_bounds().ToString()) <<
+              autofill_popup_controller->popup_bounds().ToString()) <<
         "Popup bounds failed to match for test " << i;
+
+    // Hide the controller to delete it.
+    autofill_popup_controller->DoHide();
   }
 }

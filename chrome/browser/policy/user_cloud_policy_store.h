@@ -9,7 +9,7 @@
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/policy/user_cloud_policy_store_base.h"
 
@@ -24,7 +24,7 @@ class UserCloudPolicyStore : public UserCloudPolicyStoreBase {
  public:
   // Creates a policy store associated with the user signed in to this
   // |profile|.
-  UserCloudPolicyStore(Profile* profile, const FilePath& policy_file);
+  UserCloudPolicyStore(Profile* profile, const base::FilePath& policy_file);
   virtual ~UserCloudPolicyStore();
 
   // Factory method for creating a UserCloudPolicyStore for |profile|.
@@ -65,9 +65,6 @@ class UserCloudPolicyStore : public UserCloudPolicyStoreBase {
   // Callback invoked to store the policy after validation has finished.
   void StorePolicyAfterValidation(UserCloudPolicyValidator* validator);
 
-  // Removes any policies that are not supported on desktop platforms.
-  void FilterDisallowedPolicies();
-
   // WeakPtrFactory used to create callbacks for validating and storing policy.
   base::WeakPtrFactory<UserCloudPolicyStore> weak_factory_;
 
@@ -75,7 +72,7 @@ class UserCloudPolicyStore : public UserCloudPolicyStoreBase {
   Profile* profile_;
 
   // Path to file where we store persisted policy.
-  FilePath backing_file_path_;
+  base::FilePath backing_file_path_;
 
   DISALLOW_COPY_AND_ASSIGN(UserCloudPolicyStore);
 };

@@ -17,10 +17,18 @@
 #include "chrome/common/child_process_logging.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_utility_messages.h"
+#include "chrome/common/extensions/api/extension_action/browser_action_handler.h"
+#include "chrome/common/extensions/api/extension_action/page_action_handler.h"
+#include "chrome/common/extensions/api/i18n/default_locale_handler.h"
+#include "chrome/common/extensions/api/icons/icons_handler.h"
+#include "chrome/common/extensions/api/themes/theme_handler.h"
+#include "chrome/common/extensions/background_info.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_l10n_util.h"
+#include "chrome/common/extensions/manifest.h"
 #include "chrome/common/extensions/unpacker.h"
 #include "chrome/common/extensions/update_manifest.h"
+#include "chrome/common/safe_browsing/zip_analyzer.h"
 #include "chrome/common/web_resource/web_resource_unpacker.h"
 #include "chrome/common/zip.h"
 #include "chrome/utility/profile_import_handler.h"
@@ -42,6 +50,20 @@
 #include "ui/gfx/gdi_util.h"
 #endif  // defined(OS_WIN)
 
+namespace {
+
+// Explicitly register all ManifestHandlers needed in the utility process.
+void RegisterExtensionManifestHandlers() {
+  (new extensions::BackgroundManifestHandler)->Register();
+  (new extensions::BrowserActionHandler)->Register();
+  (new extensions::DefaultLocaleHandler)->Register();
+  (new extensions::IconsHandler)->Register();
+  (new extensions::PageActionHandler)->Register();
+  (new extensions::ThemeHandler)->Register();
+}
+
+}  // namespace
+
 namespace chrome {
 
 ChromeContentUtilityClient::ChromeContentUtilityClient() {
@@ -57,7 +79,7 @@ void ChromeContentUtilityClient::UtilityThreadStarted() {
 #if defined(OS_WIN)
   // Load the pdf plugin before the sandbox is turned on. This is for Windows
   // only because we need this DLL only on Windows.
-  FilePath pdf;
+  base::FilePath pdf;
   if (PathService::Get(chrome::FILE_PDF_PLUGIN, &pdf) &&
       file_util::PathExists(pdf)) {
     bool rv = !!LoadLibrary(pdf.value().c_str());
@@ -89,6 +111,9 @@ bool ChromeContentUtilityClient::OnMessageReceived(
     IPC_MESSAGE_HANDLER(ChromeUtilityMsg_ParseJSON, OnParseJSON)
     IPC_MESSAGE_HANDLER(ChromeUtilityMsg_GetPrinterCapsAndDefaults,
                         OnGetPrinterCapsAndDefaults)
+    IPC_MESSAGE_HANDLER(ChromeUtilityMsg_StartupPing, OnStartupPing)
+    IPC_MESSAGE_HANDLER(ChromeUtilityMsg_AnalyzeZipFileForDownloadProtection,
+                        OnAnalyzeZipFileForDownloadProtection)
 
 #if defined(OS_CHROMEOS)
     IPC_MESSAGE_HANDLER(ChromeUtilityMsg_CreateZipFile, OnCreateZipFile)
@@ -110,16 +135,17 @@ bool ChromeContentUtilityClient::Send(IPC::Message* message) {
 }
 
 void ChromeContentUtilityClient::OnUnpackExtension(
-    const FilePath& extension_path,
+    const base::FilePath& extension_path,
     const std::string& extension_id,
     int location,
     int creation_flags) {
-  CHECK(location > extensions::Extension::INVALID);
-  CHECK(location < extensions::Extension::NUM_LOCATIONS);
+  CHECK(location > extensions::Manifest::INVALID_LOCATION);
+  CHECK(location < extensions::Manifest::NUM_LOCATIONS);
+  RegisterExtensionManifestHandlers();
   extensions::Unpacker unpacker(
       extension_path,
       extension_id,
-      static_cast<extensions::Extension::Location>(location),
+      static_cast<extensions::Manifest::Location>(location),
       creation_flags);
   if (unpacker.Run() && unpacker.DumpImagesToFile() &&
       unpacker.DumpMessageCatalogsToFile()) {
@@ -194,15 +220,16 @@ void ChromeContentUtilityClient::OnDecodeImageBase64(
 
 #if defined(OS_CHROMEOS)
 void ChromeContentUtilityClient::OnCreateZipFile(
-    const FilePath& src_dir,
-    const std::vector<FilePath>& src_relative_paths,
+    const base::FilePath& src_dir,
+    const std::vector<base::FilePath>& src_relative_paths,
     const base::FileDescriptor& dest_fd) {
   bool succeeded = true;
 
   // Check sanity of source relative paths. Reject if path is absolute or
   // contains any attempt to reference a parent directory ("../" tricks).
-  for (std::vector<FilePath>::const_iterator iter = src_relative_paths.begin();
-      iter != src_relative_paths.end(); ++iter) {
+  for (std::vector<base::FilePath>::const_iterator iter =
+           src_relative_paths.begin(); iter != src_relative_paths.end();
+       ++iter) {
     if (iter->IsAbsolute() || iter->ReferencesParent()) {
       succeeded = false;
       break;
@@ -222,7 +249,7 @@ void ChromeContentUtilityClient::OnCreateZipFile(
 
 void ChromeContentUtilityClient::OnRenderPDFPagesToMetafile(
     base::PlatformFile pdf_file,
-    const FilePath& metafile_path,
+    const base::FilePath& metafile_path,
     const printing::PdfRenderSettings& pdf_render_settings,
     const std::vector<printing::PageRange>& page_ranges) {
   bool succeeded = false;
@@ -298,7 +325,7 @@ DWORD WINAPI UtilityProcess_GetFontDataPatch(
 
 bool ChromeContentUtilityClient::RenderPDFToWinMetafile(
     base::PlatformFile pdf_file,
-    const FilePath& metafile_path,
+    const base::FilePath& metafile_path,
     const gfx::Rect& render_area,
     int render_dpi,
     bool autorotate,
@@ -308,7 +335,7 @@ bool ChromeContentUtilityClient::RenderPDFToWinMetafile(
   *highest_rendered_page_number = -1;
   *scale_factor = 1.0;
   base::win::ScopedHandle file(pdf_file);
-  FilePath pdf_module_path;
+  base::FilePath pdf_module_path;
   PathService::Get(chrome::FILE_PDF_PLUGIN, &pdf_module_path);
   HMODULE pdf_module = GetModuleHandle(pdf_module_path.value().c_str());
   if (!pdf_module)
@@ -444,6 +471,21 @@ void ChromeContentUtilityClient::OnGetPrinterCapsAndDefaults(
     Send(new ChromeUtilityHostMsg_GetPrinterCapsAndDefaults_Failed(
         printer_name));
   }
+  content::UtilityThread::Get()->ReleaseProcessIfNeeded();
+}
+
+void ChromeContentUtilityClient::OnStartupPing() {
+  Send(new ChromeUtilityHostMsg_ProcessStarted);
+  // Don't release the process, we assume further messages are on the way.
+}
+
+void ChromeContentUtilityClient::OnAnalyzeZipFileForDownloadProtection(
+    IPC::PlatformFileForTransit zip_file) {
+  safe_browsing::zip_analyzer::Results results;
+  safe_browsing::zip_analyzer::AnalyzeZipFile(
+      IPC::PlatformFileForTransitToPlatformFile(zip_file), &results);
+  Send(new ChromeUtilityHostMsg_AnalyzeZipFileForDownloadProtection_Finished(
+      results));
   content::UtilityThread::Get()->ReleaseProcessIfNeeded();
 }
 

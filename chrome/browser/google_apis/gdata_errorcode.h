@@ -11,6 +11,7 @@ namespace google_apis {
 enum GDataErrorCode {
   HTTP_SUCCESS               = 200,
   HTTP_CREATED               = 201,
+  HTTP_NO_CONTENT            = 204,
   HTTP_FOUND                 = 302,
   HTTP_NOT_MODIFIED          = 304,
   HTTP_RESUME_INCOMPLETE     = 308,
@@ -22,6 +23,7 @@ enum GDataErrorCode {
   HTTP_LENGTH_REQUIRED       = 411,
   HTTP_PRECONDITION          = 412,
   HTTP_INTERNAL_SERVER_ERROR = 500,
+  HTTP_BAD_GATEWAY           = 502,
   HTTP_SERVICE_UNAVAILABLE   = 503,
   GDATA_PARSE_ERROR          = -100,
   GDATA_FILE_ERROR           = -101,

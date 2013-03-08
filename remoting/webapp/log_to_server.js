@@ -69,11 +69,13 @@ remoting.LogToServer.prototype.logClientSessionStateChange =
   entry.addWebappVersionField();
   entry.addSessionIdField(this.sessionId);
   // Maybe clear the session start time, and log the session duration.
-  if (remoting.LogToServer.isEndOfSession(state) &&
+  if (remoting.LogToServer.shouldAddDuration(state) &&
       (this.sessionStartTime != 0)) {
     entry.addSessionDurationField(
         (new Date().getTime() - this.sessionStartTime) / 1000.0);
-    this.sessionStartTime = 0;
+    if (remoting.LogToServer.isEndOfSession(state)) {
+      this.sessionStartTime = 0;
+    }
   }
   this.log(entry);
   // Don't accumulate connection statistics across state changes.
@@ -110,7 +112,23 @@ remoting.LogToServer.isStartOfSession = function(state) {
 remoting.LogToServer.isEndOfSession = function(state) {
   return ((state == remoting.ClientSession.State.CLOSED) ||
       (state == remoting.ClientSession.State.FAILED) ||
-      (state == remoting.ClientSession.State.CONNECTION_DROPPED));
+      (state == remoting.ClientSession.State.CONNECTION_DROPPED) ||
+      (state == remoting.ClientSession.State.CONNECTION_CANCELED));
+};
+
+/**
+ * Whether the duration should be added to the log entry for this state.
+ *
+ * @private
+ * @param {remoting.ClientSession.State} state
+ * @return {boolean}
+ */
+remoting.LogToServer.shouldAddDuration = function(state) {
+  // Duration is added to log entries at the end of the session, as well as at
+  // some intermediate states where it is relevant (e.g. to determine how long
+  // it took for a session to become CONNECTED).
+  return (remoting.LogToServer.isEndOfSession(state) ||
+      (state == remoting.ClientSession.State.CONNECTED));
 };
 
 /**
@@ -163,21 +181,18 @@ remoting.LogToServer.prototype.log = function(entry) {
   entry.toDebugLog(1);
   // Store a stanza for the entry.
   this.pendingEntries.push(entry.toStanza());
-  // Stop if there's no connection to the server.
-  if (!remoting.wcs) {
-    return;
-  }
   // Send all pending entries to the server.
   console.log('Sending ' + this.pendingEntries.length + ' log ' +
               ((this.pendingEntries.length == 1) ? 'entry' : 'entries') +
               '  to the server.');
-  var stanza = '<cli:iq to="remoting@bot.talk.google.com" type="set" ' +
+  var stanza = '<cli:iq to="' +
+      remoting.settings.DIRECTORY_BOT_JID + '" type="set" ' +
       'xmlns:cli="jabber:client"><gr:log xmlns:gr="google:remoting">';
   while (this.pendingEntries.length > 0) {
     stanza += /** @type string */ this.pendingEntries.shift();
   }
   stanza += '</gr:log></cli:iq>';
-  remoting.wcs.sendIq(stanza);
+  remoting.wcsSandbox.sendIq(stanza);
 };
 
 /**

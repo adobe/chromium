@@ -151,7 +151,7 @@ class CONTENT_EXPORT ExynosVideoDecodeAccelerator :
     ~GscInputRecord();
     bool at_device;        // held by device.
     int mfc_output;        // MFC output buffer index to recycle when this input
-                           // is complete
+                           // is complete.
   };
 
   // Record for GSC output buffers.
@@ -178,8 +178,8 @@ class CONTENT_EXPORT ExynosVideoDecodeAccelerator :
   // Decode from the buffers queued in decoder_input_queue_.  Calls
   // DecodeBufferInitial() or DecodeBufferContinue() as appropriate.
   void DecodeBufferTask();
-  // Find the extents of one frame fragment to push to HW.
-  bool FindFrameFragment(const uint8* data, size_t size, size_t* endpos);
+  // Advance to the next fragment that begins a frame.
+  bool AdvanceFrameFragment(const uint8* data, size_t size, size_t* endpos);
   // Schedule another DecodeBufferTask() if we're behind.
   void ScheduleDecodeBufferTaskIfNeeded();
 
@@ -333,6 +333,8 @@ class CONTENT_EXPORT ExynosVideoDecodeAccelerator :
   // For H264 decode, hardware requires that we send it frame-sized chunks.
   // We'll need to parse the stream.
   scoped_ptr<content::H264Parser> decoder_h264_parser_;
+  // Set if the decoder has a pending incomplete frame in an input buffer.
+  bool decoder_partial_frame_pending_;
 
   //
   // Hardware state and associated queues.  Since decoder_thread_ services
@@ -347,8 +349,6 @@ class CONTENT_EXPORT ExynosVideoDecodeAccelerator :
 
   // MFC input buffer state.
   bool mfc_input_streamon_;
-  // MFC input buffers, total.
-  int mfc_input_buffer_count_;
   // MFC input buffers enqueued to device.
   int mfc_input_buffer_queued_count_;
   // Input buffers ready to use, as a LIFO since we don't care about ordering.
@@ -358,8 +358,6 @@ class CONTENT_EXPORT ExynosVideoDecodeAccelerator :
 
   // MFC output buffer state.
   bool mfc_output_streamon_;
-  // MFC output buffers, total.
-  int mfc_output_buffer_count_;
   // MFC output buffers enqueued to device.
   int mfc_output_buffer_queued_count_;
   // Output buffers ready to use, as a LIFO since we don't care about ordering.
@@ -378,8 +376,6 @@ class CONTENT_EXPORT ExynosVideoDecodeAccelerator :
 
   // GSC input buffer state.
   bool gsc_input_streamon_;
-  // GSC input buffers, total.
-  int gsc_input_buffer_count_;
   // GSC input buffers enqueued to device.
   int gsc_input_buffer_queued_count_;
   // Input buffers ready to use, as a LIFO since we don't care about ordering.
@@ -389,8 +385,6 @@ class CONTENT_EXPORT ExynosVideoDecodeAccelerator :
 
   // GSC output buffer state.
   bool gsc_output_streamon_;
-  // GSC output buffers, total.
-  int gsc_output_buffer_count_;
   // GSC output buffers enqueued to device.
   int gsc_output_buffer_queued_count_;
   // Output buffers ready to use.  We need a FIFO here.

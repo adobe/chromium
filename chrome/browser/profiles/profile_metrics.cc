@@ -4,7 +4,7 @@
 
 #include "chrome/browser/profiles/profile_metrics.h"
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
 #include "chrome/browser/browser_process.h"
@@ -16,11 +16,11 @@
 namespace {
 
 ProfileMetrics::ProfileType GetProfileType(
-    const FilePath& profile_path) {
+    const base::FilePath& profile_path) {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
   ProfileMetrics::ProfileType metric = ProfileMetrics::SECONDARY;
   ProfileManager* manager = g_browser_process->profile_manager();
-  FilePath user_data_dir;
+  base::FilePath user_data_dir;
   // In unittests, we do not always have a profile_manager so check.
   if (manager) {
     user_data_dir = manager->user_data_dir();
@@ -74,12 +74,17 @@ void ProfileMetrics::LogNumberOfProfiles(ProfileManager* manager,
                              number_of_profiles);
 
     size_t number_of_managed_profiles = 0;
+    size_t number_of_signed_in_profiles = 0;
     for (size_t i = 0; i < number_of_profiles; ++i) {
       if (info_cache.ProfileIsManagedAtIndex(i))
         ++number_of_managed_profiles;
+      if (!info_cache.GetUserNameOfProfileAtIndex(i).empty())
+        ++number_of_signed_in_profiles;
     }
     UMA_HISTOGRAM_COUNTS_100("Profile.NumberOfManagedProfilesOnStartup",
                              number_of_managed_profiles);
+    UMA_HISTOGRAM_COUNTS_100("Profile.NumberOfSignedInProfilesOnStartup",
+                             number_of_signed_in_profiles);
   } else {
     UMA_HISTOGRAM_COUNTS_100("Profile.NumberOfProfilesAfterAddOrDelete",
                              number_of_profiles);
@@ -219,19 +224,19 @@ void ProfileMetrics::LogProfileSyncInfo(ProfileSync metric) {
                             NUM_PROFILE_SYNC_METRICS);
 }
 
-void ProfileMetrics::LogProfileLaunch(const FilePath& profile_path) {
+void ProfileMetrics::LogProfileLaunch(const base::FilePath& profile_path) {
   UMA_HISTOGRAM_ENUMERATION("Profile.LaunchBrowser",
                             GetProfileType(profile_path),
                             NUM_PROFILE_TYPE_METRICS);
 }
 
-void ProfileMetrics::LogProfileSyncSignIn(const FilePath& profile_path) {
+void ProfileMetrics::LogProfileSyncSignIn(const base::FilePath& profile_path) {
   UMA_HISTOGRAM_ENUMERATION("Profile.SyncSignIn",
                             GetProfileType(profile_path),
                             NUM_PROFILE_TYPE_METRICS);
 }
 
-void ProfileMetrics::LogProfileUpdate(const FilePath& profile_path) {
+void ProfileMetrics::LogProfileUpdate(const base::FilePath& profile_path) {
   UMA_HISTOGRAM_ENUMERATION("Profile.Update",
                             GetProfileType(profile_path),
                             NUM_PROFILE_TYPE_METRICS);

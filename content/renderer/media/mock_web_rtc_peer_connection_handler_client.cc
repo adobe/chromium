@@ -5,7 +5,7 @@
 
 #include "base/logging.h"
 #include "base/utf_string_conversions.h"
-#include "third_party/WebKit/Source/Platform/chromium/public/WebMediaStreamDescriptor.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebMediaStream.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebString.h"
 
 namespace content {
@@ -14,7 +14,8 @@ MockWebRTCPeerConnectionHandlerClient::
 MockWebRTCPeerConnectionHandlerClient()
     : renegotiate_(false),
       signaling_state_(SignalingStateStable),
-      ice_state_(ICEStateNew),
+      ice_connection_state_(ICEConnectionStateStarting),
+      ice_gathering_state_(ICEGatheringStateNew),
       candidate_mline_index_(-1) {
 }
 
@@ -43,19 +44,28 @@ void MockWebRTCPeerConnectionHandlerClient::didChangeSignalingState(
   signaling_state_ = state;
 }
 
-void MockWebRTCPeerConnectionHandlerClient::didChangeICEState(ICEState state) {
-  ice_state_ = state;
+
+void MockWebRTCPeerConnectionHandlerClient::didChangeICEConnectionState(
+    ICEConnectionState state) {
+  ice_connection_state_ = state;
+}
+
+void MockWebRTCPeerConnectionHandlerClient::didChangeICEGatheringState(
+    ICEGatheringState state) {
+  ice_gathering_state_ = state;
 }
 
 void MockWebRTCPeerConnectionHandlerClient::didAddRemoteStream(
-    const WebKit::WebMediaStreamDescriptor& stream_descriptor) {
+    const WebKit::WebMediaStream& stream_descriptor) {
   stream_label_ = UTF16ToUTF8(stream_descriptor.label());
+  remote_steam_ = stream_descriptor;
 }
 
 void MockWebRTCPeerConnectionHandlerClient::didRemoveRemoteStream(
-    const WebKit::WebMediaStreamDescriptor& stream_descriptor) {
+    const WebKit::WebMediaStream& stream_descriptor) {
   DCHECK(stream_label_ == UTF16ToUTF8(stream_descriptor.label()));
   stream_label_.clear();
+  remote_steam_.reset();
 }
 
 }  // namespace content

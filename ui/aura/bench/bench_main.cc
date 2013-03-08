@@ -13,7 +13,6 @@
 #include "third_party/khronos/GLES2/gl2.h"
 #include "third_party/skia/include/core/SkXfermode.h"
 #include "ui/aura/client/default_capture_client.h"
-#include "ui/aura/display_util.h"
 #include "ui/aura/env.h"
 #include "ui/aura/focus_manager.h"
 #include "ui/aura/root_window.h"
@@ -96,7 +95,8 @@ class BenchCompositorObserver : public ui::CompositorObserver {
 
   virtual void OnCompositingDidCommit(ui::Compositor* compositor) OVERRIDE {}
 
-  virtual void OnCompositingStarted(Compositor* compositor) OVERRIDE {}
+  virtual void OnCompositingStarted(Compositor* compositor,
+                                    base::TimeTicks start_time) OVERRIDE {}
 
   virtual void OnCompositingEnded(Compositor* compositor) OVERRIDE {
     if (start_time_.is_null()) {
@@ -121,6 +121,11 @@ class BenchCompositorObserver : public ui::CompositorObserver {
 
   virtual void OnCompositingLockStateChanged(
       Compositor* compositor) OVERRIDE {}
+
+  virtual void OnUpdateVSyncParameters(ui::Compositor* compositor,
+                                       base::TimeTicks timebase,
+                                       base::TimeDelta interval) OVERRIDE {
+  }
 
   virtual void Draw() {}
 
@@ -299,11 +304,11 @@ int main(int argc, char** argv) {
   MessageLoop message_loop(MessageLoop::TYPE_UI);
   ui::CompositorTestSupport::Initialize();
   aura::Env::GetInstance();
-  aura::SetUseFullscreenHostWindow(true);
-  aura::TestScreen test_screen;
-  gfx::Screen::SetScreenInstance(gfx::SCREEN_TYPE_NATIVE, &test_screen);
+  scoped_ptr<aura::TestScreen> test_screen(
+      aura::TestScreen::CreateFullscreen());
+  gfx::Screen::SetScreenInstance(gfx::SCREEN_TYPE_NATIVE, test_screen.get());
   scoped_ptr<aura::RootWindow> root_window(
-      test_screen.CreateRootWindowForPrimaryDisplay());
+      test_screen->CreateRootWindowForPrimaryDisplay());
   aura::client::SetCaptureClient(
       root_window.get(),
       new aura::client::DefaultCaptureClient(root_window.get()));

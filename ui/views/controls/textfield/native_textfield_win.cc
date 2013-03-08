@@ -356,11 +356,10 @@ bool NativeTextfieldWin::IsIMEComposing() const {
   return composition_size > 0;
 }
 
-void NativeTextfieldWin::GetSelectedRange(ui::Range* range) const {
+ui::Range NativeTextfieldWin::GetSelectedRange() const {
   // TODO(tommi): Implement.
   NOTIMPLEMENTED();
-  range->set_start(0);
-  range->set_end(0);
+  return ui::Range();
 }
 
 void NativeTextfieldWin::SelectRange(const ui::Range& range) {
@@ -368,9 +367,10 @@ void NativeTextfieldWin::SelectRange(const ui::Range& range) {
   NOTIMPLEMENTED();
 }
 
-void NativeTextfieldWin::GetSelectionModel(gfx::SelectionModel* sel) const {
+gfx::SelectionModel NativeTextfieldWin::GetSelectionModel() const {
   // TODO(tommi): Implement.
   NOTIMPLEMENTED();
+  return gfx::SelectionModel();
 }
 
 void NativeTextfieldWin::SelectSelectionModel(const gfx::SelectionModel& sel) {
@@ -413,11 +413,21 @@ ui::TextInputClient* NativeTextfieldWin::GetTextInputClient() {
   return NULL;
 }
 
-void NativeTextfieldWin::ApplyStyleRange(const gfx::StyleRange& style) {
+void NativeTextfieldWin::SetColor(SkColor value) {
   NOTREACHED();
 }
 
-void NativeTextfieldWin::ApplyDefaultStyle() {
+void NativeTextfieldWin::ApplyColor(SkColor value, const ui::Range& range) {
+  NOTREACHED();
+}
+
+void NativeTextfieldWin::SetStyle(gfx::TextStyle style, bool value) {
+  NOTREACHED();
+}
+
+void NativeTextfieldWin::ApplyStyle(gfx::TextStyle style,
+                                    bool value,
+                                    const ui::Range& range) {
   NOTREACHED();
 }
 

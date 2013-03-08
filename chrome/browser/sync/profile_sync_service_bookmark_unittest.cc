@@ -12,14 +12,14 @@
 #include <vector>
 
 #include "base/command_line.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/location.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "base/string16.h"
-#include "base/string_number_conversions.h"
 #include "base/string_util.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/bookmarks/base_bookmark_model_observer.h"
@@ -128,7 +128,7 @@ class FakeServerChange {
       EXPECT_FALSE(node.GetFirstChildId());
       node.GetMutableEntryForTest()->Put(syncer::syncable::SERVER_IS_DEL,
                                          true);
-      node.Remove();
+      node.Tombstone();
     }
     {
       // Verify the deletion.
@@ -236,7 +236,7 @@ class ExtensiveChangesBookmarkModelObserver : public BaseBookmarkModelObserver {
     ++completed_count_;
   }
 
-  void BookmarkModelChanged() {}
+  virtual void BookmarkModelChanged() OVERRIDE {}
 
   int get_started() const {
     return started_count_;
@@ -981,7 +981,7 @@ TEST_F(ProfileSyncServiceBookmarkTest, UnrecoverableErrorSuspendsService) {
     syncer::WriteTransaction trans(FROM_HERE, test_user_share_.user_share());
     syncer::WriteNode sync_node(&trans);
     ASSERT_TRUE(InitSyncNodeFromChromeNode(node, &sync_node));
-    sync_node.Remove();
+    sync_node.Tombstone();
   }
   // The models don't match at this point, but the ProfileSyncService
   // doesn't know it yet.

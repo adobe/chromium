@@ -9,11 +9,11 @@
 
 #include "base/basictypes.h"
 #include "base/command_line.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
+#include "base/path_service.h"
 #include "base/stl_util.h"
 #include "base/string_util.h"
-#include "base/path_service.h"
 #include "chrome/browser/diagnostics/diagnostics_test.h"
 #include "chrome/browser/diagnostics/recon_diagnostics.h"
 #include "chrome/browser/diagnostics/sqlite_diagnostics.h"
@@ -35,19 +35,19 @@ class DiagnosticsModelImpl : public DiagnosticsModel {
   DiagnosticsModelImpl() : tests_run_(0) {
   }
 
-  ~DiagnosticsModelImpl() {
+  virtual ~DiagnosticsModelImpl() {
     STLDeleteElements(&tests_);
   }
 
-  virtual int GetTestRunCount() {
+  virtual int GetTestRunCount() OVERRIDE {
     return tests_run_;
   }
 
-  virtual int GetTestAvailableCount() {
+  virtual int GetTestAvailableCount() OVERRIDE {
     return tests_.size();
   }
 
-  virtual void RunAll(DiagnosticsModel::Observer* observer) {
+  virtual void RunAll(DiagnosticsModel::Observer* observer) OVERRIDE {
     size_t test_count = tests_.size();
     for (size_t ix = 0; ix != test_count; ++ix) {
       bool do_next = RunTest(tests_[ix], observer, ix);
@@ -58,7 +58,7 @@ class DiagnosticsModelImpl : public DiagnosticsModel {
     observer->OnDoneAll(this);
   }
 
-  virtual TestInfo& GetTest(size_t id) {
+  virtual TestInfo& GetTest(size_t id) OVERRIDE {
     return *tests_[id];
   }
 
@@ -165,7 +165,8 @@ class DiagnosticsModelPosix : public DiagnosticsModelImpl {
 }  // namespace
 
 DiagnosticsModel* MakeDiagnosticsModel(const CommandLine& cmdline) {
-  FilePath user_data_dir = cmdline.GetSwitchValuePath(switches::kUserDataDir);
+  base::FilePath user_data_dir =
+      cmdline.GetSwitchValuePath(switches::kUserDataDir);
   if (!user_data_dir.empty())
     PathService::Override(chrome::DIR_USER_DATA, user_data_dir);
 #if defined(OS_WIN)

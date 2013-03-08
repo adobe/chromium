@@ -8,9 +8,9 @@
 
 #include "base/basictypes.h"
 #include "base/bind.h"
-#include "base/files/file_path_watcher.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
+#include "base/files/file_path_watcher.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/metrics/histogram.h"
 #include "base/time.h"
@@ -28,7 +28,8 @@ namespace internal {
 
 namespace {
 
-const FilePath::CharType* kFilePathHosts = FILE_PATH_LITERAL("/etc/hosts");
+const base::FilePath::CharType* kFilePathHosts =
+    FILE_PATH_LITERAL("/etc/hosts");
 
 #if defined(OS_MACOSX)
 // From 10.7.3 configd-395.10/dnsinfo/dnsinfo.h
@@ -50,7 +51,7 @@ class ConfigWatcher {
 #define _PATH_RESCONF "/etc/resolv.conf"
 #endif
 
-static const FilePath::CharType* kFilePathConfig =
+static const base::FilePath::CharType* kFilePathConfig =
     FILE_PATH_LITERAL(_PATH_RESCONF);
 
 class ConfigWatcher {
@@ -59,13 +60,13 @@ class ConfigWatcher {
 
   bool Watch(const CallbackType& callback) {
     callback_ = callback;
-    return watcher_.Watch(FilePath(kFilePathConfig), false,
+    return watcher_.Watch(base::FilePath(kFilePathConfig), false,
                           base::Bind(&ConfigWatcher::OnCallback,
                                      base::Unretained(this)));
   }
 
  private:
-  void OnCallback(const FilePath& path, bool error) {
+  void OnCallback(const base::FilePath& path, bool error) {
     callback_.Run(!error);
   }
 
@@ -109,31 +110,52 @@ ConfigParsePosixResult ReadDnsConfig(DnsConfig* config) {
 
 class DnsConfigServicePosix::Watcher {
  public:
-  explicit Watcher(DnsConfigServicePosix* service) : service_(service) {}
+  explicit Watcher(DnsConfigServicePosix* service)
+      : weak_factory_(this),
+        service_(service) {}
   ~Watcher() {}
 
   bool Watch() {
     bool success = true;
-    if (!config_watcher_.Watch(
-        base::Bind(&DnsConfigServicePosix::OnConfigChanged,
-                   base::Unretained(service_)))) {
+    if (!config_watcher_.Watch(base::Bind(&Watcher::OnConfigChanged,
+                                          base::Unretained(this)))) {
       LOG(ERROR) << "DNS config watch failed to start.";
       success = false;
+      UMA_HISTOGRAM_ENUMERATION("AsyncDNS.WatchStatus",
+                                DNS_CONFIG_WATCH_FAILED_TO_START_CONFIG,
+                                DNS_CONFIG_WATCH_MAX);
     }
-    if (!hosts_watcher_.Watch(FilePath(kFilePathHosts), false,
+    if (!hosts_watcher_.Watch(base::FilePath(kFilePathHosts), false,
                               base::Bind(&Watcher::OnHostsChanged,
                                          base::Unretained(this)))) {
       LOG(ERROR) << "DNS hosts watch failed to start.";
       success = false;
+      UMA_HISTOGRAM_ENUMERATION("AsyncDNS.WatchStatus",
+                                DNS_CONFIG_WATCH_FAILED_TO_START_HOSTS,
+                                DNS_CONFIG_WATCH_MAX);
     }
     return success;
   }
 
  private:
-  void OnHostsChanged(const FilePath& path, bool error) {
+  void OnConfigChanged(bool succeeded) {
+    // Ignore transient flutter of resolv.conf by delaying the signal a bit.
+    const base::TimeDelta kDelay = base::TimeDelta::FromMilliseconds(50);
+    MessageLoop::current()->PostDelayedTask(
+        FROM_HERE,
+        base::Bind(&Watcher::OnConfigChangedDelayed,
+                   weak_factory_.GetWeakPtr(),
+                   succeeded),
+        kDelay);
+  }
+  void OnConfigChangedDelayed(bool succeeded) {
+    service_->OnConfigChanged(succeeded);
+  }
+  void OnHostsChanged(const base::FilePath& path, bool error) {
     service_->OnHostsChanged(!error);
   }
 
+  base::WeakPtrFactory<Watcher> weak_factory_;
   DnsConfigServicePosix* service_;
   ConfigWatcher config_watcher_;
   base::FilePathWatcher hosts_watcher_;
@@ -205,8 +227,7 @@ class DnsConfigServicePosix::HostsReader : public SerialWorker {
   }
 
   DnsConfigServicePosix* service_;
-  const FilePath path_;
-  const CallbackType callback_;
+  const base::FilePath path_;
   // Written in DoWork, read in OnWorkFinished, no locking necessary.
   DnsHosts hosts_;
   bool success_;
@@ -231,6 +252,8 @@ void DnsConfigServicePosix::ReadNow() {
 bool DnsConfigServicePosix::StartWatching() {
   // TODO(szym): re-start watcher if that makes sense. http://crbug.com/116139
   watcher_.reset(new Watcher(this));
+  UMA_HISTOGRAM_ENUMERATION("AsyncDNS.WatchStatus", DNS_CONFIG_WATCH_STARTED,
+                            DNS_CONFIG_WATCH_MAX);
   return watcher_->Watch();
 }
 
@@ -241,6 +264,9 @@ void DnsConfigServicePosix::OnConfigChanged(bool succeeded) {
   } else {
     LOG(ERROR) << "DNS config watch failed.";
     set_watch_failed(true);
+    UMA_HISTOGRAM_ENUMERATION("AsyncDNS.WatchStatus",
+                              DNS_CONFIG_WATCH_FAILED_CONFIG,
+                              DNS_CONFIG_WATCH_MAX);
   }
 }
 
@@ -251,6 +277,9 @@ void DnsConfigServicePosix::OnHostsChanged(bool succeeded) {
   } else {
     LOG(ERROR) << "DNS hosts watch failed.";
     set_watch_failed(true);
+    UMA_HISTOGRAM_ENUMERATION("AsyncDNS.WatchStatus",
+                              DNS_CONFIG_WATCH_FAILED_HOSTS,
+                              DNS_CONFIG_WATCH_MAX);
   }
 }
 

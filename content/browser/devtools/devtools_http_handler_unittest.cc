@@ -58,10 +58,16 @@ class DummyDelegate : public DevToolsHttpHandlerDelegate {
  public:
   virtual std::string GetDiscoveryPageHTML() OVERRIDE { return ""; }
   virtual bool BundlesFrontendResources() OVERRIDE { return true; }
-  virtual FilePath GetDebugFrontendDir() OVERRIDE { return FilePath(); }
-  virtual std::string GetPageThumbnailData(const GURL& url) { return ""; }
-  virtual RenderViewHost* CreateNewTarget() { return NULL; }
-  virtual TargetType GetTargetType(RenderViewHost*) { return kTargetTypeTab; }
+  virtual base::FilePath GetDebugFrontendDir() OVERRIDE {
+    return base::FilePath();
+  }
+  virtual std::string GetPageThumbnailData(const GURL& url) OVERRIDE {
+    return "";
+  }
+  virtual RenderViewHost* CreateNewTarget() OVERRIDE { return NULL; }
+  virtual TargetType GetTargetType(RenderViewHost*) OVERRIDE {
+    return kTargetTypeTab;
+  }
 };
 
 }

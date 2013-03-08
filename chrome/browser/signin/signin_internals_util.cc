@@ -7,7 +7,7 @@
 #include <sstream>
 
 #include "base/logging.h"
-#include "base/string_number_conversions.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/extensions/extension_messages.h"
@@ -32,10 +32,8 @@ const char kObfuscatedGaiaIdFetcherToken[] = "ObfuscatedGaiaIdFetcher";
 const char kOAuth2MintTokenFlowToken[] = "OAuth2MintTokenFlow";
 const char* kTokenPrefsArray[] = {
   GaiaConstants::kSyncService,
-  GaiaConstants::kDeviceManagementService,
   GaiaConstants::kLSOService,
   GaiaConstants::kGaiaOAuth2LoginRefreshToken,
-  GaiaConstants::kGaiaOAuth2LoginAccessToken,
   kChromeToMobileToken,
   kAppNotifyChannelSetupToken,
   kOperationsBaseToken,

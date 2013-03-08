@@ -4,18 +4,18 @@
 
 #include "chrome/browser/ui/chrome_select_file_policy.h"
 
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/message_loop.h"
+#include "base/prefs/pref_service.h"
 #include "base/string16.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/prefs/browser_prefs.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/pref_names.h"
+#include "chrome/test/base/scoped_testing_local_state.h"
 #include "chrome/test/base/testing_browser_process.h"
-#include "chrome/test/base/testing_pref_service.h"
 #include "content/public/test/test_browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/shell_dialogs/select_file_dialog.h"
@@ -37,7 +37,7 @@ class FileSelectionUser : public ui::SelectFileDialog::Listener {
       : file_selection_initialisation_in_progress(false) {
   }
 
-  ~FileSelectionUser() {
+  virtual ~FileSelectionUser() {
     if (select_file_dialog_.get())
       select_file_dialog_->ListenerDestroyed();
   }
@@ -47,7 +47,7 @@ class FileSelectionUser : public ui::SelectFileDialog::Listener {
     select_file_dialog_ = ui::SelectFileDialog::Create(
         this, new ChromeSelectFilePolicy(NULL));
 
-    const FilePath file_path;
+    const base::FilePath file_path;
     const string16 title=string16();
 
     file_selection_initialisation_in_progress = true;
@@ -63,16 +63,16 @@ class FileSelectionUser : public ui::SelectFileDialog::Listener {
   }
 
   // ui::SelectFileDialog::Listener implementation.
-  virtual void FileSelected(const FilePath& path,
-                            int index, void* params){
+  virtual void FileSelected(const base::FilePath& path,
+                            int index, void* params) OVERRIDE{
     ASSERT_FALSE(file_selection_initialisation_in_progress);
   }
   virtual void MultiFilesSelected(
-      const std::vector<FilePath>& files,
-      void* params) {
+      const std::vector<base::FilePath>& files,
+      void* params) OVERRIDE {
     ASSERT_FALSE(file_selection_initialisation_in_progress);
   }
-  virtual void FileSelectionCanceled(void* params) {
+  virtual void FileSelectionCanceled(void* params) OVERRIDE {
     ASSERT_FALSE(file_selection_initialisation_in_progress);
   }
 

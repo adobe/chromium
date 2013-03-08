@@ -5,11 +5,11 @@
 #include "ui/base/win/shell.h"
 
 #include <dwmapi.h>
-#include <shellapi.h>
 #include <shlobj.h>  // Must be before propkey.
 #include <propkey.h>
+#include <shellapi.h>
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/native_library.h"
 #include "base/string_util.h"
 #include "base/win/metro.h"
@@ -86,12 +86,12 @@ bool OpenAnyViaShell(const string16& full_path,
   return false;
 }
 
-bool OpenItemViaShell(const FilePath& full_path) {
+bool OpenItemViaShell(const base::FilePath& full_path) {
   return OpenAnyViaShell(full_path.value(), full_path.DirName().value(),
                          string16(), 0);
 }
 
-bool OpenItemViaShellNoZoneCheck(const FilePath& full_path) {
+bool OpenItemViaShellNoZoneCheck(const base::FilePath& full_path) {
   return OpenAnyViaShell(full_path.value(), string16(), string16(),
                          SEE_MASK_NOZONECHECKS | SEE_MASK_FLAG_DDEWAIT);
 }

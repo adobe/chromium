@@ -17,8 +17,8 @@
 #include <set>
 
 #include "base/base_paths.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/path_service.h"
 #include "base/test/test_file_util.h"
@@ -33,6 +33,8 @@
 
 // This macro helps avoid wrapped lines in the test structs.
 #define FPL(x) FILE_PATH_LITERAL(x)
+
+using base::FilePath;
 
 namespace {
 
@@ -1149,8 +1151,8 @@ TEST_F(FileUtilTest, MoveNew) {
   ASSERT_TRUE(file_util::PathExists(dir_name_from));
 
   // Create a file under the directory
-  FilePath file_name_from =
-      dir_name_from.Append(FILE_PATH_LITERAL("Move_Test_File.txt"));
+  FilePath txt_file_name(FILE_PATH_LITERAL("Move_Test_File.txt"));
+  FilePath file_name_from = dir_name_from.Append(txt_file_name);
   CreateTextFile(file_name_from, L"Gooooooooooooooooooooogle");
   ASSERT_TRUE(file_util::PathExists(file_name_from));
 
@@ -1168,6 +1170,17 @@ TEST_F(FileUtilTest, MoveNew) {
   EXPECT_FALSE(file_util::PathExists(dir_name_from));
   EXPECT_FALSE(file_util::PathExists(file_name_from));
   EXPECT_TRUE(file_util::PathExists(dir_name_to));
+  EXPECT_TRUE(file_util::PathExists(file_name_to));
+
+  // Test path traversal.
+  file_name_from = dir_name_to.Append(txt_file_name);
+  file_name_to = dir_name_to.Append(FILE_PATH_LITERAL(".."));
+  file_name_to = file_name_to.Append(txt_file_name);
+  EXPECT_FALSE(file_util::Move(file_name_from, file_name_to));
+  EXPECT_TRUE(file_util::PathExists(file_name_from));
+  EXPECT_FALSE(file_util::PathExists(file_name_to));
+  EXPECT_TRUE(file_util::MoveUnsafe(file_name_from, file_name_to));
+  EXPECT_FALSE(file_util::PathExists(file_name_from));
   EXPECT_TRUE(file_util::PathExists(file_name_to));
 }
 
@@ -1466,6 +1479,43 @@ TEST_F(FileUtilTest, CopyFileWithCopyDirectoryRecursiveToExistingDirectory) {
   EXPECT_TRUE(file_util::PathExists(file_name_to));
 }
 
+TEST_F(FileUtilTest, CopyDirectoryWithTrailingSeparators) {
+  // Create a directory.
+  FilePath dir_name_from =
+      temp_dir_.path().Append(FILE_PATH_LITERAL("Copy_From_Subdir"));
+  file_util::CreateDirectory(dir_name_from);
+  ASSERT_TRUE(file_util::PathExists(dir_name_from));
+
+  // Create a file under the directory.
+  FilePath file_name_from =
+      dir_name_from.Append(FILE_PATH_LITERAL("Copy_Test_File.txt"));
+  CreateTextFile(file_name_from, L"Gooooooooooooooooooooogle");
+  ASSERT_TRUE(file_util::PathExists(file_name_from));
+
+  // Copy the directory recursively.
+  FilePath dir_name_to =
+      temp_dir_.path().Append(FILE_PATH_LITERAL("Copy_To_Subdir"));
+  FilePath file_name_to =
+      dir_name_to.Append(FILE_PATH_LITERAL("Copy_Test_File.txt"));
+
+  // Create from path with trailing separators.
+#if defined(OS_WIN)
+  FilePath from_path =
+      temp_dir_.path().Append(FILE_PATH_LITERAL("Copy_From_Subdir\\\\\\"));
+#elif defined (OS_POSIX)
+  FilePath from_path =
+      temp_dir_.path().Append(FILE_PATH_LITERAL("Copy_From_Subdir///"));
+#endif
+
+  EXPECT_TRUE(file_util::CopyDirectory(from_path, dir_name_to, true));
+
+  // Check everything has been copied.
+  EXPECT_TRUE(file_util::PathExists(dir_name_from));
+  EXPECT_TRUE(file_util::PathExists(file_name_from));
+  EXPECT_TRUE(file_util::PathExists(dir_name_to));
+  EXPECT_TRUE(file_util::PathExists(file_name_to));
+}
+
 TEST_F(FileUtilTest, CopyFile) {
   // Create a directory
   FilePath dir_name_from =
@@ -1488,7 +1538,8 @@ TEST_F(FileUtilTest, CopyFile) {
   FilePath dest_file2(dir_name_from);
   dest_file2 = dest_file2.AppendASCII("..");
   dest_file2 = dest_file2.AppendASCII("DestFile.txt");
-  ASSERT_TRUE(file_util::CopyFile(file_name_from, dest_file2));
+  ASSERT_FALSE(file_util::CopyFile(file_name_from, dest_file2));
+  ASSERT_TRUE(file_util::CopyFileUnsafe(file_name_from, dest_file2));
 
   FilePath dest_file2_test(dir_name_from);
   dest_file2_test = dest_file2_test.DirName();
@@ -1502,41 +1553,6 @@ TEST_F(FileUtilTest, CopyFile) {
   EXPECT_TRUE(file_util::PathExists(dest_file2_test));
   EXPECT_TRUE(file_util::PathExists(dest_file2));
 }
-
-// TODO(erikkay): implement
-#if defined(OS_WIN)
-TEST_F(FileUtilTest, GetFileCreationLocalTime) {
-  FilePath file_name = temp_dir_.path().Append(L"Test File.txt");
-
-  SYSTEMTIME start_time;
-  GetLocalTime(&start_time);
-  base::PlatformThread::Sleep(base::TimeDelta::FromMilliseconds(100));
-  CreateTextFile(file_name, L"New file!");
-  base::PlatformThread::Sleep(base::TimeDelta::FromMilliseconds(100));
-  SYSTEMTIME end_time;
-  GetLocalTime(&end_time);
-
-  SYSTEMTIME file_creation_time;
-  file_util::GetFileCreationLocalTime(file_name.value(), &file_creation_time);
-
-  FILETIME start_filetime;
-  SystemTimeToFileTime(&start_time, &start_filetime);
-  FILETIME end_filetime;
-  SystemTimeToFileTime(&end_time, &end_filetime);
-  FILETIME file_creation_filetime;
-  SystemTimeToFileTime(&file_creation_time, &file_creation_filetime);
-
-  EXPECT_EQ(-1, CompareFileTime(&start_filetime, &file_creation_filetime)) <<
-    "start time: " << FileTimeAsUint64(start_filetime) << ", " <<
-    "creation time: " << FileTimeAsUint64(file_creation_filetime);
-
-  EXPECT_EQ(-1, CompareFileTime(&file_creation_filetime, &end_filetime)) <<
-    "creation time: " << FileTimeAsUint64(file_creation_filetime) << ", " <<
-    "end time: " << FileTimeAsUint64(end_filetime);
-
-  ASSERT_TRUE(DeleteFile(file_name.value().c_str()));
-}
-#endif
 
 // file_util winds up using autoreleased objects on the Mac, so this needs
 // to be a PlatformTest.

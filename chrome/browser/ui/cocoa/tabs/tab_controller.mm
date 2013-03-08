@@ -8,6 +8,7 @@
 
 #include "base/mac/bundle_locations.h"
 #include "base/mac/mac_util.h"
+#import "chrome/browser/themes/theme_properties.h"
 #import "chrome/browser/themes/theme_service.h"
 #import "chrome/browser/ui/cocoa/menu_controller.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_controller_target.h"
@@ -41,16 +42,18 @@ class MenuDelegate : public ui::SimpleMenuModel::Delegate {
         owner_(owner) {}
 
   // Overridden from ui::SimpleMenuModel::Delegate
-  virtual bool IsCommandIdChecked(int command_id) const { return false; }
-  virtual bool IsCommandIdEnabled(int command_id) const {
+  virtual bool IsCommandIdChecked(int command_id) const OVERRIDE {
+    return false;
+  }
+  virtual bool IsCommandIdEnabled(int command_id) const OVERRIDE {
     TabStripModel::ContextMenuCommand command =
         static_cast<TabStripModel::ContextMenuCommand>(command_id);
     return [target_ isCommandEnabled:command forController:owner_];
   }
   virtual bool GetAcceleratorForCommandId(
       int command_id,
-      ui::Accelerator* accelerator) { return false; }
-  virtual void ExecuteCommand(int command_id) {
+      ui::Accelerator* accelerator) OVERRIDE { return false; }
+  virtual void ExecuteCommand(int command_id) OVERRIDE {
     TabStripModel::ContextMenuCommand command =
         static_cast<TabStripModel::ContextMenuCommand>(command_id);
     [target_ commandDispatch:command forController:owner_];
@@ -110,7 +113,7 @@ class MenuDelegate : public ui::SimpleMenuModel::Delegate {
 
     // Close button.
     closeButton_.reset([[HoverCloseButton alloc] initWithFrame:
-        NSMakeRect(125, 4, 18, 18)]);
+        NSMakeRect(127, 4, 18, 18)]);
     [closeButton_ setAutoresizingMask:NSViewMinXMargin];
     [closeButton_ setTarget:self];
     [closeButton_ setAction:@selector(closeTab:)];
@@ -356,12 +359,12 @@ class MenuDelegate : public ui::SimpleMenuModel::Delegate {
   ui::ThemeProvider* theme = [[[self view] window] themeProvider];
   if (theme && ![self selected]) {
     titleColor =
-        theme->GetNSColor(ThemeService::COLOR_BACKGROUND_TAB_TEXT,
+        theme->GetNSColor(ThemeProperties::COLOR_BACKGROUND_TAB_TEXT,
                           true);
   }
   // Default to the selected text color unless told otherwise.
   if (theme && !titleColor) {
-    titleColor = theme->GetNSColor(ThemeService::COLOR_TAB_TEXT,
+    titleColor = theme->GetNSColor(ThemeProperties::COLOR_TAB_TEXT,
                                    true);
   }
   [titleView_ setTextColor:titleColor ? titleColor : [NSColor textColor]];

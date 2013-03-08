@@ -14,61 +14,61 @@ namespace test {
 class LeakyBucketTest : public ::testing::Test {
  protected:
   void SetUp() {
-    leaky_bucket_.reset(new LeakyBucket(&clock_, 0));
+    leaky_bucket_.reset(new LeakyBucket(QuicBandwidth::Zero()));
   }
   MockClock clock_;
   scoped_ptr<LeakyBucket> leaky_bucket_;
 };
 
 TEST_F(LeakyBucketTest, Basic) {
-  int bytes_per_second = 200000;
-  leaky_bucket_->SetDrainingRate(bytes_per_second);
-  leaky_bucket_->Add(2000);
-  EXPECT_EQ(2000u, leaky_bucket_->BytesPending());
+  QuicBandwidth draining_rate = QuicBandwidth::FromBytesPerSecond(200000);
+  leaky_bucket_->SetDrainingRate(clock_.Now(), draining_rate);
+  leaky_bucket_->Add(clock_.Now(), 2000);
+  EXPECT_EQ(2000u, leaky_bucket_->BytesPending(clock_.Now()));
   EXPECT_EQ(QuicTime::Delta::FromMilliseconds(10),
-            leaky_bucket_->TimeRemaining());
+            leaky_bucket_->TimeRemaining(clock_.Now()));
   clock_.AdvanceTime(QuicTime::Delta::FromMilliseconds(5));
-  EXPECT_EQ(1000u, leaky_bucket_->BytesPending());
+  EXPECT_EQ(1000u, leaky_bucket_->BytesPending(clock_.Now()));
   EXPECT_EQ(QuicTime::Delta::FromMilliseconds(5),
-            leaky_bucket_->TimeRemaining());
+            leaky_bucket_->TimeRemaining(clock_.Now()));
   clock_.AdvanceTime(QuicTime::Delta::FromMilliseconds(5));
-  EXPECT_EQ(0u, leaky_bucket_->BytesPending());
-  EXPECT_TRUE(leaky_bucket_->TimeRemaining().IsZero());
+  EXPECT_EQ(0u, leaky_bucket_->BytesPending(clock_.Now()));
+  EXPECT_TRUE(leaky_bucket_->TimeRemaining(clock_.Now()).IsZero());
   clock_.AdvanceTime(QuicTime::Delta::FromMilliseconds(5));
-  EXPECT_EQ(0u, leaky_bucket_->BytesPending());
-  EXPECT_TRUE(leaky_bucket_->TimeRemaining().IsZero());
-  leaky_bucket_->Add(2000);
+  EXPECT_EQ(0u, leaky_bucket_->BytesPending(clock_.Now()));
+  EXPECT_TRUE(leaky_bucket_->TimeRemaining(clock_.Now()).IsZero());
+  leaky_bucket_->Add(clock_.Now(), 2000);
   clock_.AdvanceTime(QuicTime::Delta::FromMilliseconds(11));
-  EXPECT_EQ(0u, leaky_bucket_->BytesPending());
-  EXPECT_TRUE(leaky_bucket_->TimeRemaining().IsZero());
-  leaky_bucket_->Add(2000);
+  EXPECT_EQ(0u, leaky_bucket_->BytesPending(clock_.Now()));
+  EXPECT_TRUE(leaky_bucket_->TimeRemaining(clock_.Now()).IsZero());
+  leaky_bucket_->Add(clock_.Now(), 2000);
   clock_.AdvanceTime(QuicTime::Delta::FromMilliseconds(5));
-  leaky_bucket_->Add(2000);
+  leaky_bucket_->Add(clock_.Now(), 2000);
   clock_.AdvanceTime(QuicTime::Delta::FromMilliseconds(5));
-  EXPECT_EQ(2000u, leaky_bucket_->BytesPending());
+  EXPECT_EQ(2000u, leaky_bucket_->BytesPending(clock_.Now()));
   EXPECT_EQ(QuicTime::Delta::FromMilliseconds(10),
-            leaky_bucket_->TimeRemaining());
+            leaky_bucket_->TimeRemaining(clock_.Now()));
   clock_.AdvanceTime(QuicTime::Delta::FromMilliseconds(10));
-  EXPECT_EQ(0u, leaky_bucket_->BytesPending());
-  EXPECT_TRUE(leaky_bucket_->TimeRemaining().IsZero());
+  EXPECT_EQ(0u, leaky_bucket_->BytesPending(clock_.Now()));
+  EXPECT_TRUE(leaky_bucket_->TimeRemaining(clock_.Now()).IsZero());
 }
 
 TEST_F(LeakyBucketTest, ChangeDrainRate) {
-  int bytes_per_second = 200000;
-  leaky_bucket_->SetDrainingRate(bytes_per_second);
-  leaky_bucket_->Add(2000);
-  EXPECT_EQ(2000u, leaky_bucket_->BytesPending());
+  QuicBandwidth draining_rate = QuicBandwidth::FromBytesPerSecond(200000);
+  leaky_bucket_->SetDrainingRate(clock_.Now(), draining_rate);
+  leaky_bucket_->Add(clock_.Now(), 2000);
+  EXPECT_EQ(2000u, leaky_bucket_->BytesPending(clock_.Now()));
   EXPECT_EQ(QuicTime::Delta::FromMilliseconds(10),
-            leaky_bucket_->TimeRemaining());
+            leaky_bucket_->TimeRemaining(clock_.Now()));
   clock_.AdvanceTime(QuicTime::Delta::FromMilliseconds(5));
-  EXPECT_EQ(1000u, leaky_bucket_->BytesPending());
+  EXPECT_EQ(1000u, leaky_bucket_->BytesPending(clock_.Now()));
   EXPECT_EQ(QuicTime::Delta::FromMilliseconds(5),
-            leaky_bucket_->TimeRemaining());
-  bytes_per_second = 100000;  // Cut drain rate in half.
-  leaky_bucket_->SetDrainingRate(bytes_per_second);
-  EXPECT_EQ(1000u, leaky_bucket_->BytesPending());
+            leaky_bucket_->TimeRemaining(clock_.Now()));
+  draining_rate = draining_rate.Scale(0.5f);  // Cut drain rate in half.
+  leaky_bucket_->SetDrainingRate(clock_.Now(), draining_rate);
+  EXPECT_EQ(1000u, leaky_bucket_->BytesPending(clock_.Now()));
   EXPECT_EQ(QuicTime::Delta::FromMilliseconds(10),
-            leaky_bucket_->TimeRemaining());
+            leaky_bucket_->TimeRemaining(clock_.Now()));
 }
 
 }  // namespace test

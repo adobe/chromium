@@ -11,10 +11,11 @@
 #include "base/memory/singleton.h"
 #include "base/message_loop.h"
 #include "base/metrics/histogram.h"
+#include "base/prefs/pref_registry_simple.h"
+#include "base/prefs/pref_service.h"
 #include "base/sys_info.h"
 #include "base/time.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
@@ -53,8 +54,8 @@ int GetDefaultCacheSize() {
 }  // anonymous namespace
 
 // static
-void WebCacheManager::RegisterPrefs(PrefServiceSimple* prefs) {
-  prefs->RegisterIntegerPref(prefs::kMemoryCacheSize, GetDefaultCacheSize());
+void WebCacheManager::RegisterPrefs(PrefRegistrySimple* registry) {
+  registry->RegisterIntegerPref(prefs::kMemoryCacheSize, GetDefaultCacheSize());
 }
 
 // static
@@ -147,15 +148,15 @@ void WebCacheManager::SetGlobalSizeLimit(size_t bytes) {
 
 void WebCacheManager::ClearCache() {
   // Tell each renderer process to clear the cache.
-  ClearRendederCache(active_renderers_, INSTANTLY);
-  ClearRendederCache(inactive_renderers_, INSTANTLY);
+  ClearRendererCache(active_renderers_, INSTANTLY);
+  ClearRendererCache(inactive_renderers_, INSTANTLY);
 }
 
 void WebCacheManager::ClearCacheOnNavigation() {
   // Tell each renderer process to clear the cache when a tab is reloaded or
   // the user navigates to a new website.
-  ClearRendederCache(active_renderers_, ON_NAVIGATION);
-  ClearRendederCache(inactive_renderers_, ON_NAVIGATION);
+  ClearRendererCache(active_renderers_, ON_NAVIGATION);
+  ClearRendererCache(inactive_renderers_, ON_NAVIGATION);
 }
 
 void WebCacheManager::Observe(int type,
@@ -332,7 +333,7 @@ void WebCacheManager::EnactStrategy(const AllocationStrategy& strategy) {
   }
 }
 
-void WebCacheManager::ClearRendederCache(
+void WebCacheManager::ClearRendererCache(
     const std::set<int>& renderers,
     WebCacheManager::ClearCacheOccasion occasion) {
   std::set<int>::const_iterator iter = renderers.begin();

@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "build/build_config.h"
 #include "webkit/fileapi/media/filtering_file_enumerator.h"
@@ -21,8 +21,8 @@ namespace {
 
 // Used to skip the hidden folders and files. Returns true if the file specified
 // by |path| should be skipped.
-bool ShouldSkip(const FilePath& path) {
-  const FilePath& base_name = path.BaseName();
+bool ShouldSkip(const base::FilePath& path) {
+  const base::FilePath& base_name = path.BaseName();
   if (base_name.empty())
     return false;
 
@@ -77,9 +77,9 @@ FilteringFileEnumerator::FilteringFileEnumerator(
 FilteringFileEnumerator::~FilteringFileEnumerator() {
 }
 
-FilePath FilteringFileEnumerator::Next() {
+base::FilePath FilteringFileEnumerator::Next() {
   while (true) {
-    FilePath next = base_enumerator_->Next();
+    base::FilePath next = base_enumerator_->Next();
     if (ShouldSkip(next))
       continue;
 

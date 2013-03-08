@@ -11,6 +11,7 @@
 #include "base/memory/scoped_vector.h"
 #include "base/memory/weak_ptr.h"
 #include "base/path_service.h"
+#include "base/prefs/pref_service.h"
 #include "base/stringprintf.h"
 #include "base/sys_info.h"
 #include "chrome/browser/chromeos/drive/drive.pb.h"
@@ -27,14 +28,13 @@
 #include "chrome/browser/google_apis/gdata_errorcode.h"
 #include "chrome/browser/google_apis/gdata_wapi_parser.h"
 #include "chrome/browser/google_apis/time_util.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/webui/chrome_web_ui_data_source.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/web_ui.h"
+#include "content/public/browser/web_ui_data_source.h"
 #include "content/public/browser/web_ui_message_handler.h"
 #include "grit/browser_resources.h"
 
@@ -54,12 +54,12 @@ namespace {
 //  },...]
 //
 // The list is sorted by the path.
-void GetGCacheContents(const FilePath& root_path,
+void GetGCacheContents(const base::FilePath& root_path,
                        base::ListValue* gcache_contents,
                        base::DictionaryValue* gcache_summary) {
   using file_util::FileEnumerator;
   // Use this map to sort the result list by the path.
-  std::map<FilePath, DictionaryValue*> files;
+  std::map<base::FilePath, DictionaryValue*> files;
 
   const int options = (file_util::FileEnumerator::FILES |
                        file_util::FileEnumerator::DIRECTORIES |
@@ -67,7 +67,7 @@ void GetGCacheContents(const FilePath& root_path,
   FileEnumerator enumerator(root_path, true /* recursive */, options);
 
   int64 total_size = 0;
-  for (FilePath current = enumerator.Next(); !current.empty();
+  for (base::FilePath current = enumerator.Next(); !current.empty();
        current = enumerator.Next()) {
     FileEnumerator::FindInfo find_info;
     enumerator.GetFindInfo(&find_info);
@@ -93,7 +93,7 @@ void GetGCacheContents(const FilePath& root_path,
   }
 
   // Convert |files| into |gcache_contents|.
-  for (std::map<FilePath, DictionaryValue*>::const_iterator
+  for (std::map<base::FilePath, DictionaryValue*>::const_iterator
            iter = files.begin(); iter != files.end(); ++iter) {
     gcache_contents->Append(iter->second);
   }
@@ -102,7 +102,7 @@ void GetGCacheContents(const FilePath& root_path,
 }
 
 // Gets the available disk space for the path |home_path|.
-void GetFreeDiskSpace(const FilePath& home_path,
+void GetFreeDiskSpace(const base::FilePath& home_path,
                       base::DictionaryValue* local_storage_summary) {
   DCHECK(!BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(local_storage_summary);
@@ -112,7 +112,7 @@ void GetFreeDiskSpace(const FilePath& home_path,
 }
 
 // Formats |entry| into text.
-std::string FormatEntry(const FilePath& path,
+std::string FormatEntry(const base::FilePath& path,
                         const drive::DriveEntryProto& entry) {
   using base::StringAppendF;
   using google_apis::util::FormatTimeAsString;
@@ -122,7 +122,7 @@ std::string FormatEntry(const FilePath& path,
   StringAppendF(&out, "  title: %s\n", entry.title().c_str());
   StringAppendF(&out, "  resource_id: %s\n", entry.resource_id().c_str());
   StringAppendF(&out, "  edit_url: %s\n", entry.edit_url().c_str());
-  StringAppendF(&out, "  content_url: %s\n", entry.content_url().c_str());
+  StringAppendF(&out, "  download_url: %s\n", entry.download_url().c_str());
   StringAppendF(&out, "  parent_resource_id: %s\n",
                 entry.parent_resource_id().c_str());
   StringAppendF(&out, "  upload_url: %s\n", entry.upload_url().c_str());
@@ -194,7 +194,9 @@ class DriveInternalsWebUIHandler : public content::WebUIMessageHandler {
   void UpdateDriveRelatedPreferencesSection();
   void UpdateAuthStatusSection(
       google_apis::DriveServiceInterface* drive_service);
-  void UpdateAccountMetadataSection(
+  void UpdateAboutResourceSection(
+      google_apis::DriveServiceInterface* drive_service);
+  void UpdateAppListSection(
       google_apis::DriveServiceInterface* drive_service);
   void UpdateLocalMetadataSection(
       google_apis::DriveServiceInterface* drive_service);
@@ -213,12 +215,12 @@ class DriveInternalsWebUIHandler : public content::WebUIMessageHandler {
                            base::DictionaryValue* cache_summary);
 
   // Called when GetEntryInfoByPath() is complete.
-  void OnGetEntryInfoByPath(const FilePath& path,
+  void OnGetEntryInfoByPath(const base::FilePath& path,
                             drive::DriveFileError error,
                             scoped_ptr<drive::DriveEntryProto> entry);
 
   // Called when ReadDirectoryByPath() is complete.
-  void OnReadDirectoryByPath(const FilePath& parent_path,
+  void OnReadDirectoryByPath(const base::FilePath& parent_path,
                              drive::DriveFileError error,
                              bool hide_hosted_documents,
                              scoped_ptr<drive::DriveEntryProtoVector> entries);
@@ -230,10 +232,15 @@ class DriveInternalsWebUIHandler : public content::WebUIMessageHandler {
   // Called when GetFreeDiskSpace() is complete.
   void OnGetFreeDiskSpace(base::DictionaryValue* local_storage_summary);
 
-  // Called when GetAccountMetadata() call to DriveService is complete.
-  void OnGetAccountMetadata(
+  // Called when GetAboutResource() call to DriveService is complete.
+  void OnGetAboutResource(
       google_apis::GDataErrorCode status,
-      scoped_ptr<google_apis::AccountMetadataFeed> account_metadata);
+      scoped_ptr<google_apis::AboutResource> about_resource);
+
+  // Called when GetAppList() call to DriveService is complete.
+  void OnGetAppList(
+      google_apis::GDataErrorCode status,
+      scoped_ptr<google_apis::AppList> app_list);
 
   // Callback for DriveFilesystem::GetMetadata for local update.
   void OnGetFilesystemMetadataForLocal(
@@ -246,6 +253,9 @@ class DriveInternalsWebUIHandler : public content::WebUIMessageHandler {
   // Called when the page requests periodic update.
   void OnPeriodicUpdate(const base::ListValue* args);
 
+  void ClearAccessToken(const base::ListValue* args);
+  void ClearRefreshToken(const base::ListValue* args);
+
   // The number of pending ReadDirectoryByPath() calls.
   int num_pending_reads_;
   // The last event sent to the JavaScript side.
@@ -255,37 +265,54 @@ class DriveInternalsWebUIHandler : public content::WebUIMessageHandler {
   DISALLOW_COPY_AND_ASSIGN(DriveInternalsWebUIHandler);
 };
 
-void DriveInternalsWebUIHandler::OnGetAccountMetadata(
+void DriveInternalsWebUIHandler::OnGetAboutResource(
     google_apis::GDataErrorCode status,
-    scoped_ptr<google_apis::AccountMetadataFeed> parsed_metadata) {
+    scoped_ptr<google_apis::AboutResource> parsed_about_resource) {
   if (status != google_apis::HTTP_SUCCESS) {
-    LOG(ERROR) << "Failed to get account metadata";
+    LOG(ERROR) << "Failed to get about resource";
     return;
   }
-  DCHECK(parsed_metadata);
+  DCHECK(parsed_about_resource);
 
-  base::DictionaryValue account_metadata;
-  account_metadata.SetDouble("account-quota-total",
-                             parsed_metadata->quota_bytes_total());
-  account_metadata.SetDouble("account-quota-used",
-                             parsed_metadata->quota_bytes_used());
-  account_metadata.SetDouble("account-largest-changestamp-remote",
-                             parsed_metadata->largest_changestamp());
+  base::DictionaryValue about_resource;
+  about_resource.SetDouble("account-quota-total",
+                           parsed_about_resource->quota_bytes_total());
+  about_resource.SetDouble("account-quota-used",
+                           parsed_about_resource->quota_bytes_used());
+  about_resource.SetDouble("account-largest-changestamp-remote",
+                           parsed_about_resource->largest_change_id());
+  about_resource.SetString("root-resource-id",
+                           parsed_about_resource->root_folder_id());
 
-  base::ListValue* installed_apps = new base::ListValue();
-  for (size_t i = 0; i < parsed_metadata->installed_apps().size(); ++i) {
-    const google_apis::InstalledApp* app = parsed_metadata->installed_apps()[i];
+  web_ui()->CallJavascriptFunction("updateAboutResource", about_resource);
+}
+
+void DriveInternalsWebUIHandler::OnGetAppList(
+    google_apis::GDataErrorCode status,
+    scoped_ptr<google_apis::AppList> parsed_app_list) {
+  if (status != google_apis::HTTP_SUCCESS) {
+    LOG(ERROR) << "Failed to get app list";
+    return;
+  }
+  DCHECK(parsed_app_list);
+
+  base::DictionaryValue app_list;
+  app_list.SetString("etag", parsed_app_list->etag());
+
+  base::ListValue* items = new base::ListValue();
+  for (size_t i = 0; i < parsed_app_list->items().size(); ++i) {
+    const google_apis::AppResource* app = parsed_app_list->items()[i];
     base::DictionaryValue* app_data = new base::DictionaryValue();
-    app_data->SetString("app_name", app->app_name());
-    app_data->SetString("app_id", app->app_id());
+    app_data->SetString("name", app->name());
+    app_data->SetString("application_id", app->application_id());
     app_data->SetString("object_type", app->object_type());
     app_data->SetBoolean("supports_create", app->supports_create());
 
-    installed_apps->Append(app_data);
+    items->Append(app_data);
   }
-  account_metadata.Set("installed-apps", installed_apps);
+  app_list.Set("items", items);
 
-  web_ui()->CallJavascriptFunction("updateAccountMetadata", account_metadata);
+  web_ui()->CallJavascriptFunction("updateAppList", app_list);
 }
 
 void DriveInternalsWebUIHandler::RegisterMessages() {
@@ -296,6 +323,14 @@ void DriveInternalsWebUIHandler::RegisterMessages() {
   web_ui()->RegisterMessageCallback(
       "periodicUpdate",
       base::Bind(&DriveInternalsWebUIHandler::OnPeriodicUpdate,
+                 weak_ptr_factory_.GetWeakPtr()));
+  web_ui()->RegisterMessageCallback(
+      "clearAccessToken",
+      base::Bind(&DriveInternalsWebUIHandler::ClearAccessToken,
+                 weak_ptr_factory_.GetWeakPtr()));
+  web_ui()->RegisterMessageCallback(
+      "clearRefreshToken",
+      base::Bind(&DriveInternalsWebUIHandler::ClearRefreshToken,
                  weak_ptr_factory_.GetWeakPtr()));
 }
 
@@ -321,7 +356,8 @@ void DriveInternalsWebUIHandler::OnPageLoaded(const base::ListValue* args) {
   UpdateDriveRelatedFlagsSection();
   UpdateDriveRelatedPreferencesSection();
   UpdateAuthStatusSection(drive_service);
-  UpdateAccountMetadataSection(drive_service);
+  UpdateAboutResourceSection(drive_service);
+  UpdateAppListSection(drive_service);
   UpdateLocalMetadataSection(drive_service);
   UpdateDeltaUpdateStatusSection();
   UpdateInFlightOperationsSection(drive_service);
@@ -342,7 +378,8 @@ void DriveInternalsWebUIHandler::UpdateDriveRelatedFlagsSection() {
   const char* kDriveRelatedFlags[] = {
     google_apis::switches::kEnableDriveV2Api,
     switches::kDisableDrive,
-    switches::kDisableDrivePrefetch,
+    switches::kEnableDriveMetadataPrefetch,
+    switches::kEnableDrivePrefetch,
   };
 
   base::ListValue flags;
@@ -398,12 +435,21 @@ void DriveInternalsWebUIHandler::UpdateAuthStatusSection(
   web_ui()->CallJavascriptFunction("updateAuthStatus", auth_status);
 }
 
-void DriveInternalsWebUIHandler::UpdateAccountMetadataSection(
+void DriveInternalsWebUIHandler::UpdateAboutResourceSection(
     google_apis::DriveServiceInterface* drive_service) {
   DCHECK(drive_service);
 
-  drive_service->GetAccountMetadata(
-      base::Bind(&DriveInternalsWebUIHandler::OnGetAccountMetadata,
+  drive_service->GetAboutResource(
+      base::Bind(&DriveInternalsWebUIHandler::OnGetAboutResource,
+                 weak_ptr_factory_.GetWeakPtr()));
+}
+
+void DriveInternalsWebUIHandler::UpdateAppListSection(
+    google_apis::DriveServiceInterface* drive_service) {
+  DCHECK(drive_service);
+
+  drive_service->GetAppList(
+      base::Bind(&DriveInternalsWebUIHandler::OnGetAppList,
                  weak_ptr_factory_.GetWeakPtr()));
 }
 
@@ -426,6 +472,17 @@ void DriveInternalsWebUIHandler::OnGetFilesystemMetadataForLocal(
   local_metadata.SetBoolean("account-metadata-loaded", metadata.loaded);
   local_metadata.SetBoolean("account-metadata-refreshing", metadata.refreshing);
   web_ui()->CallJavascriptFunction("updateLocalMetadata", local_metadata);
+}
+
+void DriveInternalsWebUIHandler::ClearAccessToken(const base::ListValue* args) {
+  drive::DriveSystemService* system_service = GetSystemService();
+  system_service->drive_service()->ClearAccessToken();
+}
+
+void DriveInternalsWebUIHandler::ClearRefreshToken(
+    const base::ListValue* args) {
+  drive::DriveSystemService* system_service = GetSystemService();
+  system_service->drive_service()->ClearRefreshToken();
 }
 
 void DriveInternalsWebUIHandler::UpdateDeltaUpdateStatusSection() {
@@ -491,7 +548,7 @@ void DriveInternalsWebUIHandler::UpdateInFlightOperationsSection(
 void DriveInternalsWebUIHandler::UpdateGCacheContentsSection() {
   // Start updating the GCache contents section.
   Profile* profile = Profile::FromWebUI(web_ui());
-  const FilePath root_path =
+  const base::FilePath root_path =
       drive::DriveCache::GetCacheRootPath(profile);
   base::ListValue* gcache_contents = new ListValue;
   base::DictionaryValue* gcache_summary = new DictionaryValue;
@@ -518,7 +575,7 @@ void DriveInternalsWebUIHandler::UpdateFileSystemContentsSection(
     return;
 
   // Start rendering the file system tree as text.
-  const FilePath root_path = FilePath(drive::kDriveRootDirectory);
+  const base::FilePath root_path = base::FilePath(drive::kDriveRootDirectory);
   ++num_pending_reads_;
   system_service->file_system()->GetEntryInfoByPath(
       root_path,
@@ -536,7 +593,7 @@ void DriveInternalsWebUIHandler::UpdateFileSystemContentsSection(
 
 void DriveInternalsWebUIHandler::UpdateLocalStorageUsageSection() {
   // Propagate the amount of local free space in bytes.
-  FilePath home_path;
+  base::FilePath home_path;
   if (PathService::Get(base::DIR_HOME, &home_path)) {
     base::DictionaryValue* local_storage_summary = new DictionaryValue;
     BrowserThread::PostBlockingPoolTaskAndReply(
@@ -590,7 +647,7 @@ void DriveInternalsWebUIHandler::OnGetGCacheContents(
 }
 
 void DriveInternalsWebUIHandler::OnGetEntryInfoByPath(
-    const FilePath& path,
+    const base::FilePath& path,
     drive::DriveFileError error,
     scoped_ptr<drive::DriveEntryProto> entry) {
   --num_pending_reads_;
@@ -602,7 +659,7 @@ void DriveInternalsWebUIHandler::OnGetEntryInfoByPath(
 }
 
 void DriveInternalsWebUIHandler::OnReadDirectoryByPath(
-    const FilePath& parent_path,
+    const base::FilePath& parent_path,
     drive::DriveFileError error,
     bool hide_hosted_documents,
     scoped_ptr<drive::DriveEntryProtoVector> entries) {
@@ -613,8 +670,8 @@ void DriveInternalsWebUIHandler::OnReadDirectoryByPath(
     std::string file_system_as_text;
     for (size_t i = 0; i < entries->size(); ++i) {
       const drive::DriveEntryProto& entry = (*entries)[i];
-      const FilePath current_path = parent_path.Append(
-          FilePath::FromUTF8Unsafe(entry.base_name()));
+      const base::FilePath current_path = parent_path.Append(
+          base::FilePath::FromUTF8Unsafe(entry.base_name()));
 
       file_system_as_text.append(FormatEntry(current_path, entry) + "\n");
 
@@ -684,13 +741,13 @@ DriveInternalsUI::DriveInternalsUI(content::WebUI* web_ui)
   web_ui->AddMessageHandler(new DriveInternalsWebUIHandler());
 
   content::WebUIDataSource* source =
-      ChromeWebUIDataSource::Create(chrome::kChromeUIDriveInternalsHost);
+      content::WebUIDataSource::Create(chrome::kChromeUIDriveInternalsHost);
   source->AddResourcePath("drive_internals.css", IDR_DRIVE_INTERNALS_CSS);
   source->AddResourcePath("drive_internals.js", IDR_DRIVE_INTERNALS_JS);
   source->SetDefaultResource(IDR_DRIVE_INTERNALS_HTML);
 
   Profile* profile = Profile::FromWebUI(web_ui);
-  ChromeURLDataManager::AddWebUIDataSource(profile, source);
+  content::WebUIDataSource::Add(profile, source);
 }
 
 }  // namespace chromeos

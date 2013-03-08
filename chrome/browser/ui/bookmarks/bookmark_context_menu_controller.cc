@@ -5,20 +5,20 @@
 #include "chrome/browser/ui/bookmarks/bookmark_context_menu_controller.h"
 
 #include "base/compiler_specific.h"
-#include "base/prefs/public/pref_service_base.h"
+#include "base/prefs/pref_service.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/bookmarks/bookmark_editor.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/bookmarks/bookmark_utils.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/chrome_pages.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/pref_names.h"
+#include "components/user_prefs/user_prefs.h"
 #include "content/public/browser/page_navigator.h"
 #include "content/public/browser/user_metrics.h"
 #include "grit/generated_resources.h"
@@ -176,8 +176,9 @@ void BookmarkContextMenuController::ExecuteCommand(int id) {
           bookmark_utils::GetParentForNewNodes(parent_, selection_, &index);
       GURL url;
       string16 title;
-      chrome::GetURLAndTitleToBookmark(chrome::GetActiveWebContents(browser_),
-                                       &url, &title);
+      chrome::GetURLAndTitleToBookmark(
+          browser_->tab_strip_model()->GetActiveWebContents(),
+          &url, &title);
       BookmarkEditor::Show(parent_window_,
                            profile_,
                            BookmarkEditor::EditDetails::AddNodeInFolder(
@@ -248,12 +249,12 @@ void BookmarkContextMenuController::ExecuteCommand(int id) {
 
 bool BookmarkContextMenuController::IsCommandIdChecked(int command_id) const {
   DCHECK(command_id == IDC_BOOKMARK_BAR_ALWAYS_SHOW);
-  PrefServiceBase* prefs = PrefServiceBase::FromBrowserContext(profile_);
+  PrefService* prefs = components::UserPrefs::Get(profile_);
   return prefs->GetBoolean(prefs::kShowBookmarkBar);
 }
 
 bool BookmarkContextMenuController::IsCommandIdEnabled(int command_id) const {
-  PrefServiceBase* prefs = PrefServiceBase::FromBrowserContext(profile_);
+  PrefService* prefs = components::UserPrefs::Get(profile_);
 
   bool is_root_node = selection_.size() == 1 &&
                       selection_[0]->parent() == model_->root_node();
@@ -266,7 +267,8 @@ bool BookmarkContextMenuController::IsCommandIdEnabled(int command_id) const {
              incognito_avail != IncognitoModePrefs::DISABLED;
 
     case IDC_BOOKMARK_BAR_OPEN_ALL_INCOGNITO:
-      return chrome::HasBookmarkURLs(selection_) &&
+      return chrome::HasBookmarkURLsAllowedInIncognitoMode(selection_, profile_)
+             &&
              !profile_->IsOffTheRecord() &&
              incognito_avail != IncognitoModePrefs::DISABLED;
 

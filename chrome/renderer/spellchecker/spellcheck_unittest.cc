@@ -22,10 +22,10 @@
 
 namespace {
 
-FilePath GetHunspellDirectory() {
-  FilePath hunspell_directory;
+base::FilePath GetHunspellDirectory() {
+  base::FilePath hunspell_directory;
   if (!PathService::Get(base::DIR_SOURCE_ROOT, &hunspell_directory))
-    return FilePath();
+    return base::FilePath();
 
   hunspell_directory = hunspell_directory.AppendASCII("third_party");
   hunspell_directory = hunspell_directory.AppendASCII("hunspell_dictionaries");
@@ -34,6 +34,7 @@ FilePath GetHunspellDirectory() {
 
 }  // namespace
 
+// TODO(groby): This needs to be a BrowserTest for OSX.
 class SpellCheckTest : public testing::Test {
  public:
   SpellCheckTest() {
@@ -49,8 +50,12 @@ class SpellCheckTest : public testing::Test {
     spell_check_.reset(new SpellCheck());
   }
 
+  bool InitializeIfNeeded() {
+    return spell_check()->InitializeIfNeeded();
+  }
+
   void InitializeSpellCheck(const std::string& language) {
-    FilePath hunspell_directory = GetHunspellDirectory();
+    base::FilePath hunspell_directory = GetHunspellDirectory();
     EXPECT_FALSE(hunspell_directory.empty());
     base::PlatformFile file = base::CreatePlatformFile(
         chrome::spellcheck_common::GetVersionedFileName(language,
@@ -74,6 +79,10 @@ class SpellCheckTest : public testing::Test {
   }
 
   SpellCheck* spell_check() { return spell_check_.get(); }
+
+  bool CheckSpelling(const std::string& word, int tag) {
+    return spell_check_->spellcheck_.CheckSpelling(ASCIIToUTF16(word), tag);
+  }
 
 #if !defined(OS_MACOSX)
  protected:
@@ -1139,6 +1148,8 @@ TEST_F(SpellCheckTest, CreateTextCheckingResults) {
   }
 }
 
+#endif
+
 // Checks some words that should be present in all English dictionaries.
 TEST_F(SpellCheckTest, EnglishWords) {
   static const struct {
@@ -1269,52 +1280,76 @@ TEST_F(SpellCheckTest, DictionaryFiles) {
   chrome::spellcheck_common::SpellCheckLanguages(&spellcheck_languages);
   EXPECT_FALSE(spellcheck_languages.empty());
 
-  FilePath hunspell = GetHunspellDirectory();
+  base::FilePath hunspell = GetHunspellDirectory();
   for (size_t i = 0; i < spellcheck_languages.size(); ++i) {
-    FilePath dict = chrome::spellcheck_common::GetVersionedFileName(
+    base::FilePath dict = chrome::spellcheck_common::GetVersionedFileName(
         spellcheck_languages[i], hunspell);
     EXPECT_TRUE(file_util::PathExists(dict)) << dict.value() << " not found";
   }
 }
 
-// Check for correct behavior around the maximum word length boundary.
-TEST_F(SpellCheckTest, MaxWordLengthBoundary) {
-  static const char* kTestCases[] = {
-    // 96 characters.
-    "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqr",
-    // 97 characters.
-    "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrs",
-    // 98 characters.
-    "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrst",
-    // 99 characters.
-    "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstu",
-    // 100 characters.
-    "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuv",
-    // 101 characters.
-    "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvw",
-    // 102 characters.
-    "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwx"
+// TODO(groby): Add a test for hunspell itself, when MAXWORDLEN is exceeded.
+TEST_F(SpellCheckTest, SpellingEngine_CheckSpelling) {
+  static const struct {
+    const char* word;
+    bool expected_result;
+  } kTestCases[] = {
+    { "", true },
+    { "automatic", true },
+    { "hello", true },
+    { "forglobantic", false },
+    { "xfdssfsdfaasds", false },
+    {  // 64 chars are the longest word to check - this should fail checking.
+      "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijkl",
+      false
+    },
+    {  // Any word longer than 64 chars should be exempt from checking.
+      "reallylongwordthatabsolutelyexceedsthespecifiedcharacterlimitabit",
+      true
+    }
   };
 
-  ReinitializeSpellCheck("en-US");
-  size_t test_cases_size = ARRAYSIZE_UNSAFE(kTestCases);
-  for (size_t i = 0; i < test_cases_size; ++i) {
-    size_t input_length = strlen(kTestCases[i]);
+  // Initialization magic - call InitializeIfNeeded twice. The first one simply
+  // flags internal state that a dictionary was requested. The second one will
+  // take the passed-in file and initialize hunspell with it. (The file was
+  // passed to hunspell in the ctor for the test fixture).
+  // This needs to be done since we need to ensure the SpellingEngine object
+  // contained in |spellcheck_| from the test fixture does get initialized.
+  // TODO(groby): Clean up this mess.
+  InitializeIfNeeded();
+  ASSERT_FALSE(InitializeIfNeeded());
 
-    int misspelling_start = 0;
-    int misspelling_length = 0;
-    std::vector<string16> suggestions;
-    bool result = spell_check()->SpellCheckWord(
-        ASCIIToUTF16(kTestCases[i]).c_str(),
-        static_cast<int>(input_length),
-        0,
-        &misspelling_start,
-        &misspelling_length,
-        &suggestions);
-
-    EXPECT_FALSE(result) << kTestCases[i] << " is spelled correctly";
-    EXPECT_TRUE(suggestions.empty()) << kTestCases[i] << " has suggestions";
+  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(kTestCases); ++i) {
+    bool result = CheckSpelling(kTestCases[i].word, 0);
+    EXPECT_EQ(kTestCases[i].expected_result, result) <<
+        "Failed test for " << kTestCases[i].word;
   }
 }
 
-#endif
+// Chrome should not suggest "Othello" for "hellllo" or "identically" for
+// "accidently".
+TEST_F(SpellCheckTest, LogicalSuggestions) {
+  static const struct {
+    const char* misspelled;
+    const char* suggestion;
+  } kTestCases[] = {
+    { "hellllo", "hello" },
+    { "accidently", "accidentally" }
+  };
+
+  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(kTestCases); ++i) {
+    int misspelling_start = 0;
+    int misspelling_length = 0;
+    std::vector<string16> suggestions;
+    EXPECT_FALSE(spell_check()->SpellCheckWord(
+        ASCIIToUTF16(kTestCases[i].misspelled).c_str(),
+        strlen(kTestCases[i].misspelled),
+        0,
+        &misspelling_start,
+        &misspelling_length,
+        &suggestions));
+    EXPECT_GE(suggestions.size(), static_cast<size_t>(1));
+    if (suggestions.size() > 0)
+      EXPECT_EQ(suggestions[0], ASCIIToUTF16(kTestCases[i].suggestion));
+  }
+}

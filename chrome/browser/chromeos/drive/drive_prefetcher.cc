@@ -22,10 +22,10 @@ namespace {
 const int kInitialPrefetchCount = 100;
 const int64 kPrefetchFileSizeLimit = 10 << 20;  // 10MB
 
-// Returns true if prefetching is disabled by a command line option.
-bool IsPrefetchDisabled() {
+// Returns true if prefetching is enabled by a command line option.
+bool IsPrefetchEnabled() {
   return CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kDisableDrivePrefetch);
+      switches::kEnableDrivePrefetch);
 }
 
 // Returns true if |left| has lower priority than |right|.
@@ -57,85 +57,69 @@ DrivePrefetcher::DrivePrefetcher(DriveFileSystemInterface* file_system,
                                  EventLogger* event_logger,
                                  const DrivePrefetcherOptions& options)
     : latest_files_(&ComparePrefetchPriority),
-      number_of_inflight_prefetches_(0),
       number_of_inflight_traversals_(0),
-      should_suspend_prefetch_(true),
       initial_prefetch_count_(options.initial_prefetch_count),
       prefetch_file_size_limit_(options.prefetch_file_size_limit),
       file_system_(file_system),
       event_logger_(event_logger),
       weak_ptr_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  file_system_->AddObserver(this);
+
+  // The flag controls whether or not the prefetch observe the file system. When
+  // it is disabled, no event (except the direct call of OnInitialLoadFinished
+  // in the unit test code) will trigger the prefetcher.
+  if (IsPrefetchEnabled())
+    file_system_->AddObserver(this);
 }
 
 DrivePrefetcher::~DrivePrefetcher() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  file_system_->RemoveObserver(this);
+  if (IsPrefetchEnabled())
+    file_system_->RemoveObserver(this);
 }
 
 void DrivePrefetcher::OnInitialLoadFinished(DriveFileError error) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   if (error == DRIVE_FILE_OK)
-    DoFullScan();
+    StartPrefetcherCycle();
 }
 
-void DrivePrefetcher::OnDirectoryChanged(const FilePath& directory_path) {
+void DrivePrefetcher::OnDirectoryChanged(const base::FilePath& directory_path) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   // TODO(kinaba): crbug.com/156270.
   // Update the list of latest files and the prefetch queue if needed.
 }
 
-void DrivePrefetcher::OnSyncTaskStarted() {
-  should_suspend_prefetch_ = true;
-}
-
-void DrivePrefetcher::OnSyncClientStopped() {
-  should_suspend_prefetch_ = true;
-}
-
-void DrivePrefetcher::OnSyncClientIdle() {
-  should_suspend_prefetch_ = IsPrefetchDisabled();
-  DoPrefetch();
-}
-
-void DrivePrefetcher::DoFullScan() {
+void DrivePrefetcher::StartPrefetcherCycle() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  if (IsPrefetchDisabled())
-    return;
-
-  FilePath root(util::ExtractDrivePath(util::GetDriveMountPointPath()));
+  // Scans the filesystem. When it is finished, DoPrefetch() will be called.
+  base::FilePath root(util::ExtractDrivePath(util::GetDriveMountPointPath()));
   VisitDirectory(root);
 }
 
 void DrivePrefetcher::DoPrefetch() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  if (should_suspend_prefetch_ ||
-      queue_.empty() ||
-      number_of_inflight_prefetches_ > 0)
-    return;
-
-  std::string resource_id = queue_.front();
-  queue_.pop_front();
-
-  event_logger_->Log("Prefetcher: Start fetching " + resource_id);
-
-  ++number_of_inflight_prefetches_;
-  file_system_->GetFileByResourceId(
-      resource_id,
-      base::Bind(&DrivePrefetcher::OnPrefetchFinished,
-                 weak_ptr_factory_.GetWeakPtr(),
-                 resource_id),
-      google_apis::GetContentCallback());
+  for (LatestFileSet::reverse_iterator it = latest_files_.rbegin();
+      it != latest_files_.rend(); ++it) {
+    const std::string& resource_id = it->resource_id();
+    event_logger_->Log("Prefetcher: Enqueue prefetching " + resource_id);
+    file_system_->GetFileByResourceId(
+        resource_id,
+        DriveClientContext(PREFETCH),
+        base::Bind(&DrivePrefetcher::OnPrefetchFinished,
+                   weak_ptr_factory_.GetWeakPtr(),
+                   resource_id),
+        google_apis::GetContentCallback());
+  }
 }
 
 void DrivePrefetcher::OnPrefetchFinished(const std::string& resource_id,
                                          DriveFileError error,
-                                         const FilePath& file_path,
+                                         const base::FilePath& file_path,
                                          const std::string& mime_type,
                                          DriveFileType file_type) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
@@ -144,20 +128,6 @@ void DrivePrefetcher::OnPrefetchFinished(const std::string& resource_id,
   event_logger_->Log(base::StringPrintf("Prefetcher: Finish fetching (%s) %s",
                                         DriveFileErrorToString(error).c_str(),
                                         resource_id.c_str()));
-
-  --number_of_inflight_prefetches_;
-  DoPrefetch();  // Start next prefetch.
-}
-
-void DrivePrefetcher::ReconstructQueue() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-
-  // Put the files with latest timestamp into the queue.
-  queue_.clear();
-  for (LatestFileSet::reverse_iterator it = latest_files_.rbegin();
-      it != latest_files_.rend(); ++it) {
-    queue_.push_back(it->resource_id());
-  }
 }
 
 void DrivePrefetcher::VisitFile(const DriveEntryProto& entry) {
@@ -174,7 +144,7 @@ void DrivePrefetcher::VisitFile(const DriveEntryProto& entry) {
     latest_files_.erase(latest_files_.begin());
 }
 
-void DrivePrefetcher::VisitDirectory(const FilePath& directory_path) {
+void DrivePrefetcher::VisitDirectory(const base::FilePath& directory_path) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   ++number_of_inflight_traversals_;
@@ -186,7 +156,7 @@ void DrivePrefetcher::VisitDirectory(const FilePath& directory_path) {
 }
 
 void DrivePrefetcher::OnReadDirectory(
-    const FilePath& directory_path,
+    const base::FilePath& directory_path,
     DriveFileError error,
     bool hide_hosted_documents,
     scoped_ptr<DriveEntryProtoVector> entries) {
@@ -220,10 +190,8 @@ void DrivePrefetcher::OnReadDirectoryFinished() {
   DCHECK(number_of_inflight_traversals_ > 0);
 
   --number_of_inflight_traversals_;
-  if (number_of_inflight_traversals_ == 0) {
-    ReconstructQueue();
+  if (number_of_inflight_traversals_ == 0)
     DoPrefetch();  // Start prefetching.
-  }
 }
 
 }  // namespace drive

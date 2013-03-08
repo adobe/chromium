@@ -4,9 +4,8 @@
 
 #include "ash/rotator/screen_rotation.h"
 
-#include "base/debug/trace_event.h"
 #include "base/time.h"
-#include "ui/compositor/layer_animation_delegate.h"
+#include "ui/compositor/layer.h"
 #include "ui/gfx/interpolated_transform.h"
 #include "ui/gfx/rect.h"
 #include "ui/gfx/transform.h"
@@ -31,23 +30,27 @@ base::TimeDelta GetTransitionDuration(int degrees) {
 
 }  // namespace
 
-ScreenRotation::ScreenRotation(int degrees)
+ScreenRotation::ScreenRotation(int degrees, ui::Layer* layer)
     : ui::LayerAnimationElement(GetProperties(),
                                 GetTransitionDuration(degrees)),
       degrees_(degrees) {
+  InitTransform(layer);
 }
 
 ScreenRotation::~ScreenRotation() {
 }
 
-void ScreenRotation::OnStart(ui::LayerAnimationDelegate* delegate) {
-  // No rotation required.
-  if (degrees_ == 0)
+void ScreenRotation::InitTransform(ui::Layer* layer) {
+  // No rotation required, use the identity transform.
+  if (degrees_ == 0) {
+    interpolated_transform_.reset(
+        new ui::InterpolatedConstantTransform(gfx::Transform()));
     return;
+  }
 
-  const gfx::Transform& current_transform =
-      delegate->GetTransformForAnimation();
-  const gfx::Rect& bounds = delegate->GetBoundsForAnimation();
+  // Use the target transform/bounds in case the layer is already animating.
+  const gfx::Transform& current_transform = layer->GetTargetTransform();
+  const gfx::Rect& bounds = layer->GetTargetBounds();
 
   gfx::Point old_pivot;
   gfx::Point new_pivot;
@@ -101,6 +104,9 @@ void ScreenRotation::OnStart(ui::LayerAnimationDelegate* delegate) {
   interpolated_transform_->SetChild(rotation.release());
 }
 
+void ScreenRotation::OnStart(ui::LayerAnimationDelegate* delegate) {
+}
+
 bool ScreenRotation::OnProgress(double t,
                                 ui::LayerAnimationDelegate* delegate) {
   delegate->SetTransformFromAnimation(interpolated_transform_->Interpolate(t));
@@ -111,7 +117,7 @@ void ScreenRotation::OnGetTarget(TargetValue* target) const {
   target->transform = interpolated_transform_->Interpolate(1.0);
 }
 
-void ScreenRotation::OnAbort() {
+void ScreenRotation::OnAbort(ui::LayerAnimationDelegate* delegate) {
 }
 
 // static

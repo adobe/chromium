@@ -10,7 +10,7 @@
 #include <vector>
 
 #include "base/basictypes.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/time.h"
@@ -81,7 +81,7 @@ class WEBKIT_STORAGE_EXPORT AppCacheDatabase {
     GURL namespace_url;
   };
 
-  explicit AppCacheDatabase(const FilePath& path);
+  explicit AppCacheDatabase(const base::FilePath& path);
   ~AppCacheDatabase();
 
   void CloseConnection();
@@ -200,7 +200,7 @@ class WEBKIT_STORAGE_EXPORT AppCacheDatabase {
   // and bodies are stored, and then creates a new database file.
   bool DeleteExistingAndCreateNewDatabase();
 
-  FilePath db_file_path_;
+  base::FilePath db_file_path_;
   scoped_ptr<sql::Connection> db_;
   scoped_ptr<sql::MetaTable> meta_table_;
   bool is_disabled_;

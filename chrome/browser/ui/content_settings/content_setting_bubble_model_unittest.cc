@@ -5,6 +5,8 @@
 #include "base/auto_reset.h"
 #include "base/command_line.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/api/infobars/infobar_delegate.h"
+#include "chrome/browser/api/infobars/infobar_service.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry.h"
@@ -36,6 +38,7 @@ class ContentSettingBubbleModelTest : public ChromeRenderViewHostTestHarness {
   virtual void SetUp() OVERRIDE {
     ChromeRenderViewHostTestHarness::SetUp();
     TabSpecificContentSettings::CreateForWebContents(web_contents());
+    InfoBarService::CreateForWebContents(web_contents());
   }
 
   virtual void TearDown() OVERRIDE {
@@ -109,6 +112,107 @@ TEST_F(ContentSettingBubbleModelTest, Cookies) {
   EXPECT_FALSE(bubble_content.custom_link.empty());
   EXPECT_TRUE(bubble_content.custom_link_enabled);
   EXPECT_FALSE(bubble_content.manage_link.empty());
+}
+
+TEST_F(ContentSettingBubbleModelTest, Mediastream) {
+  scoped_ptr<ContentSettingBubbleModel> content_setting_bubble_model(
+      ContentSettingBubbleModel::CreateContentSettingBubbleModel(
+         NULL, web_contents(), profile(),
+         CONTENT_SETTINGS_TYPE_MEDIASTREAM));
+  const ContentSettingBubbleModel::BubbleContent& bubble_content =
+      content_setting_bubble_model->bubble_content();
+  EXPECT_FALSE(bubble_content.title.empty());
+  EXPECT_EQ(2U, bubble_content.radio_group.radio_items.size());
+  EXPECT_EQ(0, bubble_content.radio_group.default_item);
+  EXPECT_TRUE(bubble_content.custom_link.empty());
+  EXPECT_FALSE(bubble_content.custom_link_enabled);
+  EXPECT_FALSE(bubble_content.manage_link.empty());
+  EXPECT_EQ(2U, bubble_content.media_menus.size());
+}
+
+TEST_F(ContentSettingBubbleModelTest, BlockedMediastream) {
+  WebContentsTester::For(web_contents())->
+      NavigateAndCommit(GURL("https://www.example.com"));
+  GURL url = web_contents()->GetURL();
+
+  HostContentSettingsMap* host_content_settings_map =
+      profile()->GetHostContentSettingsMap();
+  ContentSettingsPattern primary_pattern =
+      ContentSettingsPattern::FromURL(url);
+  ContentSetting setting = CONTENT_SETTING_BLOCK;
+  host_content_settings_map->SetContentSetting(
+        primary_pattern,
+        ContentSettingsPattern::Wildcard(),
+        CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC,
+        std::string(),
+        setting);
+  host_content_settings_map->SetContentSetting(
+        primary_pattern,
+        ContentSettingsPattern::Wildcard(),
+        CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA,
+        std::string(),
+        setting);
+
+  TabSpecificContentSettings* content_settings =
+      TabSpecificContentSettings::FromWebContents(web_contents());
+  content_settings->OnContentBlocked(CONTENT_SETTINGS_TYPE_MEDIASTREAM,
+                                     std::string());
+  {
+    scoped_ptr<ContentSettingBubbleModel> content_setting_bubble_model(
+        ContentSettingBubbleModel::CreateContentSettingBubbleModel(
+           NULL, web_contents(), profile(),
+           CONTENT_SETTINGS_TYPE_MEDIASTREAM));
+    const ContentSettingBubbleModel::BubbleContent& bubble_content =
+        content_setting_bubble_model->bubble_content();
+    // Test if the correct radio item is selected for the blocked mediastream
+    // setting.
+    EXPECT_EQ(1, bubble_content.radio_group.default_item);
+  }
+
+  // Test that the media settings where not changed.
+  EXPECT_EQ(CONTENT_SETTING_BLOCK,
+            host_content_settings_map->GetContentSetting(
+                url,
+                url,
+                CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC,
+                std::string()));
+  EXPECT_EQ(CONTENT_SETTING_BLOCK,
+            host_content_settings_map->GetContentSetting(
+                url,
+                url,
+                CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA,
+                std::string()));
+
+  {
+    scoped_ptr<ContentSettingBubbleModel> content_setting_bubble_model(
+        ContentSettingBubbleModel::CreateContentSettingBubbleModel(
+           NULL, web_contents(), profile(),
+           CONTENT_SETTINGS_TYPE_MEDIASTREAM));
+    // Change the radio setting.
+    content_setting_bubble_model->OnRadioClicked(0);
+  }
+  // Test that the media setting were change correctly.
+  EXPECT_EQ(CONTENT_SETTING_ALLOW,
+            host_content_settings_map->GetContentSetting(
+                url,
+                url,
+                CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC,
+                std::string()));
+  EXPECT_EQ(CONTENT_SETTING_ALLOW,
+            host_content_settings_map->GetContentSetting(
+                url,
+                url,
+                CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA,
+                std::string()));
+
+  // Removing an |InfoBarDelegate| from the |InfoBarService| does not delete
+  // it. Hence the |delegate| must be cleaned up after it was removed from the
+  // |infobar_service|.
+  InfoBarService* infobar_service =
+      InfoBarService::FromWebContents(web_contents());
+  scoped_ptr<InfoBarDelegate> delegate(
+      infobar_service->GetInfoBarDelegateAt(0));
+  infobar_service->RemoveInfoBar(delegate.get());
 }
 
 TEST_F(ContentSettingBubbleModelTest, Plugins) {
@@ -198,6 +302,45 @@ TEST_F(ContentSettingBubbleModelTest, MultiplePlugins) {
                                    barPlugin));
 }
 
+TEST_F(ContentSettingBubbleModelTest, PepperBroker) {
+  TabSpecificContentSettings* content_settings =
+      TabSpecificContentSettings::FromWebContents(web_contents());
+  content_settings->OnContentBlocked(CONTENT_SETTINGS_TYPE_PPAPI_BROKER,
+                                     std::string());
+
+  scoped_ptr<ContentSettingBubbleModel> content_setting_bubble_model(
+      ContentSettingBubbleModel::CreateContentSettingBubbleModel(
+         NULL, web_contents(), profile(),
+         CONTENT_SETTINGS_TYPE_PPAPI_BROKER));
+  const ContentSettingBubbleModel::BubbleContent& bubble_content =
+      content_setting_bubble_model->bubble_content();
+
+  std::string title = bubble_content.title;
+  EXPECT_FALSE(title.empty());
+  ASSERT_EQ(2U, bubble_content.radio_group.radio_items.size());
+  std::string radio1 = bubble_content.radio_group.radio_items[0];
+  std::string radio2 = bubble_content.radio_group.radio_items[1];
+  EXPECT_FALSE(bubble_content.custom_link_enabled);
+  EXPECT_FALSE(bubble_content.manage_link.empty());
+
+  content_settings->ClearBlockedContentSettingsExceptForCookies();
+  content_settings->OnContentAllowed(CONTENT_SETTINGS_TYPE_PPAPI_BROKER);
+  content_setting_bubble_model.reset(
+      ContentSettingBubbleModel::CreateContentSettingBubbleModel(
+          NULL, web_contents(), profile(),
+          CONTENT_SETTINGS_TYPE_PPAPI_BROKER));
+  const ContentSettingBubbleModel::BubbleContent& bubble_content_2 =
+      content_setting_bubble_model->bubble_content();
+
+  EXPECT_FALSE(bubble_content_2.title.empty());
+  EXPECT_NE(title, bubble_content_2.title);
+  ASSERT_EQ(2U, bubble_content_2.radio_group.radio_items.size());
+  EXPECT_NE(radio1, bubble_content_2.radio_group.radio_items[0]);
+  EXPECT_NE(radio2, bubble_content_2.radio_group.radio_items[1]);
+  EXPECT_FALSE(bubble_content_2.custom_link_enabled);
+  EXPECT_FALSE(bubble_content_2.manage_link.empty());
+}
+
 TEST_F(ContentSettingBubbleModelTest, Geolocation) {
   const GURL page_url("http://toplevel.example/");
   const GURL frame1_url("http://host1.example/");
@@ -240,6 +383,8 @@ TEST_F(ContentSettingBubbleModelTest, Geolocation) {
 TEST_F(ContentSettingBubbleModelTest, FileURL) {
   std::string file_url("file:///tmp/test.html");
   NavigateAndCommit(GURL(file_url));
+  TabSpecificContentSettings::FromWebContents(web_contents())->OnContentBlocked(
+      CONTENT_SETTINGS_TYPE_IMAGES, std::string());
   scoped_ptr<ContentSettingBubbleModel> content_setting_bubble_model(
       ContentSettingBubbleModel::CreateContentSettingBubbleModel(
           NULL, web_contents(), profile(),
@@ -275,7 +420,7 @@ TEST_F(ContentSettingBubbleModelTest, RegisterProtocolHandler) {
 
 class FakeDelegate : public ProtocolHandlerRegistry::Delegate {
  public:
-  virtual void RegisterExternalHandler(const std::string& protocol) {
+  virtual void RegisterExternalHandler(const std::string& protocol) OVERRIDE {
     // Overrides in order to not register the handler with the
     // ChildProcessSecurityPolicy. That has persistent and unalterable
     // side effects on other tests.
@@ -283,19 +428,19 @@ class FakeDelegate : public ProtocolHandlerRegistry::Delegate {
 
   virtual ShellIntegration::DefaultProtocolClientWorker* CreateShellWorker(
       ShellIntegration::DefaultWebClientObserver* observer,
-      const std::string& protocol) {
+      const std::string& protocol) OVERRIDE {
     LOG(INFO) << "CreateShellWorker";
     return NULL;
   }
 
   virtual ProtocolHandlerRegistry::DefaultClientObserver* CreateShellObserver(
-      ProtocolHandlerRegistry* registry) {
+      ProtocolHandlerRegistry* registry) OVERRIDE {
     return NULL;
   }
 
   virtual void RegisterWithOSAsDefaultClient(
       const std::string& protocol,
-      ProtocolHandlerRegistry* registry) {
+      ProtocolHandlerRegistry* registry) OVERRIDE {
     LOG(INFO) << "Register With OS";
   }
 };

@@ -211,12 +211,12 @@ message SystemTimezoneProto {
   // all users. Valid values are listed in "timezone_settings.cc". Additionally,
   // timezones from the "IANA Time Zone Database" (e.g. listed on wikipedia)
   // that are equivalent to one of the timezones in "timezone_settings.cc" are
-  // valid. In case of an invalid value (e.g. the empty string), the setting is
-  // still activated with a fallback timezone (currently "GMT").
-  // Only if no value is provided, the timezone device setting is inactive. In
-  // that case, the currently active timezone will remain in use however users
-  // can change the timezone and the change is persistent. Thus a change by one
-  // user affects the login-screen and all other users.
+  // valid. In case of an invalid value, the setting is still activated with a
+  // fallback timezone (currently "GMT"). In case of an empty string or if no
+  // value is provided, the timezone device setting is inactive. In that case,
+  // the currently active timezone will remain in use however users can change
+  // the timezone and the change is persistent. Thus a change by one user
+  // affects the login-screen and all other users.
   optional string timezone = 1;
 }
 
@@ -235,6 +235,14 @@ message DeviceLocalAccountsProto {
   // The list of device-local accounts (i.e. accounts without an associated
   // cloud-backed profile) that are available on the device.
   repeated DeviceLocalAccountInfoProto account = 1;
+}
+
+message AllowRedeemChromeOsRegistrationOffersProto {
+  // Chrome OS Registration service provides way for chromeos device users
+  // to redeem electronic offers provided by service provider.
+  // This value determines if users are allowed to redeem offers through
+  // Chrome OS Registration service.
+  optional bool allow_redeem_offers = 1 [default = true];
 }
 
 message ChromeDeviceSettingsProto {
@@ -259,4 +267,5 @@ message ChromeDeviceSettingsProto {
   optional PinnedAppsProto pinned_apps = 19;
   optional SystemTimezoneProto system_timezone = 20;
   optional DeviceLocalAccountsProto device_local_accounts = 21;
+  optional AllowRedeemChromeOsRegistrationOffersProto allow_redeem_offers = 22;
 }

@@ -7,7 +7,7 @@
 #include <algorithm>
 
 #include "base/bind.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/contacts/contact.pb.h"
@@ -27,7 +27,7 @@ namespace {
 
 // Name of the directory within the profile directory where the contact database
 // is stored.
-const FilePath::CharType kDatabaseDirectoryName[] =
+const base::FilePath::CharType kDatabaseDirectoryName[] =
     FILE_PATH_LITERAL("Google Contacts");
 
 // We wait this long after the last update has completed successfully before
@@ -125,7 +125,7 @@ void GoogleContactStore::Init() {
     gdata_service_->Initialize();
   }
 
-  FilePath db_path = profile_->GetPath().Append(kDatabaseDirectoryName);
+  base::FilePath db_path = profile_->GetPath().Append(kDatabaseDirectoryName);
   VLOG(1) << "Initializing contact database \"" << db_path.value() << "\" for "
           << profile_->GetProfileName();
   db_->Init(db_path,

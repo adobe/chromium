@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/prefs/pref_service.h"
 #include "base/prefs/public/pref_member.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_harness.h"
 #include "chrome/browser/sync/test/integration/bookmarks_helper.h"
@@ -160,13 +160,7 @@ IN_PROC_BROWSER_TEST_F(SyncErrorTest, AuthErrorTest) {
 
 // Trigger an XMPP auth error, and make sure sync treats it like any
 // other auth error.
-// This has been flaking a lot recently on Mac. http://crbug.com/165328
-#if defined(OS_MACOSX)
-#define MAYBE_XmppAuthErrorTest DISABLED_XmppAuthErrorTest
-#else
-#define MAYBE_XmppAuthErrorTest XmppAuthErrorTest
-#endif
-IN_PROC_BROWSER_TEST_F(SyncErrorTest, MAYBE_XmppAuthErrorTest) {
+IN_PROC_BROWSER_TEST_F(SyncErrorTest, XmppAuthErrorTest) {
   ASSERT_TRUE(SetupClients()) << "SetupClients() failed.";
 
   TriggerXmppAuthError();

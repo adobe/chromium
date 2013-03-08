@@ -15,13 +15,18 @@
 #include "base/timer.h"
 #include "chrome/browser/metrics/proto/study.pb.h"
 #include "chrome/browser/metrics/proto/trials_seed.pb.h"
+#include "chrome/browser/metrics/variations/network_time_tracker.h"
 #include "chrome/browser/metrics/variations/resource_request_allowed_notifier.h"
 #include "chrome/common/chrome_version_info.h"
 #include "googleurl/src/gurl.h"
 #include "net/url_request/url_fetcher_delegate.h"
 
+#if defined(OS_WIN)
+#include "chrome/browser/metrics/variations/variations_registry_syncer_win.h"
+#endif
+
 class PrefService;
-class PrefServiceSimple;
+class PrefRegistrySimple;
 
 namespace chrome_variations {
 
@@ -36,21 +41,31 @@ class VariationsService
   // Creates field trials based on Variations Seed loaded from local prefs. If
   // there is a problem loading the seed data, all trials specified by the seed
   // may not be created.
-  bool CreateTrialsFromSeed(PrefService* local_prefs);
+  bool CreateTrialsFromSeed();
 
   // Calls FetchVariationsSeed once and repeats this periodically. See
   // implementation for details on the period. Must be called after
   // |CreateTrialsFromSeed|.
   void StartRepeatedVariationsSeedFetch();
 
+  // TODO(mad): Remove this once NetworkTimeTracker is available as a global
+  // service.
+  bool GetNetworkTime(base::Time* network_time,
+                      base::TimeDelta* uncertainty) const;
+
+#if defined(OS_WIN)
+  // Starts syncing Google Update Variation IDs with the registry.
+  void StartGoogleUpdateRegistrySync();
+#endif
+
   // Exposed for testing.
   void SetCreateTrialsFromSeedCalledForTesting(bool called);
 
   // Register Variations related prefs in Local State.
-  static void RegisterPrefs(PrefServiceSimple* prefs);
+  static void RegisterPrefs(PrefRegistrySimple* registry);
 
   // Factory method for creating a VariationsService.
-  static VariationsService* Create();
+  static VariationsService* Create(PrefService* local_state);
 
  protected:
   // Starts the fetching process once, where |OnURLFetchComplete| is called with
@@ -75,10 +90,12 @@ class VariationsService
   FRIEND_TEST_ALL_PREFIXES(VariationsServiceTest, LoadSeed);
   FRIEND_TEST_ALL_PREFIXES(VariationsServiceTest, StoreSeed);
   FRIEND_TEST_ALL_PREFIXES(VariationsServiceTest, ValidateStudy);
+  FRIEND_TEST_ALL_PREFIXES(VariationsServiceTest, SeedStoredWhenOKStatus);
+  FRIEND_TEST_ALL_PREFIXES(VariationsServiceTest, SeedNotStoredWhenNonOKStatus);
 
-  // Default constructor is private. Use the |Create| factory method to create a
-  // VariationsService.
-  VariationsService();
+  // Creates the VariationsService with the given |local_state| prefs service.
+  // Use the |Create| factory method to create a VariationsService.
+  explicit VariationsService(PrefService* local_state);
 
   // Checks if prerequisites for fetching the Variations seed are met, and if
   // so, performs the actual fetch using |DoActualFetch|.
@@ -147,6 +164,12 @@ class VariationsService
   void CreateTrialFromStudy(const Study& study,
                             const base::Time& reference_date);
 
+  // Record the time of the most recent successful fetch.
+  void RecordLastFetchTime();
+
+  // The pref service used to store persist the variations seed.
+  PrefService* local_state_;
+
   // Contains the current seed request. Will only have a value while a request
   // is pending, and will be reset by |OnURLFetchComplete|.
   scoped_ptr<net::URLFetcher> pending_seed_request_;
@@ -173,6 +196,14 @@ class VariationsService
   // The start time of the last seed request. This is used to measure the
   // latency of seed requests. Initially zero.
   base::TimeTicks last_request_started_time_;
+
+  // TODO(mad): Eventually remove this.
+  NetworkTimeTracker network_time_tracker_;
+
+#if defined(OS_WIN)
+  // Helper that handles synchronizing Variations with the Registry.
+  VariationsRegistrySyncer registry_syncer_;
+#endif
 };
 
 }  // namespace chrome_variations

@@ -7,6 +7,7 @@
 #include "ash/shell.h"
 #include "ash/system/tray/system_tray_delegate.h"
 #include "ash/system/tray/tray_constants.h"
+#include "ash/system/tray/tray_views.h"
 #include "base/i18n/time_formatting.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
@@ -136,6 +137,11 @@ void DateView::SetActionable(bool actionable) {
 }
 
 void DateView::UpdateTextInternal(const base::Time& now) {
+  SetAccessibleName(
+      base::TimeFormatFriendlyDate(now) +
+      ASCIIToUTF16(",") +
+      base::TimeFormatTimeOfDayWithHourClockType(
+          now, base::k12HourClock, base:: kKeepAmPm));
   date_label_->SetText(
       l10n_util::GetStringFUTF16(
           IDS_ASH_STATUS_TRAY_DATE, FormatDayOfWeek(now), FormatDate(now)));

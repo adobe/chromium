@@ -6,8 +6,8 @@
 #define BASE_MEMORY_DISCARDABLE_MEMORY_H_
 
 #include "base/base_export.h"
+#include "base/basictypes.h"
 #include "base/compiler_specific.h"
-#include "base/synchronization/lock.h"
 
 namespace base {
 
@@ -56,6 +56,8 @@ class BASE_EXPORT DiscardableMemory {
 
   // Initialize the DiscardableMemory object. On success, this function returns
   // true and the memory is locked. This should only be called once.
+  // This call could fail because of platform-specific limitations and the user
+  // should stop using the DiscardableMemory afterwards.
   bool InitializeAndLock(size_t size);
 
   // Lock the memory so that it will not be purged by the system. Returns
@@ -70,9 +72,8 @@ class BASE_EXPORT DiscardableMemory {
   // after every successful lock call.
   void Unlock();
 
-  // Return the memory address held by this object. When this object is locked,
-  // this call will return the address in caller's address space. Otherwise,
-  // this call returns NULL.
+  // Return the memory address held by this object. The object must be locked
+  // before calling this. Otherwise, this will cause a DCHECK error.
   void* Memory() const;
 
   // Testing utility calls.
@@ -93,6 +94,13 @@ class BASE_EXPORT DiscardableMemory {
 
   // Unmaps the discardable memory from the caller's address space.
   void Unmap();
+
+  // Reserve a file descriptor. When reaching the fd limit, this call returns
+  // false and initialization should fail.
+  bool ReserveFileDescriptor();
+
+  // Release a file descriptor so that others can reserve it.
+  void ReleaseFileDescriptor();
 #endif  // OS_ANDROID
 
   void* memory_;

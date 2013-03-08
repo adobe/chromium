@@ -29,7 +29,6 @@ class Screen;
 }
 namespace views {
 
-class DropTargetEvent;
 class MenuButton;
 class MenuHostRootView;
 class MouseEvent;
@@ -46,9 +45,8 @@ class MenuRunnerImpl;
 // MenuController is used internally by the various menu classes to manage
 // showing, selecting and drag/drop for menus. All relevant events are
 // forwarded to the MenuController from SubmenuView and MenuHost.
-class VIEWS_EXPORT MenuController
-    : public MessageLoop::Dispatcher,
-      public WidgetObserver {
+class VIEWS_EXPORT MenuController : public MessageLoop::Dispatcher,
+                                    public WidgetObserver {
  public:
   // Enumeration of how the menu should exit.
   enum ExitType {
@@ -85,6 +83,9 @@ class VIEWS_EXPORT MenuController
 
   // Whether or not drag operation is in progress.
   bool drag_in_progress() const { return drag_in_progress_; }
+
+  // Get the anchor position wich is used to show this menu.
+  MenuItemView::AnchorPosition GetAnchorPosition() { return state_.anchor; }
 
   // Cancels the current Run. See ExitType for a description of what happens
   // with the various parameters.
@@ -130,7 +131,7 @@ class VIEWS_EXPORT MenuController
   void UpdateSubmenuSelection(SubmenuView* source);
 
   // WidgetObserver overrides:
-  virtual void OnWidgetClosing(Widget* widget) OVERRIDE;
+  virtual void OnWidgetDestroying(Widget* widget) OVERRIDE;
 
  private:
   friend class internal::MenuRunnerImpl;
@@ -376,6 +377,12 @@ class VIEWS_EXPORT MenuController
                                 bool prefer_leading,
                                 bool* is_leading);
 
+  // Calculates the bubble bounds of the menu to show. is_leading is set to
+  // match the direction the menu opened in.
+  gfx::Rect CalculateBubbleMenuBounds(MenuItemView* item,
+                                      bool prefer_leading,
+                                      bool* is_leading);
+
   // Returns the depth of the menu.
   static int MenuDepth(MenuItemView* item);
 
@@ -412,9 +419,10 @@ class VIEWS_EXPORT MenuController
   // the title. Returns true if a match was selected and the menu should exit.
   bool SelectByChar(char16 key);
 
-#if defined(OS_WIN) && !defined(USE_AURA)
+#if (defined(OS_WIN) && !defined(USE_AURA)) || defined(USE_X11)
   // If there is a window at the location of the event, a new mouse event is
   // generated and posted to it at the given location.
+  // For Chromeos this applies also to the desktop background window.
   void RepostEvent(SubmenuView* source, const ui::LocatedEvent& event);
 #endif
 

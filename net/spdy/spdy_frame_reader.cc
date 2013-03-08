@@ -6,6 +6,7 @@
 
 #include "base/sys_byteorder.h"
 #include "net/spdy/spdy_frame_reader.h"
+#include "net/spdy/spdy_protocol.h"
 
 namespace net {
 
@@ -13,6 +14,22 @@ SpdyFrameReader::SpdyFrameReader(const char* data, const size_t len)
     : data_(data),
       len_(len),
       ofs_(0) {
+}
+
+bool SpdyFrameReader::ReadUInt8(uint8* result) {
+  // Make sure that we have the whole uint8.
+  if (!CanRead(1)) {
+    OnFailure();
+    return false;
+  }
+
+  // Read into result.
+  *result = *reinterpret_cast<const uint8*>(data_ + ofs_);
+
+  // Iterate.
+  ofs_ += 1;
+
+  return true;
 }
 
 bool SpdyFrameReader::ReadUInt16(uint16* result) {
@@ -43,6 +60,35 @@ bool SpdyFrameReader::ReadUInt32(uint32* result) {
 
   // Iterate.
   ofs_ += 4;
+
+  return true;
+}
+
+bool SpdyFrameReader::ReadUInt31(uint32* result) {
+  bool success = ReadUInt32(result);
+
+  // Zero out highest-order bit.
+  if (success) {
+    *result &= 0x7fffffff;
+  }
+
+  return success;
+}
+
+bool SpdyFrameReader::ReadUInt24(uint32* result) {
+  // Make sure that we have the whole uint24.
+  if (!CanRead(3)) {
+    OnFailure();
+    return false;
+  }
+
+  // Read into result.
+  *result = 0;
+  memcpy(reinterpret_cast<char*>(result) + 1, data_ + ofs_, 3);
+  *result = ntohl(*result);
+
+  // Iterate.
+  ofs_ += 3;
 
   return true;
 }
@@ -102,6 +148,18 @@ bool SpdyFrameReader::ReadBytes(void* result, size_t size) {
 
   // Read into result.
   memcpy(result, data_ + ofs_, size);
+
+  // Iterate.
+  ofs_ += size;
+
+  return true;
+}
+
+bool SpdyFrameReader::Seek(size_t size) {
+  if (!CanRead(size)) {
+    OnFailure();
+    return false;
+  }
 
   // Iterate.
   ofs_ += size;

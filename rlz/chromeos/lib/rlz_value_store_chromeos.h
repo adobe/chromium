@@ -5,7 +5,7 @@
 #ifndef RLZ_CHROMEOS_LIB_RLZ_VALUE_STORE_CHROMEOS_H_
 #define RLZ_CHROMEOS_LIB_RLZ_VALUE_STORE_CHROMEOS_H_
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/threading/non_thread_safe.h"
 #include "base/values.h"
 #include "rlz/lib/rlz_value_store.h"
@@ -27,7 +27,7 @@ class RlzValueStoreChromeOS : public RlzValueStore,
   // static void SetFileTaskRunner(base::SequencedTaskRunner* file_task_runner);
 
   // Creates new instance and synchronously reads data from file.
-  RlzValueStoreChromeOS(const FilePath& store_path);
+  RlzValueStoreChromeOS(const base::FilePath& store_path);
   virtual ~RlzValueStoreChromeOS();
 
   // RlzValueStore overrides:
@@ -74,7 +74,7 @@ class RlzValueStoreChromeOS : public RlzValueStore,
   // In-memory store with RLZ data.
   scoped_ptr<base::DictionaryValue> rlz_store_;
 
-  FilePath store_path_;
+  base::FilePath store_path_;
 
   bool read_only_;
 

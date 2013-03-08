@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2013 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,7 @@
 #include <string>
 
 #include "ash/desktop_background/desktop_background_controller.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/memory/weak_ptr.h"
 #include "base/threading/sequenced_worker_pool.h"
@@ -24,7 +24,7 @@
 #include "third_party/icu/public/i18n/unicode/timezone.h"
 #include "ui/gfx/image/image_skia.h"
 
-class PrefServiceSimple;
+class PrefRegistrySimple;
 
 namespace base {
 class SequencedTaskRunner;
@@ -51,8 +51,16 @@ class UserImage;
 extern const char kWallpaperSequenceTokenName[];
 
 // File path suffices of resized small or large wallpaper.
+// TODO(bshe): Use the same sub folder system as custom wallpapers use.
+// crbug.com/174928
 extern const char kSmallWallpaperSuffix[];
 extern const char kLargeWallpaperSuffix[];
+
+// Directory names of custom wallpapers.
+extern const char kSmallWallpaperSubDir[];
+extern const char kLargeWallpaperSubDir[];
+extern const char kOriginalWallpaperSubDir[];
+extern const char kThumbnailWallpaperSubDir[];
 
 // This class maintains wallpapers for users who have logged into this Chrome
 // OS device.
@@ -63,12 +71,16 @@ class WallpaperManager: public system::TimezoneSettings::Observer,
   static WallpaperManager* Get();
 
   WallpaperManager();
+  virtual ~WallpaperManager();
+
+  // Indicates imminent shutdown, allowing the WallpaperManager to remove any
+  // observers it has registered.
+  void Shutdown();
 
   // Registers wallpaper manager preferences.
-  static void RegisterPrefs(PrefServiceSimple* local_state);
+  static void RegisterPrefs(PrefRegistrySimple* registry);
 
-  // Adds PowerManagerClient and TimeZoneSettings observers. It needs to be
-  // added after PowerManagerClient has been initialized.
+  // Adds PowerManagerClient, TimeZoneSettings and CrosSettings observers.
   void AddObservers();
 
   // Loads wallpaper asynchronously if the current wallpaper is not the
@@ -78,18 +90,26 @@ class WallpaperManager: public system::TimezoneSettings::Observer,
   // Clears ONLINE and CUSTOM wallpaper cache.
   void ClearWallpaperCache();
 
+  // Returns custom wallpaper path. Append |sub_dir|, |email| and |file| to
+  // custom wallpaper directory.
+  base::FilePath GetCustomWallpaperPath(const char* sub_dir,
+                                        const std::string& email,
+                                        const std::string& file);
+
   // Gets encoded wallpaper from cache. Returns true if success.
   bool GetWallpaperFromCache(const std::string& email,
                              gfx::ImageSkia* wallpaper);
 
   // Returns filepath to save original custom wallpaper for the given user.
-  FilePath GetOriginalWallpaperPathForUser(const std::string& username);
+  base::FilePath GetOriginalWallpaperPathForUser(const std::string& username);
 
   // Returns small resolution custom wallpaper filepath for the given user when
   // |is_small| is ture. Otherwise, returns large resolution custom wallpaper
   // path.
-  FilePath GetWallpaperPathForUser(const std::string& username,
-                                   bool is_small);
+  // TODO(bshe): Remove this function when all custom wallpapers moved to the
+  // new direcotry. crbug.com/174925
+  base::FilePath GetWallpaperPathForUser(const std::string& username,
+                                         bool is_small);
 
   // Gets wallpaper information of logged in user.
   bool GetLoggedInUserWallpaperInfo(WallpaperInfo* info);
@@ -111,7 +131,7 @@ class WallpaperManager: public system::TimezoneSettings::Observer,
   // and |preferred_height| while maintaining aspect ratio. And saves the
   // resized wallpaper to |path|.
   void ResizeAndSaveWallpaper(const UserImage& wallpaper,
-                              const FilePath& path,
+                              const base::FilePath& path,
                               ash::WallpaperLayout layout,
                               int preferred_width,
                               int preferred_height);
@@ -123,6 +143,7 @@ class WallpaperManager: public system::TimezoneSettings::Observer,
   // Saves custom wallpaper to file, post task to generate thumbnail and updates
   // local state preferences.
   void SetCustomWallpaper(const std::string& username,
+                          const std::string& file,
                           ash::WallpaperLayout layout,
                           User::WallpaperType type,
                           const UserImage& wallpaper);
@@ -158,8 +179,6 @@ class WallpaperManager: public system::TimezoneSettings::Observer,
   friend class WallpaperManagerBrowserTest;
   typedef std::map<std::string, gfx::ImageSkia> CustomWallpaperMap;
 
-  virtual ~WallpaperManager();
-
   // The number of wallpapers have loaded. For test only.
   int loaded_wallpapers() const { return loaded_wallpapers_; }
 
@@ -187,10 +206,21 @@ class WallpaperManager: public system::TimezoneSettings::Observer,
   void ClearObsoleteWallpaperPrefs();
 
   // Deletes a list of wallpaper files in |file_list|.
-  void DeleteWallpaperInList(const std::vector<FilePath>& file_list);
+  void DeleteWallpaperInList(const std::vector<base::FilePath>& file_list);
 
   // Deletes all |email| related custom or converted wallpapers.
   void DeleteUserWallpapers(const std::string& email);
+
+  // Creates all new custom wallpaper directories for |email| if not exist.
+  void EnsureCustomWallpaperDirectories(const std::string& email);
+
+  // Loads custom wallpaper from old places and triggers move all custom
+  // wallpapers to new places.
+  // TODO(bshe): Remove this function when all custom wallpapers moved to the
+  // new direcotry. crbug.com/174925
+  void FallbackToOldCustomWallpaper(const std::string& email,
+                                    const WallpaperInfo& info,
+                                    bool update_wallpaper);
 
   // Initialize wallpaper of registered device after device policy is trusted.
   // Note that before device is enrolled, it proceeds with untrusted setting.
@@ -202,12 +232,34 @@ class WallpaperManager: public system::TimezoneSettings::Observer,
                      const WallpaperInfo& info,
                      bool update_wallpaper);
 
+  // Gets UserList and starts MoveCustomWallpapersOnWorker().
+  // Must be called on UI thread.
+  // TODO(bshe): Remove this function when all custom wallpapers moved to the
+  // new direcotry. crbug.com/174925
+  void MoveCustomWallpapers();
+
+  // Move old custom wallpapers to new places for |users|.
+  // Must execute on wallpaper sequenced worker thread.
+  // TODO(bshe): Remove this function when all custom wallpapers moved to the
+  // new direcotry. crbug.com/174925
+  void MoveCustomWallpapersOnWorker(const UserList& users);
+
   // Gets |email|'s custom wallpaper at |wallpaper_path|. Falls back on original
   // custom wallpaper. When |update_wallpaper| is true, sets wallpaper to the
-  // loaded wallpaper. Must run on FILE thread.
+  // loaded wallpaper. Must run on wallpaper sequenced worker thread.
+  // TODO(bshe): Remove this function when all custom wallpapers moved to the
+  // new direcotry. crbug.com/174925
+  void GetCustomWallpaperInternalOld(const std::string& email,
+                                     const WallpaperInfo& info,
+                                     const base::FilePath& wallpaper_path,
+                                     bool update_wallpaper);
+
+  // Gets |email|'s custom wallpaper at |wallpaper_path|. Falls back on original
+  // custom wallpaper. When |update_wallpaper| is true, sets wallpaper to the
+  // loaded wallpaper. Must run on wallpaper sequenced worker thread.
   void GetCustomWallpaperInternal(const std::string& email,
                                   const WallpaperInfo& info,
-                                  const FilePath& wallpaper_path,
+                                  const base::FilePath& wallpaper_path,
                                   bool update_wallpaper);
 
   // Gets wallpaper information of |email| from Local State or memory. Returns
@@ -221,8 +273,9 @@ class WallpaperManager: public system::TimezoneSettings::Observer,
                           bool update_wallpaper,
                           const UserImage& wallpaper);
 
-  // Generates thumbnail of custom wallpaper on FILE thread. If |persistent| is
-  // true, saves original custom image and resized images to disk.
+  // Generates thumbnail of custom wallpaper on wallpaper sequenced worker
+  // thread. If |persistent| is true, saves original custom image and resized
+  // images to disk.
   void ProcessCustomWallpaper(const std::string& email,
                               bool persistent,
                               const WallpaperInfo& info,
@@ -235,19 +288,20 @@ class WallpaperManager: public system::TimezoneSettings::Observer,
   // Saves original custom wallpaper to |path| (absolute path) on filesystem
   // and starts resizing operation of the custom wallpaper if necessary.
   void SaveCustomWallpaper(const std::string& email,
-                           const FilePath& path,
+                           const base::FilePath& path,
                            ash::WallpaperLayout layout,
                            const UserImage& wallpaper);
 
   // Saves wallpaper image raw |data| to |path| (absolute path) in file system.
-  void SaveWallpaperInternal(const FilePath& path, const char* data, int size);
+  void SaveWallpaperInternal(const base::FilePath& path, const char* data,
+                             int size);
 
   // Starts to load wallpaper at |wallpaper_path|. If |wallpaper_path| is the
   // same as |current_wallpaper_path_|, do nothing. Must be called on UI thread.
   void StartLoad(const std::string& email,
                  const WallpaperInfo& info,
                  bool update_wallpaper,
-                 const FilePath& wallpaper_path);
+                 const base::FilePath& wallpaper_path);
 
   // Overridden from chromeos::PowerManagerObserver.
   virtual void SystemResumed(const base::TimeDelta& sleep_duration) OVERRIDE;
@@ -255,17 +309,8 @@ class WallpaperManager: public system::TimezoneSettings::Observer,
   // Overridden from system::TimezoneSettings::Observer.
   virtual void TimezoneChanged(const icu::TimeZone& timezone) OVERRIDE;
 
-  // Validates |wallpaper path| and loads corresponding wallpaper. If
-  // |wallpaper_path| is not valid, appends png extension to it before loading.
-  // Old wallpaper names have a png extension name. However all new wallpapers
-  // are saved in jpeg format. We have removed file extension to avoid
-  // confusion in this CL (https://codereview.chromium.org/10950014).
-  // For wallpapers saved before it, we still need to append png extension to
-  // file name.
-  void ValidateAndLoadWallpaper(const std::string& email,
-                                const WallpaperInfo& info,
-                                bool update_wallpaper,
-                                const FilePath& wallpaper_path);
+  // True if wallpaper manager is not observering other objects.
+  bool no_observers_;
 
   // The number of loaded wallpapers.
   int loaded_wallpapers_;
@@ -277,7 +322,7 @@ class WallpaperManager: public system::TimezoneSettings::Observer,
   scoped_refptr<base::SequencedTaskRunner> task_runner_;
 
   // The file path of current loaded/loading custom/online wallpaper.
-  FilePath current_wallpaper_path_;
+  base::FilePath current_wallpaper_path_;
 
   // Loads user wallpaper from its file.
   scoped_refptr<UserImageLoader> wallpaper_loader_;

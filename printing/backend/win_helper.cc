@@ -6,8 +6,8 @@
 
 #include <algorithm>
 
-#include "base/file_path.h"
 #include "base/file_version_info.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/utf_string_conversions.h"
@@ -324,7 +324,7 @@ std::string GetDriverInfo(HANDLE printer) {
   if (info_6.get()->pDriverPath) {
     scoped_ptr<FileVersionInfo> version_info(
         FileVersionInfo::CreateFileVersionInfo(
-            FilePath(info_6.get()->pDriverPath)));
+            base::FilePath(info_6.get()->pDriverPath)));
     if (version_info.get()) {
       info[1] = WideToUTF8(version_info->file_version());
       info[2] = WideToUTF8(version_info->product_name());

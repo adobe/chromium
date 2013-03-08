@@ -11,6 +11,7 @@
 #include "base/sys_byteorder.h"
 #include "media/base/audio_decoder_config.h"
 #include "media/base/audio_timestamp_helper.h"
+#include "media/base/bind_to_loop.h"
 #include "media/base/buffers.h"
 #include "media/base/data_buffer.h"
 #include "media/base/decoder_buffer.h"
@@ -42,8 +43,8 @@ static inline bool IsEndOfStream(int decoded_size,
 // http://tools.ietf.org/html/rfc6716
 
 // Opus uses Vorbis channel mapping, and Vorbis channel mapping specifies
-// mappings for up to 8 channels. See section 4.3.9 of the vorbis
-// specification:
+// mappings for up to 8 channels. This information is part of the Vorbis I
+// Specification:
 // http://www.xiph.org/vorbis/doc/Vorbis_I_spec.html
 static const int kMaxVorbisChannels = 8;
 
@@ -53,7 +54,7 @@ static const int kBitsPerChannel = 16;
 static const int kBytesPerChannel = kBitsPerChannel / 8;
 
 // Maximum packet size used in Xiph's opusdec and FFmpeg's libopusdec.
-static const int kMaxOpusOutputPacketSizeSamples = 960 * 6;
+static const int kMaxOpusOutputPacketSizeSamples = 960 * 6 * kMaxVorbisChannels;
 static const int kMaxOpusOutputPacketSizeBytes =
     kMaxOpusOutputPacketSizeSamples * kBytesPerChannel;
 
@@ -65,20 +66,62 @@ static void RemapOpusChannelLayout(const uint8* opus_mapping,
   // Opus uses Vorbis channel layout.
   const int32 num_layouts = kMaxVorbisChannels;
   const int32 num_layout_values = kMaxVorbisChannels;
-  const uint8 kVorbisChannelLayouts[num_layouts][num_layout_values] = {
+
+  // Vorbis channel ordering for streams with >= 2 channels:
+  // 2 Channels
+  //   L, R
+  // 3 Channels
+  //   L, Center, R
+  // 4 Channels
+  //   Front L, Front R, Back L, Back R
+  // 5 Channels
+  //   Front L, Center, Front R, Back L, Back R
+  // 6 Channels (5.1)
+  //   Front L, Center, Front R, Back L, Back R, LFE
+  // 7 channels (6.1)
+  //   Front L, Front Center, Front R, Side L, Side R, Back Center, LFE
+  // 8 Channels (7.1)
+  //   Front L, Center, Front R, Side L, Side R, Back L, Back R, LFE
+  //
+  // Channel ordering information is taken from section 4.3.9 of the Vorbis I
+  // Specification:
+  // http://xiph.org/vorbis/doc/Vorbis_I_spec.html#x1-800004.3.9
+
+  // These are the FFmpeg channel layouts expressed using the position of each
+  // channel in the output stream from libopus.
+  const uint8 kFFmpegChannelLayouts[num_layouts][num_layout_values] = {
     { 0 },
+
+    // Stereo: No reorder.
     { 0, 1 },
+
+    // 3 Channels, from Vorbis order to:
+    //  L, R, Center
     { 0, 2, 1 },
+
+    // 4 Channels: No reorder.
     { 0, 1, 2, 3 },
+
+    // 5 Channels, from Vorbis order to:
+    //  Front L, Front R, Center, Back L, Back R
     { 0, 2, 1, 3, 4 },
+
+    // 6 Channels (5.1), from Vorbis order to:
+    //  Front L, Front R, Center, LFE, Back L, Back R
     { 0, 2, 1, 5, 3, 4 },
-    { 0, 2, 1, 6, 5, 3, 4 },
+
+    // 7 Channels (6.1), from Vorbis order to:
+    //  Front L, Front R, Front Center, LFE, Side L, Side R, Back Center
+    { 0, 2, 1, 6, 3, 4, 5 },
+
+    // 8 Channels (7.1), from Vorbis order to:
+    //  Front L, Front R, Center, LFE, Back L, Back R, Side L, Side R
     { 0, 2, 1, 7, 5, 6, 3, 4 },
   };
 
   // Reorder the channels to produce the same ordering as FFmpeg, which is
   // what the pipeline expects.
-  const uint8* vorbis_layout_offset = kVorbisChannelLayouts[num_channels - 1];
+  const uint8* vorbis_layout_offset = kFFmpegChannelLayouts[num_channels - 1];
   for (int channel = 0; channel < num_channels; ++channel)
     channel_layout[channel] = opus_mapping[vorbis_layout_offset[channel]];
 }
@@ -184,7 +227,8 @@ static void ParseOpusHeader(const uint8* data, int data_size,
   }
 
   CHECK_GE(data_size, kOpusHeaderStreamMapOffset + header->channels)
-      << "Invalid stream map.";
+      << "Invalid stream map; insufficient data for current channel count: "
+      << header->channels;
 
   header->num_streams = *(data + kOpusHeaderNumStreamsOffset);
   header->num_coupled = *(data + kOpusHeaderNumCoupledOffset);
@@ -192,7 +236,7 @@ static void ParseOpusHeader(const uint8* data, int data_size,
   if (header->num_streams + header->num_coupled != header->channels)
     LOG(WARNING) << "Inconsistent channel mapping.";
 
-  for (int i = 0; i < kMaxVorbisChannels; ++i)
+  for (int i = 0; i < header->channels; ++i)
     header->stream_map[i] = *(data + kOpusHeaderStreamMapOffset + i);
 }
 
@@ -212,49 +256,9 @@ void OpusAudioDecoder::Initialize(
     const scoped_refptr<DemuxerStream>& stream,
     const PipelineStatusCB& status_cb,
     const StatisticsCB& statistics_cb) {
-  if (!message_loop_->BelongsToCurrentThread()) {
-    message_loop_->PostTask(FROM_HERE, base::Bind(
-        &OpusAudioDecoder::DoInitialize, this,
-        stream, status_cb, statistics_cb));
-    return;
-  }
-  DoInitialize(stream, status_cb, statistics_cb);
-}
+  DCHECK(message_loop_->BelongsToCurrentThread());
+  PipelineStatusCB initialize_cb = BindToCurrentLoop(status_cb);
 
-void OpusAudioDecoder::Read(const ReadCB& read_cb) {
-  // Complete operation asynchronously on different stack of execution as per
-  // the API contract of AudioDecoder::Read()
-  message_loop_->PostTask(FROM_HERE, base::Bind(
-      &OpusAudioDecoder::DoRead, this, read_cb));
-}
-
-int OpusAudioDecoder::bits_per_channel() {
-  return bits_per_channel_;
-}
-
-ChannelLayout OpusAudioDecoder::channel_layout() {
-  return channel_layout_;
-}
-
-int OpusAudioDecoder::samples_per_second() {
-  return samples_per_second_;
-}
-
-void OpusAudioDecoder::Reset(const base::Closure& closure) {
-  message_loop_->PostTask(FROM_HERE, base::Bind(
-      &OpusAudioDecoder::DoReset, this, closure));
-}
-
-OpusAudioDecoder::~OpusAudioDecoder() {
-  // TODO(scherkus): should we require Stop() to be called? this might end up
-  // getting called on a random thread due to refcounting.
-  CloseDecoder();
-}
-
-void OpusAudioDecoder::DoInitialize(
-    const scoped_refptr<DemuxerStream>& stream,
-    const PipelineStatusCB& status_cb,
-    const StatisticsCB& statistics_cb) {
   if (demuxer_stream_) {
     // TODO(scherkus): initialization currently happens more than once in
     // PipelineIntegrationTest.BasicPlayback.
@@ -265,38 +269,62 @@ void OpusAudioDecoder::DoInitialize(
   demuxer_stream_ = stream;
 
   if (!ConfigureDecoder()) {
-    status_cb.Run(DECODER_ERROR_NOT_SUPPORTED);
+    initialize_cb.Run(DECODER_ERROR_NOT_SUPPORTED);
     return;
   }
 
   statistics_cb_ = statistics_cb;
-  status_cb.Run(PIPELINE_OK);
+  initialize_cb.Run(PIPELINE_OK);
 }
 
-void OpusAudioDecoder::DoReset(const base::Closure& closure) {
-  opus_multistream_decoder_ctl(opus_decoder_, OPUS_RESET_STATE);
-  ResetTimestampState();
-  closure.Run();
-}
-
-void OpusAudioDecoder::DoRead(const ReadCB& read_cb) {
+void OpusAudioDecoder::Read(const ReadCB& read_cb) {
   DCHECK(message_loop_->BelongsToCurrentThread());
   DCHECK(!read_cb.is_null());
   CHECK(read_cb_.is_null()) << "Overlapping decodes are not supported.";
+  read_cb_ = BindToCurrentLoop(read_cb);
 
-  read_cb_ = read_cb;
   ReadFromDemuxerStream();
 }
 
-void OpusAudioDecoder::DoDecodeBuffer(
+int OpusAudioDecoder::bits_per_channel() {
+  DCHECK(message_loop_->BelongsToCurrentThread());
+  return bits_per_channel_;
+}
+
+ChannelLayout OpusAudioDecoder::channel_layout() {
+  DCHECK(message_loop_->BelongsToCurrentThread());
+  return channel_layout_;
+}
+
+int OpusAudioDecoder::samples_per_second() {
+  DCHECK(message_loop_->BelongsToCurrentThread());
+  return samples_per_second_;
+}
+
+void OpusAudioDecoder::Reset(const base::Closure& closure) {
+  DCHECK(message_loop_->BelongsToCurrentThread());
+  base::Closure reset_cb = BindToCurrentLoop(closure);
+
+  opus_multistream_decoder_ctl(opus_decoder_, OPUS_RESET_STATE);
+  ResetTimestampState();
+  reset_cb.Run();
+}
+
+OpusAudioDecoder::~OpusAudioDecoder() {
+  // TODO(scherkus): should we require Stop() to be called? this might end up
+  // getting called on a random thread due to refcounting.
+  CloseDecoder();
+}
+
+void OpusAudioDecoder::ReadFromDemuxerStream() {
+  DCHECK(!read_cb_.is_null());
+  demuxer_stream_->Read(base::Bind(&OpusAudioDecoder::BufferReady, this));
+}
+
+void OpusAudioDecoder::BufferReady(
     DemuxerStream::Status status,
     const scoped_refptr<DecoderBuffer>& input) {
-  if (!message_loop_->BelongsToCurrentThread()) {
-    message_loop_->PostTask(FROM_HERE, base::Bind(
-        &OpusAudioDecoder::DoDecodeBuffer, this, status, input));
-    return;
-  }
-
+  DCHECK(message_loop_->BelongsToCurrentThread());
   DCHECK(!read_cb_.is_null());
   DCHECK_EQ(status != DemuxerStream::kOk, !input) << status;
 
@@ -308,16 +336,6 @@ void OpusAudioDecoder::DoDecodeBuffer(
 
   if (status == DemuxerStream::kConfigChanged) {
     DCHECK(!input);
-
-    scoped_refptr<DataBuffer> output_buffer;
-
-    // Send a "end of stream" buffer to the decode loop
-    // to output any remaining data still in the decoder.
-    if (!Decode(DecoderBuffer::CreateEOSBuffer(), true, &output_buffer)) {
-      base::ResetAndReturn(&read_cb_).Run(kDecodeError, NULL);
-      return;
-    }
-
     DVLOG(1) << "Config changed.";
 
     if (!ConfigureDecoder()) {
@@ -326,49 +344,45 @@ void OpusAudioDecoder::DoDecodeBuffer(
     }
 
     ResetTimestampState();
-
-    if (output_buffer) {
-      // Execute callback to return the decoded audio.
-      base::ResetAndReturn(&read_cb_).Run(kOk, output_buffer);
-    } else {
-      // We exhausted the input data, but it wasn't enough for a frame.  Ask for
-      // more data in order to fulfill this read.
-      ReadFromDemuxerStream();
-    }
-
+    ReadFromDemuxerStream();
     return;
   }
 
   DCHECK_EQ(status, DemuxerStream::kOk);
   DCHECK(input);
 
+  // Libopus does not buffer output. Decoding is complete when an end of stream
+  // input buffer is received.
+  if (input->IsEndOfStream()) {
+    base::ResetAndReturn(&read_cb_).Run(kOk, DataBuffer::CreateEOSBuffer());
+    return;
+  }
+
   // Make sure we are notified if http://crbug.com/49709 returns.  Issue also
   // occurs with some damaged files.
-  if (!input->IsEndOfStream() && input->GetTimestamp() == kNoTimestamp() &&
+  if (input->GetTimestamp() == kNoTimestamp() &&
       output_timestamp_helper_->base_timestamp() == kNoTimestamp()) {
     DVLOG(1) << "Received a buffer without timestamps!";
     base::ResetAndReturn(&read_cb_).Run(kDecodeError, NULL);
     return;
   }
 
-  if (!input->IsEndOfStream()) {
-    if (last_input_timestamp_ != kNoTimestamp() &&
-        input->GetTimestamp() != kNoTimestamp() &&
-        input->GetTimestamp() < last_input_timestamp_) {
-      base::TimeDelta diff = input->GetTimestamp() - last_input_timestamp_;
-      DVLOG(1) << "Input timestamps are not monotonically increasing! "
-               << " ts " << input->GetTimestamp().InMicroseconds() << " us"
-               << " diff " << diff.InMicroseconds() << " us";
-      base::ResetAndReturn(&read_cb_).Run(kDecodeError, NULL);
-      return;
-    }
-
-    last_input_timestamp_ = input->GetTimestamp();
+  if (last_input_timestamp_ != kNoTimestamp() &&
+      input->GetTimestamp() != kNoTimestamp() &&
+      input->GetTimestamp() < last_input_timestamp_) {
+    base::TimeDelta diff = input->GetTimestamp() - last_input_timestamp_;
+    DVLOG(1) << "Input timestamps are not monotonically increasing! "
+              << " ts " << input->GetTimestamp().InMicroseconds() << " us"
+              << " diff " << diff.InMicroseconds() << " us";
+    base::ResetAndReturn(&read_cb_).Run(kDecodeError, NULL);
+    return;
   }
+
+  last_input_timestamp_ = input->GetTimestamp();
 
   scoped_refptr<DataBuffer> output_buffer;
 
-  if (!Decode(input, false, &output_buffer)) {
+  if (!Decode(input, &output_buffer)) {
     base::ResetAndReturn(&read_cb_).Run(kDecodeError, NULL);
     return;
   }
@@ -383,24 +397,18 @@ void OpusAudioDecoder::DoDecodeBuffer(
   }
 }
 
-void OpusAudioDecoder::ReadFromDemuxerStream() {
-  DCHECK(!read_cb_.is_null());
-
-  demuxer_stream_->Read(base::Bind(&OpusAudioDecoder::DoDecodeBuffer, this));
-}
-
 bool OpusAudioDecoder::ConfigureDecoder() {
   const AudioDecoderConfig& config = demuxer_stream_->audio_decoder_config();
 
   if (config.codec() != kCodecOpus) {
-    DLOG(ERROR) << "ConfigureDecoder(): codec must be kCodecOpus.";
+    DLOG(ERROR) << "codec must be kCodecOpus.";
     return false;
   }
 
   const int channel_count =
       ChannelLayoutToChannelCount(config.channel_layout());
   if (!config.IsValidConfig() || channel_count > kMaxVorbisChannels) {
-    DLOG(ERROR) << "ConfigureDecoder(): Invalid or unsupported audio stream -"
+    DLOG(ERROR) << "Invalid or unsupported audio stream -"
                 << " codec: " << config.codec()
                 << " channel count: " << channel_count
                 << " channel layout: " << config.channel_layout()
@@ -410,12 +418,12 @@ bool OpusAudioDecoder::ConfigureDecoder() {
   }
 
   if (config.bits_per_channel() != kBitsPerChannel) {
-    DLOG(ERROR) << "ConfigureDecoder(): 16 bit samples required.";
+    DLOG(ERROR) << "16 bit samples required.";
     return false;
   }
 
   if (config.is_encrypted()) {
-    DLOG(ERROR) << "ConfigureDecoder(): Encrypted audio stream not supported.";
+    DLOG(ERROR) << "Encrypted audio stream not supported.";
     return false;
   }
 
@@ -471,8 +479,8 @@ bool OpusAudioDecoder::ConfigureDecoder() {
                                                   channel_mapping,
                                                   &status);
   if (!opus_decoder_ || status != OPUS_OK) {
-    LOG(ERROR) << "ConfigureDecoder(): opus_multistream_decoder_create failed"
-               << " status=" << opus_strerror(status);
+    LOG(ERROR) << "opus_multistream_decoder_create failed status="
+               << opus_strerror(status);
     return false;
   }
 
@@ -501,19 +509,15 @@ void OpusAudioDecoder::ResetTimestampState() {
 }
 
 bool OpusAudioDecoder::Decode(const scoped_refptr<DecoderBuffer>& input,
-                              bool skip_eos_append,
                               scoped_refptr<DataBuffer>* output_buffer) {
-  int samples_decoded =
+  const int samples_decoded =
       opus_multistream_decode(opus_decoder_,
                               input->GetData(), input->GetDataSize(),
                               &output_buffer_[0],
                               kMaxOpusOutputPacketSizeSamples,
                               0);
   if (samples_decoded < 0) {
-    DCHECK(!input->IsEndOfStream())
-        << "Decode(): End of stream buffer produced an error!";
-
-    LOG(ERROR) << "ConfigureDecoder(): opus_multistream_decode failed for"
+    LOG(ERROR) << "opus_multistream_decode failed for"
                << " timestamp: " << input->GetTimestamp().InMicroseconds()
                << " us, duration: " << input->GetDuration().InMicroseconds()
                << " us, packet size: " << input->GetDataSize() << " bytes with"
@@ -548,10 +552,6 @@ bool OpusAudioDecoder::Decode(const scoped_refptr<DecoderBuffer>& input,
     (*output_buffer)->SetDuration(
         output_timestamp_helper_->GetDuration(decoded_audio_size));
     output_timestamp_helper_->AddBytes(decoded_audio_size);
-  } else if (IsEndOfStream(decoded_audio_size, input) && !skip_eos_append) {
-    DCHECK_EQ(input->GetDataSize(), 0);
-    // Create an end of stream output buffer.
-    *output_buffer = new DataBuffer(0);
   }
 
   // Decoding finished successfully, update statistics.

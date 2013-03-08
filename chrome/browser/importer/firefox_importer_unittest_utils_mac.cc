@@ -4,11 +4,11 @@
 
 #include "chrome/browser/importer/firefox_importer_unittest_utils.h"
 
-#include "base/bind.h"
 #include "base/base_switches.h"
+#include "base/bind.h"
 #include "base/command_line.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/message_loop.h"
 #include "base/test/test_timeouts.h"
 #include "chrome/browser/importer/firefox_importer_utils.h"
@@ -33,7 +33,7 @@ const char kTestChannelID[] = "T1";
 // |channel| - IPC Channel to use for communication.
 // |handle| - On return, the process handle to use to communicate with the
 // child.
-bool LaunchNSSDecrypterChildProcess(const FilePath& nss_path,
+bool LaunchNSSDecrypterChildProcess(const base::FilePath& nss_path,
     IPC::Channel* channel, base::ProcessHandle* handle) {
   CommandLine cl(*CommandLine::ForCurrentProcess());
   cl.AppendSwitchASCII(switches::kTestChildProcess, "NSSDecrypterChildProcess");
@@ -100,7 +100,7 @@ class FFDecryptorServerChannelListener : public IPC::Listener {
       sender_->Send(new Msg_Decryptor_Quit());
   }
 
-  virtual bool OnMessageReceived(const IPC::Message& msg) {
+  virtual bool OnMessageReceived(const IPC::Message& msg) OVERRIDE {
     bool handled = true;
     IPC_BEGIN_MESSAGE_MAP(FFDecryptorServerChannelListener, msg)
       IPC_MESSAGE_HANDLER(Msg_Decryptor_InitReturnCode, OnInitDecryptorResponse)
@@ -111,7 +111,7 @@ class FFDecryptorServerChannelListener : public IPC::Listener {
   }
 
   // If an error occured, just kill the message Loop.
-  virtual void OnChannelError() {
+  virtual void OnChannelError() OVERRIDE {
     got_result = false;
     MessageLoop::current()->Quit();
   }
@@ -130,7 +130,7 @@ FFUnitTestDecryptorProxy::FFUnitTestDecryptorProxy()
     : child_process_(0) {
 }
 
-bool FFUnitTestDecryptorProxy::Setup(const FilePath& nss_path) {
+bool FFUnitTestDecryptorProxy::Setup(const base::FilePath& nss_path) {
   // Create a new message loop and spawn the child process.
   message_loop_.reset(new MessageLoopForIO());
 
@@ -196,8 +196,8 @@ bool FFUnitTestDecryptorProxy::WaitForClientResponse() {
   return ret;
 }
 
-bool FFUnitTestDecryptorProxy::DecryptorInit(const FilePath& dll_path,
-                                             const FilePath& db_path) {
+bool FFUnitTestDecryptorProxy::DecryptorInit(const base::FilePath& dll_path,
+                                             const base::FilePath& db_path) {
   channel_->Send(new Msg_Decryptor_Init(dll_path, db_path));
   bool ok = WaitForClientResponse();
   if (ok && listener_->got_result) {
@@ -230,7 +230,7 @@ class FFDecryptorClientChannelListener : public IPC::Listener {
     sender_ = sender;
   }
 
-  void OnDecryptor_Init(FilePath dll_path, FilePath db_path) {
+  void OnDecryptor_Init(base::FilePath dll_path, base::FilePath db_path) {
     bool ret = decryptor_.Init(dll_path, db_path);
     sender_->Send(new Msg_Decryptor_InitReturnCode(ret));
   }
@@ -244,7 +244,7 @@ class FFDecryptorClientChannelListener : public IPC::Listener {
     MessageLoop::current()->Quit();
   }
 
-  virtual bool OnMessageReceived(const IPC::Message& msg) {
+  virtual bool OnMessageReceived(const IPC::Message& msg) OVERRIDE {
     bool handled = true;
     IPC_BEGIN_MESSAGE_MAP(FFDecryptorClientChannelListener, msg)
       IPC_MESSAGE_HANDLER(Msg_Decryptor_Init, OnDecryptor_Init)
@@ -255,7 +255,7 @@ class FFDecryptorClientChannelListener : public IPC::Listener {
     return handled;
   }
 
-  virtual void OnChannelError() {
+  virtual void OnChannelError() OVERRIDE {
     MessageLoop::current()->Quit();
   }
 

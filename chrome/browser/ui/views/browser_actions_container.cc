@@ -5,15 +5,15 @@
 #include "chrome/browser/ui/views/browser_actions_container.h"
 
 #include "base/compiler_specific.h"
+#include "base/prefs/pref_service.h"
 #include "base/stl_util.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/tab_helper.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sessions/session_tab_helper.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_tabstrip.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/view_ids.h"
 #include "chrome/browser/ui/views/browser_action_view.h"
 #include "chrome/browser/ui/views/extensions/browser_action_drag_data.h"
@@ -45,12 +45,6 @@ const int kItemSpacing = ToolbarView::kStandardSpacing;
 
 // Horizontal spacing before the chevron (if visible).
 const int kChevronSpacing = kItemSpacing - 2;
-
-void RegisterUserPrefs(PrefServiceSyncable* prefs) {
-  prefs->RegisterIntegerPref(prefs::kBrowserActionContainerWidth,
-                             0,
-                             PrefServiceSyncable::UNSYNCABLE_PREF);
-}
 
 }  // namespace
 
@@ -117,13 +111,6 @@ BrowserActionsContainer::~BrowserActionsContainer() {
 
 void BrowserActionsContainer::Init() {
   LoadImages();
-
-  // TODO(joi): Switch to official way of registering user prefs for
-  // this class, i.e. in a function called from
-  // browser_prefs::RegisterUserPrefs.
-  if (!profile_->GetPrefs()->FindPreference(
-          prefs::kBrowserActionContainerWidth))
-    RegisterUserPrefs(profile_->GetPrefs());
 
   // We wait to set the container width until now so that the chevron images
   // will be loaded.  The width calculation needs to know the chevron size.
@@ -457,7 +444,7 @@ void BrowserActionsContainer::NotifyMenuDeleted(
   overflow_menu_ = NULL;
 }
 
-void BrowserActionsContainer::OnWidgetClosing(views::Widget* widget) {
+void BrowserActionsContainer::OnWidgetDestroying(views::Widget* widget) {
   DCHECK_EQ(popup_->GetWidget(), widget);
   popup_->GetWidget()->RemoveObserver(this);
   popup_ = NULL;
@@ -474,7 +461,8 @@ void BrowserActionsContainer::InspectPopup(ExtensionAction* action) {
 }
 
 int BrowserActionsContainer::GetCurrentTabId() const {
-  content::WebContents* active_tab = chrome::GetActiveWebContents(browser_);
+  content::WebContents* active_tab =
+      browser_->tab_strip_model()->GetActiveWebContents();
   if (!active_tab)
     return -1;
 
@@ -498,7 +486,8 @@ gfx::Point BrowserActionsContainer::GetViewContentOffset() const {
 
 extensions::ActiveTabPermissionGranter*
     BrowserActionsContainer::GetActiveTabPermissionGranter() {
-  content::WebContents* web_contents = chrome::GetActiveWebContents(browser_);
+  content::WebContents* web_contents =
+      browser_->tab_strip_model()->GetActiveWebContents();
   if (!web_contents)
     return NULL;
   return extensions::TabHelper::FromWebContents(web_contents)->
@@ -518,7 +507,7 @@ void BrowserActionsContainer::MoveBrowserAction(const std::string& extension_id,
 
 void BrowserActionsContainer::HidePopup() {
   // Remove this as an observer and clear |popup_| and |popup_button_| here,
-  // since we might change them before OnWidgetClosing() gets called.
+  // since we might change them before OnWidgetDestroying() gets called.
   if (popup_) {
     popup_->GetWidget()->RemoveObserver(this);
     popup_->GetWidget()->Close();

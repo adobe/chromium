@@ -8,7 +8,7 @@
 #include <string>
 
 #include "base/basictypes.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/memory/ref_counted.h"
 #include "base/string16.h"
 #include "chrome/browser/importer/importer_type.h"
@@ -36,8 +36,8 @@ struct SourceProfile {
 
   string16 importer_name;
   ImporterType importer_type;
-  FilePath source_path;
-  FilePath app_path;
+  base::FilePath source_path;
+  base::FilePath app_path;
   uint16 services_supported;  // Bitmask of ImportItem.
   // The URLRequestContextGetter is only used for Google Toolbar.
   scoped_refptr<net::URLRequestContextGetter> request_context_getter;

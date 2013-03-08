@@ -69,7 +69,7 @@ table.
 <tr>
   <th> Permission </th> <th> Description </th>
 </tr>
-<tr>
+<tr id="host-permission">
   <td> <em>match pattern</em> </td>
   <td> Specifies a <em>host permission</em>.
        Required if the extension or app wants to interact
@@ -192,6 +192,14 @@ table.
        <a href="fileSystem.html">fileSystem API</a> to write files.</td>
 </tr>
 {{/is_apps}}
+{{?is_apps}}
+<tr>
+  <td id="fullscreen"> "fullscreen" </td>
+  <td> Allows the app to use the proposed HTML5
+       <a href="https://dvcs.w3.org/hg/fullscreen/raw-file/tip/Overview.html">fullscreen API</a>
+       without prompting the user for permission.</td>
+</tr>
+{{/is_apps}}
 <tr>
   <td id="geolocation"> "geolocation" </td>
   <td> Allows the extension or app to use the proposed HTML5
@@ -231,7 +239,7 @@ table.
   <td> "pointerLock" </td>
   <td> Required to use
     <a href="http://www.w3.org/TR/pointerlock/">Pointer Lock</a> via calls to
-    <code>webkitRequestPointerLock</code></a> or Pepper's
+    <code>webkitRequestPointerLock</code> or Pepper's
     <a href="https://developers.google.com/native-client/peppercpp/classpp_1_1_mouse_lock">
     Mouse Lock API</a>. </td>
 </tr>
@@ -253,6 +261,14 @@ table.
   <td> Required if the extension or app uses the
        <a href="storage.html">chrome.storage</a> module. </td>
 </tr>
+{{?is_apps}}
+<tr>
+  <td id="syncFileSystem"> "syncFileSystem" </td>
+  <td> Required if the app uses the
+       <a href="syncFileSystem.html">syncFileSystem API</a>
+       to save and synchronize data on Google Drive.</td>
+</tr>
+{{/is_apps}}
 {{^is_apps}}
 <tr>
   <td> "tabs" </td>
@@ -310,6 +326,14 @@ table.
   <td> Required if the extension uses the
        <a href="webRequest.html">chrome.webRequest</a> module in a blocking
        fashion. </td>
+</tr>
+{{/is_apps}}
+{{?is_apps}}
+<tr>
+  <td id="webview"> "webview" </td>
+  <td> Required if the app uses the
+       <a href="webview_tag.html">Webview Tag</a> to embed live content
+       from the web in the packaged app.</td>
 </tr>
 {{/is_apps}}
 </tr>

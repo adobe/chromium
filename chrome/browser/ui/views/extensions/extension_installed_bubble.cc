@@ -25,9 +25,9 @@
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
 #include "chrome/browser/ui/views/tabs/tab_strip.h"
 #include "chrome/browser/ui/views/toolbar_view.h"
-#include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
 #include "chrome/browser/ui/webui/sync_promo/sync_promo_ui.h"
 #include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/extensions/api/extension_action/action_info.h"
 #include "chrome/common/extensions/api/omnibox/omnibox_handler.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/url_constants.h"
@@ -207,8 +207,12 @@ class InstalledBubbleContent : public views::View,
     }
 
     if (flavors_ & HOW_TO_MANAGE) {
-      manage_ = new views::Label(
-          l10n_util::GetStringUTF16(IDS_EXTENSION_INSTALLED_MANAGE_INFO));
+      manage_ = new views::Label(l10n_util::GetStringUTF16(
+#if defined(OS_CHROMEOS)
+          IDS_EXTENSION_INSTALLED_MANAGE_INFO_CHROMEOS));
+#else
+          IDS_EXTENSION_INSTALLED_MANAGE_INFO));
+#endif
       manage_->SetFont(font);
       manage_->SetMultiLine(true);
       manage_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
@@ -240,7 +244,8 @@ class InstalledBubbleContent : public views::View,
     AddChildView(close_button_);
   }
 
-  virtual void ButtonPressed(views::Button* sender, const ui::Event& event) {
+  virtual void ButtonPressed(views::Button* sender,
+                             const ui::Event& event) OVERRIDE {
     if (sender == close_button_)
       bubble_->StartFade(false);
     else
@@ -337,8 +342,7 @@ class InstalledBubbleContent : public views::View,
       return height;
     contents_area.set_width(kRightColumnWidth);
 
-    string16 full_text = signin_promo_link_text_ + ASCIIToUTF16(" ") +
-                         signin_promo_text_;
+    string16 full_text = signin_promo_link_text_ + signin_promo_text_;
 
     // The link is the first item in the text.
     const gfx::Size link_size = sign_in_link_->GetPreferredSize();
@@ -370,27 +374,19 @@ class InstalledBubbleContent : public views::View,
                            line->GetStringSize().height());
       line->SetDisplayRect(gfx::Rect(position, size));
       position.set_y(position.y() + size.height());
-
-      // The link is always first in the text and is assumed to not be long
-      // enough to wrap to the next line.
-      if (it == lines.begin()) {
-        // First line we treat specially, because we will draw the link on its
-        // own, so we don't want to draw the text for the link twice. We
-        // therefore set it to transparent.
-        gfx::StyleRange link_text_style(line->default_style());
-        link_text_style.foreground = SK_ColorTRANSPARENT;
-        link_text_style.range = ui::Range(0, signin_promo_link_text_.size());
-        line->ApplyStyleRange(link_text_style);
-      }
-
       sign_in_promo_lines_.push_back(line);
       height += size.height();
     }
 
+    // The link is drawn separately; make it transparent here to only draw once.
+    // The link always leads other text and is assumed to fit on the first line.
+    sign_in_promo_lines_.front()->ApplyColor(SK_ColorTRANSPARENT,
+        ui::Range(0, signin_promo_link_text_.size()));
+
     return height;
   }
 
-  virtual gfx::Size GetPreferredSize() {
+  virtual gfx::Size GetPreferredSize() OVERRIDE {
     int width = kHorizOuterMargin;
     width += kIconSize;
     width += views::kPanelHorizMargin;
@@ -425,7 +421,7 @@ class InstalledBubbleContent : public views::View,
     return gfx::Size(width, std::max(height, kIconSize + 2 * kVertOuterMargin));
   }
 
-  virtual void Layout() {
+  virtual void Layout() OVERRIDE {
     int x = kHorizOuterMargin;
     int y = kVertOuterMargin;
 
@@ -482,7 +478,7 @@ class InstalledBubbleContent : public views::View,
     close_button_->SetBounds(x - 1, y - 1, sz.width(), sz.height());
   }
 
-  virtual void OnPaint(gfx::Canvas* canvas) {
+  virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE {
     for (ScopedVector<gfx::RenderText>::const_iterator it =
              sign_in_promo_lines_.begin();
          it != sign_in_promo_lines_.end(); ++it)
@@ -551,7 +547,7 @@ ExtensionInstalledBubble::ExtensionInstalledBubble(const Extension* extension,
   else if (extension_action_manager->GetBrowserAction(*extension_))
     type_ = BROWSER_ACTION;
   else if (extension_action_manager->GetPageAction(*extension) &&
-           extensions::OmniboxInfo::IsVerboseInstallMessage(extension))
+           extensions::ActionInfo::IsVerboseInstallMessage(extension))
     type_ = PAGE_ACTION;
   else
     type_ = GENERIC;

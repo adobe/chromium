@@ -7,13 +7,14 @@
 
 #include <string>
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "content/browser/renderer_host/media/mock_media_observer.h"
 #include "content/public/renderer/content_renderer_client.h"
 #include "ipc/ipc_listener.h"
+#include "media/base/audio_hardware_config.h"
 #include "media/base/channel_layout.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/webrtc/common_types.h"
@@ -109,18 +110,6 @@ class WebRTCAutoDelete {
   T* ptr_;
 };
 
-// Individual tests can provide an implementation (or mock) of this interface
-// when the audio code queries for hardware capabilities on the IO thread.
-class AudioUtilInterface {
- public:
-  virtual ~AudioUtilInterface() {}
-  virtual int GetAudioHardwareSampleRate() = 0;
-  virtual int GetAudioInputHardwareSampleRate(
-      const std::string& device_id) = 0;
-  virtual media::ChannelLayout GetAudioInputHardwareChannelLayout(
-      const std::string& device_id) = 0;
-};
-
 // Implemented and defined in the cc file.
 class ReplaceContentClientRenderer;
 
@@ -135,7 +124,7 @@ class WebRTCAudioDeviceTest : public ::testing::Test, public IPC::Listener {
   // Sends an IPC message to the IO thread channel.
   bool Send(IPC::Message* message);
 
-  void SetAudioUtilCallback(AudioUtilInterface* callback);
+  void SetAudioHardwareConfig(media::AudioHardwareConfig* hardware_config);
 
  protected:
   void InitializeIOThread(const char* thread_name);
@@ -143,9 +132,9 @@ class WebRTCAudioDeviceTest : public ::testing::Test, public IPC::Listener {
   void CreateChannel(const char* name);
   void DestroyChannel();
 
-  void OnGetHardwareSampleRate(int* sample_rate);
-  void OnGetHardwareInputSampleRate(int* sample_rate);
-  void OnGetHardwareInputChannelLayout(media::ChannelLayout* channels);
+  void OnGetAudioHardwareConfig(int* output_buffer_size,
+                                int* output_sample_rate, int* input_sample_rate,
+                                media::ChannelLayout* input_channel_layout);
 
   // IPC::Listener implementation.
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
@@ -156,18 +145,18 @@ class WebRTCAudioDeviceTest : public ::testing::Test, public IPC::Listener {
   void WaitForMessageLoopCompletion(base::MessageLoopProxy* loop);
 
   // Convenience getter for gmock.
-  MockMediaObserver& media_observer() const {
-    return *media_observer_.get();
+  MockMediaInternals& media_observer() const {
+    return *media_internals_.get();
   }
 
-  std::string GetTestDataPath(const FilePath::StringType& file_name);
+  std::string GetTestDataPath(const base::FilePath::StringType& file_name);
 
   scoped_ptr<ReplaceContentClientRenderer> saved_content_renderer_;
   MessageLoopForUI message_loop_;
   ContentRendererClient content_renderer_client_;
   RenderThreadImpl* render_thread_;  // Owned by mock_process_.
   scoped_ptr<WebRTCMockRenderProcess> mock_process_;
-  scoped_ptr<MockMediaObserver> media_observer_;
+  scoped_ptr<MockMediaInternals> media_internals_;
   scoped_ptr<MediaStreamManager> media_stream_manager_;
   scoped_ptr<media::AudioManager> audio_manager_;
   scoped_ptr<AudioMirroringManager> mirroring_manager_;
@@ -177,7 +166,7 @@ class WebRTCAudioDeviceTest : public ::testing::Test, public IPC::Listener {
   scoped_refptr<AudioRendererHost> audio_render_host_;
   scoped_refptr<AudioInputRendererHost> audio_input_renderer_host_;
 
-  AudioUtilInterface* audio_util_callback_;  // Weak reference.
+  media::AudioHardwareConfig* audio_hardware_config_;  // Weak reference.
 
   // Initialized on the main test thread that we mark as the UI thread.
   scoped_ptr<TestBrowserThread> ui_thread_;

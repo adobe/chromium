@@ -88,6 +88,9 @@ struct SYNC_EXPORT_PRIVATE HttpResponse {
 
   static const char* GetServerConnectionCodeString(
       ServerConnectionCode code);
+
+  static ServerConnectionCode ServerConnectionCodeFromNetError(
+      int error_code);
 };
 
 struct ServerConnectionEvent {
@@ -232,14 +235,12 @@ class SYNC_EXPORT_PRIVATE ServerConnectionManager {
     return false;
   }
 
-  void InvalidateAndClearAuthToken() {
-    DCHECK(thread_checker_.CalledOnValidThread());
-    // Copy over the token to previous invalid token.
-    if (!auth_token_.empty()) {
-      previously_invalidated_token.assign(auth_token_);
-      auth_token_ = std::string();
-    }
-  }
+  // Our out-of-band invalidations channel can encounter auth errors,
+  // and when it does so it tells us via this method to prevent making more
+  // requests with known-bad tokens. This will put the
+  // ServerConnectionManager in an auth error state as if it received an
+  // HTTP 401 from sync servers.
+  void OnInvalidationCredentialsRejected();
 
   bool HasInvalidAuthToken() {
     return auth_token_.empty();
@@ -255,9 +256,8 @@ class SYNC_EXPORT_PRIVATE ServerConnectionManager {
     return proto_sync_path_;
   }
 
-  std::string get_time_path() const {
-    return get_time_path_;
-  }
+  // Updates server_status_ and notifies listeners if server_status_ changed
+  void SetServerStatus(HttpResponse::ServerConnectionCode server_status);
 
   // NOTE: Tests rely on this protected function being virtual.
   //
@@ -266,6 +266,11 @@ class SYNC_EXPORT_PRIVATE ServerConnectionManager {
                                 const std::string& path,
                                 const std::string& auth_token,
                                 ScopedServerStatusWatcher* watcher);
+
+  // An internal helper to clear our auth_token_ and cache the old version
+  // in |previously_invalidated_token_| to shelter us from retrying with a
+  // known bad token.
+  void InvalidateAndClearAuthToken();
 
   // Helper to check terminated flags and build a Connection object, installing
   // it as the |active_connection_|.  If this ServerConnectionManager has been
@@ -290,7 +295,6 @@ class SYNC_EXPORT_PRIVATE ServerConnectionManager {
 
   // The paths we post to.
   std::string proto_sync_path_;
-  std::string get_time_path_;
 
   // The auth token to use in authenticated requests.
   std::string auth_token_;

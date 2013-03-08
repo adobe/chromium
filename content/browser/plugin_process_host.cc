@@ -15,8 +15,8 @@
 #include "base/base_switches.h"
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
 #include "base/path_service.h"
@@ -167,7 +167,7 @@ bool PluginProcessHost::Init(const webkit::WebPluginInfo& info) {
   int flags = ChildProcessHost::CHILD_NORMAL;
 #endif
 
-  FilePath exe_path = ChildProcessHost::GetChildPath(flags);
+  base::FilePath exe_path = ChildProcessHost::GetChildPath(flags);
   if (exe_path.empty())
     return false;
 
@@ -238,7 +238,7 @@ bool PluginProcessHost::Init(const webkit::WebPluginInfo& info) {
 
   process_->Launch(
 #if defined(OS_WIN)
-      FilePath(),
+      base::FilePath(),
 #elif defined(OS_POSIX)
       false,
       env,
@@ -342,7 +342,10 @@ void PluginProcessHost::CancelPendingRequestsForResourceContext(
 }
 
 void PluginProcessHost::OpenChannelToPlugin(Client* client) {
-  process_->Notify(NOTIFICATION_CHILD_INSTANCE_CREATED);
+  BrowserThread::PostTask(
+      BrowserThread::UI, FROM_HERE,
+      base::Bind(&BrowserChildProcessHostImpl::NotifyProcessInstanceCreated,
+                 process_->GetData()));
   client->SetPluginInfo(info_);
   if (process_->GetHost()->IsChannelOpening()) {
     // The channel is already in the process of being opened.  Put

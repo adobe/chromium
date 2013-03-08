@@ -7,8 +7,8 @@
 
 #include "build/build_config.h"
 
-#include "base/file_path.h"
-#include "base/file_util_proxy.h"
+#include "base/files/file_path.h"
+#include "base/files/file_util_proxy.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop.h"
@@ -78,7 +78,7 @@ class NaClProcessHost : public content::BrowserChildProcessHostDelegate {
  private:
   friend class PluginListener;
 
-  // Internal class that holds the nacl::Handle objecs so that
+  // Internal class that holds the NaClHandle objecs so that
   // nacl_process_host.h doesn't include NaCl headers.  Needed since it's
   // included by src\content, which can't depend on the NaCl gyp file because it
   // depends on chrome.gyp (circular dependency).
@@ -97,8 +97,8 @@ class NaClProcessHost : public content::BrowserChildProcessHostDelegate {
 
 #if defined(OS_WIN)
   // Create command line for launching loader under nacl-gdb.
-  scoped_ptr<CommandLine> GetCommandForLaunchWithGdb(const FilePath& nacl_gdb,
-                                                     CommandLine* line);
+  scoped_ptr<CommandLine> GetCommandForLaunchWithGdb(
+      const base::FilePath& nacl_gdb, CommandLine* line);
 #elif defined(OS_LINUX)
   bool LaunchNaClGdb(base::ProcessId pid);
   void OnNaClGdbAttached();
@@ -110,7 +110,7 @@ class NaClProcessHost : public content::BrowserChildProcessHostDelegate {
   SocketDescriptor GetDebugStubSocketHandle();
 #endif
   // Get path to manifest on local disk if possible.
-  FilePath GetManifestPath();
+  base::FilePath GetManifestPath();
   bool LaunchSelLdr();
 
   // BrowserChildProcessHostDelegate implementation:

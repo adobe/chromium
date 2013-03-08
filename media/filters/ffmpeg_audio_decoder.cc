@@ -11,6 +11,7 @@
 #include "media/base/audio_bus.h"
 #include "media/base/audio_decoder_config.h"
 #include "media/base/audio_timestamp_helper.h"
+#include "media/base/bind_to_loop.h"
 #include "media/base/data_buffer.h"
 #include "media/base/decoder_buffer.h"
 #include "media/base/demuxer.h"
@@ -42,7 +43,9 @@ FFmpegAudioDecoder::FFmpegAudioDecoder(
       codec_context_(NULL),
       bits_per_channel_(0),
       channel_layout_(CHANNEL_LAYOUT_NONE),
+      channels_(0),
       samples_per_second_(0),
+      av_sample_format_(0),
       bytes_per_frame_(0),
       last_input_timestamp_(kNoTimestamp()),
       output_bytes_to_drop_(0),
@@ -53,49 +56,9 @@ void FFmpegAudioDecoder::Initialize(
     const scoped_refptr<DemuxerStream>& stream,
     const PipelineStatusCB& status_cb,
     const StatisticsCB& statistics_cb) {
-  if (!message_loop_->BelongsToCurrentThread()) {
-    message_loop_->PostTask(FROM_HERE, base::Bind(
-        &FFmpegAudioDecoder::DoInitialize, this,
-        stream, status_cb, statistics_cb));
-    return;
-  }
-  DoInitialize(stream, status_cb, statistics_cb);
-}
+  DCHECK(message_loop_->BelongsToCurrentThread());
+  PipelineStatusCB initialize_cb = BindToCurrentLoop(status_cb);
 
-void FFmpegAudioDecoder::Read(const ReadCB& read_cb) {
-  // Complete operation asynchronously on different stack of execution as per
-  // the API contract of AudioDecoder::Read()
-  message_loop_->PostTask(FROM_HERE, base::Bind(
-      &FFmpegAudioDecoder::DoRead, this, read_cb));
-}
-
-int FFmpegAudioDecoder::bits_per_channel() {
-  return bits_per_channel_;
-}
-
-ChannelLayout FFmpegAudioDecoder::channel_layout() {
-  return channel_layout_;
-}
-
-int FFmpegAudioDecoder::samples_per_second() {
-  return samples_per_second_;
-}
-
-void FFmpegAudioDecoder::Reset(const base::Closure& closure) {
-  message_loop_->PostTask(FROM_HERE, base::Bind(
-      &FFmpegAudioDecoder::DoReset, this, closure));
-}
-
-FFmpegAudioDecoder::~FFmpegAudioDecoder() {
-  // TODO(scherkus): should we require Stop() to be called? this might end up
-  // getting called on a random thread due to refcounting.
-  ReleaseFFmpegResources();
-}
-
-void FFmpegAudioDecoder::DoInitialize(
-    const scoped_refptr<DemuxerStream>& stream,
-    const PipelineStatusCB& status_cb,
-    const StatisticsCB& statistics_cb) {
   FFmpegGlue::InitializeFFmpeg();
 
   if (demuxer_stream_) {
@@ -113,22 +76,15 @@ void FFmpegAudioDecoder::DoInitialize(
   }
 
   statistics_cb_ = statistics_cb;
-  status_cb.Run(PIPELINE_OK);
+  initialize_cb.Run(PIPELINE_OK);
 }
 
-void FFmpegAudioDecoder::DoReset(const base::Closure& closure) {
-  avcodec_flush_buffers(codec_context_);
-  ResetTimestampState();
-  queued_audio_.clear();
-  closure.Run();
-}
-
-void FFmpegAudioDecoder::DoRead(const ReadCB& read_cb) {
+void FFmpegAudioDecoder::Read(const ReadCB& read_cb) {
   DCHECK(message_loop_->BelongsToCurrentThread());
   DCHECK(!read_cb.is_null());
   CHECK(read_cb_.is_null()) << "Overlapping decodes are not supported.";
 
-  read_cb_ = read_cb;
+  read_cb_ = BindToCurrentLoop(read_cb);
 
   // If we don't have any queued audio from the last packet we decoded, ask for
   // more data from the demuxer to satisfy this read.
@@ -142,15 +98,46 @@ void FFmpegAudioDecoder::DoRead(const ReadCB& read_cb) {
   queued_audio_.pop_front();
 }
 
-void FFmpegAudioDecoder::DoDecodeBuffer(
+int FFmpegAudioDecoder::bits_per_channel() {
+  DCHECK(message_loop_->BelongsToCurrentThread());
+  return bits_per_channel_;
+}
+
+ChannelLayout FFmpegAudioDecoder::channel_layout() {
+  DCHECK(message_loop_->BelongsToCurrentThread());
+  return channel_layout_;
+}
+
+int FFmpegAudioDecoder::samples_per_second() {
+  DCHECK(message_loop_->BelongsToCurrentThread());
+  return samples_per_second_;
+}
+
+void FFmpegAudioDecoder::Reset(const base::Closure& closure) {
+  DCHECK(message_loop_->BelongsToCurrentThread());
+  base::Closure reset_cb = BindToCurrentLoop(closure);
+
+  avcodec_flush_buffers(codec_context_);
+  ResetTimestampState();
+  queued_audio_.clear();
+  reset_cb.Run();
+}
+
+FFmpegAudioDecoder::~FFmpegAudioDecoder() {
+  // TODO(scherkus): should we require Stop() to be called? this might end up
+  // getting called on a random thread due to refcounting.
+  ReleaseFFmpegResources();
+}
+
+void FFmpegAudioDecoder::ReadFromDemuxerStream() {
+  DCHECK(!read_cb_.is_null());
+  demuxer_stream_->Read(base::Bind(&FFmpegAudioDecoder::BufferReady, this));
+}
+
+void FFmpegAudioDecoder::BufferReady(
     DemuxerStream::Status status,
     const scoped_refptr<DecoderBuffer>& input) {
-  if (!message_loop_->BelongsToCurrentThread()) {
-    message_loop_->PostTask(FROM_HERE, base::Bind(
-        &FFmpegAudioDecoder::DoDecodeBuffer, this, status, input));
-    return;
-  }
-
+  DCHECK(message_loop_->BelongsToCurrentThread());
   DCHECK(!read_cb_.is_null());
   DCHECK(queued_audio_.empty());
   DCHECK_EQ(status != DemuxerStream::kOk, !input) << status;
@@ -241,12 +228,6 @@ void FFmpegAudioDecoder::DoDecodeBuffer(
   queued_audio_.pop_front();
 }
 
-void FFmpegAudioDecoder::ReadFromDemuxerStream() {
-  DCHECK(!read_cb_.is_null());
-
-  demuxer_stream_->Read(base::Bind(&FFmpegAudioDecoder::DoDecodeBuffer, this));
-}
-
 bool FFmpegAudioDecoder::ConfigureDecoder() {
   const AudioDecoderConfig& config = demuxer_stream_->audio_decoder_config();
 
@@ -324,6 +305,11 @@ bool FFmpegAudioDecoder::ConfigureDecoder() {
   output_timestamp_helper_.reset(new AudioTimestampHelper(
       config.bytes_per_frame(), config.samples_per_second()));
   bytes_per_frame_ = config.bytes_per_frame();
+
+  // Store initial values to guard against midstream configuration changes.
+  channels_ = codec_context_->channels;
+  av_sample_format_ = codec_context_->sample_fmt;
+
   return true;
 }
 
@@ -351,8 +337,13 @@ void FFmpegAudioDecoder::RunDecodeLoop(
     bool skip_eos_append) {
   AVPacket packet;
   av_init_packet(&packet);
-  packet.data = const_cast<uint8*>(input->GetData());
-  packet.size = input->GetDataSize();
+  if (input->IsEndOfStream()) {
+    packet.data = NULL;
+    packet.size = 0;
+  } else {
+    packet.data = const_cast<uint8*>(input->GetData());
+    packet.size = input->GetDataSize();
+  }
 
   // Each audio packet may contain several frames, so we must call the decoder
   // until we've exhausted the packet.  Regardless of the packet size we always
@@ -403,10 +394,16 @@ void FFmpegAudioDecoder::RunDecodeLoop(
 
     int decoded_audio_size = 0;
     if (frame_decoded) {
-      int output_sample_rate = av_frame_->sample_rate;
-      if (output_sample_rate != samples_per_second_) {
-        DLOG(ERROR) << "Output sample rate (" << output_sample_rate
-                    << ") doesn't match expected rate " << samples_per_second_;
+      if (av_frame_->sample_rate != samples_per_second_ ||
+          av_frame_->channels != channels_ ||
+          av_frame_->format != av_sample_format_) {
+        DLOG(ERROR) << "Unsupported midstream configuration change!"
+                    << " Sample Rate: " << av_frame_->sample_rate << " vs "
+                    << samples_per_second_
+                    << ", Channels: " << av_frame_->channels << " vs "
+                    << channels_
+                    << ", Sample Format: " << av_frame_->format << " vs "
+                    << av_sample_format_;
 
         // This is an unrecoverable error, so bail out.
         QueuedAudioBuffer queue_entry = { kDecodeError, NULL };
@@ -447,7 +444,7 @@ void FFmpegAudioDecoder::RunDecodeLoop(
         // Setup the AudioBus as a wrapper of the AVFrame data and then use
         // AudioBus::ToInterleaved() to convert the data as necessary.
         int skip_frames = start_sample;
-        int total_frames = av_frame_->nb_samples - start_sample;
+        int total_frames = av_frame_->nb_samples;
         if (codec_context_->sample_fmt == AV_SAMPLE_FMT_FLT) {
           DCHECK_EQ(converter_bus_->channels(), 1);
           total_frames *= codec_context_->channels;
@@ -455,18 +452,18 @@ void FFmpegAudioDecoder::RunDecodeLoop(
         }
         converter_bus_->set_frames(total_frames);
         DCHECK_EQ(decoded_audio_size,
-                  converter_bus_->frames() * bytes_per_frame_);
+                  (converter_bus_->frames() - skip_frames) * bytes_per_frame_);
 
         for (int i = 0; i < converter_bus_->channels(); ++i) {
           converter_bus_->SetChannelData(i, reinterpret_cast<float*>(
-              av_frame_->extended_data[i]) + skip_frames);
+              av_frame_->extended_data[i]));
         }
 
         output = new DataBuffer(decoded_audio_size);
         output->SetDataSize(decoded_audio_size);
-        converter_bus_->ToInterleaved(
-            converter_bus_->frames(), bits_per_channel_ / 8,
-            output->GetWritableData());
+        converter_bus_->ToInterleavedPartial(
+            skip_frames, converter_bus_->frames() - skip_frames,
+            bits_per_channel_ / 8, output->GetWritableData());
       } else {
         output = DataBuffer::CopyFrom(
             av_frame_->extended_data[0] + start_sample * bytes_per_frame_,

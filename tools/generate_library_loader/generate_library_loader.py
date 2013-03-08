@@ -82,7 +82,7 @@ IMPL_TEMPLATE = """// This is generated file. Do not modify directly.
 #error both %(unique_prefix)s_DLOPEN and %(unique_prefix)s_DT_NEEDED defined
 #endif
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
 
 %(class_name)s::%(class_name)s() : loaded_(false) {
@@ -99,7 +99,7 @@ bool %(class_name)s::Load(const std::string& library_name) {
   }
 
 #if defined(%(unique_prefix)s_DLOPEN)
-  library_ = base::LoadNativeLibrary(FilePath(library_name), NULL);
+  library_ = base::LoadNativeLibrary(base::FilePath(library_name), NULL);
   if (!library_)
     return false;
 #endif

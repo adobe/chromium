@@ -5,7 +5,7 @@
 #include <map>
 
 #include "base/bind.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/message_loop.h"
 #include "base/message_loop_proxy.h"
 #include "base/utf_string_conversions.h"
@@ -27,7 +27,7 @@ static const quota::StorageType kPerm = quota::kStorageTypePersistent;
 class MockDatabaseTracker : public DatabaseTracker {
  public:
   MockDatabaseTracker()
-      : DatabaseTracker(FilePath(), false, NULL, NULL, NULL),
+      : DatabaseTracker(base::FilePath(), false, NULL, NULL, NULL),
         delete_called_count_(0),
         async_delete_(false) {}
 

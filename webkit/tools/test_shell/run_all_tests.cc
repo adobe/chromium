@@ -40,10 +40,10 @@ class TestShellTestSuite : public base::TestSuite {
         test_shell_webkit_init_(true) {
   }
 
-  virtual void Initialize() {
+  virtual void Initialize() OVERRIDE {
     // Override DIR_EXE early in case anything in base::TestSuite uses it.
 #if defined(OS_MACOSX)
-    FilePath path;
+    base::FilePath path;
     PathService::Get(base::DIR_EXE, &path);
     path = path.AppendASCII("TestShell.app");
     base::mac::SetOverrideFrameworkBundlePath(path);
@@ -77,7 +77,7 @@ class TestShellTestSuite : public base::TestSuite {
     platform_delegate_.SelectUnifiedTheme();
   }
 
-  virtual void Shutdown() {
+  virtual void Shutdown() OVERRIDE {
     TestShell::ShutdownTestShell();
     TestShell::CleanupLogging();
 

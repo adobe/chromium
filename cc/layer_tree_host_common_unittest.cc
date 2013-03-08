@@ -6,9 +6,11 @@
 
 #include "cc/content_layer.h"
 #include "cc/content_layer_client.h"
+#include "cc/heads_up_display_layer_impl.h"
 #include "cc/layer.h"
 #include "cc/layer_animation_controller.h"
 #include "cc/layer_impl.h"
+#include "cc/layer_tree_impl.h"
 #include "cc/math_util.h"
 #include "cc/proxy.h"
 #include "cc/single_thread_proxy.h"
@@ -70,7 +72,7 @@ void executeCalculateDrawProperties(LayerImpl* rootLayer, float deviceScaleFacto
 
     // We are probably not testing what is intended if the rootLayer bounds are empty.
     DCHECK(!rootLayer->bounds().IsEmpty());
-    LayerTreeHostCommon::calculateDrawProperties(rootLayer, deviceViewportSize, deviceScaleFactor, pageScaleFactor, dummyMaxTextureSize, canUseLCDText, dummyRenderSurfaceLayerList);
+    LayerTreeHostCommon::calculateDrawProperties(rootLayer, deviceViewportSize, deviceScaleFactor, pageScaleFactor, dummyMaxTextureSize, canUseLCDText, dummyRenderSurfaceLayerList, false);
 }
 
 scoped_ptr<LayerImpl> createTreeForFixedPositionTests(LayerTreeHostImpl* hostImpl)
@@ -256,6 +258,58 @@ TEST(LayerTreeHostCommonTest, verifyTransformsForSingleLayer)
     EXPECT_TRANSFORMATION_MATRIX_EQ(expectedResult, layer->screenSpaceTransform());
 }
 
+TEST(LayerTreeHostCommonTest, verifyTransformsAboutScrollOffset)
+{
+    const gfx::Vector2d kScrollOffset(50, 100);
+    const gfx::Vector2dF kScrollDelta(2.34f, 5.67f);
+    const gfx::PointF kScrollLayerPosition(-kScrollOffset.x(), -kScrollOffset.y());
+    const float kPageScale = 0.888f;
+    const float kDeviceScale = 1.666f;
+
+    FakeImplProxy proxy;
+    FakeLayerTreeHostImpl hostImpl(&proxy);
+
+    gfx::Transform identityMatrix;
+    scoped_ptr<LayerImpl> sublayerScopedPtr(LayerImpl::create(hostImpl.activeTree(), 1));
+    LayerImpl* sublayer = sublayerScopedPtr.get();
+    sublayer->setContentsScale(kPageScale * kDeviceScale, kPageScale * kDeviceScale);
+    setLayerPropertiesForTesting(sublayer, identityMatrix, identityMatrix, gfx::Point(0, 0), gfx::PointF(0, 0), gfx::Size(500, 500), false);
+
+    scoped_ptr<LayerImpl> scrollLayerScopedPtr(LayerImpl::create(hostImpl.activeTree(), 2));
+    LayerImpl* scrollLayer = scrollLayerScopedPtr.get();
+    setLayerPropertiesForTesting(scrollLayer, identityMatrix, identityMatrix, gfx::PointF(0, 0), kScrollLayerPosition, gfx::Size(10, 20), false);
+    scrollLayer->setScrollable(true);
+    scrollLayer->setScrollOffset(kScrollOffset);
+    scrollLayer->setScrollDelta(kScrollDelta);
+    gfx::Transform implTransform;
+    implTransform.Scale(kPageScale, kPageScale);
+    scrollLayer->setImplTransform(implTransform);
+    scrollLayer->addChild(sublayerScopedPtr.Pass());
+
+    scoped_ptr<LayerImpl> root(LayerImpl::create(hostImpl.activeTree(), 3));
+    setLayerPropertiesForTesting(root.get(), identityMatrix, identityMatrix, gfx::PointF(0, 0), gfx::PointF(0, 0), gfx::Size(3, 4), false);
+    root->addChild(scrollLayerScopedPtr.Pass());
+
+    executeCalculateDrawProperties(root.get(), kDeviceScale, kPageScale);
+    gfx::Transform expectedTransform = identityMatrix;
+    gfx::PointF subLayerScreenPosition = kScrollLayerPosition - kScrollDelta;
+    subLayerScreenPosition.Scale(kPageScale * kDeviceScale);
+    expectedTransform.Translate(MathUtil::Round(subLayerScreenPosition.x()), MathUtil::Round(subLayerScreenPosition.y()));
+    EXPECT_TRANSFORMATION_MATRIX_EQ(expectedTransform, sublayer->drawTransform());
+    EXPECT_TRANSFORMATION_MATRIX_EQ(expectedTransform, sublayer->screenSpaceTransform());
+
+    gfx::Transform arbitraryTranslate;
+    const float kTranslateX = 10.6f;
+    const float kTranslateY = 20.6f;
+    arbitraryTranslate.Translate(kTranslateX, kTranslateY);
+    setLayerPropertiesForTesting(scrollLayer, arbitraryTranslate, identityMatrix, gfx::PointF(0, 0), kScrollLayerPosition, gfx::Size(10, 20), false);
+    executeCalculateDrawProperties(root.get(), kDeviceScale, kPageScale);
+    expectedTransform.MakeIdentity();
+    expectedTransform.Translate(MathUtil::Round(kTranslateX * kPageScale * kDeviceScale + subLayerScreenPosition.x()),
+                                MathUtil::Round(kTranslateY * kPageScale * kDeviceScale + subLayerScreenPosition.y()));
+    EXPECT_TRANSFORMATION_MATRIX_EQ(expectedTransform, sublayer->drawTransform());
+}
+
 TEST(LayerTreeHostCommonTest, verifyTransformsForSimpleHierarchy)
 {
     gfx::Transform identityMatrix;
@@ -313,11 +367,9 @@ TEST(LayerTreeHostCommonTest, verifyTransformsForSimpleHierarchy)
     //         But then, the child also does not preserve3D. When it gives its hierarchy to the grandChild, it should be flattened to 2D.
     gfx::Transform parentSublayerMatrix;
     parentSublayerMatrix.Scale3d(10, 10, 3.3);
-    gfx::Transform parentTranslationToCenter;
-    parentTranslationToCenter.Translate(5, 6);
-    // Sublayer matrix is applied to the center of the parent layer.
+    // Sublayer matrix is applied to the anchor point of the parent layer.
     parentCompositeTransform = parentTranslationToAnchor * parentLayerTransform * inverse(parentTranslationToAnchor)
-            * parentTranslationToCenter * parentSublayerMatrix * inverse(parentTranslationToCenter);
+            * parentTranslationToAnchor * parentSublayerMatrix * inverse(parentTranslationToAnchor);
     gfx::Transform flattenedCompositeTransform = parentCompositeTransform;
     flattenedCompositeTransform.FlattenTo2d();
     setLayerPropertiesForTesting(parent.get(), parentLayerTransform, parentSublayerMatrix, gfx::PointF(0.25, 0.25), gfx::PointF(0, 0), gfx::Size(10, 12), false);
@@ -366,10 +418,8 @@ TEST(LayerTreeHostCommonTest, verifyTransformsForSingleRenderSurface)
     gfx::Transform parentSublayerMatrix;
     parentSublayerMatrix.Scale3d(0.9, 1, 3.3);
 
-    gfx::Transform parentTranslationToCenter;
-    parentTranslationToCenter.Translate(50, 60);
     gfx::Transform parentCompositeTransform = parentTranslationToAnchor * parentLayerTransform * inverse(parentTranslationToAnchor)
-            * parentTranslationToCenter * parentSublayerMatrix * inverse(parentTranslationToCenter);
+            * parentTranslationToAnchor * parentSublayerMatrix * inverse(parentTranslationToAnchor);
     gfx::Vector2dF parentCompositeScale = MathUtil::computeTransform2dScaleComponents(parentCompositeTransform, 1.0f);
     gfx::Transform surfaceSublayerTransform;
     surfaceSublayerTransform.Scale(parentCompositeScale.x(), parentCompositeScale.y());
@@ -399,6 +449,35 @@ TEST(LayerTreeHostCommonTest, verifyTransformsForSingleRenderSurface)
     // The screen space is the same as the target since the child surface draws into the root.
     EXPECT_TRANSFORMATION_MATRIX_EQ(surfaceSublayerCompositeTransform, child->renderTarget()->renderSurface()->screenSpaceTransform());
 }
+
+TEST(LayerTreeHostCommonTest, verifySublayerTransformWithAnchorPoint)
+{
+    // crbug.com/157961 - we were always applying the sublayer transform about
+    // the center of the layer, rather than the anchor point.
+
+    scoped_refptr<Layer> root = Layer::create();
+    scoped_refptr<Layer> parent = Layer::create();
+    scoped_refptr<LayerWithForcedDrawsContent> child = make_scoped_refptr(new LayerWithForcedDrawsContent());
+    root->addChild(parent);
+    parent->addChild(child);
+
+    gfx::Transform identityMatrix;
+    gfx::Transform parentSublayerMatrix;
+    parentSublayerMatrix.ApplyPerspectiveDepth(2.0);
+    gfx::PointF parentAnchorPoint(0.2f, 0.8f);
+
+    setLayerPropertiesForTesting(root.get(), identityMatrix, identityMatrix, gfx::PointF(0, 0), gfx::PointF(0, 0), gfx::Size(1, 2), false);
+    setLayerPropertiesForTesting(parent.get(), identityMatrix, parentSublayerMatrix, parentAnchorPoint, gfx::PointF(0, 0), gfx::Size(100, 100), false);
+    setLayerPropertiesForTesting(child.get(), identityMatrix, identityMatrix, gfx::PointF(0, 0), gfx::PointF(0, 0), gfx::Size(10, 10), false);
+    executeCalculateDrawProperties(root.get());
+
+    gfx::Transform expectedChildDrawTransform;
+    expectedChildDrawTransform.Translate(20, 80);
+    expectedChildDrawTransform.ApplyPerspectiveDepth(2.0);
+    expectedChildDrawTransform.Translate(-20, -80);
+    EXPECT_TRANSFORMATION_MATRIX_EQ(expectedChildDrawTransform, child->drawTransform());
+}
+
 
 TEST(LayerTreeHostCommonTest, verifySeparateRenderTargetRequirementWithClipping)
 {
@@ -510,12 +589,8 @@ TEST(LayerTreeHostCommonTest, verifyTransformsForReplica)
     parentTranslationToAnchor.Translate(2.5, 3);
     gfx::Transform parentSublayerMatrix;
     parentSublayerMatrix.Scale3d(10, 10, 3.3);
-    gfx::Transform parentTranslationToCenter;
-    parentTranslationToCenter.Translate(5, 6);
     gfx::Transform parentCompositeTransform = parentTranslationToAnchor * parentLayerTransform * inverse(parentTranslationToAnchor)
-            * parentTranslationToCenter * parentSublayerMatrix * inverse(parentTranslationToCenter);
-    gfx::Transform childTranslationToCenter;
-    childTranslationToCenter.Translate(8, 9);
+            * parentTranslationToAnchor * parentSublayerMatrix * inverse(parentTranslationToAnchor);
     gfx::Transform replicaLayerTransform;
     replicaLayerTransform.Scale3d(3, 3, 1);
     gfx::Vector2dF parentCompositeScale = MathUtil::computeTransform2dScaleComponents(parentCompositeTransform, 1.f);
@@ -590,8 +665,6 @@ TEST(LayerTreeHostCommonTest, verifyTransformsForRenderSurfaceHierarchy)
     // y component has a translation by 1 for every ancestor, which indicates the "depth" of the layer in the hierarchy.
     gfx::Transform translationToAnchor;
     translationToAnchor.Translate(2.5, 0);
-    gfx::Transform translationToCenter;
-    translationToCenter.Translate(5, 5);
     gfx::Transform layerTransform;
     layerTransform.Translate(1, 1);
     gfx::Transform sublayerTransform;
@@ -600,7 +673,7 @@ TEST(LayerTreeHostCommonTest, verifyTransformsForRenderSurfaceHierarchy)
     replicaLayerTransform.Scale3d(-2, 5, 1);
 
     gfx::Transform A = translationToAnchor * layerTransform * inverse(translationToAnchor);
-    gfx::Transform B = translationToCenter * sublayerTransform * inverse(translationToCenter);
+    gfx::Transform B = translationToAnchor * sublayerTransform * inverse(translationToAnchor);
     gfx::Transform R = A * translationToAnchor * replicaLayerTransform * inverse(translationToAnchor);
 
     gfx::Vector2dF surface1ParentTransformScale = MathUtil::computeTransform2dScaleComponents(A * B, 1.f);
@@ -2916,7 +2989,7 @@ TEST(LayerTreeHostCommonTest, verifyHitTestingForSingleLayer)
 
     std::vector<LayerImpl*> renderSurfaceLayerList;
     int dummyMaxTextureSize = 512;
-    LayerTreeHostCommon::calculateDrawProperties(root.get(), root->bounds(), 1, 1, dummyMaxTextureSize, false, renderSurfaceLayerList);
+    LayerTreeHostCommon::calculateDrawProperties(root.get(), root->bounds(), 1, 1, dummyMaxTextureSize, false, renderSurfaceLayerList, false);
 
     // Sanity check the scenario we just created.
     ASSERT_EQ(1u, renderSurfaceLayerList.size());
@@ -2932,6 +3005,57 @@ TEST(LayerTreeHostCommonTest, verifyHitTestingForSingleLayer)
     EXPECT_FALSE(resultLayer);
 
     // Hit testing for a point inside should return the root layer.
+    testPoint = gfx::Point(1, 1);
+    resultLayer = LayerTreeHostCommon::findLayerThatIsHitByPoint(testPoint, renderSurfaceLayerList);
+    ASSERT_TRUE(resultLayer);
+    EXPECT_EQ(12345, resultLayer->id());
+
+    testPoint = gfx::Point(99, 99);
+    resultLayer = LayerTreeHostCommon::findLayerThatIsHitByPoint(testPoint, renderSurfaceLayerList);
+    ASSERT_TRUE(resultLayer);
+    EXPECT_EQ(12345, resultLayer->id());
+}
+
+TEST(LayerTreeHostCommonTest, verifyHitTestingForSingleLayerAndHud)
+{
+    FakeImplProxy proxy;
+    FakeLayerTreeHostImpl hostImpl(&proxy);
+    scoped_ptr<LayerImpl> root = LayerImpl::create(hostImpl.activeTree(), 12345);
+    scoped_ptr<HeadsUpDisplayLayerImpl> hud = HeadsUpDisplayLayerImpl::create(hostImpl.activeTree(), 11111);
+
+    gfx::Transform identityMatrix;
+    gfx::PointF anchor(0.f, 0.f);
+    gfx::PointF position(0.f, 0.f);
+    gfx::Size bounds(100, 100);
+    setLayerPropertiesForTesting(root.get(), identityMatrix, identityMatrix, anchor, position, bounds, false);
+    root->setDrawsContent(true);
+
+    // Create hud and add it as a child of root.
+    gfx::Size hudBounds(200, 200);
+    setLayerPropertiesForTesting(hud.get(), identityMatrix, identityMatrix, anchor, position, hudBounds, false);
+    hud->setDrawsContent(true);
+
+    hostImpl.activeTree()->set_hud_layer(hud.get());
+    root->addChild(hud.PassAs<LayerImpl>());
+
+    std::vector<LayerImpl*> renderSurfaceLayerList;
+    int dummyMaxTextureSize = 512;
+    LayerTreeHostCommon::calculateDrawProperties(root.get(), hudBounds, 1, 1, dummyMaxTextureSize, false, renderSurfaceLayerList, false);
+
+    // Sanity check the scenario we just created.
+    ASSERT_EQ(1u, renderSurfaceLayerList.size());
+    ASSERT_EQ(2u, root->renderSurface()->layerList().size());
+
+    // Hit testing for a point inside HUD, but outside root should return null
+    gfx::Point testPoint(101, 101);
+    LayerImpl* resultLayer = LayerTreeHostCommon::findLayerThatIsHitByPoint(testPoint, renderSurfaceLayerList);
+    EXPECT_FALSE(resultLayer);
+
+    testPoint = gfx::Point(-1, -1);
+    resultLayer = LayerTreeHostCommon::findLayerThatIsHitByPoint(testPoint, renderSurfaceLayerList);
+    EXPECT_FALSE(resultLayer);
+
+    // Hit testing for a point inside should return the root layer, never the HUD layer.
     testPoint = gfx::Point(1, 1);
     resultLayer = LayerTreeHostCommon::findLayerThatIsHitByPoint(testPoint, renderSurfaceLayerList);
     ASSERT_TRUE(resultLayer);
@@ -2965,7 +3089,7 @@ TEST(LayerTreeHostCommonTest, verifyHitTestingForUninvertibleTransform)
 
     std::vector<LayerImpl*> renderSurfaceLayerList;
     int dummyMaxTextureSize = 512;
-    LayerTreeHostCommon::calculateDrawProperties(root.get(), root->bounds(), 1, 1, dummyMaxTextureSize, false, renderSurfaceLayerList);
+    LayerTreeHostCommon::calculateDrawProperties(root.get(), root->bounds(), 1, 1, dummyMaxTextureSize, false, renderSurfaceLayerList, false);
 
     // Sanity check the scenario we just created.
     ASSERT_EQ(1u, renderSurfaceLayerList.size());
@@ -3019,7 +3143,7 @@ TEST(LayerTreeHostCommonTest, verifyHitTestingForSinglePositionedLayer)
 
     std::vector<LayerImpl*> renderSurfaceLayerList;
     int dummyMaxTextureSize = 512;
-    LayerTreeHostCommon::calculateDrawProperties(root.get(), root->bounds(), 1, 1, dummyMaxTextureSize, false, renderSurfaceLayerList);
+    LayerTreeHostCommon::calculateDrawProperties(root.get(), root->bounds(), 1, 1, dummyMaxTextureSize, false, renderSurfaceLayerList, false);
 
     // Sanity check the scenario we just created.
     ASSERT_EQ(1u, renderSurfaceLayerList.size());
@@ -3066,7 +3190,7 @@ TEST(LayerTreeHostCommonTest, verifyHitTestingForSingleRotatedLayer)
 
     std::vector<LayerImpl*> renderSurfaceLayerList;
     int dummyMaxTextureSize = 512;
-    LayerTreeHostCommon::calculateDrawProperties(root.get(), root->bounds(), 1, 1, dummyMaxTextureSize, false, renderSurfaceLayerList);
+    LayerTreeHostCommon::calculateDrawProperties(root.get(), root->bounds(), 1, 1, dummyMaxTextureSize, false, renderSurfaceLayerList, false);
 
     // Sanity check the scenario we just created.
     ASSERT_EQ(1u, renderSurfaceLayerList.size());
@@ -3122,7 +3246,7 @@ TEST(LayerTreeHostCommonTest, verifyHitTestingForSinglePerspectiveLayer)
 
     std::vector<LayerImpl*> renderSurfaceLayerList;
     int dummyMaxTextureSize = 512;
-    LayerTreeHostCommon::calculateDrawProperties(root.get(), root->bounds(), 1, 1, dummyMaxTextureSize, false, renderSurfaceLayerList);
+    LayerTreeHostCommon::calculateDrawProperties(root.get(), root->bounds(), 1, 1, dummyMaxTextureSize, false, renderSurfaceLayerList, false);
 
     // Sanity check the scenario we just created.
     ASSERT_EQ(1u, renderSurfaceLayerList.size());
@@ -3187,7 +3311,7 @@ TEST(LayerTreeHostCommonTest, verifyHitTestingForSingleLayerWithScaledContents)
 
     std::vector<LayerImpl*> renderSurfaceLayerList;
     int dummyMaxTextureSize = 512;
-    LayerTreeHostCommon::calculateDrawProperties(root.get(), root->bounds(), 1, 1, dummyMaxTextureSize, false, renderSurfaceLayerList);
+    LayerTreeHostCommon::calculateDrawProperties(root.get(), root->bounds(), 1, 1, dummyMaxTextureSize, false, renderSurfaceLayerList, false);
 
     // Sanity check the scenario we just created.
     // The visibleContentRect for testLayer is actually 100x100, even though its layout size is 50x50, positioned at 25x25.
@@ -3251,7 +3375,7 @@ TEST(LayerTreeHostCommonTest, verifyHitTestingForSimpleClippedLayer)
 
     std::vector<LayerImpl*> renderSurfaceLayerList;
     int dummyMaxTextureSize = 512;
-    LayerTreeHostCommon::calculateDrawProperties(root.get(), root->bounds(), 1, 1, dummyMaxTextureSize, false, renderSurfaceLayerList);
+    LayerTreeHostCommon::calculateDrawProperties(root.get(), root->bounds(), 1, 1, dummyMaxTextureSize, false, renderSurfaceLayerList, false);
 
     // Sanity check the scenario we just created.
     ASSERT_EQ(1u, renderSurfaceLayerList.size());
@@ -3341,7 +3465,7 @@ TEST(LayerTreeHostCommonTest, verifyHitTestingForMultiClippedRotatedLayer)
 
     std::vector<LayerImpl*> renderSurfaceLayerList;
     int dummyMaxTextureSize = 512;
-    LayerTreeHostCommon::calculateDrawProperties(root.get(), root->bounds(), 1, 1, dummyMaxTextureSize, false, renderSurfaceLayerList);
+    LayerTreeHostCommon::calculateDrawProperties(root.get(), root->bounds(), 1, 1, dummyMaxTextureSize, false, renderSurfaceLayerList, false);
 
     // Sanity check the scenario we just created.
     // The grandChild is expected to create a renderSurface because it masksToBounds and is not axis aligned.
@@ -3423,7 +3547,7 @@ TEST(LayerTreeHostCommonTest, verifyHitTestingForNonClippingIntermediateLayer)
 
     std::vector<LayerImpl*> renderSurfaceLayerList;
     int dummyMaxTextureSize = 512;
-    LayerTreeHostCommon::calculateDrawProperties(root.get(), root->bounds(), 1, 1, dummyMaxTextureSize, false, renderSurfaceLayerList);
+    LayerTreeHostCommon::calculateDrawProperties(root.get(), root->bounds(), 1, 1, dummyMaxTextureSize, false, renderSurfaceLayerList, false);
 
     // Sanity check the scenario we just created.
     ASSERT_EQ(1u, renderSurfaceLayerList.size());
@@ -3503,7 +3627,7 @@ TEST(LayerTreeHostCommonTest, verifyHitTestingForMultipleLayers)
 
     std::vector<LayerImpl*> renderSurfaceLayerList;
     int dummyMaxTextureSize = 512;
-    LayerTreeHostCommon::calculateDrawProperties(root.get(), root->bounds(), 1, 1, dummyMaxTextureSize, false, renderSurfaceLayerList);
+    LayerTreeHostCommon::calculateDrawProperties(root.get(), root->bounds(), 1, 1, dummyMaxTextureSize, false, renderSurfaceLayerList, false);
 
     // Sanity check the scenario we just created.
     ASSERT_TRUE(child1);
@@ -3611,7 +3735,7 @@ TEST(LayerTreeHostCommonTest, verifyHitTestingForMultipleLayerLists)
 
     std::vector<LayerImpl*> renderSurfaceLayerList;
     int dummyMaxTextureSize = 512;
-    LayerTreeHostCommon::calculateDrawProperties(root.get(), root->bounds(), 1, 1, dummyMaxTextureSize, false, renderSurfaceLayerList);
+    LayerTreeHostCommon::calculateDrawProperties(root.get(), root->bounds(), 1, 1, dummyMaxTextureSize, false, renderSurfaceLayerList, false);
 
     // Sanity check the scenario we just created.
     ASSERT_TRUE(child1);
@@ -3697,7 +3821,7 @@ TEST(LayerTreeHostCommonTest, verifyHitCheckingTouchHandlerRegionsForSingleLayer
 
     std::vector<LayerImpl*> renderSurfaceLayerList;
     int dummyMaxTextureSize = 512;
-    LayerTreeHostCommon::calculateDrawProperties(root.get(), root->bounds(), 1, 1, dummyMaxTextureSize, false, renderSurfaceLayerList);
+    LayerTreeHostCommon::calculateDrawProperties(root.get(), root->bounds(), 1, 1, dummyMaxTextureSize, false, renderSurfaceLayerList, false);
 
     // Sanity check the scenario we just created.
     ASSERT_EQ(1u, renderSurfaceLayerList.size());
@@ -3763,7 +3887,7 @@ TEST(LayerTreeHostCommonTest, verifyHitCheckingTouchHandlerRegionsForUninvertibl
 
     std::vector<LayerImpl*> renderSurfaceLayerList;
     int dummyMaxTextureSize = 512;
-    LayerTreeHostCommon::calculateDrawProperties(root.get(), root->bounds(), 1, 1, dummyMaxTextureSize, false, renderSurfaceLayerList);
+    LayerTreeHostCommon::calculateDrawProperties(root.get(), root->bounds(), 1, 1, dummyMaxTextureSize, false, renderSurfaceLayerList, false);
 
     // Sanity check the scenario we just created.
     ASSERT_EQ(1u, renderSurfaceLayerList.size());
@@ -3819,7 +3943,7 @@ TEST(LayerTreeHostCommonTest, verifyHitCheckingTouchHandlerRegionsForSinglePosit
 
     std::vector<LayerImpl*> renderSurfaceLayerList;
     int dummyMaxTextureSize = 512;
-    LayerTreeHostCommon::calculateDrawProperties(root.get(), root->bounds(), 1, 1, dummyMaxTextureSize, false, renderSurfaceLayerList);
+    LayerTreeHostCommon::calculateDrawProperties(root.get(), root->bounds(), 1, 1, dummyMaxTextureSize, false, renderSurfaceLayerList, false);
 
     // Sanity check the scenario we just created.
     ASSERT_EQ(1u, renderSurfaceLayerList.size());
@@ -3891,7 +4015,7 @@ TEST(LayerTreeHostCommonTest, verifyHitCheckingTouchHandlerRegionsForSingleLayer
 
     std::vector<LayerImpl*> renderSurfaceLayerList;
     int dummyMaxTextureSize = 512;
-    LayerTreeHostCommon::calculateDrawProperties(root.get(), root->bounds(), 1, 1, dummyMaxTextureSize, false, renderSurfaceLayerList);
+    LayerTreeHostCommon::calculateDrawProperties(root.get(), root->bounds(), 1, 1, dummyMaxTextureSize, false, renderSurfaceLayerList, false);
 
     // Sanity check the scenario we just created.
     // The visibleContentRect for testLayer is actually 100x100, even though its layout size is 50x50, positioned at 25x25.
@@ -3967,7 +4091,7 @@ TEST(LayerTreeHostCommonTest, verifyHitCheckingTouchHandlerRegionsForSingleLayer
     pageScaleTransform.Scale(pageScaleFactor, pageScaleFactor);
     root->setImplTransform(pageScaleTransform); // Applying the pageScaleFactor through implTransform.
     gfx::Size scaledBoundsForRoot = gfx::ToCeiledSize(gfx::ScaleSize(root->bounds(), deviceScaleFactor * pageScaleFactor));
-    LayerTreeHostCommon::calculateDrawProperties(root.get(), scaledBoundsForRoot, deviceScaleFactor, 1, dummyMaxTextureSize, false, renderSurfaceLayerList);
+    LayerTreeHostCommon::calculateDrawProperties(root.get(), scaledBoundsForRoot, deviceScaleFactor, 1, dummyMaxTextureSize, false, renderSurfaceLayerList, false);
 
     // Sanity check the scenario we just created.
     // The visibleContentRect for testLayer is actually 100x100, even though its layout size is 50x50, positioned at 25x25.
@@ -4051,7 +4175,7 @@ TEST(LayerTreeHostCommonTest, verifyHitCheckingTouchHandlerRegionsForSimpleClipp
 
     std::vector<LayerImpl*> renderSurfaceLayerList;
     int dummyMaxTextureSize = 512;
-    LayerTreeHostCommon::calculateDrawProperties(root.get(), root->bounds(), 1, 1, dummyMaxTextureSize, false, renderSurfaceLayerList);
+    LayerTreeHostCommon::calculateDrawProperties(root.get(), root->bounds(), 1, 1, dummyMaxTextureSize, false, renderSurfaceLayerList, false);
 
     // Sanity check the scenario we just created.
     ASSERT_EQ(1u, renderSurfaceLayerList.size());
@@ -4092,12 +4216,15 @@ public:
 
     virtual void calculateContentsScale(
         float idealContentsScale,
+        bool animatingTransformToScreen,
         float* contentsScaleX,
         float* contentsScaleY,
         gfx::Size* contentBounds) OVERRIDE
     {
-      Layer::calculateContentsScale(
+        // Skip over the ContentLayer to the base Layer class.
+        Layer::calculateContentsScale(
             idealContentsScale,
+            animatingTransformToScreen,
             contentsScaleX,
             contentsScaleY,
             contentBounds);
@@ -4423,19 +4550,7 @@ TEST(LayerTreeHostCommonTest, verifyContentsScale)
     EXPECT_FLOAT_EQ(initialParentScale * initialChildScale / fixedRasterScale, childNoAutoScale->drawTransform().matrix().getDouble(0, 0));
     EXPECT_FLOAT_EQ(initialParentScale * initialChildScale / fixedRasterScale, childNoAutoScale->drawTransform().matrix().getDouble(1, 1));
 
-    // If the transform changes, we expect the contentsScale to remain unchanged.
-    childScale->setTransform(identityMatrix);
-    childEmpty->setTransform(identityMatrix);
-
-    renderSurfaceLayerList.clear();
-    LayerTreeHostCommon::calculateDrawProperties(parent.get(), parent->bounds(), deviceScaleFactor, pageScaleFactor, dummyMaxTextureSize, false, renderSurfaceLayerList);
-
-    EXPECT_CONTENTS_SCALE_EQ(deviceScaleFactor * initialParentScale, parent);
-    EXPECT_CONTENTS_SCALE_EQ(deviceScaleFactor * pageScaleFactor * initialParentScale * initialChildScale, childScale);
-    EXPECT_CONTENTS_SCALE_EQ(deviceScaleFactor * pageScaleFactor * initialParentScale * initialChildScale, childEmpty);
-    EXPECT_CONTENTS_SCALE_EQ(1, childNoScale);
-
-    // But if the deviceScaleFactor or pageScaleFactor changes, then it should be updated, but using the initial transform.
+    // If the deviceScaleFactor or pageScaleFactor changes, then it should be updated using the initial transform as the rasterScale.
     deviceScaleFactor = 2.25;
     pageScaleFactor = 1.25;
 
@@ -4450,6 +4565,38 @@ TEST(LayerTreeHostCommonTest, verifyContentsScale)
     EXPECT_CONTENTS_SCALE_EQ(deviceScaleFactor * initialParentScale, parent);
     EXPECT_CONTENTS_SCALE_EQ(deviceScaleFactor * pageScaleFactor * initialParentScale * initialChildScale, childScale);
     EXPECT_CONTENTS_SCALE_EQ(deviceScaleFactor * pageScaleFactor * initialParentScale * initialChildScale, childEmpty);
+    EXPECT_CONTENTS_SCALE_EQ(1, childNoScale);
+    EXPECT_CONTENTS_SCALE_EQ(deviceScaleFactor * pageScaleFactor * fixedRasterScale, childNoAutoScale);
+
+    // If the transform changes, we expect the rasterScale to be reset to 1.0.
+    const double secondChildScale = 1.75;
+    childScaleMatrix.Scale(secondChildScale / initialChildScale, secondChildScale / initialChildScale);
+    childScale->setTransform(childScaleMatrix);
+    childEmpty->setTransform(childScaleMatrix);
+
+    renderSurfaceLayerList.clear();
+    LayerTreeHostCommon::calculateDrawProperties(parent.get(), parent->bounds(), deviceScaleFactor, pageScaleFactor, dummyMaxTextureSize, false, renderSurfaceLayerList);
+
+    EXPECT_CONTENTS_SCALE_EQ(deviceScaleFactor * initialParentScale, parent);
+    EXPECT_CONTENTS_SCALE_EQ(deviceScaleFactor * pageScaleFactor, childScale);
+    EXPECT_CONTENTS_SCALE_EQ(deviceScaleFactor * pageScaleFactor, childEmpty);
+    EXPECT_CONTENTS_SCALE_EQ(1, childNoScale);
+
+    // If the deviceScaleFactor or pageScaleFactor changes, then it should be updated, but still using 1.0 as the rasterScale.
+    deviceScaleFactor = 2.75;
+    pageScaleFactor = 1.75;
+
+    // FIXME: Remove this when pageScaleFactor is applied in the compositor.
+    pageScaleMatrix = identityMatrix;
+    pageScaleMatrix.Scale(pageScaleFactor, pageScaleFactor);
+    parent->setSublayerTransform(pageScaleMatrix);
+
+    renderSurfaceLayerList.clear();
+    LayerTreeHostCommon::calculateDrawProperties(parent.get(), parent->bounds(), deviceScaleFactor, pageScaleFactor, dummyMaxTextureSize, false, renderSurfaceLayerList);
+
+    EXPECT_CONTENTS_SCALE_EQ(deviceScaleFactor * initialParentScale, parent);
+    EXPECT_CONTENTS_SCALE_EQ(deviceScaleFactor * pageScaleFactor, childScale);
+    EXPECT_CONTENTS_SCALE_EQ(deviceScaleFactor * pageScaleFactor, childEmpty);
     EXPECT_CONTENTS_SCALE_EQ(1, childNoScale);
     EXPECT_CONTENTS_SCALE_EQ(deviceScaleFactor * pageScaleFactor * fixedRasterScale, childNoAutoScale);
 }

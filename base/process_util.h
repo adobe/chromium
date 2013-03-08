@@ -37,7 +37,7 @@ typedef struct _malloc_zone_t malloc_zone_t;
 #include <vector>
 
 #include "base/base_export.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/process.h"
 
 #if defined(OS_POSIX)
@@ -79,7 +79,7 @@ const uint32 kProcessAccessQueryLimitedInfomation =
 const uint32 kProcessAccessWaitForTermination     = SYNCHRONIZE;
 #elif defined(OS_POSIX)
 
-struct ProcessEntry {
+struct BASE_EXPORT ProcessEntry {
   ProcessEntry();
   ~ProcessEntry();
 
@@ -196,6 +196,12 @@ BASE_EXPORT FilePath GetProcessExecutablePath(ProcessHandle process);
 // CPU-related ticks.  Returns -1 on parse error.
 // Exposed for testing.
 BASE_EXPORT int ParseProcStatCPU(const std::string& input);
+
+// Get the number of threads of |process| as available in /proc/<pid>/stat.
+// This should be used with care as no synchronization with running threads is
+// done. This is mostly useful to guarantee being single-threaded.
+// Returns 0 on failure.
+BASE_EXPORT int GetNumberOfThreads(ProcessHandle process);
 
 // The maximum allowed value for the OOM score.
 const int kMaxOomScore = 1000;

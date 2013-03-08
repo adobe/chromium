@@ -4,10 +4,13 @@
 
 #include "content/renderer/gpu/compositor_output_surface.h"
 
+#include "base/command_line.h"
 #include "base/message_loop_proxy.h"
 #include "cc/compositor_frame.h"
+#include "cc/compositor_frame_ack.h"
 #include "cc/output_surface_client.h"
 #include "content/common/view_messages.h"
+#include "content/public/common/content_switches.h"
 #include "content/renderer/render_thread_impl.h"
 #include "ipc/ipc_forwarding_message_filter.h"
 #include "ipc/ipc_sync_channel.h"
@@ -37,7 +40,11 @@ namespace content {
 IPC::ForwardingMessageFilter* CompositorOutputSurface::CreateFilter(
     base::TaskRunner* target_task_runner)
 {
-  uint32 messages_to_filter[] = {ViewMsg_UpdateVSyncParameters::ID};
+  uint32 messages_to_filter[] = {
+    ViewMsg_UpdateVSyncParameters::ID,
+    ViewMsg_SwapCompositorFrameAck::ID
+  };
+
   return new IPC::ForwardingMessageFilter(
       messages_to_filter, arraysize(messages_to_filter),
       target_task_runner);
@@ -47,16 +54,17 @@ CompositorOutputSurface::CompositorOutputSurface(
     int32 routing_id,
     WebGraphicsContext3D* context3D,
     cc::SoftwareOutputDevice* software_device)
-    : output_surface_filter_(
+    : OutputSurface(make_scoped_ptr(context3D),
+                    make_scoped_ptr(software_device)),
+      output_surface_filter_(
           RenderThreadImpl::current()->compositor_output_surface_filter()),
-      client_(NULL),
       routing_id_(routing_id),
-      context3D_(context3D),
-      software_device_(software_device),
       prefers_smoothness_(false),
       main_thread_id_(base::PlatformThread::CurrentId()) {
   DCHECK(output_surface_filter_);
-  capabilities_.has_parent_compositor = false;
+  CommandLine* command_line = CommandLine::ForCurrentProcess();
+  capabilities_.has_parent_compositor = command_line->HasSwitch(
+      switches::kEnableDelegatedRenderer);
   DetachFromThread();
 }
 
@@ -65,26 +73,17 @@ CompositorOutputSurface::~CompositorOutputSurface() {
   if (!client_)
     return;
   UpdateSmoothnessTakesPriority(false);
-  output_surface_proxy_->ClearOutputSurface();
+  if (output_surface_proxy_)
+    output_surface_proxy_->ClearOutputSurface();
   output_surface_filter_->RemoveRoute(routing_id_);
-}
-
-const struct cc::OutputSurface::Capabilities&
-    CompositorOutputSurface::Capabilities() const {
-  DCHECK(CalledOnValidThread());
-  return capabilities_;
 }
 
 bool CompositorOutputSurface::BindToClient(
     cc::OutputSurfaceClient* client) {
   DCHECK(CalledOnValidThread());
-  DCHECK(!client_);
-  if (context3D_.get()) {
-    if (!context3D_->makeContextCurrent())
-      return false;
-  }
 
-  client_ = client;
+  if (!cc::OutputSurface::BindToClient(client))
+    return false;
 
   output_surface_proxy_ = new CompositorOutputSurfaceProxy(this);
   output_surface_filter_->AddRoute(
@@ -93,15 +92,6 @@ bool CompositorOutputSurface::BindToClient(
                  output_surface_proxy_));
 
   return true;
-}
-
-WebGraphicsContext3D* CompositorOutputSurface::Context3D() const {
-  DCHECK(CalledOnValidThread());
-  return context3D_.get();
-}
-
-cc::SoftwareOutputDevice* CompositorOutputSurface::SoftwareDevice() const {
-  return software_device_.get();
 }
 
 void CompositorOutputSurface::SendFrameToParentCompositor(
@@ -116,6 +106,7 @@ void CompositorOutputSurface::OnMessageReceived(const IPC::Message& message) {
     return;
   IPC_BEGIN_MESSAGE_MAP(CompositorOutputSurface, message)
     IPC_MESSAGE_HANDLER(ViewMsg_UpdateVSyncParameters, OnUpdateVSyncParameters);
+    IPC_MESSAGE_HANDLER(ViewMsg_SwapCompositorFrameAck, OnSwapAck);
   IPC_END_MESSAGE_MAP()
 }
 
@@ -124,6 +115,10 @@ void CompositorOutputSurface::OnUpdateVSyncParameters(
   DCHECK(CalledOnValidThread());
   DCHECK(client_);
   client_->OnVSyncParametersChanged(timebase, interval);
+}
+
+void CompositorOutputSurface::OnSwapAck(const cc::CompositorFrameAck& ack) {
+  client_->OnSendFrameToParentCompositorAck(ack);
 }
 
 bool CompositorOutputSurface::Send(IPC::Message* message) {
@@ -149,10 +144,10 @@ namespace {
 
 void CompositorOutputSurface::UpdateSmoothnessTakesPriority(
     bool prefers_smoothness) {
-#if ENABLE_DCHECK
+#ifndef NDEBUG
   // If we use different compositor threads, we need to
   // use an atomic int to track prefer smoothness count.
-  static int g_last_thread = base::PlatformThread::CurrentId();
+  base::PlatformThreadId g_last_thread = base::PlatformThread::CurrentId();
   DCHECK_EQ(g_last_thread, base::PlatformThread::CurrentId());
 #endif
   if (prefers_smoothness_ == prefers_smoothness)

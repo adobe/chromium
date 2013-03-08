@@ -141,6 +141,10 @@ void NativeComboboxWin::SetFocus() {
   OnFocus();
 }
 
+void NativeComboboxWin::ValidityStateChanged() {
+  // TODO(estade): implement.
+}
+
 bool NativeComboboxWin::HandleKeyPressed(const ui::KeyEvent& event) {
   return false;
 }
@@ -208,11 +212,7 @@ void NativeComboboxWin::UpdateFont() {
 // static
 NativeComboboxWrapper* NativeComboboxWrapper::CreateWrapper(
     Combobox* combobox) {
-#if defined(USE_AURA)
   return new NativeComboboxViews(combobox);
-#else
-  return new NativeComboboxWin(combobox);
-#endif
 }
 
 }  // namespace views

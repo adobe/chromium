@@ -17,6 +17,8 @@
 #include "base/file_util.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
+#include "base/prefs/pref_registry_simple.h"
+#include "base/prefs/pref_service.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
@@ -27,23 +29,27 @@
 #include "chrome/browser/chromeos/login/eula_screen.h"
 #include "chrome/browser/chromeos/login/existing_user_controller.h"
 #include "chrome/browser/chromeos/login/helper.h"
-#include "chrome/browser/chromeos/login/html_page_screen.h"
+#include "chrome/browser/chromeos/login/hwid_checker.h"
 #include "chrome/browser/chromeos/login/login_display_host.h"
 #include "chrome/browser/chromeos/login/login_utils.h"
+#include "chrome/browser/chromeos/login/managed/locally_managed_user_creation_screen.h"
 #include "chrome/browser/chromeos/login/network_screen.h"
 #include "chrome/browser/chromeos/login/oobe_display.h"
-#include "chrome/browser/chromeos/login/registration_screen.h"
 #include "chrome/browser/chromeos/login/reset_screen.h"
+#include "chrome/browser/chromeos/login/terms_of_service_screen.h"
 #include "chrome/browser/chromeos/login/update_screen.h"
 #include "chrome/browser/chromeos/login/user_image_screen.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
+#include "chrome/browser/chromeos/login/wrong_hwid_screen.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/chromeos/settings/cros_settings_names.h"
-#include "chrome/browser/prefs/pref_service.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/options/options_util.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
+#include "chromeos/dbus/dbus_thread_manager.h"
+#include "chromeos/dbus/session_manager_client.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
@@ -110,9 +116,12 @@ const char WizardController::kUpdateScreenName[] = "update";
 const char WizardController::kUserImageScreenName[] = "image";
 const char WizardController::kEulaScreenName[] = "eula";
 const char WizardController::kRegistrationScreenName[] = "register";
-const char WizardController::kHTMLPageScreenName[] = "html";
 const char WizardController::kEnterpriseEnrollmentScreenName[] = "enroll";
 const char WizardController::kResetScreenName[] = "reset";
+const char WizardController::kTermsOfServiceScreenName[] = "tos";
+const char WizardController::kWrongHWIDScreenName[] = "wrong-hwid";
+const char WizardController::kLocallyManagedUserCreationScreenName[] =
+  "locally-managed-user-creation-flow";
 
 // Passing this parameter as a "first screen" initiates full OOBE flow.
 const char WizardController::kOutOfBoxScreenName[] = "oobe";
@@ -125,7 +134,7 @@ const char WizardController::kTestNoScreenName[] = "test:nowindow";
 WizardController* WizardController::default_controller_ = NULL;
 
 // static
-bool WizardController::skip_user_image_selection_ = false;
+bool WizardController::skip_post_login_screens_ = false;
 
 // static
 bool WizardController::zero_delay_enabled_ = false;
@@ -176,6 +185,9 @@ void WizardController::Init(const std::string& first_screen_name,
       chrome::NOTIFICATION_WIZARD_FIRST_SCREEN_SHOWN,
       content::NotificationService::AllSources(),
       content::NotificationService::NoDetails());
+  if (!IsMachineHWIDCorrect() && !IsDeviceRegistered() &&
+      first_screen_name.empty())
+    ShowWrongHWIDScreen();
 }
 
 chromeos::NetworkScreen* WizardController::GetNetworkScreen() {
@@ -209,35 +221,6 @@ chromeos::EulaScreen* WizardController::GetEulaScreen() {
   return eula_screen_.get();
 }
 
-chromeos::RegistrationScreen* WizardController::GetRegistrationScreen() {
-  if (!registration_screen_.get())
-    registration_screen_.reset(
-        new chromeos::RegistrationScreen(
-            oobe_display_->GetRegistrationScreenActor()));
-  return registration_screen_.get();
-}
-
-chromeos::HTMLPageScreen* WizardController::GetHTMLPageScreen() {
-  if (!html_page_screen_.get()) {
-    const CommandLine* cmd_line = CommandLine::ForCurrentProcess();
-    const CommandLine::StringVector& args = cmd_line->GetArgs();
-
-    std::string url;
-    // It's strange but args may contains empty strings.
-    for (size_t i = 0; i < args.size(); i++) {
-      if (!args[i].empty()) {
-        DCHECK(url.empty()) << "More than one URL in command line";
-        url = args[i];
-      }
-    }
-    DCHECK(!url.empty()) << "No URL in command line";
-    html_page_screen_.reset(
-        new chromeos::HTMLPageScreen(
-            oobe_display_->GetHTMLPageScreenActor(), url));
-  }
-  return html_page_screen_.get();
-}
-
 chromeos::EnterpriseEnrollmentScreen*
     WizardController::GetEnterpriseEnrollmentScreen() {
   if (!enterprise_enrollment_screen_.get()) {
@@ -254,6 +237,34 @@ chromeos::ResetScreen* WizardController::GetResetScreen() {
         new chromeos::ResetScreen(this, oobe_display_->GetResetScreenActor()));
   }
   return reset_screen_.get();
+}
+
+chromeos::TermsOfServiceScreen* WizardController::GetTermsOfServiceScreen() {
+  if (!terms_of_service_screen_.get()) {
+    terms_of_service_screen_.reset(
+        new chromeos::TermsOfServiceScreen(
+            this, oobe_display_->GetTermsOfServiceScreenActor()));
+  }
+  return terms_of_service_screen_.get();
+}
+
+chromeos::WrongHWIDScreen* WizardController::GetWrongHWIDScreen() {
+  if (!wrong_hwid_screen_.get()) {
+    wrong_hwid_screen_.reset(
+        new chromeos::WrongHWIDScreen(
+            this, oobe_display_->GetWrongHWIDScreenActor()));
+  }
+  return wrong_hwid_screen_.get();
+}
+
+chromeos::LocallyManagedUserCreationScreen*
+    WizardController::GetLocallyManagedUserCreationScreen() {
+  if (!locally_managed_user_creation_screen_.get()) {
+    locally_managed_user_creation_screen_.reset(
+        new chromeos::LocallyManagedUserCreationScreen(
+            this, oobe_display_->GetLocallyManagedUserCreationScreenActor()));
+  }
+  return locally_managed_user_creation_screen_.get();
 }
 
 void WizardController::ShowNetworkScreen() {
@@ -290,8 +301,10 @@ void WizardController::ShowUpdateScreen() {
 }
 
 void WizardController::ShowUserImageScreen() {
-  // Skip image selection if the user is logging in as ephemeral.
-  if (chromeos::UserManager::Get()->IsCurrentUserNonCryptohomeDataEphemeral()) {
+  const chromeos::UserManager* user_manager = chromeos::UserManager::Get();
+  // Skip user image selection for public sessions and ephemeral logins.
+  if (user_manager->IsLoggedInAsPublicAccount() ||
+      user_manager->IsCurrentUserNonCryptohomeDataEphemeral()) {
     OnUserImageSkipped();
     return;
   }
@@ -308,25 +321,6 @@ void WizardController::ShowEulaScreen() {
   VLOG(1) << "Showing EULA screen.";
   SetStatusAreaVisible(false);
   SetCurrentScreen(GetEulaScreen());
-}
-
-void WizardController::ShowRegistrationScreen() {
-  if (!IsRegisterScreenDefined()) {
-    VLOG(1) << "Skipping registration screen: manifest not defined or invalid "
-               "URL.";
-    OnRegistrationSkipped();
-    return;
-  }
-  VLOG(1) << "Showing registration screen.";
-  SetStatusAreaVisible(true);
-  SetCurrentScreen(GetRegistrationScreen());
-}
-
-void WizardController::ShowHTMLPageScreen() {
-  VLOG(1) << "Showing HTML page screen.";
-  SetStatusAreaVisible(true);
-  host_->SetOobeProgressBarVisible(false);
-  SetCurrentScreen(GetHTMLPageScreen());
 }
 
 void WizardController::ShowEnterpriseEnrollmentScreen() {
@@ -350,6 +344,46 @@ void WizardController::ShowResetScreen() {
   SetCurrentScreen(GetResetScreen());
 }
 
+void WizardController::ShowTermsOfServiceScreen() {
+  // Only show the Terms of Service when logging into a public account and Terms
+  // of Service have been specified through policy. In all other cases, advance
+  // to the user image screen immediately.
+  if (!chromeos::UserManager::Get()->IsLoggedInAsPublicAccount() ||
+      !ProfileManager::GetDefaultProfile()->GetPrefs()->IsManagedPreference(
+          prefs::kTermsOfServiceURL)) {
+    ShowUserImageScreen();
+    return;
+  }
+
+  VLOG(1) << "Showing Terms of Service screen.";
+  SetStatusAreaVisible(true);
+  SetCurrentScreen(GetTermsOfServiceScreen());
+}
+
+void WizardController::ShowWrongHWIDScreen() {
+  VLOG(1) << "Showing wrong HWID screen.";
+  SetStatusAreaVisible(false);
+  SetCurrentScreen(GetWrongHWIDScreen());
+}
+
+void WizardController::ShowLocallyManagedUserCreationScreen() {
+  VLOG(1) << "Showing Locally managed user creation screen screen.";
+  SetStatusAreaVisible(false);
+  LocallyManagedUserCreationScreen* screen =
+      GetLocallyManagedUserCreationScreen();
+
+  string16 name;
+  std::string password;
+  DCHECK(screen_parameters_.get());
+
+  if (screen_parameters_.get()) {
+    screen_parameters_->GetString("user_display_name", &name);
+    screen_parameters_->GetString("password", &password);
+  }
+  screen->SetParameters(name, password);
+  SetCurrentScreen(screen);
+}
+
 void WizardController::SkipToLoginForTesting() {
   MarkEulaAccepted();
   PerformPostEulaActions();
@@ -357,15 +391,8 @@ void WizardController::SkipToLoginForTesting() {
   ShowLoginScreen();
 }
 
-void WizardController::SkipImageSelectionForTesting() {
-  skip_user_image_selection_ = true;
-}
-
-void WizardController::SkipRegistration() {
-  if (current_screen_ == GetRegistrationScreen())
-    OnRegistrationSkipped();
-  else
-    LOG(ERROR) << "Registration screen is not active.";
+void WizardController::SkipPostLoginScreensForTesting() {
+  skip_post_login_screens_ = true;
 }
 
 void WizardController::AddObserver(Observer* observer) {
@@ -385,27 +412,11 @@ void WizardController::SkipUpdateEnrollAfterEula() {
 }
 
 // static
-void WizardController::RegisterPrefs(PrefServiceSimple* local_state) {
-  local_state->RegisterBooleanPref(kOobeComplete, false);
-  local_state->RegisterIntegerPref(kDeviceRegistered, -1);
-  local_state->RegisterBooleanPref(kEulaAccepted, false);
-  local_state->RegisterStringPref(kInitialLocale, "en-US");
-  // Check if the pref is already registered in case
-  // Preferences::RegisterUserPrefs runs before this code in the future.
-  if (local_state->FindPreference(prefs::kSpokenFeedbackEnabled) == NULL) {
-    local_state->RegisterBooleanPref(prefs::kSpokenFeedbackEnabled, false);
-  }
-  if (local_state->FindPreference(prefs::kHighContrastEnabled) == NULL) {
-    local_state->RegisterBooleanPref(prefs::kHighContrastEnabled, false);
-  }
-  if (local_state->FindPreference(prefs::kVirtualKeyboardEnabled) == NULL) {
-    local_state->RegisterBooleanPref(prefs::kVirtualKeyboardEnabled, false);
-  }
-  local_state->RegisterBooleanPref(prefs::kOwnerPrimaryMouseButtonRight, false);
-  local_state->RegisterBooleanPref(prefs::kOwnerTapToClickEnabled, true);
-  local_state->RegisterBooleanPref(prefs::kFactoryResetRequested, false);
-  local_state->RegisterStringPref(prefs::kRLZBrand, std::string());
-  local_state->RegisterBooleanPref(prefs::kRLZDisabled, false);
+void WizardController::RegisterPrefs(PrefRegistrySimple* registry) {
+  registry->RegisterBooleanPref(kOobeComplete, false);
+  registry->RegisterIntegerPref(kDeviceRegistered, -1);
+  registry->RegisterBooleanPref(kEulaAccepted, false);
+  registry->RegisterStringPref(kInitialLocale, "en-US");
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -515,13 +526,8 @@ void WizardController::OnRegistrationSuccess() {
     }
     chromeos::LoginUtils::Get()->CompleteOffTheRecordLogin(start_url);
   } else {
-    ShowUserImageScreen();
+    ShowTermsOfServiceScreen();
   }
-}
-
-void WizardController::OnRegistrationSkipped() {
-  // TODO(nkostylev): Track in a histogram?
-  OnRegistrationSuccess();
 }
 
 void WizardController::OnEnterpriseEnrollmentDone() {
@@ -529,6 +535,13 @@ void WizardController::OnEnterpriseEnrollmentDone() {
 }
 
 void WizardController::OnResetCanceled() {
+  if (previous_screen_)
+    SetCurrentScreen(previous_screen_);
+  else
+    ShowLoginScreen();
+}
+
+void WizardController::OnWrongHWIDWarningSkipped() {
   if (previous_screen_)
     SetCurrentScreen(previous_screen_);
   else
@@ -543,6 +556,17 @@ void WizardController::OnEnterpriseAutoEnrollmentDone() {
 void WizardController::OnOOBECompleted() {
   PerformPostUpdateActions();
   ShowLoginScreen();
+}
+
+void WizardController::OnTermsOfServiceDeclined() {
+  // If the user declines the Terms of Service, end the session and return to
+  // the login screen.
+  DBusThreadManager::Get()->GetSessionManagerClient()->StopSession();
+}
+
+void WizardController::OnTermsOfServiceAccepted() {
+  // If the user accepts the Terms of Service, advance to the user image screen.
+  ShowUserImageScreen();
 }
 
 void WizardController::InitiateOOBEUpdate() {
@@ -623,18 +647,18 @@ void WizardController::AdvanceToScreen(const std::string& screen_name) {
   } else if (screen_name == kEulaScreenName) {
     ShowEulaScreen();
   } else if (screen_name == kRegistrationScreenName) {
-    if (is_official_build_) {
-      ShowRegistrationScreen();
-    } else {
-      // Just proceed to image screen.
-      OnRegistrationSuccess();
-    }
+    // Just proceed to next stage.
+    OnRegistrationSuccess();
   } else if (screen_name == kResetScreenName) {
     ShowResetScreen();
-  } else if (screen_name == kHTMLPageScreenName) {
-    ShowHTMLPageScreen();
   } else if (screen_name == kEnterpriseEnrollmentScreenName) {
     ShowEnterpriseEnrollmentScreen();
+  } else if (screen_name == kTermsOfServiceScreenName) {
+    ShowTermsOfServiceScreen();
+  } else if (screen_name == kWrongHWIDScreenName) {
+    ShowWrongHWIDScreen();
+  } else if (screen_name == kLocallyManagedUserCreationScreenName) {
+    ShowLocallyManagedUserCreationScreen();
   } else if (screen_name != kTestNoScreenName) {
     if (is_out_of_box_) {
       ShowNetworkScreen();
@@ -668,24 +692,24 @@ void WizardController::MarkOobeCompleted() {
 // completed.
 // On chrome device, returns /home/chronos/.oobe_completed.
 // On Linux desktop, returns $HOME/.oobe_completed.
-static FilePath GetOobeCompleteFlagPath() {
+static base::FilePath GetOobeCompleteFlagPath() {
   // The constant is defined here so it won't be referenced directly.
   const char kOobeCompleteFlagFilePath[] = "/home/chronos/.oobe_completed";
 
   if (base::chromeos::IsRunningOnChromeOS()) {
-    return FilePath(kOobeCompleteFlagFilePath);
+    return base::FilePath(kOobeCompleteFlagFilePath);
   } else {
     const char* home = getenv("HOME");
     // Unlikely but if HOME is not defined, use the current directory.
     if (!home)
       home = "";
-    return FilePath(home).AppendASCII(".oobe_completed");
+    return base::FilePath(home).AppendASCII(".oobe_completed");
   }
 }
 
 static void CreateOobeCompleteFlagFile() {
   // Create flag file for boot-time init scripts.
-  FilePath oobe_complete_path = GetOobeCompleteFlagPath();
+  base::FilePath oobe_complete_path = GetOobeCompleteFlagPath();
   if (!file_util::PathExists(oobe_complete_path)) {
     FILE* oobe_flag_file = file_util::OpenFile(oobe_complete_path, "w+b");
     if (oobe_flag_file == NULL)
@@ -711,7 +735,7 @@ bool WizardController::IsDeviceRegistered() {
     // Pref is not set. For compatibility check flag file. It causes blocking
     // IO on UI thread. But it's required for update from old versions.
     base::ThreadRestrictions::ScopedAllowIO allow_io;
-    FilePath oobe_complete_flag_file_path = GetOobeCompleteFlagPath();
+    base::FilePath oobe_complete_flag_file_path = GetOobeCompleteFlagPath();
     bool file_exists = file_util::PathExists(oobe_complete_flag_file_path);
     SaveIntegerPreferenceForced(kDeviceRegistered, file_exists ? 1 : 0);
     return file_exists;
@@ -744,14 +768,6 @@ void WizardController::SetInitialLocale(const std::string& locale) {
     NOTREACHED();
 }
 
-// static
-bool WizardController::IsRegisterScreenDefined() {
-  const chromeos::StartupCustomizationDocument* manifest =
-      chromeos::StartupCustomizationDocument::GetInstance();
-  return manifest->IsReady() &&
-         GURL(manifest->registration_url()).is_valid();
-}
-
 ///////////////////////////////////////////////////////////////////////////////
 // WizardController, chromeos::ScreenObserver overrides:
 void WizardController::OnExit(ExitCodes exit_code) {
@@ -782,12 +798,6 @@ void WizardController::OnExit(ExitCodes exit_code) {
     case EULA_BACK:
       ShowNetworkScreen();
       break;
-    case REGISTRATION_SUCCESS:
-      OnRegistrationSuccess();
-      break;
-    case REGISTRATION_SKIPPED:
-      OnRegistrationSkipped();
-      break;
     case ENTERPRISE_ENROLLMENT_COMPLETED:
       OnEnterpriseEnrollmentDone();
       break;
@@ -796,6 +806,14 @@ void WizardController::OnExit(ExitCodes exit_code) {
       break;
     case ENTERPRISE_AUTO_MAGIC_ENROLLMENT_COMPLETED:
       OnEnterpriseAutoEnrollmentDone();
+      break;
+    case TERMS_OF_SERVICE_DECLINED:
+      OnTermsOfServiceDeclined();
+      break;
+    case TERMS_OF_SERVICE_ACCEPTED:
+      OnTermsOfServiceAccepted();
+    case WRONG_HWID_WARNING_SKIPPED:
+      OnWrongHWIDWarningSkipped();
       break;
     default:
       NOTREACHED();

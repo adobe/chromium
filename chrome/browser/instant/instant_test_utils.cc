@@ -5,16 +5,13 @@
 #include "chrome/browser/instant/instant_test_utils.h"
 
 #include "base/command_line.h"
-#include "chrome/browser/prefs/pref_service.h"
+#include "base/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
-#include "chrome/common/chrome_notification_types.h"
-#include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/interactive_test_utils.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/result_codes.h"
@@ -31,7 +28,7 @@ std::string WrapScript(const std::string& script) {
 // InstantTestModelObserver --------------------------------------------------
 
 InstantTestModelObserver::InstantTestModelObserver(
-    const InstantModel* model,
+    InstantOverlayModel* model,
     chrome::search::Mode::Type desired_mode_type)
     : model_(model),
       desired_mode_type_(desired_mode_type) {
@@ -42,11 +39,12 @@ InstantTestModelObserver::~InstantTestModelObserver() {
   model_->RemoveObserver(this);
 }
 
-void InstantTestModelObserver::WaitUntilDesiredPreviewState() {
+void InstantTestModelObserver::WaitForDesiredOverlayState() {
   run_loop_.Run();
 }
 
-void InstantTestModelObserver::PreviewStateChanged(const InstantModel& model) {
+void InstantTestModelObserver::OverlayStateChanged(
+    const InstantOverlayModel& model) {
   if (model.mode().mode == desired_mode_type_)
     run_loop_.Quit();
 }
@@ -54,29 +52,32 @@ void InstantTestModelObserver::PreviewStateChanged(const InstantModel& model) {
 // InstantTestBase -----------------------------------------------------------
 
 void InstantTestBase::SetupInstant() {
-  CommandLine::ForCurrentProcess()->AppendSwitchASCII(
-      switches::kInstantURL, instant_url_.spec());
-  SetupInstantUsingTemplateURL();
-}
-
-void InstantTestBase::SetupInstantUsingTemplateURL() {
   TemplateURLService* service =
       TemplateURLServiceFactory::GetForProfile(browser()->profile());
   ui_test_utils::WaitForTemplateURLServiceToLoad(service);
 
   TemplateURLData data;
-  data.SetURL("http://does/not/exist?q={searchTerms}");
+  // Necessary to use exact URL for both the main URL and the alternate URL for
+  // search term extraction to work in InstantExtended.
+  data.SetURL(instant_url_.spec() + "q={searchTerms}");
   data.instant_url = instant_url_.spec();
+  data.alternate_urls.push_back(instant_url_.spec() + "#q={searchTerms}");
+  data.search_terms_replacement_key = "strk";
 
   TemplateURL* template_url = new TemplateURL(browser()->profile(), data);
   service->Add(template_url);  // Takes ownership of |template_url|.
   service->SetDefaultSearchProvider(template_url);
+
   browser()->profile()->GetPrefs()->SetBoolean(prefs::kInstantEnabled, true);
+
+  // TODO(shishir): Fix this ugly hack.
+  instant()->SetInstantEnabled(false, true);
+  instant()->SetInstantEnabled(true, false);
 }
 
 void InstantTestBase::KillInstantRenderView() {
   base::KillProcess(
-      instant()->GetPreviewContents()->GetRenderProcessHost()->GetHandle(),
+      instant()->GetOverlayContents()->GetRenderProcessHost()->GetHandle(),
       content::RESULT_CODE_KILLED,
       false);
 }
@@ -91,25 +92,17 @@ void InstantTestBase::FocusOmnibox() {
   }
 }
 
-void InstantTestBase::FocusOmniboxAndWaitForInstantSupport() {
-  content::WindowedNotificationObserver observer(
-      chrome::NOTIFICATION_INSTANT_SUPPORT_DETERMINED,
-      content::NotificationService::AllSources());
-  FocusOmnibox();
-  observer.Wait();
-}
-
 void InstantTestBase::SetOmniboxText(const std::string& text) {
   FocusOmnibox();
   omnibox()->SetUserText(UTF8ToUTF16(text));
 }
 
-void InstantTestBase::SetOmniboxTextAndWaitForInstantToShow(
+void InstantTestBase::SetOmniboxTextAndWaitForOverlayToShow(
     const std::string& text) {
   InstantTestModelObserver observer(
       instant()->model(), chrome::search::Mode::MODE_SEARCH_SUGGESTIONS);
   SetOmniboxText(text);
-  observer.WaitUntilDesiredPreviewState();
+  observer.WaitForDesiredOverlayState();
 }
 
 bool InstantTestBase::GetBoolFromJS(content::WebContents* contents,
@@ -134,7 +127,7 @@ bool InstantTestBase::GetStringFromJS(content::WebContents* contents,
 }
 
 bool InstantTestBase::ExecuteScript(const std::string& script) {
-  return content::ExecuteScript(instant()->GetPreviewContents(), script);
+  return content::ExecuteScript(instant()->GetOverlayContents(), script);
 }
 
 bool InstantTestBase::CheckVisibilityIs(content::WebContents* contents,
@@ -144,4 +137,12 @@ bool InstantTestBase::CheckVisibilityIs(content::WebContents* contents,
   // convoluted check.
   return GetBoolFromJS(contents, "!document.webkitHidden", &actual) &&
       actual == expected;
+}
+
+bool InstantTestBase::HasUserInputInProgress() {
+  return omnibox()->model()->user_input_in_progress_;
+}
+
+bool InstantTestBase::HasTemporaryText() {
+  return omnibox()->model()->has_temporary_text_;
 }

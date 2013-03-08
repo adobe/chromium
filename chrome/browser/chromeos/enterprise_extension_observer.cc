@@ -37,7 +37,7 @@ void EnterpriseExtensionObserver::Observe(
   extensions::Extension* extension =
       content::Details<extensions::Extension>(details).ptr();
   if (extension->location() !=
-      extensions::Extension::EXTERNAL_POLICY_DOWNLOAD) {
+      extensions::Manifest::EXTERNAL_POLICY_DOWNLOAD) {
     return;
   }
   BrowserThread::PostTask(
@@ -50,7 +50,7 @@ void EnterpriseExtensionObserver::Observe(
 
 // static
 void EnterpriseExtensionObserver::CheckExtensionAndNotifyEntd(
-    const FilePath& path) {
+    const base::FilePath& path) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
   if (file_util::PathExists(
       path.Append(FILE_PATH_LITERAL("isa-cros-policy")))) {

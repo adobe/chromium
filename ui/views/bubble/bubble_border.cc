@@ -133,12 +133,12 @@ struct BubbleBorder::BorderImages {
 struct BubbleBorder::BorderImages*
     BubbleBorder::border_images_[SHADOW_COUNT] = { NULL };
 
-BubbleBorder::BubbleBorder(ArrowLocation arrow_location, Shadow shadow)
+BubbleBorder::BubbleBorder(ArrowLocation arrow, Shadow shadow, SkColor color)
     : override_arrow_offset_(0),
-      arrow_location_(arrow_location),
-      paint_arrow_(true),
+      arrow_location_(arrow),
+      arrow_paint_type_(PAINT_NORMAL),
       alignment_(ALIGN_ARROW_TO_MID_ANCHOR),
-      background_color_(SK_ColorWHITE) {
+      background_color_(color) {
   DCHECK(shadow < SHADOW_COUNT);
   images_ = GetBorderImages(shadow);
 
@@ -182,7 +182,7 @@ gfx::Rect BubbleBorder::GetBounds(const gfx::Rect& position_relative_to,
   int w = position_relative_to.width();
   int h = position_relative_to.height();
 
-  const int arrow_size = images_->arrow_interior_height + kBorderStrokeSize;
+  const int arrow_size = GetArrowSize();
   const int arrow_offset = GetArrowOffset(border_size);
 
   // Calculate bubble x coordinate.
@@ -320,6 +320,12 @@ int BubbleBorder::GetBorderCornerRadius() const {
   return images_->corner_radius;
 }
 
+int BubbleBorder::GetArrowSize() const {
+  if (arrow_paint_type_ == PAINT_NONE)
+    return 0;
+  return images_->arrow_interior_height + kBorderStrokeSize;
+}
+
 int BubbleBorder::GetArrowOffset(const gfx::Size& border_size) const {
   int arrow_offset = arrow_offset_;
   if (override_arrow_offset_) {
@@ -402,19 +408,20 @@ void BubbleBorder::Paint(const views::View& view, gfx::Canvas* canvas) {
   const int height = bottom - top;
   const int width = right - left;
 
-  const ArrowLocation arrow_location = paint_arrow_ ? arrow_location_ : NONE;
-
   // |arrow_offset| is offset of arrow from the beginning of the edge.
   int arrow_offset = GetArrowOffset(view.size());
-  if (!is_arrow_at_center(arrow_location)) {
-    if (is_arrow_on_horizontal(arrow_location) &&
-        !is_arrow_on_left(arrow_location)) {
+  if (!is_arrow_at_center(arrow_location_)) {
+    if (is_arrow_on_horizontal(arrow_location_) &&
+        !is_arrow_on_left(arrow_location_)) {
       arrow_offset = view.width() - arrow_offset - 1;
-    } else if (!is_arrow_on_horizontal(arrow_location) &&
-               !is_arrow_on_top(arrow_location)) {
+    } else if (!is_arrow_on_horizontal(arrow_location_) &&
+               !is_arrow_on_top(arrow_location_)) {
       arrow_offset = view.height() - arrow_offset - 1;
     }
   }
+
+  const ArrowLocation arrow_location =
+      arrow_paint_type_ == PAINT_NORMAL ? arrow_location_ : NONE;
 
   // Left edge.
   if (arrow_location == LEFT_TOP ||

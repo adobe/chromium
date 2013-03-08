@@ -7,10 +7,10 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/logging.h"
+#include "base/prefs/pref_service.h"
 #include "chrome/browser/policy/cloud_policy_service.h"
 #include "chrome/browser/policy/policy_bundle.h"
 #include "chrome/browser/policy/policy_map.h"
-#include "chrome/browser/prefs/pref_service.h"
 
 namespace policy {
 
@@ -36,8 +36,10 @@ void CloudPolicyManager::Shutdown() {
   ConfigurationPolicyProvider::Shutdown();
 }
 
-bool CloudPolicyManager::IsInitializationComplete() const {
-  return store()->is_initialized();
+bool CloudPolicyManager::IsInitializationComplete(PolicyDomain domain) const {
+  if (domain == POLICY_DOMAIN_CHROME)
+    return store()->is_initialized();
+  return true;
 }
 
 void CloudPolicyManager::RefreshPolicies() {
@@ -65,12 +67,17 @@ void CloudPolicyManager::OnStoreError(CloudPolicyStore* cloud_policy_store) {
 }
 
 void CloudPolicyManager::CheckAndPublishPolicy() {
-  if (IsInitializationComplete() && !waiting_for_policy_refresh_) {
-    scoped_ptr<PolicyBundle> bundle(new PolicyBundle());
-    bundle->Get(POLICY_DOMAIN_CHROME, std::string()).CopyFrom(
-        store()->policy_map());
-    UpdatePolicy(bundle.Pass());
+  if (IsInitializationComplete(POLICY_DOMAIN_CHROME) &&
+      !waiting_for_policy_refresh_) {
+    UpdatePolicy(CreatePolicyBundle());
   }
+}
+
+scoped_ptr<PolicyBundle> CloudPolicyManager::CreatePolicyBundle() {
+  scoped_ptr<PolicyBundle> bundle(new PolicyBundle);
+  bundle->Get(PolicyNamespace(POLICY_DOMAIN_CHROME, std::string()))
+      .CopyFrom(store()->policy_map());
+  return bundle.Pass();
 }
 
 void CloudPolicyManager::OnRefreshComplete(bool success) {

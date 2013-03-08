@@ -8,7 +8,7 @@
 #include <shellapi.h>
 
 #include "base/bind.h"
-#include "base/system_monitor/system_monitor.h"
+#include "base/debug/trace_event.h"
 #include "base/win/windows_version.h"
 #include "ui/base/events/event.h"
 #include "ui/base/events/event_utils.h"
@@ -288,10 +288,6 @@ bool ProcessChildWindowMessage(UINT message,
 
 #endif
 
-// A custom MSAA object id used to determine if a screen reader is actively
-// listening for MSAA events.
-const int kCustomObjectID = 1;
-
 // The thickness of an auto-hide taskbar in pixels.
 const int kAutoHideTaskbarThicknessPx = 2;
 
@@ -388,7 +384,8 @@ HWNDMessageHandler::HWNDMessageHandler(HWNDMessageHandlerDelegate* delegate)
       use_layered_buffer_(false),
       layered_alpha_(255),
       ALLOW_THIS_IN_INITIALIZER_LIST(paint_layered_window_factory_(this)),
-      can_update_layered_window_(true) {
+      can_update_layered_window_(true),
+      is_first_nccalc_(true) {
 }
 
 HWNDMessageHandler::~HWNDMessageHandler() {
@@ -401,6 +398,7 @@ HWNDMessageHandler::~HWNDMessageHandler() {
 }
 
 void HWNDMessageHandler::Init(HWND parent, const gfx::Rect& bounds) {
+  TRACE_EVENT0("views", "HWNDMessageHandler::Init");
   GetMonitorAndRects(bounds.ToRECT(), &last_monitor_, &last_monitor_rect_,
                      &last_work_area_);
 
@@ -560,6 +558,7 @@ void HWNDMessageHandler::Show() {
 }
 
 void HWNDMessageHandler::ShowWindowWithState(ui::WindowShowState show_state) {
+  TRACE_EVENT0("views", "HWNDMessageHandler::ShowWindowWithState");
   DWORD native_show_state;
   switch (show_state) {
     case ui::SHOW_STATE_INACTIVE:
@@ -734,71 +733,6 @@ void HWNDMessageHandler::SetVisibilityChangedAnimationsEnabled(bool enabled) {
 
 void HWNDMessageHandler::SetTitle(const string16& title) {
   SetWindowText(hwnd(), title.c_str());
-  SetAccessibleName(title);
-}
-
-void HWNDMessageHandler::SetAccessibleName(const string16& name) {
-  // TODO(beng): figure out vis-a-vis aura.
-#if !defined(USE_AURA)
-  base::win::ScopedComPtr<IAccPropServices> pAccPropServices;
-  HRESULT hr = CoCreateInstance(CLSID_AccPropServices, NULL, CLSCTX_SERVER,
-      IID_IAccPropServices, reinterpret_cast<void**>(&pAccPropServices));
-  if (SUCCEEDED(hr))
-    hr = pAccPropServices->SetHwndPropStr(hwnd(), OBJID_CLIENT, CHILDID_SELF,
-                                          PROPID_ACC_NAME, name.c_str());
-#endif
-}
-
-void HWNDMessageHandler::SetAccessibleRole(ui::AccessibilityTypes::Role role) {
-  // TODO(beng): figure out vis-a-vis aura.
-#if !defined(USE_AURA)
-  base::win::ScopedComPtr<IAccPropServices> pAccPropServices;
-  HRESULT hr = CoCreateInstance(CLSID_AccPropServices, NULL, CLSCTX_SERVER,
-      IID_IAccPropServices, reinterpret_cast<void**>(&pAccPropServices));
-  if (SUCCEEDED(hr)) {
-    VARIANT var;
-    if (role) {
-      var.vt = VT_I4;
-      var.lVal = NativeViewAccessibilityWin::MSAARole(role);
-      hr = pAccPropServices->SetHwndProp(hwnd(), OBJID_CLIENT, CHILDID_SELF,
-                                         PROPID_ACC_ROLE, var);
-    }
-  }
-#endif
-}
-
-void HWNDMessageHandler::SetAccessibleState(
-    ui::AccessibilityTypes::State state) {
-  // TODO(beng): figure out vis-a-vis aura.
-#if !defined(USE_AURA)
-  base::win::ScopedComPtr<IAccPropServices> pAccPropServices;
-  HRESULT hr = CoCreateInstance(CLSID_AccPropServices, NULL, CLSCTX_SERVER,
-      IID_IAccPropServices, reinterpret_cast<void**>(&pAccPropServices));
-  if (SUCCEEDED(hr)) {
-    VARIANT var;
-    if (state) {
-      var.vt = VT_I4;
-      var.lVal = NativeViewAccessibilityWin::MSAAState(state);
-      hr = pAccPropServices->SetHwndProp(hwnd(), OBJID_CLIENT, CHILDID_SELF,
-                                         PROPID_ACC_STATE, var);
-    }
-  }
-#endif
-}
-
-void HWNDMessageHandler::SendNativeAccessibilityEvent(
-    int id,
-    ui::AccessibilityTypes::Event event_type) {
-  // TODO(beng): figure out vis-a-vis aura.
-#if !defined(USE_AURA)
-  // Now call the Windows-specific method to notify MSAA clients of this
-  // event.  The widget gives us a temporary unique child ID to associate
-  // with this view so that clients can call get_accChild in
-  // NativeViewAccessibilityWin to retrieve the IAccessible associated
-  // with this view.
-  ::NotifyWinEvent(NativeViewAccessibilityWin::MSAAEvent(event_type), hwnd(),
-                   OBJID_CLIENT, id);
-#endif
 }
 
 void HWNDMessageHandler::SetCursor(HCURSOR cursor) {
@@ -1243,6 +1177,12 @@ BOOL HWNDMessageHandler::OnAppCommand(HWND window,
   return handled;
 }
 
+void HWNDMessageHandler::OnCancelMode() {
+  delegate_->HandleCancelMode();
+  // Need default handling, otherwise capture and other things aren't canceled.
+  SetMsgHandled(FALSE);
+}
+
 void HWNDMessageHandler::OnCaptureChanged(HWND window) {
   delegate_->HandleCaptureLost();
 }
@@ -1263,10 +1203,18 @@ void HWNDMessageHandler::OnCommand(UINT notification_code,
 LRESULT HWNDMessageHandler::OnCreate(CREATESTRUCT* create_struct) {
   use_layered_buffer_ = !!(window_ex_style() & WS_EX_LAYERED);
 
-  fullscreen_handler_->set_hwnd(hwnd());
+#if defined(USE_AURA)
+  if (window_ex_style() &  WS_EX_COMPOSITED) {
+    if (base::win::GetVersion() >= base::win::VERSION_VISTA) {
+      // This is part of the magic to emulate layered windows with Aura
+      // see the explanation elsewere when we set WS_EX_COMPOSITED style.
+      MARGINS margins = {-1,-1,-1,-1};
+      DwmExtendFrameIntoClientArea(hwnd(), &margins);
+    }
+  }
+#endif
 
-  // Attempt to detect screen readers by sending an event with our custom id.
-  NotifyWinEvent(EVENT_SYSTEM_ALERT, hwnd(), kCustomObjectID, CHILDID_SELF);
+  fullscreen_handler_->set_hwnd(hwnd());
 
   // This message initializes the window so that focus border are shown for
   // windows.
@@ -1392,15 +1340,6 @@ LRESULT HWNDMessageHandler::OnGetObject(UINT message,
     // Create a reference that MSAA will marshall to the client.
     reference_result = LresultFromObject(IID_IAccessible, w_param,
         static_cast<IAccessible*>(root.Detach()));
-  }
-
-  if (kCustomObjectID == l_param) {
-    // An MSAA client requested our custom id. Assume that we have detected an
-    // active windows screen reader.
-    delegate_->HandleScreenReaderDetected();
-
-    // Return with failure.
-    return static_cast<LRESULT>(0L);
   }
 
   return reference_result;
@@ -1618,6 +1557,19 @@ LRESULT HWNDMessageHandler::OnNCCalcSize(BOOL mode, LPARAM l_param) {
   // non-client edge width. Note that in most cases "no insets" means no
   // custom width, but in fullscreen mode or when the NonClientFrameView
   // requests it, we want a custom width of 0.
+
+  // Let User32 handle the first nccalcsize for captioned windows
+  // so it updates its internal structures (specifically caption-present)
+  // Without this Tile & Cascade windows won't work.
+  // See http://code.google.com/p/chromium/issues/detail?id=900
+  if (is_first_nccalc_) {
+    is_first_nccalc_ = false;
+    if (GetWindowLong(hwnd(), GWL_STYLE) & WS_CAPTION) {
+      SetMsgHandled(FALSE);
+      return 0;
+    }
+  }
+
   gfx::Insets insets = GetClientAreaInsets();
   if (insets.empty() && !fullscreen_handler_->fullscreen() &&
       !(mode && remove_standard_frame_)) {
@@ -1854,14 +1806,6 @@ void HWNDMessageHandler::OnPaint(HDC dc) {
   }
 }
 
-LRESULT HWNDMessageHandler::OnPowerBroadcast(DWORD power_event, DWORD data) {
-  base::SystemMonitor* monitor = base::SystemMonitor::Get();
-  if (monitor)
-    monitor->ProcessWmPowerBroadcastMessage(power_event);
-  SetMsgHandled(FALSE);
-  return 0;
-}
-
 LRESULT HWNDMessageHandler::OnReflectedMessage(UINT message,
                                                WPARAM w_param,
                                                LPARAM l_param) {
@@ -1872,12 +1816,12 @@ LRESULT HWNDMessageHandler::OnReflectedMessage(UINT message,
 LRESULT HWNDMessageHandler::OnSetCursor(UINT message,
                                         WPARAM w_param,
                                         LPARAM l_param) {
-  // Using ScopedRedrawLock here frequently allows content behind this window to
-  // paint in front of this window, causing glaring rendering artifacts.
-  // If omitting ScopedRedrawLock here triggers caption rendering artifacts via
-  // DefWindowProc message handling, we'll need to find a better solution.
-  SetMsgHandled(FALSE);
-  return 0;
+  const LRESULT result = DefWindowProcWithRedrawLock(message, w_param, l_param);
+  // Invalidate the window to paint over any outdated window regions asap, as
+  // using a RedrawLock for WM_SETCURSOR may show content through this window.
+  if (delegate_->IsUsingCustomFrame() && !ui::win::IsAeroGlassEnabled())
+    InvalidateRect(hwnd(), NULL, FALSE);
+  return result;
 }
 
 void HWNDMessageHandler::OnSetFocus(HWND last_focused_window) {

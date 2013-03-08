@@ -47,7 +47,7 @@ class DownloadShelfView;
 class FullscreenExitBubbleViews;
 class ImmersiveModeController;
 class InfoBarContainerView;
-class InstantPreviewControllerViews;
+class InstantOverlayControllerViews;
 class LocationBarView;
 class StatusBubbleViews;
 class SearchViewController;
@@ -160,6 +160,9 @@ class BrowserView : public BrowserWindow,
 
   // Accessor for the Toolbar.
   ToolbarView* toolbar() { return toolbar_; }
+
+  // Accessor for the InfobarContainer.
+  InfoBarContainerView* infobar_container() { return infobar_container_; }
 
   // Returns true if various window components are visible.
   virtual bool IsTabStripVisible() const;
@@ -284,6 +287,7 @@ class BrowserView : public BrowserWindow,
   virtual void UpdateFullscreenExitBubbleContent(
       const GURL& url,
       FullscreenExitBubbleType bubble_type) OVERRIDE;
+  virtual bool ShouldHideUIForFullscreen() const OVERRIDE;
   virtual bool IsFullscreen() const OVERRIDE;
 #if defined(OS_WIN)
   virtual void SetMetroSnapMode(bool enable) OVERRIDE;
@@ -318,6 +322,7 @@ class BrowserView : public BrowserWindow,
   virtual void ShowChromeToMobileBubble() OVERRIDE;
 #if defined(ENABLE_ONE_CLICK_SIGNIN)
   virtual void ShowOneClickSigninBubble(
+      OneClickSigninBubbleType type,
       const StartSyncCallback& start_sync_callback) OVERRIDE;
 #endif
   // TODO(beng): Not an override, move somewhere else.
@@ -614,7 +619,7 @@ class BrowserView : public BrowserWindow,
   // |  | Page content (contents_)                                   |  |
   // |  |  +------------------------------------------------------+  |  |
   // |  |  | contents_container_ and/or                           |  |  |
-  // |  |  | preview_controller_->preview_container_              |  |  |
+  // |  |  | overlay_controller_->overlay_container_              |  |  |
   // |  |  |                                                      |  |  |
   // |  |  |                                                      |  |  |
   // |  |  +------------------------------------------------------+  |  |
@@ -633,7 +638,7 @@ class BrowserView : public BrowserWindow,
   // [2] The bookmark bar and info bar are swapped when on the new tab page.
   //     Additionally contents_ is positioned on top of the bookmark bar when
   //     the bookmark bar is detached. This is done to allow the
-  //     preview_controller_->preview_container_ to appear over the bookmark
+  //     overlay_controller_->overlay_container_ to appear over the bookmark
   //     bar.
 
   // Tool/Info bars that we are currently showing. Used for layout.
@@ -668,7 +673,7 @@ class BrowserView : public BrowserWindow,
   views::WebView* devtools_container_;
 
   // The view managing both the contents_container_ and
-  // preview_controller_->preview_container_.
+  // overlay_controller_->overlay_container_.
   ContentsContainer* contents_;
 
   // Split view containing the contents container and devtools container.
@@ -747,7 +752,7 @@ class BrowserView : public BrowserWindow,
 
   gfx::ScopedSysColorChangeListener color_change_listener_;
 
-  scoped_ptr<InstantPreviewControllerViews> preview_controller_;
+  scoped_ptr<InstantOverlayControllerViews> overlay_controller_;
 
   mutable base::WeakPtrFactory<BrowserView> activate_modal_dialog_factory_;
 

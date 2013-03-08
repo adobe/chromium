@@ -50,7 +50,7 @@ class AppApiTest : public ExtensionApiTest {
   }
 
   // Pass flags to make testing apps easier.
-  void SetUpCommandLine(CommandLine* command_line) {
+  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
     ExtensionApiTest::SetUpCommandLine(command_line);
     CommandLine::ForCurrentProcess()->AppendSwitch(
         switches::kDisablePopupBlocking);
@@ -113,7 +113,8 @@ class AppApiTest : public ExtensionApiTest {
 
     // Opening tabs with window.open should keep the page in the opener's
     // process.
-    ASSERT_EQ(1u, chrome::GetBrowserCount(browser()->profile()));
+    ASSERT_EQ(1u, chrome::GetBrowserCount(browser()->profile(),
+                                          browser()->host_desktop_type()));
     OpenWindow(tab1, base_url.Resolve("path1/empty.html"), true, NULL);
     LOG(INFO) << "WindowOpenHelper 1.";
     OpenWindow(tab2, base_url.Resolve("path2/empty.html"), true, NULL);
@@ -124,7 +125,7 @@ class AppApiTest : public ExtensionApiTest {
 // Omits the disable-popup-blocking flag so we can cover that case.
 class BlockedAppApiTest : public AppApiTest {
  protected:
-  void SetUpCommandLine(CommandLine* command_line) {
+  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
     ExtensionApiTest::SetUpCommandLine(command_line);
     CommandLine::ForCurrentProcess()->AppendSwitch(
         switches::kAllowHTTPBackgroundPage);
@@ -133,7 +134,13 @@ class BlockedAppApiTest : public AppApiTest {
 
 // Tests that hosted apps with the background permission get a process-per-app
 // model, since all pages need to be able to script the background page.
-IN_PROC_BROWSER_TEST_F(AppApiTest, AppProcess) {
+// http://crbug.com/172750
+#if defined(OS_WIN)
+#define MAYBE_AppProcess DISABLED_AppProcess
+#else
+#define MAYBE_AppProcess AppProcess
+#endif
+IN_PROC_BROWSER_TEST_F(AppApiTest, MAYBE_AppProcess) {
   LOG(INFO) << "Start of test.";
 
   extensions::ProcessMap* process_map = extensions::ExtensionSystem::Get(
@@ -198,7 +205,8 @@ IN_PROC_BROWSER_TEST_F(AppApiTest, AppProcess) {
                 GetRenderProcessHost());
 
   // Now let's do the same using window.open. The same should happen.
-  ASSERT_EQ(1u, chrome::GetBrowserCount(browser()->profile()));
+  ASSERT_EQ(1u, chrome::GetBrowserCount(browser()->profile(),
+                                        browser()->host_desktop_type()));
   OpenWindow(tab, base_url.Resolve("path1/empty.html"), true, NULL);
   LOG(INFO) << "WindowOpenHelper 1.";
   OpenWindow(tab, base_url.Resolve("path2/empty.html"), true, NULL);
@@ -281,7 +289,7 @@ IN_PROC_BROWSER_TEST_F(AppApiTest, BookmarkAppGetsNormalProcess) {
   std::string error;
   scoped_refptr<const Extension> extension(extension_file_util::LoadExtension(
       test_data_dir_.AppendASCII("app_process"),
-      Extension::LOAD,
+      extensions::Manifest::UNPACKED,
       Extension::FROM_BOOKMARK,
       &error));
   service->OnExtensionInstalled(extension,
@@ -323,7 +331,8 @@ IN_PROC_BROWSER_TEST_F(AppApiTest, BookmarkAppGetsNormalProcess) {
                 GetRenderProcessHost());
 
   // Now let's do the same using window.open. The same should happen.
-  ASSERT_EQ(1u, chrome::GetBrowserCount(browser()->profile()));
+  ASSERT_EQ(1u, chrome::GetBrowserCount(browser()->profile(),
+                                        browser()->host_desktop_type()));
   OpenWindow(tab, base_url.Resolve("path1/empty.html"), true, NULL);
   OpenWindow(tab, base_url.Resolve("path2/empty.html"), true, NULL);
 
@@ -388,16 +397,9 @@ IN_PROC_BROWSER_TEST_F(AppApiTest, AppProcessRedirectBack) {
                 GetRenderProcessHost());
 }
 
-// Ensure that reloading a URL after installing or uninstalling it as an app
-// correctly swaps the process.  (http://crbug.com/80621)
-//
-// The test times out under AddressSanitizer, see http://crbug.com/103371
-#if defined(ADDRESS_SANITIZER)
-#define MAYBE_ReloadIntoAppProcess DISABLED_ReloadIntoAppProcess
-#else
-#define MAYBE_ReloadIntoAppProcess ReloadIntoAppProcess
-#endif
-IN_PROC_BROWSER_TEST_F(AppApiTest, MAYBE_ReloadIntoAppProcess) {
+// Ensure that re-navigating to a URL after installing or uninstalling it as an
+// app correctly swaps the tab to the app process.  (http://crbug.com/80621)
+IN_PROC_BROWSER_TEST_F(AppApiTest, NavigateIntoAppProcess) {
   extensions::ProcessMap* process_map = extensions::ExtensionSystem::Get(
       browser()->profile())->extension_service()->process_map();
 
@@ -414,7 +416,7 @@ IN_PROC_BROWSER_TEST_F(AppApiTest, MAYBE_ReloadIntoAppProcess) {
   EXPECT_FALSE(process_map->Contains(
       contents->GetRenderProcessHost()->GetID()));
 
-  // Load app and navigate to the page.
+  // Load app and re-navigate to the page.
   const Extension* app =
       LoadExtension(test_data_dir_.AppendASCII("app_process"));
   ASSERT_TRUE(app);
@@ -422,9 +424,33 @@ IN_PROC_BROWSER_TEST_F(AppApiTest, MAYBE_ReloadIntoAppProcess) {
   EXPECT_TRUE(process_map->Contains(
       contents->GetRenderProcessHost()->GetID()));
 
-  // Disable app and navigate to the page.
+  // Disable app and re-navigate to the page.
   DisableExtension(app->id());
   ui_test_utils::NavigateToURL(browser(), base_url.Resolve("path1/empty.html"));
+  EXPECT_FALSE(process_map->Contains(
+      contents->GetRenderProcessHost()->GetID()));
+}
+
+// Ensure that reloading a URL after installing or uninstalling it as an app
+// correctly swaps the tab to the app process.  (http://crbug.com/80621)
+IN_PROC_BROWSER_TEST_F(AppApiTest, ReloadIntoAppProcess) {
+  extensions::ProcessMap* process_map = extensions::ExtensionSystem::Get(
+      browser()->profile())->extension_service()->process_map();
+
+  host_resolver()->AddRule("*", "127.0.0.1");
+  ASSERT_TRUE(test_server()->Start());
+
+  // The app under test acts on URLs whose host is "localhost",
+  // so the URLs we navigate to must have host "localhost".
+  GURL base_url = GetTestBaseURL("app_process");
+
+  // Load app, disable it, and navigate to the page.
+  const Extension* app =
+      LoadExtension(test_data_dir_.AppendASCII("app_process"));
+  ASSERT_TRUE(app);
+  DisableExtension(app->id());
+  ui_test_utils::NavigateToURL(browser(), base_url.Resolve("path1/empty.html"));
+  WebContents* contents = browser()->tab_strip_model()->GetWebContentsAt(0);
   EXPECT_FALSE(process_map->Contains(
       contents->GetRenderProcessHost()->GetID()));
 
@@ -449,6 +475,30 @@ IN_PROC_BROWSER_TEST_F(AppApiTest, MAYBE_ReloadIntoAppProcess) {
               GetController()));
   chrome::Reload(browser(), CURRENT_TAB);
   reload_observer2.Wait();
+  EXPECT_FALSE(process_map->Contains(
+      contents->GetRenderProcessHost()->GetID()));
+}
+
+// Ensure that reloading a URL with JavaScript after installing or uninstalling
+// it as an app correctly swaps the process.  (http://crbug.com/80621)
+IN_PROC_BROWSER_TEST_F(AppApiTest, ReloadIntoAppProcessWithJavaScript) {
+  extensions::ProcessMap* process_map = extensions::ExtensionSystem::Get(
+      browser()->profile())->extension_service()->process_map();
+
+  host_resolver()->AddRule("*", "127.0.0.1");
+  ASSERT_TRUE(test_server()->Start());
+
+  // The app under test acts on URLs whose host is "localhost",
+  // so the URLs we navigate to must have host "localhost".
+  GURL base_url = GetTestBaseURL("app_process");
+
+  // Load app, disable it, and navigate to the page.
+  const Extension* app =
+      LoadExtension(test_data_dir_.AppendASCII("app_process"));
+  ASSERT_TRUE(app);
+  DisableExtension(app->id());
+  ui_test_utils::NavigateToURL(browser(), base_url.Resolve("path1/empty.html"));
+  WebContents* contents = browser()->tab_strip_model()->GetWebContentsAt(0);
   EXPECT_FALSE(process_map->Contains(
       contents->GetRenderProcessHost()->GetID()));
 

@@ -13,11 +13,12 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/platform_file.h"
 #include "base/stl_util.h"
+#include "base/string_number_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/shell_window_registry.h"
-#include "chrome/browser/media_gallery/media_file_system_registry.h"
-#include "chrome/browser/media_gallery/media_galleries_dialog_controller.h"
+#include "chrome/browser/media_galleries/media_file_system_registry.h"
+#include "chrome/browser/media_galleries/media_galleries_dialog_controller.h"
 #include "chrome/browser/ui/chrome_select_file_policy.h"
 #include "chrome/browser/ui/extensions/shell_window.h"
 #include "chrome/browser/ui/web_contents_modal_dialog_manager.h"
@@ -38,6 +39,7 @@
 
 using chrome::MediaFileSystemInfo;
 using chrome::MediaFileSystemRegistry;
+using chrome::MediaFileSystemsCallback;
 using content::ChildProcessSecurityPolicy;
 using content::WebContents;
 
@@ -87,17 +89,20 @@ bool MediaGalleriesGetMediaFileSystemsFunction::RunImpl() {
   }
 
   switch (interactive) {
-    case MediaGalleries::GET_MEDIA_FILE_SYSTEMS_INTERACTIVITY_YES:
-      ShowDialog();
+    case MediaGalleries::GET_MEDIA_FILE_SYSTEMS_INTERACTIVITY_YES: {
+      // The MediaFileSystemRegistry only updates preferences for extensions
+      // that it knows are in use. Since this may be the first call to
+      // chrome.getMediaFileSystems for this extension, call
+      // GetMediaFileSystemsForExtension() here solely so that
+      // MediaFileSystemRegistry will send preference changes.
+      GetMediaFileSystemsForExtension(base::Bind(
+          &MediaGalleriesGetMediaFileSystemsFunction::AlwaysShowDialog, this));
       return true;
+    }
     case MediaGalleries::GET_MEDIA_FILE_SYSTEMS_INTERACTIVITY_IF_NEEDED: {
-      MediaFileSystemRegistry* registry =
-          g_browser_process->media_file_system_registry();
-      registry->GetMediaFileSystemsForExtension(
-          render_view_host(), GetExtension(), base::Bind(
-              &MediaGalleriesGetMediaFileSystemsFunction::
-                  ShowDialogIfNoGalleries,
-              this));
+      GetMediaFileSystemsForExtension(base::Bind(
+          &MediaGalleriesGetMediaFileSystemsFunction::ShowDialogIfNoGalleries,
+          this));
       return true;
     }
     case MediaGalleries::GET_MEDIA_FILE_SYSTEMS_INTERACTIVITY_NO:
@@ -110,6 +115,11 @@ bool MediaGalleriesGetMediaFileSystemsFunction::RunImpl() {
   return false;
 }
 
+void MediaGalleriesGetMediaFileSystemsFunction::AlwaysShowDialog(
+    const std::vector<MediaFileSystemInfo>& /*filesystems*/) {
+  ShowDialog();
+}
+
 void MediaGalleriesGetMediaFileSystemsFunction::ShowDialogIfNoGalleries(
     const std::vector<MediaFileSystemInfo>& filesystems) {
   if (filesystems.empty())
@@ -119,11 +129,8 @@ void MediaGalleriesGetMediaFileSystemsFunction::ShowDialogIfNoGalleries(
 }
 
 void MediaGalleriesGetMediaFileSystemsFunction::GetAndReturnGalleries() {
-  MediaFileSystemRegistry* registry =
-      g_browser_process->media_file_system_registry();
-  registry->GetMediaFileSystemsForExtension(
-      render_view_host(), GetExtension(), base::Bind(
-          &MediaGalleriesGetMediaFileSystemsFunction::ReturnGalleries, this));
+  GetMediaFileSystemsForExtension(base::Bind(
+      &MediaGalleriesGetMediaFileSystemsFunction::ReturnGalleries, this));
 }
 
 void MediaGalleriesGetMediaFileSystemsFunction::ReturnGalleries(
@@ -137,10 +144,6 @@ void MediaGalleriesGetMediaFileSystemsFunction::ReturnGalleries(
       MediaGalleriesPermission::kReadPermission);
   bool has_read_permission = GetExtension()->CheckAPIPermissionWithParam(
       APIPermission::kMediaGalleries, &read_param);
-  MediaGalleriesPermission::CheckParam write_param(
-      MediaGalleriesPermission::kWritePermission);
-  bool has_write_permission = GetExtension()->CheckAPIPermissionWithParam(
-      APIPermission::kMediaGalleries, &write_param);
 
   const int child_id = rvh->GetProcess()->GetID();
   std::set<std::string> file_system_names;
@@ -162,10 +165,11 @@ void MediaGalleriesGetMediaFileSystemsFunction::ReturnGalleries(
     file_system_names.insert(filesystems[i].name);
     file_system_dict_value->SetStringWithoutPathExpansion(
         MediaFileSystemRegistry::kNameKey, filesystems[i].name);
-    file_system_dict_value->SetIntegerWithoutPathExpansion(
-        MediaFileSystemRegistry::kGalleryIdKey, filesystems[i].pref_id);
-    if (filesystems[i].transient_device_id) {
-      file_system_dict_value->SetIntegerWithoutPathExpansion(
+    file_system_dict_value->SetStringWithoutPathExpansion(
+        MediaFileSystemRegistry::kGalleryIdKey,
+        base::Uint64ToString(filesystems[i].pref_id));
+    if (!filesystems[i].transient_device_id.empty()) {
+      file_system_dict_value->SetStringWithoutPathExpansion(
           MediaFileSystemRegistry::kDeviceIdKey,
           filesystems[i].transient_device_id);
     }
@@ -179,16 +183,12 @@ void MediaGalleriesGetMediaFileSystemsFunction::ReturnGalleries(
     if (filesystems[i].path.empty())
       continue;
 
-    if (has_read_permission || has_write_permission) {
+    if (has_read_permission) {
       content::ChildProcessSecurityPolicy* policy =
           ChildProcessSecurityPolicy::GetInstance();
       if (!policy->CanReadFile(child_id, filesystems[i].path))
         policy->GrantReadFile(child_id, filesystems[i].path);
       policy->GrantReadFileSystem(child_id, filesystems[i].fsid);
-      if (has_write_permission) {
-        policy->GrantWriteFileSystem(child_id, filesystems[i].fsid);
-        policy->GrantCreateFileForFileSystem(child_id, filesystems[i].fsid);
-      }
     }
   }
 
@@ -219,6 +219,19 @@ void MediaGalleriesGetMediaFileSystemsFunction::ShowDialog() {
   base::Closure cb = base::Bind(
       &MediaGalleriesGetMediaFileSystemsFunction::GetAndReturnGalleries, this);
   new chrome::MediaGalleriesDialogController(contents, *GetExtension(), cb);
+}
+
+void MediaGalleriesGetMediaFileSystemsFunction::GetMediaFileSystemsForExtension(
+    const chrome::MediaFileSystemsCallback& cb) {
+  if (!render_view_host()) {
+    cb.Run(std::vector<MediaFileSystemInfo>());
+    return;
+  }
+
+  MediaFileSystemRegistry* registry =
+      g_browser_process->media_file_system_registry();
+  registry->GetMediaFileSystemsForExtension(
+      render_view_host(), GetExtension(), cb);
 }
 
 // MediaGalleriesAssembleMediaFileFunction -------------------------------------

@@ -5,7 +5,7 @@
       'NAME': 'dlopen',
       'TYPE': 'main',
       'SOURCES': ['dlopen.cc'],
-      'LIBS': ['dl', 'ppapi_cpp', 'ppapi', 'pthread']
+      'LIBS': ['nacl_io', 'dl', 'ppapi_cpp', 'ppapi', 'pthread']
     },
     {
       'NAME' : 'libeightball',
@@ -13,10 +13,16 @@
       'SOURCES' : ['eightball.cc', 'eightball.h'],
       'CXXFLAGS': ['-fPIC'],
       'LIBS' : ['ppapi_cpp', 'ppapi', 'pthread']
+    },
+    {
+      'NAME' : 'libreverse',
+      'TYPE' : 'so',
+      'SOURCES' : ['reverse.cc', 'reverse.h'],
+      'CXXFLAGS': ['-fPIC'],
+      'LIBS' : ['ppapi_cpp', 'ppapi', 'pthread']
     }
   ],
   'DATA': [
-    'Makefile',
     'example.js',
   ],
   'DEST': 'examples',

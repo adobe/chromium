@@ -4,19 +4,24 @@
 
 #include "chrome/browser/notifications/notification_ui_manager.h"
 
-#include "base/command_line.h"
 #include "chrome/browser/notifications/balloon_notification_ui_manager.h"
-#include "chrome/common/chrome_switches.h"
 
 #if defined(ENABLE_MESSAGE_CENTER)
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/notifications/message_center_notification_manager.h"
+#include "ui/message_center/message_center_util.h"
 #endif
 
 // static
 bool NotificationUIManager::DelegatesToMessageCenter() {
-  return CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kEnableRichNotifications);
+  // In ChromeOS, it always uses MessageCenterNotificationManager. The flag of
+  // --enable-rich-notifications switches the contents and behaviors inside of
+  // the message center.
+#if defined(OS_CHROMEOS)
+  return true;
+#elif defined(ENABLE_MESSAGE_CENTER)
+  return message_center::IsRichNotificationEnabled();
+#endif
   return false;
 }
 
@@ -34,4 +39,3 @@ NotificationUIManager* NotificationUIManager::Create(PrefService* local_state) {
   return balloon_manager;
 }
 #endif
-

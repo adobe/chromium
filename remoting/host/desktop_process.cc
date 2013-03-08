@@ -16,6 +16,7 @@
 #include "remoting/base/auto_thread.h"
 #include "remoting/base/auto_thread_task_runner.h"
 #include "remoting/host/chromoting_messages.h"
+#include "remoting/host/desktop_environment.h"
 #include "remoting/host/desktop_session_agent.h"
 
 namespace remoting {
@@ -32,6 +33,12 @@ DesktopProcess::DesktopProcess(
 DesktopProcess::~DesktopProcess() {
   DCHECK(!daemon_channel_);
   DCHECK(!desktop_agent_);
+}
+
+DesktopEnvironmentFactory& DesktopProcess::desktop_environment_factory() {
+  DCHECK(caller_task_runner_->BelongsToCurrentThread());
+
+  return *desktop_environment_factory_;
 }
 
 void DesktopProcess::OnNetworkProcessDisconnected() {
@@ -54,6 +61,8 @@ bool DesktopProcess::OnMessageReceived(const IPC::Message& message) {
     IPC_MESSAGE_HANDLER(ChromotingDaemonDesktopMsg_Crash, OnCrash)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
+
+  CHECK(handled) << "Received unexpected IPC type: " << message.type();
   return handled;
 }
 
@@ -64,17 +73,23 @@ void DesktopProcess::OnChannelConnected(int32 peer_pid) {
 }
 
 void DesktopProcess::OnChannelError() {
-  DCHECK(caller_task_runner_->BelongsToCurrentThread());
-
   // Shutdown the desktop process.
   daemon_channel_.reset();
-  desktop_agent_->Stop();
-  desktop_agent_ = NULL;
+  if (desktop_agent_) {
+    desktop_agent_->Stop();
+    desktop_agent_ = NULL;
+  }
+
   caller_task_runner_ = NULL;
 }
 
-bool DesktopProcess::Start() {
+bool DesktopProcess::Start(
+    scoped_ptr<DesktopEnvironmentFactory> desktop_environment_factory) {
   DCHECK(caller_task_runner_->BelongsToCurrentThread());
+  DCHECK(!desktop_environment_factory_);
+  DCHECK(desktop_environment_factory);
+
+  desktop_environment_factory_ = desktop_environment_factory.Pass();
 
   // Launch the audio capturing thread.
   scoped_refptr<AutoThreadTaskRunner> audio_task_runner;

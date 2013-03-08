@@ -14,7 +14,7 @@
 #include "base/win/registry.h"
 #include "rlz/win/lib/rlz_lib.h"
 #elif defined(OS_POSIX)
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "rlz/lib/rlz_value_store.h"
 #endif
 
@@ -75,7 +75,7 @@ void RlzLibTestNoMachineState::TearDown() {
 #if defined(OS_WIN)
   UndoOverrideRegistryHives();
 #elif defined(OS_POSIX)
-  rlz_lib::testing::SetRlzStoreDirectory(FilePath());
+  rlz_lib::testing::SetRlzStoreDirectory(base::FilePath());
 #endif  // defined(OS_WIN)
 }
 

@@ -12,9 +12,9 @@
 #include "base/json/json_writer.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
-#include "base/string_number_conversions.h"
-#include "base/string_split.h"
 #include "base/string_util.h"
+#include "base/strings/string_number_conversions.h"
+#include "base/strings/string_split.h"
 #include "base/values.h"
 #include "chrome/common/extensions/api/generated_schemas.h"
 #include "chrome/common/extensions/extension.h"
@@ -159,21 +159,18 @@ void MaybePrefixFieldWithNamespace(const std::string& schema_namespace,
 // |schema_namespace| if they do not already specify a namespace.
 void PrefixRefsWithNamespace(const std::string& schema_namespace,
                              Value* value) {
-  if (value->IsType(Value::TYPE_LIST)) {
-    ListValue* list;
-    CHECK(value->GetAsList(&list));
+  ListValue* list = NULL;
+  DictionaryValue* dict = NULL;
+  if (value->GetAsList(&list)) {
     for (ListValue::iterator i = list->begin(); i != list->end(); ++i) {
       PrefixRefsWithNamespace(schema_namespace, *i);
     }
-  } else if (value->IsType(Value::TYPE_DICTIONARY)) {
-    DictionaryValue* dict;
-    CHECK(value->GetAsDictionary(&dict));
+  } else if (value->GetAsDictionary(&dict)) {
     MaybePrefixFieldWithNamespace(schema_namespace, dict, "$ref");
-    for (DictionaryValue::key_iterator i = dict->begin_keys();
-        i != dict->end_keys(); ++i) {
-      Value* next_value;
-      CHECK(dict->GetWithoutPathExpansion(*i, &next_value));
-      PrefixRefsWithNamespace(schema_namespace, next_value);
+    for (DictionaryValue::Iterator i(*dict); !i.IsAtEnd(); i.Advance()) {
+      Value* value = NULL;
+      CHECK(dict->GetWithoutPathExpansion(i.key(), &value));
+      PrefixRefsWithNamespace(schema_namespace, value);
     }
   }
 }
@@ -186,10 +183,10 @@ void PrefixTypesWithNamespace(const std::string& schema_namespace,
     return;
 
   // Add the namespace to all of the types defined in this schema
-  ListValue *types;
+  ListValue *types = NULL;
   CHECK(schema->GetList("types", &types));
   for (size_t i = 0; i < types->GetSize(); ++i) {
-    DictionaryValue *type;
+    DictionaryValue *type = NULL;
     CHECK(types->GetDictionary(i, &type));
     MaybePrefixFieldWithNamespace(schema_namespace, type, "id");
     MaybePrefixFieldWithNamespace(schema_namespace, type, "customBindings");
@@ -344,30 +341,18 @@ void ExtensionAPI::InitDefaultConfiguration() {
   CHECK(unloaded_schemas_.empty());
   RegisterSchema("app", ReadFromResource(
       IDR_EXTENSION_API_JSON_APP));
-  RegisterSchema("bookmarkManagerPrivate", ReadFromResource(
-      IDR_EXTENSION_API_JSON_BOOKMARKMANAGERPRIVATE));
   RegisterSchema("browserAction", ReadFromResource(
       IDR_EXTENSION_API_JSON_BROWSERACTION));
   RegisterSchema("browsingData", ReadFromResource(
       IDR_EXTENSION_API_JSON_BROWSINGDATA));
-  RegisterSchema("chromeosInfoPrivate", ReadFromResource(
-      IDR_EXTENSION_API_JSON_CHROMEOSINFOPRIVATE));
   RegisterSchema("commands", ReadFromResource(
       IDR_EXTENSION_API_JSON_COMMANDS));
+  RegisterSchema("declarativeContent", ReadFromResource(
+      IDR_EXTENSION_API_JSON_DECLARATIVE_CONTENT));
   RegisterSchema("declarativeWebRequest", ReadFromResource(
       IDR_EXTENSION_API_JSON_DECLARATIVE_WEBREQUEST));
-  RegisterSchema("devtools", ReadFromResource(
-      IDR_EXTENSION_API_JSON_DEVTOOLS));
-  RegisterSchema("experimental.accessibility", ReadFromResource(
-      IDR_EXTENSION_API_JSON_EXPERIMENTAL_ACCESSIBILITY));
-  RegisterSchema("experimental.app", ReadFromResource(
-      IDR_EXTENSION_API_JSON_EXPERIMENTAL_APP));
-  RegisterSchema("experimental.infobars", ReadFromResource(
-      IDR_EXTENSION_API_JSON_EXPERIMENTAL_INFOBARS));
   RegisterSchema("experimental.input.virtualKeyboard", ReadFromResource(
       IDR_EXTENSION_API_JSON_EXPERIMENTAL_INPUT_VIRTUALKEYBOARD));
-  RegisterSchema("experimental.power", ReadFromResource(
-      IDR_EXTENSION_API_JSON_EXPERIMENTAL_POWER));
   RegisterSchema("experimental.processes", ReadFromResource(
       IDR_EXTENSION_API_JSON_EXPERIMENTAL_PROCESSES));
   RegisterSchema("experimental.rlz", ReadFromResource(
@@ -376,60 +361,32 @@ void ExtensionAPI::InitDefaultConfiguration() {
       IDR_EXTENSION_API_JSON_RUNTIME));
   RegisterSchema("experimental.speechInput", ReadFromResource(
       IDR_EXTENSION_API_JSON_EXPERIMENTAL_SPEECHINPUT));
-  RegisterSchema("extension", ReadFromResource(
-      IDR_EXTENSION_API_JSON_EXTENSION));
   RegisterSchema("fileBrowserHandler", ReadFromResource(
       IDR_EXTENSION_API_JSON_FILEBROWSERHANDLER));
   RegisterSchema("fileBrowserPrivate", ReadFromResource(
       IDR_EXTENSION_API_JSON_FILEBROWSERPRIVATE));
-  RegisterSchema("idle", ReadFromResource(
-      IDR_EXTENSION_API_JSON_IDLE));
   RegisterSchema("input.ime", ReadFromResource(
       IDR_EXTENSION_API_JSON_INPUT_IME));
   RegisterSchema("inputMethodPrivate", ReadFromResource(
       IDR_EXTENSION_API_JSON_INPUTMETHODPRIVATE));
-  RegisterSchema("managedModePrivate", ReadFromResource(
-      IDR_EXTENSION_API_JSON_MANAGEDMODEPRIVATE));
-  RegisterSchema("mediaPlayerPrivate", ReadFromResource(
-      IDR_EXTENSION_API_JSON_MEDIAPLAYERPRIVATE));
-  RegisterSchema("metricsPrivate", ReadFromResource(
-      IDR_EXTENSION_API_JSON_METRICSPRIVATE));
-  RegisterSchema("echoPrivate", ReadFromResource(
-      IDR_EXTENSION_API_JSON_ECHOPRIVATE));
-  RegisterSchema("omnibox", ReadFromResource(
-      IDR_EXTENSION_API_JSON_OMNIBOX));
   RegisterSchema("pageAction", ReadFromResource(
       IDR_EXTENSION_API_JSON_PAGEACTION));
   RegisterSchema("pageActions", ReadFromResource(
       IDR_EXTENSION_API_JSON_PAGEACTIONS));
-  RegisterSchema("permissions", ReadFromResource(
-      IDR_EXTENSION_API_JSON_PERMISSIONS));
   RegisterSchema("privacy", ReadFromResource(
       IDR_EXTENSION_API_JSON_PRIVACY));
   RegisterSchema("proxy", ReadFromResource(
       IDR_EXTENSION_API_JSON_PROXY));
   RegisterSchema("scriptBadge", ReadFromResource(
       IDR_EXTENSION_API_JSON_SCRIPTBADGE));
-  RegisterSchema("systemPrivate", ReadFromResource(
-      IDR_EXTENSION_API_JSON_SYSTEMPRIVATE));
-  RegisterSchema("terminalPrivate", ReadFromResource(
-      IDR_EXTENSION_API_JSON_TERMINALPRIVATE));
-  RegisterSchema("test", ReadFromResource(
-      IDR_EXTENSION_API_JSON_TEST));
-  RegisterSchema("topSites", ReadFromResource(
-      IDR_EXTENSION_API_JSON_TOPSITES));
   RegisterSchema("ttsEngine", ReadFromResource(
       IDR_EXTENSION_API_JSON_TTSENGINE));
   RegisterSchema("tts", ReadFromResource(
       IDR_EXTENSION_API_JSON_TTS));
   RegisterSchema("types", ReadFromResource(
       IDR_EXTENSION_API_JSON_TYPES));
-  RegisterSchema("wallpaperPrivate", ReadFromResource(
-      IDR_EXTENSION_API_JSON_WALLPAPERPRIVATE));
   RegisterSchema("webRequestInternal", ReadFromResource(
       IDR_EXTENSION_API_JSON_WEBREQUESTINTERNAL));
-  RegisterSchema("webSocketProxyPrivate", ReadFromResource(
-      IDR_EXTENSION_API_JSON_WEBSOCKETPROXYPRIVATE));
   RegisterSchema("webstore", ReadFromResource(
       IDR_EXTENSION_API_JSON_WEBSTORE));
   RegisterSchema("webstorePrivate", ReadFromResource(

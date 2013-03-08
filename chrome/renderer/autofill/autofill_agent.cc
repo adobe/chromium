@@ -6,8 +6,8 @@
 
 #include "base/bind.h"
 #include "base/message_loop.h"
-#include "base/string_split.h"
 #include "base/string_util.h"
+#include "base/strings/string_split.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/common/autofill/autocheckout_status.h"
@@ -135,11 +135,13 @@ AutofillAgent::AutofillAgent(
       autofill_query_id_(0),
       autofill_action_(AUTOFILL_NONE),
       topmost_frame_(NULL),
+      web_view_(render_view->GetWebView()),
       display_warning_if_disabled_(false),
       was_query_node_autofilled_(false),
       has_shown_autofill_popup_for_current_edit_(false),
       did_set_node_text_(false),
       autocheckout_click_in_progress_(false),
+      ignore_text_changes_(false),
       ALLOW_THIS_IN_INITIALIZER_LIST(weak_ptr_factory_(this)) {
   render_view->GetWebView()->setAutofillClient(this);
 }
@@ -180,10 +182,14 @@ void AutofillAgent::DidFinishDocumentLoad(WebFrame* frame) {
   // The document has now been fully loaded.  Scan for forms to be sent up to
   // the browser.
   std::vector<FormData> forms;
-  form_cache_.ExtractForms(*frame, &forms);
 
-  if (!frame->parent())
+  if (!frame->parent()) {
     topmost_frame_ = frame;
+    form_elements_.clear();
+    form_cache_.ExtractFormsAndFormElements(*frame, &forms, &form_elements_);
+  } else {
+    form_cache_.ExtractForms(*frame, &forms);
+  }
 
   if (!forms.empty()) {
     Send(new AutofillHostMsg_FormsSeen(routing_id(), forms,
@@ -218,6 +224,7 @@ void AutofillAgent::DidFailProvisionalLoad(WebFrame* frame,
 void AutofillAgent::DidCommitProvisionalLoad(WebFrame* frame,
                                              bool is_new_navigation) {
   autocheckout_click_in_progress_ = false;
+  in_flight_request_form_.reset();
 }
 
 void AutofillAgent::FrameDetached(WebFrame* frame) {
@@ -281,6 +288,10 @@ void AutofillAgent::didRequestAutocomplete(WebKit::WebFrame* frame,
       form_data,
       frame->document().url(),
       render_view()->GetSSLStatusOfFrame(frame)));
+}
+
+void AutofillAgent::setIgnoreTextChanges(bool ignore) {
+  ignore_text_changes_ = ignore;
 }
 
 bool AutofillAgent::InputElementClicked(const WebInputElement& element,
@@ -379,6 +390,9 @@ void AutofillAgent::textFieldDidEndEditing(const WebInputElement& element) {
 }
 
 void AutofillAgent::textFieldDidChange(const WebInputElement& element) {
+  if (ignore_text_changes_)
+    return;
+
   if (did_set_node_text_) {
     did_set_node_text_ = false;
     return;
@@ -645,17 +659,24 @@ void AutofillAgent::OnAcceptPasswordAutofillSuggestion(const string16& value) {
 
 void AutofillAgent::OnRequestAutocompleteResult(
     WebFormElement::AutocompleteResult result, const FormData& form_data) {
-  DCHECK(!in_flight_request_form_.isNull());
+  if (in_flight_request_form_.isNull())
+    return;
+
   if (result == WebFormElement::AutocompleteResultSuccess)
     FillFormIncludingNonFocusableElements(form_data, in_flight_request_form_);
+
   in_flight_request_form_.finishRequestAutocomplete(result);
   in_flight_request_form_.reset();
 }
 
 void AutofillAgent::OnFillFormsAndClick(
-    const std::vector<FormData>& form_data,
+    const std::vector<FormData>& forms,
     const WebElementDescriptor& click_element_descriptor) {
-  // TODO(ramankk): Implement form filling.
+  DCHECK_EQ(forms.size(), form_elements_.size());
+
+  // Fill the form.
+  for (size_t i = 0; i < forms.size(); ++i)
+    FillFormIncludingNonFocusableElements(forms[i], form_elements_[i]);
 
   // It's possible that clicking the element to proceed in an Autocheckout
   // flow will not actually proceed to the next step in the flow, e.g. there
@@ -754,6 +775,12 @@ void AutofillAgent::QueryAutofillSuggestions(const WebInputElement& element,
 
   gfx::Rect bounding_box(element_.boundsInViewportSpace());
 
+  float scale = web_view_->pageScaleFactor();
+  gfx::RectF bounding_box_scaled(bounding_box.x() * scale,
+                                 bounding_box.y() * scale,
+                                 bounding_box.width() * scale,
+                                 bounding_box.height() * scale);
+
   // Find the datalist values and send them to the browser process.
   std::vector<string16> data_list_values;
   std::vector<string16> data_list_labels;
@@ -784,7 +811,7 @@ void AutofillAgent::QueryAutofillSuggestions(const WebInputElement& element,
                                                   autofill_query_id_,
                                                   form,
                                                   field,
-                                                  bounding_box,
+                                                  bounding_box_scaled,
                                                   display_warning_if_disabled));
 }
 

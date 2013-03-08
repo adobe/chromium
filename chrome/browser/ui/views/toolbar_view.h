@@ -24,6 +24,7 @@
 
 class BrowserActionsContainer;
 class Browser;
+class HomeImageButton;
 class WrenchMenu;
 class WrenchMenuModel;
 
@@ -189,10 +190,15 @@ class ToolbarView : public views::AccessiblePaneView,
   // Shows the critical notification bubble against the wrench menu.
   void ShowCriticalNotification();
 
+  // Shows the outdated install notification bubble against the wrench menu.
+  void ShowOutdatedInstallNotification();
+
   // Updates the badge and the accessible name of the app menu (Wrench).
   void UpdateAppMenuState();
 
   void OnShowHomeButtonChanged();
+
+  int content_shadow_height() const;
 
   // The model that contains the security level, text, icon to display...
   ToolbarModel* model_;
@@ -201,7 +207,7 @@ class ToolbarView : public views::AccessiblePaneView,
   views::ImageButton* back_;
   views::ImageButton* forward_;
   ReloadButton* reload_;
-  views::ImageButton* home_;
+  HomeImageButton* home_;
   LocationBarView* location_bar_;
   BrowserActionsContainer* browser_actions_;
   views::MenuButton* app_menu_;

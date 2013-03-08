@@ -10,7 +10,7 @@
 #include "base/guid.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/rand_util.h"
-#include "base/string_number_conversions.h"
+#include "base/strings/string_number_conversions.h"
 #include "chrome/common/metrics/entropy_provider.h"
 #include "chrome/common/metrics/metrics_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -79,7 +79,7 @@ class SHA1EntropyGenerator : public TrialEntropyGenerator {
       : trial_name_(trial_name) {
   }
 
-  ~SHA1EntropyGenerator() {
+  virtual ~SHA1EntropyGenerator() {
   }
 
   virtual double GenerateEntropyValue() const OVERRIDE {
@@ -110,7 +110,7 @@ class PermutedEntropyGenerator : public TrialEntropyGenerator {
     internal::PermuteMappingUsingTrialName(trial_name, &mapping_);
   }
 
-  ~PermutedEntropyGenerator() {
+  virtual ~PermutedEntropyGenerator() {
   }
 
   virtual double GenerateEntropyValue() const OVERRIDE {

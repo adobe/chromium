@@ -28,7 +28,7 @@ static void AddPattern(URLPatternSet* extent, const std::string& pattern) {
 
 class ExperimentalApiTest : public ExtensionApiTest {
 public:
-  void SetUpCommandLine(CommandLine* command_line) {
+  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
     ExtensionApiTest::SetUpCommandLine(command_line);
     command_line->AppendSwitch(switches::kEnableExperimentalExtensionApis);
   }
@@ -154,4 +154,12 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, OptionalPermissionsFileAccess) {
   // that the extension actually has file access, since that'd be the bug
   // that this is supposed to be testing).
   //EXPECT_TRUE(prefs->AllowFileAccess("hlonmbgfjccgolnaboonlakjckinmhmd"));
+}
+
+// Test requesting, querying, and removing host permissions for host
+// permissions that are a subset of the optional permissions.
+IN_PROC_BROWSER_TEST_F(ExtensionApiTest, HostSubsets) {
+  PermissionsRequestFunction::SetAutoConfirmForTests(true);
+  PermissionsRequestFunction::SetIgnoreUserGestureForTests(true);
+  EXPECT_TRUE(RunExtensionTest("permissions/host_subsets")) << message_;
 }

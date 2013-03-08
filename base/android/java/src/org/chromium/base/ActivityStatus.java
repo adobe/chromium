@@ -7,8 +7,6 @@ package org.chromium.base;
 import android.app.Activity;
 import android.os.Looper;
 
-import java.util.concurrent.CopyOnWriteArrayList;
-
 /**
  * Provides information about the parent activity's status.
  */
@@ -29,10 +27,8 @@ public class ActivityStatus {
     // testing.
     private static int sActivityState;
 
-    // Use CopyOnWriteArrayList to avoid ConcurrentModificationException when a listener tries to
-    // remove itself while being notified of a state change.
-    private static final CopyOnWriteArrayList<StateListener> sStateListeners =
-            new CopyOnWriteArrayList<StateListener>();
+    private static final ObserverList<StateListener> sStateListeners =
+            new ObserverList<StateListener>();
 
     /**
      * Interface to be implemented by listeners.
@@ -53,7 +49,12 @@ public class ActivityStatus {
      * @param newState New state value.
      */
     public static void onStateChange(Activity activity, int newState) {
-        if (newState == CREATED) {
+        if (sActivity != activity) {
+            // ActivityStatus is notified with the CREATED event very late during the main activity
+            // creation to avoid making startup performance worse than it is by notifying observers
+            // that could do some expensive work. This can lead to non-CREATED events being fired
+            // before the CREATED event which is problematic.
+            // TODO(pliard): fix http://crbug.com/176837.
             sActivity = activity;
         }
         sActivityState = newState;
@@ -91,7 +92,7 @@ public class ActivityStatus {
      * @param listener Listener to receive state changes.
      */
     public static void registerStateListener(StateListener listener) {
-        sStateListeners.add(listener);
+        sStateListeners.addObserver(listener);
     }
 
     /**
@@ -99,6 +100,6 @@ public class ActivityStatus {
      * @param listener Listener that doesn't want to receive state changes.
      */
     public static void unregisterStateListener(StateListener listener) {
-        sStateListeners.remove(listener);
+        sStateListeners.removeObserver(listener);
     }
 }

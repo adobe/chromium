@@ -9,6 +9,7 @@
 
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/values.h"
 #include "cc/cc_export.h"
 #include "cc/draw_properties.h"
 #include "cc/input_handler.h"
@@ -71,7 +72,6 @@ public:
     LayerImpl* childAt(size_t index) const;
     void addChild(scoped_ptr<LayerImpl>);
     scoped_ptr<LayerImpl> removeChild(LayerImpl* child);
-    void removeAllChildren();
     void setParent(LayerImpl* parent) { m_parent = parent; }
     void clearChildList(); // Warning: This does not preserve tree structure invariants.
 
@@ -106,6 +106,8 @@ public:
     virtual bool hasContributingDelegatedRenderPasses() const;
     virtual RenderPass::Id firstContributingRenderPassId() const;
     virtual RenderPass::Id nextContributingRenderPassId(RenderPass::Id) const;
+
+    virtual void updateTilePriorities() { }
 
     virtual ScrollbarLayerImpl* toScrollbarLayer();
 
@@ -210,6 +212,7 @@ public:
 
     virtual void calculateContentsScale(
         float idealContentsScale,
+        bool animatingTransformToScreen,
         float* contentsScaleX,
         float* contentsScaleY,
         gfx::Size* contentBounds);
@@ -278,7 +281,6 @@ public:
 
     virtual Region visibleContentOpaqueRegion() const;
 
-    virtual void didUpdateTransforms() { }
     virtual void didBecomeActive();
 
     // Indicates that the surface previously used to render this layer
@@ -307,6 +309,8 @@ public:
     virtual scoped_ptr<LayerImpl> createLayerImpl(LayerTreeImpl*);
     virtual void pushPropertiesTo(LayerImpl*);
 
+    virtual scoped_ptr<base::Value> AsValue() const;
+
 protected:
     LayerImpl(LayerTreeImpl* layerImpl, int);
 
@@ -318,8 +322,7 @@ protected:
     virtual void dumpLayerProperties(std::string*, int indent) const;
     static std::string indentString(int indent);
 
-private:
-    void updateScrollbarPositions();
+    void AsValueInto(base::DictionaryValue* dict) const;
 
     void noteLayerSurfacePropertyChanged();
     void noteLayerPropertyChanged();
@@ -327,6 +330,9 @@ private:
 
     // Note carefully this does not affect the current layer.
     void noteLayerPropertyChangedForDescendants();
+
+private:
+    void updateScrollbarPositions();
 
     virtual const char* layerTypeAsString() const;
 
@@ -364,7 +370,7 @@ private:
 
     // Indicates that a property has changed on this layer that would not
     // affect the pixels on its target surface, but would require redrawing
-    // but would require redrawing the targetSurface onto its ancestor targetSurface.
+    // the targetSurface onto its ancestor targetSurface.
     // For layers that do not own a surface this flag acts as m_layerPropertyChanged.
     bool m_layerSurfacePropertyChanged;
 

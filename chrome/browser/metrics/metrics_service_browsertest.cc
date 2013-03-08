@@ -8,11 +8,11 @@
 #include <string>
 
 #include "base/command_line.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/path_service.h"
+#include "base/prefs/pref_service.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/metrics/metrics_service.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
@@ -38,17 +38,17 @@ class MetricsServiceTest : public InProcessBrowserTest {
         ui_test_utils::BROWSER_TEST_WAIT_FOR_TAB |
         ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION;
 
-    FilePath test_directory;
+    base::FilePath test_directory;
     ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &test_directory));
 
-    FilePath page1_path = test_directory.AppendASCII("title2.html");
+    base::FilePath page1_path = test_directory.AppendASCII("title2.html");
     ui_test_utils::NavigateToURLWithDisposition(
         browser(),
         net::FilePathToFileURL(page1_path),
         NEW_FOREGROUND_TAB,
         kBrowserTestFlags);
 
-    FilePath page2_path = test_directory.AppendASCII("iframe.html");
+    base::FilePath page2_path = test_directory.AppendASCII("iframe.html");
     ui_test_utils::NavigateToURLWithDisposition(
         browser(),
         net::FilePathToFileURL(page2_path),
@@ -91,7 +91,7 @@ IN_PROC_BROWSER_TEST_F(MetricsServiceTest, MAYBE_CrashRenderers) {
   content::WindowedNotificationObserver observer(
       content::NOTIFICATION_RENDERER_PROCESS_CLOSED,
       content::NotificationService::AllSources());
-  ui_test_utils::NavigateToURL(browser(), GURL(chrome::kChromeUICrashURL));
+  ui_test_utils::NavigateToURL(browser(), GURL(content::kChromeUICrashURL));
   observer.Wait();
 
   // The MetricsService listens for the same notification, so the |observer|

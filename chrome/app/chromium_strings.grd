@@ -232,8 +232,12 @@ be available for now. -->
         <message name="IDS_PRODUCT_FRAME_NAME" desc="The Chrome Frame application name">
           Chromium Frame
         </message>
-        <message name="IDS_PRODUCT_APP_HOST_NAME" desc="The Chrome App Host application name">
-          Chromium App Host
+        <message name="IDS_PRODUCT_APP_LAUNCHER_NAME" desc="The Chrome App Launcher application name">
+          Chromium App Launcher
+        </message>
+        <message name="IDS_WIN8_INFOBAR_DESKTOP_RESTART_TO_LAUNCH_APPS"
+                 desc="Infobar message to restart chrome in desktop mode to launch Chrome Apps. Aplies to Windows 8 only">
+          You need to switch Chromium to desktop mode to use the App Launcher.
         </message>
         <message name="IDS_PRODUCT_BINARIES_NAME" desc="The Chrome Binaries application name">
           Chromium Binaries
@@ -480,7 +484,7 @@ Chromium is unable to recover your settings.
       <message name="IDS_INSTALL_HIGHER_VERSION" desc="Error displayed when higher version already exists.">
         This computer already has a more recent version of Chromium. If the software is not working, please uninstall Chromium and try again.
       </message>
-      <message name="IDS_INSTALL_HIGHER_VERSION_APP_HOST" desc="Error displayed when higher version of the Chromium App Host already exists.">
+      <message name="IDS_INSTALL_HIGHER_VERSION_APP_LAUNCHER" desc="Error displayed when higher version of the Chromium App Launcher already exists.">
         This computer already has a more recent version of the Chromium components. Please use a more recent installer.
       </message>
       <message name="IDS_INSTALL_HIGHER_VERSION_CF" desc="Error displayed when higher version already exists.">
@@ -655,6 +659,11 @@ Chromium is unable to recover your settings.
         Chromium is configured to automatically launch when you start your computer.
       </message>
 
+       <!-- Managed user settings page -->
+      <message name="IDS_SIGNIN_SYNC_ALLOWED" desc="A checkbox in the Managed User Settings dialog for enabling sign in and sync.">
+        Allow signing into Chromium.
+      </message>
+
       <!-- about:flags -->
       <if expr="not pp_ifdef('chromeos')">
         <message name="IDS_FLAGS_RELAUNCH_NOTICE" desc="Notifies the user that he needs to relaunch Chromium. Shown next to a button that says 'Relaunch Now'.">
@@ -670,15 +679,15 @@ Chromium is unable to recover your settings.
         </message>
       </if>
       <message name="IDS_FLAGS_SHOW_APP_LIST_SHORTCUT_NAME" desc="Name for the flag to show the Chromium app list shortcut in the taskbar.">
-        Show Chromium Apps Launcher.
+        Show Chromium App Launcher.
       </message>
       <message name="IDS_FLAGS_SHOW_APP_LIST_SHORTCUT_DESCRIPTION" desc="Description for the flag to show the Chromium app list shortcut in the taskbar.">
-        Show a shortcut to the Chromium Apps Launcher in the Windows TaskBar.
+        Show a shortcut to the Chromium App Launcher in the Windows TaskBar.
       </message>
 
       <!-- Obsolete System info bar -->
       <message name="IDS_SYSTEM_OBSOLETE_MESSAGE" desc="Message shown when your OS is no longer supported. This messages is followed by a 'Learn more' link.">
-         Chromium is no longer updating because your operating system is obsolete.
+         Chromium has stopped updating and no longer supports this version of your operating system.
       </message>
 
       <!-- about:memory -->
@@ -831,6 +840,9 @@ For Chromium, processes used to display diagnostics information (such as this "a
 
       <!-- One click sign in infobar -->
       <if expr="not pp_ifdef('chromeos')">
+        <message name="IDS_ONE_CLICK_SIGNIN_DIALOG_TITLE" desc="The title of the modal dialog window that opens when the user chooses to use one click sign in.">
+          You're signed in to Chromium!
+        </message>
         <message name="IDS_ONE_CLICK_SIGNIN_INFOBAR_MESSAGE" desc="The string shown in the infobar explaining that the user can connect his profile to a Google account instead of logging in only here.">
           Use this Google Account to sync all your Chromium stuff?
         </message>
@@ -840,7 +852,29 @@ For Chromium, processes used to display diagnostics information (such as this "a
         <message name="IDS_ONE_CLICK_SIGNIN_DIALOG_HEADING" desc="The heading of the reverse auto-login dialog.">
           Sign in to Chromium
         </message>
+        <message name="IDS_SYNC_WRONG_EMAIL" desc="Message shown when sync setup failed due to the user entering the wrong email address for sign in.">
+          You were signed in to Chromium as <ph name="USER_EMAIL_ADDRESS">$1<ex>foo@gmail.com</ex></ph>. Please use the same account to sign in again.
+        </message>
+        <message name="IDS_ONE_CLICK_SIGNIN_CONFIRM_EMAIL_DIALOG_MESSAGE" desc="Error message to display when setting up sync for a second time and the user name is different from the previous user name.">
+          Someone previously signed in to Chromium on this computer as <ph name="ACCOUNT_EMAIL_LAST">$1<ex>user@example.com</ex></ph>. If that isn't your account, create a new Chromium user to keep your information separate.
+
+Signing in anyway will merge Chromium information like bookmarks, history, and other settings to <ph name="ACCOUNT_EMAIL_NEW">$2<ex>user@example.com</ex></ph>.
+        </message>
       </if>
+
+      <!-- Enterprise sign-in profile linking -->
+      <message name="IDS_ENTERPRISE_SIGNIN_PROFILE_LINK_DIALOG_TITLE" desc="The title of the dialog to confirm linking the browser profile with the signed-in enterprise account">
+        Important information regarding your Chromium data
+      </message>
+      <message name="IDS_ENTERPRISE_SIGNIN_PROFILE_LINK_MESSAGE" desc="The warning message displayed to an enterprise user about to link their profile to their Google account. This message is followed by a 'Learn more' link.">
+	You are signing in with a managed account and giving its administrator control over your Chromium profile. Your Chromium data, such as your apps, bookmarks, history, passwords, and other settings will become permanently tied to <ph name="USER_NAME">$1<ex>pat@example.com</ex></ph>. You will be able to delete this data via the Google Accounts Dashboard, but you will not be able to associate this data with another account.
+      </message>
+      <message name="IDS_ENTERPRISE_SIGNIN_CREATE_NEW_PROFILE_PROMPT" desc="The text of the prompt to create a new profile after signing into an enterprise account">
+	If you prefer to keep your existing Chromium data separate, you can create a new Chromium user for <ph name="USER_NAME">$1<ex>pat@example.com</ex></ph>.
+      </message>
+      <message name="IDS_ENTERPRISE_SIGNIN_CREATE_NEW_PROFILE_NO" desc="Text of the button to link the current profile with the signed-in enterprise account">
+	Link my Chromium data to this account
+      </message>
 
       <message name="IDS_AUTOFILL_OPTIONS_POPUP" desc="The value of the Autofill options menu entry.">
         Chromium Autofill settings
@@ -943,11 +977,24 @@ For Chromium, processes used to display diagnostics information (such as this "a
 
       <!-- App list -->
       <message name="IDS_APP_LIST_SHORTCUT_NAME" desc="Name for the Chromium App List to appear in the taskbar and in any shortcuts to it.">
-        Chromium Apps Launcher
+        Chromium App Launcher
       </message>
       <message name="IDS_APP_LIST_OPT_IN_TEXT" desc="Text to appear in the prompt to use the Chrome app list.">
-        Use the Chromium Apps Launcher to launch your apps.
+        Use the Chromium App Launcher to launch your apps.
       </message>
+      <message name="IDS_APP_LIST_SIGNIN_HEADING" desc="Heading for when the launcher needs to sign in.">
+        Sign in to Chromium
+      </message>
+      <message name="IDS_APP_LIST_SIGNIN_TEXT" desc="Text for when the launcher needs to sign in.">
+        You need to be signed into Chromium to use apps. This allows Chromium to sync your apps, bookmarks, history, passwords and other settings across devices.
+      </message>
+
+      <!-- Chrome OS OOBE Terms of Service screen-->
+      <if expr="pp_ifdef('chromeos')">
+        <message name="IDS_TERMS_OF_SERVICE_SCREEN_SUBHEADING" desc="Subheading at the top of the Terms of Service screen.">
+          <ph name="DOMAIN">$1<ex>example.com</ex></ph> requires that you read and accept the following Terms of Service before using this device. These terms do not expand, modify or limit the Chromium OS Terms.
+        </message>
+      </if>
     </messages>
   </release>
 </grit>

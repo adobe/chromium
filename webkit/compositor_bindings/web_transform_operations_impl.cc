@@ -3,11 +3,11 @@
 // found in the LICENSE file.
 
 #include "webkit/compositor_bindings/web_transform_operations_impl.h"
+#include "webkit/compositor_bindings/web_transformation_matrix_util.h"
 
 namespace webkit {
 
-WebTransformOperationsImpl::WebTransformOperationsImpl() {
-}
+WebTransformOperationsImpl::WebTransformOperationsImpl() {}
 
 const cc::TransformOperations&
 WebTransformOperationsImpl::AsTransformOperations() const {
@@ -17,7 +17,7 @@ WebTransformOperationsImpl::AsTransformOperations() const {
 bool WebTransformOperationsImpl::canBlendWith(
     const WebKit::WebTransformOperations& other) const {
   const WebTransformOperationsImpl& other_impl =
-    static_cast<const WebTransformOperationsImpl&>(other);
+      static_cast<const WebTransformOperationsImpl&>(other);
   return transform_operations_.CanBlendWith(other_impl.transform_operations_);
 }
 
@@ -25,8 +25,10 @@ void WebTransformOperationsImpl::appendTranslate(double x, double y, double z) {
   transform_operations_.AppendTranslate(x, y, z);
 }
 
-void WebTransformOperationsImpl::appendRotate(
-    double x, double y, double z, double degrees) {
+void WebTransformOperationsImpl::appendRotate(double x,
+                                              double y,
+                                              double z,
+                                              double degrees) {
   transform_operations_.AppendRotate(x, y, z, degrees);
 }
 
@@ -44,7 +46,8 @@ void WebTransformOperationsImpl::appendPerspective(double depth) {
 
 void WebTransformOperationsImpl::appendMatrix(
     const WebKit::WebTransformationMatrix& matrix) {
-  transform_operations_.AppendMatrix(matrix);
+  transform_operations_.AppendMatrix(
+      WebTransformationMatrixUtil::ToTransform(matrix));
 }
 
 void WebTransformOperationsImpl::appendIdentity() {
@@ -55,7 +58,6 @@ bool WebTransformOperationsImpl::isIdentity() const {
   return transform_operations_.IsIdentity();
 }
 
-WebTransformOperationsImpl::~WebTransformOperationsImpl() {
-}
+WebTransformOperationsImpl::~WebTransformOperationsImpl() {}
 
 }  // namespace webkit

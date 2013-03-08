@@ -5,22 +5,24 @@
 #ifndef CHROME_BROWSER_UI_WEBUI_NTP_NEW_TAB_PAGE_HANDLER_H_
 #define CHROME_BROWSER_UI_WEBUI_NTP_NEW_TAB_PAGE_HANDLER_H_
 
+#include "base/memory/weak_ptr.h"
 #include "base/values.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/web_ui_message_handler.h"
 
-class PrefServiceSimple;
-class PrefServiceSyncable;
+class PrefRegistrySimple;
+class PrefRegistrySyncable;
 class Profile;
 
 // Handler for general New Tab Page functionality that does not belong in a
 // more specialized handler.
-class NewTabPageHandler : public content::WebUIMessageHandler {
+class NewTabPageHandler : public content::WebUIMessageHandler,
+                          public base::SupportsWeakPtr<NewTabPageHandler> {
  public:
   NewTabPageHandler();
 
   // Register NTP per-profile preferences.
-  static void RegisterUserPrefs(PrefServiceSyncable* prefs);
+  static void RegisterUserPrefs(PrefRegistrySyncable* registry);
 
   // Registers values (strings etc.) for the page.
   static void GetLocalizedValues(Profile* profile, DictionaryValue* values);
@@ -55,6 +57,12 @@ class NewTabPageHandler : public content::WebUIMessageHandler {
   // Callback for "logTimeToClick".
   void HandleLogTimeToClick(const base::ListValue* args);
 
+  // Callback for the "getShouldShowApps" message.
+  void HandleGetShouldShowApps(const base::ListValue* args);
+
+  // Callback from extensions::UpdateIsAppLauncherEnabled().
+  void GotIsAppLauncherEnabled(bool is_enabled);
+
   // Tracks the number of times the user has switches pages (for UMA).
   size_t page_switch_count_;
 
@@ -63,17 +71,13 @@ class NewTabPageHandler : public content::WebUIMessageHandler {
   // group, and the rest of the bits are used for the page group ID (defined
   // here).
   static const int kPageIdOffset = 10;
-  // TODO(vadimt): create a new enum and a new UMA histogram for search ntp so
-  // the two histograms don't get mixed in together.
   enum {
     INDEX_MASK = (1 << kPageIdOffset) - 1,
     MOST_VISITED_PAGE_ID = 1 << kPageIdOffset,
     APPS_PAGE_ID = 2 << kPageIdOffset,
     BOOKMARKS_PAGE_ID = 3 << kPageIdOffset,
     SUGGESTIONS_PAGE_ID = 4 << kPageIdOffset,
-    RECENTLY_CLOSED_PAGE_ID = 5 << kPageIdOffset,
-    OTHER_DEVICES_PAGE_ID = 6 << kPageIdOffset,
-    LAST_PAGE_ID = OTHER_DEVICES_PAGE_ID
+    LAST_PAGE_ID = SUGGESTIONS_PAGE_ID
   };
   static const int kHistogramEnumerationMax =
       (LAST_PAGE_ID >> kPageIdOffset) + 1;

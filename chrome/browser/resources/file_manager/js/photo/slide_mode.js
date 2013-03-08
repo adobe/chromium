@@ -68,7 +68,7 @@ SlideMode.editorModes = [
 ];
 
 /**
- * @return {string} Mode name
+ * @return {string} Mode name.
  */
 SlideMode.prototype.getName = function() { return 'slide' };
 
@@ -190,8 +190,8 @@ SlideMode.prototype.initDom_ = function() {
   this.editButton_.title = this.displayStringFunction_('edit');
   this.editButton_.addEventListener('click', this.toggleEditor.bind(this));
 
-  this.editBar_ = util.createChild(this.toolbar_, 'edit-bar');
-  this.editBarMain_ = util.createChild(this.editBar_, 'edit-main');
+  this.editBarSpacer_ = util.createChild(this.toolbar_, 'edit-bar-spacer');
+  this.editBarMain_ = util.createChild(this.editBarSpacer_, 'edit-main');
 
   this.editBarMode_ = util.createChild(this.container_, 'edit-modal');
   this.editBarModeWrapper_ = util.createChild(
@@ -368,7 +368,7 @@ SlideMode.prototype.getSelectedImageRect = function() {
 };
 
 /**
- * @return {Gallery.Item} Selected item
+ * @return {Gallery.Item} Selected item.
  */
 SlideMode.prototype.getSelectedItem = function() {
   return this.getItem(this.getSelectedIndex());
@@ -398,7 +398,7 @@ SlideMode.prototype.onSelection_ = function() {
  * Change the selection.
  *
  * @param {number} index New selected index.
- * @param {number} opt_slideHint Slide animation direction (-1|1).
+ * @param {number=} opt_slideHint Slide animation direction (-1|1).
  */
 SlideMode.prototype.select = function(index, opt_slideHint) {
   this.slideHint_ = opt_slideHint;
@@ -616,7 +616,7 @@ SlideMode.prototype.selectLast = function() {
  */
 SlideMode.prototype.loadItem_ = function(
     url, metadata, effect, displayCallback, loadCallback) {
-  this.selectedImageMetadata_ = ImageUtil.deepCopy(metadata);
+  this.selectedImageMetadata_ = MetadataCache.cloneMetadata(metadata);
 
   this.showSpinner_(true);
 
@@ -645,7 +645,9 @@ SlideMode.prototype.loadItem_ = function(
     } else {
       ImageUtil.metrics.recordUserAction(ImageUtil.getMetricName('View'));
 
-      function toMillions(number) { return Math.round(number / (1000 * 1000)) }
+      var toMillions = function(number) {
+        return Math.round(number / (1000 * 1000));
+      };
 
       ImageUtil.metrics.recordSmallCount(ImageUtil.getMetricName('Size.MB'),
           toMillions(metadata.filesystem.size));
@@ -1015,8 +1017,8 @@ SlideMode.prototype.isSlideshowOn_ = function() {
 
 /**
  * Start the slideshow.
- * @param {number} opt_interval First interval in ms.
- * @param {Event} opt_event Event.
+ * @param {number=} opt_interval First interval in ms.
+ * @param {Event=} opt_event Event.
  */
 SlideMode.prototype.startSlideshow = function(opt_interval, opt_event) {
   // Set the attribute early to prevent the toolbar from flashing when
@@ -1037,31 +1039,23 @@ SlideMode.prototype.startSlideshow = function(opt_interval, opt_event) {
     cr.dispatchSimpleEvent(this, 'useraction');
 
   this.fullscreenBeforeSlideshow_ = false;
-  util.platform.getWindowStatus(function(info) {
-    if (info.state == 'maximized') {
-      this.resumeSlideshow_(opt_interval);
-      return;  // Do not go fullscreen if already maximized.
+  Gallery.getFileBrowserPrivate().isFullscreen(function(fullscreen) {
+    this.fullscreenBeforeSlideshow_ = fullscreen;
+    if (!fullscreen) {
+      // Wait until the zoom animation from the mosaic mode is done.
+      setTimeout(Gallery.toggleFullscreen, ImageView.ZOOM_ANIMATION_DURATION);
+      opt_interval = (opt_interval || SlideMode.SLIDESHOW_INTERVAL) +
+          SlideMode.FULLSCREEN_TOGGLE_DELAY;
     }
-    // Wait until the zoom animation from the mosaic mode is done.
-    setTimeout(function() {
-      Gallery.getFileBrowserPrivate().isFullscreen(function(fullscreen) {
-        this.fullscreenBeforeSlideshow_ = fullscreen;
-        if (!fullscreen) {
-          Gallery.toggleFullscreen();
-          opt_interval = (opt_interval || SlideMode.SLIDESHOW_INTERVAL) +
-              SlideMode.FULLSCREEN_TOGGLE_DELAY;
-        }
-        this.resumeSlideshow_(opt_interval);
-      }.bind(this));
-    }.bind(this), ImageView.ZOOM_ANIMATION_DURATION);
+    this.resumeSlideshow_(opt_interval);
   }.bind(this));
 };
 
 /**
  * Stop the slideshow.
- * @param {Event} opt_event Event.
+ * @param {Event=} opt_event Event.
  * @private
-   */
+ */
 SlideMode.prototype.stopSlideshow_ = function(opt_event) {
   if (!this.isSlideshowOn_())
     return;
@@ -1107,7 +1101,7 @@ SlideMode.prototype.toggleSlideshowPause_ = function() {
 };
 
 /**
- * @param {number} opt_interval Slideshow interval in ms.
+ * @param {number=} opt_interval Slideshow interval in ms.
  * @private
  */
 SlideMode.prototype.scheduleNextSlide_ = function(opt_interval) {
@@ -1125,7 +1119,7 @@ SlideMode.prototype.scheduleNextSlide_ = function(opt_interval) {
 
 /**
  * Resume the slideshow.
- * @param {number} opt_interval Slideshow interval in ms.
+ * @param {number=} opt_interval Slideshow interval in ms.
  * @private
  */
 SlideMode.prototype.resumeSlideshow_ = function(opt_interval) {
@@ -1163,7 +1157,7 @@ SlideMode.prototype.stopEditing_ = function() {
 
 /**
  * Activate/deactivate editor.
- * @param {Event} opt_event Event.
+ * @param {Event=} opt_event Event.
  */
 SlideMode.prototype.toggleEditor = function(opt_event) {
   if (opt_event)  // Caused by user action, notify the Gallery.

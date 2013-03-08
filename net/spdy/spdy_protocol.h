@@ -8,10 +8,16 @@
 #define NET_SPDY_SPDY_PROTOCOL_H_
 
 #include <limits>
+#include <map>
+#include <vector>
 
 #include "base/basictypes.h"
+#include "base/compiler_specific.h"
 #include "base/logging.h"
+#include "base/memory/scoped_ptr.h"
+#include "base/string_piece.h"
 #include "base/sys_byteorder.h"
+#include "net/base/net_export.h"
 #include "net/spdy/spdy_bitmasks.h"
 
 //  Data Frame Format
@@ -143,11 +149,29 @@
 
 namespace net {
 
+const int32 kSpdyVersion2 = 2;
+const int32 kSpdyVersion3 = 3;
+
+// A SPDY stream id is a 31 bit entity.
+typedef uint32 SpdyStreamId;
+
+// Specifies the stream ID used to denote the current session (for
+// flow control).
+const SpdyStreamId kSessionFlowControlStreamId = 0;
+
 // Initial window size for a Spdy stream
 const int32 kSpdyStreamInitialWindowSize = 64 * 1024;  // 64 KBytes
 
-// Maximum window size for a Spdy stream
-const int32 kSpdyStreamMaximumWindowSize = 0x7FFFFFFF;  // Max signed 32bit int
+// Initial window size for a Spdy session
+//
+// TODO(akalin): Update this once we settle on the correct session
+// initial window size.
+//
+// TODO(akalin): Upstream this.
+const int32 kSpdySessionInitialWindowSize = 64 * 1024;  // 64 KBytes
+
+// Maximum window size for a Spdy stream or session.
+const int32 kSpdyMaximumWindowSize = 0x7FFFFFFF;  // Max signed 32bit int
 
 // SPDY 2 dictionary.
 // This is just a hacked dictionary to use for shrinking HTTP-like headers.
@@ -353,6 +377,7 @@ const int kV3DictionarySize = arraysize(kV3Dictionary);
 // Note: all protocol data structures are on-the-wire format.  That means that
 //       data is stored in network-normalized order.  Readers must use the
 //       accessors provided or call ntohX() functions.
+// TODO(hkhalil): remove above note.
 
 // Types of Spdy Control Frames.
 enum SpdyControlType {
@@ -409,24 +434,24 @@ enum SpdySettingsIds {
   SETTINGS_INITIAL_WINDOW_SIZE = 0x7
 };
 
-// Status codes, as used in control frames (primarily RST_STREAM).
-// TODO(hkhalil): Rename to SpdyRstStreamStatus
-enum SpdyStatusCodes {
-  INVALID = 0,
-  PROTOCOL_ERROR = 1,
-  INVALID_STREAM = 2,
-  REFUSED_STREAM = 3,
-  UNSUPPORTED_VERSION = 4,
-  CANCEL = 5,
-  INTERNAL_ERROR = 6,
-  FLOW_CONTROL_ERROR = 7,
-  STREAM_IN_USE = 8,
-  STREAM_ALREADY_CLOSED = 9,
-  INVALID_CREDENTIALS = 10,
-  FRAME_TOO_LARGE = 11,
-  NUM_STATUS_CODES = 12
+// Status codes for RST_STREAM frames.
+enum SpdyRstStreamStatus {
+  RST_STREAM_INVALID = 0,
+  RST_STREAM_PROTOCOL_ERROR = 1,
+  RST_STREAM_INVALID_STREAM = 2,
+  RST_STREAM_REFUSED_STREAM = 3,
+  RST_STREAM_UNSUPPORTED_VERSION = 4,
+  RST_STREAM_CANCEL = 5,
+  RST_STREAM_INTERNAL_ERROR = 6,
+  RST_STREAM_FLOW_CONTROL_ERROR = 7,
+  RST_STREAM_STREAM_IN_USE = 8,
+  RST_STREAM_STREAM_ALREADY_CLOSED = 9,
+  RST_STREAM_INVALID_CREDENTIALS = 10,
+  RST_STREAM_FRAME_TOO_LARGE = 11,
+  RST_STREAM_NUM_STATUS_CODES = 12
 };
 
+// Status codes for GOAWAY frames.
 enum SpdyGoAwayStatus {
   GOAWAY_INVALID = -1,
   GOAWAY_OK = 0,
@@ -435,100 +460,331 @@ enum SpdyGoAwayStatus {
   GOAWAY_NUM_STATUS_CODES = 3
 };
 
-// A SPDY stream id is a 31 bit entity.
-typedef uint32 SpdyStreamId;
-
 // A SPDY priority is a number between 0 and 7 (inclusive).
 // SPDY priority range is version-dependant. For SPDY 2 and below, priority is a
 // number between 0 and 3.
 typedef uint8 SpdyPriority;
 
-// -------------------------------------------------------------------------
-// These structures mirror the protocol structure definitions.
+typedef uint8 SpdyCredentialSlot;
 
-// For the control data structures, we pack so that sizes match the
-// protocol over-the-wire sizes.
-#pragma pack(push)
-#pragma pack(1)
+typedef std::map<std::string, std::string> SpdyNameValueBlock;
 
-// A special structure for the 8 bit flags and 24 bit length fields.
-union FlagsAndLength {
-  uint8 flags_[4];  // 8 bits
-  uint32 length_;   // 24 bits
+typedef uint32 SpdyPingId;
+
+class SpdyFrame;
+typedef SpdyFrame SpdySerializedFrame;
+
+class SpdyFramer;
+class SpdyFrameBuilder;
+
+// Intermediate representation for SPDY frames.
+// TODO(hkhalil): Rename this class to SpdyFrame when the existing SpdyFrame is
+// gone.
+class SpdyFrameIR {
+ public:
+  virtual ~SpdyFrameIR() {}
+
+ protected:
+  SpdyFrameIR() {}
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(SpdyFrameIR);
 };
 
-// The basic SPDY Frame structure.
-struct SpdyFrameBlock {
-  union {
-    struct {
-      uint16 version_;
-      uint16 type_;
-    } control_;
-    struct {
-      SpdyStreamId stream_id_;
-    } data_;
-  };
-  FlagsAndLength flags_length_;
-};
+// Abstract class intended to be inherited by IRs that have a stream associated
+// to them.
+class SpdyFrameWithStreamIdIR : public SpdyFrameIR {
+ public:
+  virtual ~SpdyFrameWithStreamIdIR() {}
+  SpdyStreamId stream_id() const { return stream_id_; }
+  void set_stream_id(SpdyStreamId stream_id) {
+    // TODO(hkhalil): DCHECK_LT(0u, stream_id);
+    DCHECK_EQ(0u, stream_id & ~kStreamIdMask);
+    stream_id_ = stream_id;
+  }
 
-// A SYN_STREAM Control Frame structure.
-struct SpdySynStreamControlFrameBlock : SpdyFrameBlock {
+ protected:
+  explicit SpdyFrameWithStreamIdIR(SpdyStreamId stream_id) {
+    set_stream_id(stream_id);
+  }
+
+ private:
   SpdyStreamId stream_id_;
-  SpdyStreamId associated_stream_id_;
+
+  DISALLOW_COPY_AND_ASSIGN(SpdyFrameWithStreamIdIR);
+};
+
+// Abstract class intended to be inherited by IRs that have the option of a FIN
+// flag. Implies SpdyFrameWithStreamIdIR.
+class SpdyFrameWithFinIR : public SpdyFrameWithStreamIdIR {
+ public:
+  virtual ~SpdyFrameWithFinIR() {}
+  bool fin() const { return fin_; }
+  void set_fin(bool fin) { fin_ = fin; }
+
+ protected:
+  explicit SpdyFrameWithFinIR(SpdyStreamId stream_id)
+      : SpdyFrameWithStreamIdIR(stream_id),
+        fin_(false) {}
+
+ private:
+  bool fin_;
+
+  DISALLOW_COPY_AND_ASSIGN(SpdyFrameWithFinIR);
+};
+
+// Abstract class intended to be inherited by IRs that contain a name-value
+// block. Implies SpdyFrameWithFinIR.
+class NET_EXPORT_PRIVATE SpdyFrameWithNameValueBlockIR
+    : public NON_EXPORTED_BASE(SpdyFrameWithFinIR) {
+ public:
+  const SpdyNameValueBlock& name_value_block() const {
+    return name_value_block_;
+  }
+  SpdyNameValueBlock* GetMutableNameValueBlock() { return &name_value_block_; }
+  void SetHeader(const base::StringPiece& name,
+                 const base::StringPiece& value) {
+    name_value_block_[name.as_string()] = value.as_string();
+  }
+
+ protected:
+  explicit SpdyFrameWithNameValueBlockIR(SpdyStreamId stream_id);
+  virtual ~SpdyFrameWithNameValueBlockIR();
+
+ private:
+  SpdyNameValueBlock name_value_block_;
+
+  DISALLOW_COPY_AND_ASSIGN(SpdyFrameWithNameValueBlockIR);
+};
+
+class NET_EXPORT_PRIVATE SpdyDataIR
+    : public NON_EXPORTED_BASE(SpdyFrameWithFinIR) {
+ public:
+  // Performs deep copy on data.
+  SpdyDataIR(SpdyStreamId stream_id, const base::StringPiece& data);
+
+  // Use in conjunction with SetDataShallow() for shallow-copy on data.
+  explicit SpdyDataIR(SpdyStreamId stream_id);
+
+  virtual ~SpdyDataIR();
+
+  base::StringPiece data() const { return data_; }
+
+  // Deep-copy of data (keep private copy).
+  void SetDataDeep(const base::StringPiece& data) {
+    data_store_.reset(new std::string(data.data(), data.length()));
+    data_ = *(data_store_.get());
+  }
+
+  // Shallow-copy of data (do not keep private copy).
+  void SetDataShallow(const base::StringPiece& data) {
+    data_store_.reset();
+    data_ = data;
+  }
+
+ private:
+  // Used to store data that this SpdyDataIR should own.
+  scoped_ptr<std::string> data_store_;
+  base::StringPiece data_;
+
+  DISALLOW_COPY_AND_ASSIGN(SpdyDataIR);
+};
+
+class SpdySynStreamIR : public SpdyFrameWithNameValueBlockIR {
+ public:
+  explicit SpdySynStreamIR(SpdyStreamId stream_id)
+      : SpdyFrameWithNameValueBlockIR(stream_id),
+        associated_to_stream_id_(0),
+        priority_(0),
+        slot_(0),
+        unidirectional_(false) {}
+  SpdyStreamId associated_to_stream_id() const {
+    return associated_to_stream_id_;
+  }
+  void set_associated_to_stream_id(SpdyStreamId stream_id) {
+    associated_to_stream_id_ = stream_id;
+  }
+  SpdyPriority priority() const { return priority_; }
+  void set_priority(SpdyPriority priority) { priority_ = priority; }
+  SpdyCredentialSlot slot() const { return slot_; }
+  void set_slot(SpdyCredentialSlot slot) { slot_ = slot; }
+  bool unidirectional() const { return unidirectional_; }
+  void set_unidirectional(bool unidirectional) {
+    unidirectional_ = unidirectional;
+  }
+
+ private:
+  SpdyStreamId associated_to_stream_id_;
   SpdyPriority priority_;
-  uint8 credential_slot_;
+  SpdyCredentialSlot slot_;
+  bool unidirectional_;
+
+  DISALLOW_COPY_AND_ASSIGN(SpdySynStreamIR);
 };
 
-// A SYN_REPLY Control Frame structure.
-struct SpdySynReplyControlFrameBlock : SpdyFrameBlock {
-  SpdyStreamId stream_id_;
+class SpdySynReplyIR : public SpdyFrameWithNameValueBlockIR {
+ public:
+  explicit SpdySynReplyIR(SpdyStreamId stream_id)
+      : SpdyFrameWithNameValueBlockIR(stream_id) {}
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(SpdySynReplyIR);
 };
 
-// A RST_STREAM Control Frame structure.
-struct SpdyRstStreamControlFrameBlock : SpdyFrameBlock {
-  SpdyStreamId stream_id_;
-  uint32 status_;
+class SpdyRstStreamIR : public SpdyFrameWithStreamIdIR {
+ public:
+  SpdyRstStreamIR(SpdyStreamId stream_id, SpdyRstStreamStatus status)
+      : SpdyFrameWithStreamIdIR(stream_id) {
+    set_status(status);
+  }
+  SpdyRstStreamStatus status() const {
+    return status_;
+  }
+  void set_status(SpdyRstStreamStatus status) {
+    DCHECK_NE(status, RST_STREAM_INVALID);
+    DCHECK_LT(status, RST_STREAM_NUM_STATUS_CODES);
+    status_ = status;
+  }
+
+ private:
+  SpdyRstStreamStatus status_;
+
+  DISALLOW_COPY_AND_ASSIGN(SpdyRstStreamIR);
 };
 
-// A SETTINGS Control Frame structure.
-struct SpdySettingsControlFrameBlock : SpdyFrameBlock {
-  uint32 num_entries_;
-  // Variable data here.
+class SpdySettingsIR : public SpdyFrameIR {
+ public:
+  // Associates flags with a value.
+  struct Value {
+    Value() : persist_value(false),
+              persisted(false),
+              value(0) {}
+    bool persist_value;
+    bool persisted;
+    int32 value;
+  };
+  typedef std::map<SpdySettingsIds, Value> ValueMap;
+
+  SpdySettingsIR();
+
+  virtual ~SpdySettingsIR();
+
+  // Overwrites as appropriate.
+  const ValueMap& values() const { return values_; }
+  void AddSetting(SpdySettingsIds id,
+                  bool persist_value,
+                  bool persisted,
+                  int32 value) {
+    // TODO(hkhalil): DCHECK_LE(SETTINGS_UPLOAD_BANDWIDTH, id);
+    // TODO(hkhalil): DCHECK_GE(SETTINGS_INITIAL_WINDOW_SIZE, id);
+    values_[id].persist_value = persist_value;
+    values_[id].persisted = persisted;
+    values_[id].value = value;
+  }
+  bool clear_settings() const { return clear_settings_; }
+  void set_clear_settings(bool clear_settings) {
+    clear_settings_ = clear_settings;
+  }
+
+ private:
+  ValueMap values_;
+  bool clear_settings_;
+
+  DISALLOW_COPY_AND_ASSIGN(SpdySettingsIR);
 };
 
-// A PING Control Frame structure.
-struct SpdyPingControlFrameBlock : SpdyFrameBlock {
-  uint32 unique_id_;
+class SpdyPingIR : public SpdyFrameIR {
+ public:
+  explicit SpdyPingIR(SpdyPingId id) : id_(id) {}
+  SpdyPingId id() const { return id_; }
+
+ private:
+  SpdyPingId id_;
+
+  DISALLOW_COPY_AND_ASSIGN(SpdyPingIR);
 };
 
-// TODO(avd): remove this struct
-// A CREDENTIAL Control Frame structure.
-struct SpdyCredentialControlFrameBlock : SpdyFrameBlock {
-  uint16 slot_;
-  uint32 proof_len_;
-  // Variable data here.
-  // proof data
-  // for each certificate: unit32 certificate_len + certificate_data[i]
-};
+class SpdyGoAwayIR : public SpdyFrameIR {
+ public:
+  SpdyGoAwayIR(SpdyStreamId last_good_stream_id, SpdyGoAwayStatus status) {
+    set_last_good_stream_id(last_good_stream_id);
+    set_status(status);
+  }
+  SpdyStreamId last_good_stream_id() const { return last_good_stream_id_; }
+  void set_last_good_stream_id(SpdyStreamId last_good_stream_id) {
+    DCHECK_LE(0u, last_good_stream_id);
+    DCHECK_EQ(0u, last_good_stream_id & ~kStreamIdMask);
+    last_good_stream_id_ = last_good_stream_id;
+  }
+  SpdyGoAwayStatus status() const { return status_; }
+  void set_status(SpdyGoAwayStatus status) {
+    // TODO(hkhalil): Check valid ranges of status?
+    status_ = status;
+  }
 
-// A GOAWAY Control Frame structure.
-struct SpdyGoAwayControlFrameBlock : SpdyFrameBlock {
-  SpdyStreamId last_accepted_stream_id_;
+ private:
+  SpdyStreamId last_good_stream_id_;
   SpdyGoAwayStatus status_;
+
+  DISALLOW_COPY_AND_ASSIGN(SpdyGoAwayIR);
 };
 
-// A HEADERS Control Frame structure.
-struct SpdyHeadersControlFrameBlock : SpdyFrameBlock {
-  SpdyStreamId stream_id_;
+class SpdyHeadersIR : public SpdyFrameWithNameValueBlockIR {
+ public:
+  explicit SpdyHeadersIR(SpdyStreamId stream_id)
+      : SpdyFrameWithNameValueBlockIR(stream_id) {}
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(SpdyHeadersIR);
 };
 
-// A WINDOW_UPDATE Control Frame structure
-struct SpdyWindowUpdateControlFrameBlock : SpdyFrameBlock {
-  SpdyStreamId stream_id_;
-  uint32 delta_window_size_;
+class SpdyWindowUpdateIR : public SpdyFrameWithStreamIdIR {
+ public:
+  SpdyWindowUpdateIR(SpdyStreamId stream_id, int32 delta)
+      : SpdyFrameWithStreamIdIR(stream_id) {
+    set_delta(delta);
+  }
+  int32 delta() const { return delta_; }
+  void set_delta(int32 delta) {
+    DCHECK_LT(0, delta);
+    DCHECK_LE(delta, kSpdyMaximumWindowSize);
+    delta_ = delta;
+  }
+
+ private:
+  int32 delta_;
+
+  DISALLOW_COPY_AND_ASSIGN(SpdyWindowUpdateIR);
 };
 
-#pragma pack(pop)
+class SpdyCredentialIR : public SpdyFrameIR {
+ public:
+  typedef std::vector<std::string> CertificateList;
+
+  explicit SpdyCredentialIR(int16 slot);
+  virtual ~SpdyCredentialIR();
+
+  int16 slot() const { return slot_; }
+  void set_slot(int16 slot) {
+    // TODO(hkhalil): Verify valid slot range?
+    slot_ = slot;
+  }
+  base::StringPiece proof() const { return proof_; }
+  void set_proof(const base::StringPiece& proof) {
+    proof.CopyToString(&proof_);
+  }
+  const CertificateList* certificates() const { return &certificates_; }
+  void AddCertificate(const base::StringPiece& certificate) {
+    certificates_.push_back(certificate.as_string());
+  }
+
+ private:
+  int16 slot_;
+  std::string proof_;
+  CertificateList certificates_;
+
+  DISALLOW_COPY_AND_ASSIGN(SpdyCredentialIR);
+};
 
 // -------------------------------------------------------------------------
 // Wrapper classes for various SPDY frames.
@@ -536,14 +792,6 @@ struct SpdyWindowUpdateControlFrameBlock : SpdyFrameBlock {
 // All Spdy Frame types derive from this SpdyFrame class.
 class SpdyFrame {
  public:
-  // Create a SpdyFrame for a given sized buffer.
-  explicit SpdyFrame(size_t size) : frame_(NULL), owns_buffer_(true) {
-    DCHECK_GE(size, sizeof(struct SpdyFrameBlock));
-    char* buffer = new char[size];
-    memset(buffer, 0, size);
-    frame_ = reinterpret_cast<struct SpdyFrameBlock*>(buffer);
-  }
-
   // Create a SpdyFrame using a pre-created buffer.
   // If |owns_buffer| is true, this class takes ownership of the buffer
   // and will delete it on cleanup.  The buffer must have been created using
@@ -551,503 +799,34 @@ class SpdyFrame {
   // If |owns_buffer| is false, the caller retains ownership of the buffer and
   // is responsible for making sure the buffer outlives this frame.  In other
   // words, this class does NOT create a copy of the buffer.
-  SpdyFrame(char* data, bool owns_buffer)
-      : frame_(reinterpret_cast<struct SpdyFrameBlock*>(data)),
+  SpdyFrame(char* data, size_t size, bool owns_buffer)
+      : frame_(data),
+        size_(size),
         owns_buffer_(owns_buffer) {
     DCHECK(frame_);
   }
 
   ~SpdyFrame() {
     if (owns_buffer_) {
-      char* buffer = reinterpret_cast<char*>(frame_);
-      delete [] buffer;
+      delete [] frame_;
     }
     frame_ = NULL;
   }
 
   // Provides access to the frame bytes, which is a buffer containing
   // the frame packed as expected for sending over the wire.
-  char* data() const { return reinterpret_cast<char*>(frame_); }
+  char* data() const { return frame_; }
 
-  uint8 flags() const { return frame_->flags_length_.flags_[0]; }
-  void set_flags(uint8 flags) { frame_->flags_length_.flags_[0] = flags; }
-
-  uint32 length() const {
-    return ntohl(frame_->flags_length_.length_) & kLengthMask;
-  }
-
-  void set_length(uint32 length) {
-    DCHECK_EQ(0u, (length & ~kLengthMask));
-    length = htonl(length & kLengthMask);
-    frame_->flags_length_.length_ = flags() | length;
-  }
-
-  bool is_control_frame() const {
-    return (ntohs(frame_->control_.version_) & kControlFlagMask) ==
-        kControlFlagMask;
-  }
-
-  // The size of the SpdyFrameBlock structure.
-  // Every SpdyFrame* class has a static size() method for accessing
-  // the size of the data structure which will be sent over the wire.
-  // Note:  this is not the same as sizeof(SpdyFrame).
-  enum { kHeaderSize = sizeof(struct SpdyFrameBlock) };
+  // Returns the actual size of the underlying buffer.
+  size_t size() const { return size_; }
 
  protected:
-  SpdyFrameBlock* frame_;
+  char* frame_;
 
  private:
+  size_t size_;
   bool owns_buffer_;
   DISALLOW_COPY_AND_ASSIGN(SpdyFrame);
-};
-
-// A Data Frame.
-class SpdyDataFrame : public SpdyFrame {
- public:
-  SpdyDataFrame() : SpdyFrame(size()) {}
-  SpdyDataFrame(char* data, bool owns_buffer)
-      : SpdyFrame(data, owns_buffer) {}
-
-  SpdyStreamId stream_id() const {
-    return ntohl(frame_->data_.stream_id_) & kStreamIdMask;
-  }
-
-  // Note that setting the stream id sets the control bit to false.
-  // As stream id should always be set, this means the control bit
-  // should always be set correctly.
-  void set_stream_id(SpdyStreamId id) {
-    DCHECK_EQ(0u, (id & ~kStreamIdMask));
-    frame_->data_.stream_id_ = htonl(id & kStreamIdMask);
-  }
-
-  // Returns the size of the SpdyFrameBlock structure.
-  // Note: this is not the size of the SpdyDataFrame class.
-  static size_t size() { return SpdyFrame::kHeaderSize; }
-
-  const char* payload() const {
-    return reinterpret_cast<const char*>(frame_) + size();
-  }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(SpdyDataFrame);
-};
-
-// A Control Frame.
-class SpdyControlFrame : public SpdyFrame {
- public:
-  explicit SpdyControlFrame(size_t size) : SpdyFrame(size) {}
-  SpdyControlFrame(char* data, bool owns_buffer)
-      : SpdyFrame(data, owns_buffer) {}
-
-  // Callers can use this method to check if the frame appears to be a valid
-  // frame.  Does not guarantee that there are no errors.
-  bool AppearsToBeAValidControlFrame() const {
-    // Right now we only check if the frame has an out-of-bounds type.
-    uint16 type = ntohs(block()->control_.type_);
-    // NOOP is not a 'valid' control frame in SPDY/3 and beyond.
-    return type >= SYN_STREAM &&
-        type < NUM_CONTROL_FRAME_TYPES &&
-        (version() == 2 || type != NOOP);
-  }
-
-  uint16 version() const {
-    const int kVersionMask = 0x7fff;
-    return ntohs(block()->control_.version_) & kVersionMask;
-  }
-
-  void set_version(uint16 version) {
-    const uint16 kControlBit = 0x80;
-    DCHECK_EQ(0, version & kControlBit);
-    mutable_block()->control_.version_ = kControlBit | htons(version);
-  }
-
-  SpdyControlType type() const {
-    uint16 type = ntohs(block()->control_.type_);
-    LOG_IF(DFATAL, type < SYN_STREAM || type >= NUM_CONTROL_FRAME_TYPES)
-        << "Invalid control frame type " << type;
-    return static_cast<SpdyControlType>(type);
-  }
-
-  void set_type(SpdyControlType type) {
-    DCHECK(type >= SYN_STREAM && type < NUM_CONTROL_FRAME_TYPES);
-    mutable_block()->control_.type_ = htons(type);
-  }
-
-  // Returns true if this control frame is of a type that has a header block,
-  // otherwise it returns false.
-  bool has_header_block() const {
-    return type() == SYN_STREAM || type() == SYN_REPLY || type() == HEADERS;
-  }
-
- private:
-  const struct SpdyFrameBlock* block() const {
-    return frame_;
-  }
-  struct SpdyFrameBlock* mutable_block() {
-    return frame_;
-  }
-  DISALLOW_COPY_AND_ASSIGN(SpdyControlFrame);
-};
-
-// A SYN_STREAM frame.
-class SpdySynStreamControlFrame : public SpdyControlFrame {
- public:
-  SpdySynStreamControlFrame() : SpdyControlFrame(size()) {}
-  SpdySynStreamControlFrame(char* data, bool owns_buffer)
-      : SpdyControlFrame(data, owns_buffer) {}
-
-  SpdyStreamId stream_id() const {
-    return ntohl(block()->stream_id_) & kStreamIdMask;
-  }
-
-  void set_stream_id(SpdyStreamId id) {
-    mutable_block()->stream_id_ = htonl(id & kStreamIdMask);
-  }
-
-  SpdyStreamId associated_stream_id() const {
-    return ntohl(block()->associated_stream_id_) & kStreamIdMask;
-  }
-
-  void set_associated_stream_id(SpdyStreamId id) {
-    mutable_block()->associated_stream_id_ = htonl(id & kStreamIdMask);
-  }
-
-  SpdyPriority priority() const {
-    if (version() < 3) {
-      return (block()->priority_ & kSpdy2PriorityMask) >> 6;
-    } else {
-      return (block()->priority_ & kSpdy3PriorityMask) >> 5;
-    }
-  }
-
-  uint8 credential_slot() const {
-    if (version() < 3) {
-      return 0;
-    } else {
-      return block()->credential_slot_;
-    }
-  }
-
-  void set_credential_slot(uint8 credential_slot) {
-    DCHECK(version() >= 3);
-    mutable_block()->credential_slot_ = credential_slot;
-  }
-
-  // The number of bytes in the header block beyond the frame header length.
-  int header_block_len() const {
-    return length() - (size() - SpdyFrame::kHeaderSize);
-  }
-
-  const char* header_block() const {
-    return reinterpret_cast<const char*>(block()) + size();
-  }
-
-  // Returns the size of the SpdySynStreamControlFrameBlock structure.
-  // Note: this is not the size of the SpdySynStreamControlFrame class.
-  static size_t size() { return sizeof(SpdySynStreamControlFrameBlock); }
-
- private:
-  const struct SpdySynStreamControlFrameBlock* block() const {
-    return static_cast<SpdySynStreamControlFrameBlock*>(frame_);
-  }
-  struct SpdySynStreamControlFrameBlock* mutable_block() {
-    return static_cast<SpdySynStreamControlFrameBlock*>(frame_);
-  }
-  DISALLOW_COPY_AND_ASSIGN(SpdySynStreamControlFrame);
-};
-
-// A SYN_REPLY frame.
-class SpdySynReplyControlFrame : public SpdyControlFrame {
- public:
-  SpdySynReplyControlFrame() : SpdyControlFrame(size()) {}
-  SpdySynReplyControlFrame(char* data, bool owns_buffer)
-      : SpdyControlFrame(data, owns_buffer) {}
-
-  SpdyStreamId stream_id() const {
-    return ntohl(block()->stream_id_) & kStreamIdMask;
-  }
-
-  void set_stream_id(SpdyStreamId id) {
-    mutable_block()->stream_id_ = htonl(id & kStreamIdMask);
-  }
-
-  int header_block_len() const {
-    size_t header_block_len = length() - (size() - SpdyFrame::kHeaderSize);
-    // SPDY 2 had 2 bytes of unused space preceeding the header block.
-    if (version() < 3) {
-      header_block_len -= 2;
-    }
-    return header_block_len;
-  }
-
-  const char* header_block() const {
-    const char* header_block = reinterpret_cast<const char*>(block()) + size();
-    // SPDY 2 had 2 bytes of unused space preceeding the header block.
-    if (version() < 3) {
-      header_block += 2;
-    }
-    return header_block;
-  }
-
-  // Returns the size of the SpdySynReplyControlFrameBlock structure.
-  // Note: this is not the size of the SpdySynReplyControlFrame class.
-  static size_t size() { return sizeof(SpdySynReplyControlFrameBlock); }
-
- private:
-  const struct SpdySynReplyControlFrameBlock* block() const {
-    return static_cast<SpdySynReplyControlFrameBlock*>(frame_);
-  }
-  struct SpdySynReplyControlFrameBlock* mutable_block() {
-    return static_cast<SpdySynReplyControlFrameBlock*>(frame_);
-  }
-  DISALLOW_COPY_AND_ASSIGN(SpdySynReplyControlFrame);
-};
-
-// A RST_STREAM frame.
-class SpdyRstStreamControlFrame : public SpdyControlFrame {
- public:
-  SpdyRstStreamControlFrame() : SpdyControlFrame(size()) {}
-  SpdyRstStreamControlFrame(char* data, bool owns_buffer)
-      : SpdyControlFrame(data, owns_buffer) {}
-
-  SpdyStreamId stream_id() const {
-    return ntohl(block()->stream_id_) & kStreamIdMask;
-  }
-
-  void set_stream_id(SpdyStreamId id) {
-    mutable_block()->stream_id_ = htonl(id & kStreamIdMask);
-  }
-
-  SpdyStatusCodes status() const {
-    SpdyStatusCodes status =
-        static_cast<SpdyStatusCodes>(ntohl(block()->status_));
-    if (status < INVALID || status >= NUM_STATUS_CODES) {
-      status = INVALID;
-    }
-    return status;
-  }
-  void set_status(SpdyStatusCodes status) {
-    mutable_block()->status_ = htonl(static_cast<uint32>(status));
-  }
-
-  // Returns the size of the SpdyRstStreamControlFrameBlock structure.
-  // Note: this is not the size of the SpdyRstStreamControlFrame class.
-  static size_t size() { return sizeof(SpdyRstStreamControlFrameBlock); }
-
- private:
-  const struct SpdyRstStreamControlFrameBlock* block() const {
-    return static_cast<SpdyRstStreamControlFrameBlock*>(frame_);
-  }
-  struct SpdyRstStreamControlFrameBlock* mutable_block() {
-    return static_cast<SpdyRstStreamControlFrameBlock*>(frame_);
-  }
-  DISALLOW_COPY_AND_ASSIGN(SpdyRstStreamControlFrame);
-};
-
-class SpdySettingsControlFrame : public SpdyControlFrame {
- public:
-  SpdySettingsControlFrame() : SpdyControlFrame(size()) {}
-  SpdySettingsControlFrame(char* data, bool owns_buffer)
-      : SpdyControlFrame(data, owns_buffer) {}
-
-  uint32 num_entries() const {
-    return ntohl(block()->num_entries_);
-  }
-
-  void set_num_entries(int val) {
-    mutable_block()->num_entries_ = htonl(val);
-  }
-
-  int header_block_len() const {
-    return length() - (size() - SpdyFrame::kHeaderSize);
-  }
-
-  const char* header_block() const {
-    return reinterpret_cast<const char*>(block()) + size();
-  }
-
-  // Returns the size of the SpdySettingsControlFrameBlock structure.
-  // Note: this is not the size of the SpdySettingsControlFrameBlock class.
-  static size_t size() { return sizeof(SpdySettingsControlFrameBlock); }
-
- private:
-  const struct SpdySettingsControlFrameBlock* block() const {
-    return static_cast<SpdySettingsControlFrameBlock*>(frame_);
-  }
-  struct SpdySettingsControlFrameBlock* mutable_block() {
-    return static_cast<SpdySettingsControlFrameBlock*>(frame_);
-  }
-  DISALLOW_COPY_AND_ASSIGN(SpdySettingsControlFrame);
-};
-
-class SpdyPingControlFrame : public SpdyControlFrame {
- public:
-  SpdyPingControlFrame() : SpdyControlFrame(size()) {}
-  SpdyPingControlFrame(char* data, bool owns_buffer)
-      : SpdyControlFrame(data, owns_buffer) {}
-
-  uint32 unique_id() const {
-    return ntohl(block()->unique_id_);
-  }
-
-  void set_unique_id(uint32 unique_id) {
-    mutable_block()->unique_id_ = htonl(unique_id);
-  }
-
-  static size_t size() { return sizeof(SpdyPingControlFrameBlock); }
-
- private:
-  const struct SpdyPingControlFrameBlock* block() const {
-    return static_cast<SpdyPingControlFrameBlock*>(frame_);
-  }
-  struct SpdyPingControlFrameBlock* mutable_block() {
-    return static_cast<SpdyPingControlFrameBlock*>(frame_);
-  }
-};
-
-class SpdyCredentialControlFrame : public SpdyControlFrame {
- public:
-  SpdyCredentialControlFrame() : SpdyControlFrame(size()) {}
-  SpdyCredentialControlFrame(char* data, bool owns_buffer)
-      : SpdyControlFrame(data, owns_buffer) {}
-
-  const char* payload() const {
-    return reinterpret_cast<const char*>(block()) + SpdyFrame::kHeaderSize;
-  }
-
-  static size_t size() { return sizeof(SpdyCredentialControlFrameBlock); }
-
- private:
-  const struct SpdyCredentialControlFrameBlock* block() const {
-    return static_cast<SpdyCredentialControlFrameBlock*>(frame_);
-  }
-  DISALLOW_COPY_AND_ASSIGN(SpdyCredentialControlFrame);
-};
-
-class SpdyGoAwayControlFrame : public SpdyControlFrame {
- public:
-  SpdyGoAwayControlFrame() : SpdyControlFrame(size()) {}
-  SpdyGoAwayControlFrame(char* data, bool owns_buffer)
-      : SpdyControlFrame(data, owns_buffer) {}
-
-  SpdyStreamId last_accepted_stream_id() const {
-    return ntohl(block()->last_accepted_stream_id_) & kStreamIdMask;
-  }
-
-  SpdyGoAwayStatus status() const {
-    if (version() < 3) {
-      LOG(DFATAL) << "Attempted to access status of SPDY 2 GOAWAY.";
-      return GOAWAY_INVALID;
-    } else {
-      uint32 status = ntohl(block()->status_);
-      if (status >= GOAWAY_NUM_STATUS_CODES) {
-        return GOAWAY_INVALID;
-      } else {
-        return static_cast<SpdyGoAwayStatus>(status);
-      }
-    }
-  }
-
-  void set_last_accepted_stream_id(SpdyStreamId id) {
-    mutable_block()->last_accepted_stream_id_ = htonl(id & kStreamIdMask);
-  }
-
-  static size_t size() { return sizeof(SpdyGoAwayControlFrameBlock); }
-
- private:
-  const struct SpdyGoAwayControlFrameBlock* block() const {
-    return static_cast<SpdyGoAwayControlFrameBlock*>(frame_);
-  }
-  struct SpdyGoAwayControlFrameBlock* mutable_block() {
-    return static_cast<SpdyGoAwayControlFrameBlock*>(frame_);
-  }
-  DISALLOW_COPY_AND_ASSIGN(SpdyGoAwayControlFrame);
-};
-
-// A HEADERS frame.
-class SpdyHeadersControlFrame : public SpdyControlFrame {
- public:
-  SpdyHeadersControlFrame() : SpdyControlFrame(size()) {}
-  SpdyHeadersControlFrame(char* data, bool owns_buffer)
-      : SpdyControlFrame(data, owns_buffer) {}
-
-  SpdyStreamId stream_id() const {
-    return ntohl(block()->stream_id_) & kStreamIdMask;
-  }
-
-  void set_stream_id(SpdyStreamId id) {
-    mutable_block()->stream_id_ = htonl(id & kStreamIdMask);
-  }
-
-  // The number of bytes in the header block beyond the frame header length.
-  int header_block_len() const {
-    size_t header_block_len = length() - (size() - SpdyFrame::kHeaderSize);
-    // SPDY 2 had 2 bytes of unused space preceeding the header block.
-    if (version() < 3) {
-      header_block_len -= 2;
-    }
-    return header_block_len;
-  }
-
-  const char* header_block() const {
-    const char* header_block = reinterpret_cast<const char*>(block()) + size();
-    // SPDY 2 had 2 bytes of unused space preceeding the header block.
-    if (version() < 3) {
-      header_block += 2;
-    }
-    return header_block;
-  }
-
-  // Returns the size of the SpdyHeadersControlFrameBlock structure.
-  // Note: this is not the size of the SpdyHeadersControlFrame class.
-  static size_t size() { return sizeof(SpdyHeadersControlFrameBlock); }
-
- private:
-  const struct SpdyHeadersControlFrameBlock* block() const {
-    return static_cast<SpdyHeadersControlFrameBlock*>(frame_);
-  }
-  struct SpdyHeadersControlFrameBlock* mutable_block() {
-    return static_cast<SpdyHeadersControlFrameBlock*>(frame_);
-  }
-  DISALLOW_COPY_AND_ASSIGN(SpdyHeadersControlFrame);
-};
-
-// A WINDOW_UPDATE frame.
-class SpdyWindowUpdateControlFrame : public SpdyControlFrame {
- public:
-  SpdyWindowUpdateControlFrame() : SpdyControlFrame(size()) {}
-  SpdyWindowUpdateControlFrame(char* data, bool owns_buffer)
-      : SpdyControlFrame(data, owns_buffer) {}
-
-  SpdyStreamId stream_id() const {
-    return ntohl(block()->stream_id_) & kStreamIdMask;
-  }
-
-  void set_stream_id(SpdyStreamId id) {
-    mutable_block()->stream_id_ = htonl(id & kStreamIdMask);
-  }
-
-  uint32 delta_window_size() const {
-    return ntohl(block()->delta_window_size_);
-  }
-
-  void set_delta_window_size(uint32 delta_window_size) {
-    mutable_block()->delta_window_size_ = htonl(delta_window_size);
-  }
-
-  // Returns the size of the SpdyWindowUpdateControlFrameBlock structure.
-  // Note: this is not the size of the SpdyWindowUpdateControlFrame class.
-  static size_t size() { return sizeof(SpdyWindowUpdateControlFrameBlock); }
-
- private:
-  const struct SpdyWindowUpdateControlFrameBlock* block() const {
-    return static_cast<SpdyWindowUpdateControlFrameBlock*>(frame_);
-  }
-  struct SpdyWindowUpdateControlFrameBlock* mutable_block() {
-    return static_cast<SpdyWindowUpdateControlFrameBlock*>(frame_);
-  }
-
-  DISALLOW_COPY_AND_ASSIGN(SpdyWindowUpdateControlFrame);
 };
 
 }  // namespace net

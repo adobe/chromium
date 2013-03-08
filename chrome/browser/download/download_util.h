@@ -10,7 +10,7 @@
 #include <string>
 
 #include "base/basictypes.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/memory/ref_counted.h"
 #include "base/string16.h"
 #include "ui/gfx/native_widget_types.h"
@@ -41,10 +41,10 @@ namespace download_util {
 // Download temporary file creation --------------------------------------------
 
 // Return the default download directory.
-const FilePath& GetDefaultDownloadDirectory();
+const base::FilePath& GetDefaultDownloadDirectory();
 
 // Return true if the |download_path| is dangerous path.
-bool DownloadPathIsDangerous(const FilePath& download_path);
+bool DownloadPathIsDangerous(const base::FilePath& download_path);
 
 // Download progress animations ------------------------------------------------
 
@@ -144,7 +144,7 @@ void DragDownload(const content::DownloadItem* download,
 string16 GetProgressStatusText(content::DownloadItem* download);
 
 // Returns a .crdownload intermediate path for the |suggested_path|.
-FilePath GetCrDownloadPath(const FilePath& suggested_path);
+base::FilePath GetCrDownloadPath(const base::FilePath& suggested_path);
 
 // Check whether we can do the saving page operation for the specified URL.
 bool IsSavableURL(const GURL& url);

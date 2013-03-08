@@ -19,12 +19,14 @@
 #include "base/memory/scoped_vector.h"
 #include "base/message_loop.h"
 #include "base/metrics/histogram.h"
+#include "base/rand_util.h"
 #include "base/string_util.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/api/bookmarks/bookmark_service.h"
 #include "chrome/browser/autocomplete/history_url_provider.h"
 #include "chrome/browser/history/download_row.h"
+#include "chrome/browser/history/history_db_task.h"
 #include "chrome/browser/history/history_notifications.h"
 #include "chrome/browser/history/history_publisher.h"
 #include "chrome/browser/history/in_memory_history_backend.h"
@@ -253,7 +255,7 @@ class KillHistoryDatabaseErrorDelegate : public sql::ErrorDelegate {
 
 // HistoryBackend --------------------------------------------------------------
 
-HistoryBackend::HistoryBackend(const FilePath& history_dir,
+HistoryBackend::HistoryBackend(const base::FilePath& history_dir,
                                int id,
                                Delegate* delegate,
                                BookmarkService* bookmark_service)
@@ -318,20 +320,20 @@ void HistoryBackend::NotifyRenderProcessHostDestruction(const void* host) {
   tracker_.NotifyRenderProcessHostDestruction(host);
 }
 
-FilePath HistoryBackend::GetThumbnailFileName() const {
+base::FilePath HistoryBackend::GetThumbnailFileName() const {
   return history_dir_.Append(chrome::kThumbnailsFilename);
 }
 
-FilePath HistoryBackend::GetFaviconsFileName() const {
+base::FilePath HistoryBackend::GetFaviconsFileName() const {
   return history_dir_.Append(chrome::kFaviconsFilename);
 }
 
-FilePath HistoryBackend::GetArchivedFileName() const {
+base::FilePath HistoryBackend::GetArchivedFileName() const {
   return history_dir_.Append(chrome::kArchivedHistoryFilename);
 }
 
 #if defined(OS_ANDROID)
-FilePath HistoryBackend::GetAndroidCacheFileName() const {
+base::FilePath HistoryBackend::GetAndroidCacheFileName() const {
   return history_dir_.Append(chrome::kAndroidCacheFilename);
 }
 #endif
@@ -644,9 +646,9 @@ void HistoryBackend::InitImpl(const std::string& languages) {
 
   // Compute the file names. Note that the index file can be removed when the
   // text db manager is finished being hooked up.
-  FilePath history_name = history_dir_.Append(chrome::kHistoryFilename);
-  FilePath thumbnail_name = GetThumbnailFileName();
-  FilePath archived_name = GetArchivedFileName();
+  base::FilePath history_name = history_dir_.Append(chrome::kHistoryFilename);
+  base::FilePath thumbnail_name = GetThumbnailFileName();
+  base::FilePath archived_name = GetArchivedFileName();
 
   // History database.
   db_.reset(new HistoryDatabase());
@@ -746,6 +748,14 @@ void HistoryBackend::InitImpl(const std::string& languages) {
   if (!archived_db_->Init(archived_name)) {
     LOG(WARNING) << "Could not initialize the archived database.";
     archived_db_.reset();
+  }
+
+  // Generate the history and thumbnail database metrics only after performing
+  // any migration work.
+  if (base::RandInt(1, 100) == 50) {
+    // Only do this computation sometimes since it can be expensive.
+    db_->ComputeDatabaseMetrics(history_name);
+    thumbnail_db_->ComputeDatabaseMetrics();
   }
 
   // Tell the expiration module about all the nice databases we made. This must
@@ -1172,12 +1182,6 @@ void HistoryBackend::DeleteOldSegmentData() {
                            TimeDelta::FromDays(kSegmentDataRetention));
 }
 
-void HistoryBackend::SetSegmentPresentationIndex(SegmentID segment_id,
-                                                 int index) {
-  if (db_.get())
-    db_->SetSegmentPresentationIndex(segment_id, index);
-}
-
 void HistoryBackend::QuerySegmentUsage(
     scoped_refptr<QuerySegmentUsageRequest> request,
     const Time from_time,
@@ -1197,6 +1201,47 @@ void HistoryBackend::QuerySegmentUsage(
           FROM_HERE,
           base::Bind(&HistoryBackend::DeleteOldSegmentData, this));
     }
+  }
+  request->ForwardResult(request->handle(), &request->value.get());
+}
+
+void HistoryBackend::IncreaseSegmentDuration(const GURL& url,
+                                             base::Time time,
+                                             base::TimeDelta delta) {
+  if (!db_.get())
+    return;
+
+  const std::string segment_name(VisitSegmentDatabase::ComputeSegmentName(url));
+  SegmentID segment_id = db_->GetSegmentNamed(segment_name);
+  if (!segment_id) {
+    URLID url_id = db_->GetRowForURL(url, NULL);
+    if (!url_id)
+      return;
+    segment_id = db_->CreateSegment(url_id, segment_name);
+    if (!segment_id)
+      return;
+  }
+  SegmentDurationID duration_id;
+  base::TimeDelta total_delta;
+  if (!db_->GetSegmentDuration(segment_id, time, &duration_id,
+                               &total_delta)) {
+    db_->CreateSegmentDuration(segment_id, time, delta);
+    return;
+  }
+  total_delta += delta;
+  db_->SetSegmentDuration(duration_id, total_delta);
+}
+
+void HistoryBackend::QuerySegmentDuration(
+    scoped_refptr<QuerySegmentUsageRequest> request,
+    const base::Time from_time,
+    int max_result_count) {
+  if (request->canceled())
+    return;
+
+  if (db_.get()) {
+    db_->QuerySegmentDuration(from_time, max_result_count,
+                              &request->value.get());
   }
   request->ForwardResult(request->handle(), &request->value.get());
 }
@@ -1271,20 +1316,26 @@ void HistoryBackend::QueryDownloads(std::vector<DownloadRow>* rows) {
 void HistoryBackend::CleanUpInProgressEntries() {
   // If some "in progress" entries were not updated when Chrome exited, they
   // need to be cleaned up.
-  if (db_.get())
-    db_->CleanUpInProgressEntries();
+  if (!db_.get())
+    return;
+  db_->CleanUpInProgressEntries();
+  ScheduleCommit();
 }
 
 // Update a particular download entry.
 void HistoryBackend::UpdateDownload(const history::DownloadRow& data) {
-  if (db_.get())
-    db_->UpdateDownload(data);
+  if (!db_.get())
+    return;
+  db_->UpdateDownload(data);
+  ScheduleCommit();
 }
 
 void HistoryBackend::CreateDownload(const history::DownloadRow& history_info,
                                     int64* db_handle) {
-  if (db_.get())
-    *db_handle = db_->CreateDownload(history_info);
+  if (!db_.get())
+    return;
+  *db_handle = db_->CreateDownload(history_info);
+  ScheduleCommit();
 }
 
 void HistoryBackend::RemoveDownloads(const std::set<int64>& handles) {
@@ -1316,6 +1367,7 @@ void HistoryBackend::RemoveDownloads(const std::set<int64>& handles) {
     UMA_HISTOGRAM_COUNTS("Download.DatabaseRemoveDownloadsCountNotRemoved",
                          num_downloads_not_deleted);
   }
+  ScheduleCommit();
 }
 
 void HistoryBackend::QueryHistory(scoped_refptr<QueryHistoryRequest> request,
@@ -1362,7 +1414,6 @@ void HistoryBackend::QueryHistoryBasic(URLDatabase* url_db,
 
   // Now add them and the URL rows to the results.
   URLResult url_result;
-  QueryCursor cursor;
   for (size_t i = 0; i < visits.size(); i++) {
     const VisitRow visit = visits[i];
 
@@ -1395,11 +1446,7 @@ void HistoryBackend::QueryHistoryBasic(URLDatabase* url_db,
     // We don't set any of the query-specific parts of the URLResult, since
     // snippets and stuff don't apply to basic querying.
     result->AppendURLBySwapping(&url_result);
-
-    cursor.rowid_ = visit.visit_id;
-    cursor.time_ = visit.visit_time;
   }
-  result->set_cursor(cursor);
 
   if (!has_more_results && options.begin_time <= first_recorded_time_)
     result->set_reached_beginning(true);
@@ -1421,7 +1468,6 @@ void HistoryBackend::QueryHistoryFTS(const string16& text_query,
 
   // Now get the row and visit information for each one.
   URLResult url_result;  // Declare outside loop to prevent re-construction.
-  QueryCursor cursor;
   for (size_t i = 0; i < fts_matches.size(); i++) {
     if (options.max_count != 0 &&
         static_cast<int>(result->size()) >= options.max_count)
@@ -1453,11 +1499,7 @@ void HistoryBackend::QueryHistoryFTS(const string16& text_query,
     // Add it to the vector, this will clear our |url_row| object as a
     // result of the swap.
     result->AppendURLBySwapping(&url_result);
-
-    cursor.rowid_ = fts_matches[i].rowid;
-    cursor.time_ = fts_matches[i].time;
   }
-  result->set_cursor(cursor);
 
   if (first_time_searched <= first_recorded_time_)
     result->set_reached_beginning(true);
@@ -1990,7 +2032,6 @@ void HistoryBackend::MergeFavicon(
 
   // Copy the favicon bitmaps mapped to |page_url| to the favicon at |icon_url|
   // till the limit of |kMaxFaviconBitmapsPerIconURL| is reached.
-  bool migrated_bitmaps = false;
   for (size_t i = 0; i < icon_mappings.size(); ++i) {
     if (favicon_sizes.size() >= kMaxFaviconBitmapsPerIconURL)
       break;
@@ -2010,8 +2051,6 @@ void HistoryBackend::MergeFavicon(
           favicon_sizes.end(), bitmaps_to_copy[j].pixel_size);
       if (it != favicon_sizes.end())
         continue;
-
-      migrated_bitmaps = true;
 
       // Add the favicon bitmap as expired as it is not consistent with the
       // merged in data.
@@ -2033,13 +2072,9 @@ void HistoryBackend::MergeFavicon(
     SetFaviconMappingsForPageAndRedirects(page_url, icon_type, favicon_ids);
   }
 
-  // Sync currently does not properly deal with notifications as a result of
-  // replacing a favicon bitmap. For M25, do not send any notifications if a
-  // bitmap was replaced and no bitmaps were added or deleted. This is a
-  // temporary fix for http://crbug.com/169460.
-  if (migrated_bitmaps || !replaced_bitmap)
-    SendFaviconChangedNotificationForPageAndRedirects(page_url);
-
+  // Send notification to the UI as at least a favicon bitmap was added or
+  // replaced.
+  SendFaviconChangedNotificationForPageAndRedirects(page_url);
   ScheduleCommit();
 }
 
@@ -2723,6 +2758,26 @@ void HistoryBackend::ExpireHistoryForTimes(
     db_->GetStartDate(&first_recorded_time_);
 }
 
+void HistoryBackend::ExpireHistory(
+    const std::vector<history::ExpireHistoryArgs>& expire_list) {
+  if (db_.get()) {
+    bool update_first_recorded_time = false;
+
+    for (std::vector<history::ExpireHistoryArgs>::const_iterator it =
+         expire_list.begin(); it != expire_list.end(); ++it) {
+      expirer_.ExpireHistoryBetween(it->urls, it->begin_time, it->end_time);
+
+      if (it->begin_time < first_recorded_time_)
+        update_first_recorded_time = true;
+    }
+    Commit();
+
+    // Update |first_recorded_time_| if any deletion might have affected it.
+    if (update_first_recorded_time)
+      db_->GetStartDate(&first_recorded_time_);
+  }
+}
+
 void HistoryBackend::URLsNoLongerBookmarked(const std::set<GURL>& urls) {
   if (!db_.get())
     return;
@@ -2852,7 +2907,7 @@ void HistoryBackend::DeleteAllHistory() {
   if (archived_db_.get()) {
     // Close the database and delete the file.
     archived_db_.reset();
-    FilePath archived_file_name = GetArchivedFileName();
+    base::FilePath archived_file_name = GetArchivedFileName();
     file_util::Delete(archived_file_name, false);
 
     // Now re-initialize the database (which may fail).

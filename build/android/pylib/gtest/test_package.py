@@ -24,11 +24,10 @@ class TestPackage(object):
     timeout: Timeout for each test.
     cleanup_test_files: Whether or not to cleanup test files on device.
     tool: Name of the Valgrind tool.
-    dump_debug_info: A debug_info object.
   """
 
   def __init__(self, adb, device, test_suite, timeout,
-               cleanup_test_files, tool, dump_debug_info):
+               cleanup_test_files, tool):
     self.adb = adb
     self.device = device
     self.test_suite_full = test_suite
@@ -44,7 +43,10 @@ class TestPackage(object):
     if os.environ.get('BUILDBOT_SLAVENAME'):
       timeout = timeout * 2
     self.timeout = timeout * self.tool.GetTimeoutScale()
-    self.dump_debug_info = dump_debug_info
+
+  def ClearApplicationState(self):
+    """Clears the application state."""
+    raise NotImplementedError('Method must be overriden.')
 
   def GetDisabledPrefixes(self):
     return ['DISABLED_', 'FLAKY_', 'FAILS_']
@@ -104,7 +106,8 @@ class TestPackage(object):
           external_storage + '/paks/chrome_100_percent.pak')
       self.adb.PushIfNeeded(self.test_suite_dirname + '/test_data',
                             external_storage + '/test_data')
-    if self.test_suite_basename == 'content_unittests':
+    if self.test_suite_basename in ('content_unittests',
+                                    'components_unittests'):
       self.adb.PushIfNeeded(
           self.test_suite_dirname + '/content_resources.pak',
           external_storage + '/paks/content_resources.pak')
@@ -112,6 +115,11 @@ class TestPackage(object):
       self.adb.PushIfNeeded(
           self.test_suite_dirname + '/linux_dumper_unittest_helper',
           constants.TEST_EXECUTABLE_DIR + '/linux_dumper_unittest_helper')
+    if self.test_suite_basename == 'content_browsertests':
+      self.adb.PushIfNeeded(
+          self.test_suite_dirname +
+          '/../content_shell/assets/content_shell.pak',
+          external_storage + '/paks/content_shell.pak')
 
   def _WatchTestOutput(self, p):
     """Watches the test output.
@@ -122,8 +130,6 @@ class TestPackage(object):
     failed_tests = []
     crashed_tests = []
     timed_out_tests = []
-    overall_fail = False
-    overall_timed_out = False
 
     # Test case statuses.
     re_run = re.compile('\[ RUN      \] ?(.*)\r\n')
@@ -146,12 +152,8 @@ class TestPackage(object):
         if found == 1:  # re_passed
           break
         elif found == 2:  # re_runner_fail
-          overall_fail = True
           break
         else:  # re_run
-          if self.dump_debug_info:
-            self.dump_debug_info.TakeScreenshot('_Test_Start_Run_')
-
           full_test_name = p.match.group(1).replace('\r', '')
           found = p.expect([re_ok, re_fail, re_crash], timeout=self.timeout)
           if found == 0:  # re_ok
@@ -159,17 +161,21 @@ class TestPackage(object):
               ok_tests += [BaseTestResult(full_test_name, p.before)]
           elif found == 2:  # re_crash
             crashed_tests += [BaseTestResult(full_test_name, p.before)]
-            overall_fail = True
             break
           else:  # re_fail
             failed_tests += [BaseTestResult(full_test_name, p.before)]
     except pexpect.EOF:
       logging.error('Test terminated - EOF')
-      raise errors.DeviceUnresponsiveError('Device may be offline')
+      # We're here because either the device went offline, or the test harness
+      # crashed without outputting the CRASHED marker (crbug.com/175538).
+      if not self.adb.IsOnline():
+        raise errors.DeviceUnresponsiveError('Device %s went offline.' %
+                                             self.device)
+      elif full_test_name:
+        crashed_tests += [BaseTestResult(full_test_name, p.before)]
     except pexpect.TIMEOUT:
       logging.error('Test terminated after %d second timeout.',
                     self.timeout)
-      overall_timed_out = True
       if full_test_name:
         timed_out_tests += [BaseTestResult(full_test_name, p.before)]
     finally:
@@ -180,10 +186,7 @@ class TestPackage(object):
       logging.critical(
           'gtest exit code: %d\npexpect.before: %s\npexpect.after: %s',
           ret_code, p.before, p.after)
-      overall_fail = True
 
     # Create TestResults and return
     return TestResults.FromRun(ok=ok_tests, failed=failed_tests,
-                               crashed=crashed_tests, timed_out=timed_out_tests,
-                               overall_fail=overall_fail,
-                               overall_timed_out=overall_timed_out)
+                               crashed=crashed_tests, timed_out=timed_out_tests)

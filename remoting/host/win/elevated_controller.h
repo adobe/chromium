@@ -11,18 +11,29 @@
 
 #include "remoting/base/scoped_sc_handle_win.h"
 
-// MIDL-generated declarations.
-#include "remoting/host/elevated_controller.h"
+// chromoting_lib.h contains MIDL-generated declarations.
+#include "remoting/host/chromoting_lib.h"
 
 namespace remoting {
 
-class ATL_NO_VTABLE __declspec(uuid(DAEMON_CONTROLLER_CLSID)) ElevatedController
+class __declspec(uuid(DAEMON_CONTROLLER_CLSID)) ElevatedController
     : public ATL::CComObjectRootEx<ATL::CComSingleThreadModel>,
       public ATL::CComCoClass<ElevatedController,
                               &__uuidof(ElevatedController)>,
       public ATL::IDispatchImpl<IDaemonControl2, &IID_IDaemonControl2,
-                                &LIBID_ChromotingElevatedControllerLib, 1, 1> {
+                                &LIBID_ChromotingLib, 1, 0> {
  public:
+  // Declare a class factory which must not lock the ATL module. This is the
+  // same as DECLARE_CLASSFACTORY() with the exception that
+  // ATL::CComObjectNoLock is used unconditionally.
+  //
+  // By default ATL generates locking class factories (by wrapping them in
+  // ATL::CComObjectCached) for classes hosted in a DLL. This class is compiled
+  // into a DLL but it is registered as an out-of-process class, so its class
+  // factory should not use locking.
+  typedef ATL::CComCreator<ATL::CComObjectNoLock<ATL::CComClassFactory> >
+      _ClassFactoryCreatorClass;
+
   ElevatedController();
 
   HRESULT FinalConstruct();
@@ -57,8 +68,6 @@ class ATL_NO_VTABLE __declspec(uuid(DAEMON_CONTROLLER_CLSID)) ElevatedController
 
   DECLARE_PROTECT_FINAL_CONSTRUCT()
 };
-
-OBJECT_ENTRY_AUTO(__uuidof(ElevatedController), ElevatedController)
 
 } // namespace remoting
 

@@ -16,6 +16,7 @@
         '../../skia/skia.gyp:skia',
         '../compositor/compositor.gyp:compositor',
         '../ui.gyp:ui',
+        '../ui.gyp:ui_resources',
       ],
       'defines': [
         'APP_LIST_IMPLEMENTATION',
@@ -34,10 +35,12 @@
         'app_list_switches.h',
         'app_list_view_delegate.h',
         'apps_grid_view_delegate.h',
-        'cocoa/app_list_view.h',
-        'cocoa/app_list_view.mm',
-        'cocoa/app_list_view_window.h',
-        'cocoa/app_list_view_window.mm',
+        'cocoa/app_list_window_controller.h',
+        'cocoa/app_list_window_controller.mm',
+        'cocoa/apps_grid_controller.h',
+        'cocoa/apps_grid_controller.mm',
+        'cocoa/apps_grid_view_item.h',
+        'cocoa/apps_grid_view_item.mm',
         'pagination_model.cc',
         'pagination_model.h',
         'pagination_model_observer.h',
@@ -49,6 +52,9 @@
         'search_result.h',
         'search_result_list_view_delegate.h',
         'search_result_view_delegate.h',
+        'signin_delegate.cc',
+        'signin_delegate.h',
+        'signin_delegate_observer.h',
         'views/app_list_background.cc',
         'views/app_list_background.h',
         'views/app_list_item_view.cc',
@@ -71,6 +77,8 @@
         'views/search_result_list_view.h',
         'views/search_result_view.cc',
         'views/search_result_view.h',
+        'views/signin_view.cc',
+        'views/signin_view.h',
       ],
       'conditions': [
         ['use_aura==1', {
@@ -100,6 +108,8 @@
           ],
         }],
       ],
+      # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
+      'msvs_disabled_warnings': [ 4267, ],
     },
     {
       'target_name': 'app_list_unittests',
@@ -115,11 +125,15 @@
       ],
       'sources': [
         'pagination_model_unittest.cc',
+        'test/app_list_test_model.cc',
+        'test/app_list_test_model.h',
         'test/app_list_test_suite.cc',
         'test/app_list_test_suite.h',
+        'test/app_list_test_view_delegate.cc',
+        'test/app_list_test_view_delegate.h',
         'test/run_all_unittests.cc',
-        'cocoa/app_list_view_unittest.mm',
-        'cocoa/app_list_view_window_unittest.mm',
+        'cocoa/app_list_window_controller_unittest.mm',
+        'cocoa/apps_grid_controller_unittest.mm',
         'views/apps_grid_view_unittest.cc',
         'views/test/apps_grid_view_test_api.cc',
         'views/test/apps_grid_view_test_api.h',
@@ -139,12 +153,20 @@
           'dependencies': [
             '../ui.gyp:ui_test_support',
           ],
+          'conditions': [
+            ['component=="static_library"', {
+              # Needed to link to Obj-C static libraries.
+              'xcode_settings': {'OTHER_LDFLAGS': ['-Wl,-ObjC']},
+            }],
+          ],
         }, {  # OS!="mac"
           'sources/': [
             ['exclude', 'cocoa/'],
           ],
         }],
       ],
+      # Disable c4267 warnings until we fix size_t to int truncations.
+      'msvs_disabled_warnings': [ 4267, ],
     },
   ],
 }

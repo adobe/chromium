@@ -11,11 +11,12 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/timer.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
+#include "ui/gfx/transform.h"
 
 namespace content {
 class MockRenderWidgetHost;
 class RenderWidgetHostImpl;
-class TapSuppressionController;
+class TouchpadTapSuppressionController;
 
 // Applies a sequence of filters to WebGestureEvents instances.
 // First: the sequence is filtered for bounces. A bounce is when the finger
@@ -49,8 +50,8 @@ class GestureEventFilter {
   // definitely not in progress.
   void FlingHasBeenHalted();
 
-  // Return the |TapSuppressionController| instance.
-  TapSuppressionController* GetTapSuppressionController();
+  // Return the |TouchpadTapSuppressionController| instance.
+  TouchpadTapSuppressionController* GetTapSuppressionController();
 
   // Returns whether there are any gesture event in the queue.
   bool HasQueuedGestureEvents() const;
@@ -78,8 +79,9 @@ class GestureEventFilter {
   // hence that event should be handled now.
   bool ShouldHandleEventNow();
 
-  // Merge or append a GestureScrollUpdate into the coalescing queue.
-  void MergeOrInsertScrollEvent(
+  // Merge or append a GestureScrollUpdate or GesturePinchUpdate into
+  // the coalescing queue.
+  void MergeOrInsertScrollAndPinchEvent(
        const WebKit::WebGestureEvent& gesture_event);
 
   // Sub-filter for removing bounces from in-progress scrolls.
@@ -89,6 +91,18 @@ class GestureEventFilter {
   // Sub-filter for removing unnecessary GestureFlingCancels and deferring
   // GestureTapDowns.
   bool ShouldForwardForTapDeferral(
+      const WebKit::WebGestureEvent& gesture_event);
+
+  // Whether the event_in_queue is GesturePinchUpdate or
+  // GestureScrollUpdate and it has the same modifiers as the
+  // new event.
+  bool ShouldTryMerging(const WebKit::WebGestureEvent& new_event,
+      const WebKit::WebGestureEvent& event_in_queue);
+
+  // Returns the transform matrix corresponding to the gesture event.
+  // Assumes the gesture event sent is either GestureScrollUpdate or
+  // GesturePinchUpdate. Returns the identity matrix otherwise.
+  gfx::Transform GetTransformForEvent(
       const WebKit::WebGestureEvent& gesture_event);
 
   // Only a RenderWidgetHostViewImpl can own an instance.
@@ -101,13 +115,21 @@ class GestureEventFilter {
   // True if a GestureScrollUpdate sequence is in progress.
   bool scrolling_in_progress_;
 
+  // True if two related gesture events were sent before without waiting
+  // for an ACK, so the next gesture ACK should be ignored.
+  bool ignore_next_ack_;
+
+  // Transform that holds the combined transform matrix for the current
+  // scroll-pinch sequence at the end of the queue.
+  gfx::Transform combined_scroll_pinch_;
+
   // Timer to release a previously deferred GestureTapDown event.
   base::OneShotTimer<GestureEventFilter> send_gtd_timer_;
 
   // An object tracking the state of touchpad action on the delivery of mouse
   // events to the renderer to filter mouse  immediately after a touchpad
   // fling canceling tap.
-  scoped_ptr<TapSuppressionController> tap_suppression_controller_;
+  scoped_ptr<TouchpadTapSuppressionController> tap_suppression_controller_;
 
   typedef std::deque<WebKit::WebGestureEvent> GestureEventQueue;
 

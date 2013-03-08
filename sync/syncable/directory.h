@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,11 +14,11 @@
 #include "sync/base/sync_export.h"
 #include "sync/internal_api/public/util/report_unrecoverable_error_function.h"
 #include "sync/internal_api/public/util/weak_handle.h"
-#include "sync/syncable/delete_journal.h"
 #include "sync/syncable/dir_open_result.h"
 #include "sync/syncable/entry_kernel.h"
 #include "sync/syncable/metahandle_set.h"
 #include "sync/syncable/scoped_kernel_lock.h"
+#include "sync/syncable/syncable_delete_journal.h"
 
 namespace syncer {
 
@@ -141,7 +141,7 @@ class SYNC_EXPORT Directory {
                            TakeSnapshotGetsMetahandlesToPurge);
 
  public:
-  static const FilePath::CharType kSyncDatabaseFilename[];
+  static const base::FilePath::CharType kSyncDatabaseFilename[];
 
   // Various data that the Directory::Kernel we are backing (persisting data
   // for) needs saved across runs of the application.
@@ -168,8 +168,6 @@ class SYNC_EXPORT Directory {
     std::string store_birthday;
     // The next local ID that has not been used with this cache-GUID.
     int64 next_id;
-    // The persisted notification state.
-    std::string notification_state;
     // The serialized bag of chips we were given by the server. Contents are
     // opaque to the client. This is the serialization of a message of type
     // ChipBag defined in sync.proto. It can contains NULL characters.
@@ -275,9 +273,6 @@ class SYNC_EXPORT Directory {
   // client.
   std::string bag_of_chips() const;
   void set_bag_of_chips(const std::string& bag_of_chips);
-
-  std::string GetNotificationState() const;
-  void SetNotificationState(const std::string& notification_state);
 
   // Unique to each account / client pair.
   std::string cache_guid() const;
@@ -442,14 +437,18 @@ class SYNC_EXPORT Directory {
   bool FullyCheckTreeInvariants(BaseTransaction *trans);
 
   // Purges all data associated with any entries whose ModelType or
-  // ServerModelType is found in |types|, from _both_ memory and disk.
-  // Only  valid, "real" model types are allowed in |types| (see model_type.h
-  // for definitions).  "Purge" is just meant to distinguish from "deleting"
+  // ServerModelType is found in |types|, from sync directory _both_ in memory
+  // and on disk. |types_to_journal| should be subset of |types| and data
+  // of |types_to_journal| are saved in delete journal to help prevent
+  // back-from-dead problem due to offline delete in next sync session. Only
+  // valid, "real" model types are allowed in |types| (see model_type.h for
+  // definitions).  "Purge" is just meant to distinguish from "deleting"
   // entries, which means something different in the syncable namespace.
   // WARNING! This can be real slow, as it iterates over all entries.
   // WARNING! Performs synchronous I/O.
   // Returns: true on success, false if an error was encountered.
-  virtual bool PurgeEntriesWithTypeIn(ModelTypeSet types);
+  virtual bool PurgeEntriesWithTypeIn(ModelTypeSet types,
+                                      ModelTypeSet types_to_journal);
 
  private:
   // A helper that implements the logic of checking tree invariants.
@@ -483,11 +482,6 @@ class SYNC_EXPORT Directory {
   void GetAllMetaHandles(BaseTransaction* trans, MetahandleSet* result);
   bool SafeToPurgeFromMemory(WriteTransaction* trans,
                              const EntryKernel* const entry) const;
-
-  // Internal setters that do not acquire a lock internally.  These are unsafe
-  // on their own; caller must guarantee exclusive access manually by holding
-  // a ScopedKernelLock.
-  void SetNotificationStateUnsafe(const std::string& notification_state);
 
   Directory& operator = (const Directory&);
 

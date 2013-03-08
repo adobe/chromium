@@ -7,6 +7,7 @@
 
 import optparse
 import os
+import subprocess
 import sys
 import urllib2
 import zipfile
@@ -16,6 +17,61 @@ sys.path.insert(0, os.path.join(_THIS_DIR, os.pardir, 'pylib'))
 
 from common import chrome_paths
 from common import util
+
+GS_BUCKET = 'gs://chromedriver-prebuilts'
+GS_ZIP_PREFIX = 'chromedriver2_prebuilts'
+SLAVE_SCRIPT_DIR = os.path.join(_THIS_DIR, os.pardir, os.pardir, os.pardir,
+                                os.pardir, os.pardir, os.pardir, os.pardir,
+                                'scripts', 'slave')
+UPLOAD_SCRIPT = os.path.join(SLAVE_SCRIPT_DIR, 'skia', 'upload_to_bucket.py')
+DOWNLOAD_SCRIPT = os.path.join(SLAVE_SCRIPT_DIR, 'gsutil_download.py')
+
+
+def Archive(revision):
+  print '@@@BUILD_STEP archive@@@'
+  prebuilts = ['libchromedriver2.so', 'chromedriver2_server',
+               'chromedriver2_unittests', 'chromedriver2_tests']
+  build_dir = chrome_paths.GetBuildDir(prebuilts[0:1])
+  zip_name = '%s_r%s.zip' % (GS_ZIP_PREFIX, revision)
+  temp_dir = util.MakeTempDir()
+  zip_path = os.path.join(temp_dir, zip_name)
+  print 'Zipping prebuilts %s' % zip_path
+  f = zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED)
+  for prebuilt in prebuilts:
+    f.write(os.path.join(build_dir, prebuilt), prebuilt)
+  f.close()
+
+  cmd = [
+    sys.executable,
+    UPLOAD_SCRIPT,
+    '--source_filepath=%s' % zip_path,
+    '--dest_gsbase=%s' % GS_BUCKET
+  ]
+  if util.RunCommand(cmd):
+    print '@@@STEP_FAILURE@@@'
+
+
+def Download():
+  print '@@@BUILD_STEP Download chromedriver prebuilts@@@'
+
+  temp_dir = util.MakeTempDir()
+  zip_path = os.path.join(temp_dir, 'chromedriver2_prebuilts.zip')
+  cmd = [
+    sys.executable,
+    DOWNLOAD_SCRIPT,
+    '--url=%s' % GS_BUCKET,
+    '--partial-name=%s' % GS_ZIP_PREFIX,
+    '--dst=%s' % zip_path
+  ]
+  if util.RunCommand(cmd):
+    print '@@@STEP_FAILURE@@@'
+
+  build_dir = chrome_paths.GetBuildDir([
+      os.path.join('apks', 'ChromiumTestShell.apk')])
+  print 'Unzipping prebuilts %s to %s' % (zip_path, build_dir)
+  f = zipfile.ZipFile(zip_path, 'r')
+  f.extractall(build_dir)
+  f.close()
 
 
 def MaybeRelease(revision):
@@ -52,7 +108,7 @@ def MaybeRelease(revision):
   print 'Zipping ChromeDriver server', server
   temp_dir = util.MakeTempDir()
   zip_path = os.path.join(temp_dir, zip_name)
-  f = zipfile.ZipFile(zip_path, 'w')
+  f = zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED)
   f.write(server, server_name)
   f.close()
 
@@ -66,31 +122,43 @@ def MaybeRelease(revision):
     '--label', 'Release-Alpha',
     zip_path
   ]
-  code = util.RunCommand(cmd)
-  if code != 0:
-    print '@@@STEP_FAILURE@@@'
-  return code
+  with open(os.devnull, 'wb') as no_output:
+    if subprocess.Popen(cmd, stdout=no_output, stderr=no_output).wait():
+      print '@@@STEP_FAILURE@@@'
 
 
 def main():
   parser = optparse.OptionParser()
   parser.add_option(
+      '', '--android-package',
+      help='Application package name, if running tests on Android.')
+  parser.add_option(
       '-r', '--revision', type='string', default=None,
       help='Chromium revision')
   options, _ = parser.parse_args()
-  if options.revision is None:
-    parser.error('Must supply a --revision')
+
+  if options.android_package:
+    Download()
+  else:
+    if options.revision is None:
+      parser.error('Must supply a --revision')
+
+    platform = util.GetPlatformName()
+    if 'linux' in platform:
+      Archive(options.revision)
 
   cmd = [
     sys.executable,
     os.path.join(_THIS_DIR, 'run_all_tests.py'),
   ]
-  code = util.RunCommand(cmd)
-  if code != 0:
-    return code
+  if options.android_package:
+    cmd.append('--android-package=' + options.android_package)
 
-  return MaybeRelease(options.revision)
+  passed = (util.RunCommand(cmd) == 0)
+
+  if not options.android_package and passed:
+    MaybeRelease(options.revision)
 
 
 if __name__ == '__main__':
-  sys.exit(main())
+  main()

@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "chrome_frame/test/test_server.h"
+
 #include <windows.h>
 #include <objbase.h>
 #include <urlmon.h>
@@ -14,7 +16,6 @@
 #include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
 #include "chrome_frame/test/chrome_frame_test_utils.h"
-#include "chrome_frame/test/test_server.h"
 #include "net/base/tcp_listen_socket.h"
 #include "net/base/winsock_init.h"
 #include "net/http/http_util.h"
@@ -37,7 +38,7 @@ void Request::ParseHeaders(const std::string& headers) {
   if (pos != std::string::npos) {
     headers_ = headers.substr(pos + 2);
 
-    StringTokenizer tokenizer(headers.begin(), headers.begin() + pos, " ");
+    base::StringTokenizer tokenizer(headers.begin(), headers.begin() + pos, " ");
     std::string* parse[] = { &method_, &path_, &version_ };
     int field = 0;
     while (tokenizer.GetNext() && field < arraysize(parse)) {
@@ -117,7 +118,7 @@ void FileResponse::WriteContents(net::StreamListenSocket* socket) const {
 
 size_t FileResponse::ContentLength() const {
   if (file_.get() == NULL) {
-    file_.reset(new file_util::MemoryMappedFile());
+    file_.reset(new base::MemoryMappedFile());
     if (!file_->Initialize(file_path_)) {
       NOTREACHED();
       file_.reset();
@@ -251,7 +252,7 @@ void SimpleWebServer::DidClose(net::StreamListenSocket* sock) {
 }
 
 HTTPTestServer::HTTPTestServer(int port, const std::wstring& address,
-                               FilePath root_dir)
+                               base::FilePath root_dir)
     : port_(port), address_(address), root_dir_(root_dir) {
   net::EnsureWinsockInit();
   server_ =

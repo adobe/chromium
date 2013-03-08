@@ -76,6 +76,12 @@ enum NotificationType {
   // Source<ThemeService>. There are no details.
   NOTIFICATION_BROWSER_THEME_CHANGED,
 
+#if defined(USE_AURA)
+  // The user has changed the fling curve configuration.
+  // Source<GesturePrefsObserver>. There are no details.
+  NOTIFICATION_BROWSER_FLING_CURVE_PARAMETERS_CHANGED,
+#endif  // defined(USE_AURA)
+
   // Sent when the renderer returns focus to the browser, as part of focus
   // traversal. The source is the browser, there are no details.
   NOTIFICATION_FOCUS_RETURNED_TO_BROWSER,
@@ -348,12 +354,6 @@ enum NotificationType {
   // one of the images changes. The source is the TopSites, the details not
   // used.
   NOTIFICATION_TOP_SITES_CHANGED,
-
-  // Bookmarks ---------------------------------------------------------------
-
-  // Sent when the bookmark bar model finishes loading. This source is the
-  // Profile, and the details aren't used.
-  NOTIFICATION_BOOKMARK_MODEL_LOADED,
 
   // Task Manager ------------------------------------------------------------
 
@@ -746,6 +746,9 @@ enum NotificationType {
   // Sent when a critical update has been installed. No details are expected.
   NOTIFICATION_CRITICAL_UPGRADE_INSTALLED,
 
+  // Sent when the current install is outdated. No details are expected.
+  NOTIFICATION_OUTDATED_INSTALL,
+
   // Software incompatibility notifications ----------------------------------
 
   // Sent when Chrome has finished compiling the list of loaded modules (and
@@ -1027,8 +1030,8 @@ enum NotificationType {
   // Sent when proxy dialog is closed.
   NOTIFICATION_LOGIN_PROXY_CHANGED,
 
-  // Sent when the user list has changed due to a policy change.
-  NOTIFICATION_POLICY_USER_LIST_CHANGED,
+  // Sent when the user list has changed.
+  NOTIFICATION_USER_LIST_CHANGED,
 
   // Sent when a panel state changed.
   NOTIFICATION_PANEL_STATE_CHANGED,
@@ -1097,13 +1100,21 @@ enum NotificationType {
   // Sent each time the InstantController is updated.
   NOTIFICATION_INSTANT_CONTROLLER_UPDATED,
 
-  // Sent when an Instant preview is committed. The Source is the WebContents
-  // containing the committed preview.
+  // Sent when an Instant overlay is committed. The Source is the WebContents
+  // containing the committed overlay.
   NOTIFICATION_INSTANT_COMMITTED,
 
-  // Sent when the Instant loader determines whether the page supports the
+  // Sent when the Instant Controller determines whether the overlay supports
+  // the Instant API or not.
+  NOTIFICATION_INSTANT_OVERLAY_SUPPORT_DETERMINED,
+
+  // Sent when the Instant Controller determines whether the NTP supports the
   // Instant API or not.
-  NOTIFICATION_INSTANT_SUPPORT_DETERMINED,
+  NOTIFICATION_INSTANT_NTP_SUPPORT_DETERMINED,
+
+  // Sent when the Instant Controller has sent the Most Visited Items to the
+  // renderer.
+  NOTIFICATION_INSTANT_SENT_MOST_VISITED_ITEMS,
 
   // Sent when the CaptivePortalService checks if we're behind a captive portal.
   // The Source is the Profile the CaptivePortalService belongs to, and the
@@ -1233,6 +1244,12 @@ enum NotificationType {
   // if it is leaving.
   NOTIFICATION_CONTENT_BLOCKED_STATE_CHANGED,
 
+  // Session Restore --------------------------------------------------------
+
+  // Sent when synchronous (startup) session restore completes. No details or
+  // source.
+  NOTIFICATION_SESSION_RESTORE_DONE,
+
   // Note:-
   // Currently only Content and Chrome define and use notifications.
   // Custom notifications not belonging to Content and Chrome should start
@@ -1241,6 +1258,5 @@ enum NotificationType {
 };
 
 }  // namespace chrome
-
 
 #endif  // CHROME_COMMON_CHROME_NOTIFICATION_TYPES_H_

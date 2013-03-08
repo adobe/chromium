@@ -9,6 +9,14 @@ namespace chromeos {
 // Constants for ONC properties.
 namespace onc {
 
+const char kAugmentationEffectiveSetting[] = "Effective";
+const char kAugmentationUserPolicy[] = "UserPolicy";
+const char kAugmentationDevicePolicy[] = "DevicePolicy";
+const char kAugmentationUserSetting[] = "UserSetting";
+const char kAugmentationSharedSetting[] = "SharedSetting";
+const char kAugmentationUserEditable[] = "UserEditable";
+const char kAugmentationDeviceEditable[] = "DeviceEditable";
+
 // Common keys/values.
 const char kRecommended[] = "Recommended";
 const char kRemove[] = "Remove";
@@ -113,10 +121,11 @@ const char kPassphrase[] = "Passphrase";
 const char kProxyURL[] = "ProxyURL";
 const char kSSID[] = "SSID";
 const char kSecurity[] = "Security";
-const char kWEP_PSK[] = "WEP-PSK";
+const char kSignalStrength[] = "SignalStrength";
 const char kWEP_8021X[] = "WEP-8021X";
-const char kWPA_PSK[] = "WPA-PSK";
+const char kWEP_PSK[] = "WEP-PSK";
 const char kWPA_EAP[] = "WPA-EAP";
+const char kWPA_PSK[] = "WPA-PSK";
 }  // namespace wifi
 
 namespace certificate {

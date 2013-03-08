@@ -12,7 +12,7 @@
 #include "content/browser/renderer_host/overscroll_controller_delegate.h"
 #include "content/common/content_export.h"
 #include "content/port/browser/render_view_host_delegate_view.h"
-#include "content/public/browser/web_contents_view.h"
+#include "content/port/browser/web_contents_view_port.h"
 #include "ui/aura/client/drag_drop_delegate.h"
 #include "ui/aura/window_delegate.h"
 #include "ui/compositor/layer_animation_observer.h"
@@ -27,12 +27,13 @@ class DropTargetEvent;
 
 namespace content {
 class OverscrollNavigationOverlay;
+class ShadowWindow;
 class WebContentsViewDelegate;
 class WebContentsImpl;
 class WebDragDestDelegate;
 
 class CONTENT_EXPORT WebContentsViewAura
-    : public WebContentsView,
+    : public WebContentsViewPort,
       public RenderViewHostDelegateView,
       NON_EXPORTED_BASE(public OverscrollControllerDelegate),
       public ui::ImplicitAnimationObserver,
@@ -42,8 +43,13 @@ class CONTENT_EXPORT WebContentsViewAura
   WebContentsViewAura(WebContentsImpl* web_contents,
                       WebContentsViewDelegate* delegate);
 
+  void SetupOverlayWindowForTesting();
+
  private:
   class WindowObserver;
+#if defined(OS_WIN)
+  class ChildWindowObserver;
+#endif
 
   virtual ~WebContentsViewAura();
 
@@ -82,32 +88,35 @@ class CONTENT_EXPORT WebContentsViewAura
   // by overscroll. This function sets this up.
   void PrepareOverscrollNavigationOverlay();
 
-  void SetOverscrollWindowBrightness(float brightness, bool animate);
+  // Changes the brightness of the layer depending on the amount of horizontal
+  // overscroll (|delta_x|, in pixels).
+  void UpdateOverscrollWindowBrightness(float delta_x);
 
   // Overridden from WebContentsView:
+  virtual gfx::NativeView GetNativeView() const OVERRIDE;
+  virtual gfx::NativeView GetContentNativeView() const OVERRIDE;
+  virtual gfx::NativeWindow GetTopLevelNativeWindow() const OVERRIDE;
+  virtual void GetContainerBounds(gfx::Rect *out) const OVERRIDE;
+  virtual void OnTabCrashed(base::TerminationStatus status,
+                            int error_code) OVERRIDE;
+  virtual void SizeContents(const gfx::Size& size) OVERRIDE;
+  virtual void Focus() OVERRIDE;
+  virtual void SetInitialFocus() OVERRIDE;
+  virtual void StoreFocus() OVERRIDE;
+  virtual void RestoreFocus() OVERRIDE;
+  virtual WebDropData* GetDropData() const OVERRIDE;
+  virtual gfx::Rect GetViewBounds() const OVERRIDE;
+
+  // Overridden from WebContentsViewPort:
   virtual void CreateView(
       const gfx::Size& initial_size, gfx::NativeView context) OVERRIDE;
   virtual RenderWidgetHostView* CreateViewForWidget(
       RenderWidgetHost* render_widget_host) OVERRIDE;
   virtual RenderWidgetHostView* CreateViewForPopupWidget(
       RenderWidgetHost* render_widget_host) OVERRIDE;
-  virtual gfx::NativeView GetNativeView() const OVERRIDE;
-  virtual gfx::NativeView GetContentNativeView() const OVERRIDE;
-  virtual gfx::NativeWindow GetTopLevelNativeWindow() const OVERRIDE;
-  virtual void GetContainerBounds(gfx::Rect *out) const OVERRIDE;
   virtual void SetPageTitle(const string16& title) OVERRIDE;
-  virtual void OnTabCrashed(base::TerminationStatus status,
-                            int error_code) OVERRIDE;
-  virtual void SizeContents(const gfx::Size& size) OVERRIDE;
   virtual void RenderViewCreated(RenderViewHost* host) OVERRIDE;
-  virtual void Focus() OVERRIDE;
-  virtual void SetInitialFocus() OVERRIDE;
-  virtual void StoreFocus() OVERRIDE;
-  virtual void RestoreFocus() OVERRIDE;
-  virtual WebDropData* GetDropData() const OVERRIDE;
-  virtual bool IsEventTracking() const OVERRIDE;
-  virtual void CloseTabAfterEventTracking() OVERRIDE;
-  virtual gfx::Rect GetViewBounds() const OVERRIDE;
+  virtual void RenderViewSwappedIn(RenderViewHost* host) OVERRIDE;
 
   // Overridden from RenderViewHostDelegateView:
   virtual void ShowContextMenu(
@@ -170,9 +179,15 @@ class CONTENT_EXPORT WebContentsViewAura
   virtual int OnPerformDrop(const ui::DropTargetEvent& event) OVERRIDE;
 
   scoped_ptr<aura::Window> window_;
+
+  // The window that shows the screenshot of the history page during an
+  // overscroll navigation gesture.
   scoped_ptr<aura::Window> overscroll_window_;
 
   scoped_ptr<WindowObserver> window_observer_;
+#if defined(OS_WIN)
+  scoped_ptr<ChildWindowObserver> child_window_observer_;
+#endif
 
   // The WebContentsImpl whose contents we display.
   WebContentsImpl* web_contents_;
@@ -190,6 +205,10 @@ class CONTENT_EXPORT WebContentsViewAura
   // this pointer should never be dereferenced.  We only use it for comparing
   // pointers.
   void* current_rvh_for_drag_;
+
+  // The container for the content-window. The doc for ShadowWindow explains its
+  // lifetime and ownership.
+  ShadowWindow* content_container_;
 
   bool overscroll_change_brightness_;
 

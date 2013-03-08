@@ -11,12 +11,13 @@
 #include "base/command_line.h"
 #include "base/metrics/histogram.h"
 #include "base/stl_util.h"
-#include "base/string_number_conversions.h"
 #include "base/stringprintf.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/time.h"
-#include "chrome/browser/history/history.h"
 #include "chrome/browser/history/history_database.h"
+#include "chrome/browser/history/history_db_task.h"
 #include "chrome/browser/history/history_notifications.h"
+#include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/predictors/predictor_database.h"
 #include "chrome/browser/predictors/predictor_database_factory.h"
@@ -98,7 +99,7 @@ namespace predictors {
 // History lookup task.
 
 // Used to fetch the visit count for a URL from the History database.
-class GetUrlVisitCountTask : public HistoryDBTask {
+class GetUrlVisitCountTask : public history::HistoryDBTask {
  public:
   typedef ResourcePrefetchPredictor::URLRequestSummary URLRequestSummary;
   typedef base::Callback<void(

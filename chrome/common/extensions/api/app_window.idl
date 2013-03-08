@@ -3,6 +3,13 @@
 // found in the LICENSE file.
 
 namespace app.window {
+  dictionary Bounds {
+    long? left;
+    long? top;
+    long? width;
+    long? height;
+  };
+
   dictionary CreateWindowOptions {
     // Id to identify the window. This will be used to remember the size
     // and position of the window and restore that geometry when a window
@@ -71,6 +78,9 @@ namespace app.window {
     // the window to show it once it has been created. Defaults to false.
     boolean? hidden;
 
+    // If true, the window will be resizable by the user. Defaults to true.
+    boolean? resizable;
+
     // By default if you specify an id for the window, the window will only be
     // created if another window with the same id doesn't already exist. If a
     // window with the same id already exists that window is activated instead.
@@ -81,13 +91,6 @@ namespace app.window {
 
   callback CreateWindowCallback =
       void ([instanceOf=AppWindow] object created_window);
-
-  dictionary Bounds {
-    long? left;
-    long? top;
-    long? width;
-    long? height;
-  };
 
   dictionary AppWindow {
     // Focus the window.
@@ -103,7 +106,7 @@ namespace app.window {
     static void maximize();
 
     // Is the window maximized?
-    static bool isMaximized();
+    static boolean isMaximized();
 
     // Restore the window.
     static void restore();

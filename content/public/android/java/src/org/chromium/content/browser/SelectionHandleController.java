@@ -4,6 +4,7 @@
 
 package org.chromium.content.browser;
 
+import android.graphics.PointF;
 import android.view.View;
 
 /**
@@ -11,9 +12,11 @@ import android.view.View;
  */
 abstract class SelectionHandleController implements CursorController {
 
-    // The following constants match the ones in base/i18n/rtl.h.
-    private static final int TEXT_DIRECTION_RTL = 1;
-    private static final int TEXT_DIRECTION_LTR = 2;
+    // The following constants match the ones in
+    // third_party/WebKit/Source/WebKit/chromium/public/WebTextDirection.h
+    private static final int TEXT_DIRECTION_DEFAULT = 0;
+    private static final int TEXT_DIRECTION_LTR = 1;
+    private static final int TEXT_DIRECTION_RTL = 2;
 
     /** The cursor controller images, lazily created when shown. */
     private HandleView mStartHandle, mEndHandle;
@@ -67,7 +70,7 @@ abstract class SelectionHandleController implements CursorController {
      * should be the start handle or end handle) to coordinates x,y.
      * Note that this will not actually result in the handle moving to (x,y):
      * selectBetweenCoordinates(x1,y1,x2,y2) will trigger the selection and set the
-     * actual coordinates later via showHandlesAt.
+     * actual coordinates later via set[Start|End]HandlePosition.
      */
     @Override
     public void updatePosition(HandleView handle, int x, int y) {
@@ -84,11 +87,7 @@ abstract class SelectionHandleController implements CursorController {
     /**
      * The concrete implementation must trigger a selection between the given
      * coordinates and (possibly asynchronously) set the actual handle positions
-     * after the selection is made via showHandlesAt(x1,y1,x2,y2).
-     * @param x1
-     * @param y1
-     * @param x2
-     * @param y2
+     * after the selection is made via set[Start|End]HandlePosition.
      */
     protected abstract void selectBetweenCoordinates(int x1, int y1, int x2, int y2);
 
@@ -119,43 +118,66 @@ abstract class SelectionHandleController implements CursorController {
 
     /**
      * Moves the start handle so that it points at the given coordinates.
-     * @param x
-     * @param y
+     * @param x The start handle position X in physical pixels.
+     * @param y The start handle position Y in physical pixels.
      */
     void setStartHandlePosition(int x, int y) {
         mStartHandle.positionAt(x, y);
     }
 
     /**
+     * Moves the start handle so that it points at the given coordinates.
+     * @param x The start handle position X in physical pixels.
+     * @param y The start handle position Y in physical pixels.
+     */
+    void setStartHandlePosition(float x, float y) {
+        setStartHandlePosition((int) x, (int) y);
+    }
+
+    /**
      * Moves the end handle so that it points at the given coordinates.
-     * @param x
-     * @param y
+     * @param x The end handle position X in physical pixels.
+     * @param y The end handle position Y in physical pixels.
      */
     void setEndHandlePosition(int x, int y) {
         mEndHandle.positionAt(x, y);
     }
 
     /**
-     * Moves the start handle by x pixels horizontally and y pixels vertically.
-     * @param x
-     * @param y
+     * Moves the end handle so that it points at the given coordinates.
+     * @param x The end handle position X in physical pixels.
+     * @param y The end handle position Y in physical pixels.
      */
-    void moveStartHandleBy(int x, int y) {
-        mStartHandle.moveTo(mStartHandle.getPositionX() + x, mStartHandle.getPositionY() + y);
+    void setEndHandlePosition(float x, float y) {
+        setEndHandlePosition((int) x, (int) y);
     }
 
     /**
-     * Moves the end handle by x pixels horizontally and y pixels vertically.
-     * @param x
-     * @param y
+     * If the handles are not visible, sets their visibility to View.VISIBLE and begins fading them
+     * in.
      */
-    void moveEndHandleBy(int x, int y) {
-        mEndHandle.moveTo(mEndHandle.getPositionX() + x, mEndHandle.getPositionY() + y);
+    void beginHandleFadeIn() {
+        mStartHandle.beginFadeIn();
+        mEndHandle.beginFadeIn();
     }
 
-    void onSelectionChanged(int x1, int y1, int dir1, int x2, int y2, int dir2) {
+    /**
+     * Sets the start and end handles to the given visibility.
+     */
+    void setHandleVisibility(int visibility) {
+        mStartHandle.setVisibility(visibility);
+        mEndHandle.setVisibility(visibility);
+    }
+
+    /**
+     * Shows the handles if allowed.
+     *
+     * @param startDir Direction (left/right) of start handle.
+     * @param endDir Direction (left/right) of end handle.
+     */
+    void onSelectionChanged(int startDir, int endDir) {
         if (mAllowAutomaticShowing) {
-            showHandlesAt(x1, y1, dir1, x2, y2, dir2);
+            showHandles(startDir, endDir);
         }
     }
 
@@ -164,26 +186,22 @@ abstract class SelectionHandleController implements CursorController {
      * Note: this method does not trigger a selection, see
      * selectBetweenCoordinates()
      *
-     * @param x1
-     * @param y1
-     * @param x2
-     * @param y2
+     * @param startDir Direction (left/right) of start handle.
+     * @param endDir Direction (left/right) of end handle.
      */
-    void showHandlesAt(int x1, int y1, int dir1, int x2, int y2, int dir2) {
-        createHandlesIfNeeded(dir1, dir2);
-        setStartHandlePosition(x1, y1);
-        setEndHandlePosition(x2, y2);
+    void showHandles(int startDir, int endDir) {
+        createHandlesIfNeeded(startDir, endDir);
         showHandlesIfNeeded();
     }
 
-    private void createHandlesIfNeeded(int start_dir, int end_dir) {
+    private void createHandlesIfNeeded(int startDir, int endDir) {
         if (mStartHandle == null) {
             mStartHandle = new HandleView(this,
-                start_dir == TEXT_DIRECTION_LTR ? HandleView.LEFT : HandleView.RIGHT, mParent);
+                startDir == TEXT_DIRECTION_RTL ? HandleView.RIGHT : HandleView.LEFT, mParent);
         }
         if (mEndHandle == null) {
             mEndHandle = new HandleView(this,
-                end_dir == TEXT_DIRECTION_LTR ? HandleView.RIGHT : HandleView.LEFT, mParent);
+                endDir == TEXT_DIRECTION_RTL ? HandleView.LEFT : HandleView.RIGHT, mParent);
         }
     }
 
@@ -192,6 +210,7 @@ abstract class SelectionHandleController implements CursorController {
             mIsShowing = true;
             mStartHandle.show();
             mEndHandle.show();
+            setHandleVisibility(HandleView.VISIBLE);
         }
     }
 }

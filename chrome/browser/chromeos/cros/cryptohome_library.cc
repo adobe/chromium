@@ -8,8 +8,8 @@
 
 #include "base/bind.h"
 #include "base/memory/weak_ptr.h"
-#include "base/string_number_conversions.h"
 #include "base/string_util.h"
+#include "base/strings/string_number_conversions.h"
 #include "chromeos/dbus/cryptohome_client.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 
@@ -42,13 +42,15 @@ class CryptohomeLibraryImpl : public CryptohomeLibrary {
 
   virtual bool TpmIsOwned() OVERRIDE {
     bool result = false;
-    DBusThreadManager::Get()->GetCryptohomeClient()->TpmIsOwned(&result);
+    DBusThreadManager::Get()->GetCryptohomeClient()->CallTpmIsOwnedAndBlock(
+        &result);
     return result;
   }
 
   virtual bool TpmIsBeingOwned() OVERRIDE {
     bool result = false;
-    DBusThreadManager::Get()->GetCryptohomeClient()->TpmIsBeingOwned(&result);
+    DBusThreadManager::Get()->GetCryptohomeClient()->
+        CallTpmIsBeingOwnedAndBlock(&result);
     return result;
   }
 
@@ -58,7 +60,8 @@ class CryptohomeLibraryImpl : public CryptohomeLibrary {
   }
 
   virtual void TpmClearStoredPassword() OVERRIDE {
-    DBusThreadManager::Get()->GetCryptohomeClient()->TpmClearStoredPassword();
+    DBusThreadManager::Get()->GetCryptohomeClient()->
+        CallTpmClearStoredPasswordAndBlock();
   }
 
   virtual bool InstallAttributesGet(

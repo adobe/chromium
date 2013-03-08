@@ -7,16 +7,18 @@
 
 #include "chrome/browser/notifications/balloon_collection.h"
 
-class PrefServiceSimple;
+class PrefService;
+class PrefRegistrySimple;
 
 // This interface is used to access and mutate the preferences related to
 // desktop notifications.
 class NotificationPrefsManager {
  public:
+  explicit NotificationPrefsManager(PrefService* prefs);
   virtual ~NotificationPrefsManager() {}
 
   // Registers preferences.
-  static void RegisterPrefs(PrefServiceSimple* prefs);
+  static void RegisterPrefs(PrefRegistrySimple* registry);
 
   // Gets the preference indicating where notifications should be placed.
   virtual BalloonCollection::PositionPreference

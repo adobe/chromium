@@ -13,7 +13,12 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebAnimationDelegate.h"
 
+namespace Webkit {
+class WebGraphicsContext3D;
+}
+
 namespace cc {
+class FakeLayerImplTreeHostClient;
 class LayerImpl;
 class LayerTreeHost;
 class LayerTreeHostClient;
@@ -22,29 +27,43 @@ class LayerTreeHostImpl;
 // Used by test stubs to notify the test when something interesting happens.
 class TestHooks : public WebKit::WebAnimationDelegate {
 public:
+    TestHooks();
+    virtual ~TestHooks();
+
     virtual void beginCommitOnThread(LayerTreeHostImpl*) { }
     virtual void commitCompleteOnThread(LayerTreeHostImpl*) { }
+    virtual void treeActivatedOnThread(LayerTreeHostImpl*) { }
+    virtual void initializedRendererOnThread(LayerTreeHostImpl*, bool success) { }
     virtual bool prepareToDrawOnThread(
         LayerTreeHostImpl*, LayerTreeHostImpl::FrameData&, bool result);
     virtual void drawLayersOnThread(LayerTreeHostImpl*) { }
-    virtual void animateLayers(LayerTreeHostImpl*, base::TimeTicks monotonicTime, bool hasUnfinishedAnimation) { }
+    virtual void animateLayers(LayerTreeHostImpl*, base::TimeTicks monotonicTime) { }
+    virtual void updateAnimationState(LayerTreeHostImpl*, bool hasUnfinishedAnimation) { }
     virtual void willAnimateLayers(LayerTreeHostImpl*, base::TimeTicks monotonicTime) { }
     virtual void applyScrollAndScale(gfx::Vector2d, float) { }
     virtual void animate(base::TimeTicks monotonicTime) { }
     virtual void layout() { }
     virtual void didRecreateOutputSurface(bool succeeded) { }
+    virtual void willRetryRecreateOutputSurface() { }
     virtual void didAddAnimation() { }
     virtual void didCommit() { }
     virtual void didCommitAndDrawFrame() { }
     virtual void scheduleComposite() { }
     virtual void didDeferCommit() { }
     virtual bool canActivatePendingTree();
+    virtual void didSetVisibleOnImplTree(LayerTreeHostImpl*, bool visible) { }
 
     // Implementation of WebAnimationDelegate
     virtual void notifyAnimationStarted(double time) OVERRIDE { }
     virtual void notifyAnimationFinished(double time) OVERRIDE { }
 
     virtual scoped_ptr<OutputSurface> createOutputSurface();
+
+    virtual scoped_refptr<cc::ContextProvider> OffscreenContextProviderForMainThread();
+    virtual scoped_refptr<cc::ContextProvider> OffscreenContextProviderForCompositorThread();
+
+private:
+    scoped_ptr<FakeLayerImplTreeHostClient> m_fakeClient;
 };
 
 class TimeoutTask;
@@ -113,12 +132,16 @@ protected:
     scoped_ptr<MockLayerImplTreeHostClient> m_client;
     scoped_ptr<LayerTreeHost> m_layerTreeHost;
 
+    bool testEnded() const { return m_ended; }
+
 private:
     bool m_beginning;
     bool m_endWhenBeginReturns;
     bool m_timedOut;
     bool m_scheduled;
+    bool m_scheduleWhenSetVisibleTrue;
     bool m_started;
+    bool m_ended;
 
     scoped_ptr<Thread> m_mainCCThread;
     scoped_ptr<base::Thread> m_implThread;
@@ -144,13 +167,16 @@ public:
     virtual void commitComplete() OVERRIDE;
     virtual bool prepareToDraw(FrameData&) OVERRIDE;
     virtual void drawLayers(FrameData&) OVERRIDE;
-    virtual void activatePendingTreeIfNeeded() OVERRIDE;
+    virtual bool activatePendingTreeIfNeeded() OVERRIDE;
+    virtual bool initializeRenderer(scoped_ptr<OutputSurface> outputSurface) OVERRIDE;
+    virtual void setVisible(bool visible) OVERRIDE;
 
     // Make these public.
     typedef std::vector<LayerImpl*> LayerList;
 
 protected:
     virtual void animateLayers(base::TimeTicks monotonicTime, base::Time wallClockTime) OVERRIDE;
+    virtual void updateAnimationState() OVERRIDE;
     virtual base::TimeDelta lowFrequencyAnimationInterval() const OVERRIDE;
 
 private:

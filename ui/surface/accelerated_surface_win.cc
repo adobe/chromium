@@ -12,7 +12,7 @@
 #include "base/callback.h"
 #include "base/command_line.h"
 #include "base/debug/trace_event.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/lazy_instance.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop_proxy.h"
@@ -21,13 +21,18 @@
 #include "base/synchronization/waitable_event.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_restrictions.h"
-#include "base/time.h"
 #include "base/win/wrapped_window_proc.h"
+#include "media/base/video_frame.h"
+#include "media/base/video_util.h"
+#include "third_party/skia/include/core/SkBitmap.h"
+#include "ui/base/win/dpi.h"
 #include "ui/base/win/hwnd_util.h"
+#include "ui/base/win/shell.h"
 #include "ui/gfx/rect.h"
 #include "ui/gl/gl_switches.h"
 #include "ui/surface/accelerated_surface_transformer_win.h"
 #include "ui/surface/d3d9_utils_win.h"
+#include "ui/surface/surface_switches.h"
 
 namespace d3d_utils = ui_surface_d3d9_utils;
 
@@ -38,6 +43,41 @@ UINT GetPresentationInterval() {
     return D3DPRESENT_INTERVAL_IMMEDIATE;
   else
     return D3DPRESENT_INTERVAL_ONE;
+}
+
+bool DoFirstShowPresentWithGDI() {
+  return CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kDoFirstShowPresentWithGDI);
+}
+
+bool DoAllShowPresentWithGDI() {
+  return CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kDoAllShowPresentWithGDI);
+}
+
+// Lock a D3D surface, and invoke a VideoFrame copier on the result.
+bool LockAndCopyPlane(IDirect3DSurface9* src_surface,
+                      media::VideoFrame* dst_frame,
+                      size_t plane_id) {
+  gfx::Size src_size = d3d_utils::GetSize(src_surface);
+
+  D3DLOCKED_RECT locked_rect;
+  {
+    TRACE_EVENT0("gpu", "LockRect");
+    HRESULT hr = src_surface->LockRect(&locked_rect, NULL,
+                                       D3DLOCK_READONLY | D3DLOCK_NOSYSLOCK);
+    if (FAILED(hr))
+      return false;
+  }
+
+  {
+    TRACE_EVENT0("gpu", "memcpy");
+    uint8* src = reinterpret_cast<uint8*>(locked_rect.pBits);
+    int src_stride = locked_rect.Pitch;
+    media::CopyPlane(plane_id, src, src_stride, src_size.height(), dst_frame);
+  }
+  src_surface->UnlockRect();
+  return true;
 }
 
 }  // namespace
@@ -57,6 +97,11 @@ class PresentThread : public base::Thread,
 
   void InitDevice();
   void ResetDevice();
+  bool IsDeviceLost();
+
+  base::Lock* lock() {
+    return &lock_;
+  }
 
  protected:
   virtual void Init();
@@ -66,6 +111,10 @@ class PresentThread : public base::Thread,
   friend class base::RefCountedThreadSafe<PresentThread>;
 
   ~PresentThread();
+
+  // The lock is taken while any thread is calling an AcceleratedPresenter
+  // associated with this thread.
+  base::Lock lock_;
 
   base::ScopedNativeLibrary d3d_module_;
   base::win::ScopedComPtr<IDirect3DDevice9Ex> device_;
@@ -105,6 +154,11 @@ class AcceleratedPresenterMap {
   scoped_refptr<AcceleratedPresenter> GetPresenter(
       gfx::PluginWindowHandle window);
 
+
+  // Destroy any D3D resources owned by the given present thread. Called on
+  // the given present thread.
+  void ResetPresentThread(PresentThread* present_thread);
+
  private:
   base::Lock lock_;
   typedef std::map<gfx::PluginWindowHandle, AcceleratedPresenter*> PresenterMap;
@@ -133,10 +187,18 @@ void PresentThread::InitDevice() {
 void PresentThread::ResetDevice() {
   TRACE_EVENT0("gpu", "PresentThread::ResetDevice");
 
+  LOG(ERROR) << "Reseting D3D device";
+
+  // The D3D device must be created on the present thread.
+  CHECK(message_loop() == MessageLoop::current());
+
   // This will crash some Intel drivers but we can't render anything without
   // reseting the device, which would be disappointing.
   query_ = NULL;
   device_ = NULL;
+  surface_transformer_.ReleaseAll();
+
+  g_accelerated_presenter_map.Pointer()->ResetPresentThread(this);
 
   if (!d3d_utils::CreateDevice(d3d_module_,
                                D3DDEVTYPE_HAL,
@@ -147,15 +209,22 @@ void PresentThread::ResetDevice() {
 
   HRESULT hr = device_->CreateQuery(D3DQUERYTYPE_EVENT, query_.Receive());
   if (FAILED(hr)) {
+    LOG(ERROR) << "Failed to create query";
     device_ = NULL;
     return;
   }
 
   if (!surface_transformer_.Init(device_)) {
+    LOG(ERROR) << "Failed to initialize surface transformer";
     query_ = NULL;
     device_ = NULL;
     return;
   }
+}
+
+bool PresentThread::IsDeviceLost() {
+  HRESULT hr = device_->CheckDeviceState(NULL);
+  return FAILED(hr) || hr == S_PRESENT_MODE_CHANGED;
 }
 
 void PresentThread::Init() {
@@ -236,11 +305,25 @@ scoped_refptr<AcceleratedPresenter> AcceleratedPresenterMap::GetPresenter(
   return it->second;
 }
 
+void AcceleratedPresenterMap::ResetPresentThread(
+    PresentThread* present_thread) {
+  base::AutoLock locked(lock_);
+
+  for (PresenterMap::iterator it = presenters_.begin();
+      it != presenters_.end();
+      ++it) {
+    it->second->ResetPresentThread(present_thread);
+  }
+}
+
 AcceleratedPresenter::AcceleratedPresenter(gfx::PluginWindowHandle window)
     : present_thread_(g_present_thread_pool.Pointer()->NextThread()),
       window_(window),
       event_(false, false),
-      hidden_(true) {
+      hidden_(true),
+      do_present_with_GDI_(DoAllShowPresentWithGDI() ||
+                           DoFirstShowPresentWithGDI()),
+      is_session_locked_(false) {
 }
 
 // static
@@ -272,7 +355,7 @@ void AcceleratedPresenter::AsyncPresentAndAcknowledge(
 void AcceleratedPresenter::Present(HDC dc) {
   TRACE_EVENT0("gpu", "Present");
 
-  base::AutoLock locked(lock_);
+  base::AutoLock locked(*present_thread_->lock());
 
   // If invalidated, do nothing. The window is gone.
   if (!window_)
@@ -288,15 +371,27 @@ void AcceleratedPresenter::Present(HDC dc) {
 void AcceleratedPresenter::AsyncCopyTo(
     const gfx::Rect& requested_src_subrect,
     const gfx::Size& dst_size,
-    void* buf,
-    const base::Callback<void(bool)>& callback) {
+    const base::Callback<void(bool, const SkBitmap&)>& callback) {
   present_thread_->message_loop()->PostTask(
       FROM_HERE,
       base::Bind(&AcceleratedPresenter::DoCopyToAndAcknowledge,
                  this,
                  requested_src_subrect,
                  dst_size,
-                 buf,
+                 base::MessageLoopProxy::current(),
+                 callback));
+}
+
+void AcceleratedPresenter::AsyncCopyToVideoFrame(
+    const gfx::Rect& requested_src_subrect,
+    const scoped_refptr<media::VideoFrame>& target,
+    const base::Callback<void(bool)>& callback) {
+  present_thread_->message_loop()->PostTask(
+      FROM_HERE,
+      base::Bind(&AcceleratedPresenter::DoCopyToVideoFrameAndAcknowledge,
+                 this,
+                 requested_src_subrect,
+                 target,
                  base::MessageLoopProxy::current(),
                  callback));
 }
@@ -304,27 +399,131 @@ void AcceleratedPresenter::AsyncCopyTo(
 void AcceleratedPresenter::DoCopyToAndAcknowledge(
     const gfx::Rect& src_subrect,
     const gfx::Size& dst_size,
-    void* buf,
     scoped_refptr<base::SingleThreadTaskRunner> callback_runner,
-    const base::Callback<void(bool)>& callback) {
-
-  bool result = DoCopyTo(src_subrect, dst_size, buf);
-  callback_runner->PostTask(
-      FROM_HERE,
-      base::Bind(callback, result));
+    const base::Callback<void(bool, const SkBitmap&)>& callback) {
+  SkBitmap target;
+  bool result = DoCopyToARGB(src_subrect, dst_size, &target);
+  if (!result)
+    target.reset();
+  callback_runner->PostTask(FROM_HERE, base::Bind(callback, result, target));
 }
 
-bool AcceleratedPresenter::DoCopyTo(const gfx::Rect& requested_src_subrect,
-                                    const gfx::Size& dst_size,
-                                    void* buf) {
+void AcceleratedPresenter::DoCopyToVideoFrameAndAcknowledge(
+    const gfx::Rect& src_subrect,
+    const scoped_refptr<media::VideoFrame>& target,
+    const scoped_refptr<base::SingleThreadTaskRunner>& callback_runner,
+    const base::Callback<void(bool)>& callback) {
+
+  bool result = DoCopyToYUV(src_subrect, target);
+  callback_runner->PostTask(FROM_HERE, base::Bind(callback, result));
+}
+
+bool AcceleratedPresenter::DoCopyToARGB(const gfx::Rect& requested_src_subrect,
+                                        const gfx::Size& dst_size,
+                                        SkBitmap* bitmap) {
   TRACE_EVENT2(
       "gpu", "CopyTo",
       "width", dst_size.width(),
       "height", dst_size.height());
 
-  base::AutoLock locked(lock_);
+  base::AutoLock locked(*present_thread_->lock());
 
-  TRACE_EVENT0("gpu", "CopyTo_locked");
+  if (!swap_chain_)
+    return false;
+
+  AcceleratedSurfaceTransformer* gpu_ops =
+      present_thread_->surface_transformer();
+
+  base::win::ScopedComPtr<IDirect3DSurface9> back_buffer;
+  HRESULT hr = swap_chain_->GetBackBuffer(0,
+                                          D3DBACKBUFFER_TYPE_MONO,
+                                          back_buffer.Receive());
+  if (FAILED(hr)) {
+    LOG(ERROR) << "Failed to get back buffer";
+    return false;
+  }
+
+  D3DSURFACE_DESC desc;
+  hr = back_buffer->GetDesc(&desc);
+  if (FAILED(hr)) {
+    LOG(ERROR) << "Failed to get buffer description";
+    return false;
+  }
+
+  const gfx::Size back_buffer_size(desc.Width, desc.Height);
+  if (back_buffer_size.IsEmpty())
+    return false;
+
+  // With window resizing, it's possible that the back buffer is smaller than
+  // the requested src subset. Clip to the actual back buffer.
+  gfx::Rect src_subrect = requested_src_subrect;
+  src_subrect.Intersect(gfx::Rect(back_buffer_size));
+  base::win::ScopedComPtr<IDirect3DSurface9> final_surface;
+  {
+    TRACE_EVENT0("gpu", "CreateTemporaryLockableSurface");
+    if (!d3d_utils::CreateTemporaryLockableSurface(present_thread_->device(),
+                                                   dst_size,
+                                                   final_surface.Receive())) {
+      LOG(ERROR) << "Failed to create temporary lockable surface";
+      return false;
+    }
+  }
+
+  {
+    // Let the surface transformer start the resize into |final_surface|.
+    TRACE_EVENT0("gpu", "ResizeBilinear");
+    if (!gpu_ops->ResizeBilinear(back_buffer, src_subrect,
+                                 final_surface, gfx::Rect(dst_size))) {
+      LOG(ERROR) << "Failed to resize bilinear";
+      return false;
+    }
+  }
+
+  D3DLOCKED_RECT locked_rect;
+
+  // Empirical evidence seems to suggest that LockRect and memcpy are faster
+  // than would be GetRenderTargetData to an offscreen surface wrapping *buf.
+  {
+    TRACE_EVENT0("gpu", "LockRect");
+    hr = final_surface->LockRect(&locked_rect, NULL,
+                                 D3DLOCK_READONLY | D3DLOCK_NOSYSLOCK);
+    if (FAILED(hr)) {
+      LOG(ERROR) << "Failed to lock surface";
+      return false;
+    }
+  }
+
+  {
+    TRACE_EVENT0("gpu", "memcpy");
+
+    bitmap->setConfig(SkBitmap::kARGB_8888_Config,
+                      dst_size.width(), dst_size.height(),
+                      locked_rect.Pitch);
+    if (!bitmap->allocPixels()) {
+      final_surface->UnlockRect();
+      return false;
+    }
+    bitmap->setIsOpaque(true);
+
+    memcpy(reinterpret_cast<int8*>(bitmap->getPixels()),
+           reinterpret_cast<int8*>(locked_rect.pBits),
+           locked_rect.Pitch * dst_size.height());
+  }
+  final_surface->UnlockRect();
+
+  return true;
+}
+
+bool AcceleratedPresenter::DoCopyToYUV(
+    const gfx::Rect& requested_src_subrect,
+    const scoped_refptr<media::VideoFrame>& frame) {
+  gfx::Size dst_size = frame->coded_size();
+  TRACE_EVENT2(
+      "gpu", "CopyToYUV",
+      "width", dst_size.width(),
+      "height", dst_size.height());
+
+  base::AutoLock locked(*present_thread_->lock());
 
   if (!swap_chain_)
     return false;
@@ -352,53 +551,53 @@ bool AcceleratedPresenter::DoCopyTo(const gfx::Rect& requested_src_subrect,
   // the requested src subset. Clip to the actual back buffer.
   gfx::Rect src_subrect = requested_src_subrect;
   src_subrect.Intersect(gfx::Rect(back_buffer_size));
-  base::win::ScopedComPtr<IDirect3DSurface9> final_surface;
+
+  base::win::ScopedComPtr<IDirect3DTexture9> resized_as_texture;
+  base::win::ScopedComPtr<IDirect3DSurface9> resized;
   {
-    TRACE_EVENT0("gpu", "CreateTemporaryLockableSurface");
-    if (!d3d_utils::CreateTemporaryLockableSurface(present_thread_->device(),
-                                                   dst_size,
-                                                   final_surface.Receive())) {
+    TRACE_EVENT0("gpu", "CreateTemporaryRenderTargetTexture");
+    if (!d3d_utils::CreateTemporaryRenderTargetTexture(
+            present_thread_->device(),
+            dst_size,
+            resized_as_texture.Receive(),
+            resized.Receive())) {
       return false;
     }
   }
 
+  // Shrink the source to fit entirely in the destination while preserving
+  // aspect ratio. Fill in any margin with black.
+  // TODO(nick): It would be more efficient all around to implement
+  // letterboxing as a memset() on the dst.
+  gfx::Rect letterbox = media::ComputeLetterboxRegion(gfx::Rect(dst_size),
+                                                      src_subrect.size());
+  if (letterbox != gfx::Rect(dst_size)) {
+    TRACE_EVENT0("gpu", "Letterbox");
+    present_thread_->device()->ColorFill(resized, NULL, 0xFF000000);
+  }
+
   {
-    // Let the surface transformer start the resize into |final_surface|.
     TRACE_EVENT0("gpu", "ResizeBilinear");
-    if (!gpu_ops->ResizeBilinear(back_buffer, src_subrect, final_surface))
+    if (!gpu_ops->ResizeBilinear(back_buffer, src_subrect, resized, letterbox))
       return false;
   }
 
-  D3DLOCKED_RECT locked_rect;
-
-  // Empirical evidence seems to suggest that LockRect and memcpy are faster
-  // than would be GetRenderTargetData to an offscreen surface wrapping *buf.
+  base::win::ScopedComPtr<IDirect3DSurface9> y, u, v;
   {
-    TRACE_EVENT0("gpu", "LockRect");
-    hr = final_surface->LockRect(&locked_rect, NULL,
-                                 D3DLOCK_READONLY | D3DLOCK_NOSYSLOCK);
-    if (FAILED(hr))
+    TRACE_EVENT0("gpu", "TransformRGBToYV12");
+    if (!gpu_ops->TransformRGBToYV12(resized_as_texture,
+                                     dst_size,
+                                     y.Receive(), u.Receive(), v.Receive())) {
       return false;
-  }
-
-  {
-    TRACE_EVENT0("gpu", "memcpy");
-    size_t bytesPerDstRow = 4 * dst_size.width();
-    size_t bytesPerSrcRow = locked_rect.Pitch;
-    if (bytesPerDstRow == bytesPerSrcRow) {
-      memcpy(reinterpret_cast<int8*>(buf),
-             reinterpret_cast<int8*>(locked_rect.pBits),
-             bytesPerDstRow * dst_size.height());
-    } else {
-      for (int i = 0; i < dst_size.height(); ++i) {
-        memcpy(reinterpret_cast<int8*>(buf) + bytesPerDstRow * i,
-               reinterpret_cast<int8*>(locked_rect.pBits) + bytesPerSrcRow * i,
-               bytesPerDstRow);
-      }
     }
   }
-  final_surface->UnlockRect();
 
+  if (!LockAndCopyPlane(y, frame, media::VideoFrame::kYPlane))
+    return false;
+  if (!LockAndCopyPlane(u, frame, media::VideoFrame::kUPlane))
+    return false;
+  if (!LockAndCopyPlane(v, frame, media::VideoFrame::kVPlane))
+    return false;
   return true;
 }
 
@@ -410,7 +609,7 @@ void AcceleratedPresenter::Suspend() {
 }
 
 void AcceleratedPresenter::WasHidden() {
-  base::AutoLock locked(lock_);
+  base::AutoLock locked(*present_thread_->lock());
   hidden_ = true;
 }
 
@@ -421,13 +620,32 @@ void AcceleratedPresenter::ReleaseSurface() {
                  this));
 }
 
+void AcceleratedPresenter::SetIsSessionLocked(bool locked) {
+  is_session_locked_ = locked;
+}
+
 void AcceleratedPresenter::Invalidate() {
   // Make any pending or future presentation tasks do nothing. Once the last
   // last pending task has been ignored, the reference count on the presenter
   // will go to zero and the presenter, and potentially also the present thread
   // it has a reference count on, will be destroyed.
-  base::AutoLock locked(lock_);
+  base::AutoLock locked(*present_thread_->lock());
   window_ = NULL;
+}
+
+void AcceleratedPresenter::ResetPresentThread(
+    PresentThread* present_thread) {
+  TRACE_EVENT0("gpu", "ResetPresentThread");
+
+  // present_thread_ can be accessed without the lock because it is immutable.
+  if (present_thread_ != present_thread)
+    return;
+
+  present_thread_->lock()->AssertAcquired();
+
+  source_texture_ = NULL;
+  swap_chain_ = NULL;
+  quantized_size_ = gfx::Size();
 }
 
 #if defined(USE_AURA)
@@ -450,19 +668,18 @@ void AcceleratedPresenter::DoPresentAndAcknowledge(
 
   HRESULT hr;
 
-  base::AutoLock locked(lock_);
+  base::AutoLock locked(*present_thread_->lock());
 
   // Initialize the device lazily since calling Direct3D can crash bots.
   present_thread_->InitDevice();
 
   if (!present_thread_->device()) {
-    if (!completion_task.is_null())
-      completion_task.Run(false, base::TimeTicks(), base::TimeDelta());
+    completion_task.Run(false, base::TimeTicks(), base::TimeDelta());
     TRACE_EVENT0("gpu", "EarlyOut_NoDevice");
     return;
   }
 
-  // Ensure the task is always run and while the lock is taken.
+  // Ensure the task is acknowledged on early out after this point.
   base::ScopedClosureRunner scoped_completion_runner(
       base::Bind(completion_task, true, base::TimeTicks(), base::TimeDelta()));
 
@@ -476,7 +693,19 @@ void AcceleratedPresenter::DoPresentAndAcknowledge(
   // If the window is a different size than the swap chain that is being
   // presented then drop the frame.
   gfx::Size window_size = GetWindowSize();
-  if (hidden_ && size != window_size) {
+#if defined(ENABLE_HIDPI)
+  // Check if the size mismatch is within allowable round off or truncation
+  // error.
+  gfx::Size dip_size = ui::win::ScreenToDIPSize(window_size);
+  gfx::Size pixel_size = ui::win::DIPToScreenSize(dip_size);
+  bool size_mismatch = abs(window_size.width() - size.width()) >
+      abs(window_size.width() - pixel_size.width()) ||
+      abs(window_size.height() - size.height()) >
+      abs(window_size.height() - pixel_size.height());
+#else
+  bool size_mismatch = size != window_size;
+#endif
+  if (hidden_ && size_mismatch) {
     TRACE_EVENT2("gpu", "EarlyOut_WrongWindowSize",
                  "backwidth", size.width(), "backheight", size.height());
     TRACE_EVENT2("gpu", "EarlyOut_WrongWindowSize2",
@@ -514,8 +743,11 @@ void AcceleratedPresenter::DoPresentAndAcknowledge(
     HRESULT hr = present_thread_->device()->CreateAdditionalSwapChain(
         &parameters,
         swap_chain_.Receive());
-    if (FAILED(hr))
+    if (FAILED(hr)) {
+      LOG(ERROR) << "Failed to create swap chain "
+                 << quantized_size.width() << " x " <<quantized_size.height();
       return;
+    }
   }
 
   if (!source_texture_.get()) {
@@ -524,6 +756,7 @@ void AcceleratedPresenter::DoPresentAndAcknowledge(
                                       surface_handle,
                                       size,
                                       source_texture_.Receive())) {
+      LOG(ERROR) << "Failed to open shared texture";
       return;
     }
   }
@@ -532,6 +765,7 @@ void AcceleratedPresenter::DoPresentAndAcknowledge(
   hr = source_texture_->GetSurfaceLevel(0, source_surface.Receive());
   if (FAILED(hr)) {
     TRACE_EVENT0("gpu", "EarlyOut_NoSurfaceLevel");
+    LOG(ERROR) << "Failed to get source surface";
     return;
   }
 
@@ -541,6 +775,7 @@ void AcceleratedPresenter::DoPresentAndAcknowledge(
                                   dest_surface.Receive());
   if (FAILED(hr)) {
     TRACE_EVENT0("gpu", "EarlyOut_NoBackbuffer");
+    LOG(ERROR) << "Failed to get back buffer";
     return;
   }
 
@@ -555,13 +790,17 @@ void AcceleratedPresenter::DoPresentAndAcknowledge(
     // Copy while flipping the source texture on the vertical axis.
     bool result = present_thread_->surface_transformer()->CopyInverted(
         source_texture_, dest_surface, size);
-    if (!result)
+    if (!result) {
+      LOG(ERROR) << "Failed to copy shared texture";
       return;
+    }
   }
 
   hr = present_thread_->query()->Issue(D3DISSUE_END);
-  if (FAILED(hr))
+  if (FAILED(hr)) {
+    LOG(ERROR) << "Failed to issue query";
     return;
+  }
 
   present_size_ = size;
 
@@ -575,9 +814,10 @@ void AcceleratedPresenter::DoPresentAndAcknowledge(
     // For latency_tests.cc:
     UNSHIPPED_TRACE_EVENT_INSTANT0("test_gpu", "CompositorSwapBuffersComplete");
 
-    if (FAILED(hr) &&
-        FAILED(present_thread_->device()->CheckDeviceState(window_))) {
-      present_thread_->ResetDevice();
+    if (FAILED(hr)) {
+      if (present_thread_->IsDeviceLost())
+        present_thread_->ResetDevice();
+      return;
     }
   } else {
     HDC dc = GetDC(window_);
@@ -585,21 +825,21 @@ void AcceleratedPresenter::DoPresentAndAcknowledge(
     ReleaseDC(window_, dc);
   }
 
-  // Early out if failed to reset device.
-  if (!present_thread_->device())
-    return;
-
   hidden_ = false;
 
   D3DDISPLAYMODE display_mode;
   hr = present_thread_->device()->GetDisplayMode(0, &display_mode);
-  if (FAILED(hr))
+  if (FAILED(hr)) {
+    LOG(ERROR) << "Failed to get display mode";
     return;
+  }
 
   D3DRASTER_STATUS raster_status;
   hr = swap_chain_->GetRasterStatus(&raster_status);
-  if (FAILED(hr))
+  if (FAILED(hr)) {
+    LOG(ERROR) << "Failed to get raster status";
     return;
+  }
 
   // I can't figure out how to determine how many scanlines are in the
   // vertical blank so clamp it such that scanline / height <= 1.
@@ -628,11 +868,17 @@ void AcceleratedPresenter::DoPresentAndAcknowledge(
   // that it is safe to write to its backing store again.
   {
     TRACE_EVENT0("gpu", "spin");
+
     do {
       hr = present_thread_->query()->GetData(NULL, 0, D3DGETDATA_FLUSH);
-
-      if (hr == S_FALSE)
+      if (hr == S_FALSE) {
         Sleep(1);
+
+        if (present_thread_->IsDeviceLost()) {
+          present_thread_->ResetDevice();
+          return;
+        }
+      }
     } while (hr == S_FALSE);
   }
 
@@ -641,12 +887,12 @@ void AcceleratedPresenter::DoPresentAndAcknowledge(
 }
 
 void AcceleratedPresenter::DoSuspend() {
-  base::AutoLock locked(lock_);
+  base::AutoLock locked(*present_thread_->lock());
   swap_chain_ = NULL;
 }
 
 void AcceleratedPresenter::DoReleaseSurface() {
-  base::AutoLock locked(lock_);
+  base::AutoLock locked(*present_thread_->lock());
   present_thread_->InitDevice();
   source_texture_.Release();
 }
@@ -654,11 +900,15 @@ void AcceleratedPresenter::DoReleaseSurface() {
 void AcceleratedPresenter::PresentWithGDI(HDC dc) {
   TRACE_EVENT0("gpu", "PresentWithGDI");
 
-  if (!present_thread_->device())
+  if (!present_thread_->device()) {
+    LOG(ERROR) << "No device";
     return;
+  }
 
-  if (!swap_chain_)
+  if (!swap_chain_) {
+    LOG(ERROR) << "No swap chain";
     return;
+  }
 
   base::win::ScopedComPtr<IDirect3DTexture9> system_texture;
   {
@@ -672,8 +922,10 @@ void AcceleratedPresenter::PresentWithGDI(HDC dc) {
         D3DPOOL_SYSTEMMEM,
         system_texture.Receive(),
         NULL);
-    if (FAILED(hr))
+    if (FAILED(hr)) {
+      LOG(ERROR) << "Failed to create system memory texture";
       return;
+    }
   }
 
   base::win::ScopedComPtr<IDirect3DSurface9> system_surface;
@@ -690,6 +942,16 @@ void AcceleratedPresenter::PresentWithGDI(HDC dc) {
     TRACE_EVENT0("gpu", "GetRenderTargetData");
     hr = present_thread_->device()->GetRenderTargetData(back_buffer,
                                                         system_surface);
+
+    if (FAILED(hr)) {
+      if (present_thread_->IsDeviceLost()) {
+        present_thread_->message_loop()->PostTask(
+            FROM_HERE,
+            base::Bind(&PresentThread::ResetDevice, present_thread_));
+      }
+      return;
+    }
+
     DCHECK(SUCCEEDED(hr));
   }
 
@@ -739,10 +1001,30 @@ gfx::Size AcceleratedPresenter::GetWindowSize() {
 }
 
 bool AcceleratedPresenter::CheckDirect3DWillWork() {
+  // On a composited desktop, when the screen saver or logon screen are
+  // active, D3D presents never make it to the window but GDI presents
+  // do. If the session is locked GDI presents can be avoided since
+  // the window gets a message on unlock and forces a repaint.
+  if (!is_session_locked_ && ui::win::IsAeroGlassEnabled()) {
+    // Failure to open the input desktop is a sign of running with a non-default
+    // desktop.
+    HDESK input_desktop = ::OpenInputDesktop(0, 0, GENERIC_READ);
+    if (!input_desktop)
+      return false;
+    ::CloseDesktop(input_desktop);
+  }
+
   gfx::Size window_size = GetWindowSize();
   if (window_size != last_window_size_ && last_window_size_.GetArea() != 0) {
     last_window_size_ = window_size;
     last_window_resize_time_ = base::Time::Now();
+    return false;
+  }
+
+  if (do_present_with_GDI_ && hidden_) {
+    if (DoFirstShowPresentWithGDI())
+      do_present_with_GDI_ = false;
+
     return false;
   }
 
@@ -767,9 +1049,15 @@ void AcceleratedSurface::Present(HDC dc) {
 void AcceleratedSurface::AsyncCopyTo(
     const gfx::Rect& src_subrect,
     const gfx::Size& dst_size,
-    void* buf,
+    const base::Callback<void(bool, const SkBitmap&)>& callback) {
+  presenter_->AsyncCopyTo(src_subrect, dst_size, callback);
+}
+
+void AcceleratedSurface::AsyncCopyToVideoFrame(
+    const gfx::Rect& src_subrect,
+    const scoped_refptr<media::VideoFrame>& target,
     const base::Callback<void(bool)>& callback) {
-  presenter_->AsyncCopyTo(src_subrect, dst_size, buf, callback);
+  presenter_->AsyncCopyToVideoFrame(src_subrect, target, callback);
 }
 
 void AcceleratedSurface::Suspend() {
@@ -778,4 +1066,8 @@ void AcceleratedSurface::Suspend() {
 
 void AcceleratedSurface::WasHidden() {
   presenter_->WasHidden();
+}
+
+void AcceleratedSurface::SetIsSessionLocked(bool locked) {
+  presenter_->SetIsSessionLocked(locked);
 }

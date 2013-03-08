@@ -29,8 +29,6 @@ class GPU_EXPORT QueryManager {
  public:
   class GPU_EXPORT Query : public base::RefCounted<Query> {
    public:
-    typedef scoped_refptr<Query> Ref;
-
     Query(
         QueryManager* manager, GLenum target, int32 shm_id, uint32 shm_offset);
 
@@ -89,9 +87,19 @@ class GPU_EXPORT QueryManager {
       submit_count_ = submit_count;
     }
 
+    void UnmarkAsPending() {
+      DCHECK(pending_);
+      pending_ = false;
+    }
+
     // Returns false if shared memory for sync is invalid.
     bool AddToPendingQueue(uint32 submit_count) {
       return manager_->AddPendingQuery(this, submit_count);
+    }
+
+    // Returns false if shared memory for sync is invalid.
+    bool AddToPendingTransferQueue(uint32 submit_count) {
+      return manager_->AddPendingTransferQuery(this, submit_count);
     }
 
     void BeginQueryHelper(GLenum target, GLuint id) {
@@ -102,14 +110,14 @@ class GPU_EXPORT QueryManager {
       manager_->EndQueryHelper(target);
     }
 
+    uint32 submit_count() const {
+      return submit_count_;
+    }
+
    private:
     friend class QueryManager;
     friend class QueryManagerTest;
     friend class base::RefCounted<Query>;
-
-    uint32 submit_count() const {
-      return submit_count_;
-    }
 
     // The manager that owns this Query.
     QueryManager* manager_;
@@ -162,6 +170,13 @@ class GPU_EXPORT QueryManager {
   // True if there are pending queries.
   bool HavePendingQueries();
 
+  // Processes pending transfer queries. Returns false if any queries are
+  // pointing to invalid shared memory.
+  bool ProcessPendingTransferQueries();
+
+  // True if there are pending transfer queries.
+  bool HavePendingTransferQueries();
+
   GLES2Decoder* decoder() const {
     return decoder_;
   }
@@ -178,6 +193,10 @@ class GPU_EXPORT QueryManager {
   // Adds to queue of queries waiting for completion.
   // Returns false if any query is pointing to invalid shared memory.
   bool AddPendingQuery(Query* query, uint32 submit_count);
+
+  // Adds to queue of transfer queries waiting for completion.
+  // Returns false if any query is pointing to invalid shared memory.
+  bool AddPendingTransferQuery(Query* query, uint32 submit_count);
 
   // Removes a query from the queue of pending queries.
   // Returns false if any query is pointing to invalid shared memory.
@@ -198,12 +217,15 @@ class GPU_EXPORT QueryManager {
   unsigned query_count_;
 
   // Info for each query in the system.
-  typedef base::hash_map<GLuint, Query::Ref> QueryMap;
+  typedef base::hash_map<GLuint, scoped_refptr<Query> > QueryMap;
   QueryMap queries_;
 
   // Queries waiting for completion.
-  typedef std::deque<Query::Ref> QueryQueue;
+  typedef std::deque<scoped_refptr<Query> > QueryQueue;
   QueryQueue pending_queries_;
+
+  // Async pixel transfer queries waiting for completion.
+  QueryQueue pending_transfer_queries_;
 
   DISALLOW_COPY_AND_ASSIGN(QueryManager);
 };

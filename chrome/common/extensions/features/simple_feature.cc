@@ -9,34 +9,34 @@
 
 #include "base/command_line.h"
 #include "base/lazy_instance.h"
+#include "base/sha1.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
+#include "base/strings/string_number_conversions.h"
 #include "chrome/common/chrome_switches.h"
 
 using chrome::VersionInfo;
-using extensions::Extension;
+
+namespace extensions {
 
 namespace {
 
 struct Mappings {
   Mappings() {
-    extension_types["extension"] = Extension::TYPE_EXTENSION;
-    extension_types["theme"] = Extension::TYPE_THEME;
-    extension_types["packaged_app"]
-        = Extension::TYPE_LEGACY_PACKAGED_APP;
-    extension_types["hosted_app"] = Extension::TYPE_HOSTED_APP;
-    extension_types["platform_app"] = Extension::TYPE_PLATFORM_APP;
+    extension_types["extension"] = Manifest::TYPE_EXTENSION;
+    extension_types["theme"] = Manifest::TYPE_THEME;
+    extension_types["packaged_app"] = Manifest::TYPE_LEGACY_PACKAGED_APP;
+    extension_types["hosted_app"] = Manifest::TYPE_HOSTED_APP;
+    extension_types["platform_app"] = Manifest::TYPE_PLATFORM_APP;
 
-    contexts["blessed_extension"] =
-        extensions::Feature::BLESSED_EXTENSION_CONTEXT;
-    contexts["unblessed_extension"] =
-        extensions::Feature::UNBLESSED_EXTENSION_CONTEXT;
-    contexts["content_script"] = extensions::Feature::CONTENT_SCRIPT_CONTEXT;
-    contexts["web_page"] = extensions::Feature::WEB_PAGE_CONTEXT;
+    contexts["blessed_extension"] = Feature::BLESSED_EXTENSION_CONTEXT;
+    contexts["unblessed_extension"] = Feature::UNBLESSED_EXTENSION_CONTEXT;
+    contexts["content_script"] = Feature::CONTENT_SCRIPT_CONTEXT;
+    contexts["web_page"] = Feature::WEB_PAGE_CONTEXT;
 
-    locations["component"] = extensions::Feature::COMPONENT_LOCATION;
+    locations["component"] = Feature::COMPONENT_LOCATION;
 
-    platforms["chromeos"] = extensions::Feature::CHROMEOS_PLATFORM;
+    platforms["chromeos"] = Feature::CHROMEOS_PLATFORM;
 
     channels["trunk"] = VersionInfo::CHANNEL_UNKNOWN;
     channels["canary"] = VersionInfo::CHANNEL_CANARY;
@@ -45,10 +45,10 @@ struct Mappings {
     channels["stable"] = VersionInfo::CHANNEL_STABLE;
   }
 
-  std::map<std::string, Extension::Type> extension_types;
-  std::map<std::string, extensions::Feature::Context> contexts;
-  std::map<std::string, extensions::Feature::Location> locations;
-  std::map<std::string, extensions::Feature::Platform> platforms;
+  std::map<std::string, Manifest::Type> extension_types;
+  std::map<std::string, Feature::Context> contexts;
+  std::map<std::string, Feature::Location> locations;
+  std::map<std::string, Feature::Platform> platforms;
   std::map<std::string, VersionInfo::Channel> channels;
 };
 
@@ -136,21 +136,21 @@ void ParseEnumSet(const DictionaryValue* value,
 }
 
 // Gets a human-readable name for the given extension type.
-std::string GetDisplayTypeName(Extension::Type type) {
+std::string GetDisplayTypeName(Manifest::Type type) {
   switch (type) {
-    case Extension::TYPE_UNKNOWN:
+    case Manifest::TYPE_UNKNOWN:
       return "unknown";
-    case Extension::TYPE_EXTENSION:
+    case Manifest::TYPE_EXTENSION:
       return "extension";
-    case Extension::TYPE_HOSTED_APP:
+    case Manifest::TYPE_HOSTED_APP:
       return "hosted app";
-    case Extension::TYPE_LEGACY_PACKAGED_APP:
+    case Manifest::TYPE_LEGACY_PACKAGED_APP:
       return "legacy packaged app";
-    case Extension::TYPE_PLATFORM_APP:
+    case Manifest::TYPE_PLATFORM_APP:
       return "packaged app";
-    case Extension::TYPE_THEME:
+    case Manifest::TYPE_THEME:
       return "theme";
-    case Extension::TYPE_USER_SCRIPT:
+    case Manifest::TYPE_USER_SCRIPT:
       return "user script";
   }
 
@@ -159,8 +159,6 @@ std::string GetDisplayTypeName(Extension::Type type) {
 }
 
 }  // namespace
-
-namespace extensions {
 
 SimpleFeature::SimpleFeature()
   : location_(UNSPECIFIED_LOCATION),
@@ -197,7 +195,7 @@ bool SimpleFeature::Equals(const SimpleFeature& other) const {
 
 void SimpleFeature::Parse(const DictionaryValue* value) {
   ParseSet(value, "whitelist", &whitelist_);
-  ParseEnumSet<Extension::Type>(value, "extension_types", &extension_types_,
+  ParseEnumSet<Manifest::Type>(value, "extension_types", &extension_types_,
                                 g_mappings.Get().extension_types);
   ParseEnumSet<Context>(value, "contexts", &contexts_,
                         g_mappings.Get().contexts);
@@ -214,7 +212,7 @@ void SimpleFeature::Parse(const DictionaryValue* value) {
 
 Feature::Availability SimpleFeature::IsAvailableToManifest(
     const std::string& extension_id,
-    Extension::Type type,
+    Manifest::Type type,
     Location location,
     int manifest_version,
     Platform platform) const {
@@ -223,7 +221,7 @@ Feature::Availability SimpleFeature::IsAvailableToManifest(
     return CreateAvailability(IS_AVAILABLE, type);
 
   if (!whitelist_.empty()) {
-    if (whitelist_.find(extension_id) == whitelist_.end()) {
+    if (!IsIdInWhitelist(extension_id)) {
       // TODO(aa): This is gross. There should be a better way to test the
       // whitelist.
       CommandLine* command_line = CommandLine::ForCurrentProcess();
@@ -283,7 +281,7 @@ Feature::Availability SimpleFeature::IsAvailableToContext(
 }
 
 std::string SimpleFeature::GetAvailabilityMessage(
-    AvailabilityResult result, Extension::Type type) const {
+    AvailabilityResult result, Manifest::Type type) const {
   switch (result) {
     case IS_AVAILABLE:
       return "";
@@ -295,7 +293,7 @@ std::string SimpleFeature::GetAvailabilityMessage(
       std::string allowed_type_names;
       // Turn the set of allowed types into a vector so that it's easier to
       // inject the appropriate separator into the display string.
-      std::vector<Extension::Type> extension_types(
+      std::vector<Manifest::Type> extension_types(
           extension_types_.begin(), extension_types_.end());
       for (size_t i = 0; i < extension_types.size(); i++) {
         // Pluralize type name.
@@ -356,16 +354,48 @@ std::string SimpleFeature::GetAvailabilityMessage(
 Feature::Availability SimpleFeature::CreateAvailability(
     AvailabilityResult result) const {
   return Availability(
-      result, GetAvailabilityMessage(result, Extension::TYPE_UNKNOWN));
+      result, GetAvailabilityMessage(result, Manifest::TYPE_UNKNOWN));
 }
 
 Feature::Availability SimpleFeature::CreateAvailability(
-    AvailabilityResult result, Extension::Type type) const {
+    AvailabilityResult result, Manifest::Type type) const {
   return Availability(result, GetAvailabilityMessage(result, type));
 }
 
 std::set<Feature::Context>* SimpleFeature::GetContexts() {
   return &contexts_;
+}
+
+bool SimpleFeature::IsIdInWhitelist(const std::string& extension_id) const {
+  // An empty whitelist means the absence of a whitelist, rather than a
+  // whitelist that allows no ID through. This could be surprising behavior, so
+  // we force the caller to handle it explicitly. A DCHECK should be sufficient
+  // here because all whitelists today are hardcoded, meaning that errors
+  // should be caught during development, but if that assumption changes in the
+  // future (e.g., a whitelist that lives in the user's profile and is managed
+  // by runtime behavior), better to die via CHECK than to let an edge case
+  // open up access to a whitelisted API with a whitelist that has shrunk to
+  // size zero.
+  CHECK(!whitelist_.empty());
+
+  // Belt-and-suspenders philosophy here. We should be pretty confident by this
+  // point that we've validated the extension ID format, but in case something
+  // slips through, we avoid a class of attack where creative ID manipulation
+  // leads to hash collisions.
+  if (extension_id.length() != 32)  // 128 bits / 4 = 32 mpdecimal characters
+    return false;
+
+  if (whitelist_.find(extension_id) != whitelist_.end())
+    return true;
+
+  const std::string id_hash = base::SHA1HashString(extension_id);
+  DCHECK(id_hash.length() == base::kSHA1Length);
+  const std::string hexencoded_id_hash = base::HexEncode(id_hash.c_str(),
+      id_hash.length());
+  if (whitelist_.find(hexencoded_id_hash) != whitelist_.end())
+    return true;
+
+  return false;
 }
 
 }  // namespace extensions

@@ -33,14 +33,20 @@ UserCloudPolicyManager::~UserCloudPolicyManager() {
 }
 
 void UserCloudPolicyManager::Connect(
-    PrefService* local_state,
-    DeviceManagementService* device_management_service) {
-  core()->Connect(
-      make_scoped_ptr(new CloudPolicyClient(std::string(), std::string(),
-                                            USER_AFFILIATION_NONE,
-                                            NULL, device_management_service)));
+    PrefService* local_state, scoped_ptr<CloudPolicyClient> client) {
+  core()->Connect(client.Pass());
   core()->StartRefreshScheduler();
   core()->TrackRefreshDelayPref(local_state, prefs::kUserPolicyRefreshRate);
+}
+
+// static
+scoped_ptr<CloudPolicyClient>
+UserCloudPolicyManager::CreateCloudPolicyClient(
+    DeviceManagementService* device_management_service) {
+  return make_scoped_ptr(
+      new CloudPolicyClient(std::string(), std::string(),
+                            USER_AFFILIATION_NONE,
+                            NULL, device_management_service)).Pass();
 }
 
 void UserCloudPolicyManager::DisconnectAndRemovePolicy() {
@@ -56,7 +62,7 @@ void UserCloudPolicyManager::RegisterClient(const std::string& access_token) {
   DCHECK(client()) << "Callers must invoke Initialize() first";
   if (!client()->is_registered()) {
     DVLOG(1) << "Registering client with access token: " << access_token;
-    client()->Register(em::DeviceRegisterRequest::USER,
+    client()->Register(em::DeviceRegisterRequest::BROWSER,
                        access_token, std::string(), false);
   }
 }

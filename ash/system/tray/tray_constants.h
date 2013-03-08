@@ -15,6 +15,8 @@ extern const int kPaddingFromOuterEdgeOfLauncherVerticalAlignment;
 extern const int kPaddingFromInnerEdgeOfLauncherVerticalAlignment;
 extern const int kPaddingFromBottomOfScreenVerticalAlignment;
 
+extern const int kTrayBubbleAnchorTopInsetBottomAnchor;
+
 extern const int kTrayImageItemHorizontalPaddingBottomAlignment;
 extern const int kTrayImageItemHorizontalPaddingVerticalAlignment;
 extern const int kTrayImageItemVerticalPaddingVerticalAlignment;
@@ -43,8 +45,7 @@ extern const SkColor kPublicAccountBackgroundColor;
 extern const SkColor kPublicAccountUserCardTextColor;
 extern const SkColor kPublicAccountUserCardNameColor;
 
-extern const SkColor kHeaderBackgroundColorLight;
-extern const SkColor kHeaderBackgroundColorDark;
+extern const SkColor kHeaderBackgroundColor;
 
 extern const SkColor kBorderDarkColor;
 extern const SkColor kBorderLightColor;
@@ -57,6 +58,8 @@ extern const int kTrayPopupMinWidth;
 extern const int kTrayPopupMaxWidth;
 extern const int kNotificationIconWidth;
 extern const int kTrayNotificationContentsWidth;
+
+extern const int kTraySpacing;
 
 }  // namespace ash
 

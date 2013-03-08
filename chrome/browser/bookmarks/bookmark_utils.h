@@ -17,7 +17,7 @@
 class BookmarkModel;
 class BookmarkNode;
 class Browser;
-class PrefServiceSyncable;
+class PrefRegistrySyncable;
 class Profile;
 
 namespace content {
@@ -160,7 +160,7 @@ const BookmarkNode* ApplyEditsWithPossibleFolderChange(
     const GURL& new_url);
 
 // Register user preferences for BookmarksBar.
-void RegisterUserPrefs(PrefServiceSyncable* prefs);
+void RegisterUserPrefs(PrefRegistrySyncable* registry);
 
 // Returns the parent for newly created folders/bookmarks. If |selection| has
 // one element and it is a folder, |selection[0]| is returned, otherwise
@@ -216,6 +216,12 @@ enum BookmarkLaunchLocation {
 
 // Records the launch of a bookmark for UMA purposes.
 void RecordBookmarkLaunch(BookmarkLaunchLocation location);
+
+// Records the user opening a folder of bookmarks for UMA purposes.
+void RecordBookmarkFolderOpen(BookmarkLaunchLocation location);
+
+// Records the user opening the apps page for UMA purposes.
+void RecordAppsPageOpen(BookmarkLaunchLocation location);
 
 #if defined(OS_WIN) || defined(OS_CHROMEOS) || defined(USE_AURA)
 void DisableBookmarkBarViewAnimationsForTesting(bool disabled);

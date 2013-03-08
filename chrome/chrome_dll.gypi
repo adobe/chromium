@@ -139,11 +139,6 @@
                 '<(SHARED_INTERMEDIATE_DIR)/net/net_resources.rc',
                 '<(SHARED_INTERMEDIATE_DIR)/webkit/webkit_chromium_resources.rc',
                 '<(SHARED_INTERMEDIATE_DIR)/webkit/webkit_unscaled_resources.rc',
-
-                # TODO(sgk):  left-over from pre-gyp build, figure out
-                # if we still need them and/or how to update to gyp.
-                #'app/check_dependents.bat',
-                #'app/chrome.dll.deps',
               ],
               'include_dirs': [
                 '<(DEPTH)/third_party/wtl/include',
@@ -165,7 +160,6 @@
               },
               'msvs_settings': {
                 'VCLinkerTool': {
-                  'AdditionalLibraryDirectories': ['$(DXSDK_DIR)/lib/x86'],
                   'BaseAddress': '0x01c30000',
                   'ImportLibrary': '$(OutDir)\\lib\\chrome_dll.lib',
                   # Set /SUBSYSTEM:WINDOWS for chrome.dll (for consistency).
@@ -274,15 +268,19 @@
           'target_name': 'chrome_dll_pdb_workaround',
           'type': 'static_library',
           'sources': [ 'empty_pdb_workaround.cc' ],
-          'msvs_settings': {
-            'VCCLCompilerTool': {
-              # This *in the compile phase* must match the pdb name that's
-              # output by the final link. See empty_pdb_workaround.cc for
-              # more details.
-              'DebugInformationFormat': '3',
-              'ProgramDataBaseFileName': '<(PRODUCT_DIR)/chrome.dll.pdb',
-            },
-          },
+          'conditions': [
+            ['fastbuild==0 or win_z7!=0', {
+             'msvs_settings': {
+              'VCCLCompilerTool': {
+                # This *in the compile phase* must match the pdb name that's
+                # output by the final link. See empty_pdb_workaround.cc for
+                # more details.
+                'DebugInformationFormat': '3',
+                'ProgramDataBaseFileName': '<(PRODUCT_DIR)/chrome.dll.pdb',
+              },
+             },
+            }],
+          ],
         },
       ],
     }],

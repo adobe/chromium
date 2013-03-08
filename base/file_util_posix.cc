@@ -32,7 +32,7 @@
 #include <fstream>
 
 #include "base/basictypes.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/singleton.h"
@@ -41,7 +41,7 @@
 #include "base/stl_util.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
-#include "base/sys_string_conversions.h"
+#include "base/strings/sys_string_conversions.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
@@ -57,6 +57,8 @@
 #if defined(OS_CHROMEOS)
 #include "base/chromeos/chromeos_version.h"
 #endif
+
+using base::FilePath;
 
 namespace file_util {
 
@@ -249,7 +251,7 @@ bool Delete(const FilePath& path, bool recursive) {
   return success;
 }
 
-bool Move(const FilePath& from_path, const FilePath& to_path) {
+bool MoveUnsafe(const FilePath& from_path, const FilePath& to_path) {
   base::ThreadRestrictions::AssertIOAllowed();
   // Windows compatibility: if to_path exists, from_path and to_path
   // must be the same type, either both files, or both directories.
@@ -343,15 +345,15 @@ bool CopyDirectory(const FilePath& from_path,
   DCHECK(recursive || S_ISDIR(info.stat.st_mode));
 
   while (success && !current.empty()) {
-    // current is the source path, including from_path, so paste
-    // the suffix after from_path onto to_path to create the target_path.
-    std::string suffix(&current.value().c_str()[from_path_base.value().size()]);
-    // Strip the leading '/' (if any).
-    if (!suffix.empty()) {
-      DCHECK_EQ('/', suffix[0]);
-      suffix.erase(0, 1);
+    // current is the source path, including from_path, so append
+    // the suffix after from_path to to_path to create the target_path.
+    FilePath target_path(to_path);
+    if (from_path_base != current) {
+      if (!from_path_base.AppendRelativePath(current, &target_path)) {
+        success = false;
+        break;
+      }
     }
-    const FilePath target_path = to_path.Append(suffix);
 
     if (S_ISDIR(info.stat.st_mode)) {
       if (mkdir(target_path.value().c_str(), info.stat.st_mode & 01777) != 0 &&
@@ -395,34 +397,6 @@ bool DirectoryExists(const FilePath& path) {
     return S_ISDIR(file_info.st_mode);
   return false;
 }
-
-// TODO(erikkay): implement
-#if 0
-bool GetFileCreationLocalTimeFromHandle(int fd,
-                                        LPSYSTEMTIME creation_time) {
-  if (!file_handle)
-    return false;
-
-  FILETIME utc_filetime;
-  if (!GetFileTime(file_handle, &utc_filetime, NULL, NULL))
-    return false;
-
-  FILETIME local_filetime;
-  if (!FileTimeToLocalFileTime(&utc_filetime, &local_filetime))
-    return false;
-
-  return !!FileTimeToSystemTime(&local_filetime, creation_time);
-}
-
-bool GetFileCreationLocalTime(const std::string& filename,
-                              LPSYSTEMTIME creation_time) {
-  ScopedHandle file_handle(
-      CreateFile(filename.c_str(), GENERIC_READ,
-                 FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL,
-                 OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL));
-  return GetFileCreationLocalTimeFromHandle(file_handle.Get(), creation_time);
-}
-#endif
 
 bool ReadFromFD(int fd, char* buffer, size_t bytes) {
   size_t total_read = 0;
@@ -885,46 +859,6 @@ bool FileEnumerator::ReadDirectory(std::vector<DirectoryEntryInfo>* entries,
   return true;
 }
 
-///////////////////////////////////////////////
-// MemoryMappedFile
-
-MemoryMappedFile::MemoryMappedFile()
-    : file_(base::kInvalidPlatformFileValue),
-      data_(NULL),
-      length_(0) {
-}
-
-bool MemoryMappedFile::MapFileToMemoryInternal() {
-  base::ThreadRestrictions::AssertIOAllowed();
-
-  struct stat file_stat;
-  if (fstat(file_, &file_stat) == base::kInvalidPlatformFileValue) {
-    DLOG(ERROR) << "Couldn't fstat " << file_ << ", errno " << errno;
-    return false;
-  }
-  length_ = file_stat.st_size;
-
-  data_ = static_cast<uint8*>(
-      mmap(NULL, length_, PROT_READ, MAP_SHARED, file_, 0));
-  if (data_ == MAP_FAILED)
-    DLOG(ERROR) << "Couldn't mmap " << file_ << ", errno " << errno;
-
-  return data_ != MAP_FAILED;
-}
-
-void MemoryMappedFile::CloseHandles() {
-  base::ThreadRestrictions::AssertIOAllowed();
-
-  if (data_ != NULL)
-    munmap(data_, length_);
-  if (file_ != base::kInvalidPlatformFileValue)
-    ignore_result(HANDLE_EINTR(close(file_)));
-
-  data_ = NULL;
-  length_ = 0;
-  file_ = base::kInvalidPlatformFileValue;
-}
-
 bool HasFileBeenModifiedSince(const FileEnumerator::FindInfo& find_info,
                               const base::Time& cutoff_time) {
   return static_cast<time_t>(find_info.stat.st_mtime) >= cutoff_time.ToTimeT();
@@ -1040,7 +974,7 @@ FilePath GetHomeDir() {
   return FilePath("/tmp");
 }
 
-bool CopyFile(const FilePath& from_path, const FilePath& to_path) {
+bool CopyFileUnsafe(const FilePath& from_path, const FilePath& to_path) {
   base::ThreadRestrictions::AssertIOAllowed();
   int infile = HANDLE_EINTR(open(from_path.value().c_str(), O_RDONLY));
   if (infile < 0)
@@ -1157,5 +1091,10 @@ bool VerifyPathControlledByAdmin(const FilePath& path) {
       kFileSystemRoot, path, kRootUid, allowed_group_ids);
 }
 #endif  // defined(OS_MACOSX) && !defined(OS_IOS)
+
+int GetMaximumPathComponentLength(const FilePath& path) {
+  base::ThreadRestrictions::AssertIOAllowed();
+  return pathconf(path.value().c_str(), _PC_NAME_MAX);
+}
 
 }  // namespace file_util

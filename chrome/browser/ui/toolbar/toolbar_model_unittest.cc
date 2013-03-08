@@ -4,8 +4,13 @@
 
 #include "chrome/browser/ui/toolbar/toolbar_model.h"
 
+#include <vector>
+
 #include "base/command_line.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/autocomplete/autocomplete_classifier_factory.h"
+#include "chrome/browser/instant/instant_service.h"
+#include "chrome/browser/instant/instant_service_factory.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
@@ -15,8 +20,10 @@
 #include "chrome/browser/ui/toolbar/toolbar_model.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/browser_with_test_window_test.h"
+#include "content/public/browser/render_process_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/url_constants.h"
+#include "net/base/escape.h"
 
 using content::OpenURLParams;
 using content::Referrer;
@@ -105,7 +112,23 @@ struct TestItem {
     ASCIIToUTF16("tractor supply"),
     true,
     true
-  }
+  },
+  {
+    GURL("https://google.com/search?q=tractorsupply.com&espv=1"),
+    ASCIIToUTF16("https://google.com/search?q=tractorsupply.com&espv=1"),
+    ASCIIToUTF16("https://google.com/search?q=tractorsupply.com&espv=1"),
+    ASCIIToUTF16("https://google.com/search?q=tractorsupply.com&espv=1"),
+    false,
+    true
+  },
+  {
+    GURL("https://google.com/search?q=ftp://tractorsupply.ie&espv=1"),
+    ASCIIToUTF16("https://google.com/search?q=ftp://tractorsupply.ie&espv=1"),
+    ASCIIToUTF16("https://google.com/search?q=ftp://tractorsupply.ie&espv=1"),
+    ASCIIToUTF16("https://google.com/search?q=ftp://tractorsupply.ie&espv=1"),
+    false,
+    true
+  },
 };
 
 }  // end namespace
@@ -118,6 +141,8 @@ class ToolbarModelTest : public BrowserWithTestWindowTest {
     BrowserWithTestWindowTest::SetUp();
     TemplateURLServiceFactory::GetInstance()->SetTestingFactoryAndUse(
         profile(), &TemplateURLServiceFactory::BuildInstanceFor);
+    AutocompleteClassifierFactory::GetInstance()->SetTestingFactoryAndUse(
+        profile(), &AutocompleteClassifierFactory::BuildInstanceFor);
   }
   virtual void TearDown() OVERRIDE { BrowserWithTestWindowTest::TearDown(); }
 
@@ -126,6 +151,7 @@ class ToolbarModelTest : public BrowserWithTestWindowTest {
   void ResetDefaultTemplateURL() {
     TemplateURLData data;
     data.SetURL("http://google.com/search?q={searchTerms}");
+    data.instant_url = "http://does/not/exist";
     data.search_terms_replacement_key = "{google:instantExtendedEnabledKey}";
     TemplateURL* search_template_url = new TemplateURL(profile(), data);
     TemplateURLService* template_url_service =
@@ -147,6 +173,26 @@ class ToolbarModelTest : public BrowserWithTestWindowTest {
                              should_display);
   }
 
+  void NavigateAndCheckQueries(const std::vector<const char*>& queries,
+                               bool would_replace) {
+    const std::string kInstantExtendedPrefix(
+        "https://google.com/search?espv=1&q=");
+
+    chrome::search::EnableQueryExtractionForTesting();
+
+    ResetDefaultTemplateURL();
+    AddTab(browser(), GURL(chrome::kAboutBlankURL));
+    for (size_t i = 0; i < queries.size(); ++i) {
+      std::string url_string = kInstantExtendedPrefix +
+          net::EscapeQueryParamValue(queries[i], true);
+      NavigateAndCheckTextImpl(GURL(url_string), true,
+                               ASCIIToUTF16(would_replace ?
+                                            std::string(queries[i]) :
+                                            url_string),
+                               would_replace, true);
+    }
+  }
+
  private:
   void NavigateAndCheckTextImpl(const GURL& url,
                                 bool can_replace,
@@ -157,6 +203,13 @@ class ToolbarModelTest : public BrowserWithTestWindowTest {
     browser()->OpenURL(OpenURLParams(
         url, Referrer(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED,
         false));
+
+    // Query terms replacement requires that the renderer process be a
+    // recognized Instant renderer. Fake it.
+    InstantService* instant_service =
+        InstantServiceFactory::GetForProfile(profile());
+    int process_id = contents->GetRenderProcessHost()->GetID();
+    instant_service->AddInstantProcess(process_id);
 
     ToolbarModel* toolbar_model = browser()->toolbar_model();
 
@@ -177,7 +230,7 @@ class ToolbarModelTest : public BrowserWithTestWindowTest {
 
 // Test that we don't replace any URLs when the query extraction is disabled.
 TEST_F(ToolbarModelTest, ShouldDisplayURLQueryExtractionDisabled) {
-  ASSERT_FALSE(chrome::search::IsQueryExtractionEnabled(profile()))
+  ASSERT_FALSE(chrome::search::IsQueryExtractionEnabled())
       << "This test expects query extraction to be disabled.";
 
   ResetDefaultTemplateURL();
@@ -206,4 +259,49 @@ TEST_F(ToolbarModelTest, ShouldDisplayURLQueryExtractionEnabled) {
                          test_item.would_replace,
                          test_item.should_display);
   }
+}
+
+// Test that replacement doesn't happen for URLs.
+TEST_F(ToolbarModelTest, DoNotExtractUrls) {
+  static const char* const kQueries[] = {
+    "www.google.com ",
+    "www.google.ca",  // Oh, Canada!
+    "www.google.ca.",
+    "www.google.ca ",
+    "www.google.ca. ",
+    "something.xxx",
+    "something.travel",
+    "bankofamerica.com/",
+    "bankofamerica.com/foo",
+    "bankofamerica.com/foo bla",
+    "BankOfAmerica.BIZ/foo bla",
+    "   http:/monkeys",
+    "http://monkeys",
+    "javascript:alert(1)",
+    "JavaScript:alert(1)",
+    "localhost",
+  };
+
+  NavigateAndCheckQueries(
+      std::vector<const char*>(&kQueries[0],
+                               &kQueries[arraysize(kQueries)]), false);
+}
+
+// Test that replacement does happen for non-URLs.
+TEST_F(ToolbarModelTest, ExtractNonUrls) {
+  static const char* const kQueries[] = {
+    "facebook.com login",
+    "site:amazon.com",
+    "e.coli",
+    "info:http://www.google.com/",
+    "cache:http://www.apple.com/",
+    "9/11",
+    "<nomatch/>",
+    "ac/dc",
+    "ps/2",
+  };
+
+  NavigateAndCheckQueries(
+      std::vector<const char*>(&kQueries[0],
+                               &kQueries[arraysize(kQueries)]), true);
 }

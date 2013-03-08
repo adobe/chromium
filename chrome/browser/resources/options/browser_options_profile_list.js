@@ -58,6 +58,7 @@ cr.define('options.browser_options', function() {
       this.contentElement.appendChild(iconEl);
 
       var nameEl = this.ownerDocument.createElement('div');
+      nameEl.className = 'profile-name';
       if (profileInfo.isCurrentProfile)
         nameEl.classList.add('profile-item-current');
       this.contentElement.appendChild(nameEl);
@@ -88,11 +89,14 @@ cr.define('options.browser_options', function() {
     /** @override */
     createItem: function(pageInfo) {
       var item = new ProfileListItem(pageInfo);
+      item.deletable = this.canDeleteItems_;
       return item;
     },
 
     /** @override */
     deleteItemAtIndex: function(index) {
+      if (loadTimeData.getBoolean('profileIsManaged'))
+        return;
       ManageProfileOverlay.showDeleteDialog(this.dataModel.item(index));
     },
 
@@ -103,6 +107,19 @@ cr.define('options.browser_options', function() {
       if (profileInfo.isCurrentProfile)
         ManageProfileOverlay.showManageDialog(profileInfo);
     },
+
+    /**
+     * Sets whether items in this list are deletable.
+     */
+    set canDeleteItems(value) {
+      this.canDeleteItems_ = value;
+    },
+
+    /**
+     * If false, items in this list will not be deltable.
+     * @private
+     */
+    canDeleteItems_: true,
   };
 
   return {

@@ -4,14 +4,14 @@
 
 #include <windows.h>
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/path_service.h"
 #include "chrome/installer/mini_installer/decompress.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 TEST(MiniDecompressTest, ExpandTest) {
-  FilePath source_path;
+  base::FilePath source_path;
   PathService::Get(base::DIR_SOURCE_ROOT, &source_path);
   source_path = source_path.Append(FILE_PATH_LITERAL("chrome"))
       .Append(FILE_PATH_LITERAL("installer"))
@@ -23,7 +23,8 @@ TEST(MiniDecompressTest, ExpandTest) {
   // our temporary test data.
   base::ScopedTempDir temp_dir;
   EXPECT_TRUE(temp_dir.CreateUniqueTempDir());
-  FilePath dest_path(temp_dir.path().Append(FILE_PATH_LITERAL("setup.exe")));
+  base::FilePath dest_path(
+      temp_dir.path().Append(FILE_PATH_LITERAL("setup.exe")));
 
   // Decompress our test file.
   EXPECT_TRUE(mini_installer::Expand(source_path.value().c_str(),

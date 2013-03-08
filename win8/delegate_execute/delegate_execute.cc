@@ -18,7 +18,7 @@
 #include "base/win/scoped_handle.h"
 #include "breakpad/src/client/windows/handler/exception_handler.h"
 #include "chrome/common/chrome_switches.h"
-#include "command_execute_impl.h"
+#include "win8/delegate_execute/command_execute_impl.h"
 #include "win8/delegate_execute/crash_server_init.h"
 #include "win8/delegate_execute/delegate_execute_operation.h"
 #include "win8/delegate_execute/resource.h"
@@ -29,9 +29,6 @@ class DelegateExecuteModule
     : public ATL::CAtlExeModuleT< DelegateExecuteModule > {
  public :
   typedef ATL::CAtlExeModuleT<DelegateExecuteModule> ParentClass;
-
-  DECLARE_REGISTRY_APPID_RESOURCEID(IDR_DELEGATEEXECUTE,
-                                    "{B1935DA1-112F-479A-975B-AB8588ABA636}")
 
   HRESULT RegisterServer(BOOL reg_type_lib) {
     return ParentClass::RegisterServer(FALSE);

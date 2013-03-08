@@ -9,7 +9,7 @@
 #include "chrome/browser/extensions/extension_process_manager.h"
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/platform_app_browsertest_util.h"
-#include "chrome/browser/media_gallery/media_galleries_test_util.h"
+#include "chrome/browser/media_galleries/media_galleries_test_util.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/chrome_switches.h"
 #include "content/public/browser/render_view_host.h"
@@ -62,24 +62,10 @@ IN_PROC_BROWSER_TEST_F(PlatformAppMediaGalleriesBrowserTest, NoGalleriesRead) {
       << message_;
 }
 
-IN_PROC_BROWSER_TEST_F(PlatformAppMediaGalleriesBrowserTest, NoGalleriesWrite) {
-  chrome::EnsureMediaDirectoriesExists media_directories;
-  ASSERT_TRUE(RunPlatformAppTest("api_test/media_galleries/no_galleries_write"))
-      << message_;
-}
-
 IN_PROC_BROWSER_TEST_F(PlatformAppMediaGalleriesBrowserTest,
                        MediaGalleriesRead) {
   chrome::EnsureMediaDirectoriesExists media_directories;
   ASSERT_TRUE(RunPlatformAppTest("api_test/media_galleries/read_access"))
-      << message_;
-  RunSecondTestPhase(media_directories.num_galleries());
-}
-
-IN_PROC_BROWSER_TEST_F(PlatformAppMediaGalleriesBrowserTest,
-                       MediaGalleriesWrite) {
-  chrome::EnsureMediaDirectoriesExists media_directories;
-  ASSERT_TRUE(RunPlatformAppTest("api_test/media_galleries/write_access"))
       << message_;
   RunSecondTestPhase(media_directories.num_galleries());
 }

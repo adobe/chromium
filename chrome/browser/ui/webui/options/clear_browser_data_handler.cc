@@ -7,13 +7,13 @@
 #include "base/basictypes.h"
 #include "base/bind.h"
 #include "base/bind_helpers.h"
+#include "base/prefs/pref_service.h"
 #include "base/string16.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browsing_data/browsing_data_helper.h"
 #include "chrome/browser/browsing_data/browsing_data_remover.h"
 #include "chrome/browser/google/google_util.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/notification_details.h"
@@ -21,6 +21,7 @@
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
+#include "ui/base/accelerators/accelerator.h"
 #include "ui/base/l10n/l10n_util.h"
 
 namespace {
@@ -40,10 +41,35 @@ ClearBrowserDataHandler::~ClearBrowserDataHandler() {
 }
 
 void ClearBrowserDataHandler::InitializeHandler() {
-  clear_plugin_lso_data_enabled_.Init(prefs::kClearPluginLSODataEnabled,
-                                      Profile::FromWebUI(web_ui())->GetPrefs());
+  PrefService* prefs = Profile::FromWebUI(web_ui())->GetPrefs();
+  clear_plugin_lso_data_enabled_.Init(prefs::kClearPluginLSODataEnabled, prefs);
   pepper_flash_settings_enabled_.Init(prefs::kPepperFlashSettingsEnabled,
-                                      Profile::FromWebUI(web_ui())->GetPrefs());
+                                      prefs);
+  allow_deleting_browser_history_.Init(
+      prefs::kAllowDeletingBrowserHistory,
+      prefs,
+      base::Bind(&ClearBrowserDataHandler::OnBrowsingHistoryPrefChanged,
+                 base::Unretained(this)));
+}
+
+void ClearBrowserDataHandler::InitializePage() {
+  UpdateInfoBannerVisibility();
+  OnBrowsingHistoryPrefChanged();
+}
+
+void ClearBrowserDataHandler::UpdateInfoBannerVisibility() {
+  Profile* profile = Profile::FromWebUI(web_ui());
+  base::Time lastClearBrowsingDataTime = base::Time::FromInternalValue(
+      profile->GetPrefs()->GetInt64(prefs::kLastClearBrowsingDataTime));
+
+  const int64 kHoursPerDay = 24;
+  bool visible = (base::Time::Now() - lastClearBrowsingDataTime) <=
+      base::TimeDelta::FromHours(kHoursPerDay);
+
+  ListValue args;
+  args.Append(Value::CreateBooleanValue(visible));
+  web_ui()->CallJavascriptFunction(
+      "ClearBrowserDataOverlay.setBannerVisibility", args);
 }
 
 void ClearBrowserDataHandler::GetLocalizedValues(
@@ -73,6 +99,13 @@ void ClearBrowserDataHandler::GetLocalizedValues(
       "clearBrowsingDataLearnMoreUrl",
       google_util::StringAppendGoogleLocaleParam(
           kClearBrowsingDataLearnMoreUrl));
+
+  ui::Accelerator acc(ui::VKEY_N, ui::EF_CONTROL_DOWN | ui::EF_SHIFT_DOWN);
+  localized_strings->SetString(
+      "clearBrowserDataInfoBar",
+      l10n_util::GetStringFUTF16(
+          IDS_CLEAR_BROWSING_DATA_INFO_BAR_TEXT,
+          acc.GetShortcutText()));
 
   ListValue* time_list = new ListValue;
   for (int i = 0; i < 5; i++) {
@@ -122,10 +155,14 @@ void ClearBrowserDataHandler::HandleClearBrowserData(const ListValue* value) {
 
   int remove_mask = 0;
   int origin_mask = 0;
-  if (prefs->GetBoolean(prefs::kDeleteBrowsingHistory))
+  if (prefs->GetBoolean(prefs::kDeleteBrowsingHistory) &&
+      *allow_deleting_browser_history_) {
     remove_mask |= BrowsingDataRemover::REMOVE_HISTORY;
-  if (prefs->GetBoolean(prefs::kDeleteDownloadHistory))
+  }
+  if (prefs->GetBoolean(prefs::kDeleteDownloadHistory) &&
+      *allow_deleting_browser_history_) {
     remove_mask |= BrowsingDataRemover::REMOVE_DOWNLOADS;
+  }
   if (prefs->GetBoolean(prefs::kDeleteCache))
     remove_mask |= BrowsingDataRemover::REMOVE_CACHE;
   if (prefs->GetBoolean(prefs::kDeleteCookies)) {
@@ -152,6 +189,12 @@ void ClearBrowserDataHandler::HandleClearBrowserData(const ListValue* value) {
       static_cast<BrowsingDataRemover::TimePeriod>(period_selected));
   remover_->AddObserver(this);
   remover_->Remove(remove_mask, origin_mask);
+
+  // Store the clear browsing data time. Next time the clear browsing data
+  // dialog is open, this time is used to decide whether to display an info
+  // banner or not.
+  prefs->SetInt64(prefs::kLastClearBrowsingDataTime,
+                  base::Time::Now().ToInternalValue());
 }
 
 void ClearBrowserDataHandler::OnBrowsingDataRemoverDone() {
@@ -159,6 +202,12 @@ void ClearBrowserDataHandler::OnBrowsingDataRemoverDone() {
   // itself after we return.
   remover_ = NULL;
   web_ui()->CallJavascriptFunction("ClearBrowserDataOverlay.doneClearing");
+}
+
+void ClearBrowserDataHandler::OnBrowsingHistoryPrefChanged() {
+  web_ui()->CallJavascriptFunction(
+      "ClearBrowserDataOverlay.updateHistoryCheckboxes",
+      base::FundamentalValue(*allow_deleting_browser_history_));
 }
 
 }  // namespace options

@@ -8,6 +8,7 @@
 #include "base/i18n/rtl.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
+#include "base/prefs/pref_service.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/threading/platform_thread.h"
 #include "base/time.h"
@@ -17,12 +18,12 @@
 #include "chrome/browser/autofill/autofill_profile.h"
 #include "chrome/browser/autofill/personal_data_manager.h"
 #include "chrome/browser/autofill/personal_data_manager_factory.h"
-#include "chrome/browser/history/history.h"
+#include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prefs/session_startup_pref.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/browser_thread.h"
@@ -32,12 +33,12 @@
 #include <gtk/gtk.h>
 #endif
 
-static const FilePath::CharType* kWebUIBidiCheckerLibraryJS =
+static const base::FilePath::CharType* kWebUIBidiCheckerLibraryJS =
     FILE_PATH_LITERAL("third_party/bidichecker/bidichecker_packaged.js");
 
 namespace {
-FilePath WebUIBidiCheckerLibraryJSPath() {
-  FilePath src_root;
+base::FilePath WebUIBidiCheckerLibraryJSPath() {
+  base::FilePath src_root;
   if (!PathService::Get(base::DIR_SOURCE_ROOT, &src_root))
     LOG(ERROR) << "Couldn't find source root";
   return src_root.Append(kWebUIBidiCheckerLibraryJS);
@@ -76,8 +77,25 @@ void ReloadLocaleResources(const std::string& new_locale) {
 
 }  // namespace
 
-static const FilePath::CharType* kBidiCheckerTestsJS =
+static const base::FilePath::CharType* kBidiCheckerTestsJS =
     FILE_PATH_LITERAL("bidichecker_tests.js");
+
+void WebUIBidiCheckerBrowserTest::SetUp() {
+  argv_ = CommandLine::ForCurrentProcess()->GetArgs();
+
+  // Sync only uses webui when client login is enabled.  Client login is going
+  // away, but to keep it tested for now, force client login to be used.
+  if (!CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kUseClientLoginSigninFlow)) {
+    CommandLine::ForCurrentProcess()->AppendSwitch(
+        switches::kUseClientLoginSigninFlow);
+  }
+}
+
+void WebUIBidiCheckerBrowserTest::TearDown() {
+  // Reset command line to the way it was before the test was run.
+  CommandLine::ForCurrentProcess()->InitFromArgv(argv_);
+}
 
 WebUIBidiCheckerBrowserTest::~WebUIBidiCheckerBrowserTest() {}
 
@@ -86,7 +104,7 @@ WebUIBidiCheckerBrowserTest::WebUIBidiCheckerBrowserTest() {}
 void WebUIBidiCheckerBrowserTest::SetUpInProcessBrowserTestFixture() {
   WebUIBrowserTest::SetUpInProcessBrowserTestFixture();
   WebUIBrowserTest::AddLibrary(WebUIBidiCheckerLibraryJSPath());
-  WebUIBrowserTest::AddLibrary(FilePath(kBidiCheckerTestsJS));
+  WebUIBrowserTest::AddLibrary(base::FilePath(kBidiCheckerTestsJS));
 }
 
 void WebUIBidiCheckerBrowserTest::RunBidiCheckerOnPage(
@@ -109,7 +127,7 @@ void WebUIBidiCheckerBrowserTestRTL::RunBidiCheckerOnPage(
 
 void WebUIBidiCheckerBrowserTestRTL::SetUpOnMainThread() {
   WebUIBidiCheckerBrowserTest::SetUpOnMainThread();
-  FilePath pak_path;
+  base::FilePath pak_path;
   app_locale_ = base::i18n::GetConfiguredLocale();
   ASSERT_TRUE(PathService::Get(base::FILE_MODULE, &pak_path));
   pak_path = pak_path.DirName();
@@ -131,7 +149,8 @@ void WebUIBidiCheckerBrowserTestRTL::CleanUpOnMainThread() {
 #endif
 
   base::i18n::SetICUDefaultLocale(app_locale_);
-  ResourceBundle::GetSharedInstance().OverrideLocalePakForTest(FilePath());
+  ResourceBundle::GetSharedInstance().OverrideLocalePakForTest(
+      base::FilePath());
   ReloadLocaleResources(app_locale_);
 }
 

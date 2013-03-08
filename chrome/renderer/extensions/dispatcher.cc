@@ -12,8 +12,10 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/extensions/api/extension_api.h"
+#include "chrome/common/extensions/background_info.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_messages.h"
+#include "chrome/common/extensions/manifest.h"
 #include "chrome/common/extensions/permissions/permission_set.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/common/view_type.h"
@@ -24,6 +26,7 @@
 #include "chrome/renderer/extensions/app_window_custom_bindings.h"
 #include "chrome/renderer/extensions/chrome_v8_context.h"
 #include "chrome/renderer/extensions/chrome_v8_extension.h"
+#include "chrome/renderer/extensions/content_watcher.h"
 #include "chrome/renderer/extensions/context_menus_custom_bindings.h"
 #include "chrome/renderer/extensions/event_bindings.h"
 #include "chrome/renderer/extensions/extension_custom_bindings.h"
@@ -84,12 +87,13 @@ namespace {
 static const int64 kInitialExtensionIdleHandlerDelayMs = 5*1000;
 static const int64 kMaxExtensionIdleHandlerDelayMs = 5*60*1000;
 static const char kEventDispatchFunction[] = "Event.dispatchEvent";
-static const char kOnUnloadEvent[] = "runtime.onSuspend";
+static const char kOnSuspendEvent[] = "runtime.onSuspend";
 static const char kOnSuspendCanceledEvent[] = "runtime.onSuspendCanceled";
 
 class ChromeHiddenNativeHandler : public NativeHandler {
  public:
-  ChromeHiddenNativeHandler() {
+  explicit ChromeHiddenNativeHandler(v8::Isolate* isolate)
+      : NativeHandler(isolate) {
     RouteFunction("GetChromeHidden",
         base::Bind(&ChromeHiddenNativeHandler::GetChromeHidden,
                    base::Unretained(this)));
@@ -102,7 +106,8 @@ class ChromeHiddenNativeHandler : public NativeHandler {
 
 class PrintNativeHandler : public NativeHandler {
  public:
-  PrintNativeHandler() {
+  explicit PrintNativeHandler(v8::Isolate* isolate)
+      : NativeHandler(isolate) {
     RouteFunction("Print",
         base::Bind(&PrintNativeHandler::Print,
                    base::Unretained(this)));
@@ -164,7 +169,7 @@ class LazyBackgroundPageNativeHandler : public ChromeV8Extension {
       return false;
 
     ExtensionHelper* helper = ExtensionHelper::Get(render_view);
-    return (extension && extension->has_lazy_background_page() &&
+    return (extension && BackgroundInfo::HasLazyBackgroundPage(extension) &&
             helper->view_type() == chrome::VIEW_TYPE_EXTENSION_BACKGROUND_PAGE);
   }
 };
@@ -236,7 +241,8 @@ class ProcessInfoNativeHandler : public ChromeV8Extension {
 
 class LoggingNativeHandler : public NativeHandler {
  public:
-  LoggingNativeHandler() {
+  explicit LoggingNativeHandler(v8::Isolate* isolate)
+      : NativeHandler(isolate) {
     RouteFunction("DCHECK",
         base::Bind(&LoggingNativeHandler::Dcheck,
                    base::Unretained(this)));
@@ -314,7 +320,8 @@ static v8::Handle<v8::Object> GetOrCreateChrome(
 }  // namespace
 
 Dispatcher::Dispatcher()
-    : is_webkit_initialized_(false),
+    : content_watcher_(new ContentWatcher(this)),
+      is_webkit_initialized_(false),
       webrequest_adblock_(false),
       webrequest_adblock_plus_(false),
       webrequest_other_(false),
@@ -360,9 +367,11 @@ bool Dispatcher::OnControlMessageReceived(const IPC::Message& message) {
                         OnClearTabSpecificPermissions)
     IPC_MESSAGE_HANDLER(ExtensionMsg_UpdateUserScripts, OnUpdateUserScripts)
     IPC_MESSAGE_HANDLER(ExtensionMsg_UsingWebRequestAPI, OnUsingWebRequestAPI)
-    IPC_MESSAGE_HANDLER(ExtensionMsg_ShouldUnload, OnShouldUnload)
-    IPC_MESSAGE_HANDLER(ExtensionMsg_Unload, OnUnload)
-    IPC_MESSAGE_HANDLER(ExtensionMsg_CancelUnload, OnCancelUnload)
+    IPC_MESSAGE_HANDLER(ExtensionMsg_ShouldSuspend, OnShouldSuspend)
+    IPC_MESSAGE_HANDLER(ExtensionMsg_Suspend, OnSuspend)
+    IPC_MESSAGE_HANDLER(ExtensionMsg_CancelSuspend, OnCancelSuspend)
+    IPC_MESSAGE_FORWARD(ExtensionMsg_WatchPages,
+                        content_watcher_.get(), ContentWatcher::OnWatchPages)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
 
@@ -418,7 +427,7 @@ void Dispatcher::OnSetChannel(int channel) {
 
 void Dispatcher::OnMessageInvoke(const std::string& extension_id,
                                  const std::string& function_name,
-                                 const ListValue& args,
+                                 const base::ListValue& args,
                                  const GURL& event_url,
                                  bool user_gesture) {
   scoped_ptr<WebScopedUserGesture> web_user_gesture;
@@ -439,7 +448,7 @@ void Dispatcher::OnMessageInvoke(const std::string& extension_id,
   // Tell the browser process when an event has been dispatched with a lazy
   // background page active.
   const Extension* extension = extensions_.GetByID(extension_id);
-  if (extension && extension->has_lazy_background_page() &&
+  if (extension && BackgroundInfo::HasLazyBackgroundPage(extension) &&
       function_name == kEventDispatchFunction) {
     RenderView* background_view =
         ExtensionHelper::GetBackgroundPage(extension_id);
@@ -566,6 +575,8 @@ void Dispatcher::RegisterNativeHandlers(ModuleSystem* module_system,
   module_system->RegisterNativeHandler("setIcon",
       scoped_ptr<NativeHandler>(
           new SetIconNatives(this, request_sender_.get())));
+  module_system->RegisterNativeHandler("contentWatcherNative",
+                                       content_watcher_->MakeNatives());
 
   // Natives used by multiple APIs.
   module_system->RegisterNativeHandler("file_system_natives",
@@ -599,7 +610,7 @@ void Dispatcher::RegisterNativeHandlers(ModuleSystem* module_system,
   module_system->RegisterNativeHandler("page_capture",
       scoped_ptr<NativeHandler>(new PageCaptureCustomBindings()));
   module_system->RegisterNativeHandler("runtime",
-      scoped_ptr<NativeHandler>(new RuntimeCustomBindings(context)));
+      scoped_ptr<NativeHandler>(new RuntimeCustomBindings(this, context)));
   module_system->RegisterNativeHandler("tabs",
       scoped_ptr<NativeHandler>(new TabsCustomBindings()));
   module_system->RegisterNativeHandler("tts",
@@ -616,10 +627,13 @@ void Dispatcher::PopulateSourceMap() {
       IDR_MISCELLANEOUS_BINDINGS_JS);
   source_map_.RegisterSource("schema_generated_bindings",
       IDR_SCHEMA_GENERATED_BINDINGS_JS);
+  source_map_.RegisterSource("json", IDR_JSON_JS);
   source_map_.RegisterSource("json_schema", IDR_JSON_SCHEMA_JS);
   source_map_.RegisterSource("apitest", IDR_EXTENSION_APITEST_JS);
 
   // Libraries.
+  source_map_.RegisterSource("contentWatcher", IDR_CONTENT_WATCHER_JS);
+  source_map_.RegisterSource("imageUtil", IDR_IMAGE_UTIL_JS);
   source_map_.RegisterSource("lastError", IDR_LAST_ERROR_JS);
   source_map_.RegisterSource("schemaUtils", IDR_SCHEMA_UTILS_JS);
   source_map_.RegisterSource("sendRequest", IDR_SEND_REQUEST_JS);
@@ -638,13 +652,19 @@ void Dispatcher::PopulateSourceMap() {
                              IDR_CONTENT_SETTINGS_CUSTOM_BINDINGS_JS);
   source_map_.RegisterSource("contextMenus",
                              IDR_CONTEXT_MENUS_CUSTOM_BINDINGS_JS);
+  source_map_.RegisterSource("declarativeContent",
+                             IDR_DECLARATIVE_CONTENT_CUSTOM_BINDINGS_JS);
   source_map_.RegisterSource("declarativeWebRequest",
                              IDR_DECLARATIVE_WEBREQUEST_CUSTOM_BINDINGS_JS);
+  source_map_.RegisterSource("downloads",
+                             IDR_DOWNLOADS_CUSTOM_BINDINGS_JS);
   source_map_.RegisterSource(
       "experimental.mediaGalleries",
       IDR_EXPERIMENTAL_MEDIA_GALLERIES_CUSTOM_BINDINGS_JS);
   source_map_.RegisterSource("experimental.offscreen",
                              IDR_EXPERIMENTAL_OFFSCREENTABS_CUSTOM_BINDINGS_JS);
+  source_map_.RegisterSource("experimental.notification",
+                             IDR_NOTIFICATION_CUSTOM_BINDINGS_JS);
   source_map_.RegisterSource("extension", IDR_EXTENSION_CUSTOM_BINDINGS_JS);
   source_map_.RegisterSource("fileBrowserHandler",
                              IDR_FILE_BROWSER_HANDLER_CUSTOM_BINDINGS_JS);
@@ -682,6 +702,8 @@ void Dispatcher::PopulateSourceMap() {
   // Platform app sources that are not API-specific..
   source_map_.RegisterSource("tagWatcher", IDR_TAG_WATCHER_JS);
   source_map_.RegisterSource("webview", IDR_WEB_VIEW_JS);
+  source_map_.RegisterSource("webview.experimental",
+                             IDR_WEB_VIEW_EXPERIMENTAL_JS);
   source_map_.RegisterSource("denyWebview", IDR_WEB_VIEW_DENY_JS);
   source_map_.RegisterSource("platformApp", IDR_PLATFORM_APP_JS);
   source_map_.RegisterSource("injectAppTitlebar", IDR_INJECT_APP_TITLEBAR_JS);
@@ -754,19 +776,20 @@ void Dispatcher::DidCreateScriptContext(
 
   RegisterNativeHandlers(module_system.get(), context);
 
+  v8::Isolate* isolate = v8_context->GetIsolate();
   module_system->RegisterNativeHandler("chrome_hidden",
-      scoped_ptr<NativeHandler>(new ChromeHiddenNativeHandler()));
+      scoped_ptr<NativeHandler>(new ChromeHiddenNativeHandler(isolate)));
   module_system->RegisterNativeHandler("print",
-      scoped_ptr<NativeHandler>(new PrintNativeHandler()));
+      scoped_ptr<NativeHandler>(new PrintNativeHandler(isolate)));
   module_system->RegisterNativeHandler("lazy_background_page",
       scoped_ptr<NativeHandler>(new LazyBackgroundPageNativeHandler(this)));
   module_system->RegisterNativeHandler("logging",
-      scoped_ptr<NativeHandler>(new LoggingNativeHandler()));
+      scoped_ptr<NativeHandler>(new LoggingNativeHandler(isolate)));
 
   int manifest_version = extension ? extension->manifest_version() : 1;
   bool send_request_disabled =
-      (extension && extension->location() == Extension::LOAD &&
-       extension->has_lazy_background_page());
+      (extension && Manifest::IsUnpackedLocation(extension->location()) &&
+       BackgroundInfo::HasLazyBackgroundPage(extension));
   module_system->RegisterNativeHandler("process",
       scoped_ptr<NativeHandler>(new ProcessInfoNativeHandler(
           this, context->GetExtensionID(),
@@ -789,6 +812,7 @@ void Dispatcher::DidCreateScriptContext(
     case Feature::BLESSED_EXTENSION_CONTEXT:
     case Feature::UNBLESSED_EXTENSION_CONTEXT:
     case Feature::CONTENT_SCRIPT_CONTEXT: {
+      module_system->Require("json");  // see paranoid comment in json.js
       module_system->Require("miscellaneous_bindings");
       module_system->Require("schema_generated_bindings");
       module_system->Require("apitest");
@@ -814,6 +838,10 @@ void Dispatcher::DidCreateScriptContext(
   if (context_type == Feature::BLESSED_EXTENSION_CONTEXT) {
     bool has_permission = extension->HasAPIPermission(APIPermission::kWebView);
     module_system->Require(has_permission ? "webview" : "denyWebview");
+    if (has_permission &&
+        Feature::GetCurrentChannel() <= chrome::VersionInfo::CHANNEL_DEV) {
+      module_system->Require("webview.experimental");
+    }
   }
 
   context->set_module_system(module_system.Pass());
@@ -869,6 +897,8 @@ void Dispatcher::DidCreateDocumentElement(WebKit::WebFrame* frame) {
             GetRawDataResource(IDR_PLATFORM_APP_CSS)),
         WebDocument::UserStyleUserLevel);
   }
+
+  content_watcher_->DidCreateDocumentElement(frame);
 }
 
 void Dispatcher::OnActivateExtension(const std::string& extension_id) {
@@ -1018,31 +1048,31 @@ void Dispatcher::OnUsingWebRequestAPI(
   webrequest_other_ = other;
 }
 
-void Dispatcher::OnShouldUnload(const std::string& extension_id,
-                                         int sequence_id) {
+void Dispatcher::OnShouldSuspend(const std::string& extension_id,
+                                 int sequence_id) {
   RenderThread::Get()->Send(
-      new ExtensionHostMsg_ShouldUnloadAck(extension_id, sequence_id));
+      new ExtensionHostMsg_ShouldSuspendAck(extension_id, sequence_id));
 }
 
-void Dispatcher::OnUnload(const std::string& extension_id) {
-  // Dispatch the unload event. This doesn't go through the standard event
+void Dispatcher::OnSuspend(const std::string& extension_id) {
+  // Dispatch the suspend event. This doesn't go through the standard event
   // dispatch machinery because it requires special handling. We need to let
   // the browser know when we are starting and stopping the event dispatch, so
-  // that it still considers the extension idle despite any activity the unload
+  // that it still considers the extension idle despite any activity the suspend
   // event creates.
-  ListValue args;
-  args.Set(0, Value::CreateStringValue(kOnUnloadEvent));
-  args.Set(1, new ListValue());
+  base::ListValue args;
+  args.Set(0, new base::StringValue(kOnSuspendEvent));
+  args.Set(1, new base::ListValue());
   v8_context_set_.DispatchChromeHiddenMethod(
       extension_id, kEventDispatchFunction, args, NULL, GURL());
 
-  RenderThread::Get()->Send(new ExtensionHostMsg_UnloadAck(extension_id));
+  RenderThread::Get()->Send(new ExtensionHostMsg_SuspendAck(extension_id));
 }
 
-void Dispatcher::OnCancelUnload(const std::string& extension_id) {
-  ListValue args;
-  args.Set(0, Value::CreateStringValue(kOnSuspendCanceledEvent));
-  args.Set(1, new ListValue());
+void Dispatcher::OnCancelSuspend(const std::string& extension_id) {
+  base::ListValue args;
+  args.Set(0, new base::StringValue(kOnSuspendCanceledEvent));
+  args.Set(1, new base::ListValue());
   v8_context_set_.DispatchChromeHiddenMethod(
       extension_id, kEventDispatchFunction, args, NULL, GURL());
 }

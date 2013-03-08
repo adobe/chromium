@@ -14,6 +14,10 @@
 #include "ui/gl/gl_fence.h"
 #include "ui/gl/gl_switches.h"
 
+#if defined(OS_WIN)
+#include "base/win/windows_version.h"
+#endif
+
 using ::base::SharedMemory;
 
 namespace gpu {
@@ -65,16 +69,8 @@ void GpuScheduler::PutChanged() {
   base::TimeTicks begin_time(base::TimeTicks::HighResNow());
   error::Error error = error::kNoError;
   while (!parser_->IsEmpty()) {
-    if (preempt_by_counter_.get() &&
-        !was_preempted_ &&
-        !preempt_by_counter_->IsZero()) {
-      TRACE_COUNTER_ID1("gpu","GpuScheduler::Preempted", this, 1);
-      was_preempted_ = true;
+    if (IsPreempted())
       break;
-    } else if (was_preempted_) {
-      TRACE_COUNTER_ID1("gpu","GpuScheduler::Preempted", this, 0);
-      was_preempted_ = false;
-    }
 
     DCHECK(IsScheduled());
     DCHECK(unschedule_fences_.empty());
@@ -82,7 +78,7 @@ void GpuScheduler::PutChanged() {
     error = parser_->ProcessCommand();
 
     if (error == error::kDeferCommandUntilLater) {
-      DCHECK(unscheduled_count_ > 0);
+      DCHECK_GT(unscheduled_count_, 0);
       break;
     }
 
@@ -140,26 +136,29 @@ void GpuScheduler::SetScheduled(bool scheduled) {
       // state, cancel the task that would reschedule it after a timeout.
       reschedule_task_factory_.InvalidateWeakPtrs();
 
-      if (!scheduled_callback_.is_null())
-        scheduled_callback_.Run();
+      if (!scheduling_changed_callback_.is_null())
+        scheduling_changed_callback_.Run(true);
     }
   } else {
-    if (unscheduled_count_ == 0) {
+    ++unscheduled_count_;
+    if (unscheduled_count_ == 1) {
       TRACE_EVENT_ASYNC_BEGIN1("gpu", "ProcessingSwap", this,
                                "GpuScheduler", this);
 #if defined(OS_WIN)
-      // When the scheduler transitions from scheduled to unscheduled, post a
-      // delayed task that it will force it back into a scheduled state after a
-      // timeout.
-      MessageLoop::current()->PostDelayedTask(
-          FROM_HERE,
-          base::Bind(&GpuScheduler::RescheduleTimeOut,
-                     reschedule_task_factory_.GetWeakPtr()),
-          base::TimeDelta::FromMilliseconds(kRescheduleTimeOutDelay));
+      if (base::win::GetVersion() < base::win::VERSION_VISTA) {
+        // When the scheduler transitions from scheduled to unscheduled, post a
+        // delayed task that it will force it back into a scheduled state after
+        // a timeout. This should only be necessary on pre-Vista.
+        MessageLoop::current()->PostDelayedTask(
+            FROM_HERE,
+            base::Bind(&GpuScheduler::RescheduleTimeOut,
+                       reschedule_task_factory_.GetWeakPtr()),
+            base::TimeDelta::FromMilliseconds(kRescheduleTimeOutDelay));
+      }
 #endif
+      if (!scheduling_changed_callback_.is_null())
+        scheduling_changed_callback_.Run(false);
     }
-
-    ++unscheduled_count_;
   }
 }
 
@@ -172,9 +171,9 @@ bool GpuScheduler::HasMoreWork() {
          (decoder_ && decoder_->ProcessPendingQueries());
 }
 
-void GpuScheduler::SetScheduledCallback(
-    const base::Closure& scheduled_callback) {
-  scheduled_callback_ = scheduled_callback;
+void GpuScheduler::SetSchedulingChangedCallback(
+    const SchedulingChangedCallback& callback) {
+  scheduling_changed_callback_ = callback;
 }
 
 Buffer GpuScheduler::GetSharedMemoryBuffer(int32 shm_id) {
@@ -253,6 +252,21 @@ bool GpuScheduler::PollUnscheduleFences() {
   }
 
   return true;
+}
+
+bool GpuScheduler::IsPreempted() {
+  if (!preemption_flag_.get())
+    return false;
+
+  if (!was_preempted_ && preemption_flag_->IsSet()) {
+    TRACE_COUNTER_ID1("gpu", "GpuScheduler::Preempted", this, 1);
+    was_preempted_ = true;
+  } else if (was_preempted_ && !preemption_flag_->IsSet()) {
+    TRACE_COUNTER_ID1("gpu", "GpuScheduler::Preempted", this, 0);
+    was_preempted_ = false;
+  }
+
+  return preemption_flag_->IsSet();
 }
 
 void GpuScheduler::RescheduleTimeOut() {

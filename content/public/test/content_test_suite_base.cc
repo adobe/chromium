@@ -15,6 +15,15 @@
 #include "ui/base/ui_base_paths.h"
 #include "ui/compositor/compositor_setup.h"
 
+#if defined(OS_ANDROID)
+#include "base/android/jni_android.h"
+#include "content/browser/android/browser_jni_registrar.h"
+#include "content/common/android/common_jni_registrar.h"
+#include "net/android/net_jni_registrar.h"
+#include "ui/android/ui_jni_registrar.h"
+#include "ui/shell_dialogs/android/shell_dialogs_jni_registrar.h"
+#endif
+
 namespace content {
 
 ContentTestSuiteBase::ContentTestSuiteBase(int argc, char** argv)
@@ -24,6 +33,16 @@ ContentTestSuiteBase::ContentTestSuiteBase(int argc, char** argv)
 
 void ContentTestSuiteBase::Initialize() {
   base::TestSuite::Initialize();
+
+#if defined(OS_ANDROID)
+  // Register JNI bindings for android.
+  JNIEnv* env = base::android::AttachCurrentThread();
+  content::android::RegisterCommonJni(env);
+  content::android::RegisterBrowserJni(env);
+  net::android::RegisterJni(env);
+  ui::android::RegisterJni(env);
+  ui::shell_dialogs::RegisterJni(env);
+#endif
 
   if (external_libraries_enabled_)
     media::InitializeMediaLibraryForTesting();

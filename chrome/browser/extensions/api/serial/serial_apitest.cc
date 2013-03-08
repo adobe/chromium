@@ -35,7 +35,7 @@ namespace extensions {
 
 class FakeSerialGetPortsFunction : public AsyncExtensionFunction {
  public:
-  virtual bool RunImpl() {
+  virtual bool RunImpl() OVERRIDE {
     ListValue* ports = new ListValue();
     ports->Append(Value::CreateStringValue("/dev/fakeserial"));
     ports->Append(Value::CreateStringValue("\\\\COM800\\"));
@@ -94,7 +94,7 @@ class FakeEchoSerialConnection : public SerialConnection {
 
   virtual int Write(scoped_refptr<net::IOBuffer> io_buffer, int byte_count) {
     DCHECK(io_buffer.get());
-    DCHECK(byte_count >= 0);
+    DCHECK_GE(byte_count, 0);
 
     char *data = io_buffer->data();
     int count = byte_count;

@@ -7,13 +7,20 @@
 #include "base/logging.h"
 #include "base/string_util.h"
 
+namespace autofill {
 namespace wallet {
 
 bool ActionAppliesToFullWallet(RequiredAction action) {
   return action == UPDATE_EXPIRATION_DATE ||
          action == UPGRADE_MIN_ADDRESS ||
          action == INVALID_FORM_FIELD ||
-         action == CVC_RISK_CHALLENGE;
+         action == VERIFY_CVV ||
+         action == REQUIRE_PHONE_NUMBER;
+}
+
+bool ActionAppliesToSaveToWallet(RequiredAction action) {
+  return action == INVALID_FORM_FIELD ||
+         action == REQUIRE_PHONE_NUMBER;
 }
 
 bool ActionAppliesToWalletItems(RequiredAction action) {
@@ -21,6 +28,7 @@ bool ActionAppliesToWalletItems(RequiredAction action) {
          action == ACCEPT_TOS ||
          action == GAIA_AUTH ||
          action == INVALID_FORM_FIELD ||
+         action == REQUIRE_PHONE_NUMBER ||
          action == PASSIVE_GAIA_AUTH;
 }
 
@@ -40,13 +48,16 @@ RequiredAction ParseRequiredActionFromString(const std::string& str) {
     return UPGRADE_MIN_ADDRESS;
   else if (str_lower == "invalid_form_field")
     return INVALID_FORM_FIELD;
-  else if (str_lower == "cvc_risk_challenge")
-    return CVC_RISK_CHALLENGE;
+  else if (str_lower == "verify_cvv")
+    return VERIFY_CVV;
   else if (str_lower == "passive_gaia_auth")
     return PASSIVE_GAIA_AUTH;
+  else if (str_lower == "require_phone_number")
+    return REQUIRE_PHONE_NUMBER;
 
   DLOG(ERROR) << "Failed to parse: \"" << str << "\" as a required action";
   return UNKNOWN_TYPE;
 }
 
 }  // namespace wallet
+}  // namespace autofill

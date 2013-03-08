@@ -17,6 +17,8 @@
 #include "net/url_request/url_request_status.h"
 #include "testing/platform_test.h"
 #include "webkit/fileapi/file_system_context.h"
+#include "webkit/fileapi/file_system_file_util.h"
+#include "webkit/fileapi/file_system_operation_context.h"
 #include "webkit/fileapi/file_writer_delegate.h"
 #include "webkit/fileapi/local_file_system_operation.h"
 #include "webkit/fileapi/local_file_system_test_helper.h"
@@ -197,7 +199,7 @@ net::URLRequestJob* FileWriterDelegateTest::Factory(
 
 void FileWriterDelegateTest::SetUp() {
   ASSERT_TRUE(dir_.CreateUniqueTempDir());
-  FilePath base_dir = dir_.path().AppendASCII("filesystem");
+  base::FilePath base_dir = dir_.path().AppendASCII("filesystem");
   test_helper_.SetUp(base_dir);
 
   scoped_ptr<FileSystemOperationContext> context(

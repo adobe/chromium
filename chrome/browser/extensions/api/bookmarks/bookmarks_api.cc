@@ -5,19 +5,19 @@
 #include "chrome/browser/extensions/api/bookmarks/bookmarks_api.h"
 
 #include "base/bind.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/i18n/file_util_icu.h"
 #include "base/i18n/time_formatting.h"
 #include "base/json/json_writer.h"
 #include "base/lazy_instance.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
-#include "base/prefs/public/pref_service_base.h"
+#include "base/prefs/pref_service.h"
 #include "base/sha1.h"
 #include "base/stl_util.h"
 #include "base/string16.h"
-#include "base/string_number_conversions.h"
 #include "base/string_util.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_codec.h"
@@ -39,6 +39,7 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/api/bookmarks.h"
 #include "chrome/common/pref_names.h"
+#include "components/user_prefs/user_prefs.h"
 #include "content/public/browser/notification_service.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -64,23 +65,23 @@ namespace {
 
 // Generates a default path (including a default filename) that will be
 // used for pre-populating the "Export Bookmarks" file chooser dialog box.
-FilePath GetDefaultFilepathForBookmarkExport() {
+base::FilePath GetDefaultFilepathForBookmarkExport() {
   base::Time time = base::Time::Now();
 
   // Concatenate a date stamp to the filename.
 #if defined(OS_POSIX)
-  FilePath::StringType filename =
+  base::FilePath::StringType filename =
       l10n_util::GetStringFUTF8(IDS_EXPORT_BOOKMARKS_DEFAULT_FILENAME,
                                 base::TimeFormatShortDateNumeric(time));
 #elif defined(OS_WIN)
-  FilePath::StringType filename =
+  base::FilePath::StringType filename =
       l10n_util::GetStringFUTF16(IDS_EXPORT_BOOKMARKS_DEFAULT_FILENAME,
                                  base::TimeFormatShortDateNumeric(time));
 #endif
 
   file_util::ReplaceIllegalCharactersInPath(&filename, '_');
 
-  FilePath default_path;
+  base::FilePath default_path;
   PathService::Get(chrome::DIR_USER_DOCUMENTS, &default_path);
   return default_path.Append(filename);
 }
@@ -91,10 +92,8 @@ void BookmarksFunction::Run() {
   BookmarkModel* model = BookmarkModelFactory::GetForProfile(profile());
   if (!model->IsLoaded()) {
     // Bookmarks are not ready yet.  We'll wait.
-    registrar_.Add(
-        this, chrome::NOTIFICATION_BOOKMARK_MODEL_LOADED,
-        content::NotificationService::AllBrowserContextsAndSources());
-    AddRef();  // Balanced in Observe().
+    model->AddObserver(this);
+    AddRef();  // Balanced in Loaded().
     return;
   }
 
@@ -108,8 +107,8 @@ void BookmarksFunction::Run() {
   SendResponse(success);
 }
 
-bool BookmarksFunction::GetBookmarkIdAsInt64(
-    const std::string& id_string, int64* id) {
+bool BookmarksFunction::GetBookmarkIdAsInt64(const std::string& id_string,
+                                             int64* id) {
   if (base::StringToInt64(id_string, id))
     return true;
 
@@ -118,22 +117,18 @@ bool BookmarksFunction::GetBookmarkIdAsInt64(
 }
 
 bool BookmarksFunction::EditBookmarksEnabled() {
-  PrefServiceBase* prefs = PrefServiceBase::FromBrowserContext(profile_);
+  PrefService* prefs = components::UserPrefs::Get(profile_);
   if (prefs->GetBoolean(prefs::kEditBookmarksEnabled))
     return true;
   error_ = keys::kEditBookmarksDisabled;
   return false;
 }
 
-void BookmarksFunction::Observe(int type,
-                                const content::NotificationSource& source,
-                                const content::NotificationDetails& details) {
-  DCHECK(type == chrome::NOTIFICATION_BOOKMARK_MODEL_LOADED);
-  Profile* source_profile = content::Source<Profile>(source).ptr();
-  if (!source_profile || !source_profile->IsSameProfile(profile()))
-    return;
+void BookmarksFunction::BookmarkModelChanged() {
+}
 
-  DCHECK(BookmarkModelFactory::GetForProfile(profile())->IsLoaded());
+void BookmarksFunction::Loaded(BookmarkModel* model, bool ids_reassigned) {
+  model->RemoveObserver(this);
   Run();
   Release();  // Balanced in Run().
 }
@@ -437,7 +432,7 @@ bool BookmarksSearchFunction::RunImpl() {
       bookmarks::Search::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
-  PrefServiceBase* prefs = PrefServiceBase::FromBrowserContext(profile_);
+  PrefService* prefs = components::UserPrefs::Get(profile_);
   std::string lang = prefs->GetString(prefs::kAcceptLanguages);
   std::vector<const BookmarkNode*> nodes;
   bookmark_utils::GetBookmarksContainingText(
@@ -729,7 +724,8 @@ class CreateBookmarkBucketMapper : public BookmarkBucketMapper<std::string> {
   explicit CreateBookmarkBucketMapper(Profile* profile) : profile_(profile) {}
   // TODO(tim): This should share code with BookmarksCreateFunction::RunImpl,
   // but I can't figure out a good way to do that with all the macros.
-  virtual void GetBucketsForArgs(const ListValue* args, BucketList* buckets) {
+  virtual void GetBucketsForArgs(const ListValue* args,
+                                 BucketList* buckets) OVERRIDE {
     const DictionaryValue* json;
     if (!args->GetDictionary(0, &json))
       return;
@@ -767,7 +763,8 @@ class CreateBookmarkBucketMapper : public BookmarkBucketMapper<std::string> {
 class RemoveBookmarksBucketMapper : public BookmarkBucketMapper<std::string> {
  public:
   explicit RemoveBookmarksBucketMapper(Profile* profile) : profile_(profile) {}
-  virtual void GetBucketsForArgs(const ListValue* args, BucketList* buckets) {
+  virtual void GetBucketsForArgs(const ListValue* args,
+                                 BucketList* buckets) OVERRIDE {
     typedef std::list<int64> IdList;
     IdList ids;
     bool invalid_id = false;
@@ -904,7 +901,7 @@ void BookmarksIOFunction::SelectFile(ui::SelectFileDialog::Type type) {
 
   // Pre-populating the filename field in case this is a SELECT_SAVEAS_FILE
   // dialog. If not, there is no filename field in the dialog box.
-  FilePath default_path;
+  base::FilePath default_path;
   if (type == ui::SelectFileDialog::SELECT_SAVEAS_FILE)
     default_path = GetDefaultFilepathForBookmarkExport();
   else
@@ -916,8 +913,12 @@ void BookmarksIOFunction::SelectFile(ui::SelectFileDialog::Type type) {
                  type, default_path));
 }
 
-void BookmarksIOFunction::ShowSelectFileDialog(ui::SelectFileDialog::Type type,
-                                               const FilePath& default_path) {
+void BookmarksIOFunction::ShowSelectFileDialog(
+    ui::SelectFileDialog::Type type,
+    const base::FilePath& default_path) {
+  if (!dispatcher())
+    return;  // Extension was unloaded.
+
   // Balanced in one of the three callbacks of SelectFileDialog:
   // either FileSelectionCanceled, MultiFilesSelected, or FileSelected
   AddRef();
@@ -930,10 +931,10 @@ void BookmarksIOFunction::ShowSelectFileDialog(ui::SelectFileDialog::Type type,
   ui::SelectFileDialog::FileTypeInfo file_type_info;
   file_type_info.extensions.resize(1);
   file_type_info.extensions[0].push_back(FILE_PATH_LITERAL("html"));
-  // TODO(kinaba): http://crbug.com/140425. Turn file_type_info.support_gdata
+  // TODO(kinaba): http://crbug.com/140425. Turn file_type_info.support_drive
   // on for saving once Google Drive client on ChromeOS supports it.
   if (type == ui::SelectFileDialog::SELECT_OPEN_FILE)
-    file_type_info.support_gdata = true;
+    file_type_info.support_drive = true;
   // |web_contents| can be NULL (for background pages), which is fine. In such
   // a case if file-selection dialogs are forbidden by policy, we will not
   // show an InfoBar, which is better than letting one appear out of the blue.
@@ -952,7 +953,7 @@ void BookmarksIOFunction::FileSelectionCanceled(void* params) {
 }
 
 void BookmarksIOFunction::MultiFilesSelected(
-    const std::vector<FilePath>& files, void* params) {
+    const std::vector<base::FilePath>& files, void* params) {
   Release();  // Balanced in BookmarsIOFunction::SelectFile()
   NOTREACHED() << "Should not be able to select multiple files";
 }
@@ -964,7 +965,7 @@ bool BookmarksImportFunction::RunImpl() {
   return true;
 }
 
-void BookmarksImportFunction::FileSelected(const FilePath& path,
+void BookmarksImportFunction::FileSelected(const base::FilePath& path,
                                            int index,
                                            void* params) {
 #if !defined(OS_ANDROID)
@@ -989,7 +990,7 @@ bool BookmarksExportFunction::RunImpl() {
   return true;
 }
 
-void BookmarksExportFunction::FileSelected(const FilePath& path,
+void BookmarksExportFunction::FileSelected(const base::FilePath& path,
                                            int index,
                                            void* params) {
 #if !defined(OS_ANDROID)

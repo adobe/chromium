@@ -94,6 +94,10 @@ gfx::Font NativeWidgetAura::GetWindowTitleFont() {
 // NativeWidgetAura, internal::NativeWidgetPrivate implementation:
 
 void NativeWidgetAura::InitNativeWidget(const Widget::InitParams& params) {
+  // Aura needs to know which desktop (Ash or regular) will manage this widget.
+  // See Widget::InitParams::context for details.
+  DCHECK(params.parent || params.context);
+
   ownership_ = params.ownership;
 
   window_->set_user_data(this);
@@ -153,7 +157,7 @@ void NativeWidgetAura::InitNativeWidget(const Widget::InitParams& params) {
   DCHECK(GetWidget()->GetRootView());
 #if !defined(OS_MACOSX)
   if (params.type != Widget::InitParams::TYPE_TOOLTIP)
-    tooltip_manager_.reset(new views::TooltipManagerAura(this));
+    tooltip_manager_.reset(new views::TooltipManagerAura(window_, GetWidget()));
 #endif  // !defined(OS_MACOSX)
 
   drop_helper_.reset(new DropHelper(GetWidget()->GetRootView()));
@@ -240,19 +244,6 @@ TooltipManager* NativeWidgetAura::GetTooltipManager() const {
   return tooltip_manager_.get();
 }
 
-bool NativeWidgetAura::IsScreenReaderActive() const {
-  // http://crbug.com/102570
-  // NOTIMPLEMENTED();
-  return false;
-}
-
-void NativeWidgetAura::SendNativeAccessibilityEvent(
-    View* view,
-    ui::AccessibilityTypes::Event event_type) {
-  // http://crbug.com/102570
-  // NOTIMPLEMENTED();
-}
-
 void NativeWidgetAura::SetCapture() {
   window_->SetCapture();
 }
@@ -269,7 +260,7 @@ InputMethod* NativeWidgetAura::CreateInputMethod() {
   aura::RootWindow* root_window = window_->GetRootWindow();
   ui::InputMethod* host =
       root_window->GetProperty(aura::client::kRootWindowInputMethodKey);
-  return new InputMethodBridge(this, host);
+  return new InputMethodBridge(this, host, true);
 }
 
 internal::InputMethodDelegate* NativeWidgetAura::GetInputMethodDelegate() {
@@ -338,21 +329,6 @@ void NativeWidgetAura::SetWindowTitle(const string16& title) {
 void NativeWidgetAura::SetWindowIcons(const gfx::ImageSkia& window_icon,
                                       const gfx::ImageSkia& app_icon) {
   // Aura doesn't have window icons.
-}
-
-void NativeWidgetAura::SetAccessibleName(const string16& name) {
-  // http://crbug.com/102570
-  // NOTIMPLEMENTED();
-}
-
-void NativeWidgetAura::SetAccessibleRole(ui::AccessibilityTypes::Role role) {
-  // http://crbug.com/102570
-  // NOTIMPLEMENTED();
-}
-
-void NativeWidgetAura::SetAccessibleState(ui::AccessibilityTypes::State state) {
-  // http://crbug.com/102570
-  // NOTIMPLEMENTED();
 }
 
 void NativeWidgetAura::InitModalType(ui::ModalType modal_type) {
@@ -557,12 +533,6 @@ void NativeWidgetAura::FlashFrame(bool flash) {
   window_->SetProperty(aura::client::kDrawAttentionKey, flash);
 }
 
-bool NativeWidgetAura::IsAccessibleWidget() const {
-  // http://crbug.com/102570
-  // NOTIMPLEMENTED();
-  return false;
-}
-
 void NativeWidgetAura::RunShellDrag(View* view,
                                     const ui::OSExchangeData& data,
                                     const gfx::Point& location,
@@ -605,12 +575,18 @@ void NativeWidgetAura::SetInactiveRenderingDisabled(bool value) {
 }
 
 Widget::MoveLoopResult NativeWidgetAura::RunMoveLoop(
-    const gfx::Vector2d& drag_offset) {
+    const gfx::Vector2d& drag_offset,
+    Widget::MoveLoopSource source) {
   if (window_->parent() &&
       aura::client::GetWindowMoveClient(window_->parent())) {
     SetCapture();
+    aura::client::WindowMoveSource window_move_source =
+        source == Widget::MOVE_LOOP_SOURCE_MOUSE ?
+        aura::client::WINDOW_MOVE_SOURCE_MOUSE :
+        aura::client::WINDOW_MOVE_SOURCE_TOUCH;
     if (aura::client::GetWindowMoveClient(window_->parent())->RunMoveLoop(
-            window_, drag_offset) == aura::client::MOVE_SUCCESSFUL) {
+            window_, drag_offset, window_move_source) ==
+        aura::client::MOVE_SUCCESSFUL) {
       return Widget::MOVE_LOOP_SUCCESSFUL;
     }
   }
@@ -733,7 +709,6 @@ void NativeWidgetAura::OnWindowDestroying() {
 
 void NativeWidgetAura::OnWindowDestroyed() {
   window_ = NULL;
-  tooltip_manager_.reset();
   delegate_->OnNativeWidgetDestroyed();
   if (ownership_ == Widget::InitParams::NATIVE_WIDGET_OWNS_WIDGET)
     delete this;
@@ -855,8 +830,9 @@ void NativeWidgetAura::OnWindowFocused(aura::Window* gained_focus,
       DCHECK_EQ(ownership_, Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET);
     }
 
-    delegate_->OnNativeBlur(
-        aura::client::GetFocusClient(window_)->GetFocusedWindow());
+    aura::client::FocusClient* client = aura::client::GetFocusClient(window_);
+    if (client)  // NULL during destruction of aura::Window.
+      delegate_->OnNativeBlur(client->GetFocusedWindow());
   }
 }
 
@@ -1034,8 +1010,9 @@ void NativeWidgetPrivate::ReparentNativeView(gfx::NativeView native_view,
     // in this case is the stacking client of the current RootWindow. This
     // matches our previous behaviour; the global stacking client would almost
     // always reattach the window to the same RootWindow.
-    native_view->SetDefaultParentByRootWindow(native_view->GetRootWindow(),
-                                              gfx::Rect());
+    aura::RootWindow* root_window = native_view->GetRootWindow();
+    native_view->SetDefaultParentByRootWindow(
+        root_window, root_window->GetBoundsInScreen());
   }
 
   // And now, notify them that they have a brand new parent.

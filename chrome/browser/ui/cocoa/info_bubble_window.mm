@@ -38,9 +38,10 @@ class AppNotificationBridge : public content::NotificationObserver {
   }
 
   // Overridden from content::NotificationObserver.
-  void Observe(int type,
-               const content::NotificationSource& source,
-               const content::NotificationDetails& details) {
+  virtual void Observe(
+      int type,
+      const content::NotificationSource& source,
+      const content::NotificationDetails& details) OVERRIDE {
     switch (type) {
       case chrome::NOTIFICATION_APP_TERMINATING:
         [owner_ appIsTerminating];
@@ -93,7 +94,7 @@ class AppNotificationBridge : public content::NotificationObserver {
 
 @implementation InfoBubbleWindow
 
-@synthesize delayOnClose = delayOnClose_;
+@synthesize allowedAnimations = allowedAnimations_;
 @synthesize canBecomeKeyWindow = canBecomeKeyWindow_;
 
 - (id)initWithContentRect:(NSRect)contentRect
@@ -108,8 +109,9 @@ class AppNotificationBridge : public content::NotificationObserver {
     [self setExcludedFromWindowsMenu:YES];
     [self setOpaque:NO];
     [self setHasShadow:YES];
-    delayOnClose_ = YES;
     canBecomeKeyWindow_ = YES;
+    allowedAnimations_ = info_bubble::kAnimateOrderIn |
+                         info_bubble::kAnimateOrderOut;
     notificationBridge_.reset(new AppNotificationBridge(self));
 
     // Start invisible. Will be made visible when ordered front.
@@ -151,7 +153,7 @@ class AppNotificationBridge : public content::NotificationObserver {
   // Block the window from receiving events while it fades out.
   closing_ = YES;
 
-  if (!delayOnClose_) {
+  if ((allowedAnimations_ & info_bubble::kAnimateOrderOut) == 0) {
     [self finishCloseAfterAnimation];
   } else {
     // Apply animations to hide self.
@@ -168,7 +170,7 @@ class AppNotificationBridge : public content::NotificationObserver {
 // animation and close the window to prevent it from leaking.
 // See http://crbug.com/37717
 - (void)appIsTerminating {
-  if (!delayOnClose_)
+  if ((allowedAnimations_ & info_bubble::kAnimateOrderOut) == 0)
     return;  // The close has already happened with no Core Animation.
 
   // Cancel the current animation so that it closes immediately, triggering
@@ -205,9 +207,12 @@ class AppNotificationBridge : public content::NotificationObserver {
     // Apply animations to show and move self.
     [NSAnimationContext beginGrouping];
     // The star currently triggers on mouse down, not mouse up.
+    NSTimeInterval duration =
+        (allowedAnimations_ & info_bubble::kAnimateOrderIn)
+            ? kOrderInAnimationDuration : kMinimumTimeInterval;
     [[NSAnimationContext currentContext]
-        gtm_setDuration:kOrderInAnimationDuration
-              eventMask:NSLeftMouseUpMask|NSLeftMouseDownMask];
+        gtm_setDuration:duration
+              eventMask:NSLeftMouseUpMask | NSLeftMouseDownMask];
     [[self animator] setAlphaValue:1.0];
     [[self animator] setFrame:frame display:YES];
     [NSAnimationContext endGrouping];

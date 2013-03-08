@@ -47,7 +47,7 @@ class EGLSyncControlVSyncProvider
  protected:
   virtual bool GetSyncValues(int64* system_time,
                              int64* media_stream_counter,
-                             int64* swap_buffer_counter) {
+                             int64* swap_buffer_counter) OVERRIDE {
     uint64 u_system_time, u_media_stream_counter, u_swap_buffer_counter;
     bool result = eglGetSyncValuesCHROMIUM(
         g_display, surface_, &u_system_time,
@@ -60,7 +60,7 @@ class EGLSyncControlVSyncProvider
     return result;
   }
 
-  virtual bool GetMscRate(int32* numerator, int32* denominator) {
+  virtual bool GetMscRate(int32* numerator, int32* denominator) OVERRIDE {
     return false;
   }
 
@@ -223,6 +223,11 @@ NativeViewGLSurfaceEGL::NativeViewGLSurfaceEGL(bool software,
 
 bool NativeViewGLSurfaceEGL::Initialize() {
   DCHECK(!surface_);
+
+  if (window_ == kNullAcceleratedWidget) {
+    LOG(ERROR) << "Trying to create surface without window.";
+    return false;
+  }
 
   if (!GetDisplay()) {
     LOG(ERROR) << "Trying to create surface with invalid display.";
@@ -441,9 +446,10 @@ PbufferGLSurfaceEGL::PbufferGLSurfaceEGL(bool software, const gfx::Size& size)
 }
 
 bool PbufferGLSurfaceEGL::Initialize() {
-  DCHECK(!surface_);
+  EGLSurface old_surface = surface_;
 
-  if (!GetDisplay()) {
+  EGLDisplay display = GetDisplay();
+  if (!display) {
     LOG(ERROR) << "Trying to create surface with invalid display.";
     return false;
   }
@@ -454,22 +460,29 @@ bool PbufferGLSurfaceEGL::Initialize() {
     return false;
   }
 
+  // Allocate the new pbuffer surface before freeing the old one to ensure
+  // they have different addresses. If they have the same address then a
+  // future call to MakeCurrent might early out because it appears the current
+  // context and surface have not changed.
   const EGLint pbuffer_attribs[] = {
     EGL_WIDTH, size_.width(),
     EGL_HEIGHT, size_.height(),
     EGL_NONE
   };
 
-  surface_ = eglCreatePbufferSurface(GetDisplay(),
-                                     GetConfig(),
-                                     pbuffer_attribs);
-  if (!surface_) {
+  EGLSurface new_surface = eglCreatePbufferSurface(display,
+                                                   GetConfig(),
+                                                   pbuffer_attribs);
+  if (!new_surface) {
     LOG(ERROR) << "eglCreatePbufferSurface failed with error "
                << GetLastEGLErrorString();
-    Destroy();
     return false;
   }
 
+  if (old_surface)
+    eglDestroySurface(display, old_surface);
+
+  surface_ = new_surface;
   return true;
 }
 
@@ -506,10 +519,6 @@ bool PbufferGLSurfaceEGL::Resize(const gfx::Size& size) {
 
   GLContext* current_context = GLContext::GetCurrent();
   bool was_current = current_context && current_context->IsCurrent(this);
-  if (was_current)
-    current_context->ReleaseCurrent(this);
-
-  Destroy();
 
   size_ = size;
 

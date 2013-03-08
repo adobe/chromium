@@ -10,9 +10,10 @@
 #include "base/base_export.h"
 #include "build/build_config.h"
 
+namespace base {
+
 class FilePath;
 
-namespace base {
 namespace nix {
 
 // Gets the mime type for a file based on its filename. The file path does not
@@ -24,12 +25,10 @@ BASE_EXPORT std::string GetFileMimeType(const FilePath& filepath);
 // Get the mime type for a byte vector.
 BASE_EXPORT std::string GetDataMimeType(const std::string& data);
 
-#if defined(TOOLKIT_GTK)
-// This detects the current GTK theme by calling gtk_settings_get_default().
-// It should only be executed on the UI thread and must be called before
-// GetMimeIcon().
-BASE_EXPORT void DetectGtkTheme();
-#endif
+// Sets the current icon theme that we've detected from the desktop
+// environment. Currently only works when we believe we're in a GTK
+// environment.
+BASE_EXPORT void SetIconThemeName(const std::string& name);
 
 // Gets the file name for an icon given the mime type and icon pixel size.
 // Where an icon is a square image of |size| x |size|.

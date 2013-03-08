@@ -10,6 +10,7 @@
 #include "base/values.h"
 #include "chrome/browser/extensions/active_tab_permission_granter.h"
 #include "chrome/browser/extensions/tab_helper.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sessions/session_id.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension.h"
@@ -54,8 +55,7 @@ scoped_refptr<const Extension> CreateTestExtension(
 class ActiveTabTest : public ChromeRenderViewHostTestHarness {
  public:
   ActiveTabTest()
-      : current_channel_(chrome::VersionInfo::CHANNEL_DEV),
-        extension(CreateTestExtension("deadbeef", true)),
+      : extension(CreateTestExtension("deadbeef", true)),
         another_extension(CreateTestExtension("feedbeef", true)),
         extension_without_active_tab(CreateTestExtension("badbeef", false)),
         ui_thread_(BrowserThread::UI, MessageLoop::current()) {}
@@ -109,11 +109,6 @@ class ActiveTabTest : public ChromeRenderViewHostTestHarness {
                          int tab_id) {
     return extension->HasAPIPermissionForTab(tab_id, APIPermission::kTab);
   }
-
-  // Force the test to run in dev channel because the permission is only
-  // available in dev channel. Without declaring this first, the extensions
-  // below won't load due to manifest errors.
-  Feature::ScopedCurrentChannel current_channel_;
 
   // An extension with the activeTab permission.
   scoped_refptr<const Extension> extension;

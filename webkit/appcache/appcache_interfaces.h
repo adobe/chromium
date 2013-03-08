@@ -8,7 +8,7 @@
 #include <string>
 #include <vector>
 #include "base/basictypes.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/time.h"
 #include "googleurl/src/gurl.h"
 #include "webkit/storage/webkit_storage_export.h"
@@ -47,11 +47,12 @@ enum EventID {
   OBSOLETE_EVENT
 };
 
+// Temporarily renumber them in wierd way, to help remove LOG_TIP from WebKit
 enum LogLevel {
-  LOG_TIP,
-  LOG_INFO,
-  LOG_WARNING,
-  LOG_ERROR,
+  LOG_DEBUG = 4,
+  LOG_INFO = 1,
+  LOG_WARNING = 2,
+  LOG_ERROR = 3,
 };
 
 enum NamespaceType {
@@ -169,7 +170,8 @@ bool IsSchemeSupported(const GURL& url);
 bool IsMethodSupported(const std::string& method);
 bool IsSchemeAndMethodSupported(const net::URLRequest* request);
 
-WEBKIT_STORAGE_EXPORT extern const FilePath::CharType kAppCacheDatabaseName[];
+WEBKIT_STORAGE_EXPORT extern const base::FilePath::CharType
+    kAppCacheDatabaseName[];
 
 }  // namespace
 

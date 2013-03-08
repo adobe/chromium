@@ -42,8 +42,8 @@ class MockPermissionBrokerClient;
 class MockPowerManagerClient;
 class MockSessionManagerClient;
 class MockSMSClient;
-class MockSpeechSynthesizerClient;
 class MockUpdateEngineClient;
+class PowerPolicyController;
 
 // This class provides a mock DBusThreadManager with mock clients
 // installed. You can customize the behaviors of mock clients with
@@ -55,7 +55,8 @@ class MockDBusThreadManager : public DBusThreadManager {
 
   void AddObserver(DBusThreadManagerObserver* observer) OVERRIDE;
   void RemoveObserver(DBusThreadManagerObserver* observer) OVERRIDE;
-  MOCK_METHOD1(InitIBusBus, void(const std::string& ibus_address));
+  MOCK_METHOD2(InitIBusBus, void(const std::string& ibus_address,
+                                 const base::Closure& closure));
   MOCK_METHOD0(GetSystemBus, dbus::Bus*(void));
   MOCK_METHOD0(GetIBusBus, dbus::Bus*(void));
   MOCK_METHOD0(GetBluetoothAdapterClient, BluetoothAdapterClient*(void));
@@ -78,9 +79,9 @@ class MockDBusThreadManager : public DBusThreadManager {
   MOCK_METHOD0(GetModemMessagingClient, ModemMessagingClient*(void));
   MOCK_METHOD0(GetPermissionBrokerClient, PermissionBrokerClient*(void));
   MOCK_METHOD0(GetPowerManagerClient, PowerManagerClient*(void));
+  MOCK_METHOD0(GetPowerPolicyController, PowerPolicyController*(void));
   MOCK_METHOD0(GetSessionManagerClient, SessionManagerClient*(void));
   MOCK_METHOD0(GetSMSClient, SMSClient*(void));
-  MOCK_METHOD0(GetSpeechSynthesizerClient, SpeechSynthesizerClient*(void));
   MOCK_METHOD0(GetUpdateEngineClient, UpdateEngineClient*(void));
   MOCK_METHOD0(GetIBusClient, IBusClient*(void));
   MOCK_METHOD0(GetIBusConfigClient, IBusConfigClient*(void));
@@ -90,7 +91,7 @@ class MockDBusThreadManager : public DBusThreadManager {
                IBusEngineService*(const dbus::ObjectPath& object_path));
   MOCK_METHOD1(RemoveIBusEngineService,
                void(const dbus::ObjectPath& object_path));
-  MOCK_METHOD0(GetIBusPanelService, ibus::IBusPanelService*(void));
+  MOCK_METHOD0(GetIBusPanelService, IBusPanelService*(void));
 
   MockBluetoothAdapterClient* mock_bluetooth_adapter_client() {
     return mock_bluetooth_adapter_client_.get();
@@ -158,14 +159,15 @@ class MockDBusThreadManager : public DBusThreadManager {
   MockSMSClient* mock_sms_client() {
     return mock_sms_client_.get();
   }
-  MockSpeechSynthesizerClient* mock_speech_synthesizer_client() {
-    return mock_speech_synthesizer_client_.get();
-  }
   MockUpdateEngineClient* mock_update_engine_client() {
     return mock_update_engine_client_.get();
   }
 
  private:
+  // Note: Keep this before other members so they can call AddObserver() in
+  // their c'tors.
+  ObserverList<DBusThreadManagerObserver> observers_;
+
   scoped_ptr<MockBluetoothAdapterClient> mock_bluetooth_adapter_client_;
   scoped_ptr<MockBluetoothDeviceClient> mock_bluetooth_device_client_;
   scoped_ptr<MockBluetoothInputClient> mock_bluetooth_input_client_;
@@ -188,10 +190,8 @@ class MockDBusThreadManager : public DBusThreadManager {
   scoped_ptr<MockPowerManagerClient> mock_power_manager_client_;
   scoped_ptr<MockSessionManagerClient> mock_session_manager_client_;
   scoped_ptr<MockSMSClient> mock_sms_client_;
-  scoped_ptr<MockSpeechSynthesizerClient> mock_speech_synthesizer_client_;
   scoped_ptr<MockUpdateEngineClient> mock_update_engine_client_;
-
-  ObserverList<DBusThreadManagerObserver> observers_;
+  scoped_ptr<PowerPolicyController> power_policy_controller_;
 
   DISALLOW_COPY_AND_ASSIGN(MockDBusThreadManager);
 };

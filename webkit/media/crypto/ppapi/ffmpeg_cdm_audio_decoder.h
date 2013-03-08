@@ -29,7 +29,7 @@ namespace webkit_media {
 // solution for this. See http://crbug.com/169203
 class FFmpegCdmAudioDecoder {
  public:
-  explicit FFmpegCdmAudioDecoder(cdm::Allocator* allocator);
+  explicit FFmpegCdmAudioDecoder(cdm::Host* host);
   ~FFmpegCdmAudioDecoder();
   bool Initialize(const cdm::AudioDecoderConfig& config);
   void Deinitialize();
@@ -42,6 +42,9 @@ class FFmpegCdmAudioDecoder {
   // output in |decoded_frames| when output is available. Returns
   // |cdm::kNeedMoreData| when |compressed_frame| does not produce output.
   // Returns |cdm::kDecodeError| when decoding fails.
+  //
+  // A null |compressed_buffer| will attempt to flush the decoder of any
+  // remaining frames. |compressed_buffer_size| and |timestamp| are ignored.
   cdm::Status DecodeBuffer(const uint8_t* compressed_buffer,
                            int32_t compressed_buffer_size,
                            int64_t timestamp,
@@ -57,7 +60,7 @@ class FFmpegCdmAudioDecoder {
 
   bool is_initialized_;
 
-  cdm::Allocator* const allocator_;
+  cdm::Host* const host_;
 
   // FFmpeg structures owned by this object.
   AVCodecContext* codec_context_;
@@ -66,6 +69,10 @@ class FFmpegCdmAudioDecoder {
   // Audio format.
   int bits_per_channel_;
   int samples_per_second_;
+  int channels_;
+
+  // AVSampleFormat initially requested; not Chrome's SampleFormat.
+  int av_sample_format_;
 
   // Used for computing output timestamps.
   scoped_ptr<media::AudioTimestampHelper> output_timestamp_helper_;

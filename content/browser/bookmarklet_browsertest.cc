@@ -50,6 +50,7 @@ IN_PROC_BROWSER_TEST_F(BookmarkletTest, RedirectVoided) {
   EXPECT_EQ("SUCCESS", GetBodyText());
 }
 
+// http://crbug.com/177957
 IN_PROC_BROWSER_TEST_F(BookmarkletTest, NonEmptyResult) {
   NavigateToStartPage();
   // If there's no navigation, javascript: URLs are run synchronously.

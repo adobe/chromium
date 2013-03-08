@@ -90,7 +90,7 @@ NSTextField* LabelWithFrame(NSString* text, const NSRect& frame) {
 - (void)initializePopupList;
 - (void)initializeGeoLists;
 - (void)sizeToFitLoadButton;
-- (void)sizeToFitManageDoneButtons;
+- (void)initManageDoneButtons;
 - (void)removeInfoButton;
 - (void)popupLinkClicked:(id)sender;
 - (void)clearGeolocationForCurrentHost:(id)sender;
@@ -122,9 +122,9 @@ NSTextField* LabelWithFrame(NSString* text, const NSRect& frame) {
     case CONTENT_SETTINGS_TYPE_COOKIES:
       nibPath = @"ContentBlockedCookies"; break;
     case CONTENT_SETTINGS_TYPE_IMAGES:
-      nibPath = @"ContentBlockedImages"; break;
     case CONTENT_SETTINGS_TYPE_JAVASCRIPT:
-      nibPath = @"ContentBlockedJavaScript"; break;
+    case CONTENT_SETTINGS_TYPE_PPAPI_BROKER:
+      nibPath = @"ContentBlockedSimple"; break;
     case CONTENT_SETTINGS_TYPE_PLUGINS:
       nibPath = @"ContentBlockedPlugins"; break;
     case CONTENT_SETTINGS_TYPE_POPUPS:
@@ -135,17 +135,16 @@ NSTextField* LabelWithFrame(NSString* text, const NSRect& frame) {
       nibPath = @"ContentBlockedMixedScript"; break;
     case CONTENT_SETTINGS_TYPE_PROTOCOL_HANDLERS:
       nibPath = @"ContentProtocolHandlers"; break;
+    case CONTENT_SETTINGS_TYPE_MEDIASTREAM:
+      nibPath = @"ContentBlockedMedia"; break;
     // These content types have no bubble:
     case CONTENT_SETTINGS_TYPE_DEFAULT:
     case CONTENT_SETTINGS_TYPE_NOTIFICATIONS:
-    case CONTENT_SETTINGS_TYPE_INTENTS:
     case CONTENT_SETTINGS_TYPE_AUTO_SELECT_CERTIFICATE:
     case CONTENT_SETTINGS_TYPE_FULLSCREEN:
     case CONTENT_SETTINGS_TYPE_MOUSELOCK:
-    case CONTENT_SETTINGS_TYPE_MEDIASTREAM:
     case CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC:
     case CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA:
-    case CONTENT_SETTINGS_TYPE_PPAPI_BROKER:
     case CONTENT_SETTINGS_NUM_TYPES:
       NOTREACHED();
   }
@@ -416,7 +415,12 @@ NSTextField* LabelWithFrame(NSString* text, const NSRect& frame) {
   }
 }
 
-- (void)sizeToFitManageDoneButtons {
+- (void)initManageDoneButtons {
+  const ContentSettingBubbleModel::BubbleContent& content =
+      contentSettingBubbleModel_->bubble_content();
+  [manageButton_ setTitle:base::SysUTF8ToNSString(content.manage_link)];
+  [GTMUILocalizerAndLayoutTweaker sizeToFitView:manageButton_];
+
   CGFloat actualWidth = NSWidth([[[self window] contentView] frame]);
   CGFloat requiredWidth = NSMaxX([manageButton_ frame]) + kManageDonePadding +
       NSWidth([[doneButton_ superview] frame]) - NSMinX([doneButton_ frame]);
@@ -438,7 +442,7 @@ NSTextField* LabelWithFrame(NSString* text, const NSRect& frame) {
   [[self bubble] setArrowLocation:info_bubble::kTopRight];
 
   // Adapt window size to bottom buttons. Do this before all other layouting.
-  [self sizeToFitManageDoneButtons];
+  [self initManageDoneButtons];
 
   [self initializeTitle];
 

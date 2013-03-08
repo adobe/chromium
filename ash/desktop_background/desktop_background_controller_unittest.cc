@@ -5,10 +5,14 @@
 #include "ash/desktop_background/desktop_background_controller.h"
 
 #include "ash/desktop_background/desktop_background_widget_controller.h"
+#include "ash/desktop_background/wallpaper_resizer.h"
+#include "ash/desktop_background/wallpaper_resizer_observer.h"
 #include "ash/shell.h"
 #include "ash/shell_window_ids.h"
 #include "ash/test/ash_test_base.h"
 #include "ui/aura/root_window.h"
+#include "ui/compositor/test/layer_animator_test_controller.h"
+#include "ui/gfx/image/image_skia_rep.h"
 
 using aura::RootWindow;
 using aura::Window;
@@ -35,12 +39,13 @@ void RunAnimationForWidget(views::Widget* widget) {
   DCHECK(!ui::LayerAnimator::disable_animations_for_test());
 
   ui::Layer* layer = widget->GetNativeView()->layer();
-  ui::LayerAnimator* animator = layer->GetAnimator();
+  ui::LayerAnimatorTestController controller(layer->GetAnimator());
   ui::AnimationContainerElement* element = layer->GetAnimator();
   // Multiple steps are required to complete complex animations.
   // TODO(vollick): This should not be necessary. crbug.com/154017
-  while (animator->is_animating()) {
-    base::TimeTicks step_time = animator->last_step_time();
+  while (controller.animator()->is_animating()) {
+    controller.StartThreadedAnimationsIfNeeded();
+    base::TimeTicks step_time = controller.animator()->last_step_time();
     element->Step(step_time + base::TimeDelta::FromMilliseconds(1000));
   }
 }
@@ -50,7 +55,8 @@ void RunAnimationForWidget(views::Widget* widget) {
 namespace ash {
 namespace internal {
 
-class DesktopBackgroundControllerTest : public test::AshTestBase {
+class DesktopBackgroundControllerTest : public test::AshTestBase,
+                                        public WallpaperResizerObserver {
  public:
   DesktopBackgroundControllerTest() {}
   virtual ~DesktopBackgroundControllerTest() {}
@@ -64,6 +70,26 @@ class DesktopBackgroundControllerTest : public test::AshTestBase {
         static_cast<DesktopBackgroundWidgetController*>(NULL));
     root->SetProperty(kAnimatingDesktopController,
         static_cast<AnimatingDesktopController*>(NULL));
+  }
+
+  void WaitForResize() {
+    MessageLoop::current()->Run();
+  }
+
+  virtual void OnWallpaperResized() OVERRIDE {
+    MessageLoop::current()->Quit();
+  }
+
+  void AddWallpaperResizerObserver() {
+    DesktopBackgroundController* controller =
+        Shell::GetInstance()->desktop_background_controller();
+    controller->current_wallpaper_->AddObserver(this);
+  }
+
+  void RemoveWallpaperResizerObserver() {
+    DesktopBackgroundController* controller =
+        Shell::GetInstance()->desktop_background_controller();
+    controller->current_wallpaper_->RemoveObserver(this);
   }
 
  private:
@@ -223,6 +249,74 @@ TEST_F(DesktopBackgroundControllerTest, ChangeWallpaperQuick) {
       root->GetProperty(kAnimatingDesktopController)->GetController(false));
   // The desktop controller should be the last created animating controller.
   EXPECT_EQ(animatingController, root->GetProperty(kDesktopController));
+}
+
+#if defined(OS_WIN)
+// Broken on win8_aura. http://crbug.com/179763
+# define MAYBE_ResizeToFitScreens DISABLED_ResizeToFitScreens
+#else
+# define MAYBE_ResizeToFitScreens ResizeToFitScreens
+#endif
+
+TEST_F(DesktopBackgroundControllerTest, MAYBE_ResizeToFitScreens) {
+  // We cannot short-circuit animations for this test.
+  ui::LayerAnimator::set_disable_animations_for_test(false);
+
+  // Keeps in sync with WallpaperLayout enum.
+  WallpaperLayout layouts[4] = {
+      WALLPAPER_LAYOUT_CENTER,
+      WALLPAPER_LAYOUT_CENTER_CROPPED,
+      WALLPAPER_LAYOUT_STRETCH,
+      WALLPAPER_LAYOUT_TILE,
+  };
+  const int length = arraysize(layouts);
+  for (int i = 0; i < length; i++) {
+    WallpaperLayout layout = layouts[i];
+    UpdateDisplay("800x600");
+    gfx::ImageSkia small_wallpaper(gfx::ImageSkiaRep(gfx::Size(10, 20),
+                                                     ui::SCALE_FACTOR_100P));
+    DesktopBackgroundController* controller =
+        Shell::GetInstance()->desktop_background_controller();
+    controller->SetCustomWallpaper(small_wallpaper, layout);
+
+    // Run wallpaper show animation to completion.
+    RootWindow* root = Shell::GetPrimaryRootWindow();
+    RunAnimationForWidget(
+        root->GetProperty(kAnimatingDesktopController)->GetController(false)->
+                widget());
+
+    // Resize is not needed.
+    EXPECT_EQ(10, controller->GetWallpaper().width());
+    EXPECT_EQ(20, controller->GetWallpaper().height());
+
+    gfx::ImageSkia large(gfx::ImageSkiaRep(gfx::Size(1000, 1000),
+                                           ui::SCALE_FACTOR_100P));
+
+    controller->SetCustomWallpaper(large, layout);
+    AddWallpaperResizerObserver();
+    RunAnimationForWidget(
+        root->GetProperty(kAnimatingDesktopController)->GetController(false)->
+                widget());
+    WaitForResize();
+    RemoveWallpaperResizerObserver();
+    EXPECT_EQ(800, controller->GetWallpaper().width());
+    EXPECT_EQ(600, controller->GetWallpaper().height());
+
+    UpdateDisplay("800x600,500x700");
+    controller->SetCustomWallpaper(large, layout);
+    AddWallpaperResizerObserver();
+    Shell::RootWindowList root_windows = Shell::GetAllRootWindows();
+    for (Shell::RootWindowList::iterator iter = root_windows.begin();
+         iter != root_windows.end(); ++iter) {
+      RunAnimationForWidget(
+          (*iter)->GetProperty(kAnimatingDesktopController)->
+              GetController(false)->widget());
+    }
+    WaitForResize();
+    RemoveWallpaperResizerObserver();
+    EXPECT_EQ(800, controller->GetWallpaper().width());
+    EXPECT_EQ(700, controller->GetWallpaper().height());
+  }
 }
 
 }  // namespace internal

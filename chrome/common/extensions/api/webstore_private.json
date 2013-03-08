@@ -9,6 +9,7 @@
     "functions": [
       {
         "name": "install",
+        "nocompile": true,
         "description": "Installs the extension corresponding to the given id",
         "parameters": [
           {
@@ -105,6 +106,11 @@
                 "type": "boolean",
                 "optional": true,
                 "description": "A flag to change the UI we show when an app is installed - a value of true means to show a bubble pointing at the new tab button (instead of the default behavior of opening the new tab page and animating the app icon)."
+              },
+              "enableLauncher": {
+                "type": "boolean",
+                "optional": true,
+                "description": "A flag to cause the app launcher to be installed before installing the extension, if it isn't installed already."
               }
             },
             "additionalProperties": { "type": "any" }
@@ -203,6 +209,20 @@
                 "type": "string",
                 "enum": ["webgl_allowed", "webgl_blocked"]
               }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "getIsLauncherEnabled",
+        "description": "Returns whether the apps launcher is enabled or not.",
+        "parameters": [
+          {
+            "name": "callback",
+            "type": "function",
+            "optional": "false",
+            "parameters": [
+              { "name": "is_enabled", "type": "boolean" }
             ]
           }
         ]

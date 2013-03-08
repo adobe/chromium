@@ -12,7 +12,7 @@
 #include <vector>
 
 #include "base/compiler_specific.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/memory/scoped_vector.h"
 #include "base/memory/weak_ptr.h"
 #include "base/string16.h"
@@ -31,7 +31,7 @@ class OAuth2AccessTokenFetcher;
 class Browser;
 class CloudPrintURL;
 class MockChromeToMobileService;
-class PrefServiceSyncable;
+class PrefRegistrySyncable;
 class Profile;
 
 namespace net {
@@ -52,7 +52,7 @@ class ChromeToMobileService : public ProfileKeyedService,
     virtual ~Observer();
 
     // Called on generation of the page's MHTML snapshot.
-    virtual void SnapshotGenerated(const FilePath& path, int64 bytes) = 0;
+    virtual void SnapshotGenerated(const base::FilePath& path, int64 bytes) = 0;
 
     // Called after URLFetcher responses from sending the URL (and snapshot).
     virtual void OnSendComplete(bool success) = 0;
@@ -80,7 +80,7 @@ class ChromeToMobileService : public ProfileKeyedService,
     string16 mobile_id;
     GURL url;
     string16 title;
-    FilePath snapshot;
+    base::FilePath snapshot;
     std::string snapshot_id;
     std::string snapshot_content;
     JobType type;
@@ -98,7 +98,7 @@ class ChromeToMobileService : public ProfileKeyedService,
   static bool UpdateAndGetCommandState(Browser* browser);
 
   // Register the user prefs associated with this service.
-  static void RegisterUserPrefs(PrefServiceSyncable* prefs);
+  static void RegisterUserPrefs(PrefRegistrySyncable* registry);
 
   explicit ChromeToMobileService(Profile* profile);
   virtual ~ChromeToMobileService();
@@ -120,13 +120,13 @@ class ChromeToMobileService : public ProfileKeyedService,
   // Send the browser's selected WebContents to the specified mobile device.
   // Virtual for unit test mocking.
   virtual void SendToMobile(const base::DictionaryValue* mobile,
-                            const FilePath& snapshot,
+                            const base::FilePath& snapshot,
                             Browser* browser,
                             base::WeakPtr<Observer> observer);
 
   // Delete the snapshot file (should be called on observer destruction).
   // Virtual for unit test mocking.
-  virtual void DeleteSnapshot(const FilePath& snapshot);
+  virtual void DeleteSnapshot(const base::FilePath& snapshot);
 
   // Opens the "Learn More" help article link in the supplied |browser|.
   void LearnMore(Browser* browser) const;
@@ -151,8 +151,7 @@ class ChromeToMobileService : public ProfileKeyedService,
   virtual void OnInvalidatorStateChange(
       syncer::InvalidatorState state) OVERRIDE;
   virtual void OnIncomingInvalidation(
-      const syncer::ObjectIdInvalidationMap& invalidation_map,
-      syncer::IncomingInvalidationSource source) OVERRIDE;
+      const syncer::ObjectIdInvalidationMap& invalidation_map) OVERRIDE;
 
   // Expose access token accessors for test purposes.
   const std::string& GetAccessTokenForTest() const;
@@ -164,11 +163,11 @@ class ChromeToMobileService : public ProfileKeyedService,
   // Handle the attempted creation of a temporary file for snapshot generation.
   void SnapshotFileCreated(base::WeakPtr<Observer> observer,
                            SessionID::id_type browser_id,
-                           const FilePath& path);
+                           const base::FilePath& path);
 
   // Handle the attempted MHTML snapshot generation; alerts the observer.
   void SnapshotGenerated(base::WeakPtr<Observer> observer,
-                         const FilePath& path,
+                         const base::FilePath& path,
                          int64 bytes);
 
   // Handle the attempted reading of the snapshot file for job submission.
@@ -211,7 +210,7 @@ class ChromeToMobileService : public ProfileKeyedService,
   std::string access_token_;
 
   // The set of snapshots currently available.
-  std::set<FilePath> snapshots_;
+  std::set<base::FilePath> snapshots_;
 
   // The list of active URLFetcher requests owned by the service.
   ScopedVector<net::URLFetcher> url_fetchers_;

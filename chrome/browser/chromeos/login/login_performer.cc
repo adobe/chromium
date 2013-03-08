@@ -10,6 +10,7 @@
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/metrics/histogram.h"
+#include "base/prefs/pref_service.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
@@ -21,7 +22,6 @@
 #include "chrome/browser/chromeos/settings/cros_settings_names.h"
 #include "chrome/browser/policy/browser_policy_connector.h"
 #include "chrome/browser/policy/device_local_account_policy_service.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -271,8 +271,9 @@ void LoginPerformer::PerformLogin(const std::string& username,
 
 void LoginPerformer::CreateLocallyManagedUser(const string16& display_name,
                                               const std::string& password) {
+  std::string id = UserManager::Get()->GenerateUniqueLocallyManagedUserId();
   const User* user = UserManager::Get()->
-      CreateLocallyManagedUserRecord(display_name);
+      CreateLocallyManagedUserRecord(id, display_name);
   LoginAsLocallyManagedUser(user->email(), password);
 }
 
@@ -351,6 +352,8 @@ void LoginPerformer::RequestScreenLock() {
     ResolveScreenLocked();
   } else {
     screen_lock_requested_ = true;
+    // TODO(antrim) : additional logging for crbug/173178
+    LOG(WARNING) << "Requesting screen lock from LoginPerformer";
     DBusThreadManager::Get()->GetSessionManagerClient()->RequestLockScreen();
   }
 }

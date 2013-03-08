@@ -13,7 +13,7 @@
 #include "base/utf_string_conversions.h"
 //  These are only used for commented out tests.  If someone wants to enable
 //  them, they should be moved to chrome first.
-//  #include "chrome/browser/history/history.h"
+//  #include "chrome/browser/history/history_service.h"
 //  #include "chrome/browser/profiles/profile_manager.h"
 //  #include "chrome/browser/sessions/session_service.h"
 //  #include "chrome/browser/sessions/session_service_factory.h"
@@ -23,7 +23,6 @@
 #include "content/browser/site_instance_impl.h"
 #include "content/browser/web_contents/navigation_controller_impl.h"
 #include "content/browser/web_contents/navigation_entry_impl.h"
-#include "content/browser/web_contents/test_web_contents.h"
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/common/view_messages.h"
 #include "content/public/browser/navigation_details.h"
@@ -34,6 +33,7 @@
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/test/mock_render_process_host.h"
 #include "content/public/test/test_notification_tracker.h"
+#include "content/test/test_web_contents.h"
 #include "net/base/net_util.h"
 #include "skia/ext/platform_canvas.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -166,7 +166,7 @@ class TestWebContentsDelegate : public WebContentsDelegate {
 
   // Keep track of whether the tab has notified us of a navigation state change.
   virtual void NavigationStateChanged(const WebContents* source,
-                                      unsigned changed_flags) {
+                                      unsigned changed_flags) OVERRIDE {
     navigation_state_change_count_++;
   }
 
@@ -300,6 +300,8 @@ TEST_F(NavigationControllerTest, LoadURL) {
   EXPECT_FALSE(controller.CanGoBack());
   EXPECT_FALSE(controller.CanGoForward());
   EXPECT_EQ(contents()->GetMaxPageID(), 0);
+  EXPECT_EQ(0, NavigationEntryImpl::FromNavigationEntry(
+      controller.GetLastCommittedEntry())->bindings());
 
   // The timestamp should have been set.
   EXPECT_FALSE(controller.GetActiveEntry()->GetTimestamp().is_null());
@@ -665,6 +667,58 @@ TEST_F(NavigationControllerTest, LoadURL_ExistingPending) {
   EXPECT_EQ(kNewURL, controller.GetActiveEntry()->GetURL());
 }
 
+// Tests navigating to a new URL when there is a pending back/forward
+// navigation to a cross-process, privileged URL. This will happen if the user
+// hits back, but before that commits, they navigate somewhere new.
+TEST_F(NavigationControllerTest, LoadURL_PrivilegedPending) {
+  NavigationControllerImpl& controller = controller_impl();
+  TestNotificationTracker notifications;
+  RegisterForAllNavNotifications(&notifications, &controller);
+
+  // First make some history, starting with a privileged URL.
+  const GURL kExistingURL1("http://privileged");
+  controller.LoadURL(
+      kExistingURL1, Referrer(), PAGE_TRANSITION_TYPED, std::string());
+  // Pretend it has bindings so we can tell if we incorrectly copy it.
+  test_rvh()->AllowBindings(2);
+  test_rvh()->SendNavigate(0, kExistingURL1);
+  EXPECT_TRUE(notifications.Check1AndReset(NOTIFICATION_NAV_ENTRY_COMMITTED));
+
+  // Navigate cross-process to a second URL.
+  const GURL kExistingURL2("http://foo/eh");
+  controller.LoadURL(
+      kExistingURL2, Referrer(), PAGE_TRANSITION_TYPED, std::string());
+  test_rvh()->SendShouldCloseACK(true);
+  TestRenderViewHost* foo_rvh = static_cast<TestRenderViewHost*>(
+      contents()->GetPendingRenderViewHost());
+  foo_rvh->SendNavigate(1, kExistingURL2);
+  EXPECT_TRUE(notifications.Check1AndReset(NOTIFICATION_NAV_ENTRY_COMMITTED));
+
+  // Now make a pending back/forward navigation to a privileged entry.
+  // The zeroth entry should be pending.
+  controller.GoBack();
+  foo_rvh->SendShouldCloseACK(true);
+  EXPECT_EQ(0U, notifications.size());
+  EXPECT_EQ(0, controller.GetPendingEntryIndex());
+  EXPECT_EQ(1, controller.GetLastCommittedEntryIndex());
+  EXPECT_EQ(2, NavigationEntryImpl::FromNavigationEntry(
+                controller.GetPendingEntry())->bindings());
+
+  // Before that commits, do a new navigation.
+  const GURL kNewURL("http://foo/bee");
+  LoadCommittedDetails details;
+  foo_rvh->SendNavigate(3, kNewURL);
+
+  // There should no longer be any pending entry, and the third navigation we
+  // just made should be committed.
+  EXPECT_TRUE(notifications.Check1AndReset(NOTIFICATION_NAV_ENTRY_COMMITTED));
+  EXPECT_EQ(-1, controller.GetPendingEntryIndex());
+  EXPECT_EQ(2, controller.GetLastCommittedEntryIndex());
+  EXPECT_EQ(kNewURL, controller.GetActiveEntry()->GetURL());
+  EXPECT_EQ(0, NavigationEntryImpl::FromNavigationEntry(
+                controller.GetLastCommittedEntry())->bindings());
+}
+
 // Tests navigating to an existing URL when there is a pending new navigation.
 // This will happen if the user enters a URL, but before that commits, the
 // current page fires history.back().
@@ -863,6 +917,54 @@ TEST_F(NavigationControllerTest, LoadURL_RedirectAbortDoesntShowPendingURL) {
   EXPECT_FALSE(controller.GetVisibleEntry());
 
   contents()->SetDelegate(NULL);
+}
+
+// Ensure that NavigationEntries track which bindings their RenderViewHost had
+// at the time they committed.  http://crbug.com/173672.
+TEST_F(NavigationControllerTest, LoadURL_WithBindings) {
+  NavigationControllerImpl& controller = controller_impl();
+  TestNotificationTracker notifications;
+  RegisterForAllNavNotifications(&notifications, &controller);
+
+  const GURL url1("http://foo1");
+  const GURL url2("http://foo2");
+
+  // Navigate to a first, unprivileged URL.
+  controller.LoadURL(url1, Referrer(), PAGE_TRANSITION_TYPED, std::string());
+  EXPECT_EQ(NavigationEntryImpl::kInvalidBindings,
+            NavigationEntryImpl::FromNavigationEntry(
+                controller.GetPendingEntry())->bindings());
+
+  // Commit.
+  TestRenderViewHost* orig_rvh = static_cast<TestRenderViewHost*>(test_rvh());
+  orig_rvh->SendNavigate(0, url1);
+  EXPECT_EQ(controller.GetEntryCount(), 1);
+  EXPECT_EQ(0, controller.GetLastCommittedEntryIndex());
+  EXPECT_EQ(0, NavigationEntryImpl::FromNavigationEntry(
+      controller.GetLastCommittedEntry())->bindings());
+
+  // Navigate to a second URL, simulate the beforeunload ack for the cross-site
+  // transition, and set bindings on the pending RenderViewHost to simulate a
+  // privileged url.
+  controller.LoadURL(url2, Referrer(), PAGE_TRANSITION_TYPED, std::string());
+  orig_rvh->SendShouldCloseACK(true);
+  contents()->GetPendingRenderViewHost()->AllowBindings(1);
+  static_cast<TestRenderViewHost*>(
+      contents()->GetPendingRenderViewHost())->SendNavigate(1, url2);
+
+  // The second load should be committed, and bindings should be remembered.
+  EXPECT_EQ(controller.GetEntryCount(), 2);
+  EXPECT_EQ(1, controller.GetLastCommittedEntryIndex());
+  EXPECT_TRUE(controller.CanGoBack());
+  EXPECT_EQ(1, NavigationEntryImpl::FromNavigationEntry(
+      controller.GetLastCommittedEntry())->bindings());
+
+  // Going back, the first entry should still appear unprivileged.
+  controller.GoBack();
+  orig_rvh->SendNavigate(0, url1);
+  EXPECT_EQ(0, controller.GetLastCommittedEntryIndex());
+  EXPECT_EQ(0, NavigationEntryImpl::FromNavigationEntry(
+      controller.GetLastCommittedEntry())->bindings());
 }
 
 TEST_F(NavigationControllerTest, Reload) {
@@ -1595,6 +1697,8 @@ TEST_F(NavigationControllerTest, BackSubframe) {
   EXPECT_TRUE(notifications.Check1AndReset(NOTIFICATION_NAV_ENTRY_COMMITTED));
   EXPECT_EQ(3, controller.GetEntryCount());
   EXPECT_EQ(1, controller.GetCurrentEntryIndex());
+  EXPECT_EQ(-1, controller.GetPendingEntryIndex());
+  EXPECT_FALSE(controller.GetPendingEntry());
 
   // Go back one more.
   controller.GoBack();
@@ -1604,6 +1708,8 @@ TEST_F(NavigationControllerTest, BackSubframe) {
   EXPECT_TRUE(notifications.Check1AndReset(NOTIFICATION_NAV_ENTRY_COMMITTED));
   EXPECT_EQ(3, controller.GetEntryCount());
   EXPECT_EQ(0, controller.GetCurrentEntryIndex());
+  EXPECT_EQ(-1, controller.GetPendingEntryIndex());
+  EXPECT_FALSE(controller.GetPendingEntry());
 }
 
 TEST_F(NavigationControllerTest, LinkClick) {
@@ -1850,7 +1956,7 @@ class PrunedListener : public NotificationObserver {
 
   virtual void Observe(int type,
                        const NotificationSource& source,
-                       const NotificationDetails& details) {
+                       const NotificationDetails& details) OVERRIDE {
     if (type == NOTIFICATION_NAV_LIST_PRUNED) {
       notification_count_++;
       details_ = *(Details<PrunedDetails>(details).ptr());
@@ -2190,7 +2296,7 @@ TEST_F(NavigationControllerTest, TransientEntry) {
   // Adding a transient with no pending entry.
   NavigationEntryImpl* transient_entry = new NavigationEntryImpl;
   transient_entry->SetURL(transient_url);
-  controller.AddTransientEntry(transient_entry);
+  controller.SetTransientEntry(transient_entry);
 
   // We should not have received any notifications.
   EXPECT_EQ(0U, notifications.size());
@@ -2218,7 +2324,7 @@ TEST_F(NavigationControllerTest, TransientEntry) {
   // Add a transient again, then navigate with no pending entry this time.
   transient_entry = new NavigationEntryImpl;
   transient_entry->SetURL(transient_url);
-  controller.AddTransientEntry(transient_entry);
+  controller.SetTransientEntry(transient_entry);
   EXPECT_EQ(transient_url, controller.GetActiveEntry()->GetURL());
   test_rvh()->SendNavigate(3, url3);
   // Transient entry should be gone.
@@ -2230,7 +2336,7 @@ TEST_F(NavigationControllerTest, TransientEntry) {
       url4, Referrer(), PAGE_TRANSITION_TYPED, std::string());
   transient_entry = new NavigationEntryImpl;
   transient_entry->SetURL(transient_url);
-  controller.AddTransientEntry(transient_entry);
+  controller.SetTransientEntry(transient_entry);
   EXPECT_EQ(transient_url, controller.GetActiveEntry()->GetURL());
   test_rvh()->SendNavigate(4, url4);
   EXPECT_EQ(url4, controller.GetActiveEntry()->GetURL());
@@ -2239,7 +2345,7 @@ TEST_F(NavigationControllerTest, TransientEntry) {
   // Add a transient and go back.  This should simply remove the transient.
   transient_entry = new NavigationEntryImpl;
   transient_entry->SetURL(transient_url);
-  controller.AddTransientEntry(transient_entry);
+  controller.SetTransientEntry(transient_entry);
   EXPECT_EQ(transient_url, controller.GetActiveEntry()->GetURL());
   EXPECT_TRUE(controller.CanGoBack());
   EXPECT_FALSE(controller.CanGoForward());
@@ -2252,7 +2358,7 @@ TEST_F(NavigationControllerTest, TransientEntry) {
   // Add a transient and go to an entry before the current one.
   transient_entry = new NavigationEntryImpl;
   transient_entry->SetURL(transient_url);
-  controller.AddTransientEntry(transient_entry);
+  controller.SetTransientEntry(transient_entry);
   EXPECT_EQ(transient_url, controller.GetActiveEntry()->GetURL());
   controller.GoToIndex(1);
   // The navigation should have been initiated, transient entry should be gone.
@@ -2265,7 +2371,7 @@ TEST_F(NavigationControllerTest, TransientEntry) {
   // Add a transient and go to an entry after the current one.
   transient_entry = new NavigationEntryImpl;
   transient_entry->SetURL(transient_url);
-  controller.AddTransientEntry(transient_entry);
+  controller.SetTransientEntry(transient_entry);
   EXPECT_EQ(transient_url, controller.GetActiveEntry()->GetURL());
   controller.GoToIndex(3);
   // The navigation should have been initiated, transient entry should be gone.
@@ -2279,7 +2385,7 @@ TEST_F(NavigationControllerTest, TransientEntry) {
   // Add a transient and go forward.
   transient_entry = new NavigationEntryImpl;
   transient_entry->SetURL(transient_url);
-  controller.AddTransientEntry(transient_entry);
+  controller.SetTransientEntry(transient_entry);
   EXPECT_EQ(transient_url, controller.GetActiveEntry()->GetURL());
   EXPECT_TRUE(controller.CanGoForward());
   controller.GoForward();
@@ -2292,7 +2398,7 @@ TEST_F(NavigationControllerTest, TransientEntry) {
   // Add a transient and do an in-page navigation, replacing the current entry.
   transient_entry = new NavigationEntryImpl;
   transient_entry->SetURL(transient_url);
-  controller.AddTransientEntry(transient_entry);
+  controller.SetTransientEntry(transient_entry);
   EXPECT_EQ(transient_url, controller.GetActiveEntry()->GetURL());
   test_rvh()->SendNavigate(3, url3_ref);
   // Transient entry should be gone.
@@ -2324,7 +2430,7 @@ TEST_F(NavigationControllerTest, ReloadTransient) {
   // A transient entry is added, interrupting the navigation.
   NavigationEntryImpl* transient_entry = new NavigationEntryImpl;
   transient_entry->SetURL(transient_url);
-  controller.AddTransientEntry(transient_entry);
+  controller.SetTransientEntry(transient_entry);
   EXPECT_TRUE(controller.GetTransientEntry());
   EXPECT_EQ(transient_url, controller.GetActiveEntry()->GetURL());
 
@@ -2476,7 +2582,7 @@ TEST_F(NavigationControllerTest, CloneOmitsInterstitials) {
   // Add an interstitial entry.  Should be deleted with controller.
   NavigationEntryImpl* interstitial_entry = new NavigationEntryImpl();
   interstitial_entry->set_page_type(PAGE_TYPE_INTERSTITIAL);
-  controller.AddTransientEntry(interstitial_entry);
+  controller.SetTransientEntry(interstitial_entry);
 
   scoped_ptr<WebContents> clone(controller.GetWebContents()->Clone());
 
@@ -2807,6 +2913,11 @@ TEST_F(NavigationControllerTest, PruneAllButActiveForSingle) {
   NavigationControllerImpl& controller = controller_impl();
   const GURL url1("http://foo1");
   NavigateAndCommit(url1);
+
+  contents()->ExpectSetHistoryLengthAndPrune(
+      GetSiteInstanceFromEntry(controller.GetEntryAtIndex(0)), 0,
+      controller.GetEntryAtIndex(0)->GetPageID());
+
   controller.PruneAllButActive();
 
   EXPECT_EQ(-1, controller.GetPendingEntryIndex());
@@ -2827,6 +2938,10 @@ TEST_F(NavigationControllerTest, PruneAllButActiveForLast) {
   controller.GoBack();
   contents()->CommitPendingNavigation();
 
+  contents()->ExpectSetHistoryLengthAndPrune(
+      GetSiteInstanceFromEntry(controller.GetEntryAtIndex(0)), 0,
+      controller.GetEntryAtIndex(0)->GetPageID());
+
   controller.PruneAllButActive();
 
   EXPECT_EQ(-1, controller.GetPendingEntryIndex());
@@ -2846,6 +2961,10 @@ TEST_F(NavigationControllerTest, PruneAllButActiveForIntermediate) {
   controller.GoBack();
   contents()->CommitPendingNavigation();
 
+  contents()->ExpectSetHistoryLengthAndPrune(
+      GetSiteInstanceFromEntry(controller.GetEntryAtIndex(1)), 0,
+      controller.GetEntryAtIndex(1)->GetPageID());
+
   controller.PruneAllButActive();
 
   EXPECT_EQ(-1, controller.GetPendingEntryIndex());
@@ -2863,6 +2982,10 @@ TEST_F(NavigationControllerTest, PruneAllButActiveForPending) {
   NavigateAndCommit(url2);
   NavigateAndCommit(url3);
   controller.GoBack();
+
+  contents()->ExpectSetHistoryLengthAndPrune(
+      GetSiteInstanceFromEntry(controller.GetEntryAtIndex(1)), 0,
+      controller.GetEntryAtIndex(1)->GetPageID());
 
   controller.PruneAllButActive();
 
@@ -2886,7 +3009,11 @@ TEST_F(NavigationControllerTest, PruneAllButActiveForTransient) {
   // Adding a transient with no pending entry.
   NavigationEntryImpl* transient_entry = new NavigationEntryImpl;
   transient_entry->SetURL(transient_url);
-  controller.AddTransientEntry(transient_entry);
+  controller.SetTransientEntry(transient_entry);
+
+  contents()->ExpectSetHistoryLengthAndPrune(
+      GetSiteInstanceFromEntry(controller.GetTransientEntry()), 0,
+      controller.GetTransientEntry()->GetPageID());
 
   controller.PruneAllButActive();
 
@@ -3030,8 +3157,10 @@ TEST_F(NavigationControllerTest, MAYBE_PurgeScreenshot) {
   NavigationControllerImpl& controller = controller_impl();
 
   // Prepare some data to use as screenshot for each navigation.
-  skia::PlatformBitmap bitmap;
-  ASSERT_TRUE(bitmap.Allocate(1, 1, false));
+  SkBitmap bitmap;
+  bitmap.setConfig(SkBitmap::kARGB_8888_Config, 1, 1);
+  ASSERT_TRUE(bitmap.allocPixels());
+  bitmap.eraseRGB(0, 0, 0);
   NavigationEntryImpl* entry;
 
   // Navigate enough times to make sure that some screenshots are purged.
@@ -3039,14 +3168,20 @@ TEST_F(NavigationControllerTest, MAYBE_PurgeScreenshot) {
     const GURL url(base::StringPrintf("http://foo%d/", i));
     NavigateAndCommit(url);
     EXPECT_EQ(i, controller.GetCurrentEntryIndex());
+  }
 
+  for (int i = 0; i < controller.GetEntryCount(); ++i) {
     entry = NavigationEntryImpl::FromNavigationEntry(
-        controller.GetActiveEntry());
-    controller.OnScreenshotTaken(entry->GetUniqueID(), &bitmap, true);
+        controller.GetEntryAtIndex(i));
+    controller.OnScreenshotTaken(entry->GetUniqueID(), true, bitmap);
     EXPECT_TRUE(entry->screenshot());
   }
+
   NavigateAndCommit(GURL("https://foo/"));
   EXPECT_EQ(13, controller.GetEntryCount());
+  entry = NavigationEntryImpl::FromNavigationEntry(
+      controller.GetEntryAtIndex(11));
+  controller.OnScreenshotTaken(entry->GetUniqueID(), true, bitmap);
 
   for (int i = 0; i < 2; ++i) {
     entry = NavigationEntryImpl::FromNavigationEntry(
@@ -3067,14 +3202,14 @@ TEST_F(NavigationControllerTest, MAYBE_PurgeScreenshot) {
   for (int i = 0; i < controller.GetEntryCount() - 1; ++i) {
     entry = NavigationEntryImpl::FromNavigationEntry(
         controller.GetEntryAtIndex(i));
-    controller.OnScreenshotTaken(entry->GetUniqueID(), &bitmap, true);
+    controller.OnScreenshotTaken(entry->GetUniqueID(), true, bitmap);
   }
 
   for (int i = 10; i <= 12; ++i) {
     entry = NavigationEntryImpl::FromNavigationEntry(
         controller.GetEntryAtIndex(i));
     EXPECT_FALSE(entry->screenshot()) << "Screenshot " << i << " not purged";
-    controller.OnScreenshotTaken(entry->GetUniqueID(), &bitmap, true);
+    controller.OnScreenshotTaken(entry->GetUniqueID(), true, bitmap);
   }
 
   // Navigate to index 7 and assign screenshot to all entries.
@@ -3084,7 +3219,7 @@ TEST_F(NavigationControllerTest, MAYBE_PurgeScreenshot) {
   for (int i = 0; i < controller.GetEntryCount() - 1; ++i) {
     entry = NavigationEntryImpl::FromNavigationEntry(
         controller.GetEntryAtIndex(i));
-    controller.OnScreenshotTaken(entry->GetUniqueID(), &bitmap, true);
+    controller.OnScreenshotTaken(entry->GetUniqueID(), true, bitmap);
   }
 
   for (int i = 0; i < 2; ++i) {
@@ -3095,9 +3230,9 @@ TEST_F(NavigationControllerTest, MAYBE_PurgeScreenshot) {
 
   // Clear all screenshots.
   EXPECT_EQ(13, controller.GetEntryCount());
-  EXPECT_EQ(10, controller.screenshot_count_);
+  EXPECT_EQ(10, controller.GetScreenshotCount());
   controller.ClearAllScreenshots();
-  EXPECT_EQ(0, controller.screenshot_count_);
+  EXPECT_EQ(0, controller.GetScreenshotCount());
   for (int i = 0; i < controller.GetEntryCount(); ++i) {
     entry = NavigationEntryImpl::FromNavigationEntry(
         controller.GetEntryAtIndex(i));
@@ -3200,7 +3335,7 @@ class NavigationControllerHistoryTest : public NavigationControllerTest {
 
  private:
   ProfileManager* profile_manager_;
-  FilePath test_dir_;
+  base::FilePath test_dir_;
 };
 
 // A basic test case. Navigates to a single url, and make sure the history

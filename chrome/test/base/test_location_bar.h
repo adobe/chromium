@@ -39,7 +39,6 @@ class TestLocationBar : public LocationBar {
   virtual void UpdateContentSettingsIcons() OVERRIDE {}
   virtual void UpdatePageActions() OVERRIDE {}
   virtual void InvalidatePageActions() OVERRIDE {}
-  virtual void UpdateWebIntentsButton() OVERRIDE {}
   virtual void UpdateOpenPDFInReaderPrompt() OVERRIDE {}
   virtual void SaveStateToContents(content::WebContents* contents) OVERRIDE {}
   virtual void Revert() OVERRIDE {}

@@ -6,6 +6,7 @@
 #include "base/debug/trace_event.h"
 #include "base/logging.h"
 #include "gpu/command_buffer/common/gles2_cmd_utils.h"
+#include "gpu/command_buffer/service/buffer_manager.h"
 #include "gpu/command_buffer/service/gles2_cmd_decoder.h"
 #include "gpu/command_buffer/service/vertex_attrib_manager.h"
 
@@ -29,7 +30,7 @@ void VertexArrayManager::Destroy(bool have_context) {
 
 void VertexArrayManager::CreateVertexAttribManager(
     GLuint client_id, GLuint service_id, uint32 num_vertex_attribs) {
-  VertexAttribManager::Ref vertex_attrib_manager(
+  scoped_refptr<VertexAttribManager> vertex_attrib_manager(
     new VertexAttribManager(this, service_id, num_vertex_attribs));
   std::pair<VertexAttribManagerMap::iterator, bool> result =
       vertex_attrib_managers_.insert(

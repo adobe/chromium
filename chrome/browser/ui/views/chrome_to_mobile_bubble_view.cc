@@ -15,7 +15,6 @@
 #include "chrome/browser/chrome_to_mobile_service.h"
 #include "chrome/browser/chrome_to_mobile_service_factory.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/chrome_style.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "ui/base/animation/throb_animation.h"
@@ -114,7 +113,7 @@ void ChromeToMobileBubbleView::WindowClosing() {
   service_->DeleteSnapshot(snapshot_path_);
 
   // Restore the resting state action box icon.
-  SetTextButtonIconToId(anchor_view(), IDR_ACTION_BOX_BUTTON);
+  SetTextButtonIconToId(anchor_view(), IDR_ACTION_BOX_BUTTON_NORMAL);
 }
 
 bool ChromeToMobileBubbleView::AcceleratorPressed(
@@ -152,7 +151,7 @@ void ChromeToMobileBubbleView::ButtonPressed(views::Button* sender,
   HandleButtonPressed(sender);
 }
 
-void ChromeToMobileBubbleView::SnapshotGenerated(const FilePath& path,
+void ChromeToMobileBubbleView::SnapshotGenerated(const base::FilePath& path,
                                                  int64 bytes) {
   snapshot_path_ = path;
   if (bytes > 0) {
@@ -205,7 +204,7 @@ void ChromeToMobileBubbleView::Init() {
 
   const size_t kRadioColumnSetId = 1;
   cs = layout->AddColumnSet(kRadioColumnSetId);
-  cs->AddPaddingColumn(0, chrome_style::kCheckboxIndent);
+  cs->AddPaddingColumn(0, views::kCheckboxIndent);
   cs->AddColumn(GridLayout::LEADING, GridLayout::LEADING, 0,
                 GridLayout::USE_PREF, 0, 0);
 
@@ -337,7 +336,8 @@ void ChromeToMobileBubbleView::Send() {
 
   const DictionaryValue* mobile = NULL;
   if (mobiles->GetDictionary(selected_index, &mobile)) {
-    FilePath snapshot = send_copy_->checked() ? snapshot_path_ : FilePath();
+    base::FilePath snapshot =
+        send_copy_->checked() ? snapshot_path_ : base::FilePath();
     service_->SendToMobile(mobile, snapshot, browser_,
                            weak_ptr_factory_.GetWeakPtr());
   } else {

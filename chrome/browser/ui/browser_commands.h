@@ -9,6 +9,7 @@
 
 #include "chrome/browser/devtools/devtools_toggle_action.h"
 #include "chrome/browser/ui/host_desktop.h"
+#include "chrome/browser/ui/tabs/tab_strip_model_delegate.h"
 #include "content/public/common/page_zoom.h"
 #include "ui/base/window_open_disposition.h"
 
@@ -39,12 +40,10 @@ void RemoveCommandObserver(Browser*, int command, CommandObserver* observer);
 int GetContentRestrictions(const Browser* browser);
 
 // Opens a new window with the default blank tab.
-void NewEmptyWindow(Profile* profile);
 void NewEmptyWindow(Profile* profile, HostDesktopType desktop_type);
 
 // Opens a new window with the default blank tab. This bypasses metrics and
 // various internal bookkeeping; NewEmptyWindow (above) is preferred.
-Browser* OpenEmptyWindow(Profile* profile);
 Browser* OpenEmptyWindow(Profile* profile, HostDesktopType desktop_type);
 
 // Opens a new window with the tabs from |profile|'s TabRestoreService.
@@ -77,7 +76,8 @@ void CloseWindow(Browser* browser);
 void NewTab(Browser* browser);
 void CloseTab(Browser* browser);
 void RestoreTab(Browser* browser);
-bool CanRestoreTab(const Browser* browser);
+TabStripModelDelegate::RestoreTabType GetRestoreTabType(
+    const Browser* browser);
 void SelectNextTab(Browser* browser);
 void SelectPreviousTab(Browser* browser);
 void OpenTabpose(Browser* browser);  // Mac-only

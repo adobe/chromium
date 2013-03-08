@@ -4,7 +4,7 @@
 
 #include "content/public/browser/content_browser_client.h"
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "googleurl/src/gurl.h"
 #include "ui/gfx/image/image_skia.h"
 
@@ -15,7 +15,7 @@ BrowserMainParts* ContentBrowserClient::CreateBrowserMainParts(
   return NULL;
 }
 
-WebContentsView* ContentBrowserClient::OverrideCreateWebContentsView(
+WebContentsViewPort* ContentBrowserClient::OverrideCreateWebContentsView(
     WebContents* web_contents,
     RenderViewHostDelegateView** render_view_host_delegate_view) {
   return NULL;
@@ -23,10 +23,6 @@ WebContentsView* ContentBrowserClient::OverrideCreateWebContentsView(
 
 WebContentsViewDelegate* ContentBrowserClient::GetWebContentsViewDelegate(
     WebContents* web_contents) {
-  return NULL;
-}
-
-WebUIControllerFactory* ContentBrowserClient::GetWebUIControllerFactory() {
   return NULL;
 }
 
@@ -38,6 +34,39 @@ GURL ContentBrowserClient::GetEffectiveURL(BrowserContext* browser_context,
 bool ContentBrowserClient::ShouldUseProcessPerSite(
     BrowserContext* browser_context, const GURL& effective_url) {
   return false;
+}
+
+net::URLRequestContextGetter* ContentBrowserClient::CreateRequestContext(
+    BrowserContext* browser_context,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        blob_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        file_system_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        developer_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        chrome_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        chrome_devtools_protocol_handler) {
+  return NULL;
+}
+
+net::URLRequestContextGetter*
+ContentBrowserClient::CreateRequestContextForStoragePartition(
+    BrowserContext* browser_context,
+    const base::FilePath& partition_path,
+    bool in_memory,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        blob_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        file_system_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        developer_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        chrome_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        chrome_devtools_protocol_handler) {
+  return NULL;
 }
 
 bool ContentBrowserClient::IsHandledURL(const GURL& url) {
@@ -55,6 +84,7 @@ bool ContentBrowserClient::ShouldTryToUseExistingProcessHost(
 }
 
 bool ContentBrowserClient::ShouldSwapProcessesForNavigation(
+    SiteInstance* site_instance,
     const GURL& current_url,
     const GURL& new_url) {
   return false;
@@ -177,10 +207,6 @@ MediaObserver* ContentBrowserClient::GetMediaObserver() {
   return NULL;
 }
 
-WebRTCInternals* ContentBrowserClient::GetWebRTCInternals() {
-  return NULL;
-}
-
 WebKit::WebNotificationPresenter::Permission
     ContentBrowserClient::CheckDesktopNotificationPermission(
         const GURL& source_origin,
@@ -221,8 +247,8 @@ bool ContentBrowserClient::IsFastShutdownPossible() {
   return true;
 }
 
-FilePath ContentBrowserClient::GetDefaultDownloadDirectory() {
-  return FilePath();
+base::FilePath ContentBrowserClient::GetDefaultDownloadDirectory() {
+  return base::FilePath();
 }
 
 std::string ContentBrowserClient::GetDefaultDownloadName() {
@@ -241,8 +267,13 @@ bool ContentBrowserClient::AllowPepperSocketAPI(
   return false;
 }
 
-FilePath ContentBrowserClient::GetHyphenDictionaryDirectory() {
-  return FilePath();
+base::FilePath ContentBrowserClient::GetHyphenDictionaryDirectory() {
+  return base::FilePath();
+}
+
+ui::SelectFilePolicy* ContentBrowserClient::CreateSelectFilePolicy(
+    WebContents* web_contents) {
+  return NULL;
 }
 
 #if defined(OS_WIN)

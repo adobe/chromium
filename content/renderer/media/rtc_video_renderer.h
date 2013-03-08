@@ -25,9 +25,13 @@ namespace content {
 // RTCVideoRenderer register itself to the Video Track when the
 // VideoFrameProvider is started and deregisters itself when it is stopped.
 // Calls to webrtc::VideoTrackInterface must occur on the main thread.
+// TODO(wuchengli): Add unit test. See the link below for reference.
+// http://src.chromium.org/viewvc/chrome/trunk/src/content/renderer/media/rtc_vi
+// deo_decoder_unittest.cc?revision=180591&view=markup
 class CONTENT_EXPORT RTCVideoRenderer
     : NON_EXPORTED_BASE(public webkit_media::VideoFrameProvider),
-      NON_EXPORTED_BASE(public webrtc::VideoRendererInterface) {
+      NON_EXPORTED_BASE(public webrtc::VideoRendererInterface),
+      NON_EXPORTED_BASE(public webrtc::ObserverInterface) {
  public:
   RTCVideoRenderer(
       webrtc::VideoTrackInterface* video_track,
@@ -45,6 +49,9 @@ class CONTENT_EXPORT RTCVideoRenderer
   virtual void SetSize(int width, int height) OVERRIDE;
   virtual void RenderFrame(const cricket::VideoFrame* frame) OVERRIDE;
 
+  // webrtc::ObserverInterface implementation.
+  virtual void OnChanged() OVERRIDE;
+
  protected:
   virtual ~RTCVideoRenderer();
 
@@ -55,6 +62,7 @@ class CONTENT_EXPORT RTCVideoRenderer
     kStopped,
   };
 
+  void MaybeRenderSignalingFrame();
   void DoRenderFrameOnMainThread(scoped_refptr<media::VideoFrame> video_frame);
 
   base::Closure error_cb_;

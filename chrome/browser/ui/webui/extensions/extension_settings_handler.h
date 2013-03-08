@@ -12,6 +12,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/prefs/public/pref_change_registrar.h"
 #include "base/scoped_observer.h"
+#include "chrome/browser/extensions/extension_install_prompt.h"
 #include "chrome/browser/extensions/extension_install_ui.h"
 #include "chrome/browser/extensions/extension_uninstall_dialog.h"
 #include "chrome/browser/extensions/extension_warning_service.h"
@@ -27,11 +28,11 @@
 #include "ui/shell_dialogs/select_file_dialog.h"
 
 class ExtensionService;
-class FilePath;
-class PrefServiceSyncable;
+class PrefRegistrySyncable;
 
 namespace base {
 class DictionaryValue;
+class FilePath;
 class ListValue;
 }
 
@@ -66,6 +67,7 @@ class ExtensionSettingsHandler
       public content::NotificationObserver,
       public content::WebContentsObserver,
       public ui::SelectFileDialog::Listener,
+      public ExtensionInstallPrompt::Delegate,
       public ExtensionUninstallDialog::Delegate,
       public extensions::ExtensionWarningService::Observer,
       public base::SupportsWeakPtr<ExtensionSettingsHandler> {
@@ -73,7 +75,7 @@ class ExtensionSettingsHandler
   ExtensionSettingsHandler();
   virtual ~ExtensionSettingsHandler();
 
-  static void RegisterUserPrefs(PrefServiceSyncable* prefs);
+  static void RegisterUserPrefs(PrefRegistrySyncable* registry);
 
   // Extension Detail JSON Struct for page. |pages| is injected for unit
   // testing.
@@ -102,10 +104,10 @@ class ExtensionSettingsHandler
   virtual void RegisterMessages() OVERRIDE;
 
   // SelectFileDialog::Listener implementation.
-  virtual void FileSelected(const FilePath& path,
+  virtual void FileSelected(const base::FilePath& path,
                             int index, void* params) OVERRIDE;
   virtual void MultiFilesSelected(
-      const std::vector<FilePath>& files, void* params) OVERRIDE;
+      const std::vector<base::FilePath>& files, void* params) OVERRIDE;
   virtual void FileSelectionCanceled(void* params) OVERRIDE {}
 
   // content::NotificationObserver implementation.
@@ -121,8 +123,19 @@ class ExtensionSettingsHandler
   // extensions::ExtensionWarningService::Observer implementation.
   virtual void ExtensionWarningsChanged() OVERRIDE;
 
+  // ExtensionInstallPrompt::Delegate implementation.
+  virtual void InstallUIProceed() OVERRIDE;
+  virtual void InstallUIAbort(bool user_initiated) OVERRIDE;
+
   // Helper method that reloads all unpacked extensions.
   void ReloadUnpackedExtensions();
+
+  // Callback for "setElevated" message.
+  void ManagedUserSetElevated(const base::ListValue* args);
+
+  // If the authentication of the managed user was successful,
+  // it gives this information back to the UI.
+  void PassphraseDialogCallback(bool success);
 
   // Callback for "requestExtensionsData" message.
   void HandleRequestExtensionsData(const base::ListValue* args);
@@ -156,6 +169,9 @@ class ExtensionSettingsHandler
 
   // Callback for "options" message.
   void HandleOptionsMessage(const base::ListValue* args);
+
+  // Callback for "permissions" message.
+  void HandlePermissionsMessage(const base::ListValue* args);
 
   // Callback for "showButton" message.
   void HandleShowButtonMessage(const base::ListValue* args);
@@ -209,7 +225,7 @@ class ExtensionSettingsHandler
 
   // Used to start the |load_extension_dialog_| in the last directory that was
   // loaded.
-  FilePath last_unpacked_directory_;
+  base::FilePath last_unpacked_directory_;
 
   // Used to show confirmation UI for uninstalling extensions in incognito mode.
   scoped_ptr<ExtensionUninstallDialog> extension_uninstall_dialog_;
@@ -238,12 +254,14 @@ class ExtensionSettingsHandler
   content::NotificationRegistrar registrar_;
 
   PrefChangeRegistrar pref_registrar_;
-  PrefChangeRegistrar local_state_pref_registrar_;
 
   // This will not be empty when a requirements check is in progress. Doing
   // another Check() before the previous one is complete will cause the first
   // one to abort.
   scoped_ptr<extensions::RequirementsChecker> requirements_checker_;
+
+  // The UI for showing what permissions the extension has.
+  scoped_ptr<ExtensionInstallPrompt> prompt_;
 
   ScopedObserver<extensions::ExtensionWarningService,
                  extensions::ExtensionWarningService::Observer>

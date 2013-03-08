@@ -16,9 +16,11 @@
 #include "base/platform_file.h"
 #include "base/string_number_conversions.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "webkit/fileapi/async_file_test_helper.h"
+#include "webkit/fileapi/file_system_file_util.h"
+#include "webkit/fileapi/file_system_operation_context.h"
 #include "webkit/fileapi/file_system_usage_cache.h"
 #include "webkit/fileapi/file_system_util.h"
-#include "webkit/fileapi/file_util_helper.h"
 #include "webkit/fileapi/local_file_system_operation.h"
 #include "webkit/fileapi/local_file_system_test_helper.h"
 #include "webkit/quota/quota_manager.h"
@@ -48,18 +50,37 @@ class LocalFileSystemQuotaTest
         usage_(-1),
         quota_(-1) {}
 
-  LocalFileSystemOperation* operation();
+  virtual void SetUp() OVERRIDE {
+    ASSERT_TRUE(work_dir_.CreateUniqueTempDir());
+    base::FilePath filesystem_dir_path =
+        work_dir_.path().AppendASCII("filesystem");
+    ASSERT_TRUE(file_util::CreateDirectory(filesystem_dir_path));
+
+    quota_manager_ = new quota::QuotaManager(
+        false /* is_incognito */,
+        filesystem_dir_path,
+        base::MessageLoopProxy::current(),
+        base::MessageLoopProxy::current(),
+        NULL);
+
+    test_helper_.SetUp(filesystem_dir_path,
+                       false /* unlimited quota */,
+                       quota_manager_->proxy());
+  }
+
+  virtual void TearDown() OVERRIDE {
+    quota_manager_ = NULL;
+    test_helper_.TearDown();
+  }
+
+  LocalFileSystemOperation* NewOperation() {
+    return test_helper_.NewOperation();
+  }
 
   int status() const { return status_; }
   quota::QuotaStatusCode quota_status() const { return quota_status_; }
   int64 usage() { return usage_; }
   int64 quota() { return quota_; }
-
-  virtual void SetUp() OVERRIDE;
-  virtual void TearDown() OVERRIDE;
-
-  void OnGetUsageAndQuota(
-      quota::QuotaStatusCode status, int64 usage, int64 quota);
 
  protected:
   FileSystemFileUtil* file_util() {
@@ -72,13 +93,13 @@ class LocalFileSystemQuotaTest
     return context;
   }
 
-  void PrepareFileSet(const FilePath& virtual_path);
+  void PrepareFileSet(const base::FilePath& virtual_path);
 
-  FileSystemURL URLForPath(const FilePath& path) const {
+  FileSystemURL URLForPath(const base::FilePath& path) const {
     return test_helper_.CreateURL(path);
   }
 
-  FilePath PlatformPath(const FilePath& virtual_path) {
+  base::FilePath PlatformPath(const base::FilePath& virtual_path) {
     return test_helper_.GetLocalPath(virtual_path);
   }
 
@@ -93,31 +114,27 @@ class LocalFileSystemQuotaTest
   }
 
   void GetUsageAndQuotaFromQuotaManager() {
-    quota_manager_->GetUsageAndQuota(
-        test_helper_.origin(), test_helper_.storage_type(),
-        base::Bind(&LocalFileSystemQuotaTest::OnGetUsageAndQuota,
-                   weak_factory_.GetWeakPtr()));
+    quota_status_ = AsyncFileTestHelper::GetUsageAndQuota(
+            quota_manager_, test_helper_.origin(), test_helper_.type(),
+            &usage_, &quota_);
     MessageLoop::current()->RunUntilIdle();
   }
 
-  bool FileExists(const FilePath& virtual_path) {
+  bool FileExists(const base::FilePath& virtual_path) {
     FileSystemURL url = test_helper_.CreateURL(virtual_path);
-    base::PlatformFileInfo file_info;
-    FilePath platform_path;
-    scoped_ptr<FileSystemOperationContext> context(NewContext());
-    base::PlatformFileError error = file_util()->GetFileInfo(
-        context.get(), url, &file_info, &platform_path);
-    return error == base::PLATFORM_FILE_OK;
+    return AsyncFileTestHelper::FileExists(
+        test_helper_.file_system_context(), url,
+        AsyncFileTestHelper::kDontCheckSize);
   }
 
-  bool DirectoryExists(const FilePath& virtual_path) {
-    FileSystemURL path = test_helper_.CreateURL(virtual_path);
-    scoped_ptr<FileSystemOperationContext> context(NewContext());
-    return FileUtilHelper::DirectoryExists(context.get(), file_util(), path);
+  bool DirectoryExists(const base::FilePath& virtual_path) {
+    FileSystemURL url = test_helper_.CreateURL(virtual_path);
+    return AsyncFileTestHelper::DirectoryExists(
+        test_helper_.file_system_context(), url);
   }
 
-  FilePath CreateUniqueFileInDir(const FilePath& virtual_dir_path) {
-    FilePath file_name = FilePath::FromUTF8Unsafe(
+  base::FilePath CreateUniqueFileInDir(const base::FilePath& virtual_dir_path) {
+    base::FilePath file_name = base::FilePath::FromUTF8Unsafe(
         "tmpfile-" + base::IntToString(next_unique_path_suffix_++));
     FileSystemURL url = test_helper_.CreateURL(
         virtual_dir_path.Append(file_name));
@@ -130,8 +147,8 @@ class LocalFileSystemQuotaTest
     return url.path();
   }
 
-  FilePath CreateUniqueDirInDir(const FilePath& virtual_dir_path) {
-    FilePath dir_name = FilePath::FromUTF8Unsafe(
+  base::FilePath CreateUniqueDirInDir(const base::FilePath& virtual_dir_path) {
+    base::FilePath dir_name = base::FilePath::FromUTF8Unsafe(
         "tmpdir-" + base::IntToString(next_unique_path_suffix_++));
     FileSystemURL url = test_helper_.CreateURL(
         virtual_dir_path.Append(dir_name));
@@ -142,15 +159,15 @@ class LocalFileSystemQuotaTest
     return url.path();
   }
 
-  FilePath CreateUniqueDir() {
-    return CreateUniqueDirInDir(FilePath());
+  base::FilePath CreateUniqueDir() {
+    return CreateUniqueDirInDir(base::FilePath());
   }
 
-  FilePath child_dir_path_;
-  FilePath child_file1_path_;
-  FilePath child_file2_path_;
-  FilePath grandchild_file1_path_;
-  FilePath grandchild_file2_path_;
+  base::FilePath child_dir_path_;
+  base::FilePath child_file1_path_;
+  base::FilePath child_file2_path_;
+  base::FilePath grandchild_file1_path_;
+  base::FilePath grandchild_file2_path_;
 
   int64 child_path_cost_;
   int64 grandchild_path_cost_;
@@ -184,40 +201,8 @@ class LocalFileSystemQuotaTest
   DISALLOW_COPY_AND_ASSIGN(LocalFileSystemQuotaTest);
 };
 
-void LocalFileSystemQuotaTest::SetUp() {
-  ASSERT_TRUE(work_dir_.CreateUniqueTempDir());
-  FilePath filesystem_dir_path = work_dir_.path().AppendASCII("filesystem");
-  ASSERT_TRUE(file_util::CreateDirectory(filesystem_dir_path));
-
-  quota_manager_ = new quota::QuotaManager(
-      false /* is_incognito */,
-      filesystem_dir_path,
-      base::MessageLoopProxy::current(),
-      base::MessageLoopProxy::current(),
-      NULL);
-
-  test_helper_.SetUp(filesystem_dir_path,
-                     false /* unlimited quota */,
-                     quota_manager_->proxy());
-}
-
-void LocalFileSystemQuotaTest::TearDown() {
-  quota_manager_ = NULL;
-  test_helper_.TearDown();
-}
-
-LocalFileSystemOperation* LocalFileSystemQuotaTest::operation() {
-  return test_helper_.NewOperation();
-}
-
-void LocalFileSystemQuotaTest::OnGetUsageAndQuota(
-    quota::QuotaStatusCode status, int64 usage, int64 quota) {
-  quota_status_ = status;
-  usage_ = usage;
-  quota_ = quota;
-}
-
-void LocalFileSystemQuotaTest::PrepareFileSet(const FilePath& virtual_path) {
+void LocalFileSystemQuotaTest::PrepareFileSet(
+    const base::FilePath& virtual_path) {
   int64 usage = SizeByQuotaUtil();
   child_dir_path_ = CreateUniqueDirInDir(virtual_path);
   child_file1_path_ = CreateUniqueFileInDir(virtual_path);
@@ -231,22 +216,26 @@ void LocalFileSystemQuotaTest::PrepareFileSet(const FilePath& virtual_path) {
 }
 
 TEST_F(LocalFileSystemQuotaTest, TestMoveSuccessSrcDirRecursive) {
-  FilePath src_dir_path(CreateUniqueDir());
+  base::FilePath src_dir_path(CreateUniqueDir());
   int src_path_cost = SizeByQuotaUtil();
   PrepareFileSet(src_dir_path);
-  FilePath dest_dir_path(CreateUniqueDir());
+  base::FilePath dest_dir_path(CreateUniqueDir());
 
   EXPECT_EQ(0, ActualFileSize());
   int total_path_cost = SizeByQuotaUtil();
 
-  operation()->Truncate(URLForPath(child_file1_path_), 5000,
-                        base::Bind(&AssertFileErrorEq, base::PLATFORM_FILE_OK));
-  operation()->Truncate(URLForPath(child_file2_path_), 400,
-                        base::Bind(&AssertFileErrorEq, base::PLATFORM_FILE_OK));
-  operation()->Truncate(URLForPath(grandchild_file1_path_), 30,
-                        base::Bind(&AssertFileErrorEq, base::PLATFORM_FILE_OK));
-  operation()->Truncate(URLForPath(grandchild_file2_path_), 2,
-                        base::Bind(&AssertFileErrorEq, base::PLATFORM_FILE_OK));
+  NewOperation()->Truncate(
+      URLForPath(child_file1_path_), 5000,
+      base::Bind(&AssertFileErrorEq, base::PLATFORM_FILE_OK));
+  NewOperation()->Truncate(
+      URLForPath(child_file2_path_), 400,
+      base::Bind(&AssertFileErrorEq, base::PLATFORM_FILE_OK));
+  NewOperation()->Truncate(
+      URLForPath(grandchild_file1_path_), 30,
+      base::Bind(&AssertFileErrorEq, base::PLATFORM_FILE_OK));
+  NewOperation()->Truncate(
+      URLForPath(grandchild_file2_path_), 2,
+      base::Bind(&AssertFileErrorEq, base::PLATFORM_FILE_OK));
   MessageLoop::current()->RunUntilIdle();
 
   const int64 all_file_size = 5000 + 400 + 30 + 2;
@@ -258,8 +247,9 @@ TEST_F(LocalFileSystemQuotaTest, TestMoveSuccessSrcDirRecursive) {
   EXPECT_EQ(all_file_size + total_path_cost, usage());
   ASSERT_LT(all_file_size + total_path_cost, quota());
 
-  operation()->Move(URLForPath(src_dir_path), URLForPath(dest_dir_path),
-                    RecordStatusCallback());
+  NewOperation()->Move(
+      URLForPath(src_dir_path), URLForPath(dest_dir_path),
+      RecordStatusCallback());
   MessageLoop::current()->RunUntilIdle();
 
   EXPECT_EQ(base::PLATFORM_FILE_OK, status());
@@ -279,22 +269,26 @@ TEST_F(LocalFileSystemQuotaTest, TestMoveSuccessSrcDirRecursive) {
 }
 
 TEST_F(LocalFileSystemQuotaTest, TestCopySuccessSrcDirRecursive) {
-  FilePath src_dir_path(CreateUniqueDir());
+  base::FilePath src_dir_path(CreateUniqueDir());
   PrepareFileSet(src_dir_path);
-  FilePath dest_dir1_path(CreateUniqueDir());
-  FilePath dest_dir2_path(CreateUniqueDir());
+  base::FilePath dest_dir1_path(CreateUniqueDir());
+  base::FilePath dest_dir2_path(CreateUniqueDir());
 
   EXPECT_EQ(0, ActualFileSize());
   int total_path_cost = SizeByQuotaUtil();
 
-  operation()->Truncate(URLForPath(child_file1_path_), 8000,
-                        base::Bind(&AssertFileErrorEq, base::PLATFORM_FILE_OK));
-  operation()->Truncate(URLForPath(child_file2_path_), 700,
-                        base::Bind(&AssertFileErrorEq, base::PLATFORM_FILE_OK));
-  operation()->Truncate(URLForPath(grandchild_file1_path_), 60,
-                        base::Bind(&AssertFileErrorEq, base::PLATFORM_FILE_OK));
-  operation()->Truncate(URLForPath(grandchild_file2_path_), 5,
-                        base::Bind(&AssertFileErrorEq, base::PLATFORM_FILE_OK));
+  NewOperation()->Truncate(
+      URLForPath(child_file1_path_), 8000,
+      base::Bind(&AssertFileErrorEq, base::PLATFORM_FILE_OK));
+  NewOperation()->Truncate(
+      URLForPath(child_file2_path_), 700,
+      base::Bind(&AssertFileErrorEq, base::PLATFORM_FILE_OK));
+  NewOperation()->Truncate(
+      URLForPath(grandchild_file1_path_), 60,
+      base::Bind(&AssertFileErrorEq, base::PLATFORM_FILE_OK));
+  NewOperation()->Truncate(
+      URLForPath(grandchild_file2_path_), 5,
+      base::Bind(&AssertFileErrorEq, base::PLATFORM_FILE_OK));
   MessageLoop::current()->RunUntilIdle();
 
   const int64 child_file_size = 8000 + 700;
@@ -309,8 +303,9 @@ TEST_F(LocalFileSystemQuotaTest, TestCopySuccessSrcDirRecursive) {
   EXPECT_EQ(expected_usage, usage());
   ASSERT_LT(expected_usage, quota());
 
-  operation()->Copy(URLForPath(src_dir_path), URLForPath(dest_dir1_path),
-                    RecordStatusCallback());
+  NewOperation()->Copy(
+      URLForPath(src_dir_path), URLForPath(dest_dir1_path),
+      RecordStatusCallback());
   MessageLoop::current()->RunUntilIdle();
   expected_usage += all_file_size +
       child_path_cost_ + grandchild_path_cost_;
@@ -335,8 +330,9 @@ TEST_F(LocalFileSystemQuotaTest, TestCopySuccessSrcDirRecursive) {
   EXPECT_EQ(expected_usage, usage());
   ASSERT_LT(expected_usage, quota());
 
-  operation()->Copy(URLForPath(child_dir_path_), URLForPath(dest_dir2_path),
-                    RecordStatusCallback());
+  NewOperation()->Copy(
+      URLForPath(child_dir_path_), URLForPath(dest_dir2_path),
+      RecordStatusCallback());
   MessageLoop::current()->RunUntilIdle();
 
   EXPECT_EQ(base::PLATFORM_FILE_OK, status());

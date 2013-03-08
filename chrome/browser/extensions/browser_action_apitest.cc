@@ -3,7 +3,8 @@
 // found in the LICENSE file.
 
 #include "chrome/browser/extensions/extension_system.h"
-#include "chrome/browser/ui/browser_tabstrip.h"
+#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 
 // Tests that tooltips of a browser action icon can be specified using UTF8.
 // See http://crbug.com/25349.
@@ -11,7 +12,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, TitleLocalizationBrowserAction) {
   ExtensionService* service = extensions::ExtensionSystem::Get(
       browser()->profile())->extension_service();
   const size_t size_before = service->extensions()->size();
-  FilePath extension_path(test_data_dir_.AppendASCII("browsertest")
+  base::FilePath extension_path(test_data_dir_.AppendASCII("browsertest")
                                         .AppendASCII("title_localized"));
   const Extension* extension = LoadExtension(extension_path);
   ASSERT_TRUE(extension);
@@ -23,7 +24,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, TitleLocalizationBrowserAction) {
   EXPECT_STREQ(WideToUTF8(L"Hreggvi\u00F0ur is my name").c_str(),
                extension->name().c_str());
   int tab_id = ExtensionTabUtil::GetTabId(
-      chrome::GetActiveWebContents(browser()));
+      browser()->tab_strip_model()->GetActiveWebContents());
   EXPECT_STREQ(WideToUTF8(L"Hreggvi\u00F0ur").c_str(),
                extension->browser_action()->GetTitle(tab_id).c_str());
 }

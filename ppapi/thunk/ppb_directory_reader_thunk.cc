@@ -5,6 +5,7 @@
 #include "ppapi/c/dev/ppb_directory_reader_dev.h"
 #include "ppapi/c/pp_completion_callback.h"
 #include "ppapi/c/pp_errors.h"
+#include "ppapi/shared_impl/proxy_lock.h"
 #include "ppapi/shared_impl/tracked_callback.h"
 #include "ppapi/thunk/enter.h"
 #include "ppapi/thunk/thunk.h"
@@ -17,14 +18,16 @@ namespace thunk {
 namespace {
 
 PP_Resource Create(PP_Resource directory_ref) {
+  ppapi::ProxyAutoLock lock;
   Resource* object =
       PpapiGlobals::Get()->GetResourceTracker()->GetResource(directory_ref);
   if (!object)
     return 0;
-  EnterResourceCreation enter(object->pp_instance());
+  EnterResourceCreationNoLock enter(object->pp_instance());
   if (enter.failed())
     return 0;
-  return enter.functions()->CreateDirectoryReader(directory_ref);
+  return enter.functions()->CreateDirectoryReader(
+      object->pp_instance(), directory_ref);
 }
 
 PP_Bool IsDirectoryReader(PP_Resource resource) {
@@ -32,25 +35,25 @@ PP_Bool IsDirectoryReader(PP_Resource resource) {
   return PP_FromBool(enter.succeeded());
 }
 
-int32_t GetNextEntry(PP_Resource directory_reader,
-                     PP_DirectoryEntry_Dev* entry,
-                     PP_CompletionCallback callback) {
+int32_t ReadEntries(PP_Resource directory_reader,
+                    PP_ArrayOutput output,
+                    PP_CompletionCallback callback) {
   EnterResource<PPB_DirectoryReader_API> enter(
       directory_reader, callback, true);
   if (enter.failed())
     return enter.retval();
-  return enter.SetResult(enter.object()->GetNextEntry(entry, enter.callback()));
+  return enter.SetResult(enter.object()->ReadEntries(output, enter.callback()));
 }
 
 const PPB_DirectoryReader_Dev g_ppb_directory_reader_thunk = {
   &Create,
   &IsDirectoryReader,
-  &GetNextEntry
+  &ReadEntries
 };
 
 }  // namespace
 
-const PPB_DirectoryReader_Dev_0_5* GetPPB_DirectoryReader_Dev_0_5_Thunk() {
+const PPB_DirectoryReader_Dev_0_6* GetPPB_DirectoryReader_Dev_0_6_Thunk() {
   return &g_ppb_directory_reader_thunk;
 }
 

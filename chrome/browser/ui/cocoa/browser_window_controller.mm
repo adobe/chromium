@@ -22,12 +22,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/signin/signin_manager.h"
-#include "chrome/browser/signin/signin_manager_factory.h"
-#include "chrome/browser/sync/profile_sync_service.h"
-#include "chrome/browser/sync/profile_sync_service_factory.h"
-#include "chrome/browser/sync/sync_global_error.h"
-#include "chrome/browser/sync/sync_ui_util.h"
+#include "chrome/browser/signin/signin_ui_util.h"
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/ui/browser.h"
@@ -57,7 +52,7 @@
 #import "chrome/browser/ui/cocoa/location_bar/autocomplete_text_field_editor.h"
 #import "chrome/browser/ui/cocoa/presentation_mode_controller.h"
 #import "chrome/browser/ui/cocoa/status_bubble_mac.h"
-#import "chrome/browser/ui/cocoa/tab_contents/previewable_contents_controller.h"
+#import "chrome/browser/ui/cocoa/tab_contents/overlayable_contents_controller.h"
 #import "chrome/browser/ui/cocoa/tab_contents/sad_tab_controller.h"
 #import "chrome/browser/ui/cocoa/tab_contents/tab_contents_controller.h"
 #import "chrome/browser/ui/cocoa/tabpose_window.h"
@@ -67,8 +62,6 @@
 #import "chrome/browser/ui/cocoa/toolbar/toolbar_controller.h"
 #include "chrome/browser/ui/fullscreen/fullscreen_controller.h"
 #include "chrome/browser/ui/omnibox/location_bar.h"
-#include "chrome/browser/ui/search/search.h"
-#include "chrome/browser/ui/search/search_model.h"
 #include "chrome/browser/ui/tabs/dock_info.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_delegate.h"
@@ -247,36 +240,8 @@ enum {
     }
   }
 
-  // Figure out what string to display in the signin menu item - depending on
-  // the state of the signed-in services, this will be one of:
-  //   "Sign in to <product name>"
-  //   "Signed in as <username>"
-  //   "Signin Error"
-  ProfileSyncService* syncService = profile->IsSyncAccessible() ?
-      ProfileSyncServiceFactory::GetInstance()->GetForProfile(
-          profile->GetOriginalProfile()) : NULL;
-  SigninManager* signin = SigninManagerFactory::GetForProfile(profile);
-  std::string userName = signin->GetAuthenticatedUsername();
-  NSString* title = NULL;
-  if (userName.empty() || signin->AuthInProgress() ||
-      (syncService && !syncService->HasSyncSetupCompleted())) {
-    // Not signed in yet - display the default string.
-    title = GetNSStringFWithFixup(IDS_SYNC_MENU_PRE_SYNCED_LABEL,
-                                  GetStringUTF16(IDS_SHORT_PRODUCT_NAME));
-  } else if (signin->signin_global_error()->HasBadge()) {
-    // TODO(atwilson): Change this string to a generic signin error instead of
-    // a "Sync error" string once we allow signin without sync.
-    title = GetNSStringWithFixup(IDS_SYNC_MENU_SYNC_ERROR_LABEL);
-  } else if (syncService && syncService->sync_global_error() &&
-             syncService->sync_global_error()->HasBadge()) {
-    title = GetNSStringWithFixup(IDS_SYNC_MENU_SYNC_ERROR_LABEL);
-  } else {
-    // Signed in.
-    title = GetNSStringFWithFixup(IDS_SYNC_MENU_SYNCED_LABEL,
-                                  UTF8ToUTF16(userName));
-  }
-
-  [signinMenuItem setTitle:title];
+  string16 label = signin_ui_util::GetSigninMenuLabel(profile);
+  [signinMenuItem setTitle:l10n_util::FixUpWindowsStyleLabel(label)];
   [signinMenuItem setHidden:!showSigninMenuItem];
   [followingSeparator setHidden:!showSigninMenuItem];
 }
@@ -366,15 +331,15 @@ enum {
     [[devToolsController_ view] setFrame:[[self tabContentArea] bounds]];
     [[self tabContentArea] addSubview:[devToolsController_ view]];
 
-    // Create the previewable contents controller.  This provides the switch
+    // Create the overlayable contents controller.  This provides the switch
     // view that TabStripController needs.
-    previewableContentsController_.reset(
-        [[PreviewableContentsController alloc] initWithBrowser:browser
+    overlayableContentsController_.reset(
+        [[OverlayableContentsController alloc] initWithBrowser:browser
                                               windowController:self]);
-    [[previewableContentsController_ view]
+    [[overlayableContentsController_ view]
         setFrame:[[devToolsController_ view] bounds]];
     [[devToolsController_ view]
-        addSubview:[previewableContentsController_ view]];
+        addSubview:[overlayableContentsController_ view]];
 
     // Create a controller for the tab strip, giving it the model object for
     // this window's Browser and the tab strip view. The controller will handle
@@ -550,8 +515,8 @@ enum {
   return floatingBarBackingView_;
 }
 
-- (PreviewableContentsController*)previewableContentsController {
-  return previewableContentsController_;
+- (OverlayableContentsController*)overlayableContentsController {
+  return overlayableContentsController_;
 }
 
 - (Profile*)profile {
@@ -1123,7 +1088,6 @@ enum {
         case IDC_SHOW_SIGNIN: {
           Profile* original_profile =
               browser_->profile()->GetOriginalProfile();
-          enable &= original_profile->IsSyncAccessible();
           [BrowserWindowController updateSigninItem:item
                                          shouldShow:enable
                                      currentProfile:original_profile];
@@ -1234,7 +1198,7 @@ enum {
 // StatusBubble delegate method: tell the status bubble the frame it should
 // position itself in.
 - (NSRect)statusBubbleBaseFrame {
-  NSView* view = [previewableContentsController_ view];
+  NSView* view = [overlayableContentsController_ view];
   return [view convertRect:[view bounds] toView:nil];
 }
 
@@ -1512,6 +1476,10 @@ enum {
   return bookmarkBarController_;
 }
 
+- (DevToolsController*)devToolsController {
+  return devToolsController_;
+}
+
 - (BOOL)isDownloadShelfVisible {
   return downloadShelfController_ != nil &&
       [downloadShelfController_ isVisible];
@@ -1610,7 +1578,7 @@ enum {
 
   [infoBarContainerController_ changeWebContents:contents];
 
-  [previewableContentsController_ onActivateTabWithContents:contents];
+  [overlayableContentsController_ onActivateTabWithContents:contents];
 }
 
 - (void)onTabChanged:(TabStripModelObserver::TabChangeType)change
@@ -1835,11 +1803,6 @@ enum {
   // do this.
   if ([findBarCocoaController_ isFindBarVisible])
     [self layoutSubviews];
-
-  if ([self placeBookmarkBarBelowInfoBar] &&
-      [bookmarkBarController_ shouldShowAtBottomWhenDetached]) {
-    [self layoutBottomBookmarkBarInContentFrame:[[self tabContentArea] frame]];
-  }
 }
 
 // Handle the openLearnMoreAboutCrashLink: action from SadTabController when
@@ -1964,7 +1927,7 @@ willAnimateFromState:(BookmarkBar::State)oldState
   // The view's bounds are in its own coordinate system.  Convert that to the
   // window base coordinate system, then translate it into the screen's
   // coordinate system.
-  NSView* view = [previewableContentsController_ view];
+  NSView* view = [overlayableContentsController_ view];
   if (!view)
     return NSZeroRect;
 
@@ -1987,7 +1950,7 @@ willAnimateFromState:(BookmarkBar::State)oldState
   [sheet orderOut:self];
 }
 
-- (void)updateBookmarkBarStateForInstantPreview {
+- (void)updateBookmarkBarStateForInstantOverlay {
   [toolbarController_ setDividerOpacity:[self toolbarDividerOpacity]];
   [self updateContentOffsets];
   [self updateSubviewZOrder:[self inPresentationMode]];
@@ -2007,9 +1970,7 @@ willAnimateFromState:(BookmarkBar::State)oldState
 // "Enter Full Screen" menu item.  On Snow Leopard, this function is never
 // called by the UI directly, but it provides the implementation for
 // |-setPresentationMode:|.
-- (void)setFullscreen:(BOOL)fullscreen
-                  url:(const GURL&)url
-           bubbleType:(FullscreenExitBubbleType)bubbleType {
+- (void)setFullscreen:(BOOL)fullscreen {
   if (fullscreen == [self isFullscreen])
     return;
 
@@ -2028,14 +1989,12 @@ willAnimateFromState:(BookmarkBar::State)oldState
   }
 }
 
-- (void)enterFullscreenForURL:(const GURL&)url
-                   bubbleType:(FullscreenExitBubbleType)bubbleType {
-  [self setFullscreen:YES url:url bubbleType:bubbleType];
+- (void)enterFullscreen {
+  [self setFullscreen:YES];
 }
 
 - (void)exitFullscreen {
-  // url: and bubbleType: are ignored when leaving fullscreen.
-  [self setFullscreen:NO url:GURL() bubbleType:FEB_TYPE_NONE];
+  [self setFullscreen:NO];
 }
 
 - (void)updateFullscreenExitBubbleURL:(const GURL&)url
@@ -2065,7 +2024,7 @@ willAnimateFromState:(BookmarkBar::State)oldState
 
   // Presentation mode on Snow Leopard maps directly to fullscreen mode.
   if (base::mac::IsOSSnowLeopard()) {
-    [self setFullscreen:presentationMode url:url bubbleType:bubbleType];
+    [self setFullscreen:presentationMode];
     return;
   }
 

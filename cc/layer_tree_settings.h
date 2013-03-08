@@ -8,6 +8,7 @@
 #include "base/basictypes.h"
 #include "cc/cc_export.h"
 #include "cc/layer_tree_debug_state.h"
+#include "third_party/skia/include/core/SkColor.h"
 #include "ui/gfx/size.h"
 
 namespace cc {
@@ -23,21 +24,28 @@ class CC_EXPORT LayerTreeSettings {
   bool renderVSyncEnabled;
   bool perTilePaintingEnabled;
   bool partialSwapEnabled;
+  bool cacheRenderPassContents;
   bool rightAlignedSchedulingEnabled;
   bool acceleratedAnimationEnabled;
-  bool pageScalePinchZoomEnabled;
   bool backgroundColorInsteadOfCheckerboard;
   bool showOverdrawInTracing;
   bool canUseLCDText;
   bool shouldClearRootRenderPass;
   bool useLinearFadeScrollbarAnimator;
+  bool solidColorScrollbars;
+  SkColor solidColorScrollbarColor;
+  int solidColorScrollbarThicknessDIP;
   bool calculateTopControlsPosition;
+  bool useCheapnessEstimator;
+  bool useMemoryManagement;
   float minimumContentsScale;
   float lowResContentsScaleFactor;
+  float topControlsHeight;
+  float topControlsShowThreshold;
+  float topControlsHideThreshold;
   double refreshRate;
   size_t maxPartialTextureUpdates;
   size_t numRasterThreads;
-  int topControlsHeightPx;
   gfx::Size defaultTileSize;
   gfx::Size maxUntiledLayerSize;
   gfx::Size minimumOcclusionTrackingSize;

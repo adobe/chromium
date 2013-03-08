@@ -12,7 +12,6 @@
 #include "ash/wm/workspace/frame_maximize_button.h"
 #include "ash/wm/workspace/snap_sizer.h"
 #include "base/command_line.h"
-#include "ui/aura/aura_switches.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/client/focus_client.h"
 #include "ui/aura/test/event_generator.h"
@@ -40,7 +39,7 @@ class ShellViewsDelegate : public views::TestViewsDelegate {
       views::Widget* widget) OVERRIDE {
     return ash::Shell::GetInstance()->CreateDefaultNonClientFrameView(widget);
   }
-  bool UseTransparentWindows() const OVERRIDE {
+  virtual bool UseTransparentWindows() const OVERRIDE {
     // Ash uses transparent window frames.
     return true;
   }
@@ -152,8 +151,15 @@ TEST_F(CustomFrameViewAshTest, ResizeButtonToggleMaximize) {
   widget->Close();
 }
 
+#if defined(OS_WIN)
+// RootWindow and Display can't resize on Windows Ash. http://crbug.com/165962
+#define MAYBE_ResizeButtonDrag DISABLED_ResizeButtonDrag
+#else
+#define MAYBE_ResizeButtonDrag ResizeButtonDrag
+#endif
+
 // Tests that click+dragging on the resize-button tiles or minimizes the window.
-TEST_F(CustomFrameViewAshTest, ResizeButtonDrag) {
+TEST_F(CustomFrameViewAshTest, MAYBE_ResizeButtonDrag) {
   views::Widget* widget = CreateWidget();
   aura::Window* window = widget->GetNativeWindow();
   CustomFrameViewAsh* frame = custom_frame_view_ash(widget);
@@ -266,9 +272,19 @@ TEST_F(CustomFrameViewAshTest, ResizeButtonDrag) {
   widget->Close();
 }
 
+#if defined(OS_WIN)
+// RootWindow and Display can't resize on Windows Ash. http://crbug.com/165962
+#define MAYBE_TouchDragResizeCloseToCornerDiffersFromMouse \
+        DISABLED_TouchDragResizeCloseToCornerDiffersFromMouse
+#else
+#define MAYBE_TouchDragResizeCloseToCornerDiffersFromMouse \
+        TouchDragResizeCloseToCornerDiffersFromMouse
+#endif
+
 // Tests Left/Right snapping with resize button touch dragging - which should
 // trigger dependent on the available drag distance.
-TEST_F(CustomFrameViewAshTest, TouchDragResizeCloseToCornerDiffersFromMouse) {
+TEST_F(CustomFrameViewAshTest,
+       MAYBE_TouchDragResizeCloseToCornerDiffersFromMouse) {
   views::Widget* widget = CreateWidget();
   aura::Window* window = widget->GetNativeWindow();
   CustomFrameViewAsh* frame = custom_frame_view_ash(widget);
@@ -699,6 +715,39 @@ TEST_F(CustomFrameViewAshTest, MinimizePerKeyClosesBubble) {
   wm::MinimizeWindow(window);
 
   EXPECT_TRUE(ash::wm::IsWindowMinimized(window));
+  EXPECT_FALSE(maximize_button->maximizer());
+}
+
+// Tests that dragging down on the maximize button minimizes the window.
+TEST_F(CustomFrameViewAshTest, MaximizeButtonDragDownMinimizes) {
+  views::Widget* widget = CreateWidget();
+  aura::Window* window = widget->GetNativeWindow();
+  widget->SetBounds(gfx::Rect(10, 10, 100, 100));
+  CustomFrameViewAsh* frame = custom_frame_view_ash(widget);
+  CustomFrameViewAsh::TestApi test(frame);
+  FrameMaximizeButton* maximize_button = test.maximize_button();
+
+  // Drag down on a maximized window.
+  wm::MaximizeWindow(window);
+  EXPECT_TRUE(wm::IsWindowMaximized(window));
+  gfx::Point button_pos = maximize_button->GetBoundsInScreen().CenterPoint();
+  gfx::Point off_pos(button_pos.x(), button_pos.y() + 100);
+
+  aura::test::EventGenerator generator(window->GetRootWindow());
+  generator.GestureScrollSequence(button_pos, off_pos,
+      base::TimeDelta::FromMilliseconds(0), 1);
+
+  EXPECT_TRUE(wm::IsWindowMinimized(window));
+  EXPECT_FALSE(maximize_button->maximizer());
+
+  // Drag down on a restored window.
+  wm::RestoreWindow(window);
+
+  button_pos = maximize_button->GetBoundsInScreen().CenterPoint();
+  off_pos = gfx::Point(button_pos.x(), button_pos.y() + 200);
+  generator.GestureScrollSequence(button_pos, off_pos,
+      base::TimeDelta::FromMilliseconds(10), 1);
+  EXPECT_TRUE(wm::IsWindowMinimized(window));
   EXPECT_FALSE(maximize_button->maximizer());
 }
 

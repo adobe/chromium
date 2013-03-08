@@ -7,6 +7,8 @@
 
 #include <list>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
@@ -278,8 +280,7 @@ class ProfileSyncService : public ProfileSyncServiceBase,
   virtual void OnInvalidatorStateChange(
       syncer::InvalidatorState state) OVERRIDE;
   virtual void OnIncomingInvalidation(
-      const syncer::ObjectIdInvalidationMap& invalidation_map,
-      syncer::IncomingInvalidationSource source) OVERRIDE;
+      const syncer::ObjectIdInvalidationMap& invalidation_map) OVERRIDE;
 
   // SyncFrontend implementation.
   virtual void OnBackendInitialized(
@@ -383,6 +384,10 @@ class ProfileSyncService : public ProfileSyncServiceBase,
   // Returns a user-friendly string form of last synced time (in minutes).
   virtual string16 GetLastSyncedTimeString() const;
 
+  // Returns true if startup is suppressed (i.e. user has stopped syncing via
+  // the google dashboard).
+  virtual bool IsStartSuppressed() const;
+
   ProfileSyncComponentsFactory* factory() { return factory_.get(); }
 
   // The profile we are syncing for.
@@ -405,7 +410,7 @@ class ProfileSyncService : public ProfileSyncServiceBase,
 
   // Returns whether sync is managed, i.e. controlled by configuration
   // management. If so, the user is not allowed to configure sync.
-  bool IsManaged() const;
+  virtual bool IsManaged() const;
 
   // SigninGlobalError::AuthStatusProvider implementation.
   virtual GoogleServiceAuthError GetAuthStatus() const OVERRIDE;
@@ -596,6 +601,10 @@ class ProfileSyncService : public ProfileSyncServiceBase,
       const syncer::ObjectIdSet& ids) OVERRIDE;
   virtual void UnregisterInvalidationHandler(
       syncer::InvalidationHandler* handler) OVERRIDE;
+  virtual void AcknowledgeInvalidation(
+      const invalidation::ObjectId& id,
+      const syncer::AckHandle& ack_handle) OVERRIDE;
+
   virtual syncer::InvalidatorState GetInvalidatorState() const OVERRIDE;
 
   // ProfileKeyedService implementation.  This must be called exactly
@@ -670,6 +679,8 @@ class ProfileSyncService : public ProfileSyncServiceBase,
     ERROR_REASON_ACTIONABLE_ERROR,
     ERROR_REASON_LIMIT
   };
+  typedef std::vector<std::pair<invalidation::ObjectId,
+                                syncer::AckHandle> > AckHandleReplayQueue;
   friend class ProfileSyncServicePasswordTest;
   friend class SyncTest;
   friend class TestProfileSyncService;
@@ -897,6 +908,8 @@ class ProfileSyncService : public ProfileSyncServiceBase,
   // Dispatches invalidations to handlers.  Set in Initialize() and
   // unset in Shutdown().
   scoped_ptr<syncer::InvalidatorRegistrar> invalidator_registrar_;
+  // Queues any acknowledgements received while the backend is uninitialized.
+  AckHandleReplayQueue ack_replay_queue_;
 
   // Sync's internal debug info listener. Used to record datatype configuration
   // and association information.

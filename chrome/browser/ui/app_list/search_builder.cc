@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2013 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "base/command_line.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/autocomplete/autocomplete_classifier.h"
 #include "chrome/browser/autocomplete/autocomplete_controller.h"
 #include "chrome/browser/autocomplete/autocomplete_input.h"
@@ -22,6 +23,7 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
+#include "chrome/common/extensions/api/icons/icons_handler.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_icon_set.h"
@@ -30,6 +32,7 @@
 #include "content/public/browser/web_contents.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
+#include "grit/ui_resources.h"
 #include "ui/app_list/app_list_switches.h"
 #include "ui/app_list/search_box_model.h"
 #include "ui/app_list/search_result.h"
@@ -175,8 +178,9 @@ class ExtensionAppResult : public SearchBuilderResult,
     const gfx::ImageSkia default_icon = extensions::OmniboxAPI::Get(profile())->
         GetOmniboxPopupIcon(extension->id()).AsImageSkia();
     icon_.reset(new extensions::IconImage(
+        profile(),
         extension,
-        extension->icons(),
+        extensions::IconsInfo::GetIcons(extension),
         extension_misc::EXTENSION_ICON_SMALL,
         default_icon,
         this));
@@ -254,6 +258,7 @@ class ContactResult : public SearchBuilderResult,
  protected:
   // Overridden from SearchBuilderResult:
   virtual void UpdateIcon() OVERRIDE {
+    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
     const contacts::Contact* contact = GetContact();
     if (contact && contact->has_raw_untrusted_photo()) {
       photo_decoder_ =
@@ -261,7 +266,9 @@ class ContactResult : public SearchBuilderResult,
               this,
               contact->raw_untrusted_photo(),
               ImageDecoder::DEFAULT_CODEC);
-      photo_decoder_->Start();
+      scoped_refptr<base::MessageLoopProxy> task_runner =
+          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::UI);
+      photo_decoder_->Start(task_runner);
     } else {
       SetIcon(
           *ui::ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
@@ -305,6 +312,10 @@ SearchBuilder::SearchBuilder(
       l10n_util::GetStringUTF16(IDS_SEARCH_BOX_HINT));
   search_box_->SetIcon(*ui::ResourceBundle::GetSharedInstance().
       GetImageSkiaNamed(IDR_OMNIBOX_SEARCH));
+  search_box_->SetUserIconEnabled(list_controller->ShouldShowUserIcon());
+  search_box_->SetUserIcon(*ui::ResourceBundle::GetSharedInstance().
+      GetImageSkiaNamed(IDR_APP_LIST_USER_INDICATOR));
+  search_box_->SetUserIconTooltip(UTF8ToUTF16(profile_->GetProfileName()));
 
   int providers = AutocompleteProvider::TYPE_EXTENSION_APP;
   bool apps_only = true;

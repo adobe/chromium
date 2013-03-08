@@ -8,6 +8,7 @@
 
 #include "base/basictypes.h"
 #include "base/command_line.h"
+#include "base/prefs/pref_service.h"
 #include "base/stl_util.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
@@ -22,13 +23,12 @@
 #include "chrome/browser/content_settings/content_settings_rule.h"
 #include "chrome/browser/content_settings/content_settings_utils.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/intents/web_intents_util.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/content_settings_pattern.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
@@ -77,8 +77,11 @@ bool SupportsResourceIdentifier(ContentSettingsType content_type) {
 
 HostContentSettingsMap::HostContentSettingsMap(
     PrefService* prefs,
-    bool incognito)
-    : prefs_(prefs),
+    bool incognito) :
+#ifndef NDEBUG
+      used_content_settings_providers_(false),
+#endif
+      prefs_(prefs),
       is_off_the_record_(incognito) {
   content_settings::ObservableProvider* policy_provider =
       new content_settings::PolicyProvider(prefs_);
@@ -105,6 +108,10 @@ HostContentSettingsMap::HostContentSettingsMap(
 void HostContentSettingsMap::RegisterExtensionService(
     ExtensionService* extension_service) {
   DCHECK(extension_service);
+  // http://crbug.com/176315
+  // #ifndef NDEBUG
+  //   DCHECK(!used_content_settings_providers_);
+  // #endif
   DCHECK(!content_settings_providers_[INTERNAL_EXTENSION_PROVIDER]);
   DCHECK(!content_settings_providers_[CUSTOM_EXTENSION_PROVIDER]);
 
@@ -130,19 +137,21 @@ void HostContentSettingsMap::RegisterExtensionService(
 #endif
 
 // static
-void HostContentSettingsMap::RegisterUserPrefs(PrefServiceSyncable* prefs) {
-  prefs->RegisterIntegerPref(prefs::kContentSettingsWindowLastTabIndex,
-                             0,
-                             PrefServiceSyncable::UNSYNCABLE_PREF);
-  prefs->RegisterIntegerPref(prefs::kContentSettingsDefaultWhitelistVersion,
-                             0, PrefServiceSyncable::SYNCABLE_PREF);
-  prefs->RegisterBooleanPref(prefs::kContentSettingsClearOnExitMigrated,
-                             false, PrefServiceSyncable::SYNCABLE_PREF);
+void HostContentSettingsMap::RegisterUserPrefs(PrefRegistrySyncable* registry) {
+  registry->RegisterIntegerPref(prefs::kContentSettingsWindowLastTabIndex,
+                                0,
+                                PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterIntegerPref(prefs::kContentSettingsDefaultWhitelistVersion,
+                                0,
+                                PrefRegistrySyncable::SYNCABLE_PREF);
+  registry->RegisterBooleanPref(prefs::kContentSettingsClearOnExitMigrated,
+                                false,
+                                PrefRegistrySyncable::SYNCABLE_PREF);
 
   // Register the prefs for the content settings providers.
-  content_settings::DefaultProvider::RegisterUserPrefs(prefs);
-  content_settings::PrefProvider::RegisterUserPrefs(prefs);
-  content_settings::PolicyProvider::RegisterUserPrefs(prefs);
+  content_settings::DefaultProvider::RegisterUserPrefs(registry);
+  content_settings::PrefProvider::RegisterUserPrefs(registry);
+  content_settings::PolicyProvider::RegisterUserPrefs(registry);
 }
 
 ContentSetting HostContentSettingsMap::GetDefaultContentSettingFromProvider(
@@ -165,6 +174,8 @@ ContentSetting HostContentSettingsMap::GetDefaultContentSettingFromProvider(
 ContentSetting HostContentSettingsMap::GetDefaultContentSetting(
     ContentSettingsType content_type,
     std::string* provider_id) const {
+  UsedContentSettingsProviders();
+
   // Iterate through the list of providers and return the first non-NULL value
   // that matches |primary_url| and |secondary_url|.
   for (ConstProviderIterator provider = content_settings_providers_.begin();
@@ -206,6 +217,7 @@ void HostContentSettingsMap::GetSettingsForOneType(
   DCHECK(SupportsResourceIdentifier(content_type) ||
          resource_identifier.empty());
   DCHECK(settings);
+  UsedContentSettingsProviders();
 
   settings->clear();
   for (ConstProviderIterator provider = content_settings_providers_.begin();
@@ -255,6 +267,8 @@ void HostContentSettingsMap::SetWebsiteSetting(
   DCHECK(IsValueAllowedForType(prefs_, value, content_type));
   DCHECK(SupportsResourceIdentifier(content_type) ||
          resource_identifier.empty());
+  UsedContentSettingsProviders();
+
   for (ProviderIterator provider = content_settings_providers_.begin();
        provider != content_settings_providers_.end();
        ++provider) {
@@ -314,6 +328,7 @@ void HostContentSettingsMap::AddExceptionForURL(
 
 void HostContentSettingsMap::ClearSettingsForOneType(
     ContentSettingsType content_type) {
+  UsedContentSettingsProviders();
   for (ProviderIterator provider = content_settings_providers_.begin();
        provider != content_settings_providers_.end();
        ++provider) {
@@ -332,12 +347,6 @@ bool HostContentSettingsMap::IsSettingAllowedForType(
     PrefService* prefs,
     ContentSetting setting,
     ContentSettingsType content_type) {
-  // Intents content settings are hidden behind a switch for now.
-  if (content_type == CONTENT_SETTINGS_TYPE_INTENTS) {
-    if (!web_intents::IsWebIntentsEnabled(prefs))
-      return false;
-  }
-
   // We don't yet support stored content settings for mixed scripting.
   if (content_type == CONTENT_SETTINGS_TYPE_MIXEDSCRIPT)
     return false;
@@ -366,7 +375,6 @@ bool HostContentSettingsMap::IsSettingAllowedForType(
     case CONTENT_SETTINGS_TYPE_PLUGINS:
     case CONTENT_SETTINGS_TYPE_GEOLOCATION:
     case CONTENT_SETTINGS_TYPE_NOTIFICATIONS:
-    case CONTENT_SETTINGS_TYPE_INTENTS:
     case CONTENT_SETTINGS_TYPE_MOUSELOCK:
     case CONTENT_SETTINGS_TYPE_MEDIASTREAM:
     case CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC:
@@ -500,6 +508,12 @@ void HostContentSettingsMap::AddSettingsForOneType(
         kProviderNames[provider_type],
         incognito));
   }
+}
+
+void HostContentSettingsMap::UsedContentSettingsProviders() const {
+#ifndef NDEBUG
+  used_content_settings_providers_ = true;
+#endif
 }
 
 bool HostContentSettingsMap::ShouldAllowAllContent(

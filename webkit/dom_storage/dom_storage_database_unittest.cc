@@ -4,8 +4,8 @@
 
 #include "webkit/dom_storage/dom_storage_database.h"
 
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/path_service.h"
 #include "base/utf_string_conversions.h"
@@ -110,7 +110,7 @@ TEST(DomStorageDatabaseTest, SimpleOpenAndClose) {
 TEST(DomStorageDatabaseTest, CloseEmptyDatabaseDeletesFile) {
   base::ScopedTempDir temp_dir;
   ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
-  FilePath file_name = temp_dir.path().AppendASCII("TestDomStorageDatabase.db");
+  base::FilePath file_name = temp_dir.path().AppendASCII("TestDomStorageDatabase.db");
   ValuesMap storage;
   CreateMapWithValues(&storage);
 
@@ -167,7 +167,7 @@ TEST(DomStorageDatabaseTest, TestLazyOpenIsLazy) {
   // open a file that already exists when only invoking ReadAllValues.
   base::ScopedTempDir temp_dir;
   ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
-  FilePath file_name = temp_dir.path().AppendASCII("TestDomStorageDatabase.db");
+  base::FilePath file_name = temp_dir.path().AppendASCII("TestDomStorageDatabase.db");
 
   DomStorageDatabase db(file_name);
   EXPECT_FALSE(db.IsOpen());
@@ -214,7 +214,7 @@ TEST(DomStorageDatabaseTest, TestLazyOpenUpgradesDatabase) {
   // early if the database is already open).
   base::ScopedTempDir temp_dir;
   ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
-  FilePath file_name = temp_dir.path().AppendASCII("TestDomStorageDatabase.db");
+  base::FilePath file_name = temp_dir.path().AppendASCII("TestDomStorageDatabase.db");
 
   DomStorageDatabase db(file_name);
   db.db_.reset(new sql::Connection());
@@ -301,7 +301,7 @@ TEST(DomStorageDatabaseTest, TestSimpleRemoveOneValue) {
 }
 
 TEST(DomStorageDatabaseTest, TestCanOpenAndReadWebCoreDatabase) {
-  FilePath webcore_database;
+  base::FilePath webcore_database;
   PathService::Get(base::DIR_SOURCE_ROOT, &webcore_database);
   webcore_database = webcore_database.AppendASCII("webkit");
   webcore_database = webcore_database.AppendASCII("data");
@@ -334,7 +334,7 @@ TEST(DomStorageDatabaseTest, TestCanOpenFileThatIsNotADatabase) {
   // Write into the temporary file first.
   base::ScopedTempDir temp_dir;
   ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
-  FilePath file_name = temp_dir.path().AppendASCII("TestDomStorageDatabase.db");
+  base::FilePath file_name = temp_dir.path().AppendASCII("TestDomStorageDatabase.db");
 
   const char kData[] = "I am not a database.";
   file_util::WriteFile(file_name, kData, strlen(kData));

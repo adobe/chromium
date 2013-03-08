@@ -6,12 +6,11 @@
 
 #include "base/logging.h"
 #include "base/metrics/field_trial.h"
-#include "base/string_number_conversions.h"
+#include "base/strings/string_number_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/google/google_url_tracker.h"
 #include "chrome/browser/google/google_util.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/browser_instant_controller.h"
 #include "chrome/browser/ui/search/search.h"
 #include "content/public/browser/browser_thread.h"
 #include "googleurl/src/gurl.h"
@@ -130,26 +129,20 @@ std::string UIThreadSearchTermsData::GetSearchClient() const {
 std::string UIThreadSearchTermsData::InstantEnabledParam() const {
   DCHECK(!BrowserThread::IsWellKnownThread(BrowserThread::UI) ||
          BrowserThread::CurrentlyOn(BrowserThread::UI));
-  if (profile_) {
-    uint32 instant_extended_api_version =
-        chrome::search::EmbeddedSearchPageVersion(profile_);
-    if (instant_extended_api_version == 0 &&
-        chrome::BrowserInstantController::IsInstantEnabled(profile_))
-      return "ion=1&";
-  }
+  if (chrome::search::IsInstantPrefEnabled(profile_) &&
+      !chrome::search::IsInstantExtendedAPIEnabled())
+    return "ion=1&";
   return std::string();
 }
 
 std::string UIThreadSearchTermsData::InstantExtendedEnabledParam() const {
   DCHECK(!BrowserThread::IsWellKnownThread(BrowserThread::UI) ||
          BrowserThread::CurrentlyOn(BrowserThread::UI));
-  if (profile_) {
-    uint32 instant_extended_api_version =
-        chrome::search::EmbeddedSearchPageVersion(profile_);
-    if (instant_extended_api_version != 0) {
-      return std::string(google_util::kInstantExtendedAPIParam) + "=" +
-          base::Uint64ToString(instant_extended_api_version) + "&";
-    }
+  uint64 instant_extended_api_version =
+      chrome::search::EmbeddedSearchPageVersion();
+  if (instant_extended_api_version) {
+    return std::string(google_util::kInstantExtendedAPIParam) + "=" +
+        base::Uint64ToString(instant_extended_api_version) + "&";
   }
   return std::string();
 }

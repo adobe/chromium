@@ -10,7 +10,7 @@
 #include <string>
 
 #include "base/compiler_specific.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/singleton.h"
@@ -22,6 +22,7 @@
 #include "content/public/browser/gpu_data_manager.h"
 #include "content/public/common/gpu_info.h"
 #include "content/public/common/gpu_memory_stats.h"
+#include "content/public/common/three_d_api_types.h"
 
 class CommandLine;
 class GURL;
@@ -57,9 +58,6 @@ class CONTENT_EXPORT GpuDataManagerImpl
       const std::string& gpu_blacklist_json,
       const GPUInfo& gpu_info) OVERRIDE;
   virtual GpuFeatureType GetBlacklistedFeatures() const OVERRIDE;
-  virtual GpuSwitchingOption GetGpuSwitchingOption() const OVERRIDE;
-  virtual base::ListValue* GetBlacklistReasons() const OVERRIDE;
-  virtual std::string GetBlacklistVersion() const OVERRIDE;
   virtual GPUInfo GetGPUInfo() const OVERRIDE;
   virtual void GetGpuProcessHandles(
       const GetGpuProcessHandlesCallback& callback) const OVERRIDE;
@@ -68,16 +66,12 @@ class CONTENT_EXPORT GpuDataManagerImpl
   virtual bool IsCompleteGpuInfoAvailable() const OVERRIDE;
   virtual void RequestVideoMemoryUsageStatsUpdate() const OVERRIDE;
   virtual bool ShouldUseSoftwareRendering() const OVERRIDE;
-  virtual void RegisterSwiftShaderPath(const FilePath& path) OVERRIDE;
-  virtual void AddLogMessage(int level, const std::string& header,
-                             const std::string& message) OVERRIDE;
-  virtual base::ListValue* GetLogMessages() const OVERRIDE;
+  virtual void RegisterSwiftShaderPath(const base::FilePath& path) OVERRIDE;
   virtual void AddObserver(GpuDataManagerObserver* observer) OVERRIDE;
   virtual void RemoveObserver(GpuDataManagerObserver* observer) OVERRIDE;
   virtual void SetWindowCount(uint32 count) OVERRIDE;
   virtual uint32 GetWindowCount() const OVERRIDE;
   virtual void UnblockDomainFrom3DAPIs(const GURL& url) OVERRIDE;
-  virtual void DisableDomainBlockingFor3DAPIsForTesting() OVERRIDE;
   virtual void DisableGpuWatchdog() OVERRIDE;
   virtual void SetGLStrings(const std::string& gl_vendor,
                             const std::string& gl_renderer,
@@ -110,9 +104,27 @@ class CONTENT_EXPORT GpuDataManagerImpl
   // kDisableCoreAnimationPlugins.
   void AppendPluginCommandLine(CommandLine* command_line) const;
 
+  GpuSwitchingOption GetGpuSwitchingOption() const;
+
   // Force the current card to be blacklisted (usually due to GPU process
   // crashes).
   void BlacklistCard();
+
+  std::string GetBlacklistVersion() const;
+
+  // Returns the reasons for the latest run of blacklisting decisions.
+  // For the structure of returned value, see documentation for
+  // GpuBlacklist::GetBlacklistedReasons().
+  // Caller is responsible to release the returned value.
+  base::ListValue* GetBlacklistReasons() const;
+
+  void AddLogMessage(int level,
+                     const std::string& header,
+                     const std::string& message);
+
+  // Returns a new copy of the ListValue.  Caller is responsible to release
+  // the returned value.
+  base::ListValue* GetLogMessages() const;
 
   // Called when switching gpu.
   void HandleGpuSwitch();
@@ -135,7 +147,13 @@ class CONTENT_EXPORT GpuDataManagerImpl
   // Note that the unblocking API must be part of the content API
   // because it is called from Chrome side code.
   void BlockDomainFrom3DAPIs(const GURL& url, DomainGuilt guilt);
-  DomainBlockStatus Are3DAPIsBlocked(const GURL& url) const;
+  bool Are3DAPIsBlocked(const GURL& url,
+                        int render_process_id,
+                        int render_view_id,
+                        ThreeDAPIType requester);
+
+  // Disables domain blocking for 3D APIs. For use only in tests.
+  void DisableDomainBlockingFor3DAPIsForTesting();
 
  private:
   struct DomainBlockEntry {
@@ -204,6 +222,11 @@ class CONTENT_EXPORT GpuDataManagerImpl
       const GURL& url, base::Time at_time) const;
   int64 GetBlockAllDomainsDurationInMs() const;
 
+  void Notify3DAPIBlocked(const GURL& url,
+                          int render_process_id,
+                          int render_view_id,
+                          ThreeDAPIType requester);
+
   bool complete_gpu_info_already_requested_;
 
   GpuFeatureType blacklisted_features_;
@@ -223,7 +246,7 @@ class CONTENT_EXPORT GpuDataManagerImpl
 
   bool software_rendering_;
 
-  FilePath swiftshader_path_;
+  base::FilePath swiftshader_path_;
 
   // Current card force-blacklisted due to GPU crashes, or disabled through
   // the --disable-gpu commandline switch.

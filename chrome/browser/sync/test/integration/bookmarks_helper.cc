@@ -5,9 +5,12 @@
 #include "chrome/browser/sync/test/integration/bookmarks_helper.h"
 
 #include "base/compiler_specific.h"
+#include "base/file_util.h"
+#include "base/path_service.h"
 #include "base/rand_util.h"
-#include "base/string_number_conversions.h"
+#include "base/string_util.h"
 #include "base/stringprintf.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
@@ -16,12 +19,15 @@
 #include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/favicon/favicon_service_factory.h"
 #include "chrome/browser/favicon/favicon_util.h"
+#include "chrome/browser/history/history_db_task.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/history/history_types.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/sync/glue/bookmark_change_processor.h"
 #include "chrome/browser/sync/profile_sync_service_harness.h"
-#include "chrome/browser/sync/test/integration/sync_test.h"
 #include "chrome/browser/sync/test/integration/sync_datatype_helper.h"
+#include "chrome/browser/sync/test/integration/sync_test.h"
+#include "chrome/common/chrome_paths.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -34,18 +40,18 @@ namespace {
 
 // History task which runs all pending tasks on the history thread and
 // signals when the tasks have completed.
-class HistoryEmptyTask : public HistoryDBTask {
+class HistoryEmptyTask : public history::HistoryDBTask {
  public:
   explicit HistoryEmptyTask(base::WaitableEvent* done) : done_(done) {}
 
   virtual bool RunOnDBThread(history::HistoryBackend* backend,
-                             history::HistoryDatabase* db) {
+                             history::HistoryDatabase* db) OVERRIDE {
     content::RunAllPendingInMessageLoop();
     done_->Signal();
     return true;
   }
 
-  virtual void DoneRunOnMainThread() {}
+  virtual void DoneRunOnMainThread() OVERRIDE {}
 
  private:
   virtual ~HistoryEmptyTask() {}
@@ -208,17 +214,23 @@ FaviconData GetFaviconData(BookmarkModel* model,
 void SetFaviconImpl(Profile* profile,
                     const BookmarkNode* node,
                     const GURL& icon_url,
-                    const gfx::Image& image) {
+                    const gfx::Image& image,
+                    bookmarks_helper::FaviconSource favicon_source) {
     BookmarkModel* model = BookmarkModelFactory::GetForProfile(profile);
 
     FaviconChangeObserver observer(model, node);
     FaviconService* favicon_service =
         FaviconServiceFactory::GetForProfile(profile,
                                              Profile::EXPLICIT_ACCESS);
-    favicon_service->SetFavicons(node->url(),
-                                 icon_url,
-                                 history::FAVICON,
-                                 image);
+    if (favicon_source == bookmarks_helper::FROM_UI) {
+      favicon_service->SetFavicons(node->url(),
+                                   icon_url,
+                                   history::FAVICON,
+                                   image);
+    } else {
+      browser_sync::BookmarkChangeProcessor::ApplyBookmarkFavicon(
+          node, profile, icon_url, image.As1xPNGBytes());
+    }
 
     // Wait for the favicon for |node| to be invalidated.
     observer.WaitForSetFavicon();
@@ -493,7 +505,8 @@ void SetTitle(int profile,
 void SetFavicon(int profile,
                 const BookmarkNode* node,
                 const GURL& icon_url,
-                const gfx::Image& image) {
+                const gfx::Image& image,
+                FaviconSource favicon_source) {
   ASSERT_EQ(GetBookmarkModel(profile)->GetNodeByID(node->id()), node)
       << "Node " << node->GetTitle() << " does not belong to "
       << "Profile " << profile;
@@ -505,9 +518,10 @@ void SetFavicon(int profile,
   if (test()->use_verifier()) {
     const BookmarkNode* v_node = NULL;
     FindNodeInVerifier(GetBookmarkModel(profile), node, &v_node);
-    SetFaviconImpl(test()->verifier(), v_node, icon_url, image);
+    SetFaviconImpl(test()->verifier(), v_node, icon_url, image, favicon_source);
   }
-  SetFaviconImpl(test()->GetProfile(profile), node, icon_url, image);
+  SetFaviconImpl(test()->GetProfile(profile), node, icon_url, image,
+                 favicon_source);
 }
 
 const BookmarkNode* SetURL(int profile,
@@ -703,6 +717,22 @@ gfx::Image CreateFavicon(SkColor color) {
     favicon.AddRepresentation(gfx::ImageSkiaRep(bmp, favicon_scale_factors[i]));
   }
   return gfx::Image(favicon);
+}
+
+gfx::Image Create1xFaviconFromPNGFile(const std::string& path) {
+  const char* kPNGExtension = ".png";
+  if (!EndsWith(path, kPNGExtension, false))
+    return gfx::Image();
+
+  base::FilePath full_path;
+  if (!PathService::Get(chrome::DIR_TEST_DATA, &full_path))
+    return gfx::Image();
+
+  full_path = full_path.AppendASCII("sync").AppendASCII(path);
+  std::string contents;
+  file_util::ReadFileToString(full_path, &contents);
+  return gfx::Image::CreateFrom1xPNGBytes(
+      reinterpret_cast<const unsigned char*>(contents.data()), contents.size());
 }
 
 std::string IndexedURL(int i) {

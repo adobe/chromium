@@ -8,7 +8,7 @@
 #include "chrome/browser/chromeos/input_method/mock_input_method_manager.h"
 #include "chrome/browser/download/download_prefs.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/test/base/testing_pref_service.h"
+#include "chrome/test/base/testing_pref_service_syncable.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace chromeos {
@@ -55,8 +55,8 @@ class MyMockInputMethodManager : public input_method::MockInputMethodManager {
 
 TEST(PreferencesTest, TestUpdatePrefOnBrowserScreenDetails) {
   TestingPrefServiceSyncable prefs;
-  Preferences::RegisterUserPrefs(&prefs);
-  DownloadPrefs::RegisterUserPrefs(&prefs);
+  Preferences::RegisterUserPrefs(prefs.registry());
+  DownloadPrefs::RegisterUserPrefs(prefs.registry());
 
   StringPrefMember previous;
   previous.Init(prefs::kLanguagePreviousInputMethod, &prefs);

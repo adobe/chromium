@@ -5,12 +5,12 @@
 #include "remoting/protocol/ssl_hmac_channel_authenticator.h"
 
 #include "base/bind.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/message_loop.h"
+#include "base/path_service.h"
 #include "base/test/test_timeouts.h"
 #include "base/timer.h"
-#include "base/path_service.h"
 #include "crypto/rsa_private_key.h"
 #include "net/base/net_errors.h"
 #include "net/base/test_data_directory.h"
@@ -53,12 +53,12 @@ class SslHmacChannelAuthenticatorTest : public testing::Test {
 
  protected:
   virtual void SetUp() OVERRIDE {
-    FilePath certs_dir(net::GetTestCertsDirectory());
+    base::FilePath certs_dir(net::GetTestCertsDirectory());
 
-    FilePath cert_path = certs_dir.AppendASCII("unittest.selfsigned.der");
+    base::FilePath cert_path = certs_dir.AppendASCII("unittest.selfsigned.der");
     ASSERT_TRUE(file_util::ReadFileToString(cert_path, &host_cert_));
 
-    FilePath key_path = certs_dir.AppendASCII("unittest.key.bin");
+    base::FilePath key_path = certs_dir.AppendASCII("unittest.key.bin");
     std::string key_string;
     ASSERT_TRUE(file_util::ReadFileToString(key_path, &key_string));
     std::vector<uint8> key_vector(

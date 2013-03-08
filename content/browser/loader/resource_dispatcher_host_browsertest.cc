@@ -31,7 +31,7 @@ class ResourceDispatcherHostBrowserTest : public ContentBrowserTest,
 
  protected:
   virtual void SetUpOnMainThread() OVERRIDE {
-    FilePath path = GetTestFilePath("", "");
+    base::FilePath path = GetTestFilePath("", "");
     BrowserThread::PostTask(
         BrowserThread::IO, FROM_HERE,
         base::Bind(&URLRequestMockHTTPJob::AddUrlHandler, path));
@@ -48,7 +48,8 @@ class ResourceDispatcherHostBrowserTest : public ContentBrowserTest,
   }
 
   GURL GetMockURL(const std::string& file) {
-    return URLRequestMockHTTPJob::GetMockUrl(FilePath().AppendASCII(file));
+    return URLRequestMockHTTPJob::GetMockUrl(
+        base::FilePath().AppendASCII(file));
   }
 
   void CheckTitleTest(const GURL& url,
@@ -273,7 +274,7 @@ IN_PROC_BROWSER_TEST_F(ResourceDispatcherHostBrowserTest, CrossSiteAfterCrash) {
   WindowedNotificationObserver crash_observer(
       NOTIFICATION_RENDERER_PROCESS_CLOSED,
       NotificationService::AllSources());
-  NavigateToURL(shell(), GURL(chrome::kChromeUICrashURL));
+  NavigateToURL(shell(), GURL(kChromeUICrashURL));
   // Wait for browser to notice the renderer crash.
   crash_observer.Wait();
 

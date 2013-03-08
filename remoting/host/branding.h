@@ -5,7 +5,7 @@
 #ifndef REMOTING_HOST_BRANDING_H_
 #define REMOTING_HOST_BRANDING_H_
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 
 namespace remoting {
 
@@ -15,7 +15,7 @@ extern const wchar_t kWindowsServiceName[];
 #endif
 
 // Returns the location of the host configuration directory.
-FilePath GetConfigDir();
+base::FilePath GetConfigDir();
 
 } // namespace remoting
 

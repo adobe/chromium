@@ -11,18 +11,29 @@
 #include "content/common/content_export.h"
 #include "content/port/common/input_event_ack_state.h"
 #include "content/public/browser/render_widget_host_view.h"
+#include "ipc/ipc_listener.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPopupType.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebTextDirection.h"
 #include "ui/base/ime/text_input_type.h"
 #include "ui/base/range/range.h"
 #include "ui/surface/transport_dib.h"
 
+class SkBitmap;
 class WebCursor;
 
 struct AccessibilityHostMsg_NotificationParams;
 struct GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params;
 struct GpuHostMsg_AcceleratedSurfacePostSubBuffer_Params;
 struct ViewHostMsg_TextInputState_Params;
+struct ViewHostMsg_SelectionBounds_Params;
+
+namespace cc {
+class CompositorFrame;
+}
+
+namespace media {
+class VideoFrame;
+}
 
 namespace webkit {
 namespace npapi {
@@ -30,25 +41,21 @@ struct WebPluginGeometry;
 }
 }
 
-#if defined(OS_POSIX) || defined(USE_AURA)
 namespace WebKit {
 struct WebScreenInfo;
 }
-#endif
-
-namespace skia {
-class PlatformBitmap;
-};
 
 namespace content {
 class BackingStore;
+class RenderWidgetHostViewFrameSubscriber;
 class SmoothScrollGesture;
 struct NativeWebKeyboardEvent;
 
 // This is the larger RenderWidgetHostView interface exposed only
 // within content/ and to embedders looking to port to new platforms.
 // RenderWidgetHostView class hierarchy described in render_widget_host_view.h.
-class CONTENT_EXPORT RenderWidgetHostViewPort : public RenderWidgetHostView {
+class CONTENT_EXPORT RenderWidgetHostViewPort : public RenderWidgetHostView,
+                                                public IPC::Listener {
  public:
   virtual ~RenderWidgetHostViewPort() {}
 
@@ -58,6 +65,8 @@ class CONTENT_EXPORT RenderWidgetHostViewPort : public RenderWidgetHostView {
   // Like RenderWidgetHostView::CreateViewForWidget, with cast.
   static RenderWidgetHostViewPort* CreateViewForWidget(
       RenderWidgetHost* widget);
+
+  static void GetDefaultScreenInfo(WebKit::WebScreenInfo* results);
 
   // Perform all the initialization steps necessary for this object to represent
   // a popup (such as a <select> dropdown), then shows the popup at |pos|.
@@ -102,7 +111,7 @@ class CONTENT_EXPORT RenderWidgetHostViewPort : public RenderWidgetHostView {
   // Updates the range of the marked text in an IME composition.
   virtual void ImeCompositionRangeChanged(
       const ui::Range& range,
-      const std::vector<gfx::Rect>& character_bounds) {}
+      const std::vector<gfx::Rect>& character_bounds) = 0;
 
   // Informs the view that a portion of the widget's backing store was scrolled
   // and/or painted.  The view should ensure this gets copied to the screen.
@@ -147,10 +156,11 @@ class CONTENT_EXPORT RenderWidgetHostViewPort : public RenderWidgetHostView {
   // |start_rect| and |end_rect| are the bounds end of the selection in the
   // coordinate system of the render view. |start_direction| and |end_direction|
   // indicates the direction at which the selection was made on touch devices.
-  virtual void SelectionBoundsChanged(const gfx::Rect& start_rect,
-                                      WebKit::WebTextDirection start_direction,
-                                      const gfx::Rect& end_rect,
-                                      WebKit::WebTextDirection end_direction) {}
+  virtual void SelectionBoundsChanged(
+      const ViewHostMsg_SelectionBounds_Params& params) = 0;
+
+  // Notifies the view that the scroll offset has changed.
+  virtual void ScrollOffsetChanged() = 0;
 
   // Allocate a backing store for this view.
   virtual BackingStore* AllocBackingStore(const gfx::Size& size) = 0;
@@ -161,13 +171,46 @@ class CONTENT_EXPORT RenderWidgetHostViewPort : public RenderWidgetHostView {
   // contents, scaled to |dst_size|, and written to |output|.
   // |callback| is invoked with true on success, false otherwise. |output| can
   // be initialized even on failure.
-  // NOTE: |callback| is called asynchronously on Aura and synchronously on the
-  // other platforms.
+  // A smaller region than |src_subrect| may be copied if the underlying surface
+  // is smaller than |src_subrect|.
+  // NOTE: |callback| is called asynchronously.
   virtual void CopyFromCompositingSurface(
       const gfx::Rect& src_subrect,
       const gfx::Size& dst_size,
-      const base::Callback<void(bool)>& callback,
-      skia::PlatformBitmap* output) = 0;
+      const base::Callback<void(bool, const SkBitmap&)>& callback) = 0;
+
+  // Copies a given subset of the compositing surface's content into a YV12
+  // VideoFrame, and invokes a callback with a success/fail parameter. |target|
+  // must contain an allocated, YV12 video frame of the intended size. If the
+  // copy rectangle does not match |target|'s size, the copied content will be
+  // scaled and letterboxed with black borders. The copy will happen
+  // asynchronously. This operation will fail if there is no available
+  // compositing surface.
+  virtual void CopyFromCompositingSurfaceToVideoFrame(
+      const gfx::Rect& src_subrect,
+      const scoped_refptr<media::VideoFrame>& target,
+      const base::Callback<void(bool)>& callback) = 0;
+
+  // Returns true if CopyFromCompositingSurfaceToVideoFrame() is likely to
+  // succeed.
+  //
+  // TODO(nick): When VideoFrame copies are broadly implemented, this method
+  // should be renamed to HasCompositingSurface(), or unified with
+  // IsSurfaceAvailableForCopy() and HasAcceleratedSurface().
+  virtual bool CanCopyToVideoFrame() const = 0;
+
+  // Return true if frame subscription is supported on this platform.
+  virtual bool CanSubscribeFrame() const = 0;
+
+  // Begin subscribing for presentation events and captured frames.
+  // |subscriber| is now owned by this object, it will be called only on the
+  // UI thread.
+  virtual void BeginFrameSubscription(
+      RenderWidgetHostViewFrameSubscriber* subscriber) = 0;
+
+  // End subscribing for frame presentation events. FrameSubscriber will be
+  // deleted after this call.
+  virtual void EndFrameSubscription() = 0;
 
   // Called when accelerated compositing state changes.
   virtual void OnAcceleratedCompositingStateChange() = 0;
@@ -189,76 +232,19 @@ class CONTENT_EXPORT RenderWidgetHostViewPort : public RenderWidgetHostView {
   // next swap buffers or post sub buffer.
   virtual void AcceleratedSurfaceSuspend() = 0;
 
+  virtual void AcceleratedSurfaceRelease() = 0;
+
   // Return true if the view has an accelerated surface that contains the last
   // presented frame for the view. If |desired_size| is non-empty, true is
   // returned only if the accelerated surface size matches.
   virtual bool HasAcceleratedSurface(const gfx::Size& desired_size) = 0;
 
-#if defined(OS_MACOSX)
-  // Called just before GetBackingStore blocks for an updated frame.
-  virtual void AboutToWaitForBackingStoreMsg() = 0;
+  virtual void OnSwapCompositorFrame(const cc::CompositorFrame& frame) = 0;
 
-  // Informs the view that a plugin gained or lost focus.
-  virtual void PluginFocusChanged(bool focused, int plugin_id) = 0;
-
-  // Start plugin IME.
-  virtual void StartPluginIme() = 0;
-
-  // Does any event handling necessary for plugin IME; should be called after
-  // the plugin has already had a chance to process the event. If plugin IME is
-  // not enabled, this is a no-op, so it is always safe to call.
-  // Returns true if the event was handled by IME.
-  virtual bool PostProcessEventForPluginIme(
-      const NativeWebKeyboardEvent& event) = 0;
-
-  // Methods associated with GPU-accelerated plug-in instances.
-  virtual gfx::PluginWindowHandle AllocateFakePluginWindowHandle(
-      bool opaque, bool root) = 0;
-  virtual void DestroyFakePluginWindowHandle(
-      gfx::PluginWindowHandle window) = 0;
-  virtual void AcceleratedSurfaceSetIOSurface(
-      gfx::PluginWindowHandle window,
-      int32 width,
-      int32 height,
-      uint64 io_surface_identifier) = 0;
-  virtual void AcceleratedSurfaceSetTransportDIB(
-      gfx::PluginWindowHandle window,
-      int32 width,
-      int32 height,
-      TransportDIB::Handle transport_dib) = 0;
-#endif
-
-#if defined(OS_ANDROID)
-  virtual void ShowDisambiguationPopup(const gfx::Rect& target_rect,
-                                       const SkBitmap& zoomed_bitmap) = 0;
-  virtual void SetCachedPageScaleFactorLimits(float minimum_scale,
-                                              float maximum_scale) = 0;
-  virtual void UpdateFrameInfo(const gfx::Vector2d& scroll_offset,
-                               float page_scale_factor,
-                               float min_page_scale_factor,
-                               float max_page_scale_factor,
-                               const gfx::Size& content_size,
-                               const gfx::Vector2dF& controls_offset,
-                               const gfx::Vector2dF& content_offset) = 0;
-  virtual void HasTouchEventHandlers(bool need_touch_events) = 0;
-#endif
-
-  virtual void AcceleratedSurfaceRelease() {}
-
-#if defined(TOOLKIT_GTK)
-  virtual void CreatePluginContainer(gfx::PluginWindowHandle id) = 0;
-  virtual void DestroyPluginContainer(gfx::PluginWindowHandle id) = 0;
-#endif  // defined(TOOLKIT_GTK)
-
-#if defined(OS_WIN) && !defined(USE_AURA)
-  virtual void WillWmDestroy() = 0;
-#endif
-
-#if defined(OS_POSIX) || defined(USE_AURA)
-  static void GetDefaultScreenInfo(
-      WebKit::WebScreenInfo* results);
   virtual void GetScreenInfo(WebKit::WebScreenInfo* results) = 0;
-#endif
+
+  // The size of the view's backing surface in non-DPI-adjusted pixels.
+  virtual gfx::Size GetPhysicalBackingSize() const = 0;
 
   // Gets the bounds of the window, in screen coordinates.
   virtual gfx::Rect GetBoundsInRootWindow() = 0;
@@ -292,8 +278,36 @@ class CONTENT_EXPORT RenderWidgetHostViewPort : public RenderWidgetHostView {
   virtual BrowserAccessibilityManager*
       GetBrowserAccessibilityManager() const = 0;
   virtual void OnAccessibilityNotifications(
-      const std::vector<AccessibilityHostMsg_NotificationParams>& params) {
-  }
+      const std::vector<AccessibilityHostMsg_NotificationParams>& params) = 0;
+
+#if defined(OS_MACOSX)
+  // Called just before GetBackingStore blocks for an updated frame.
+  virtual void AboutToWaitForBackingStoreMsg() = 0;
+
+  // Does any event handling necessary for plugin IME; should be called after
+  // the plugin has already had a chance to process the event. If plugin IME is
+  // not enabled, this is a no-op, so it is always safe to call.
+  // Returns true if the event was handled by IME.
+  virtual bool PostProcessEventForPluginIme(
+      const NativeWebKeyboardEvent& event) = 0;
+#endif
+
+#if defined(OS_ANDROID)
+  virtual void ShowDisambiguationPopup(const gfx::Rect& target_rect,
+                                       const SkBitmap& zoomed_bitmap) = 0;
+  virtual void UpdateFrameInfo(const gfx::Vector2dF& scroll_offset,
+                               float page_scale_factor,
+                               const gfx::Vector2dF& page_scale_factor_limits,
+                               const gfx::SizeF& content_size,
+                               const gfx::SizeF& viewport_size,
+                               const gfx::Vector2dF& controls_offset,
+                               const gfx::Vector2dF& content_offset) = 0;
+  virtual void HasTouchEventHandlers(bool need_touch_events) = 0;
+#endif
+
+#if defined(OS_WIN) && !defined(USE_AURA)
+  virtual void WillWmDestroy() = 0;
+#endif
 };
 
 }  // namespace content

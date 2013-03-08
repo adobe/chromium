@@ -50,7 +50,7 @@
   -webkit-box-align: center;
   -webkit-box-orient: horizontal;
   display: -webkit-box;
-  height: 50px;
+  height: 65px;
   width: 100%;
 }
 
@@ -76,7 +76,6 @@
 }
 
 button.import {
-  -webkit-margin-end: 20px;
   min-width: 100px;
 }
 
@@ -150,6 +149,21 @@ button.import {
   -webkit-user-drag: none;
   box-sizing: border-box;
   position: absolute;
+}
+
+.img-container > img:not(.cached) {
+  -webkit-animation: fadeIn ease-in 1;
+  -webkit-animation-duration: 100ms;
+  -webkit-animation-fill-mode: forwards;
+}
+
+@-webkit-keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 .grid-item[lead] {

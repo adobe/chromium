@@ -69,9 +69,16 @@ int SpdyHttpStream::InitializeStream(const HttpRequestInfo* request_info,
   if (stream_.get())
     return OK;
 
-  return spdy_session_->CreateStream(request_info_->url,
-                                     request_info_->priority, &stream_,
-                                     stream_net_log, callback);
+  int rv = stream_request_.StartRequest(
+      spdy_session_, request_info_->url, request_info_->priority,
+      stream_net_log,
+      base::Bind(&SpdyHttpStream::OnStreamCreated,
+                 weak_factory_.GetWeakPtr(), callback));
+
+  if (rv == OK)
+    stream_ = stream_request_.ReleaseStream();
+
+  return rv;
 }
 
 const HttpResponseInfo* SpdyHttpStream::GetResponseInfo() const {
@@ -190,7 +197,7 @@ bool SpdyHttpStream::GetLoadTimingInfo(LoadTimingInfo* load_timing_info) const {
   // The reused flag can only be correctly set once a stream has an ID.  Streams
   // get their IDs once the request has been successfully sent, so this does not
   // behave that differently from other stream types.
-  if (!stream_ || stream_->stream_id() == 0)
+  if (!spdy_session_ || !stream_ || stream_->stream_id() == 0)
     return false;
   return spdy_session_->GetLoadTimingInfo(stream_->stream_id(),
                                           load_timing_info);
@@ -274,11 +281,17 @@ int SpdyHttpStream::SendRequest(const HttpRequestHeaders& request_headers,
 }
 
 void SpdyHttpStream::Cancel() {
-  if (spdy_session_)
-    spdy_session_->CancelPendingCreateStreams(&stream_);
   callback_.Reset();
   if (stream_)
     stream_->Cancel();
+}
+
+void SpdyHttpStream::OnStreamCreated(
+    const CompletionCallback& callback,
+    int rv) {
+  if (rv == OK)
+    stream_ = stream_request_.ReleaseStream();
+  callback.Run(rv);
 }
 
 int SpdyHttpStream::SendData() {

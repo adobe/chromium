@@ -5,11 +5,11 @@
 #ifndef WIN8_DELEGATE_EXECUTE_DELEGATE_EXECUTE_OPERATION_H_
 #define WIN8_DELEGATE_EXECUTE_DELEGATE_EXECUTE_OPERATION_H_
 
-#include <atldef.h>
 #include <windows.h>
+#include <atldef.h>
 
 #include "base/basictypes.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/string16.h"
 
 class CommandLine;
@@ -60,14 +60,14 @@ class DelegateExecuteOperation {
   // Returns the process id of the parent or 0 on failure.
   DWORD GetParentPid() const;
 
-  const FilePath& shortcut() const {
+  const base::FilePath& shortcut() const {
     return relaunch_shortcut_;
   }
 
  private:
   OperationType operation_type_;
   string16 relaunch_flags_;
-  FilePath relaunch_shortcut_;
+  base::FilePath relaunch_shortcut_;
   string16 mutex_;
 
   DISALLOW_COPY_AND_ASSIGN(DelegateExecuteOperation);

@@ -9,7 +9,7 @@
 
 #include <string>
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
@@ -17,12 +17,12 @@
 #include "base/timer.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_impl_io_data.h"
-#include "content/public/browser/notification_observer.h"
-#include "content/public/browser/notification_registrar.h"
+#include "content/public/browser/host_zoom_map.h"
 
 class NetPrefObserver;
+class PrefRegistrySyncable;
+class PrefService;
 class PrefServiceSyncable;
-class PrefServiceBase;
 class SSLConfigServiceManager;
 
 #if defined(OS_CHROMEOS)
@@ -50,32 +50,28 @@ class UserCloudPolicyManager;
 }
 
 // The default profile implementation.
-class ProfileImpl : public Profile,
-                    public content::NotificationObserver {
+class ProfileImpl : public Profile {
  public:
   // Value written to prefs when the exit type is EXIT_NORMAL. Public for tests.
   static const char* const kPrefExitTypeNormal;
 
   virtual ~ProfileImpl();
 
-  static void RegisterUserPrefs(PrefServiceSyncable* prefs);
+  static void RegisterUserPrefs(PrefRegistrySyncable* registry);
 
   // content::BrowserContext implementation:
-  virtual FilePath GetPath() OVERRIDE;
+  virtual base::FilePath GetPath() OVERRIDE;
   virtual content::DownloadManagerDelegate*
       GetDownloadManagerDelegate() OVERRIDE;
   virtual net::URLRequestContextGetter* GetRequestContext() OVERRIDE;
   virtual net::URLRequestContextGetter* GetRequestContextForRenderProcess(
       int renderer_child_id) OVERRIDE;
-  virtual net::URLRequestContextGetter* GetRequestContextForStoragePartition(
-      const FilePath& partition_path,
-      bool in_memory) OVERRIDE;
   virtual net::URLRequestContextGetter* GetMediaRequestContext() OVERRIDE;
   virtual net::URLRequestContextGetter* GetMediaRequestContextForRenderProcess(
       int renderer_child_id) OVERRIDE;
   virtual net::URLRequestContextGetter*
       GetMediaRequestContextForStoragePartition(
-          const FilePath& partition_path,
+          const base::FilePath& partition_path,
           bool in_memory) OVERRIDE;
   virtual content::ResourceContext* GetResourceContext() OVERRIDE;
   virtual content::GeolocationPermissionContext*
@@ -100,8 +96,8 @@ class ProfileImpl : public Profile,
   virtual policy::ManagedModePolicyProvider*
       GetManagedModePolicyProvider() OVERRIDE;
   virtual policy::PolicyService* GetPolicyService() OVERRIDE;
-  virtual PrefServiceSyncable* GetPrefs() OVERRIDE;
-  virtual PrefServiceSyncable* GetOffTheRecordPrefs() OVERRIDE;
+  virtual PrefService* GetPrefs() OVERRIDE;
+  virtual PrefService* GetOffTheRecordPrefs() OVERRIDE;
   virtual net::URLRequestContextGetter*
       GetRequestContextForExtensions() OVERRIDE;
   virtual net::SSLConfigService* GetSSLConfigService() OVERRIDE;
@@ -109,8 +105,32 @@ class ProfileImpl : public Profile,
   virtual ProtocolHandlerRegistry* GetProtocolHandlerRegistry() OVERRIDE;
   virtual bool IsSameProfile(Profile* profile) OVERRIDE;
   virtual base::Time GetStartTime() const OVERRIDE;
-  virtual FilePath last_selected_directory() OVERRIDE;
-  virtual void set_last_selected_directory(const FilePath& path) OVERRIDE;
+  virtual net::URLRequestContextGetter* CreateRequestContext(
+      scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+          blob_protocol_handler,
+      scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+          file_system_protocol_handler,
+      scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+          developer_protocol_handler,
+      scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+          chrome_protocol_handler,
+      scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+          chrome_devtools_protocol_handler) OVERRIDE;
+  virtual net::URLRequestContextGetter* CreateRequestContextForStoragePartition(
+      const base::FilePath& partition_path,
+      bool in_memory,
+      scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+          blob_protocol_handler,
+      scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+          file_system_protocol_handler,
+      scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+          developer_protocol_handler,
+      scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+          chrome_protocol_handler,
+      scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+          chrome_devtools_protocol_handler) OVERRIDE;
+  virtual base::FilePath last_selected_directory() OVERRIDE;
+  virtual void set_last_selected_directory(const base::FilePath& path) OVERRIDE;
   virtual chrome_browser_net::Predictor* GetNetworkPredictor() OVERRIDE;
   virtual void ClearNetworkingHistorySince(
       base::Time time,
@@ -130,11 +150,6 @@ class ProfileImpl : public Profile,
 
   virtual PrefProxyConfigTracker* GetProxyConfigTracker() OVERRIDE;
 
-  // content::NotificationObserver implementation.
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
-
  private:
   friend class Profile;
   friend class BetterSessionRestoreCrashTest;
@@ -148,7 +163,7 @@ class ProfileImpl : public Profile,
   // This is non-const for testing purposes.
   static int create_readme_delay_ms;
 
-  ProfileImpl(const FilePath& path,
+  ProfileImpl(const base::FilePath& path,
               Delegate* delegate,
               CreateMode create_mode,
               base::SequencedTaskRunner* sequenced_task_runner);
@@ -159,14 +174,15 @@ class ProfileImpl : public Profile,
   void InitHostZoomMap();
 
   void OnDefaultZoomLevelChanged();
+  void OnZoomLevelChanged(const std::string& host);
 
-  void OnInitializationCompleted(PrefServiceBase* pref_service,
+  void OnInitializationCompleted(PrefService* pref_service,
                                  bool succeeded);
 
   // Does final prefs initialization and calls Init().
   void OnPrefsLoaded(bool success);
 
-  FilePath GetPrefFilePath();
+  base::FilePath GetPrefFilePath();
 
 #if defined(ENABLE_SESSION_SERVICE)
   void StopCreateSessionServiceTimer();
@@ -186,17 +202,14 @@ class ProfileImpl : public Profile,
   void UpdateProfileAvatarCache();
 
   void GetCacheParameters(bool is_media_context,
-                          FilePath* cache_path,
+                          base::FilePath* cache_path,
                           int* max_size);
 
-  virtual base::Callback<ChromeURLDataManagerBackend*(void)>
-      GetChromeURLDataManagerBackendGetter() const OVERRIDE;
-
-  content::NotificationRegistrar registrar_;
+  content::HostZoomMap::ZoomLevelChangedCallback zoom_callback_;
   PrefChangeRegistrar pref_change_registrar_;
 
-  FilePath path_;
-  FilePath base_cache_path_;
+  base::FilePath path_;
+  base::FilePath base_cache_path_;
 
   // !!! BIG HONKING WARNING !!!
   //  The order of the members below is important. Do not change it unless
@@ -217,8 +230,9 @@ class ProfileImpl : public Profile,
   scoped_ptr<policy::PolicyService> policy_service_;
 
   // Keep |prefs_| on top for destruction order because |extension_prefs_|,
-  // |net_pref_observer_|, |io_data_| an others store pointers to |prefs_| and
+  // |net_pref_observer_|, |io_data_| and others store pointers to |prefs_| and
   // shall be destructed first.
+  scoped_refptr<PrefRegistrySyncable> pref_registry_;
   scoped_ptr<PrefServiceSyncable> prefs_;
   scoped_ptr<PrefServiceSyncable> otr_prefs_;
   ProfileImplIOData::Handle io_data_;

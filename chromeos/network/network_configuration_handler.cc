@@ -20,11 +20,11 @@
 
 namespace chromeos {
 
-static NetworkConfigurationHandler* g_network_configuration_handler = NULL;
-
 namespace {
 
 const char kLogModule[] = "NetworkConfigurationHandler";
+
+NetworkConfigurationHandler* g_configuration_handler_instance = NULL;
 
 // None of these error messages are user-facing: they should only appear in
 // logs.
@@ -60,7 +60,7 @@ void ClearPropertiesCallback(
         network_handler::CreateErrorData(service_path,
                                          kClearPropertiesFailedError,
                                          kClearPropertiesFailedErrorMessage));
-    LOG(ERROR) << "ClearPropertiesCallback Failed for service path: "
+    LOG(ERROR) << "ClearPropertiesCallback failed for service path: "
                << service_path;
     error_data->Set("errors", result.DeepCopy());
     scoped_ptr<base::ListValue> name_list(new base::ListValue);
@@ -85,7 +85,7 @@ void RunCallbackWithDictionaryValue(
         network_handler::CreateErrorData(service_path,
                                          kDBusFailedError,
                                          kDBusFailedErrorMessage));
-    LOG(ERROR) << "CallbackWithDictionaryValue Failed for service path: "
+    LOG(ERROR) << "CallbackWithDictionaryValue failed for service path: "
                << service_path;
     error_callback.Run(kDBusFailedError, error_data.Pass());
   } else {
@@ -99,32 +99,31 @@ void RunCreateNetworkCallback(
   callback.Run(service_path.value());
 }
 
+void IgnoreObjectPathCallback(const base::Closure& callback,
+                              const dbus::ObjectPath& object_path) {
+  callback.Run();
+}
+
 }  // namespace
-
-NetworkConfigurationHandler::NetworkConfigurationHandler() {
-}
-
-NetworkConfigurationHandler::~NetworkConfigurationHandler() {
-}
 
 // static
 void NetworkConfigurationHandler::Initialize() {
-  CHECK(!g_network_configuration_handler);
-  g_network_configuration_handler = new NetworkConfigurationHandler();
+  CHECK(!g_configuration_handler_instance);
+  g_configuration_handler_instance = new NetworkConfigurationHandler;
 }
 
 // static
 void NetworkConfigurationHandler::Shutdown() {
-  CHECK(g_network_configuration_handler);
-  delete g_network_configuration_handler;
-  g_network_configuration_handler = NULL;
+  CHECK(g_configuration_handler_instance);
+  delete g_configuration_handler_instance;
+  g_configuration_handler_instance = NULL;
 }
 
 // static
 NetworkConfigurationHandler* NetworkConfigurationHandler::Get() {
-  CHECK(g_network_configuration_handler)
+  CHECK(g_configuration_handler_instance)
       << "NetworkConfigurationHandler::Get() called before Initialize()";
-  return g_network_configuration_handler;
+  return g_configuration_handler_instance;
 }
 
 void NetworkConfigurationHandler::GetProperties(
@@ -146,7 +145,7 @@ void NetworkConfigurationHandler::SetProperties(
     const network_handler::ErrorCallback& error_callback) const {
   DBusThreadManager::Get()->GetShillManagerClient()->ConfigureService(
       properties,
-      callback,
+      base::Bind(&IgnoreObjectPathCallback, callback),
       base::Bind(&network_handler::ShillErrorCallbackFunction,
                  kLogModule, service_path, error_callback));
 }
@@ -210,6 +209,12 @@ void NetworkConfigurationHandler::RemoveConfiguration(
       callback,
       base::Bind(&network_handler::ShillErrorCallbackFunction,
                  kLogModule, service_path, error_callback));
+}
+
+NetworkConfigurationHandler::NetworkConfigurationHandler() {
+}
+
+NetworkConfigurationHandler::~NetworkConfigurationHandler() {
 }
 
 }  // namespace chromeos

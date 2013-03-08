@@ -5,8 +5,8 @@
 #include "net/proxy/proxy_config.h"
 
 #include "base/logging.h"
-#include "base/string_tokenizer.h"
 #include "base/string_util.h"
+#include "base/strings/string_tokenizer.h"
 #include "base/values.h"
 #include "net/proxy/proxy_info.h"
 
@@ -17,7 +17,7 @@ namespace {
 // If |proxy| is valid, sets it in |dict| under the key |name|.
 void AddProxyToValue(const char* name,
                      const ProxyServer& proxy,
-                     DictionaryValue* dict) {
+                     base::DictionaryValue* dict) {
   if (proxy.is_valid())
     dict->SetString(name, proxy.ToURI());
 }
@@ -79,9 +79,9 @@ void ProxyConfig::ProxyRules::ParseFromString(const std::string& proxy_rules) {
   proxy_for_ftp = ProxyServer();
   fallback_proxy = ProxyServer();
 
-  StringTokenizer proxy_server_list(proxy_rules, ";");
+  base::StringTokenizer proxy_server_list(proxy_rules, ";");
   while (proxy_server_list.GetNext()) {
-    StringTokenizer proxy_server_for_scheme(
+    base::StringTokenizer proxy_server_for_scheme(
         proxy_server_list.token_begin(), proxy_server_list.token_end(), "=");
 
     while (proxy_server_for_scheme.GetNext()) {
@@ -203,8 +203,8 @@ void ProxyConfig::ClearAutomaticSettings() {
   pac_url_ = GURL();
 }
 
-Value* ProxyConfig::ToValue() const {
-  DictionaryValue* dict = new DictionaryValue();
+base::Value* ProxyConfig::ToValue() const {
+  base::DictionaryValue* dict = new base::DictionaryValue();
 
   // Output the automatic settings.
   if (auto_detect_)
@@ -222,7 +222,7 @@ Value* ProxyConfig::ToValue() const {
         AddProxyToValue("single_proxy", proxy_rules_.single_proxy, dict);
         break;
       case ProxyRules::TYPE_PROXY_PER_SCHEME: {
-        DictionaryValue* dict2 = new DictionaryValue();
+        base::DictionaryValue* dict2 = new base::DictionaryValue();
         AddProxyToValue("http", proxy_rules_.proxy_for_http, dict2);
         AddProxyToValue("https", proxy_rules_.proxy_for_https, dict2);
         AddProxyToValue("ftp", proxy_rules_.proxy_for_ftp, dict2);
@@ -240,12 +240,12 @@ Value* ProxyConfig::ToValue() const {
       if (proxy_rules_.reverse_bypass)
         dict->SetBoolean("reverse_bypass", true);
 
-      ListValue* list = new ListValue();
+      base::ListValue* list = new base::ListValue();
 
       for (ProxyBypassRules::RuleList::const_iterator it =
               bypass.rules().begin();
            it != bypass.rules().end(); ++it) {
-        list->Append(Value::CreateStringValue((*it)->ToString()));
+        list->Append(new base::StringValue((*it)->ToString()));
       }
 
       dict->Set("bypass_list", list);

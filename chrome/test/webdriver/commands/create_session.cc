@@ -7,7 +7,7 @@
 #include <string>
 
 #include "base/command_line.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/values.h"
 #include "chrome/test/webdriver/commands/response.h"
@@ -18,7 +18,7 @@
 namespace webdriver {
 
 CreateSession::CreateSession(const std::vector<std::string>& path_segments,
-                             const DictionaryValue* const parameters)
+                             const base::DictionaryValue* const parameters)
     : Command(path_segments, parameters) {}
 
 CreateSession::~CreateSession() {}
@@ -26,7 +26,7 @@ CreateSession::~CreateSession() {}
 bool CreateSession::DoesPost() { return true; }
 
 void CreateSession::ExecutePost(Response* const response) {
-  const DictionaryValue* dict;
+  const base::DictionaryValue* dict;
   if (!GetDictionaryParameter("desiredCapabilities", &dict)) {
     response->SetError(new Error(
         kBadRequest, "Missing or invalid 'desiredCapabilities'"));
@@ -49,7 +49,7 @@ void CreateSession::ExecutePost(Response* const response) {
   stream << SessionManager::GetInstance()->url_base() << "/session/"
          << session->id();
   response->SetStatus(kSeeOther);
-  response->SetValue(Value::CreateStringValue(stream.str()));
+  response->SetValue(new base::StringValue(stream.str()));
 }
 
 }  // namespace webdriver

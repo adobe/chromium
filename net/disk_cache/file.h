@@ -11,7 +11,9 @@
 #include "base/platform_file.h"
 #include "net/base/net_export.h"
 
+namespace base {
 class FilePath;
+}
 
 namespace disk_cache {
 
@@ -41,7 +43,7 @@ class NET_EXPORT_PRIVATE File : public base::RefCounted<File> {
 
   // Initializes the object to point to a given file. The file must aready exist
   // on disk, and allow shared read and write.
-  bool Init(const FilePath& name);
+  bool Init(const base::FilePath& name);
 
   // Returns the handle or file descriptor.
   base::PlatformFile platform_file() const;

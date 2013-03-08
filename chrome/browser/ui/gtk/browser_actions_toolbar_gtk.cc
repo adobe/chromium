@@ -23,7 +23,6 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sessions/session_tab_helper.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/gtk/browser_window_gtk.h"
 #include "chrome/browser/ui/gtk/custom_button.h"
 #include "chrome/browser/ui/gtk/extensions/extension_popup_gtk.h"
@@ -34,6 +33,7 @@
 #include "chrome/browser/ui/gtk/hover_controller_gtk.h"
 #include "chrome/browser/ui/gtk/menu_gtk.h"
 #include "chrome/browser/ui/gtk/view_id_util.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_manifest_constants.h"
@@ -104,7 +104,8 @@ class BrowserActionButton : public content::NotificationObserver,
       : toolbar_(toolbar),
         extension_(extension),
         image_(NULL),
-        icon_factory_(extension, browser_action(), this),
+        icon_factory_(toolbar->browser()->profile(), extension,
+                      browser_action(), this),
         accel_group_(NULL) {
     button_.reset(new CustomDrawButton(
         theme_provider,
@@ -158,7 +159,7 @@ class BrowserActionButton : public content::NotificationObserver,
         toolbar->browser()->profile()->GetOriginalProfile()));
   }
 
-  ~BrowserActionButton() {
+  virtual ~BrowserActionButton() {
     DisconnectBrowserActionPopupAccelerator();
 
     alignment_.Destroy();
@@ -171,9 +172,9 @@ class BrowserActionButton : public content::NotificationObserver,
   const Extension* extension() { return extension_; }
 
   // NotificationObserver implementation.
-  void Observe(int type,
-               const content::NotificationSource& source,
-               const content::NotificationDetails& details) {
+  virtual void Observe(int type,
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE {
     switch (type) {
      case chrome::NOTIFICATION_EXTENSION_BROWSER_ACTION_UPDATED:
       UpdateState();
@@ -204,7 +205,7 @@ class BrowserActionButton : public content::NotificationObserver,
   }
 
   // ExtensionActionIconFactory::Observer implementation.
-  void OnIconUpdated() OVERRIDE {
+  virtual void OnIconUpdated() OVERRIDE {
     UpdateState();
   }
 
@@ -274,7 +275,7 @@ class BrowserActionButton : public content::NotificationObserver,
   }
 
   // MenuGtk::Delegate implementation.
-  virtual void StoppedShowing() {
+  virtual void StoppedShowing() OVERRIDE {
     if (enabled_)
       button_->UnsetPaintOverride();
     else
@@ -286,7 +287,7 @@ class BrowserActionButton : public content::NotificationObserver,
       gtk_util::GrabAllInput(toolbar_->overflow_menu_->widget());
   }
 
-  virtual void CommandWillBeExecuted() {
+  virtual void CommandWillBeExecuted() OVERRIDE {
     // If the context menu was showing for the overflow menu, and a command
     // is executed, then stop showing the overflow menu.
     if (toolbar_->overflow_menu_.get())
@@ -294,7 +295,7 @@ class BrowserActionButton : public content::NotificationObserver,
   }
 
   // ExtensionContextMenuModel::PopupDelegate implementation.
-  virtual void InspectPopup(ExtensionAction* action) {
+  virtual void InspectPopup(ExtensionAction* action) OVERRIDE {
     GURL popup_url = action->GetPopupUrl(toolbar_->GetCurrentTabId());
     ExtensionPopupGtk::Show(popup_url, toolbar_->browser(), widget(),
                             ExtensionPopupGtk::SHOW_AND_INSPECT);
@@ -586,7 +587,8 @@ BrowserActionsToolbarGtk::~BrowserActionsToolbarGtk() {
 }
 
 int BrowserActionsToolbarGtk::GetCurrentTabId() const {
-  content::WebContents* active_tab = chrome::GetActiveWebContents(browser_);
+  content::WebContents* active_tab =
+      browser_->tab_strip_model()->GetActiveWebContents();
   if (!active_tab)
     return -1;
 

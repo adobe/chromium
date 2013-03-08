@@ -7,7 +7,6 @@
 #include "cc/animation.h"
 #include "cc/animation_registrar.h"
 #include "cc/content_layer.h"
-#include "cc/font_atlas.h"
 #include "cc/input_handler.h"
 #include "cc/layer.h"
 #include "cc/layer_animation_controller.h"
@@ -16,6 +15,7 @@
 #include "cc/single_thread_proxy.h"
 #include "cc/thread_impl.h"
 #include "cc/test/animation_test_common.h"
+#include "cc/test/fake_layer_tree_host_client.h"
 #include "cc/test/fake_output_surface.h"
 #include "cc/test/occlusion_tracker_test_common.h"
 #include "cc/test/tiled_layer_test_common.h"
@@ -28,6 +28,15 @@
 using namespace WebKit;
 
 namespace cc {
+
+TestHooks::TestHooks()
+{
+  bool useSoftwareRendering = false;
+  bool useDelegatingRenderer = false;
+  m_fakeClient.reset(new FakeLayerImplTreeHostClient(useSoftwareRendering, useDelegatingRenderer));
+}
+
+TestHooks::~TestHooks() { }
 
 bool TestHooks::prepareToDrawOnThread(cc::LayerTreeHostImpl*, LayerTreeHostImpl::FrameData&, bool)
 {
@@ -42,6 +51,16 @@ bool TestHooks::canActivatePendingTree()
 scoped_ptr<OutputSurface> TestHooks::createOutputSurface()
 {
     return createFakeOutputSurface();
+}
+
+scoped_refptr<cc::ContextProvider> TestHooks::OffscreenContextProviderForMainThread()
+{
+    return m_fakeClient->OffscreenContextProviderForMainThread();
+}
+
+scoped_refptr<cc::ContextProvider> TestHooks::OffscreenContextProviderForCompositorThread()
+{
+    return m_fakeClient->OffscreenContextProviderForCompositorThread();
 }
 
 scoped_ptr<MockLayerTreeHostImpl> MockLayerTreeHostImpl::create(TestHooks* testHooks, const LayerTreeSettings& settings, LayerTreeHostImplClient* client, Proxy* proxy)
@@ -59,6 +78,10 @@ void MockLayerTreeHostImpl::commitComplete()
 {
     LayerTreeHostImpl::commitComplete();
     m_testHooks->commitCompleteOnThread(this);
+
+    if (!settings().implSidePainting)
+        m_testHooks->treeActivatedOnThread(this);
+
 }
 
 bool MockLayerTreeHostImpl::prepareToDraw(FrameData& frame)
@@ -75,19 +98,43 @@ void MockLayerTreeHostImpl::drawLayers(FrameData& frame)
     m_testHooks->drawLayersOnThread(this);
 }
 
-void MockLayerTreeHostImpl::activatePendingTreeIfNeeded()
+bool MockLayerTreeHostImpl::activatePendingTreeIfNeeded()
 {
     if (!pendingTree())
-        return;
+        return false;
 
-    if (m_testHooks->canActivatePendingTree())
-        activatePendingTree();
+    if (!m_testHooks->canActivatePendingTree())
+        return false;
+
+    bool activated = LayerTreeHostImpl::activatePendingTreeIfNeeded();
+    if (activated)
+        m_testHooks->treeActivatedOnThread(this);
+    return activated;
+}
+
+bool MockLayerTreeHostImpl::initializeRenderer(scoped_ptr<OutputSurface> outputSurface)
+{
+    bool success = LayerTreeHostImpl::initializeRenderer(outputSurface.Pass());
+    m_testHooks->initializedRendererOnThread(this, success);
+    return success;
+}
+
+void MockLayerTreeHostImpl::setVisible(bool visible)
+{
+    LayerTreeHostImpl::setVisible(visible);
+    m_testHooks->didSetVisibleOnImplTree(this, visible);
 }
 
 void MockLayerTreeHostImpl::animateLayers(base::TimeTicks monotonicTime, base::Time wallClockTime)
 {
     m_testHooks->willAnimateLayers(this, monotonicTime);
     LayerTreeHostImpl::animateLayers(monotonicTime, wallClockTime);
+    m_testHooks->animateLayers(this, monotonicTime);
+}
+
+void MockLayerTreeHostImpl::updateAnimationState()
+{
+    LayerTreeHostImpl::updateAnimationState();
     bool hasUnfinishedAnimation = false;
     AnimationRegistrar::AnimationControllerMap::const_iterator iter = activeAnimationControllers().begin();
     for (; iter != activeAnimationControllers().end(); ++iter) {
@@ -96,7 +143,7 @@ void MockLayerTreeHostImpl::animateLayers(base::TimeTicks monotonicTime, base::T
             break;
         }
     }
-    m_testHooks->animateLayers(this, monotonicTime, hasUnfinishedAnimation);
+    m_testHooks->updateAnimationState(this, hasUnfinishedAnimation);
 }
 
 base::TimeDelta MockLayerTreeHostImpl::lowFrequencyAnimationInterval() const
@@ -121,7 +168,7 @@ public:
         return layerTreeHost.Pass();
     }
 
-    virtual scoped_ptr<cc::LayerTreeHostImpl> createLayerTreeHostImpl(cc::LayerTreeHostImplClient* client)
+    virtual scoped_ptr<cc::LayerTreeHostImpl> createLayerTreeHostImpl(cc::LayerTreeHostImplClient* client) OVERRIDE
     {
         return MockLayerTreeHostImpl::create(m_testHooks, settings(), client, proxy()).PassAs<cc::LayerTreeHostImpl>();
     }
@@ -193,6 +240,11 @@ public:
         m_testHooks->didRecreateOutputSurface(succeeded);
     }
 
+    virtual void willRetryRecreateOutputSurface() OVERRIDE
+    {
+        m_testHooks->willRetryRecreateOutputSurface();
+    }
+
     virtual scoped_ptr<InputHandler> createInputHandler() OVERRIDE
     {
         return scoped_ptr<InputHandler>();
@@ -221,9 +273,14 @@ public:
         m_testHooks->scheduleComposite();
     }
 
-    virtual scoped_ptr<FontAtlas> createFontAtlas() OVERRIDE
+    virtual scoped_refptr<cc::ContextProvider> OffscreenContextProviderForMainThread() OVERRIDE
     {
-        return scoped_ptr<FontAtlas>();
+        return m_testHooks->OffscreenContextProviderForMainThread();
+    }
+
+    virtual scoped_refptr<cc::ContextProvider> OffscreenContextProviderForCompositorThread() OVERRIDE
+    {
+        return m_testHooks->OffscreenContextProviderForCompositorThread();
     }
 
 private:
@@ -237,7 +294,9 @@ ThreadedTest::ThreadedTest()
     , m_endWhenBeginReturns(false)
     , m_timedOut(false)
     , m_scheduled(false)
+    , m_scheduleWhenSetVisibleTrue(false)
     , m_started(false)
+    , m_ended(false)
     , m_implThread(0)
     , m_weakFactory(ALLOW_THIS_IN_INITIALIZER_LIST(this))
 {
@@ -312,8 +371,6 @@ void ThreadedTest::doBeginTest()
     if (m_endWhenBeginReturns)
         realEndTest();
 
-    LayerTreeHost::setNeedsFilterContext(false);
-
     // Allow commits to happen once beginTest() has had a chance to post tasks
     // so that those tasks will happen before the first commit.
     if (m_layerTreeHost)
@@ -350,6 +407,8 @@ void ThreadedTest::scheduleComposite()
 
 void ThreadedTest::realEndTest()
 {
+    m_ended = true;
+
     if (m_layerTreeHost && proxy()->commitPendingForTesting()) {
         proxy()->mainThread()->postTask(base::Bind(&ThreadedTest::realEndTest, m_mainThreadWeakPtr));
         return;
@@ -402,15 +461,33 @@ void ThreadedTest::dispatchSetVisible(bool visible)
 {
     DCHECK(!proxy() || proxy()->isMainThread());
 
-    if (m_layerTreeHost.get())
-        m_layerTreeHost->setVisible(visible);
+    if (!m_layerTreeHost)
+        return;
+
+    m_layerTreeHost->setVisible(visible);
+
+    // If the LTH is being made visible and a previous scheduleComposite() was
+    // deferred because the LTH was not visible, re-schedule the composite now.
+    if (m_layerTreeHost->visible() && m_scheduleWhenSetVisibleTrue)
+        scheduleComposite();
 }
 
 void ThreadedTest::dispatchComposite()
 {
     m_scheduled = false;
-    if (m_layerTreeHost.get())
-        m_layerTreeHost->composite();
+
+    if (!m_layerTreeHost)
+        return;
+
+    // If the LTH is not visible, defer the composite until the LTH is made
+    // visible.
+    if (!m_layerTreeHost->visible()) {
+        m_scheduleWhenSetVisibleTrue = true;
+        return;
+    }
+
+    m_scheduleWhenSetVisibleTrue = false;
+    m_layerTreeHost->composite();
 }
 
 void ThreadedTest::runTest(bool threaded)

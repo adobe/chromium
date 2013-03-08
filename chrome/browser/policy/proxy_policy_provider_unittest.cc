@@ -20,7 +20,7 @@ class ProxyPolicyProviderTest : public testing::Test {
     proxy_provider_.AddObserver(&observer_);
   }
 
-  ~ProxyPolicyProviderTest() {
+  virtual ~ProxyPolicyProviderTest() {
     proxy_provider_.RemoveObserver(&observer_);
     proxy_provider_.Shutdown();
     mock_provider_.Shutdown();
@@ -40,14 +40,16 @@ class ProxyPolicyProviderTest : public testing::Test {
 };
 
 TEST_F(ProxyPolicyProviderTest, Init) {
-  EXPECT_TRUE(proxy_provider_.IsInitializationComplete());
+  EXPECT_TRUE(proxy_provider_.IsInitializationComplete(POLICY_DOMAIN_CHROME));
   EXPECT_TRUE(PolicyBundle().Equals(proxy_provider_.policies()));
 }
 
 TEST_F(ProxyPolicyProviderTest, Delegate) {
   PolicyBundle bundle;
-  bundle.Get(POLICY_DOMAIN_CHROME, std::string())
-      .Set("policy", POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
+  bundle.Get(PolicyNamespace(POLICY_DOMAIN_CHROME, std::string()))
+      .Set("policy",
+           POLICY_LEVEL_MANDATORY,
+           POLICY_SCOPE_USER,
            Value::CreateStringValue("value"));
   mock_provider_.UpdatePolicy(CopyBundle(bundle));
 
@@ -57,8 +59,10 @@ TEST_F(ProxyPolicyProviderTest, Delegate) {
   EXPECT_TRUE(bundle.Equals(proxy_provider_.policies()));
 
   EXPECT_CALL(observer_, OnUpdatePolicy(&proxy_provider_));
-  bundle.Get(POLICY_DOMAIN_CHROME, std::string())
-      .Set("policy", POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
+  bundle.Get(PolicyNamespace(POLICY_DOMAIN_CHROME, std::string()))
+      .Set("policy",
+           POLICY_LEVEL_MANDATORY,
+           POLICY_SCOPE_USER,
            Value::CreateStringValue("new value"));
   mock_provider_.UpdatePolicy(CopyBundle(bundle));
   Mock::VerifyAndClearExpectations(&observer_);

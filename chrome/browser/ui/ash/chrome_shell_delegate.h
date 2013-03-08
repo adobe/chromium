@@ -5,6 +5,8 @@
 #ifndef CHROME_BROWSER_UI_ASH_CHROME_SHELL_DELEGATE_H_
 #define CHROME_BROWSER_UI_ASH_CHROME_SHELL_DELEGATE_H_
 
+#include <string>
+
 #include "ash/launcher/launcher_types.h"
 #include "ash/shell_delegate.h"
 #include "base/basictypes.h"
@@ -13,12 +15,10 @@
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 
+class Browser;
+
 namespace ash {
 class WindowPositioner;
-}
-
-namespace views {
-class View;
 }
 
 class ChromeLauncherController;
@@ -31,6 +31,9 @@ class ChromeShellDelegate : public ash::ShellDelegate,
 
   static ChromeShellDelegate* instance() { return instance_; }
 
+  // Prefer the version in ImmersiveModeController.
+  static bool UseImmersiveFullscreen();
+
   ash::WindowPositioner* window_positioner() {
     return window_positioner_.get();
   }
@@ -39,6 +42,7 @@ class ChromeShellDelegate : public ash::ShellDelegate,
   virtual bool IsUserLoggedIn() const OVERRIDE;
   virtual bool IsSessionStarted() const OVERRIDE;
   virtual bool IsFirstRunAfterBoot() const OVERRIDE;
+  virtual bool IsRunningInForcedAppMode() const OVERRIDE;
   virtual bool CanLockScreen() const OVERRIDE;
   virtual void LockScreen() OVERRIDE;
   virtual void UnlockScreen() OVERRIDE;
@@ -48,7 +52,7 @@ class ChromeShellDelegate : public ash::ShellDelegate,
   virtual void NewTab() OVERRIDE;
   virtual void NewWindow(bool is_incognito) OVERRIDE;
   virtual void ToggleMaximized() OVERRIDE;
-  virtual void OpenFileManager() OVERRIDE;
+  virtual void OpenFileManager(bool as_dialog) OVERRIDE;
   virtual void OpenCrosh() OVERRIDE;
   virtual void OpenMobileSetup(const std::string& service_path) OVERRIDE;
   virtual void RestoreTab() OVERRIDE;
@@ -84,6 +88,7 @@ class ChromeShellDelegate : public ash::ShellDelegate,
   virtual double GetSavedScreenMagnifierScale() OVERRIDE;
   virtual ui::MenuModel* CreateContextMenu(aura::RootWindow* root) OVERRIDE;
   virtual ash::RootWindowHostFactory* CreateRootWindowHostFactory() OVERRIDE;
+  virtual string16 GetProductName() const OVERRIDE;
 
   // content::NotificationObserver override:
   virtual void Observe(int type,
@@ -91,6 +96,12 @@ class ChromeShellDelegate : public ash::ShellDelegate,
                        const content::NotificationDetails& details) OVERRIDE;
 
  private:
+  void PlatformInit();
+
+  // Returns the browser for active ash window if any. Otherwise it searches
+  // for a browser or create one for default profile and returns it.
+  Browser* GetTargetBrowser();
+
   static ChromeShellDelegate* instance_;
 
   content::NotificationRegistrar registrar_;

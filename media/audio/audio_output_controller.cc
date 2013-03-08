@@ -10,6 +10,7 @@
 #include "base/threading/platform_thread.h"
 #include "base/time.h"
 #include "build/build_config.h"
+#include "media/audio/audio_util.h"
 #include "media/audio/shared_memory_util.h"
 
 using base::Time;
@@ -272,6 +273,16 @@ int AudioOutputController::OnMoreIOData(AudioBus* source,
   DisallowEntryToOnMoreIOData();
   TRACE_EVENT0("audio", "AudioOutputController::OnMoreIOData");
 
+  // The OS level audio APIs on Linux and Windows all have problems requesting
+  // data on a fixed interval.  Sometimes they will issue calls back to back
+  // which can cause glitching, so wait until the renderer is ready for Read().
+  //
+  // See many bugs for context behind this decision: http://crbug.com/170498,
+  // http://crbug.com/171651, http://crbug.com/174985, and more.
+#if defined(OS_WIN) || defined(OS_LINUX)
+  WaitTillDataReady();
+#endif
+
   const int frames = sync_reader_->Read(source, dest);
   DCHECK_LE(0, frames);
   sync_reader_->UpdatePendingBytes(
@@ -282,21 +293,15 @@ int AudioOutputController::OnMoreIOData(AudioBus* source,
 }
 
 void AudioOutputController::WaitTillDataReady() {
-#if defined(OS_WIN) || defined(OS_MACOSX)
   base::Time start = base::Time::Now();
-  // Wait for up to 1.5 seconds for DataReady().  1.5 seconds was chosen because
-  // it's larger than the playback time of the WaveOut buffer size using the
-  // minimum supported sample rate: 4096 / 3000 = ~1.4 seconds.  Even a client
-  // expecting real time playout should be able to fill in this time.
-  const base::TimeDelta max_wait = base::TimeDelta::FromMilliseconds(1500);
+  // Wait for up to 683ms for DataReady().  683ms was chosen because it's larger
+  // than the playback time of the WaveOut buffer size using the minimum
+  // supported sample rate: 2048 / 3000 = ~683ms.
+  const base::TimeDelta kMaxWait = base::TimeDelta::FromMilliseconds(683);
   while (!sync_reader_->DataReady() &&
-         ((base::Time::Now() - start) < max_wait)) {
+         ((base::Time::Now() - start) < kMaxWait)) {
     base::PlatformThread::YieldCurrentThread();
   }
-#else
-  // WaitTillDataReady() is deprecated and should not be used.
-  CHECK(false);
-#endif
 }
 
 void AudioOutputController::OnError(AudioOutputStream* stream, int code) {
@@ -327,6 +332,10 @@ void AudioOutputController::DoStopCloseAndClearStream() {
 
 void AudioOutputController::OnDeviceChange() {
   DCHECK(message_loop_->BelongsToCurrentThread());
+
+  // TODO(dalecurtis): Notify the renderer side that a device change has
+  // occurred.  Currently querying the hardware information here will lead to
+  // crashes on OSX.  See http://crbug.com/158170.
 
   // Recreate the stream (DoCreate() will first shut down an existing stream).
   // Exit if we ran into an error.

@@ -196,11 +196,33 @@ void PepperTCPSocket::Write(const std::string& data) {
   DoWrite();
 }
 
+void PepperTCPSocket::SetBoolOption(uint32_t name, bool value) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK(socket_.get());
+
+  switch (name) {
+    case PP_TCPSOCKETOPTION_NO_DELAY:
+      if (!IsSsl()) {
+        net::TCPClientSocket* tcp_socket =
+            static_cast<net::TCPClientSocket*>(socket_.get());
+        SendSetBoolOptionACK(tcp_socket->SetNoDelay(value));
+      } else {
+        SendSetBoolOptionACK(false);
+      }
+      return;
+    default:
+      break;
+  }
+
+  NOTREACHED();
+  SendSetBoolOptionACK(false);
+}
+
 void PepperTCPSocket::StartConnect(const net::AddressList& addresses) {
   DCHECK(connection_state_ == CONNECT_IN_PROGRESS);
 
-  socket_.reset(
-      new net::TCPClientSocket(addresses, NULL, net::NetLog::Source()));
+  socket_.reset(new net::TCPClientSocket(addresses, NULL,
+                                         net::NetLog::Source()));
   int result = socket_->Connect(
       base::Bind(&PepperTCPSocket::OnConnectCompleted,
                  base::Unretained(this)));
@@ -252,9 +274,9 @@ bool PepperTCPSocket::GetCertificateFields(
       base::BinaryValue::CreateWithCopiedBuffer(serial_number.data(),
                                                 serial_number.length()));
   fields->SetField(PP_X509CERTIFICATE_PRIVATE_VALIDITY_NOT_BEFORE,
-      base::Value::CreateDoubleValue(cert.valid_start().ToDoubleT()));
+      new base::FundamentalValue(cert.valid_start().ToDoubleT()));
   fields->SetField(PP_X509CERTIFICATE_PRIVATE_VALIDITY_NOT_AFTER,
-      base::Value::CreateDoubleValue(cert.valid_expiry().ToDoubleT()));
+      new base::FundamentalValue(cert.valid_expiry().ToDoubleT()));
   std::string der;
   net::X509Certificate::GetDEREncoded(cert.os_cert_handle(), &der);
   fields->SetField(PP_X509CERTIFICATE_PRIVATE_RAW,
@@ -301,6 +323,11 @@ void PepperTCPSocket::SendSSLHandshakeACK(bool succeeded) {
       socket_id_,
       succeeded,
       certificate_fields));
+}
+
+void PepperTCPSocket::SendSetBoolOptionACK(bool succeeded) {
+  manager_->Send(new PpapiMsg_PPBTCPSocket_SetBoolOptionACK(
+      routing_id_, plugin_dispatcher_id_, socket_id_, succeeded));
 }
 
 void PepperTCPSocket::OnResolveCompleted(int result) {
@@ -403,6 +430,12 @@ void PepperTCPSocket::OnWriteCompleted(int result) {
 
 bool PepperTCPSocket::IsConnected() const {
   return connection_state_ == CONNECTED || connection_state_ == SSL_CONNECTED;
+}
+
+bool PepperTCPSocket::IsSsl() const {
+ return connection_state_ == SSL_HANDSHAKE_IN_PROGRESS ||
+     connection_state_ == SSL_CONNECTED ||
+     connection_state_ == SSL_HANDSHAKE_FAILED;
 }
 
 void PepperTCPSocket::DoWrite() {

@@ -4,17 +4,17 @@
 
 var testStep = [
   function () {
-    chrome.syncFileSystem.requestFileSystem('drive', testStep.shift());
+    chrome.syncFileSystem.requestFileSystem(testStep.shift());
   },
   function(fs) {
     chrome.syncFileSystem.getUsageAndQuota(fs, testStep.shift());
   },
   function(info) {
-    chrome.test.assertEq(0, info.usage_bytes);
+    chrome.test.assertEq(0, info.usageBytes);
 
     // TODO(calvinlo): Update test code after default quota is made const
     // (http://crbug.com/155488).
-    chrome.test.assertEq(123456789, info.quota_bytes);
+    chrome.test.assertEq(123456789, info.quotaBytes);
     chrome.test.succeed();
   }
 ];

@@ -77,6 +77,13 @@ FormCache::~FormCache() {
 
 void FormCache::ExtractForms(const WebFrame& frame,
                              std::vector<FormData>* forms) {
+  ExtractFormsAndFormElements(frame, forms, NULL);
+}
+
+void FormCache::ExtractFormsAndFormElements(
+    const WebFrame& frame,
+    std::vector<FormData>* forms,
+    std::vector<WebFormElement>* web_form_elements) {
   // Reset the cache for this frame.
   ResetFrame(frame);
 
@@ -96,6 +103,8 @@ void FormCache::ExtractForms(const WebFrame& frame,
     std::vector<WebFormControlElement> control_elements;
     ExtractAutofillableElements(form_element, autofill::REQUIRE_NONE,
                                 &control_elements);
+
+    size_t num_editable_elements = 0;
     for (size_t j = 0; j < control_elements.size(); ++j) {
       WebFormControlElement element = control_elements[j];
 
@@ -106,24 +115,31 @@ void FormCache::ExtractForms(const WebFrame& frame,
             element.toConst<WebSelectElement>();
         initial_select_values_.insert(std::make_pair(select_element,
                                                      select_element.value()));
+        ++num_editable_elements;
       } else {
         const WebInputElement input_element =
             element.toConst<WebInputElement>();
-        if (IsCheckableElement(&input_element))
+        if (IsCheckableElement(&input_element)) {
           initial_checked_state_.insert(
               std::make_pair(input_element, input_element.isChecked()));
+        } else {
+          ++num_editable_elements;
+        }
       }
     }
 
     // To avoid overly expensive computation, we impose a minimum number of
     // allowable fields.  The corresponding maximum number of allowable fields
     // is imposed by WebFormElementToFormData().
-    if (control_elements.size() < kRequiredAutofillFields)
+    if (num_editable_elements < kRequiredAutofillFields)
       continue;
 
     FormData form;
+    ExtractMask extract_mask =
+      static_cast<ExtractMask>(EXTRACT_VALUE | EXTRACT_OPTIONS);
+
     if (!WebFormElementToFormData(form_element, WebFormControlElement(),
-                                  REQUIRE_NONE, EXTRACT_VALUE, &form, NULL)) {
+                                  REQUIRE_NONE, extract_mask, &form, NULL)) {
       continue;
     }
 
@@ -131,8 +147,11 @@ void FormCache::ExtractForms(const WebFrame& frame,
     if (num_fields_seen > kMaxParseableFields)
       break;
 
-    if (form.fields.size() >= kRequiredAutofillFields)
+    if (form.fields.size() >= kRequiredAutofillFields) {
       forms->push_back(form);
+      if (web_form_elements)
+        web_form_elements->push_back(form_element);
+    }
   }
 }
 

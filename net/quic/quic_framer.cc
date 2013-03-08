@@ -15,6 +15,7 @@ using base::StringPiece;
 using std::make_pair;
 using std::map;
 using std::numeric_limits;
+using std::string;
 
 namespace net {
 
@@ -42,13 +43,17 @@ QuicPacketSequenceNumber ClosestTo(QuicPacketSequenceNumber target,
 
 }  // namespace
 
-QuicFramer::QuicFramer(QuicDecrypter* decrypter, QuicEncrypter* encrypter)
+QuicFramer::QuicFramer(QuicVersionTag version,
+                       QuicDecrypter* decrypter,
+                       QuicEncrypter* encrypter)
     : visitor_(NULL),
       fec_builder_(NULL),
       error_(QUIC_NO_ERROR),
       last_sequence_number_(0),
+      quic_version_(version),
       decrypter_(decrypter),
       encrypter_(encrypter) {
+  DCHECK_EQ(kQuicVersion1, version);
 }
 
 QuicFramer::~QuicFramer() {}
@@ -61,77 +66,98 @@ bool CanTruncate(const QuicFrame& frame) {
   return false;
 }
 
-QuicPacket* QuicFramer::ConstructFrameDataPacket(
-    const QuicPacketHeader& header,
-    const QuicFrames& frames) {
-  size_t num_consumed = 0;
-  QuicPacket* packet =
-      ConstructMaxFrameDataPacket(header, frames, &num_consumed);
-  DCHECK_EQ(frames.size(), num_consumed);
-  return packet;
+// static
+size_t QuicFramer::GetMinStreamFrameSize() {
+  return kQuicFrameTypeSize + kQuicStreamIdSize +
+      kQuicStreamFinSize + kQuicStreamOffsetSize + kQuicStreamPayloadLengthSize;
 }
 
-QuicPacket* QuicFramer::ConstructMaxFrameDataPacket(
+// static
+size_t QuicFramer::GetMinAckFrameSize() {
+  return kQuicFrameTypeSize + kQuicEntropyHashSize + kSequenceNumberSize +
+      kQuicEntropyHashSize + kSequenceNumberSize + kNumberOfMissingPacketsSize;
+}
+
+// static
+size_t QuicFramer::GetMinRstStreamFrameSize() {
+  return kQuicFrameTypeSize + kQuicStreamIdSize + kQuicErrorCodeSize +
+      kQuicErrorDetailsLengthSize;
+}
+
+// static
+size_t QuicFramer::GetMinConnectionCloseFrameSize() {
+  return kQuicFrameTypeSize + kQuicErrorCodeSize + kQuicErrorDetailsLengthSize +
+      GetMinAckFrameSize();
+}
+
+// static
+size_t QuicFramer::GetMinGoAwayFrameSize() {
+  return kQuicFrameTypeSize + kQuicErrorCodeSize + kQuicErrorDetailsLengthSize +
+      kQuicStreamIdSize;
+}
+
+size_t QuicFramer::GetSerializedFrameLength(
+    const QuicFrame& frame, size_t free_bytes, bool first_frame) {
+  if (frame.type == PADDING_FRAME) {
+    // PADDING implies end of packet.
+    return free_bytes;
+  }
+  size_t frame_len = ComputeFrameLength(frame);
+  if (frame_len > free_bytes) {
+    // Only truncate the first frame in a packet, so if subsequent ones go
+    // over, stop including more frames.
+    if (!first_frame) {
+      return 0;
+    }
+    if (CanTruncate(frame)) {
+      // Truncate the frame so the packet will not exceed kMaxPacketSize.
+      // Note that we may not use every byte of the writer in this case.
+      DLOG(INFO) << "Truncating large frame";
+      return free_bytes;
+    }
+  }
+  return frame_len;
+}
+
+QuicPacketEntropyHash QuicFramer::GetPacketEntropyHash(
+    const QuicPacketHeader& header) const {
+  if (!header.entropy_flag) {
+    // TODO(satyamshekhar): Return some more better value here (something that
+    // is not a constant).
+    return 0;
+  }
+  return 1 << (header.packet_sequence_number % 8);
+}
+
+SerializedPacket QuicFramer::ConstructFrameDataPacket(
+    const QuicPacketHeader& header,
+    const QuicFrames& frames) {
+  const size_t max_plaintext_size = GetMaxPlaintextSize(kMaxPacketSize);
+  size_t packet_size = GetPacketHeaderSize(header.public_header.version_flag);
+  for (size_t i = 0; i < frames.size(); ++i) {
+    DCHECK_LE(packet_size, max_plaintext_size);
+    const size_t frame_size = GetSerializedFrameLength(
+        frames[i], max_plaintext_size - packet_size, i == 0);
+    DCHECK(frame_size);
+    packet_size += frame_size;
+  }
+  return ConstructFrameDataPacket(header, frames, packet_size);
+}
+
+SerializedPacket QuicFramer::ConstructFrameDataPacket(
     const QuicPacketHeader& header,
     const QuicFrames& frames,
-    size_t* num_consumed) {
-  DCHECK(!frames.empty());
-  // Compute the length of the packet.  We use "magic numbers" here because
-  // sizeof(member_) is not necessarily the same as sizeof(member_wire_format).
-  const size_t max_plaintext_size = GetMaxPlaintextSize(kMaxPacketSize);
-  size_t len = kPacketHeaderSize;
-  bool truncating = false;
-  for (size_t i = 0; i < frames.size(); ++i) {
-    if (frames[i].type == PADDING_FRAME) {
-      // PADDING implies end of packet so make sure we don't have
-      // more frames on the list.
-      DCHECK_EQ(i, frames.size() - 1);
-      len = max_plaintext_size;
-      *num_consumed = i + 1;
-      break;
-    }
-    size_t frame_len = 1;  // Space for the 8 bit type.
-    frame_len += ComputeFramePayloadLength(frames[i]);
-    if (len + frame_len > max_plaintext_size) {
-      // Only truncate the first frame in a packet, so if subsequent ones go
-      // over, stop including more frames.
-      if (i > 0) {
-        break;
-      }
-      if (CanTruncate(frames[0])) {
-        // Truncate the frame so the packet will not exceed kMaxPacketSize.
-        // Note that we may not use every byte of the writer in this case.
-        len = max_plaintext_size;
-        *num_consumed = 1;
-        truncating = true;
-        DLOG(INFO) << "Truncating large frame";
-        break;
-      } else {
-        return NULL;
-      }
-    }
-    len += frame_len;
-    *num_consumed = i + 1;
-  }
-  if (truncating) {
-    DCHECK_EQ(1u, *num_consumed);
-  }
-
-  QuicDataWriter writer(len);
-
+    size_t packet_size) {
+  QuicDataWriter writer(packet_size);
+  SerializedPacket kNoPacket = SerializedPacket(0, NULL, 0, NULL);
   if (!WritePacketHeader(header, &writer)) {
-    return NULL;
+    return kNoPacket;
   }
 
-  // frame count
-  if (*num_consumed > 256u) {
-    return NULL;
-  }
-
-  for (size_t i = 0; i < *num_consumed; ++i) {
+  for (size_t i = 0; i < frames.size(); ++i) {
     const QuicFrame& frame = frames[i];
     if (!writer.WriteUInt8(frame.type)) {
-          return NULL;
+      return kNoPacket;
     }
 
     switch (frame.type) {
@@ -140,81 +166,94 @@ QuicPacket* QuicFramer::ConstructMaxFrameDataPacket(
         break;
       case STREAM_FRAME:
         if (!AppendStreamFramePayload(*frame.stream_frame, &writer)) {
-          return NULL;
+          return kNoPacket;
         }
         break;
       case ACK_FRAME:
         if (!AppendAckFramePayload(*frame.ack_frame, &writer)) {
-          return NULL;
+          return kNoPacket;
         }
         break;
       case CONGESTION_FEEDBACK_FRAME:
         if (!AppendQuicCongestionFeedbackFramePayload(
                 *frame.congestion_feedback_frame, &writer)) {
-          return NULL;
+          return kNoPacket;
         }
         break;
       case RST_STREAM_FRAME:
         if (!AppendRstStreamFramePayload(*frame.rst_stream_frame, &writer)) {
-          return NULL;
+          return kNoPacket;
         }
         break;
       case CONNECTION_CLOSE_FRAME:
         if (!AppendConnectionCloseFramePayload(
-            *frame.connection_close_frame, &writer)) {
-          return NULL;
+                *frame.connection_close_frame, &writer)) {
+          return kNoPacket;
+        }
+        break;
+      case GOAWAY_FRAME:
+        if (!AppendGoAwayFramePayload(*frame.goaway_frame, &writer)) {
+          return kNoPacket;
         }
         break;
       default:
         RaiseError(QUIC_INVALID_FRAME_DATA);
-        return NULL;
+        return kNoPacket;
     }
   }
 
-  DCHECK(truncating || len == writer.length());
   // Save the length before writing, because take clears it.
-  len = writer.length();
-  QuicPacket* packet = QuicPacket::NewDataPacket(writer.take(), len, true);
+  const size_t len = writer.length();
+  // Less than or equal because truncated acks end up with max_plaintex_size
+  // length, even though they're typically slightly shorter.
+  DCHECK_LE(len, packet_size);
+  QuicPacket* packet = QuicPacket::NewDataPacket(
+      writer.take(), len, true, header.public_header.version_flag);
 
   if (fec_builder_) {
     fec_builder_->OnBuiltFecProtectedPayload(header,
                                              packet->FecProtectedData());
   }
 
-  return packet;
+  return SerializedPacket(header.packet_sequence_number, packet,
+                          GetPacketEntropyHash(header), NULL);
 }
 
-QuicPacket* QuicFramer::ConstructFecPacket(const QuicPacketHeader& header,
-                                           const QuicFecData& fec) {
-  size_t len = kPacketHeaderSize;
+SerializedPacket QuicFramer::ConstructFecPacket(const QuicPacketHeader& header,
+                                                const QuicFecData& fec) {
+  size_t len = GetPacketHeaderSize(header.public_header.version_flag);
   len += fec.redundancy.length();
 
   QuicDataWriter writer(len);
-
+  SerializedPacket kNoPacket = SerializedPacket(0, NULL, 0, NULL);
   if (!WritePacketHeader(header, &writer)) {
-    return NULL;
+    return kNoPacket;
   }
 
   if (!writer.WriteBytes(fec.redundancy.data(), fec.redundancy.length())) {
-    return NULL;
+    return kNoPacket;
   }
 
-  return QuicPacket::NewFecPacket(writer.take(), len, true);
+  return SerializedPacket(header.packet_sequence_number,
+                          QuicPacket::NewFecPacket(
+                              writer.take(), len, true,
+                              header.public_header.version_flag),
+                          GetPacketEntropyHash(header), NULL);
 }
 
 // static
 QuicEncryptedPacket* QuicFramer::ConstructPublicResetPacket(
     const QuicPublicResetPacket& packet) {
-  DCHECK_EQ(PACKET_PUBLIC_FLAGS_RST,
-            PACKET_PUBLIC_FLAGS_RST & packet.public_header.flags);
-  size_t len = kPublicResetPacketSize;
+  DCHECK(packet.public_header.reset_flag);
+  DCHECK(!packet.public_header.version_flag);
+  size_t len = GetPublicResetPacketSize();
   QuicDataWriter writer(len);
 
   if (!writer.WriteUInt64(packet.public_header.guid)) {
     return NULL;
   }
 
-  uint8 flags = static_cast<uint8>(packet.public_header.flags);
+  uint8 flags = static_cast<uint8>(PACKET_PUBLIC_FLAGS_RST);
   if (!writer.WriteUInt8(flags)) {
     return NULL;
   }
@@ -231,10 +270,7 @@ QuicEncryptedPacket* QuicFramer::ConstructPublicResetPacket(
   return new QuicEncryptedPacket(writer.take(), len, true);
 }
 
-// TODO(satyamshekhar): Framer doesn't need addresses. Get rid of them.
-bool QuicFramer::ProcessPacket(const IPEndPoint& self_address,
-                               const IPEndPoint& peer_address,
-                               const QuicEncryptedPacket& packet) {
+bool QuicFramer::ProcessPacket(const QuicEncryptedPacket& packet) {
   DCHECK(!reader_.get());
   reader_.reset(new QuicDataReader(packet.data(), packet.length()));
 
@@ -245,12 +281,16 @@ bool QuicFramer::ProcessPacket(const IPEndPoint& self_address,
     reader_.reset(NULL);
     return RaiseError(QUIC_INVALID_PACKET_HEADER);
   }
+  // TODO(satyamshekhar): Handle version negotiation.
+  if (public_header.version_flag && public_header.version != quic_version_) {
+      return false;
+  }
 
   bool rv;
-  if (public_header.flags & PACKET_PUBLIC_FLAGS_RST) {
+  if (public_header.reset_flag) {
     rv = ProcessPublicResetPacket(public_header);
   } else {
-    rv = ProcessDataPacket(public_header, self_address, peer_address, packet);
+    rv = ProcessDataPacket(public_header, packet);
   }
 
   reader_.reset(NULL);
@@ -259,10 +299,8 @@ bool QuicFramer::ProcessPacket(const IPEndPoint& self_address,
 
 bool QuicFramer::ProcessDataPacket(
     const QuicPacketPublicHeader& public_header,
-    const IPEndPoint& self_address,
-    const IPEndPoint& peer_address,
     const QuicEncryptedPacket& packet) {
-  visitor_->OnPacket(self_address, peer_address);
+  visitor_->OnPacket();
 
   QuicPacketHeader header(public_header);
   if (!ProcessPacketHeader(&header, packet)) {
@@ -280,7 +318,7 @@ bool QuicFramer::ProcessDataPacket(
   }
 
   // Handle the payload.
-  if ((header.private_flags & PACKET_PRIVATE_FLAGS_FEC) == 0) {
+  if (!header.fec_flag) {
     if (header.fec_group != 0) {
       StringPiece payload = reader_->PeekRemainingPayload();
       visitor_->OnFecProtectedPayload(payload);
@@ -314,18 +352,20 @@ bool QuicFramer::ProcessPublicResetPacket(
     set_detailed_error("Unable to read rejected sequence number.");
     return false;
   }
-
   visitor_->OnPublicResetPacket(packet);
   return true;
 }
 
-bool QuicFramer::ProcessRevivedPacket(const QuicPacketHeader& header,
+bool QuicFramer::ProcessRevivedPacket(QuicPacketHeader* header,
                                       StringPiece payload) {
   DCHECK(!reader_.get());
 
   visitor_->OnRevivedPacket();
 
-  visitor_->OnPacketHeader(header);
+  header->entropy_hash = GetPacketEntropyHash(*header);
+
+  // TODO(satyamshekhar): Don't process if the visitor refuses the header.
+  visitor_->OnPacketHeader(*header);
 
   if (payload.length() > kMaxPacketSize) {
     set_detailed_error("Revived packet too large.");
@@ -350,16 +390,35 @@ bool QuicFramer::WritePacketHeader(const QuicPacketHeader& header,
     return false;
   }
 
-  uint8 flags =static_cast<uint8>(header.public_header.flags);
+  uint8 flags = 0;
+  if (header.public_header.reset_flag) {
+    flags |= PACKET_PUBLIC_FLAGS_RST;
+  }
+  if (header.public_header.version_flag) {
+    flags |= PACKET_PUBLIC_FLAGS_VERSION;
+  }
   if (!writer->WriteUInt8(flags)) {
     return false;
+  }
+
+  if (header.public_header.version_flag) {
+    writer->WriteUInt32(quic_version_);
   }
 
   if (!AppendPacketSequenceNumber(header.packet_sequence_number, writer)) {
     return false;
   }
 
-  flags = static_cast<uint8>(header.private_flags);
+  flags = 0;
+  if (header.fec_flag) {
+    flags |= PACKET_PRIVATE_FLAGS_FEC;
+  }
+  if (header.entropy_flag) {
+    flags |= PACKET_PRIVATE_FLAGS_ENTROPY;
+  }
+  if (header.fec_entropy_flag) {
+    flags |= PACKET_PRIVATE_FLAGS_FEC_ENTROPY;
+  }
   if (!writer->WriteUInt8(flags)) {
     return false;
   }
@@ -385,7 +444,7 @@ bool QuicFramer::WritePacketHeader(const QuicPacketHeader& header,
 
 QuicPacketSequenceNumber QuicFramer::CalculatePacketSequenceNumberFromWire(
     QuicPacketSequenceNumber packet_sequence_number) const {
-  // The new sequence number might have wrapped to the next epoc, or
+  // The new sequence number might have wrapped to the next epoch, or
   // it might have reverse wrapped to the previous epoch, or it might
   // remain in the same epoch.  Select the sequence number closest to the
   // previous sequence number.
@@ -398,13 +457,6 @@ QuicPacketSequenceNumber QuicFramer::CalculatePacketSequenceNumberFromWire(
                    ClosestTo(last_sequence_number_,
                              prev_epoch + packet_sequence_number,
                              next_epoch + packet_sequence_number));
-}
-
-/* static */
-bool QuicFramer::ReadGuidFromPacket(const QuicEncryptedPacket& packet,
-                                    QuicGuid* guid) {
-  QuicDataReader reader(packet.data(), packet.length());
-  return reader.ReadUInt64(guid);
 }
 
 bool QuicFramer::ProcessPublicHeader(QuicPacketPublicHeader* public_header) {
@@ -424,8 +476,24 @@ bool QuicFramer::ProcessPublicHeader(QuicPacketPublicHeader* public_header) {
     return false;
   }
 
-  public_header->flags = static_cast<QuicPacketPublicFlags>(public_flags);
+  public_header->reset_flag = (public_flags & PACKET_PUBLIC_FLAGS_RST) != 0;
+  public_header->version_flag =
+      (public_flags & PACKET_PUBLIC_FLAGS_VERSION) != 0;
+
+  if (public_header->version_flag &&
+      !reader_->ReadUInt32(&public_header->version)) {
+    set_detailed_error("Unable to read protocol version.");
+    return false;
+  }
+
   return true;
+}
+
+// static
+bool QuicFramer::ReadGuidFromPacket(const QuicEncryptedPacket& packet,
+                                    QuicGuid* guid) {
+  QuicDataReader reader(packet.data(), packet.length());
+  return reader.ReadUInt64(guid);
 }
 
 bool QuicFramer::ProcessPacketHeader(
@@ -441,7 +509,9 @@ bool QuicFramer::ProcessPacketHeader(
     return false;
   }
 
-  if (!DecryptPayload(packet)) {
+  if (!DecryptPayload(header->packet_sequence_number,
+                      header->public_header.version_flag,
+                      packet)) {
     DLOG(WARNING) << "Unable to decrypt payload.";
     return RaiseError(QUIC_DECRYPTION_FAILURE);
   }
@@ -457,7 +527,10 @@ bool QuicFramer::ProcessPacketHeader(
     return false;
   }
 
-  header->private_flags = static_cast<QuicPacketPrivateFlags>(private_flags);
+  header->fec_flag = (private_flags & PACKET_PRIVATE_FLAGS_FEC) != 0;
+  header->entropy_flag = (private_flags & PACKET_PRIVATE_FLAGS_ENTROPY) != 0;
+  header->fec_entropy_flag =
+      (private_flags & PACKET_PRIVATE_FLAGS_FEC_ENTROPY) != 0;
 
   uint8 first_fec_protected_packet_offset;
   if (!reader_->ReadBytes(&first_fec_protected_packet_offset, 1)) {
@@ -467,6 +540,7 @@ bool QuicFramer::ProcessPacketHeader(
   header->fec_group = first_fec_protected_packet_offset == kNoFecOffset ? 0 :
       header->packet_sequence_number - first_fec_protected_packet_offset;
 
+  header->entropy_hash = GetPacketEntropyHash(*header);
   // Set the last sequence number after we have decrypted the packet
   // so we are confident is not attacker controlled.
   last_sequence_number_ = header->packet_sequence_number;
@@ -529,6 +603,11 @@ bool QuicFramer::ProcessFrameData() {
           return RaiseError(QUIC_INVALID_CONNECTION_CLOSE_DATA);
         }
         break;
+      case GOAWAY_FRAME:
+        if (!ProcessGoAwayFrame()) {
+          return RaiseError(QUIC_INVALID_GOAWAY_DATA);
+        }
+        break;
       default:
         set_detailed_error("Illegal frame type.");
         DLOG(WARNING) << "Illegal frame type: "
@@ -584,6 +663,11 @@ bool QuicFramer::ProcessAckFrame(QuicAckFrame* frame) {
 }
 
 bool QuicFramer::ProcessReceivedInfo(ReceivedPacketInfo* received_info) {
+  if (!reader_->ReadBytes(&received_info->entropy_hash, 1)) {
+    set_detailed_error("Unable to read entropy hash for received packets.");
+    return false;
+  }
+
   if (!ProcessPacketSequenceNumber(&received_info->largest_observed)) {
      set_detailed_error("Unable to read largest observed.");
      return false;
@@ -608,6 +692,11 @@ bool QuicFramer::ProcessReceivedInfo(ReceivedPacketInfo* received_info) {
 }
 
 bool QuicFramer::ProcessSentInfo(SentPacketInfo* sent_info) {
+  if (!reader_->ReadBytes(&sent_info->entropy_hash, 1)) {
+    set_detailed_error("Unable to read entropy hash for sent packets.");
+    return false;
+  }
+
   if (!ProcessPacketSequenceNumber(&sent_info->least_unacked)) {
     set_detailed_error("Unable to read least unacked.");
     return false;
@@ -682,11 +771,12 @@ bool QuicFramer::ProcessQuicCongestionFeedbackFrame(
       break;
     }
     case kFixRate: {
-      CongestionFeedbackMessageFixRate* fix_rate = &frame->fix_rate;
-      if (!reader_->ReadUInt32(&fix_rate->bitrate_in_bytes_per_second)) {
+      uint32 bitrate = 0;
+      if (!reader_->ReadUInt32(&bitrate)) {
         set_detailed_error("Unable to read bitrate.");
         return false;
       }
+      frame->fix_rate.bitrate = QuicBandwidth::FromBytesPerSecond(bitrate);
       break;
     }
     case kTCP: {
@@ -696,10 +786,13 @@ bool QuicFramer::ProcessQuicCongestionFeedbackFrame(
             "Unable to read accumulated number of lost packets.");
         return false;
       }
-      if (!reader_->ReadUInt16(&tcp->receive_window)) {
+      uint16 receive_window = 0;
+      if (!reader_->ReadUInt16(&receive_window)) {
         set_detailed_error("Unable to read receive window.");
         return false;
       }
+      // Simple bit packing, don't send the 4 least significant bits.
+      tcp->receive_window = static_cast<QuicByteCount>(receive_window) << 4;
       break;
     }
     default:
@@ -717,11 +810,6 @@ bool QuicFramer::ProcessRstStreamFrame() {
   QuicRstStreamFrame frame;
   if (!reader_->ReadUInt32(&frame.stream_id)) {
     set_detailed_error("Unable to read stream_id.");
-    return false;
-  }
-
-  if (!reader_->ReadUInt64(&frame.offset)) {
-    set_detailed_error("Unable to read offset in rst frame.");
     return false;
   }
 
@@ -769,18 +857,57 @@ bool QuicFramer::ProcessConnectionCloseFrame() {
   return true;
 }
 
-QuicEncryptedPacket* QuicFramer::EncryptPacket(const QuicPacket& packet) {
-  scoped_ptr<QuicData> out(encrypter_->Encrypt(packet.AssociatedData(),
+bool QuicFramer::ProcessGoAwayFrame() {
+  QuicGoAwayFrame frame;
+
+  uint32 error_code;
+  if (!reader_->ReadUInt32(&error_code)) {
+    set_detailed_error("Unable to read go away error code.");
+    return false;
+  }
+  frame.error_code = static_cast<QuicErrorCode>(error_code);
+
+  uint32 stream_id;
+  if (!reader_->ReadUInt32(&stream_id)) {
+    set_detailed_error("Unable to read last good stream id.");
+    return false;
+  }
+  frame.last_good_stream_id = static_cast<QuicErrorCode>(stream_id);
+
+  StringPiece reason_phrase;
+  if (!reader_->ReadStringPiece16(&reason_phrase)) {
+    set_detailed_error("Unable to read goaway reason.");
+    return false;
+  }
+  frame.reason_phrase = reason_phrase.as_string();
+
+  visitor_->OnGoAwayFrame(frame);
+  return true;
+}
+
+StringPiece QuicFramer::GetAssociatedDataFromEncryptedPacket(
+    const QuicEncryptedPacket& encrypted, bool includes_version) {
+  return StringPiece(encrypted.data() + kStartOfHashData,
+                     GetStartOfEncryptedData(includes_version)
+                     - kStartOfHashData);
+}
+
+QuicEncryptedPacket* QuicFramer::EncryptPacket(
+    QuicPacketSequenceNumber packet_sequence_number,
+    const QuicPacket& packet) {
+  scoped_ptr<QuicData> out(encrypter_->Encrypt(packet_sequence_number,
+                                               packet.AssociatedData(),
                                                packet.Plaintext()));
   if (out.get() == NULL) {
     RaiseError(QUIC_ENCRYPTION_FAILURE);
     return NULL;
   }
-  size_t len = kStartOfEncryptedData + out->length();
+  StringPiece header_data = packet.BeforePlaintext();
+  size_t len =  header_data.length() + out->length();
   char* buffer = new char[len];
   // TODO(rch): eliminate this buffer copy by passing in a buffer to Encrypt().
-  memcpy(buffer, packet.data(), kStartOfEncryptedData);
-  memcpy(buffer + kStartOfEncryptedData, out->data(), out->length());
+  memcpy(buffer, header_data.data(), header_data.length());
+  memcpy(buffer + header_data.length(), out->data(), out->length());
   return new QuicEncryptedPacket(buffer, len, true);
 }
 
@@ -788,13 +915,18 @@ size_t QuicFramer::GetMaxPlaintextSize(size_t ciphertext_size) {
   return encrypter_->GetMaxPlaintextSize(ciphertext_size);
 }
 
-bool QuicFramer::DecryptPayload(const QuicEncryptedPacket& packet) {
+bool QuicFramer::DecryptPayload(QuicPacketSequenceNumber sequence_number,
+                                bool version_flag,
+                                const QuicEncryptedPacket& packet) {
   StringPiece encrypted;
   if (!reader_->ReadStringPiece(&encrypted, reader_->BytesRemaining())) {
     return false;
   }
   DCHECK(decrypter_.get() != NULL);
-  decrypted_.reset(decrypter_->Decrypt(packet.AssociatedData(), encrypted));
+  decrypted_.reset(decrypter_->Decrypt(
+      sequence_number,
+      GetAssociatedDataFromEncryptedPacket(packet, version_flag),
+      encrypted));
   if  (decrypted_.get() == NULL) {
     return false;
   }
@@ -803,42 +935,33 @@ bool QuicFramer::DecryptPayload(const QuicEncryptedPacket& packet) {
   return true;
 }
 
-size_t QuicFramer::ComputeFramePayloadLength(const QuicFrame& frame) {
-  size_t len = 0;
-  // We use "magic numbers" here because sizeof(member_) is not necessarily the
-  // same as sizeof(member_wire_format).
+size_t QuicFramer::ComputeFrameLength(const QuicFrame& frame) {
   switch (frame.type) {
     case STREAM_FRAME:
-      len += 4;  // stream id
-      len += 1;  // fin
-      len += 8;  // offset
-      len += 2;  // space for the 16 bit length
-      len += frame.stream_frame->data.size();
-      break;
+      return GetMinStreamFrameSize() + frame.stream_frame->data.size();
     case ACK_FRAME: {
       const QuicAckFrame& ack = *frame.ack_frame;
-      len += 6;  // largest observed packet sequence number
-      len += 1;  // num missing packets
-      len += 6 * ack.received_info.missing_packets.size();
-      len += 6;  // least packet sequence number awaiting an ack
-      break;
+      return GetMinAckFrameSize() +
+          kSequenceNumberSize * ack.received_info.missing_packets.size();
     }
     case CONGESTION_FEEDBACK_FRAME: {
+      size_t len = kQuicFrameTypeSize;
       const QuicCongestionFeedbackFrame& congestion_feedback =
           *frame.congestion_feedback_frame;
-      len += 1;  // congestion feedback type
+      len += 1;  // Congestion feedback type.
 
       switch (congestion_feedback.type) {
         case kInterArrival: {
           const CongestionFeedbackMessageInterArrival& inter_arrival =
               congestion_feedback.inter_arrival;
           len += 2;
-          len += 1;  // num received packets
+          len += 1;  // Number received packets.
           if (inter_arrival.received_packet_times.size() > 0) {
-            len += 6;  // smallest received
-            len += 8;  // time
+            len += kSequenceNumberSize;  // Smallest received.
+            len += 8;  // Time.
             // 2 bytes per sequence number delta plus 4 bytes per delta time.
-            len += 6 * (inter_arrival.received_packet_times.size() - 1);
+            len += kSequenceNumberSize *
+                (inter_arrival.received_packet_times.size() - 1);
           }
           break;
         }
@@ -853,28 +976,29 @@ size_t QuicFramer::ComputeFramePayloadLength(const QuicFrame& frame) {
           DLOG(INFO) << "Illegal feedback type: " << congestion_feedback.type;
           break;
       }
-      break;
+      return len;
     }
     case RST_STREAM_FRAME:
-      len += 4;  // stream id
-      len += 8;  // offset
-      len += 4;  // error code
-      len += 2;  // error details size
-      len += frame.rst_stream_frame->error_details.size();
-      break;
-    case CONNECTION_CLOSE_FRAME:
-      len += 4;  // error code
-      len += 2;  // error details size
-      len += frame.connection_close_frame->error_details.size();
-      len += ComputeFramePayloadLength(
-          QuicFrame(&frame.connection_close_frame->ack_frame));
-      break;
-    default:
-      set_detailed_error("Illegal frame type.");
-      DLOG(INFO) << "Illegal frame type: " << frame.type;
-      break;
+      return GetMinRstStreamFrameSize() +
+          frame.rst_stream_frame->error_details.size();
+    case CONNECTION_CLOSE_FRAME: {
+      const QuicAckFrame& ack = frame.connection_close_frame->ack_frame;
+      return GetMinConnectionCloseFrameSize() +
+          frame.connection_close_frame->error_details.size() +
+          kSequenceNumberSize * ack.received_info.missing_packets.size();
+    }
+    case GOAWAY_FRAME:
+      return GetMinGoAwayFrameSize() + frame.goaway_frame->reason_phrase.size();
+    case PADDING_FRAME:
+      DCHECK(false);
+      return 0;
+    case NUM_FRAME_TYPES:
+      DCHECK(false);
+      return 0;
   }
-  return len;
+  // Not reachable, but some Chrome compilers can't figure that out.
+  DCHECK(false);
+  return 0;
 }
 
 // static
@@ -911,17 +1035,17 @@ bool QuicFramer::AppendStreamFramePayload(
 }
 
 QuicPacketSequenceNumber QuicFramer::CalculateLargestObserved(
-    const SequenceSet& missing_packets,
-    SequenceSet::const_iterator largest_written) {
-  SequenceSet::const_iterator it = largest_written;
+    const SequenceNumberSet& missing_packets,
+    SequenceNumberSet::const_iterator largest_written) {
+  SequenceNumberSet::const_iterator it = largest_written;
   QuicPacketSequenceNumber previous_missing = *it;
   ++it;
 
   // See if the next thing is a gap in the missing packets: if it's a
   // non-missing packet we can return it.
   if (it != missing_packets.end() && previous_missing + 1 != *it) {
-      return *it - 1;
-    }
+    return *it - 1;
+  }
 
   // Otherwise return the largest missing packet, as indirectly observed.
   return *largest_written;
@@ -931,7 +1055,18 @@ QuicPacketSequenceNumber QuicFramer::CalculateLargestObserved(
 bool QuicFramer::AppendAckFramePayload(
     const QuicAckFrame& frame,
     QuicDataWriter* writer) {
+  // TODO(satyamshekhar): Decide how often we really should send this
+  // entropy_hash update.
+  if (!writer->WriteUInt8(frame.sent_info.entropy_hash)) {
+    return false;
+  }
+
   if (!AppendPacketSequenceNumber(frame.sent_info.least_unacked, writer)) {
+    return false;
+  }
+
+  size_t received_entropy_offset = writer->length();
+  if (!writer->WriteUInt8(frame.received_info.entropy_hash)) {
     return false;
   }
 
@@ -949,13 +1084,19 @@ bool QuicFramer::AppendAckFramePayload(
     return false;
   }
 
-  SequenceSet::const_iterator it = frame.received_info.missing_packets.begin();
+  SequenceNumberSet::const_iterator it =
+      frame.received_info.missing_packets.begin();
   int num_missing_packets_written = 0;
   for (; it != frame.received_info.missing_packets.end(); ++it) {
     if (!AppendPacketSequenceNumber(*it, writer)) {
-      // We are truncating.  Overwrite largest_observed.
+      // We are truncating.
       QuicPacketSequenceNumber largest_observed =
           CalculateLargestObserved(frame.received_info.missing_packets, --it);
+      // Overwrite entropy hash for received packets.
+      writer->WriteUInt8ToOffset(
+          entropy_calculator_->ReceivedEntropyHash(largest_observed),
+          received_entropy_offset);
+      // Overwrite largest_observed.
       writer->WriteUInt48ToOffset(largest_observed & kSequenceNumberMask,
                                   largest_observed_offset);
       writer->WriteUInt8ToOffset(num_missing_packets_written,
@@ -1034,17 +1175,20 @@ bool QuicFramer::AppendQuicCongestionFeedbackFramePayload(
     case kFixRate: {
       const CongestionFeedbackMessageFixRate& fix_rate =
           frame.fix_rate;
-      if (!writer->WriteUInt32(fix_rate.bitrate_in_bytes_per_second)) {
+      if (!writer->WriteUInt32(fix_rate.bitrate.ToBytesPerSecond())) {
         return false;
       }
       break;
     }
     case kTCP: {
       const CongestionFeedbackMessageTCP& tcp = frame.tcp;
+      DCHECK_LE(tcp.receive_window, 1u << 20);
+      // Simple bit packing, don't send the 4 least significant bits.
+      uint16 receive_window = static_cast<uint16>(tcp.receive_window >> 4);
       if (!writer->WriteUInt16(tcp.accumulated_number_of_lost_packets)) {
         return false;
       }
-      if (!writer->WriteUInt16(tcp.receive_window)) {
+      if (!writer->WriteUInt16(receive_window)) {
         return false;
       }
       break;
@@ -1060,9 +1204,6 @@ bool QuicFramer::AppendRstStreamFramePayload(
         const QuicRstStreamFrame& frame,
         QuicDataWriter* writer) {
   if (!writer->WriteUInt32(frame.stream_id)) {
-    return false;
-  }
-  if (!writer->WriteUInt64(frame.offset)) {
     return false;
   }
 
@@ -1088,6 +1229,22 @@ bool QuicFramer::AppendConnectionCloseFramePayload(
     return false;
   }
   AppendAckFramePayload(frame.ack_frame, writer);
+  return true;
+}
+
+bool QuicFramer::AppendGoAwayFramePayload(const QuicGoAwayFrame& frame,
+                                          QuicDataWriter* writer) {
+  uint32 error_code = static_cast<uint32>(frame.error_code);
+  if (!writer->WriteUInt32(error_code)) {
+    return false;
+  }
+  uint32 stream_id = static_cast<uint32>(frame.last_good_stream_id);
+  if (!writer->WriteUInt32(stream_id)) {
+    return false;
+  }
+  if (!writer->WriteStringPiece16(frame.reason_phrase)) {
+    return false;
+  }
   return true;
 }
 

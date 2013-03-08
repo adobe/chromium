@@ -5,12 +5,16 @@
 #include "chrome/browser/extensions/tab_helper.h"
 
 #include "chrome/browser/extensions/activity_log.h"
+#include "chrome/browser/extensions/api/declarative/rules_registry_service.h"
+#include "chrome/browser/extensions/api/declarative_content/content_rules_registry.h"
 #include "chrome/browser/extensions/app_notify_channel_ui.h"
 #include "chrome/browser/extensions/crx_installer.h"
 #include "chrome/browser/extensions/extension_action.h"
 #include "chrome/browser/extensions/extension_action_manager.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
+#include "chrome/browser/extensions/image_loader.h"
 #include "chrome/browser/extensions/page_action_controller.h"
 #include "chrome/browser/extensions/script_badge_controller.h"
 #include "chrome/browser/extensions/script_bubble_controller.h"
@@ -23,6 +27,7 @@
 #include "chrome/browser/ui/web_applications/web_app_ui.h"
 #include "chrome/browser/web_applications/web_app.h"
 #include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/extensions/api/icons/icons_handler.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_icon_set.h"
@@ -82,7 +87,12 @@ TabHelper::TabHelper(content::WebContents* web_contents)
               this)),
       pending_web_app_action_(NONE),
       script_executor_(new ScriptExecutor(web_contents,
-                                          &script_execution_observers_)) {
+                                          &script_execution_observers_)),
+      rules_registry_service_(
+          ExtensionSystem::Get(
+              Profile::FromBrowserContext(web_contents->GetBrowserContext()))->
+          rules_registry_service()),
+      ALLOW_THIS_IN_INITIALIZER_LIST(image_loader_ptr_factory_(this)) {
   // The ActiveTabPermissionManager requires a session ID; ensure this
   // WebContents has one.
   SessionTabHelper::CreateForWebContents(web_contents);
@@ -186,6 +196,13 @@ void TabHelper::RenderViewCreated(RenderViewHost* render_view_host) {
 void TabHelper::DidNavigateMainFrame(
     const content::LoadCommittedDetails& details,
     const content::FrameNavigateParams& params) {
+#if defined(ENABLE_EXTENSIONS)
+  if (rules_registry_service_) {
+    rules_registry_service_->content_rules_registry()->DidNavigateMainFrame(
+        web_contents(), details, params);
+  }
+#endif  // defined(ENABLE_EXTENSIONS)
+
   if (details.is_in_page)
     return;
 
@@ -227,6 +244,8 @@ bool TabHelper::OnMessageReceived(const IPC::Message& message) {
     IPC_MESSAGE_HANDLER(ExtensionHostMsg_Request, OnRequest)
     IPC_MESSAGE_HANDLER(ExtensionHostMsg_ContentScriptsExecuting,
                         OnContentScriptsExecuting)
+    IPC_MESSAGE_HANDLER(ExtensionHostMsg_OnWatchedPageChange,
+                        OnWatchedPageChange)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
   return handled;
@@ -300,11 +319,12 @@ void TabHelper::OnInlineWebstoreInstall(
                  install_id, return_route_id);
   scoped_refptr<WebstoreStandaloneInstaller> installer(
       new WebstoreStandaloneInstaller(
-          web_contents(),
           webstore_item_id,
           WebstoreStandaloneInstaller::REQUIRE_VERIFIED_SITE,
           WebstoreStandaloneInstaller::INLINE_PROMPT,
           requestor_url,
+          Profile::FromBrowserContext(web_contents()->GetBrowserContext()),
+          web_contents(),
           callback));
   installer->BeginInstall();
 }
@@ -415,6 +435,16 @@ void TabHelper::OnContentScriptsExecuting(
                                       on_url));
 }
 
+void TabHelper::OnWatchedPageChange(
+    const std::vector<std::string>& css_selectors) {
+#if defined(ENABLE_EXTENSIONS)
+  if (rules_registry_service_) {
+    rules_registry_service_->content_rules_registry()->Apply(
+        web_contents(), css_selectors);
+  }
+#endif  // defined(ENABLE_EXTENSIONS)
+}
+
 const Extension* TabHelper::GetExtension(const std::string& extension_app_id) {
   if (extension_app_id.empty())
     return NULL;
@@ -432,18 +462,23 @@ const Extension* TabHelper::GetExtension(const std::string& extension_app_id) {
 
 void TabHelper::UpdateExtensionAppIcon(const Extension* extension) {
   extension_app_icon_.reset();
+  // Ensure previously enqueued callbacks are ignored.
+  image_loader_ptr_factory_.InvalidateWeakPtrs();
 
+  // Enqueue OnImageLoaded callback.
   if (extension) {
-    extension_app_image_loader_.reset(new ImageLoadingTracker(this));
-    extension_app_image_loader_->LoadImage(
+    Profile* profile =
+        Profile::FromBrowserContext(web_contents()->GetBrowserContext());
+    extensions::ImageLoader* loader = extensions::ImageLoader::Get(profile);
+    loader->LoadImageAsync(
         extension,
-        extension->GetIconResource(extension_misc::EXTENSION_ICON_SMALLISH,
+        IconsInfo::GetIconResource(extension,
+                                   extension_misc::EXTENSION_ICON_SMALLISH,
                                    ExtensionIconSet::MATCH_EXACTLY),
         gfx::Size(extension_misc::EXTENSION_ICON_SMALLISH,
                   extension_misc::EXTENSION_ICON_SMALLISH),
-        ImageLoadingTracker::CACHE);
-  } else {
-    extension_app_image_loader_.reset(NULL);
+        base::Bind(&TabHelper::OnImageLoaded,
+                   image_loader_ptr_factory_.GetWeakPtr()));
   }
 }
 
@@ -452,9 +487,7 @@ void TabHelper::SetAppIcon(const SkBitmap& app_icon) {
   web_contents()->NotifyNavigationStateChanged(content::INVALIDATE_TYPE_TITLE);
 }
 
-void TabHelper::OnImageLoaded(const gfx::Image& image,
-                              const std::string& extension_id,
-                              int index) {
+void TabHelper::OnImageLoaded(const gfx::Image& image) {
   if (!image.IsEmpty()) {
     extension_app_icon_ = *image.ToSkBitmap();
     web_contents()->NotifyNavigationStateChanged(content::INVALIDATE_TYPE_TAB);

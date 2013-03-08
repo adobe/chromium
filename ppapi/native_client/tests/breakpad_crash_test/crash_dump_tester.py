@@ -73,7 +73,8 @@ def GetDumpFiles(dumps_dirs):
                for filename in ListPathsInDir(dumps_dir)]
   sys.stdout.write('crash_dump_tester: Found %i files\n' % len(all_files))
   for dump_file in all_files:
-    sys.stdout.write('  %s\n' % dump_file)
+    sys.stdout.write('  %s (size %i)\n'
+                     % (dump_file, os.stat(dump_file).st_size))
   return [dump_file for dump_file in all_files
           if dump_file.endswith('.dmp')]
 
@@ -162,22 +163,22 @@ def Main(cleanup_funcs):
   if len(dmp_files) != options.expected_crash_dumps:
     sys.stdout.write(msg)
     failed = True
-  # On Windows, the crash dumps should come in pairs of a .dmp and
-  # .txt file.
-  if sys.platform == 'win32':
-    for dump_file in dmp_files:
+
+  for dump_file in dmp_files:
+    # Sanity check: Make sure dumping did not fail after opening the file.
+    msg = 'crash_dump_tester: ERROR: Dump file is empty\n'
+    if os.stat(dump_file).st_size == 0:
+      sys.stdout.write(msg)
+      failed = True
+
+    # On Windows, the crash dumps should come in pairs of a .dmp and
+    # .txt file.
+    if sys.platform == 'win32':
       second_file = dump_file[:-4] + '.txt'
       msg = ('crash_dump_tester: ERROR: File %r is missing a corresponding '
              '%r file\n' % (dump_file, second_file))
       if not os.path.exists(second_file):
         sys.stdout.write(msg)
-        # TODO(mseaborn): Investigate and remove this workaround.
-        if (options.expected_process_type_for_crash == 'browser' and
-            sys.platform == 'win32'):
-          sys.stdout.write('crash_dump_tester: Ignoring this error on Windows '
-                           'because the .txt file is sometimes missing -- '
-                           'see http://crbug.com/169394\n')
-          continue
         failed = True
         continue
       # Check that the crash dump comes from the NaCl process.

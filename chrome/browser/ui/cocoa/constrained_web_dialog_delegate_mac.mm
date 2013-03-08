@@ -11,6 +11,7 @@
 #import "chrome/browser/ui/cocoa/constrained_window/constrained_window_custom_window.h"
 #import "chrome/browser/ui/cocoa/constrained_window/constrained_window_mac.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_view.h"
 #include "ui/gfx/size.h"
 #include "ui/web_dialogs/web_dialog_delegate.h"
 #include "ui/web_dialogs/web_dialog_ui.h"
@@ -20,17 +21,46 @@ using content::WebContents;
 using ui::WebDialogDelegate;
 using ui::WebDialogWebContentsDelegate;
 
-class ConstrainedWebDialogDelegateMac :
-    public ConstrainedWindowMacDelegate,
-    public ConstrainedWebDialogDelegate {
+namespace {
 
+class ConstrainedWebDialogDelegateMac
+    : public ConstrainedWebDialogDelegateBase {
  public:
   ConstrainedWebDialogDelegateMac(
       content::BrowserContext* browser_context,
       WebDialogDelegate* delegate,
+      WebDialogWebContentsDelegate* tab_delegate)
+      : ConstrainedWebDialogDelegateBase(
+            browser_context, delegate, tab_delegate) {}
+
+  // WebDialogWebContentsDelegate interface.
+  virtual void CloseContents(WebContents* source) OVERRIDE {
+    window_->CloseWebContentsModalDialog();
+  }
+
+  void set_window(ConstrainedWindowMac* window) { window_ = window; }
+  ConstrainedWindowMac* window() const { return window_; }
+
+ private:
+  // Weak, owned by ConstrainedWebDialogDelegateViewMac.
+  ConstrainedWindowMac* window_;
+
+  DISALLOW_COPY_AND_ASSIGN(ConstrainedWebDialogDelegateMac);
+};
+
+}  // namespace
+
+class ConstrainedWebDialogDelegateViewMac :
+    public ConstrainedWindowMacDelegate,
+    public ConstrainedWebDialogDelegate {
+
+ public:
+  ConstrainedWebDialogDelegateViewMac(
+      content::BrowserContext* browser_context,
+      WebDialogDelegate* delegate,
       WebDialogWebContentsDelegate* tab_delegate,
       content::WebContents* web_contents);
-  virtual ~ConstrainedWebDialogDelegateMac() {}
+  virtual ~ConstrainedWebDialogDelegateViewMac() {}
 
   // ConstrainedWebDialogDelegate interface
   virtual const WebDialogDelegate*
@@ -46,8 +76,8 @@ class ConstrainedWebDialogDelegateMac :
   virtual void ReleaseWebContentsOnDialogClose() OVERRIDE {
     return impl_->ReleaseWebContentsOnDialogClose();
   }
-  virtual WebContentsModalDialog* GetWindow() OVERRIDE {
-    return impl_->GetWindow();
+  virtual NativeWebContentsModalDialog GetNativeDialog() OVERRIDE {
+    return constrained_window_->GetNativeDialog();
   }
   virtual WebContents* GetWebContents() OVERRIDE {
     return impl_->GetWebContents();
@@ -62,21 +92,21 @@ class ConstrainedWebDialogDelegateMac :
   }
 
  private:
-  scoped_ptr<ConstrainedWebDialogDelegateBase> impl_;
+  scoped_ptr<ConstrainedWebDialogDelegateMac> impl_;
   scoped_ptr<ConstrainedWindowMac> constrained_window_;
   scoped_nsobject<NSWindow> window_;
 
-  DISALLOW_COPY_AND_ASSIGN(ConstrainedWebDialogDelegateMac);
+  DISALLOW_COPY_AND_ASSIGN(ConstrainedWebDialogDelegateViewMac);
 };
 
-ConstrainedWebDialogDelegateMac::ConstrainedWebDialogDelegateMac(
+ConstrainedWebDialogDelegateViewMac::ConstrainedWebDialogDelegateViewMac(
     content::BrowserContext* browser_context,
     WebDialogDelegate* delegate,
     WebDialogWebContentsDelegate* tab_delegate,
     content::WebContents* web_contents)
-    : impl_(new ConstrainedWebDialogDelegateBase(browser_context,
-                                                 delegate,
-                                                 tab_delegate)) {
+    : impl_(new ConstrainedWebDialogDelegateMac(browser_context,
+                                                delegate,
+                                                tab_delegate)) {
   // Create a window to hold web_contents in the constrained sheet:
   gfx::Size size;
   delegate->GetDialogSize(&size);
@@ -84,15 +114,17 @@ ConstrainedWebDialogDelegateMac::ConstrainedWebDialogDelegateMac(
 
   window_.reset(
       [[ConstrainedWindowCustomWindow alloc] initWithContentRect:frame]);
-  [GetWebContents()->GetNativeView() setFrame:frame];
-  [[window_ contentView] addSubview:GetWebContents()->GetNativeView()];
+  [GetWebContents()->GetView()->GetNativeView() setFrame:frame];
+  [[window_ contentView]
+      addSubview:GetWebContents()->GetView()->GetNativeView()];
 
   scoped_nsobject<CustomConstrainedWindowSheet> sheet(
       [[CustomConstrainedWindowSheet alloc]
           initWithCustomWindow:window_]);
   constrained_window_.reset(new ConstrainedWindowMac(
       this, web_contents, sheet));
-  return impl_->set_window(constrained_window_.get());
+
+  impl_->set_window(constrained_window_.get());
 }
 
 ConstrainedWebDialogDelegate* CreateConstrainedWebDialog(
@@ -101,8 +133,8 @@ ConstrainedWebDialogDelegate* CreateConstrainedWebDialog(
         WebDialogWebContentsDelegate* tab_delegate,
         content::WebContents* web_contents) {
   // Deleted when the dialog closes.
-  ConstrainedWebDialogDelegateMac* constrained_delegate =
-      new ConstrainedWebDialogDelegateMac(
+  ConstrainedWebDialogDelegateViewMac* constrained_delegate =
+      new ConstrainedWebDialogDelegateViewMac(
           browser_context, delegate, tab_delegate, web_contents);
   return constrained_delegate;
 }

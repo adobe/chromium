@@ -18,8 +18,8 @@ class DelegatingRendererTest : public ThreadedTest {
   virtual ~DelegatingRendererTest() {}
 
   virtual scoped_ptr<OutputSurface> createOutputSurface() OVERRIDE {
-    scoped_ptr<FakeWebGraphicsContext3D> context3d =
-        FakeWebGraphicsContext3D::Create(
+    scoped_ptr<TestWebGraphicsContext3D> context3d =
+        TestWebGraphicsContext3D::Create(
             WebKit::WebGraphicsContext3D::Attributes());
     context3d_ = context3d.get();
     scoped_ptr<FakeOutputSurface> output_surface =
@@ -30,7 +30,7 @@ class DelegatingRendererTest : public ThreadedTest {
   }
 
  protected:
-  FakeWebGraphicsContext3D* context3d_;
+  TestWebGraphicsContext3D* context3d_;
   FakeOutputSurface* output_surface_;
 };
 
@@ -60,16 +60,17 @@ class DelegatingRendererTestDraw : public DelegatingRendererTest {
     EXPECT_EQ(1u, output_surface_->num_sent_frames());
 
     CompositorFrame& last_frame = output_surface_->last_sent_frame();
+    DelegatedFrameData* last_frame_data = last_frame.delegated_frame_data.get();
     ASSERT_TRUE(last_frame.delegated_frame_data);
     EXPECT_FALSE(last_frame.gl_frame_data);
     EXPECT_EQ(
-        host_impl->deviceViewportSize().ToString(),
-        last_frame.delegated_frame_data->size.ToString());
+        gfx::Rect(host_impl->deviceViewportSize()).ToString(),
+        last_frame_data->render_pass_list.back()->output_rect.ToString());
     EXPECT_EQ(0.5f, last_frame.metadata.min_page_scale_factor);
     EXPECT_EQ(4.f, last_frame.metadata.max_page_scale_factor);
 
     EXPECT_EQ(
-        0u, last_frame.delegated_frame_data->resource_list.resources.size());
+        0u, last_frame.delegated_frame_data->resource_list.size());
     EXPECT_EQ(1u, last_frame.delegated_frame_data->render_pass_list.size());
 
     endTest();
@@ -124,7 +125,7 @@ class DelegatingRendererTestResources : public DelegatingRendererTest {
     // change if AppendOneOfEveryQuadType is updated, and the value here should
     // be updated accordingly.
     EXPECT_EQ(
-        15u, last_frame.delegated_frame_data->resource_list.resources.size());
+        15u, last_frame.delegated_frame_data->resource_list.size());
 
     endTest();
   }

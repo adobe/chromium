@@ -79,7 +79,8 @@ def GetBotStepMap():
   bot_configs = [
       # Main builders
       B('main-builder-dbg',
-        ['bb_compile', 'bb_run_findbugs', 'bb_zip_build'], None, None),
+        ['bb_check_webview_licenses', 'bb_compile', 'bb_run_findbugs',
+         'bb_zip_build'], None, None),
       B('main-builder-rel',
         ['bb_compile', 'bb_zip_build'], None, None),
       B('main-clang-builder', compile_step, None, None),
@@ -90,6 +91,8 @@ def GetBotStepMap():
       B('asan-builder', std_build_steps, None, None),
       B('asan-tests', std_test_steps + ['bb_asan_tests_setup'],
         T(std_tests, ['--asan']), None),
+      B('chromedriver-fyi-tests-dbg', std_test_steps, T(['chromedriver']),
+        None),
       B('fyi-builder-dbg',
         ['bb_check_webview_licenses', 'bb_compile', 'bb_compile_experimental',
          'bb_run_findbugs', 'bb_zip_build'], None, None),
@@ -177,7 +180,6 @@ def main(argv):
   for command_obj in command_objs:
     print 'Will run:', CommandToString(command_obj.command)
 
-  return_code = 0
   for command_obj in command_objs:
     if command_obj.step_name:
       buildbot_report.PrintNamedStep(command_obj.step_name)
@@ -192,8 +194,9 @@ def main(argv):
       env = dict(os.environ)
       env['BUILDBOT_TESTING'] = '1'
 
-    return_code |= subprocess.call(command, cwd=CHROME_SRC, env=env)
-  return return_code
+    return_code = subprocess.call(command, cwd=CHROME_SRC, env=env)
+    if return_code != 0:
+      return return_code
 
 
 if __name__ == '__main__':

@@ -13,6 +13,7 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebString.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebRange.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 
 #if defined(OS_WIN) || defined(OS_MACOSX)
@@ -29,6 +30,17 @@ namespace {
 
 // A simple web page.
 const char kHelloWorldHTML[] = "<body><p>Hello World!</p></body>";
+
+// HTML with 3 pages.
+const char kMultipageHTML[] =
+  "<html><head><style>"
+  ".break { page-break-after: always; }"
+  "</style></head>"
+  "<body>"
+  "<div class='break'>page1</div>"
+  "<div class='break'>page2</div>"
+  "<div>page3</div>"
+  "</body></html>";
 
 // A simple web page with print page size css.
 const char kHTMLWithPageSizeCss[] =
@@ -53,10 +65,6 @@ const char kHTMLWithLandscapePageCss[] =
     "</style></head>"
     "<body>Lorem Ipsum:"
     "</body></html>";
-
-// A simple webpage that prints itself.
-const char kPrintWithJSHTML[] =
-    "<body>Hello<script>window.print()</script>World</body>";
 
 // A simple webpage with a button to print itself with.
 const char kPrintOnUserAction[] =
@@ -87,6 +95,8 @@ void CreatePrintSettingsDictionary(DictionaryValue* dict) {
   dict->SetBoolean(kSettingPreviewModifiable, false);
   dict->SetBoolean(kSettingHeaderFooterEnabled, false);
   dict->SetBoolean(kSettingGenerateDraftData, true);
+  dict->SetBoolean(kSettingShouldPrintBackgrounds, false);
+  dict->SetBoolean(kSettingShouldPrintSelectionOnly, false);
 }
 
 }  // namespace
@@ -94,9 +104,13 @@ void CreatePrintSettingsDictionary(DictionaryValue* dict) {
 class PrintWebViewHelperTestBase : public ChromeRenderViewTest {
  public:
   PrintWebViewHelperTestBase() {}
-  ~PrintWebViewHelperTestBase() {}
+  virtual ~PrintWebViewHelperTestBase() {}
 
  protected:
+  void PrintWithJavaScript() {
+    ExecuteJavaScript("window.print();");
+    ProcessPendingMessages();
+  }
   // The renderer should be done calculating the number of rendered pages
   // according to the specified settings defined in the mock render thread.
   // Verify the page count is correct.
@@ -115,6 +129,20 @@ class PrintWebViewHelperTestBase : public ChromeRenderViewTest {
                                                &post_page_count_param);
     EXPECT_EQ(count, post_page_count_param.b);
 #endif  // defined(OS_CHROMEOS)
+  }
+
+  // The renderer should be done calculating the number of rendered pages
+  // according to the specified settings defined in the mock render thread.
+  // Verify the page count is correct.
+  void VerifyPreviewPageCount(int count) {
+    const IPC::Message* page_cnt_msg =
+        render_thread_->sink().GetUniqueMessageMatching(
+        PrintHostMsg_DidGetPreviewPageCount::ID);
+    ASSERT_TRUE(page_cnt_msg);
+    PrintHostMsg_DidGetPreviewPageCount::Param post_page_count_param;
+    PrintHostMsg_DidGetPreviewPageCount::Read(page_cnt_msg,
+                                              &post_page_count_param);
+    EXPECT_EQ(count, post_page_count_param.a.page_count);
   }
 
   // Verifies whether the pages printed or not.
@@ -136,15 +164,21 @@ class PrintWebViewHelperTestBase : public ChromeRenderViewTest {
     }
 #endif  // defined(OS_CHROMEOS)
   }
+  void OnPrintPages() {
+    PrintWebViewHelper::Get(view_)->OnPrintPages();
+    ProcessPendingMessages();
+  }
 
   void OnPrintPreview(const DictionaryValue& dict) {
     PrintWebViewHelper* print_web_view_helper = PrintWebViewHelper::Get(view_);
-    print_web_view_helper->OnInitiatePrintPreview();
+    print_web_view_helper->OnInitiatePrintPreview(false);
     print_web_view_helper->OnPrintPreview(dict);
+    ProcessPendingMessages();
   }
 
   void OnPrintForPrintPreview(const DictionaryValue& dict) {
     PrintWebViewHelper::Get(view_)->OnPrintForPrintPreview(dict);
+    ProcessPendingMessages();
   }
 
   DISALLOW_COPY_AND_ASSIGN(PrintWebViewHelperTestBase);
@@ -167,7 +201,7 @@ class PrintWebViewHelperTest : public PrintWebViewHelperTestBase {
 // that channel all works.
 TEST_F(PrintWebViewHelperTest, OnPrintPages) {
   LoadHTML(kHelloWorldHTML);
-  PrintWebViewHelper::Get(view_)->OnPrintPages();
+  OnPrintPages();
 
   VerifyPageCount(1);
   VerifyPagesPrinted(true);
@@ -175,8 +209,7 @@ TEST_F(PrintWebViewHelperTest, OnPrintPages) {
 
 // Duplicate of OnPrintPagesTest only using javascript to print.
 TEST_F(PrintWebViewHelperTest, PrintWithJavascript) {
-  // HTML contains a call to window.print()
-  LoadHTML(kPrintWithJSHTML);
+  PrintWithJavaScript();
 
   VerifyPageCount(1);
   VerifyPagesPrinted(true);
@@ -188,20 +221,20 @@ TEST_F(PrintWebViewHelperTest, BlockScriptInitiatedPrinting) {
   // Pretend user will cancel printing.
   chrome_render_thread_->set_print_dialog_user_response(false);
   // Try to print with window.print() a few times.
-  LoadHTML(kPrintWithJSHTML);
-  LoadHTML(kPrintWithJSHTML);
-  LoadHTML(kPrintWithJSHTML);
+  PrintWithJavaScript();
+  PrintWithJavaScript();
+  PrintWithJavaScript();
   VerifyPagesPrinted(false);
 
   // Pretend user will print. (but printing is blocked.)
   chrome_render_thread_->set_print_dialog_user_response(true);
-  LoadHTML(kPrintWithJSHTML);
+  PrintWithJavaScript();
   VerifyPagesPrinted(false);
 
   // Unblock script initiated printing and verify printing works.
   PrintWebViewHelper::Get(view_)->ResetScriptedPrintCount();
   chrome_render_thread_->printer()->ResetPrinter();
-  LoadHTML(kPrintWithJSHTML);
+  PrintWithJavaScript();
   VerifyPageCount(1);
   VerifyPagesPrinted(true);
 }
@@ -212,14 +245,14 @@ TEST_F(PrintWebViewHelperTest, AllowUserOriginatedPrinting) {
   // Pretend user will cancel printing.
   chrome_render_thread_->set_print_dialog_user_response(false);
   // Try to print with window.print() a few times.
-  LoadHTML(kPrintWithJSHTML);
-  LoadHTML(kPrintWithJSHTML);
-  LoadHTML(kPrintWithJSHTML);
+  PrintWithJavaScript();
+  PrintWithJavaScript();
+  PrintWithJavaScript();
   VerifyPagesPrinted(false);
 
   // Pretend user will print. (but printing is blocked.)
   chrome_render_thread_->set_print_dialog_user_response(true);
-  LoadHTML(kPrintWithJSHTML);
+  PrintWithJavaScript();
   VerifyPagesPrinted(false);
 
   // Try again as if user initiated, without resetting the print count.
@@ -239,6 +272,7 @@ TEST_F(PrintWebViewHelperTest, AllowUserOriginatedPrinting) {
   SendWebMouseEvent(mouse_event);
   mouse_event.type = WebKit::WebInputEvent::MouseUp;
   SendWebMouseEvent(mouse_event);
+  ProcessPendingMessages();
 
   VerifyPageCount(1);
   VerifyPagesPrinted(true);
@@ -247,11 +281,11 @@ TEST_F(PrintWebViewHelperTest, AllowUserOriginatedPrinting) {
 TEST_F(PrintWebViewHelperTest, BlockScriptInitiatedPrintingFromPopup) {
   PrintWebViewHelper* print_web_view_helper = PrintWebViewHelper::Get(view_);
   print_web_view_helper->SetScriptedPrintBlocked(true);
-  LoadHTML(kPrintWithJSHTML);
+  PrintWithJavaScript();
   VerifyPagesPrinted(false);
 
   print_web_view_helper->SetScriptedPrintBlocked(false);
-  LoadHTML(kPrintWithJSHTML);
+  PrintWithJavaScript();
   VerifyPageCount(1);
   VerifyPagesPrinted(true);
 }
@@ -283,7 +317,8 @@ TEST_F(PrintWebViewHelperTest, PrintWithIframe) {
             view_->GetWebView()->mainFrame());
 
   // Initiate printing.
-  PrintWebViewHelper::Get(view_)->OnPrintPages();
+  OnPrintPages();
+  VerifyPagesPrinted(true);
 
   // Verify output through MockPrinter.
   const MockPrinter* printer(chrome_render_thread_->printer());
@@ -347,7 +382,8 @@ TEST_F(PrintWebViewHelperTest, PrintLayoutTest) {
   for (size_t i = 0; i < arraysize(kTestPages); ++i) {
     // Load an HTML page and print it.
     LoadHTML(kTestPages[i].page);
-    PrintWebViewHelper::Get(view_)->OnPrintPages();
+    OnPrintPages();
+    VerifyPagesPrinted(true);
 
     // MockRenderThread::Send() just calls MockRenderThread::OnReceived().
     // So, all IPC messages sent in the above RenderView::OnPrintPages() call
@@ -381,11 +417,11 @@ TEST_F(PrintWebViewHelperTest, PrintLayoutTest) {
     if (baseline) {
       // Save the source data and the bitmap data into temporary files to
       // create base-line results.
-      FilePath source_path;
+      base::FilePath source_path;
       file_util::CreateTemporaryFile(&source_path);
       chrome_render_thread_->printer()->SaveSource(0, source_path);
 
-      FilePath bitmap_path;
+      base::FilePath bitmap_path;
       file_util::CreateTemporaryFile(&bitmap_path);
       chrome_render_thread_->printer()->SaveBitmap(0, bitmap_path);
     }
@@ -705,7 +741,7 @@ TEST_F(PrintWebViewHelperPreviewTest, PrintToPDFSelectedHonorOrientationCss) {
 // Test to verify that complete metafile is generated for a subset of pages
 // without creating draft pages.
 TEST_F(PrintWebViewHelperPreviewTest, OnPrintPreviewForSelectedPages) {
-  LoadHTML(kHelloWorldHTML);
+  LoadHTML(kMultipageHTML);
 
   // Fill in some dummy values.
   DictionaryValue dict;
@@ -715,8 +751,8 @@ TEST_F(PrintWebViewHelperPreviewTest, OnPrintPreviewForSelectedPages) {
   // metafile with the selected pages. Page numbers used in the dictionary
   // are 1-based.
   DictionaryValue* page_range = new DictionaryValue();
-  page_range->SetInteger(kSettingPageRangeFrom, 1);
-  page_range->SetInteger(kSettingPageRangeTo, 1);
+  page_range->SetInteger(kSettingPageRangeFrom, 2);
+  page_range->SetInteger(kSettingPageRangeTo, 3);
 
   ListValue* page_range_array = new ListValue();
   page_range_array->Append(page_range);
@@ -726,9 +762,30 @@ TEST_F(PrintWebViewHelperPreviewTest, OnPrintPreviewForSelectedPages) {
 
   OnPrintPreview(dict);
 
-  // Verify that we did not create the draft metafile for the first page.
   VerifyDidPreviewPage(false, 0);
+  VerifyDidPreviewPage(false, 1);
+  VerifyDidPreviewPage(false, 2);
+  VerifyPreviewPageCount(3);
+  VerifyPrintPreviewCancelled(false);
+  VerifyPrintPreviewFailed(false);
+  VerifyPrintPreviewGenerated(true);
+  VerifyPagesPrinted(false);
+}
 
+// Test to verify that preview generated only for one page.
+TEST_F(PrintWebViewHelperPreviewTest, OnPrintPreviewForSelectedText) {
+  LoadHTML(kMultipageHTML);
+  GetMainFrame()->selectRange(
+      WebKit::WebRange::fromDocumentRange(GetMainFrame(), 1, 3));
+
+  // Fill in some dummy values.
+  DictionaryValue dict;
+  CreatePrintSettingsDictionary(&dict);
+  dict.SetBoolean(kSettingShouldPrintSelectionOnly, true);
+
+  OnPrintPreview(dict);
+
+  VerifyPreviewPageCount(1);
   VerifyPrintPreviewCancelled(false);
   VerifyPrintPreviewFailed(false);
   VerifyPrintPreviewGenerated(true);
@@ -902,17 +959,17 @@ TEST_F(PrintWebViewHelperKioskTest, DontBlockScriptInitiatedPrinting) {
   // Pretend user will cancel printing.
   chrome_render_thread_->set_print_dialog_user_response(false);
   // Try to print with window.print() a few times.
-  LoadHTML(kPrintWithJSHTML);
+  PrintWithJavaScript();
   chrome_render_thread_->printer()->ResetPrinter();
-  LoadHTML(kPrintWithJSHTML);
+  PrintWithJavaScript();
   chrome_render_thread_->printer()->ResetPrinter();
-  LoadHTML(kPrintWithJSHTML);
+  PrintWithJavaScript();
   chrome_render_thread_->printer()->ResetPrinter();
   VerifyPagesPrinted(false);
 
   // Pretend user will print, should not be throttled.
   chrome_render_thread_->set_print_dialog_user_response(true);
-  LoadHTML(kPrintWithJSHTML);
+  PrintWithJavaScript();
   VerifyPagesPrinted(true);
 }
 

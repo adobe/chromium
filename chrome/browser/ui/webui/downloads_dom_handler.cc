@@ -31,14 +31,15 @@
 #include "chrome/browser/download/download_util.h"
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/webui/chrome_url_data_manager.h"
 #include "chrome/browser/ui/webui/fileicon_source.h"
 #include "chrome/common/time_format.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/download_item.h"
 #include "content/public/browser/user_metrics.h"
+#include "content/public/browser/url_data_source.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_view.h"
 #include "content/public/browser/web_ui.h"
 #include "grit/generated_resources.h"
 #include "net/base/net_util.h"
@@ -94,6 +95,8 @@ const char* GetDangerTypeString(content::DownloadDangerType danger_type) {
       return "DANGEROUS_CONTENT";
     case content::DOWNLOAD_DANGER_TYPE_UNCOMMON_CONTENT:
       return "UNCOMMON_CONTENT";
+    case content::DOWNLOAD_DANGER_TYPE_DANGEROUS_HOST:
+      return "DANGEROUS_HOST";
     default:
       // Don't return a danger type string if it is NOT_DANGEROUS or
       // MAYBE_DANGEROUS_CONTENT.
@@ -123,7 +126,7 @@ DictionaryValue* CreateDownloadItemValue(
       "date_string", base::TimeFormatShortDate(download_item->GetStartTime()));
   file_value->SetInteger("id", download_item->GetId());
 
-  FilePath download_path(download_item->GetTargetFilePath());
+  base::FilePath download_path(download_item->GetTargetFilePath());
   file_value->Set("file_path", base::CreateFilePathValue(download_path));
   file_value->SetString("file_url",
                         net::FilePathToFileURL(download_path).spec());
@@ -151,7 +154,9 @@ DictionaryValue* CreateDownloadItemValue(
              download_item->GetDangerType() ==
                  content::DOWNLOAD_DANGER_TYPE_DANGEROUS_CONTENT ||
              download_item->GetDangerType() ==
-                 content::DOWNLOAD_DANGER_TYPE_UNCOMMON_CONTENT);
+                 content::DOWNLOAD_DANGER_TYPE_UNCOMMON_CONTENT ||
+             download_item->GetDangerType() ==
+                 content::DOWNLOAD_DANGER_TYPE_DANGEROUS_HOST);
       const char* danger_type_value =
           GetDangerTypeString(download_item->GetDangerType());
       file_value->SetString("danger_type", danger_type_value);
@@ -209,7 +214,7 @@ DownloadsDOMHandler::DownloadsDOMHandler(content::DownloadManager* dlm)
       ALLOW_THIS_IN_INITIALIZER_LIST(weak_ptr_factory_(this)) {
   // Create our fileicon data source.
   Profile* profile = Profile::FromBrowserContext(dlm->GetBrowserContext());
-  ChromeURLDataManager::AddDataSource(profile, new FileIconSource());
+  content::URLDataSource::Add(profile, new FileIconSource());
 
   if (profile->IsOffTheRecord()) {
     original_notifier_.reset(new AllDownloadItemNotifier(
@@ -340,7 +345,7 @@ void DownloadsDOMHandler::HandleDrag(const base::ListValue* args) {
     return;
   gfx::Image* icon = g_browser_process->icon_manager()->LookupIcon(
       file->GetTargetFilePath(), IconLoader::NORMAL);
-  gfx::NativeView view = web_contents->GetNativeView();
+  gfx::NativeView view = web_contents->GetView()->GetNativeView();
   {
     // Enable nested tasks during DnD, while |DragDownload()| blocks.
     MessageLoop::ScopedNestableTaskAllower allow(MessageLoop::current());

@@ -39,7 +39,8 @@
 #include <string>
 
 #include "base/basictypes.h"
-#include "base/file_util.h"
+#include "base/files/file_path.h"
+#include "base/files/memory_mapped_file.h"
 #include "base/message_loop.h"
 #include "net/base/stream_listen_socket.h"
 
@@ -203,7 +204,7 @@ class ResponseForPath : public Response {
   }
 
  protected:
-   std::string request_path_;
+  std::string request_path_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(ResponseForPath);
@@ -241,7 +242,7 @@ class SimpleResponse : public ResponseForPath {
 // contents of the file and performs registry lookups.
 class FileResponse : public ResponseForPath {
  public:
-  FileResponse(const char* request_path, const FilePath& file_path)
+  FileResponse(const char* request_path, const base::FilePath& file_path)
       : ResponseForPath(request_path), file_path_(file_path) {
   }
 
@@ -250,8 +251,8 @@ class FileResponse : public ResponseForPath {
   virtual size_t ContentLength() const;
 
  protected:
-  FilePath file_path_;
-  mutable scoped_ptr<file_util::MemoryMappedFile> file_;
+  base::FilePath file_path_;
+  mutable scoped_ptr<base::MemoryMappedFile> file_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(FileResponse);
@@ -398,7 +399,8 @@ class ConfigurableConnection : public base::RefCounted<ConfigurableConnection> {
 // instance to send the response.
 class HTTPTestServer : public net::StreamListenSocket::Delegate {
  public:
-  HTTPTestServer(int port, const std::wstring& address, FilePath root_dir);
+  HTTPTestServer(int port, const std::wstring& address,
+                 base::FilePath root_dir);
   virtual ~HTTPTestServer();
 
   // HTTP GET request is received. Override in derived classes.
@@ -414,12 +416,12 @@ class HTTPTestServer : public net::StreamListenSocket::Delegate {
   // Return the appropriate url with the specified path for this server.
   std::wstring Resolve(const std::wstring& path);
 
-  FilePath root_dir() { return root_dir_; }
+  base::FilePath root_dir() { return root_dir_; }
 
  protected:
   int port_;
   std::wstring address_;
-  FilePath root_dir_;
+  base::FilePath root_dir_;
 
  private:
   typedef std::list<scoped_refptr<ConfigurableConnection> > ConnectionList;

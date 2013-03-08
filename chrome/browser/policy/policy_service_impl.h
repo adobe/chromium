@@ -38,10 +38,12 @@ class PolicyServiceImpl : public PolicyService,
                            PolicyService::Observer* observer) OVERRIDE;
   virtual void RemoveObserver(PolicyDomain domain,
                               PolicyService::Observer* observer) OVERRIDE;
-  virtual const PolicyMap& GetPolicies(
+  virtual void RegisterPolicyDomain(
       PolicyDomain domain,
-      const std::string& component_id) const OVERRIDE;
-  virtual bool IsInitializationComplete() const OVERRIDE;
+      const std::set<std::string>& components) OVERRIDE;
+  virtual const PolicyMap& GetPolicies(
+      const PolicyNamespace& ns) const OVERRIDE;
+  virtual bool IsInitializationComplete(PolicyDomain domain) const OVERRIDE;
   virtual void RefreshPolicies(const base::Closure& callback) OVERRIDE;
 
  private:
@@ -51,11 +53,12 @@ class PolicyServiceImpl : public PolicyService,
   // Information about policy changes sent to observers.
   class PolicyChangeInfo {
    public:
-    PolicyChangeInfo(const PolicyBundle::PolicyNamespace& policy_namespace,
-                     const PolicyMap& previous, const PolicyMap& current);
+    PolicyChangeInfo(const PolicyNamespace& policy_namespace,
+                     const PolicyMap& previous,
+                     const PolicyMap& current);
     ~PolicyChangeInfo();
 
-    PolicyBundle::PolicyNamespace policy_namespace_;
+    PolicyNamespace policy_namespace_;
     PolicyMap previous_;
     PolicyMap current_;
   };
@@ -65,7 +68,7 @@ class PolicyServiceImpl : public PolicyService,
 
   // Posts a task to notify observers of |ns| that its policies have changed,
   // passing along the |previous| and the |current| policies.
-  void NotifyNamespaceUpdated(const PolicyBundle::PolicyNamespace& ns,
+  void NotifyNamespaceUpdated(const PolicyNamespace& ns,
                               const PolicyMap& previous,
                               const PolicyMap& current);
 
@@ -94,8 +97,8 @@ class PolicyServiceImpl : public PolicyService,
   // Maps each policy domain to its observer list.
   ObserverMap observers_;
 
-  // True if all the providers are initialized.
-  bool initialization_complete_;
+  // True if all the providers are initialized for the indexed policy domain.
+  bool initialization_complete_[POLICY_DOMAIN_SIZE];
 
   // Set of providers that have a pending update that was triggered by a
   // call to RefreshPolicies().

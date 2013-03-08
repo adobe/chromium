@@ -5,6 +5,7 @@
 #include "chrome/browser/first_run/first_run.h"
 
 #include "base/path_service.h"
+#include "base/prefs/pref_service.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/first_run/first_run_internal.h"
@@ -12,7 +13,6 @@
 #include "chrome/browser/importer/importer_list.h"
 #include "chrome/browser/importer/importer_progress_dialog.h"
 #include "chrome/browser/importer/importer_progress_observer.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
@@ -77,8 +77,8 @@ void DoPostImportPlatformSpecificTasks() {
 #endif
 }
 
-bool GetFirstRunSentinelFilePath(FilePath* path) {
-  FilePath first_run_sentinel;
+bool GetFirstRunSentinelFilePath(base::FilePath* path) {
+  base::FilePath first_run_sentinel;
 
   if (!PathService::Get(chrome::DIR_USER_DATA, &first_run_sentinel))
     return false;
@@ -95,8 +95,10 @@ bool ImportSettings(Profile* profile,
       importer_list->GetSourceProfileAt(0);
 
   // Ensure that importers aren't requested to import items that they do not
-  // support.
+  // support. If there is no overlap, skip.
   items_to_import &= source_profile.services_supported;
+  if (items_to_import == 0)
+    return true;
 
   scoped_ptr<ImportEndedObserver> observer(new ImportEndedObserver);
   importer_host->SetObserver(observer.get());
@@ -124,7 +126,7 @@ void SetImportPreferencesAndLaunchImport(
       &import_bookmarks_path);
   if (!import_bookmarks_path.empty()) {
     // There are bookmarks to import from a file.
-    FilePath path = FilePath::FromWStringHack(UTF8ToWide(
+    base::FilePath path = base::FilePath::FromWStringHack(UTF8ToWide(
         import_bookmarks_path));
     if (!ImportBookmarks(path)) {
       LOG(WARNING) << "silent bookmark import failed";

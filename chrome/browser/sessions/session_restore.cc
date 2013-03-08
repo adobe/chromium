@@ -526,6 +526,8 @@ class SessionRestoreImpl : public content::NotificationObserver {
     g_browser_process->AddRefModule();
   }
 
+  bool synchronous() const { return synchronous_; }
+
   Browser* Restore() {
     SessionService* session_service =
         SessionServiceFactory::GetForProfile(profile_);
@@ -541,6 +543,10 @@ class SessionRestoreImpl : public content::NotificationObserver {
       }
       Browser* browser = ProcessSessionWindows(&windows_, active_window_id_);
       delete this;
+      content::NotificationService::current()->Notify(
+          chrome::NOTIFICATION_SESSION_RESTORE_DONE,
+          content::NotificationService::AllSources(),
+          content::NotificationService::NoDetails());
       return browser;
     }
 
@@ -643,7 +649,7 @@ class SessionRestoreImpl : public content::NotificationObserver {
     DCHECK(synchronous_);
   }
 
-  ~SessionRestoreImpl() {
+  virtual ~SessionRestoreImpl() {
     STLDeleteElements(&windows_);
 
     active_session_restorers->erase(this);
@@ -657,7 +663,7 @@ class SessionRestoreImpl : public content::NotificationObserver {
 
   virtual void Observe(int type,
                        const content::NotificationSource& source,
-                       const content::NotificationDetails& details) {
+                       const content::NotificationDetails& details) OVERRIDE {
     switch (type) {
       case chrome::NOTIFICATION_BROWSER_CLOSED:
         delete this;
@@ -1005,9 +1011,9 @@ class SessionRestoreImpl : public content::NotificationObserver {
         base::PLATFORM_FILE_ASYNC;
     const std::string& state =
         tab.navigations.at(selected_index).content_state();
-    const std::vector<FilePath>& file_paths =
+    const std::vector<base::FilePath>& file_paths =
         webkit_glue::FilePathsFromHistoryState(state);
-    for (std::vector<FilePath>::const_iterator file = file_paths.begin();
+    for (std::vector<base::FilePath>::const_iterator file = file_paths.begin();
          file != file_paths.end(); ++file) {
       content::ChildProcessSecurityPolicy::GetInstance()->
           GrantPermissionsForFile(id, *file, read_file_permissions);
@@ -1210,6 +1216,19 @@ bool SessionRestore::IsRestoring(const Profile* profile) {
            active_session_restorers->begin();
        it != active_session_restorers->end(); ++it) {
     if ((*it)->profile() == profile)
+      return true;
+  }
+  return false;
+}
+
+// static
+bool SessionRestore::IsRestoringSynchronously() {
+  if (!active_session_restorers)
+    return false;
+  for (std::set<SessionRestoreImpl*>::const_iterator it =
+           active_session_restorers->begin();
+       it != active_session_restorers->end(); ++it) {
+    if ((*it)->synchronous())
       return true;
   }
   return false;

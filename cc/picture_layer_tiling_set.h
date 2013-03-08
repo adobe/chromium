@@ -22,15 +22,14 @@ class CC_EXPORT PictureLayerTilingSet {
   // Shallow copies all data (except client and bounds from other).
   void CloneAll(
      const PictureLayerTilingSet& other,
-     const Region& invalidation);
+     const Region& invalidation,
+     float minimum_contents_scale);
   void Clone(const PictureLayerTiling* tiling, const Region& invalidation);
 
   void SetLayerBounds(gfx::Size layer_bounds);
   gfx::Size LayerBounds() const;
 
-  PictureLayerTiling* AddTiling(
-      float contents_scale,
-      gfx::Size tile_size);
+  PictureLayerTiling* AddTiling(float contents_scale);
   size_t num_tilings() const { return tilings_.size(); }
   PictureLayerTiling* tiling_at(size_t idx) { return tilings_[idx]; }
   const PictureLayerTiling* tiling_at(size_t idx) const {
@@ -46,14 +45,22 @@ class CC_EXPORT PictureLayerTilingSet {
   // Remove all tiles; keep all tilings.
   void RemoveAllTiles();
 
+  // For all tilings, create any tile that intersects |layer_rect|.
+  void CreateTilesFromLayerRect(gfx::Rect layer_rect);
+
   void UpdateTilePriorities(
       WhichTree tree,
-      const gfx::Size& device_viewport,
-      float layer_content_scale_x,
-      float layer_content_scale_y,
+      gfx::Size device_viewport,
+      gfx::Rect viewport_in_content_space,
+      gfx::Size last_layer_bounds,
+      gfx::Size current_layer_bounds,
+      float last_layer_contents_scale,
+      float current_layer_contents_scale,
       const gfx::Transform& last_screen_transform,
       const gfx::Transform& current_screen_transform,
-      double time_delta);
+      int current_source_frame_number,
+      double current_frame_time,
+      bool store_screen_space_quads_on_tiles);
 
   void DidBecomeActive();
 
@@ -64,11 +71,11 @@ class CC_EXPORT PictureLayerTilingSet {
   // exactly fill rect with no overlap.
   class CC_EXPORT Iterator {
    public:
-    Iterator(
-      const PictureLayerTilingSet* set,
+    Iterator(const PictureLayerTilingSet* set,
       float contents_scale,
       gfx::Rect content_rect,
-      float ideal_contents_scale);
+      float ideal_contents_scale,
+      PictureLayerTiling::LayerDeviceAlignment layerDeviceAlignment);
     ~Iterator();
 
     // Visible rect (no borders), always in the space of rect,
@@ -93,6 +100,7 @@ class CC_EXPORT PictureLayerTilingSet {
     const PictureLayerTilingSet* set_;
     float contents_scale_;
     float ideal_contents_scale_;
+    PictureLayerTiling::LayerDeviceAlignment layer_device_alignment_;
     PictureLayerTiling::Iterator tiling_iter_;
     int current_tiling_;
     int ideal_tiling_;
@@ -101,6 +109,8 @@ class CC_EXPORT PictureLayerTilingSet {
     Region missing_region_;
     Region::Iterator region_iter_;
   };
+
+  scoped_ptr<base::Value> AsValue() const;
 
  private:
   PictureLayerTilingClient* client_;

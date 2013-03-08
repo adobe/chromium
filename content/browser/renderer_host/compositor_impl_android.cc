@@ -11,7 +11,7 @@
 #include "base/command_line.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
-#include "cc/font_atlas.h"
+#include "cc/context_provider.h"
 #include "cc/input_handler.h"
 #include "cc/layer.h"
 #include "cc/layer_tree_host.h"
@@ -19,6 +19,7 @@
 #include "cc/thread_impl.h"
 #include "content/browser/gpu/browser_gpu_channel_host_factory.h"
 #include "content/browser/gpu/gpu_surface_tracker.h"
+#include "content/browser/renderer_host/android_compositor_switches.h"
 #include "content/browser/renderer_host/image_transport_factory_android.h"
 #include "content/common/gpu/client/gl_helper.h"
 #include "content/common/gpu/client/gpu_channel_host.h"
@@ -38,48 +39,20 @@ class JavaBitmap;
 
 namespace {
 
+// Used for drawing directly to the screen. Bypasses resizing and swaps.
+class DirectOutputSurface : public cc::OutputSurface {
+ public:
+  DirectOutputSurface(scoped_ptr<WebKit::WebGraphicsContext3D> context3d)
+      : cc::OutputSurface(context3d.Pass()) {}
+
+  virtual void Reshape(gfx::Size size) OVERRIDE {}
+  virtual void PostSubBuffer(gfx::Rect rect) OVERRIDE {}
+  virtual void SwapBuffers() OVERRIDE {}
+};
+
 static bool g_initialized = false;
 static webkit_glue::WebThreadImpl* g_impl_thread = NULL;
 static bool g_use_direct_gl = false;
-
-// Adapts a pure WebGraphicsContext3D into a cc::OutputSurface.
-class WebGraphicsContextToOutputSurfaceAdapter : public cc::OutputSurface {
- public:
-  explicit WebGraphicsContextToOutputSurfaceAdapter(
-      WebKit::WebGraphicsContext3D* context)
-      : context3d_(context),
-        client_(0) {
-  }
-
-  virtual bool BindToClient(cc::OutputSurfaceClient* client) OVERRIDE {
-    DCHECK(client);
-    if (!context3d_->makeContextCurrent())
-      return false;
-    client_ = client;
-    return true;
-  }
-
-  virtual const struct Capabilities& Capabilities() const OVERRIDE {
-    return capabilities_;
-  }
-
-  virtual WebKit::WebGraphicsContext3D* Context3D() const OVERRIDE {
-    return context3d_.get();
-  }
-
-  virtual cc::SoftwareOutputDevice* SoftwareDevice() const OVERRIDE {
-    return NULL;
-  }
-
-  virtual void SendFrameToParentCompositor(
-      cc::CompositorFrame*) OVERRIDE {
-  }
-
- private:
-  scoped_ptr<WebKit::WebGraphicsContext3D> context3d_;
-  struct Capabilities capabilities_;
-  cc::OutputSurfaceClient* client_;
-};
 
 } // anonymous namespace
 
@@ -161,7 +134,7 @@ void CompositorImpl::SetWindowSurface(ANativeWindow* window) {
     surface_id_ = tracker->AddSurfaceForNativeWidget(window);
     tracker->SetSurfaceHandle(
         surface_id_,
-        gfx::GLSurfaceHandle(gfx::kDummyPluginWindow, false));
+        gfx::GLSurfaceHandle(gfx::kNullPluginWindow, gfx::NATIVE_DIRECT));
     SetVisible(true);
   }
 }
@@ -174,7 +147,16 @@ void CompositorImpl::SetVisible(bool visible) {
     settings.refreshRate = 60.0;
     settings.implSidePainting = false;
     settings.calculateTopControlsPosition = false;
-    settings.topControlsHeightPx = 0;
+    settings.topControlsHeight = 0.f;
+    settings.useMemoryManagement = false;
+
+    CommandLine* command_line = CommandLine::ForCurrentProcess();
+    settings.initialDebugState.showFPSCounter =
+        command_line->HasSwitch(switches::kAndroidUIShowFPSCounter);
+    settings.initialDebugState.showPlatformLayerTree =
+        command_line->HasSwitch(switches::kAndroidUIShowLayerTree);
+    settings.initialDebugState.showDebugBorders =
+        command_line->HasSwitch(switches::kAndroidUIShowLayerBorders);
 
     // Do not clear the framebuffer when rendering into external GL contexts
     // like Android View System's.
@@ -194,6 +176,10 @@ void CompositorImpl::SetVisible(bool visible) {
     host_->setViewportSize(size_, size_);
     host_->setHasTransparentBackground(has_transparent_background_);
   }
+}
+
+void CompositorImpl::setDeviceScaleFactor(float factor) {
+  host_->setDeviceScaleFactor(factor);
 }
 
 void CompositorImpl::SetWindowBounds(const gfx::Size& size) {
@@ -309,13 +295,20 @@ scoped_ptr<cc::OutputSurface> CompositorImpl::createOutputSurface() {
     WebKit::WebGraphicsContext3D::Attributes attrs;
     attrs.shareResources = false;
     attrs.noAutomaticFlushes = true;
-    scoped_ptr<webkit::gpu::WebGraphicsContext3DInProcessImpl> context(
+    scoped_ptr<WebKit::WebGraphicsContext3D> context(
         webkit::gpu::WebGraphicsContext3DInProcessImpl::CreateForWindow(
             attrs,
             window_,
             NULL));
-    return scoped_ptr<cc::OutputSurface>(
-        new WebGraphicsContextToOutputSurfaceAdapter(context.release()));
+            
+    ImageTransportFactoryAndroid::GetInstance()->SetContext3D(context.get());
+
+    if (!window_) {
+      return scoped_ptr<cc::OutputSurface>(
+          new DirectOutputSurface(context.Pass()));
+    }
+
+    return make_scoped_ptr(new cc::OutputSurface(context.Pass()));
   } else {
     DCHECK(window_ && surface_id_);
     WebKit::WebGraphicsContext3D::Attributes attrs;
@@ -335,8 +328,8 @@ scoped_ptr<cc::OutputSurface> CompositorImpl::createOutputSurface() {
       LOG(ERROR) << "Failed to create 3D context for compositor.";
       return scoped_ptr<cc::OutputSurface>();
     }
-    return scoped_ptr<cc::OutputSurface>(
-        new WebGraphicsContextToOutputSurfaceAdapter(context.release()));
+    return make_scoped_ptr(new cc::OutputSurface(
+        context.PassAs<WebKit::WebGraphicsContext3D>()));
   }
 }
 
@@ -361,8 +354,38 @@ void CompositorImpl::scheduleComposite() {
   client_->ScheduleComposite();
 }
 
-scoped_ptr<cc::FontAtlas> CompositorImpl::createFontAtlas() {
-  return scoped_ptr<cc::FontAtlas>();
+class NullContextProvider : public cc::ContextProvider {
+  virtual bool InitializeOnMainThread() OVERRIDE { return false; }
+  virtual bool BindToCurrentThread() OVERRIDE { return false; }
+  virtual WebKit::WebGraphicsContext3D* Context3d() OVERRIDE { return NULL; }
+  virtual class GrContext* GrContext() OVERRIDE { return NULL; }
+  virtual void VerifyContexts() OVERRIDE {}
+  virtual bool DestroyedOnMainThread() OVERRIDE { return false; }
+
+ protected:
+  virtual ~NullContextProvider() {}
+};
+
+scoped_refptr<cc::ContextProvider>
+CompositorImpl::OffscreenContextProviderForMainThread() {
+  // There is no support for offscreen contexts, or compositor filters that
+  // would require them in this compositor instance. If they are needed,
+  // then implement a context provider that provides contexts from
+  // ImageTransportSurfaceAndroid.
+  if (!null_offscreen_context_provider_)
+    null_offscreen_context_provider_ = new NullContextProvider();
+  return null_offscreen_context_provider_;
+}
+
+scoped_refptr<cc::ContextProvider>
+CompositorImpl::OffscreenContextProviderForCompositorThread() {
+  // There is no support for offscreen contexts, or compositor filters that
+  // would require them in this compositor instance. If they are needed,
+  // then implement a context provider that provides contexts from
+  // ImageTransportSurfaceAndroid.
+  if (!null_offscreen_context_provider_)
+    null_offscreen_context_provider_ = new NullContextProvider();
+  return null_offscreen_context_provider_;
 }
 
 void CompositorImpl::OnViewContextSwapBuffersPosted() {

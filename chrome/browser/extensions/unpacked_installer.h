@@ -8,7 +8,7 @@
 #include <string>
 #include <vector>
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
@@ -35,12 +35,14 @@ class UnpackedInstaller
   // the top directory of a specific extension where its manifest file lives.
   // Errors are reported through ExtensionErrorReporter. On success,
   // ExtensionService::AddExtension() is called.
-  void Load(const FilePath& extension_path);
+  void Load(const base::FilePath& extension_path);
 
   // Loads the extension from the directory |extension_path|;
   // for use with command line switch --load-extension=path.
-  // This is equivalent to Load, except that it runs synchronously.
-  void LoadFromCommandLine(const FilePath& extension_path);
+  // This is equivalent to Load, except that it runs synchronously and
+  // optionally launches the extension once it's loaded.
+  void LoadFromCommandLine(const base::FilePath& extension_path,
+                           bool launch_on_load);
 
   // Allows prompting for plugins to be disabled; intended for testing only.
   bool prompt_for_plugins() { return prompt_for_plugins_; }
@@ -94,7 +96,7 @@ class UnpackedInstaller
 
   // The pathname of the directory to load from, which is an absolute path
   // after GetAbsolutePath has been called.
-  FilePath extension_path_;
+  base::FilePath extension_path_;
 
   // If true and the extension contains plugins, we prompt the user before
   // loading.
@@ -107,6 +109,9 @@ class UnpackedInstaller
   // Whether to require the extension installed to have a modern manifest
   // version.
   bool require_modern_manifest_version_;
+
+  // Whether to launch the extension once it's loaded.
+  bool launch_on_load_;
 
   DISALLOW_COPY_AND_ASSIGN(UnpackedInstaller);
 };

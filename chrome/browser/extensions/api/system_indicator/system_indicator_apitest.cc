@@ -16,18 +16,18 @@
 
 class SystemIndicatorApiTest : public ExtensionApiTest {
  public:
-  void SetUpCommandLine(CommandLine* command_line) {
+  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
     ExtensionApiTest::SetUpCommandLine(command_line);
     // Set shorter delays to prevent test timeouts in tests that need to wait
     // for the event page to unload.
     command_line->AppendSwitchASCII(switches::kEventPageIdleTime, "1");
-    command_line->AppendSwitchASCII(switches::kEventPageUnloadingTime, "1");
+    command_line->AppendSwitchASCII(switches::kEventPageSuspendingTime, "1");
   }
 
   const extensions::Extension* LoadExtensionAndWait(
       const std::string& test_name) {
     LazyBackgroundObserver page_complete;
-    FilePath extdir = test_data_dir_.AppendASCII(test_name);
+    base::FilePath extdir = test_data_dir_.AppendASCII(test_name);
     const extensions::Extension* extension = LoadExtension(extdir);
     if (extension)
       page_complete.Wait();

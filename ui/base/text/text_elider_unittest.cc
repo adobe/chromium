@@ -6,7 +6,7 @@
 
 #include "ui/base/text/text_elider.h"
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/i18n/rtl.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/string_util.h"
@@ -25,7 +25,7 @@ struct Testcase {
 };
 
 struct FileTestcase {
-  const FilePath::StringType input;
+  const base::FilePath::StringType input;
   const std::string output;
 };
 
@@ -180,7 +180,18 @@ TEST(TextEliderTest, TestTrailingEllipsisSlashEllipsisHack) {
   GURL url("http://battersbox.com/directory/foo/peter_paul_and_mary.html");
   int available_width = font.GetStringWidth(
       UTF8ToUTF16("battersbox.com/" + kEllipsisStr + "/" + kEllipsisStr));
-  EXPECT_EQ(UTF8ToUTF16("battersbox.com/dir" + kEllipsisStr),
+
+  // Create the expected string, after elision. Depending on font size, the
+  // directory might become /dir... or /di... or/d... - it never should be
+  // shorter than that. (If it is, the font considers d... to be longer
+  // than .../... -  that should never happen).
+  ASSERT_GT(font.GetStringWidth(UTF8ToUTF16(kEllipsisStr + "/" + kEllipsisStr)),
+      font.GetStringWidth(UTF8ToUTF16("d" + kEllipsisStr)));
+  GURL long_url("http://battersbox.com/directorynameisreallylongtoforcetrunc");
+  string16 expected = ElideUrl(long_url, font, available_width, std::string());
+  // Ensure that the expected result still contains part of the directory name.
+  ASSERT_GT(expected.length(), std::string("battersbox.com/d").length());
+  EXPECT_EQ(expected,
              ElideUrl(url, font, available_width, std::string()));
 
   // More space available - elide directories, partially elide filename.
@@ -263,8 +274,8 @@ TEST(TextEliderTest, TestFileURLEliding) {
 #endif
 TEST(TextEliderTest, MAYBE_TestFilenameEliding) {
   const std::string kEllipsisStr(kEllipsis);
-  const FilePath::StringType kPathSeparator =
-      FilePath::StringType().append(1, FilePath::kSeparators[0]);
+  const base::FilePath::StringType kPathSeparator =
+      base::FilePath::StringType().append(1, base::FilePath::kSeparators[0]);
 
   FileTestcase testcases[] = {
     {FILE_PATH_LITERAL(""), ""},
@@ -302,7 +313,7 @@ TEST(TextEliderTest, MAYBE_TestFilenameEliding) {
 
   static const gfx::Font font;
   for (size_t i = 0; i < arraysize(testcases); ++i) {
-    FilePath filepath(testcases[i].input);
+    base::FilePath filepath(testcases[i].input);
     string16 expected = UTF8ToUTF16(testcases[i].output);
     expected = base::i18n::GetDisplayStringInLTRDirectionality(expected);
     EXPECT_EQ(expected, ElideFilename(filepath,

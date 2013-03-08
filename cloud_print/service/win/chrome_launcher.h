@@ -8,13 +8,13 @@
 #include <string>
 
 #include "base/basictypes.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/threading/simple_thread.h"
 
 class ChromeLauncher : public base::DelegateSimpleThread::Delegate {
  public:
-  explicit ChromeLauncher(const FilePath& user_data);
+  explicit ChromeLauncher(const base::FilePath& user_data);
 
   virtual ~ChromeLauncher();
 
@@ -24,7 +24,7 @@ class ChromeLauncher : public base::DelegateSimpleThread::Delegate {
   virtual void Run() OVERRIDE;
 
  private:
-  FilePath user_data_;
+  base::FilePath user_data_;
   base::WaitableEvent stop_event_;
   scoped_ptr<base::DelegateSimpleThread> thread_;
 

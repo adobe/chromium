@@ -50,7 +50,8 @@ class RenderViewHost;
 class WebContents;
 
 // Generate a URL for a file path including a query string.
-GURL GetFileUrlWithQuery(const FilePath& path, const std::string& query_string);
+GURL GetFileUrlWithQuery(const base::FilePath& path,
+                         const std::string& query_string);
 
 // Waits for a load stop for the specified |web_contents|'s controller, if the
 // tab is currently web_contents.  Otherwise returns immediately.
@@ -64,6 +65,13 @@ void CrashTab(WebContents* web_contents);
 void SimulateMouseClick(WebContents* web_contents,
                         int modifiers,
                         WebKit::WebMouseEvent::Button button);
+
+// Simulates clicking at the point |point| of the given tab asynchronously;
+// modifiers may contain bits from WebInputEvent::Modifiers.
+void SimulateMouseClickAt(WebContents* web_contents,
+                          int modifiers,
+                          WebKit::WebMouseEvent::Button button,
+                          const gfx::Point& point);
 
 // Simulates asynchronously a mouse enter/move/leave event.
 void SimulateMouseEvent(WebContents* web_contents,

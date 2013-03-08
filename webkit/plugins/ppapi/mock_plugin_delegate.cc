@@ -68,7 +68,7 @@ SkBitmap* MockPluginDelegate::GetSadPluginBitmap() {
 }
 
 WebKit::WebPlugin* MockPluginDelegate::CreatePluginReplacement(
-    const FilePath& file_path) {
+    const base::FilePath& file_path) {
   return NULL;
 }
 
@@ -141,7 +141,7 @@ void MockPluginDelegate::NumberOfFindResultsChanged(int identifier,
 void MockPluginDelegate::SelectedFindResultChanged(int identifier, int index) {
 }
 
-bool MockPluginDelegate::AsyncOpenFile(const FilePath& path,
+bool MockPluginDelegate::AsyncOpenFile(const base::FilePath& path,
                                        int flags,
                                        const AsyncOpenFileCallback& callback) {
   return false;
@@ -222,9 +222,9 @@ void MockPluginDelegate::DidUpdateFile(const GURL& file_path, int64_t delta) {
 
 void MockPluginDelegate::SyncGetFileSystemPlatformPath(
     const GURL& url,
-    FilePath* platform_path) {
+    base::FilePath* platform_path) {
   DCHECK(platform_path);
-  *platform_path = FilePath();
+  *platform_path = base::FilePath();
 }
 
 scoped_refptr<base::MessageLoopProxy>
@@ -264,6 +264,11 @@ void MockPluginDelegate::TCPSocketWrite(uint32 socket_id,
                                         const std::string& buffer) {
 }
 
+void MockPluginDelegate::TCPSocketSetBoolOption(uint32 socket_id,
+                                                PP_TCPSocketOption_Private name,
+                                                bool value) {
+}
+
 void MockPluginDelegate::TCPSocketDisconnect(uint32 socket_id) {
 }
 
@@ -283,20 +288,6 @@ void MockPluginDelegate::TCPServerSocketAccept(uint32 server_socket_id) {
 void MockPluginDelegate::TCPServerSocketStopListening(
     PP_Resource socket_resource,
     uint32 socket_id) {
-}
-
-void MockPluginDelegate::RegisterHostResolver(
-    ::ppapi::PPB_HostResolver_Shared* host_resolver,
-    uint32 host_resolver_id) {
-}
-
-void MockPluginDelegate::HostResolverResolve(
-    uint32 host_resolver_id,
-    const ::ppapi::HostPortPair& host_port,
-    const PP_HostResolver_Private_Hint* hint) {
-}
-
-void MockPluginDelegate::UnregisterHostResolver(uint32 host_resolver_id) {
 }
 
 bool MockPluginDelegate::AddNetworkListObserver(

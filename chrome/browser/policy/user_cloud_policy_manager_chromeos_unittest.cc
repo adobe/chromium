@@ -7,13 +7,14 @@
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
+#include "base/prefs/pref_registry_simple.h"
+#include "base/prefs/testing_pref_service.h"
 #include "chrome/browser/policy/cloud_policy_constants.h"
 #include "chrome/browser/policy/mock_cloud_policy_store.h"
 #include "chrome/browser/policy/mock_configuration_policy_provider.h"
 #include "chrome/browser/policy/mock_device_management_service.h"
 #include "chrome/browser/policy/proto/device_management_backend.pb.h"
 #include "chrome/browser/prefs/browser_prefs.h"
-#include "chrome/test/base/testing_pref_service.h"
 #include "policy/policy_constants.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -34,13 +35,13 @@ class UserCloudPolicyManagerChromeOSTest : public testing::Test {
       : store_(NULL) {}
 
   virtual void SetUp() OVERRIDE {
-    chrome::RegisterLocalState(&prefs_);
+    chrome::RegisterLocalState(prefs_.registry());
 
     // Set up a policy map for testing.
     policy_map_.Set("key", POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
                     base::Value::CreateStringValue("value"));
-    expected_bundle_.Get(POLICY_DOMAIN_CHROME, std::string()).CopyFrom(
-        policy_map_);
+    expected_bundle_.Get(PolicyNamespace(POLICY_DOMAIN_CHROME, std::string()))
+        .CopyFrom(policy_map_);
 
     // Create a fake policy blob to deliver to the client.
     em::PolicyData policy_data;
@@ -72,12 +73,12 @@ class UserCloudPolicyManagerChromeOSTest : public testing::Test {
     manager_->Connect(&prefs_, &device_management_service_,
                       USER_AFFILIATION_NONE);
     Mock::VerifyAndClearExpectations(store_);
-    EXPECT_FALSE(manager_->IsInitializationComplete());
+    EXPECT_FALSE(manager_->IsInitializationComplete(POLICY_DOMAIN_CHROME));
 
     // Finishing the Load() operation shouldn't set the initialized flag.
     EXPECT_CALL(observer_, OnUpdatePolicy(_)).Times(0);
     store_->NotifyStoreLoaded();
-    EXPECT_FALSE(manager_->IsInitializationComplete());
+    EXPECT_FALSE(manager_->IsInitializationComplete(POLICY_DOMAIN_CHROME));
     Mock::VerifyAndClearExpectations(&observer_);
   }
 
@@ -111,21 +112,21 @@ TEST_F(UserCloudPolicyManagerChromeOSTest, WaitForPolicyFetch) {
       .WillOnce(device_management_service_.CreateAsyncJob(&fetch_request));
   manager_->core()->client()->SetupRegistration("dm_token", "client_id");
   ASSERT_TRUE(fetch_request);
-  EXPECT_FALSE(manager_->IsInitializationComplete());
+  EXPECT_FALSE(manager_->IsInitializationComplete(POLICY_DOMAIN_CHROME));
   Mock::VerifyAndClearExpectations(&observer_);
 
   // Respond to the policy fetch, which should trigger a write to |store_|.
   EXPECT_CALL(observer_, OnUpdatePolicy(_)).Times(0);
   EXPECT_CALL(*store_, Store(_));
   fetch_request->SendResponse(DM_STATUS_SUCCESS, policy_blob_);
-  EXPECT_FALSE(manager_->IsInitializationComplete());
+  EXPECT_FALSE(manager_->IsInitializationComplete(POLICY_DOMAIN_CHROME));
   Mock::VerifyAndClearExpectations(&observer_);
 
   // The load notification from |store_| should trigger the policy update and
   // flip the initialized bit.
   EXPECT_CALL(observer_, OnUpdatePolicy(manager_.get()));
   store_->NotifyStoreLoaded();
-  EXPECT_TRUE(manager_->IsInitializationComplete());
+  EXPECT_TRUE(manager_->IsInitializationComplete(POLICY_DOMAIN_CHROME));
   Mock::VerifyAndClearExpectations(&observer_);
 }
 
@@ -140,13 +141,13 @@ TEST_F(UserCloudPolicyManagerChromeOSTest, WaitForPolicyFetchError) {
       .WillOnce(device_management_service_.CreateAsyncJob(&fetch_request));
   manager_->core()->client()->SetupRegistration("dm_token", "client_id");
   ASSERT_TRUE(fetch_request);
-  EXPECT_FALSE(manager_->IsInitializationComplete());
+  EXPECT_FALSE(manager_->IsInitializationComplete(POLICY_DOMAIN_CHROME));
   Mock::VerifyAndClearExpectations(&observer_);
 
   // Make the policy fetch fail, at which point the manager should bail out.
   EXPECT_CALL(observer_, OnUpdatePolicy(manager_.get())).Times(AtLeast(1));
   fetch_request->SendResponse(DM_STATUS_REQUEST_FAILED, policy_blob_);
-  EXPECT_TRUE(manager_->IsInitializationComplete());
+  EXPECT_TRUE(manager_->IsInitializationComplete(POLICY_DOMAIN_CHROME));
   Mock::VerifyAndClearExpectations(&observer_);
 }
 
@@ -156,7 +157,7 @@ TEST_F(UserCloudPolicyManagerChromeOSTest, WaitForPolicyFetchCancel) {
   // Cancelling the initial fetch should flip the flag.
   EXPECT_CALL(observer_, OnUpdatePolicy(manager_.get()));
   manager_->CancelWaitForPolicyFetch();
-  EXPECT_TRUE(manager_->IsInitializationComplete());
+  EXPECT_TRUE(manager_->IsInitializationComplete(POLICY_DOMAIN_CHROME));
   Mock::VerifyAndClearExpectations(&observer_);
 }
 

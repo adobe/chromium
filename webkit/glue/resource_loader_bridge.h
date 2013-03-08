@@ -23,13 +23,14 @@
 #if defined(OS_POSIX)
 #include "base/file_descriptor_posix.h"
 #endif
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/memory/ref_counted.h"
 #include "base/platform_file.h"
 #include "base/time.h"
 #include "base/values.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/host_port_pair.h"
+#include "net/base/request_priority.h"
 #include "net/url_request/url_request_status.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebReferrerPolicy.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebURLRequest.h"
@@ -181,7 +182,7 @@ struct ResourceResponseInfo {
   // The path to a file that will contain the response body.  It may only
   // contain a portion of the response body at the time that the ResponseInfo
   // becomes available.
-  FilePath download_file_path;
+  base::FilePath download_file_path;
 
   // True if the response was delivered using SPDY.
   bool was_fetched_via_spdy;
@@ -245,6 +246,9 @@ class ResourceLoaderBridge {
     // Indicates if the current request is the main frame load, a sub-frame
     // load, or a sub objects load.
     ResourceType::Type request_type;
+
+    // Indicates the priority of this request, as determined by WebKit.
+    net::RequestPriority priority;
 
     // Used for plugin to browser requests.
     uint32 request_context;
@@ -367,6 +371,11 @@ class ResourceLoaderBridge {
   // Call this method to suspend or resume a load that is in progress.  This
   // method may only be called after a successful call to the Start method.
   virtual void SetDefersLoading(bool value) = 0;
+
+  // Call this method when the priority of the requested resource changes after
+  // Start() has been called.  This method may only be called after a successful
+  // call to the Start method.
+  virtual void DidChangePriority(net::RequestPriority new_priority) = 0;
 
   // Call this method to load the resource synchronously (i.e., in one shot).
   // This is an alternative to the Start method.  Be warned that this method

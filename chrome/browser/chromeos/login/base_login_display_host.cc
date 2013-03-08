@@ -9,8 +9,10 @@
 #include "ash/shell_window_ids.h"
 #include "base/bind.h"
 #include "base/command_line.h"
+#include "base/debug/trace_event.h"
 #include "base/file_util.h"
 #include "base/logging.h"
+#include "base/prefs/pref_service.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
@@ -35,7 +37,6 @@
 #include "chrome/browser/managed_mode/managed_mode.h"
 #include "chrome/browser/policy/auto_enrollment_client.h"
 #include "chrome/browser/policy/browser_policy_connector.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
@@ -496,6 +497,7 @@ void ShowLoginWizard(const std::string& first_screen_name,
   chromeos::LoginUtils::Get()->PrewarmAuthentication();
   chromeos::DBusThreadManager::Get()->GetSessionManagerClient()
       ->EmitLoginPromptReady();
+  TRACE_EVENT0("chromeos", "ShowLoginWizard::EmitLoginPromptReady");
 
   // Set initial timezone if specified by customization.
   const std::string timezone_name = startup_manifest->initial_timezone();

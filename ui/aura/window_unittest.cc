@@ -23,6 +23,7 @@
 #include "ui/aura/test/event_generator.h"
 #include "ui/aura/test/test_window_delegate.h"
 #include "ui/aura/test/test_windows.h"
+#include "ui/aura/test/window_test_api.h"
 #include "ui/aura/window_delegate.h"
 #include "ui/aura/window_observer.h"
 #include "ui/aura/window_property.h"
@@ -374,7 +375,7 @@ TEST_F(WindowTest, ContainsMouse) {
       CreateTestWindow(SK_ColorWHITE, 1, gfx::Rect(10, 10, 500, 500),
                        root_window()));
   w->Show();
-  Window::TestApi w_test_api(w.get());
+  WindowTestApi w_test_api(w.get());
   RootWindow* root = root_window();
   root->MoveCursorTo(gfx::Point(10, 10));
   EXPECT_TRUE(w_test_api.ContainsMouse());
@@ -1148,7 +1149,26 @@ TEST_F(WindowTest, MouseEnterExit) {
   EXPECT_FALSE(d2.exited());
 }
 
-#if !defined(OS_WIN)
+// Verifies that the WindowDelegate receives MouseExit from ET_MOUSE_EXITED.
+TEST_F(WindowTest, RootWindowHostExit) {
+  MouseEnterExitWindowDelegate d1;
+  scoped_ptr<Window> w1(
+      CreateTestWindowWithDelegate(&d1, 1, gfx::Rect(10, 10, 50, 50),
+                                   root_window()));
+
+  test::EventGenerator generator(root_window());
+  generator.MoveMouseToCenterOf(w1.get());
+  EXPECT_TRUE(d1.entered());
+  EXPECT_FALSE(d1.exited());
+  d1.ResetExpectations();
+
+  ui::MouseEvent exit_event(
+      ui::ET_MOUSE_EXITED, gfx::Point(), gfx::Point(), 0);
+  root_window()->AsRootWindowHostDelegate()->OnHostMouseEvent(&exit_event);
+  EXPECT_FALSE(d1.entered());
+  EXPECT_TRUE(d1.exited());
+}
+
 // Verifies that the WindowDelegate receives MouseExit and MouseEnter events for
 // mouse transitions from window to window, even if the entered window sets
 // and releases capture.
@@ -1182,7 +1202,6 @@ TEST_F(WindowTest, MouseEnterExitWithClick) {
   EXPECT_FALSE(d2.exited());
 }
 
-// Temporarily disabled for windows. See crbug.com/112222.
 // Verifies that enter / exits are sent if windows appear and are deleted
 // under the current mouse position..
 TEST_F(WindowTest, MouseEnterExitWithDelete) {
@@ -1244,7 +1263,6 @@ TEST_F(WindowTest, MouseEnterExitWithHide) {
   RunAllPendingInMessageLoop();
   EXPECT_TRUE(d1.entered());
 }
-#endif
 
 // Creates a window with a delegate (w111) that can handle events at a lower
 // z-index than a window without a delegate (w12). w12 is sized to fill the
@@ -1845,8 +1863,8 @@ TEST_F(WindowTest, AcquireLayer) {
   ui::Layer* parent = window1->parent()->layer();
   EXPECT_EQ(2U, parent->children().size());
 
-  Window::TestApi window1_test_api(window1.get());
-  Window::TestApi window2_test_api(window2.get());
+  WindowTestApi window1_test_api(window1.get());
+  WindowTestApi window2_test_api(window2.get());
 
   EXPECT_TRUE(window1_test_api.OwnsLayer());
   EXPECT_TRUE(window2_test_api.OwnsLayer());
@@ -1996,9 +2014,6 @@ TEST_F(WindowTest, VisibilityClientIsVisible) {
   EXPECT_TRUE(window->layer()->visible());
 }
 
-#if !defined(OS_WIN)
-// Temporarily disabled for windows. See crbug.com/112222.
-
 // Tests mouse events on window change.
 TEST_F(WindowTest, MouseEventsOnWindowChange) {
   gfx::Size size = root_window()->GetHostSize();
@@ -2074,7 +2089,6 @@ TEST_F(WindowTest, MouseEventsOnWindowChange) {
   RunAllPendingInMessageLoop();
   EXPECT_EQ("1 1 0", d1.GetMouseMotionCountsAndReset());
 }
-#endif
 
 class StackingMadrigalLayoutManager : public LayoutManager {
  public:

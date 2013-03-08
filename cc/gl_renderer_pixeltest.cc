@@ -11,11 +11,11 @@
 #include "cc/prioritized_resource_manager.h"
 #include "cc/resource_provider.h"
 #include "cc/test/paths.h"
-#include "cc/test/pixel_test_output_surface.h"
 #include "cc/test/pixel_test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/gfx/codec/png_codec.h"
 #include "ui/gl/gl_implementation.h"
+#include "webkit/gpu/webgraphicscontext3d_in_process_command_buffer_impl.h"
 
 namespace cc {
 namespace {
@@ -42,7 +42,7 @@ class FakeRendererClient : public RendererClient {
   virtual void enforceManagedMemoryPolicy(
       const ManagedMemoryPolicy&) OVERRIDE {}
   virtual bool hasImplThread() const OVERRIDE { return false; }
-  virtual bool shouldClearRootRenderPass() const { return true; }
+  virtual bool shouldClearRootRenderPass() const OVERRIDE { return true; }
   virtual CompositorFrameMetadata makeCompositorFrameMetadata() const
       OVERRIDE { return CompositorFrameMetadata(); }
 };
@@ -53,14 +53,18 @@ class GLRendererPixelTest : public testing::Test {
 
   virtual void SetUp() {
     gfx::InitializeGLBindings(gfx::kGLImplementationOSMesaGL);
-    output_surface_ = PixelTestOutputSurface::create();
+    scoped_ptr<webkit::gpu::WebGraphicsContext3DInProcessCommandBufferImpl> context3d(
+        new webkit::gpu::WebGraphicsContext3DInProcessCommandBufferImpl);
+    context3d->Initialize(WebKit::WebGraphicsContext3D::Attributes(), NULL);
+    output_surface_.reset(new OutputSurface(
+        context3d.PassAs<WebKit::WebGraphicsContext3D>()));
     resource_provider_ = ResourceProvider::create(output_surface_.get());
     renderer_ = GLRenderer::create(&fake_client_,
                                    output_surface_.get(),
                                    resource_provider_.get());
   }
 
-  bool PixelsMatchReference(FilePath ref_file, gfx::Rect viewport_rect) {
+  bool PixelsMatchReference(base::FilePath ref_file, gfx::Rect viewport_rect) {
     SkBitmap bitmap;
     bitmap.setConfig(SkBitmap::kARGB_8888_Config,
                      viewport_rect.width(), viewport_rect.height());
@@ -68,7 +72,7 @@ class GLRendererPixelTest : public testing::Test {
     unsigned char* pixels = static_cast<unsigned char*>(bitmap.getPixels());
     renderer_->getFramebufferPixels(pixels, viewport_rect);
 
-    FilePath test_data_dir;
+    base::FilePath test_data_dir;
     if (!PathService::Get(cc::DIR_TEST_DATA, &test_data_dir))
       return false;
 
@@ -92,12 +96,14 @@ scoped_ptr<RenderPass> CreateTestRenderPass(RenderPass::Id id, gfx::Rect rect) {
 
 scoped_ptr<SharedQuadState> CreateTestSharedQuadState(
     gfx::Transform content_to_target_transform, gfx::Rect rect) {
+  const gfx::Size content_bounds = rect.size();
   const gfx::Rect visible_content_rect = rect;
   const gfx::Rect clip_rect = rect;
   const bool is_clipped = false;
   const float opacity = 1.0f;
   scoped_ptr<SharedQuadState> shared_state = SharedQuadState::Create();
   shared_state->SetAll(content_to_target_transform,
+                       content_bounds,
                        visible_content_rect,
                        clip_rect,
                        is_clipped,
@@ -144,8 +150,9 @@ TEST_F(GLRendererPixelTest, simpleGreenRect) {
 
   renderer_->drawFrame(pass_list);
 
-  EXPECT_TRUE(PixelsMatchReference(FilePath(FILE_PATH_LITERAL("green.png")),
-                                   rect));
+  EXPECT_TRUE(PixelsMatchReference(
+      base::FilePath(FILE_PATH_LITERAL("green.png")),
+      rect));
 }
 
 TEST_F(GLRendererPixelTest, RenderPassChangesSize) {
@@ -188,7 +195,7 @@ TEST_F(GLRendererPixelTest, RenderPassChangesSize) {
   renderer_->drawFrame(pass_list);
 
   EXPECT_TRUE(PixelsMatchReference(
-      FilePath(FILE_PATH_LITERAL("blue_yellow.png")), viewport_rect));
+      base::FilePath(FILE_PATH_LITERAL("blue_yellow.png")), viewport_rect));
 }
 #endif
 

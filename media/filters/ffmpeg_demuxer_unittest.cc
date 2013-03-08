@@ -7,8 +7,8 @@
 #include <string>
 
 #include "base/bind.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/path_service.h"
 #include "base/threading/thread.h"
 #include "media/base/mock_demuxer_host.h"
@@ -45,8 +45,6 @@ static void EosOnReadDone(bool* got_eos_buffer,
   EXPECT_EQ(status, DemuxerStream::kOk);
   if (buffer->IsEndOfStream()) {
     *got_eos_buffer = true;
-    EXPECT_TRUE(!buffer->GetData());
-    EXPECT_EQ(buffer->GetDataSize(), 0);
     return;
   }
 
@@ -163,7 +161,7 @@ class FFmpegDemuxerTest : public testing::Test {
   void CreateDataSource(const std::string& name) {
     CHECK(!data_source_);
 
-    FilePath file_path;
+    base::FilePath file_path;
     EXPECT_TRUE(PathService::Get(base::DIR_SOURCE_ROOT, &file_path));
 
     file_path = file_path.Append(FILE_PATH_LITERAL("media"))

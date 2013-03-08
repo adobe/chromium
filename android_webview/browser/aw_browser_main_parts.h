@@ -17,6 +17,7 @@ namespace android_webview {
 bool UseCompositorDirectDraw();
 
 class AwBrowserContext;
+class AwDevToolsDelegate;
 
 class AwBrowserMainParts : public content::BrowserMainParts {
  public:
@@ -26,13 +27,16 @@ class AwBrowserMainParts : public content::BrowserMainParts {
   // Overriding methods from content::BrowserMainParts.
   virtual void PreEarlyInitialization() OVERRIDE;
   virtual int PreCreateThreads() OVERRIDE;
+  virtual void PreMainMessageLoopRun() OVERRIDE;
   virtual bool MainMessageLoopRun(int* result_code) OVERRIDE;
+  virtual void PostMainMessageLoopRun() OVERRIDE;
 
  private:
   // Android specific UI MessageLoop.
   scoped_ptr<MessageLoop> main_message_loop_;
 
   AwBrowserContext* browser_context_;  // weak
+  AwDevToolsDelegate* devtools_delegate_;
 
   DISALLOW_COPY_AND_ASSIGN(AwBrowserMainParts);
 };

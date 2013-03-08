@@ -4,17 +4,18 @@
 
 #include "chrome/browser/ui/webui/chromeos/about_network.h"
 
+#include "ash/ash_switches.h"
 #include "base/command_line.h"
-#include "base/string_number_conversions.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/cros/network_library.h"
 #include "chrome/browser/ui/webui/about_ui.h"
-#include "chromeos/chromeos_switches.h"
 #include "chromeos/network/network_event_log.h"
 #include "chromeos/network/network_state.h"
 #include "chromeos/network/network_state_handler.h"
 #include "grit/generated_resources.h"
+#include "net/base/escape.h"
 #include "ui/base/l10n/l10n_util.h"
 
 namespace chromeos {
@@ -24,15 +25,15 @@ namespace {
 // Html output helper functions
 
 std::string WrapWithH3(const std::string& text) {
-  return "<h3>" + text + "</h3>";
+  return "<h3>" + net::EscapeForHTML(text) + "</h3>";
 }
 
 std::string WrapWithTH(const std::string& text) {
-  return "<th>" + text + "</th>";
+  return "<th>" + net::EscapeForHTML(text) + "</th>";
 }
 
 std::string WrapWithTD(const std::string& text) {
-  return "<td>" + text + "</td>";
+  return "<td>" + net::EscapeForHTML(text) + "</td>";
 }
 
 std::string WrapWithTR(const std::string& text) {
@@ -285,7 +286,7 @@ std::string AboutNetwork(const std::string& query) {
   if (network_event_log::IsInitialized())
     output += GetHeaderEventLogInfo();
   if (CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableNewNetworkHandlers)) {
+          ash::switches::kAshEnableNewNetworkStatusArea)) {
     output += GetNetworkStateHtmlInfo();
   } else {
     output += GetCrosNetworkHtmlInfo();

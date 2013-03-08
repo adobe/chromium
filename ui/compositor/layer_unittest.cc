@@ -4,12 +4,13 @@
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
+#include "cc/delegated_frame_data.h"
 #include "cc/layer.h"
 #include "cc/test/pixel_test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -140,13 +141,15 @@ class LayerWithRealCompositorTest : public testing::Test {
         gfx::Rect(0, 0, layer->bounds().width(), layer->bounds().height()));
   }
 
-  const FilePath& test_data_directory() const { return test_data_directory_; }
+  const base::FilePath& test_data_directory() const {
+    return test_data_directory_;
+  }
 
  private:
   scoped_ptr<TestCompositorHost> window_;
 
   // The root directory for test files.
-  FilePath test_data_directory_;
+  base::FilePath test_data_directory_;
 
   DISALLOW_COPY_AND_ASSIGN(LayerWithRealCompositorTest);
 };
@@ -275,7 +278,8 @@ class TestCompositorObserver : public CompositorObserver {
   virtual void OnCompositingDidCommit(Compositor* compositor) OVERRIDE {
   }
 
-  virtual void OnCompositingStarted(Compositor* compositor) OVERRIDE {
+  virtual void OnCompositingStarted(Compositor* compositor,
+                                    base::TimeTicks start_time) OVERRIDE {
     started_ = true;
   }
 
@@ -288,6 +292,11 @@ class TestCompositorObserver : public CompositorObserver {
   }
 
   virtual void OnCompositingLockStateChanged(Compositor* compositor) OVERRIDE {
+  }
+
+  virtual void OnUpdateVSyncParameters(Compositor* compositor,
+                                       base::TimeTicks timebase,
+                                       base::TimeDelta interval) OVERRIDE {
   }
 
   bool started_;
@@ -578,7 +587,7 @@ class LayerWithNullDelegateTest : public LayerWithDelegateTest {
   virtual void TearDown() OVERRIDE {
   }
 
-  Layer* CreateLayer(LayerType type) OVERRIDE {
+  virtual Layer* CreateLayer(LayerType type) OVERRIDE {
     Layer* layer = new Layer(type);
     layer->set_delegate(default_layer_delegate_.get());
     return layer;
@@ -596,7 +605,7 @@ class LayerWithNullDelegateTest : public LayerWithDelegateTest {
     return layer;
   }
 
-  Layer* CreateNoTextureLayer(const gfx::Rect& bounds) OVERRIDE {
+  virtual Layer* CreateNoTextureLayer(const gfx::Rect& bounds) OVERRIDE {
     Layer* layer = CreateLayer(LAYER_NOT_DRAWN);
     layer->SetBounds(bounds);
     return layer;
@@ -629,9 +638,9 @@ TEST_F(LayerWithNullDelegateTest, Visibility) {
   EXPECT_TRUE(l1->IsDrawn());
   EXPECT_TRUE(l2->IsDrawn());
   EXPECT_TRUE(l3->IsDrawn());
-  EXPECT_EQ(1.f, l1->cc_layer()->opacity());
-  EXPECT_EQ(1.f, l2->cc_layer()->opacity());
-  EXPECT_EQ(1.f, l3->cc_layer()->opacity());
+  EXPECT_TRUE(l1->cc_layer()->drawsContent());
+  EXPECT_TRUE(l2->cc_layer()->drawsContent());
+  EXPECT_TRUE(l3->cc_layer()->drawsContent());
 
   compositor()->SetRootLayer(l1.get());
 
@@ -641,19 +650,25 @@ TEST_F(LayerWithNullDelegateTest, Visibility) {
   EXPECT_FALSE(l1->IsDrawn());
   EXPECT_FALSE(l2->IsDrawn());
   EXPECT_FALSE(l3->IsDrawn());
-  EXPECT_EQ(0.f, l1->cc_layer()->opacity());
+  EXPECT_FALSE(l1->cc_layer()->drawsContent());
+  EXPECT_FALSE(l2->cc_layer()->drawsContent());
+  EXPECT_FALSE(l3->cc_layer()->drawsContent());
 
   l3->SetVisible(false);
   EXPECT_FALSE(l1->IsDrawn());
   EXPECT_FALSE(l2->IsDrawn());
   EXPECT_FALSE(l3->IsDrawn());
-  EXPECT_EQ(0.f, l3->cc_layer()->opacity());
+  EXPECT_FALSE(l1->cc_layer()->drawsContent());
+  EXPECT_FALSE(l2->cc_layer()->drawsContent());
+  EXPECT_FALSE(l3->cc_layer()->drawsContent());
 
   l1->SetVisible(true);
   EXPECT_TRUE(l1->IsDrawn());
   EXPECT_TRUE(l2->IsDrawn());
   EXPECT_FALSE(l3->IsDrawn());
-  EXPECT_EQ(1.f, l1->cc_layer()->opacity());
+  EXPECT_TRUE(l1->cc_layer()->drawsContent());
+  EXPECT_TRUE(l2->cc_layer()->drawsContent());
+  EXPECT_FALSE(l3->cc_layer()->drawsContent());
 }
 
 // Checks that stacking-related methods behave as advertised.
@@ -886,8 +901,10 @@ TEST_F(LayerWithRealCompositorTest, MAYBE_ModifyHierarchy) {
   scoped_ptr<Layer> l12(CreateColorLayer(SK_ColorBLUE,
                                          gfx::Rect(10, 10, 25, 25)));
 
-  FilePath ref_img1 = test_data_directory().AppendASCII("ModifyHierarchy1.png");
-  FilePath ref_img2 = test_data_directory().AppendASCII("ModifyHierarchy2.png");
+  base::FilePath ref_img1 =
+      test_data_directory().AppendASCII("ModifyHierarchy1.png");
+  base::FilePath ref_img2 =
+      test_data_directory().AppendASCII("ModifyHierarchy2.png");
   SkBitmap bitmap;
 
   l0->Add(l11.get());
@@ -940,7 +957,7 @@ TEST_F(LayerWithRealCompositorTest, MAYBE_Opacity) {
   scoped_ptr<Layer> l11(CreateColorLayer(SK_ColorGREEN,
                                          gfx::Rect(0, 0, 25, 25)));
 
-  FilePath ref_img = test_data_directory().AppendASCII("Opacity.png");
+  base::FilePath ref_img = test_data_directory().AppendASCII("Opacity.png");
 
   l11->SetOpacity(0.75);
   l0->Add(l11.get());
@@ -1237,6 +1254,59 @@ TEST_F(LayerWithDelegateTest, SetBoundsWhenInvisible) {
   EXPECT_TRUE(schedule_draw_invoked_);
   DrawTree(root.get());
   EXPECT_TRUE(delegate.painted());
+}
+
+static scoped_ptr<cc::DelegatedFrameData> MakeFrameData(gfx::Size size) {
+  scoped_ptr<cc::DelegatedFrameData> frame_data(new cc::DelegatedFrameData);
+  scoped_ptr<cc::RenderPass> render_pass(cc::RenderPass::Create());
+  render_pass->SetNew(cc::RenderPass::Id(1, 1),
+                      gfx::Rect(size),
+                      gfx::RectF(),
+                      gfx::Transform());
+  frame_data->render_pass_list.push_back(render_pass.Pass());
+  return frame_data.Pass();
+}
+
+TEST_F(LayerWithDelegateTest, DelegatedLayer) {
+  scoped_ptr<Layer> root(CreateNoTextureLayer(gfx::Rect(0, 0, 1000, 1000)));
+
+  scoped_ptr<Layer> child(CreateLayer(LAYER_TEXTURED));
+
+  child->SetBounds(gfx::Rect(0, 0, 10, 10));
+  child->SetVisible(true);
+  root->Add(child.get());
+  DrawTree(root.get());
+
+  // Content matches layer size.
+  child->SetDelegatedFrame(MakeFrameData(gfx::Size(10, 10)), gfx::Size(10, 10));
+  EXPECT_EQ(child->cc_layer()->bounds().ToString(),
+            gfx::Size(10, 10).ToString());
+
+  // Content larger than layer.
+  child->SetBounds(gfx::Rect(0, 0, 5, 5));
+  EXPECT_EQ(child->cc_layer()->bounds().ToString(),
+            gfx::Size(5, 5).ToString());
+
+  // Content smaller than layer.
+  child->SetBounds(gfx::Rect(0, 0, 10, 10));
+  child->SetDelegatedFrame(MakeFrameData(gfx::Size(5, 5)), gfx::Size(5, 5));
+  EXPECT_EQ(child->cc_layer()->bounds().ToString(),
+            gfx::Size(5, 5).ToString());
+
+  // Hi-DPI content on low-DPI layer.
+  child->SetDelegatedFrame(MakeFrameData(gfx::Size(20, 20)), gfx::Size(10, 10));
+  EXPECT_EQ(child->cc_layer()->bounds().ToString(),
+            gfx::Size(10, 10).ToString());
+
+  // Hi-DPI content on hi-DPI layer.
+  compositor()->SetScaleAndSize(2.f, gfx::Size(1000, 1000));
+  EXPECT_EQ(child->cc_layer()->bounds().ToString(),
+            gfx::Size(20, 20).ToString());
+
+  // Low-DPI content on hi-DPI layer.
+  child->SetDelegatedFrame(MakeFrameData(gfx::Size(10, 10)), gfx::Size(10, 10));
+  EXPECT_EQ(child->cc_layer()->bounds().ToString(),
+            gfx::Size(20, 20).ToString());
 }
 
 }  // namespace ui

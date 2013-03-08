@@ -7,6 +7,7 @@
 #include <algorithm>
 
 #include "base/command_line.h"
+#include "base/prefs/pref_service.h"
 #include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_about_handler.h"
@@ -14,13 +15,13 @@
 #include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/google/google_url_tracker.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prerender/prerender_manager.h"
 #include "chrome/browser/prerender/prerender_manager_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/tab_contents/tab_util.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
+#include "chrome/browser/ui/browser_instant_controller.h"
 #include "chrome/browser/ui/browser_tab_contents.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/host_desktop.h"
@@ -164,7 +165,8 @@ Browser* GetBrowserForDisposition(chrome::NavigateParams* params) {
       }
 
       return new Browser(Browser::CreateParams::CreateForApp(
-          Browser::TYPE_POPUP, app_name, params->window_bounds, profile));
+          Browser::TYPE_POPUP, app_name, params->window_bounds, profile,
+          params->host_desktop_type));
     }
     case NEW_WINDOW: {
       // Make a new normal browser window.
@@ -309,6 +311,41 @@ class ScopedTargetContentsOwner {
   DISALLOW_COPY_AND_ASSIGN(ScopedTargetContentsOwner);
 };
 
+content::WebContents* CreateTargetContents(const chrome::NavigateParams& params,
+                                           const GURL& url) {
+  WebContents::CreateParams create_params(
+      params.browser->profile(),
+      tab_util::GetSiteInstanceForNewTab(params.browser->profile(), url));
+  if (params.source_contents) {
+    create_params.initial_size =
+        params.source_contents->GetView()->GetContainerSize();
+  }
+#if defined(USE_AURA)
+  if (params.browser->window() &&
+      params.browser->window()->GetNativeWindow()) {
+    create_params.context =
+        params.browser->window()->GetNativeWindow();
+  }
+#endif
+
+  content::WebContents* target_contents = WebContents::Create(create_params);
+  // New tabs can have WebUI URLs that will make calls back to arbitrary
+  // tab helpers, so the entire set of tab helpers needs to be set up
+  // immediately.
+  BrowserNavigatorWebContentsAdoption::AttachTabHelpers(target_contents);
+  extensions::TabHelper::FromWebContents(target_contents)->
+      SetExtensionAppById(params.extension_app_id);
+  // TODO(sky): Figure out why this is needed. Without it we seem to get
+  // failures in startup tests.
+  // By default, content believes it is not hidden.  When adding contents
+  // in the background, tell it that it's hidden.
+  if ((params.tabstrip_add_types & TabStripModel::ADD_ACTIVE) == 0) {
+    // TabStripModel::AddWebContents invokes WasHidden if not foreground.
+    target_contents->WasHidden();
+  }
+  return target_contents;
+}
+
 // If a prerendered page exists for |url|, replace the page at |target_contents|
 // with it.
 bool SwapInPrerender(WebContents* target_contents, const GURL& url) {
@@ -317,6 +354,15 @@ bool SwapInPrerender(WebContents* target_contents, const GURL& url) {
           Profile::FromBrowserContext(target_contents->GetBrowserContext()));
   return prerender_manager &&
       prerender_manager->MaybeUsePrerenderedPage(target_contents, url);
+}
+
+bool SwapInInstantNTP(chrome::NavigateParams* params,
+                      const GURL& url,
+                      content::WebContents* source_contents) {
+  chrome::BrowserInstantController* instant =
+      params->browser->instant_controller();
+  return instant && instant->MaybeSwapInInstantNTPContents(
+      url, source_contents, &params->target_contents);
 }
 
 }  // namespace
@@ -466,6 +512,9 @@ void Navigate(NavigateParams* params) {
   // Check if this is a singleton tab that already exists
   int singleton_index = chrome::GetIndexOfSingletonTab(params);
 
+  // Did we use Instant's NTP contents?
+  bool swapped_in_instant = false;
+
   // If no target WebContents was specified, we need to construct one if
   // we are supposed to target a new tab; unless it's a singleton that already
   // exists.
@@ -480,59 +529,39 @@ void Navigate(NavigateParams* params) {
     }
 
     if (params->disposition != CURRENT_TAB) {
-      WebContents::CreateParams create_params(
-          params->browser->profile(),
-          tab_util::GetSiteInstanceForNewTab(params->browser->profile(), url));
-      if (params->source_contents) {
-        create_params.initial_size =
-            params->source_contents->GetView()->GetContainerSize();
-      }
-#if defined(USE_AURA)
-      if (params->browser->window() &&
-          params->browser->window()->GetNativeWindow()) {
-        create_params.context =
-            params->browser->window()->GetNativeWindow();
-      }
-#endif
-      params->target_contents = WebContents::Create(create_params);
-      // New tabs can have WebUI URLs that will make calls back to arbitrary
-      // tab helpers, so the entire set of tab helpers needs to be set up
-      // immediately.
-      BrowserNavigatorWebContentsAdoption::AttachTabHelpers(
-          params->target_contents);
+      swapped_in_instant = SwapInInstantNTP(params, url, NULL);
+      if (!swapped_in_instant)
+        params->target_contents = CreateTargetContents(*params, url);
+
       // This function takes ownership of |params->target_contents| until it
       // is added to a TabStripModel.
       target_contents_owner.TakeOwnership();
-      extensions::TabHelper::FromWebContents(params->target_contents)->
-          SetExtensionAppById(params->extension_app_id);
-      // TODO(sky): Figure out why this is needed. Without it we seem to get
-      // failures in startup tests.
-      // By default, content believes it is not hidden.  When adding contents
-      // in the background, tell it that it's hidden.
-      if ((params->tabstrip_add_types & TabStripModel::ADD_ACTIVE) == 0) {
-        // TabStripModel::AddWebContents invokes WasHidden if not foreground.
-        params->target_contents->WasHidden();
-      }
     } else {
       // ... otherwise if we're loading in the current tab, the target is the
       // same as the source.
-      params->target_contents = params->source_contents;
+      DCHECK(params->source_contents);
+      swapped_in_instant = SwapInInstantNTP(params, url,
+                                            params->source_contents);
+      if (!swapped_in_instant)
+        params->target_contents = params->source_contents;
       DCHECK(params->target_contents);
     }
 
     if (user_initiated)
       params->target_contents->UserGestureDone();
 
-    if (SwapInPrerender(params->target_contents, url))
-      return;
+    if (!swapped_in_instant) {
+      if (SwapInPrerender(params->target_contents, url))
+        return;
 
-    // Try to handle non-navigational URLs that popup dialogs and such, these
-    // should not actually navigate.
-    if (!HandleNonNavigationAboutURL(url)) {
-      // Perform the actual navigation, tracking whether it came from the
-      // renderer.
+      // Try to handle non-navigational URLs that popup dialogs and such, these
+      // should not actually navigate.
+      if (!HandleNonNavigationAboutURL(url)) {
+        // Perform the actual navigation, tracking whether it came from the
+        // renderer.
 
-      LoadURLInContents(params->target_contents, url, params);
+        LoadURLInContents(params->target_contents, url, params);
+      }
     }
   } else {
     // |target_contents| was specified non-NULL, and so we assume it has already
@@ -547,9 +576,10 @@ void Navigate(NavigateParams* params) {
       (params->disposition == NEW_FOREGROUND_TAB ||
        params->disposition == NEW_WINDOW) &&
       (params->tabstrip_add_types & TabStripModel::ADD_INHERIT_OPENER))
-    params->source_contents->Focus();
+    params->source_contents->GetView()->Focus();
 
-  if (params->source_contents == params->target_contents) {
+  if (params->source_contents == params->target_contents ||
+      (swapped_in_instant && params->disposition == CURRENT_TAB)) {
     // The navigation occurred in the source tab.
     params->browser->UpdateUIForNavigationInTab(params->target_contents,
                                                 params->transition,

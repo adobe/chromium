@@ -21,6 +21,15 @@ cr.define('options', function() {
     'pinyin-dv': 'languagePinyin',
   };
 
+  /**
+   * Spell check dictionary download status.
+   * @type {Enum}
+   */
+  /** @const*/ var DOWNLOAD_STATUS = {
+    IN_PROGRESS: 1,
+    FAILED: 2
+  };
+
   /////////////////////////////////////////////////////////////////////////////
   // LanguageOptions class:
 
@@ -45,6 +54,21 @@ cr.define('options', function() {
      * @private
      */
     prospectiveUiLanguageCode_: null,
+
+    /*
+     * Map from language code to spell check dictionary download status for that
+     * language.
+     * @type {Array}
+     * @private
+     */
+    spellcheckDictionaryDownloadStatus_: [],
+
+    /**
+     * Number of times a spell check dictionary download failed.
+     * @type {int}
+     * @private
+     */
+    spellcheckDictionaryDownloadFailures_: 0,
 
     /**
      * Initializes LanguageOptions page.
@@ -92,27 +116,40 @@ cr.define('options', function() {
 
       if (!cr.isMac) {
         // Set up the button for editing custom spelling dictionary.
-        $('edit-dictionary-button') .onclick = function(e) {
+        $('edit-dictionary-button').onclick = function(e) {
           OptionsPage.navigateToPage('editDictionary');
+        };
+        $('dictionary-download-retry-button').onclick = function(e) {
+          chrome.send('retryDictionaryDownload');
         };
       }
 
       if (cr.isChromeOS) {
-        // Listen to user clicks on the add language list.
-        var addLanguageList = $('add-language-overlay-language-list');
-        addLanguageList.addEventListener(
-            'click',
-            this.handleAddLanguageListClick_.bind(this));
+        // Listen to user click on the extension ime button.
         $('language-options-extension-ime-button').addEventListener(
             'click',
             this.handleExtensionImeButtonClick_.bind(this));
-      } else {
-        // Listen to add language dialog ok button.
-        var addLanguageOkButton = $('add-language-overlay-ok-button');
-        addLanguageOkButton.addEventListener(
-            'click',
-            this.handleAddLanguageOkButtonClick_.bind(this));
 
+        // Check if there is an Extension IME.
+        var hasExtensionIme = false;
+        var inputMethods = ($('language-options-input-method-list')
+            .querySelectorAll('.input-method'));
+        for (var i = 0, inputMethod; inputMethod = inputMethods[i]; ++i) {
+          if (inputMethod.querySelector('input')
+              .inputMethodId.match(/^_ext_ime_/)) {
+            hasExtensionIme = true;
+            break;
+          }
+        }
+        // Show the Extension IME button only if available.
+        $('language-options-extension-ime-button').hidden = !hasExtensionIme;
+      }
+
+      // Listen to add language dialog ok button.
+      $('add-language-overlay-ok-button').addEventListener(
+          'click', this.handleAddLanguageOkButtonClick_.bind(this));
+
+      if (!cr.isChromeOS) {
         // Show experimental features if enabled.
         if (loadTimeData.getBoolean('enableSpellingAutoCorrect'))
           $('auto-spell-correction-option').hidden = false;
@@ -181,9 +218,9 @@ cr.define('options', function() {
         var element = inputMethodPrototype.cloneNode(true);
         element.id = '';
         element.languageCodeSet = inputMethod.languageCodeSet;
-        var input = element.querySelectorAll('input')[0];
+        var input = element.querySelector('input');
         input.inputMethodId = inputMethod.id;
-        var span = element.querySelectorAll('span')[0];
+        var span = element.querySelector('span');
         span.textContent = inputMethod.displayName;
 
         // Listen to user clicks.
@@ -207,9 +244,9 @@ cr.define('options', function() {
         var element = inputMethodPrototype.cloneNode(true);
         element.id = '';
         element.languageCodeSet = {};
-        var input = element.querySelectorAll('input')[0];
+        var input = element.querySelector('input');
         input.inputMethodId = inputMethod.id;
-        var span = element.querySelectorAll('span')[0];
+        var span = element.querySelector('span');
         span.textContent = inputMethod.displayName;
 
         input.addEventListener('click',
@@ -459,16 +496,40 @@ cr.define('options', function() {
      * @private
      */
     updateSpellCheckLanguageButton_: function(languageCode) {
+      var spellCheckLanguageSection = $('language-options-spellcheck');
       var spellCheckLanguageButton =
           $('language-options-spell-check-language-button');
       var spellCheckLanguageMessage =
           $('language-options-spell-check-language-message');
+      var dictionaryDownloadInProgress =
+          $('language-options-dictionary-downloading-message');
+      var dictionaryDownloadFailed =
+          $('language-options-dictionary-download-failed-message');
+      var dictionaryDownloadFailHelp =
+          $('language-options-dictionary-download-fail-help-message');
+      spellCheckLanguageSection.hidden = false;
+      spellCheckLanguageMessage.hidden = true;
+      spellCheckLanguageButton.hidden = true;
+      dictionaryDownloadInProgress.hidden = true;
+      dictionaryDownloadFailed.hidden = true;
+      dictionaryDownloadFailHelp.hidden = true;
 
       if (languageCode == this.spellCheckDictionary_) {
-        spellCheckLanguageMessage.textContent =
-            loadTimeData.getString('is_used_for_spell_checking');
-        showMutuallyExclusiveNodes(
-            [spellCheckLanguageButton, spellCheckLanguageMessage], 1);
+        if (!(languageCode in this.spellcheckDictionaryDownloadStatus_)) {
+          spellCheckLanguageMessage.textContent =
+              loadTimeData.getString('is_used_for_spell_checking');
+          showMutuallyExclusiveNodes(
+              [spellCheckLanguageButton, spellCheckLanguageMessage], 1);
+        } else if (this.spellcheckDictionaryDownloadStatus_[languageCode] ==
+                       DOWNLOAD_STATUS.IN_PROGRESS) {
+          dictionaryDownloadInProgress.hidden = false;
+        } else if (this.spellcheckDictionaryDownloadStatus_[languageCode] ==
+                       DOWNLOAD_STATUS.FAILED) {
+          spellCheckLanguageSection.hidden = true;
+          dictionaryDownloadFailed.hidden = false;
+          if (this.spellcheckDictionaryDownloadFailures_ > 1)
+            dictionaryDownloadFailHelp.hidden = false;
+        }
       } else if (languageCode in
           loadTimeData.getValue('spellCheckLanguageCodeSet')) {
         spellCheckLanguageButton.textContent =
@@ -508,7 +569,7 @@ cr.define('options', function() {
         var method = methods[i];
         if (languageCode in method.languageCodeSet) {
           method.hidden = false;
-          var input = method.querySelectorAll('input')[0];
+          var input = method.querySelector('input');
           // Give it focus if the ID matches.
           if (input.inputMethodId == focusInputMethodId) {
             input.focus();
@@ -538,15 +599,19 @@ cr.define('options', function() {
       for (var i = 0; i < languageCodes.length; i++) {
         languageCodeSet[languageCodes[i]] = true;
       }
+
       var addLanguageList = $('add-language-overlay-language-list');
-      var lis = addLanguageList.querySelectorAll('li');
-      for (var i = 0; i < lis.length; i++) {
-        // The first child button knows the language code.
-        var button = lis[i].childNodes[0];
-        if (button.languageCode in languageCodeSet) {
-          lis[i].style.display = 'none';
-        } else {
-          lis[i].style.display = 'block';
+      var options = addLanguageList.querySelectorAll('option');
+      assert(options.length > 0);
+      var selectedFirstItem = false;
+      for (var i = 0; i < options.length; i++) {
+        var option = options[i];
+        option.hidden = option.value in languageCodeSet;
+        if (!option.hidden && !selectedFirstItem) {
+          // Select first visible item, otherwise previously selected hidden
+          // item will be selected by default at the next time.
+          option.selected = true;
+          selectedFirstItem = true;
         }
       }
     },
@@ -611,34 +676,6 @@ cr.define('options', function() {
     },
 
     /**
-     * Handles add language list's click event.
-     * @param {Event} e Click event.
-     */
-    handleAddLanguageListClick_: function(e) {
-      var languageOptionsList = $('language-options-list');
-      var languageCode = e.target.languageCode;
-      // languageCode can be undefined, if click was made on some random
-      // place in the overlay, rather than a button. Ignore it.
-      if (!languageCode) {
-        return;
-      }
-      languageOptionsList.addLanguage(languageCode);
-      var inputMethodIds = this.languageCodeToInputMethodIdsMap_[languageCode];
-      // Enable the first input method for the language added.
-      if (inputMethodIds && inputMethodIds[0] &&
-          // Don't add the input method it's already present. This can
-          // happen if the same input method is shared among multiple
-          // languages (ex. English US keyboard is used for English US and
-          // Filipino).
-          this.preloadEngines_.indexOf(inputMethodIds[0]) == -1) {
-        this.preloadEngines_.push(inputMethodIds[0]);
-        this.updateCheckboxesFromPreloadEngines_();
-        this.savePreloadEnginesPref_();
-      }
-      OptionsPage.closeOverlay();
-    },
-
-    /**
      * Handles extension IME button.
      */
     handleExtensionImeButtonClick_: function() {
@@ -662,7 +699,7 @@ cr.define('options', function() {
       var methods = inputMethodList.querySelectorAll('.input-method');
       for (var i = 0; i < methods.length; i++) {
         var method = methods[i];
-        var input = method.querySelectorAll('input')[0];
+        var input = method.querySelector('input');
         // Give it focus if the ID matches.
         if (input.inputMethodId.match(/^_ext_ime_/))
           method.hidden = false;
@@ -671,13 +708,27 @@ cr.define('options', function() {
       }
     },
 
-
     handleAddLanguageOkButtonClick_: function() {
       var languagesSelect = $('add-language-overlay-language-list');
       var selectedIndex = languagesSelect.selectedIndex;
       if (selectedIndex >= 0) {
         var selection = languagesSelect.options[selectedIndex];
         $('language-options-list').addLanguage(String(selection.value));
+        if (cr.isChromeOS) {
+          var inputMethodIds =
+              this.languageCodeToInputMethodIdsMap_[selection.value];
+          // Enable the first input method for the language added.
+          if (inputMethodIds && inputMethodIds[0] &&
+              // Don't add the input method it's already present. This can
+              // happen if the same input method is shared among multiple
+              // languages (ex. English US keyboard is used for English US and
+              // Filipino).
+              this.preloadEngines_.indexOf(inputMethodIds[0]) == -1) {
+            this.preloadEngines_.push(inputMethodIds[0]);
+            this.updateCheckboxesFromPreloadEngines_();
+            this.savePreloadEnginesPref_();
+          }
+        }
         OptionsPage.closeOverlay();
       }
     },
@@ -959,6 +1010,37 @@ cr.define('options', function() {
 
       show();
       delayedHide();
+    },
+
+    onDictionaryDownloadBegin_: function(languageCode) {
+      this.spellcheckDictionaryDownloadStatus_[languageCode] =
+          DOWNLOAD_STATUS.IN_PROGRESS;
+      if (!cr.isMac &&
+          languageCode ==
+              $('language-options-list').getSelectedLanguageCode()) {
+        this.updateSpellCheckLanguageButton_(languageCode);
+      }
+    },
+
+    onDictionaryDownloadSuccess_: function(languageCode) {
+      delete this.spellcheckDictionaryDownloadStatus_[languageCode];
+      this.spellcheckDictionaryDownloadFailures_ = 0;
+      if (!cr.isMac &&
+          languageCode ==
+              $('language-options-list').getSelectedLanguageCode()) {
+        this.updateSpellCheckLanguageButton_(languageCode);
+      }
+    },
+
+    onDictionaryDownloadFailure_: function(languageCode) {
+      this.spellcheckDictionaryDownloadStatus_[languageCode] =
+          DOWNLOAD_STATUS.FAILED;
+      this.spellcheckDictionaryDownloadFailures_++;
+      if (!cr.isMac &&
+          languageCode ==
+              $('language-options-list').getSelectedLanguageCode()) {
+        this.updateSpellCheckLanguageButton_(languageCode);
+      }
     }
   };
 
@@ -998,6 +1080,18 @@ cr.define('options', function() {
     // only take effect after restart.
     showMutuallyExclusiveNodes([$('language-options-ui-language-button'),
                                 $('language-options-ui-notification-bar')], 1);
+  };
+
+  LanguageOptions.onDictionaryDownloadBegin = function(languageCode) {
+    LanguageOptions.getInstance().onDictionaryDownloadBegin_(languageCode);
+  };
+
+  LanguageOptions.onDictionaryDownloadSuccess = function(languageCode) {
+    LanguageOptions.getInstance().onDictionaryDownloadSuccess_(languageCode);
+  };
+
+  LanguageOptions.onDictionaryDownloadFailure = function(languageCode) {
+    LanguageOptions.getInstance().onDictionaryDownloadFailure_(languageCode);
   };
 
   // Export

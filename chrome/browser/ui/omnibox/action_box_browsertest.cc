@@ -32,17 +32,11 @@ class ActionBoxTest : public InProcessBrowserTest,
  protected:
   ActionBoxTest() {}
 
-  virtual void SetUpOnMainThread() {
+  virtual void SetUpOnMainThread() OVERRIDE {
     ASSERT_TRUE(ui_test_utils::BringBrowserWindowToFront(browser()));
     ASSERT_NO_FATAL_FAILURE(SetupComponents());
     chrome::FocusLocationBar(browser());
-    // Use Textfield's view id on pure views. See crbug.com/71144.
-    ViewID location_bar_focus_view_id = VIEW_ID_LOCATION_BAR;
-#if defined(USE_AURA)
-    location_bar_focus_view_id = VIEW_ID_OMNIBOX;
-#endif
-    ASSERT_TRUE(ui_test_utils::IsViewFocused(browser(),
-                                             location_bar_focus_view_id));
+    ASSERT_TRUE(ui_test_utils::IsViewFocused(browser(), VIEW_ID_OMNIBOX));
   }
 
   virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
@@ -59,7 +53,6 @@ class ActionBoxTest : public InProcessBrowserTest,
       case content::NOTIFICATION_WEB_CONTENTS_DESTROYED:
       case chrome::NOTIFICATION_TAB_PARENTED:
       case chrome::NOTIFICATION_AUTOCOMPLETE_CONTROLLER_RESULT_READY:
-      case chrome::NOTIFICATION_BOOKMARK_MODEL_LOADED:
       case chrome::NOTIFICATION_HISTORY_LOADED:
       case chrome::NOTIFICATION_HISTORY_URLS_MODIFIED:
       case chrome::NOTIFICATION_TEMPLATE_URL_SERVICE_LOADED:
@@ -75,27 +68,28 @@ class ActionBoxTest : public InProcessBrowserTest,
 
 // Test if Bookmark star appears after bookmarking a page in the action box, and
 // disappears after unbookmarking a page.
-// Flakily fails: http://crbug.com/163733
-IN_PROC_BROWSER_TEST_F(ActionBoxTest, DISABLED_BookmarkAPageTest) {
+IN_PROC_BROWSER_TEST_F(ActionBoxTest, BookmarkAPageTest) {
   LocationBarTesting* loc_bar =
       browser()->window()->GetLocationBar()->GetLocationBarForTesting();
 
   // Navigate somewhere we can bookmark.
   ui_test_utils::NavigateToURL(browser(), GURL("http://www.google.com"));
 
+  // Make sure the bookmarking system is up and running.
+  BookmarkModel* model =
+      BookmarkModelFactory::GetForProfile(browser()->profile());
+  ui_test_utils::WaitForBookmarkModelToLoad(model);
+
   // Page is not bookmarked yet.
   ASSERT_FALSE(loc_bar->GetBookmarkStarVisibility());
 
   // Simulate an action box click and menu item selection.
-  chrome::ExecuteCommand(browser(), IDC_BOOKMARK_PAGE);
+  chrome::ExecuteCommand(browser(), IDC_BOOKMARK_PAGE_FROM_STAR);
 
   // Page is now bookmarked.
   ASSERT_TRUE(loc_bar->GetBookmarkStarVisibility());
 
   // Get the BookmarkModel to unbookmark the bookmark.
-  BookmarkModel* model =
-      BookmarkModelFactory::GetForProfile(browser()->profile());
-  ui_test_utils::WaitForBookmarkModelToLoad(model);
   bookmark_utils::RemoveAllBookmarks(model, GURL("http://www.google.com"));
 
   // Page is now unbookmarked.

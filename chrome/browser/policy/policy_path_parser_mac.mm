@@ -4,8 +4,12 @@
 
 #include "chrome/browser/policy/policy_path_parser.h"
 
+#include "base/basictypes.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
+#import "base/mac/scoped_nsautorelease_pool.h"
 #include "base/sys_string_conversions.h"
+#include "policy/policy_constants.h"
 
 #import <Cocoa/Cocoa.h>
 #import <SystemConfiguration/SCDynamicStore.h>
@@ -35,9 +39,9 @@ const MacFolderNamesToSPDMaping mac_folder_mapping[] = {
 
 // Replaces all variable occurrences in the policy string with the respective
 // system settings values.
-FilePath::StringType ExpandPathVariables(
-    const FilePath::StringType& untranslated_string) {
-  FilePath::StringType result(untranslated_string);
+base::FilePath::StringType ExpandPathVariables(
+    const base::FilePath::StringType& untranslated_string) {
+  base::FilePath::StringType result(untranslated_string);
   if (result.length() == 0)
     return result;
   // Sanitize quotes in case of any around the whole string.
@@ -88,6 +92,23 @@ FilePath::StringType ExpandPathVariables(
     CFRelease(store);
   }
   return result;
+}
+
+void CheckUserDataDirPolicy(base::FilePath* user_data_dir) {
+  base::mac::ScopedNSAutoreleasePool pool;
+
+  // Since the configuration management infrastructure is not initialized when
+  // this code runs, read the policy preference directly.
+  NSString* key = base::SysUTF8ToNSString(policy::key::kUserDataDir);
+  NSUserDefaults* defaults = [NSUserDefaults standardUserDefaults];
+  NSString* value = [defaults stringForKey:key];
+  if (value && [defaults objectIsForcedForKey:key]) {
+    std::string string_value = base::SysNSStringToUTF8(value);
+    // Now replace any vars the user might have used.
+    string_value =
+        policy::path_parser::ExpandPathVariables(string_value);
+    *user_data_dir = base::FilePath(string_value);
+  }
 }
 
 }  // namespace path_parser

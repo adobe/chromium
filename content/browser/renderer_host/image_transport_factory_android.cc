@@ -26,6 +26,7 @@ class DirectGLImageTransportFactory : public ImageTransportFactoryAndroid {
   virtual ~DirectGLImageTransportFactory();
 
   virtual uint32_t InsertSyncPoint() OVERRIDE { return 0; }
+  virtual void WaitSyncPoint(uint32_t sync_point) OVERRIDE {}
   virtual uint32_t CreateTexture() OVERRIDE {
     return context_->createTexture();
   }
@@ -37,25 +38,23 @@ class DirectGLImageTransportFactory : public ImageTransportFactoryAndroid {
   virtual void ReleaseTexture(
       uint32 texture_id, const signed char* mailbox_name) OVERRIDE {}
   virtual WebKit::WebGraphicsContext3D* GetContext3D() OVERRIDE {
-    return context_.get();
+    return context_;
   }
   virtual GLHelper* GetGLHelper() OVERRIDE { return NULL; }
 
+  virtual void SetContext3D(WebKit::WebGraphicsContext3D* context) OVERRIDE {
+    context_ = context;
+  }
+
  private:
-  scoped_ptr<webkit::gpu::WebGraphicsContext3DInProcessImpl> context_;
+  WebKit::WebGraphicsContext3D* context_;
 
   DISALLOW_COPY_AND_ASSIGN(DirectGLImageTransportFactory);
 };
 
-DirectGLImageTransportFactory::DirectGLImageTransportFactory() {
-  WebKit::WebGraphicsContext3D::Attributes attrs;
-  attrs.shareResources = false;
-  attrs.noAutomaticFlushes = true;
-  context_.reset(
-      webkit::gpu::WebGraphicsContext3DInProcessImpl::CreateForWindow(
-          attrs,
-          NULL,
-          NULL));
+DirectGLImageTransportFactory::DirectGLImageTransportFactory() 
+  : context_(0) {
+  // CompositorImpl is supposed to inject the right context using SetContext3D.
 }
 
 DirectGLImageTransportFactory::~DirectGLImageTransportFactory() {
@@ -67,6 +66,7 @@ class CmdBufferImageTransportFactory : public ImageTransportFactoryAndroid {
   virtual ~CmdBufferImageTransportFactory();
 
   virtual uint32_t InsertSyncPoint() OVERRIDE;
+  virtual void WaitSyncPoint(uint32_t sync_point) OVERRIDE;
   virtual uint32_t CreateTexture() OVERRIDE;
   virtual void DeleteTexture(uint32_t id) OVERRIDE;
   virtual void AcquireTexture(
@@ -105,7 +105,19 @@ CmdBufferImageTransportFactory::~CmdBufferImageTransportFactory() {
 }
 
 uint32_t CmdBufferImageTransportFactory::InsertSyncPoint() {
+  if (!context_->makeContextCurrent()) {
+    LOG(ERROR) << "Failed to make helper context current.";
+    return 0;
+  }
   return context_->insertSyncPoint();
+}
+
+void CmdBufferImageTransportFactory::WaitSyncPoint(uint32_t sync_point) {
+  if (!context_->makeContextCurrent()) {
+    LOG(ERROR) << "Failed to make helper context current.";
+    return;
+  }
+  context_->waitSyncPoint(sync_point);
 }
 
 uint32_t CmdBufferImageTransportFactory::CreateTexture() {

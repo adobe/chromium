@@ -13,29 +13,43 @@
 namespace ash {
 namespace internal {
 
-class TrayNetwork;
-
 class TrayNetworkStateObserver : public chromeos::NetworkStateHandlerObserver {
  public:
-  enum WifiState {
-    WIFI_DISABLED,
-    WIFI_ENABLED,
-    WIFI_UNKNOWN,
+  class Delegate {
+   public:
+    // Called when the network state may have changed. If |list_changed| is
+    // true then the list of networks may have changed.
+    virtual void NetworkStateChanged(bool list_changed) = 0;
+
+    // Called when the properties for |network| may have been updated.
+    virtual void NetworkServiceChanged(
+        const chromeos::NetworkState* network) = 0;
+
+   protected:
+    virtual ~Delegate() {}
   };
 
-  explicit TrayNetworkStateObserver(TrayNetwork* tray);
+  explicit TrayNetworkStateObserver(Delegate* delegate);
 
   virtual ~TrayNetworkStateObserver();
 
   // NetworkStateHandlerObserver overrides.
   virtual void NetworkManagerChanged() OVERRIDE;
-  virtual void NetworkListChanged(const NetworkStateList& networks) OVERRIDE;
+  virtual void NetworkListChanged() OVERRIDE;
+  virtual void DeviceListChanged() OVERRIDE;
+  virtual void DefaultNetworkChanged(
+      const chromeos::NetworkState* network) OVERRIDE;
   virtual void NetworkPropertiesUpdated(
       const chromeos::NetworkState* network) OVERRIDE;
 
+  // Keep track of user initiated connecting networks
+  static void AddConnectingNetwork(const std::string& service_path);
+
+  // Returns true if a user initiated connection to |network| occured
+  static bool HasConnectingNetwork(const std::string& service_path);
+
  private:
-  TrayNetwork* tray_;
-  WifiState wifi_state_;  // cache wifi enabled state
+  Delegate* delegate_;
 
   DISALLOW_COPY_AND_ASSIGN(TrayNetworkStateObserver);
 };

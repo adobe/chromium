@@ -26,6 +26,7 @@ class ImageTransportFactoryAndroid {
   static ImageTransportFactoryAndroid* GetInstance();
 
   virtual uint32_t InsertSyncPoint() = 0;
+  virtual void WaitSyncPoint(uint32_t sync_point) = 0;
   virtual uint32_t CreateTexture() = 0;
   virtual void DeleteTexture(uint32_t id) = 0;
   virtual void AcquireTexture(
@@ -35,6 +36,7 @@ class ImageTransportFactoryAndroid {
 
   virtual WebKit::WebGraphicsContext3D* GetContext3D() = 0;
   virtual GLHelper* GetGLHelper() = 0;
+  virtual void SetContext3D(WebKit::WebGraphicsContext3D*) { }
 
 protected:
   ImageTransportFactoryAndroid();

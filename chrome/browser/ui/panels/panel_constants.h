@@ -16,7 +16,7 @@ namespace panel {
 // single line of text - so the height is set to be likely less then a titlebar,
 // to make sure even small content is tightly wrapped.
 const int kPanelMinWidth = 80;
-const int kPanelMinHeight = 20;
+const int kPanelMinHeight = 30;
 
 // The panel can be minimized to 4-pixel lines.
 static const int kMinimizedPanelHeight = 4;
@@ -57,9 +57,28 @@ enum ResizingSides {
 
 // Ways a panel can be resized.
 enum Resizability {
-  NOT_RESIZABLE,
-  RESIZABLE_ALL_SIDES,
-  RESIZABLE_ALL_SIDES_EXCEPT_BOTTOM
+  NOT_RESIZABLE = 0,
+  RESIZABLE_TOP = 0x1,
+  RESIZABLE_BOTTOM = 0x2,
+  RESIZABLE_LEFT = 0x4,
+  RESIZABLE_RIGHT = 0x8,
+  RESIZABLE_TOP_LEFT = 0x10,
+  RESIZABLE_TOP_RIGHT = 0x20,
+  RESIZABLE_BOTTOM_LEFT = 0x40,
+  RESIZABLE_BOTTOM_RIGHT = 0x80,
+  RESIZABLE_EXCEPT_BOTTOM = RESIZABLE_TOP | RESIZABLE_LEFT | RESIZABLE_RIGHT |
+      RESIZABLE_TOP_LEFT | RESIZABLE_TOP_RIGHT,
+  RESIZABLE_ALL = RESIZABLE_TOP | RESIZABLE_BOTTOM | RESIZABLE_LEFT |
+      RESIZABLE_RIGHT | RESIZABLE_TOP_LEFT | RESIZABLE_TOP_RIGHT |
+      RESIZABLE_BOTTOM_LEFT | RESIZABLE_BOTTOM_RIGHT
+};
+
+// Describes how 4 corners of a panel should be painted.
+enum CornerStyle {
+  NOT_ROUNDED = 0,
+  TOP_ROUNDED = 0x1,
+  BOTTOM_ROUNDED = 0x2,
+  ALL_ROUNDED = TOP_ROUNDED | BOTTOM_ROUNDED
 };
 
 }  // namespace panel

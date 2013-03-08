@@ -75,7 +75,7 @@ class ViewAccumulator : public content::RenderViewVisitor {
   std::vector<content::RenderView*> views() { return views_; }
 
   // Returns false to terminate the iteration.
-  virtual bool Visit(content::RenderView* render_view) {
+  virtual bool Visit(content::RenderView* render_view) OVERRIDE {
     ExtensionHelper* helper = ExtensionHelper::Get(render_view);
     if (!ViewTypeMatches(helper->view_type(), view_type_))
       return true;
@@ -419,6 +419,8 @@ void ExtensionHelper::OnAppWindowClosed() {
       render_view()->GetWebView()->mainFrame()->mainWorldScriptContext();
   ChromeV8Context* chrome_v8_context =
       dispatcher_->v8_context_set().GetByV8Context(script_context);
+  if (!chrome_v8_context)
+    return;
   chrome_v8_context->CallChromeHiddenMethod("OnAppWindowClosed", 0, NULL, NULL);
 }
 
@@ -524,8 +526,8 @@ void ExtensionHelper::AddMessageToRootConsole(ConsoleMessageLevel level,
   if (render_view()->GetWebView() && render_view()->GetWebView()->mainFrame()) {
     WebConsoleMessage::Level target_level = WebConsoleMessage::LevelLog;
     switch (level) {
-      case content::CONSOLE_MESSAGE_LEVEL_TIP:
-        target_level = WebConsoleMessage::LevelTip;
+      case content::CONSOLE_MESSAGE_LEVEL_DEBUG:
+        target_level = WebConsoleMessage::LevelDebug;
         break;
       case content::CONSOLE_MESSAGE_LEVEL_LOG:
         target_level = WebConsoleMessage::LevelLog;

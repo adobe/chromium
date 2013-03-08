@@ -4,12 +4,14 @@
 
 #include "media/audio/mac/audio_device_listener_mac.h"
 
-#include "base/file_path.h"
+#include "base/bind.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/mac/libdispatch_task_runner.h"
 #include "base/mac/mac_logging.h"
 #include "base/mac/mac_util.h"
 #include "base/message_loop.h"
+#include "base/pending_task.h"
 
 namespace media {
 
@@ -27,7 +29,7 @@ class ExclusiveDispatchQueueTaskObserver : public MessageLoop::TaskObserver {
     // If we're currently on the thread, fire the suspend operation so we don't
     // end up with an unbalanced resume.
     if (message_loop_->message_loop_proxy()->BelongsToCurrentThread())
-      WillProcessTask(base::TimeTicks());
+      SuspendDispatchQueue();
 
     message_loop_->AddTaskObserver(this);
   }
@@ -38,26 +40,18 @@ class ExclusiveDispatchQueueTaskObserver : public MessageLoop::TaskObserver {
     // If we're currently on the thread, fire the resume operation so we don't
     // end up with an unbalanced suspend.
     if (message_loop_->message_loop_proxy()->BelongsToCurrentThread())
-      DidProcessTask(base::TimeTicks());
+      ResumeDispatchQueue();
 
     // This will hang if any listeners are still registered with the queue.
     property_listener_queue_->Shutdown();
   }
 
-  virtual void WillProcessTask(base::TimeTicks time_posted) OVERRIDE {
-    // Issue a synchronous suspend operation.  Benchmarks on a retina 10.8.2
-    // machine show this takes < 20us on average.  dispatch_suspend() is an
-    // asynchronous operation so we need to issue it inside of a synchronous
-    // block to ensure it completes before WillProccesTask() completes.
-    dispatch_sync(queue_, ^{
-        dispatch_suspend(queue_);
-    });
+  virtual void WillProcessTask(const base::PendingTask& pending_task) OVERRIDE {
+    SuspendDispatchQueue();
   }
 
-  virtual void DidProcessTask(base::TimeTicks time_posted) OVERRIDE {
-    // Issue an asynchronous resume operation.  Benchmarks on a retina 10.8.2
-    // machine show this takes < 10us on average.
-    dispatch_resume(queue_);
+  virtual void DidProcessTask(const base::PendingTask& pending_task) OVERRIDE {
+    ResumeDispatchQueue();
   }
 
   dispatch_queue_t dispatch_queue() const {
@@ -65,6 +59,22 @@ class ExclusiveDispatchQueueTaskObserver : public MessageLoop::TaskObserver {
   }
 
  private:
+  // Issue a synchronous suspend operation.  Benchmarks on a retina 10.8.2
+  // machine show this takes < 20us on average.  dispatch_suspend() is an
+  // asynchronous operation so we need to issue it inside of a synchronous block
+  // to ensure it completes before WillProccesTask() completes.
+  void SuspendDispatchQueue() {
+    dispatch_sync(queue_, ^{
+        dispatch_suspend(queue_);
+    });
+  }
+
+  // Issue an asynchronous resume operation.  Benchmarks on a retina 10.8.2
+  // machine show this takes < 10us on average.
+  void ResumeDispatchQueue() {
+    dispatch_resume(queue_);
+  }
+
   scoped_refptr<base::mac::LibDispatchTaskRunner> property_listener_queue_;
   const dispatch_queue_t queue_;
   MessageLoop* message_loop_;
@@ -115,8 +125,8 @@ AudioDeviceListenerMac::AudioDeviceListenerMac(const base::Closure& listener_cb)
   // by pausing and resuming the dispatch queue before and after each pumped
   // task.  This is not ideal and long term we should replace the audio thread
   // on OSX with a dispatch queue.  See http://crbug.com/158170 for discussion.
-  // TODO(dalecurtis): Does not fix the cases where GetAudioHardwareSampleRate()
-  // and GetAudioInputHardwareSampleRate() are called by the browser process.
+  // TODO(dalecurtis): Does not fix the cases where
+  // GetDefaultOutputStreamParameters() are called by the browser process.
   // These are one time events due to renderer side cache and thus unlikely to
   // occur at the same time as a device callback.  Should be fixed along with
   // http://crbug.com/137326 using a forced PostTask.
@@ -205,7 +215,7 @@ bool AudioDeviceListenerMac::LoadAudioObjectPropertyListenerBlockFunctions() {
   // Dynamically load required block functions.
   // TODO(dalecurtis): Remove once the deployment target is > 10.6.
   std::string error;
-  base::NativeLibrary core_audio = base::LoadNativeLibrary(FilePath(
+  base::NativeLibrary core_audio = base::LoadNativeLibrary(base::FilePath(
       "/System/Library/Frameworks/CoreAudio.framework/Versions/Current/"
       "CoreAudio"), &error);
   if (!error.empty()) {

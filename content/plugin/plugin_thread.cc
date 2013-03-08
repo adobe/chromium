@@ -51,7 +51,7 @@ class EnsureTerminateMessageFilter : public IPC::ChannelProxy::MessageFilter {
   virtual ~EnsureTerminateMessageFilter() {}
 
   // IPC::ChannelProxy::MessageFilter:
-  virtual void OnChannelError() {
+  virtual void OnChannelError() OVERRIDE {
     // How long we wait before forcibly shutting down the process.
     const base::TimeDelta kPluginProcessTerminateTimeout =
         base::TimeDelta::FromSeconds(3);
@@ -77,8 +77,9 @@ static base::LazyInstance<base::ThreadLocalPointer<PluginThread> > lazy_tls =
 
 PluginThread::PluginThread()
     : preloaded_plugin_module_(NULL) {
-  FilePath plugin_path = CommandLine::ForCurrentProcess()->GetSwitchValuePath(
-      switches::kPluginPath);
+  base::FilePath plugin_path =
+      CommandLine::ForCurrentProcess()->GetSwitchValuePath(
+          switches::kPluginPath);
 
   lazy_tls.Pointer()->Set(this);
 #if defined(USE_AURA)

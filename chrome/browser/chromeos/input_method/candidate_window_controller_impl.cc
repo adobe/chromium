@@ -30,23 +30,28 @@ namespace {
 const int kInfolistShowDelayMilliSeconds = 500;
 // The milliseconds of the delay to hide the infolist window.
 const int kInfolistHideDelayMilliSeconds = 500;
+
+// Converts from ibus::Rect to gfx::Rect.
+gfx::Rect IBusRectToGfxRect(const ibus::Rect& rect) {
+  return gfx::Rect(rect.x, rect.y, rect.width, rect.height);
+}
+
+// Returns pointer of IBusPanelService. This function returns NULL if it is not
+// ready.
+IBusPanelService* GetIBusPanelService() {
+  return DBusThreadManager::Get()->GetIBusPanelService();
+}
 }  // namespace
 
 bool CandidateWindowControllerImpl::Init(IBusController* controller) {
-  if (controller)
-    controller->AddObserver(this);
+  IBusDaemonController::GetInstance()->AddObserver(this);
   // Create the candidate window view.
   CreateView();
-
-  // The observer should be added before Connect() so we can capture the
-  // initial connection change.
-  ibus_ui_controller_->AddObserver(this);
   return true;
 }
 
 void CandidateWindowControllerImpl::Shutdown(IBusController* controller) {
-  if (controller)
-    controller->RemoveObserver(this);
+  IBusDaemonController::GetInstance()->RemoveObserver(this);
 }
 
 void CandidateWindowControllerImpl::CreateView() {
@@ -95,8 +100,7 @@ void CandidateWindowControllerImpl::CreateView() {
 }
 
 CandidateWindowControllerImpl::CandidateWindowControllerImpl()
-    : ibus_ui_controller_(new IBusUiController),
-      candidate_window_(NULL),
+    : candidate_window_(NULL),
       infolist_window_(NULL),
       latest_infolist_focused_index_(InfolistWindowView::InvalidFocusIndex()) {
 }
@@ -105,48 +109,47 @@ CandidateWindowControllerImpl::~CandidateWindowControllerImpl() {
   if (DBusThreadManager::Get()->GetIBusPanelService())
     DBusThreadManager::Get()->GetIBusPanelService()->
         SetUpCandidateWindowHandler(NULL);
-  ibus_ui_controller_->RemoveObserver(this);
   candidate_window_->RemoveObserver(this);
-  // ibus_ui_controller_'s destructor will close the connection.
 }
 
-void CandidateWindowControllerImpl::OnHideAuxiliaryText() {
+void CandidateWindowControllerImpl::HideAuxiliaryText() {
   candidate_window_->HideAuxiliaryText();
 }
 
-void CandidateWindowControllerImpl::OnHideLookupTable() {
+void CandidateWindowControllerImpl::HideLookupTable() {
   candidate_window_->HideLookupTable();
   infolist_window_->Hide();
 }
 
-void CandidateWindowControllerImpl::OnHidePreeditText() {
+void CandidateWindowControllerImpl::HidePreeditText() {
   candidate_window_->HidePreeditText();
 }
 
-void CandidateWindowControllerImpl::OnSetCursorLocation(
-    const gfx::Rect& cursor_location,
-    const gfx::Rect& composition_head) {
+void CandidateWindowControllerImpl::SetCursorLocation(
+    const ibus::Rect& cursor_location,
+    const ibus::Rect& composition_head) {
   // A workaround for http://crosbug.com/6460. We should ignore very short Y
   // move to prevent the window from shaking up and down.
   const int kKeepPositionThreshold = 2;  // px
   const gfx::Rect& last_location =
       candidate_window_->cursor_location();
-  const int delta_y = abs(last_location.y() - cursor_location.y());
-  if ((last_location.x() == cursor_location.x()) &&
+  const int delta_y = abs(last_location.y() - cursor_location.y);
+  if ((last_location.x() == cursor_location.x) &&
       (delta_y <= kKeepPositionThreshold)) {
     DVLOG(1) << "Ignored set_cursor_location signal to prevent window shake";
     return;
   }
 
   // Remember the cursor location.
-  candidate_window_->set_cursor_location(cursor_location);
-  candidate_window_->set_composition_head_location(composition_head);
+  candidate_window_->set_cursor_location(IBusRectToGfxRect(cursor_location));
+  candidate_window_->set_composition_head_location(
+      IBusRectToGfxRect(composition_head));
   // Move the window per the cursor location.
   candidate_window_->ResizeAndMoveParentFrame();
   UpdateInfolistBounds();
 }
 
-void CandidateWindowControllerImpl::OnUpdateAuxiliaryText(
+void CandidateWindowControllerImpl::UpdateAuxiliaryText(
     const std::string& utf8_text,
     bool visible) {
   // If it's not visible, hide the auxiliary text and return.
@@ -160,7 +163,7 @@ void CandidateWindowControllerImpl::OnUpdateAuxiliaryText(
 
 // static
 void CandidateWindowControllerImpl::ConvertLookupTableToInfolistEntry(
-    const ibus::IBusLookupTable& lookup_table,
+    const IBusLookupTable& lookup_table,
     std::vector<InfolistWindowView::Entry>* infolist_entries,
     size_t* focused_index) {
   DCHECK(focused_index);
@@ -172,7 +175,7 @@ void CandidateWindowControllerImpl::ConvertLookupTableToInfolistEntry(
       lookup_table.cursor_position() % lookup_table.page_size();
 
   for (size_t i = 0; i < lookup_table.candidates().size(); ++i) {
-    const ibus::IBusLookupTable::Entry& ibus_entry =
+    const IBusLookupTable::Entry& ibus_entry =
         lookup_table.candidates()[i];
     if (ibus_entry.description_title.empty() &&
         ibus_entry.description_body.empty())
@@ -208,8 +211,8 @@ bool CandidateWindowControllerImpl::ShouldUpdateInfolist(
   return false;
 }
 
-void CandidateWindowControllerImpl::OnUpdateLookupTable(
-    const ibus::IBusLookupTable& lookup_table,
+void CandidateWindowControllerImpl::UpdateLookupTable(
+    const IBusLookupTable& lookup_table,
     bool visible) {
   // If it's not visible, hide the lookup table and return.
   if (!visible) {
@@ -281,7 +284,7 @@ void CandidateWindowControllerImpl::UpdateInfolistBounds() {
     infolist_window_->SetBounds(new_bounds);
 }
 
-void CandidateWindowControllerImpl::OnUpdatePreeditText(
+void CandidateWindowControllerImpl::UpdatePreeditText(
     const std::string& utf8_text, unsigned int cursor, bool visible) {
   // If it's not visible, hide the preedit text and return.
   if (!visible || utf8_text.empty()) {
@@ -295,7 +298,10 @@ void CandidateWindowControllerImpl::OnUpdatePreeditText(
 void CandidateWindowControllerImpl::OnCandidateCommitted(int index,
                                                          int button,
                                                          int flags) {
-  ibus_ui_controller_->NotifyCandidateClicked(index, button, flags);
+  GetIBusPanelService()->CandidateClicked(
+      index,
+      static_cast<ibus::IBusMouseButton>(button),
+      flags);
 }
 
 void CandidateWindowControllerImpl::OnCandidateWindowOpened() {
@@ -318,12 +324,9 @@ void CandidateWindowControllerImpl::RemoveObserver(
   observers_.RemoveObserver(observer);
 }
 
-void CandidateWindowControllerImpl::PropertyChanged() {
-}
-
 void CandidateWindowControllerImpl::OnConnected() {
   DBusThreadManager::Get()->GetIBusPanelService()->SetUpCandidateWindowHandler(
-      ibus_ui_controller_.get());
+      this);
 }
 
 void CandidateWindowControllerImpl::OnDisconnected() {

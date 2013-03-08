@@ -10,7 +10,7 @@
 #include <vector>
 
 #include "base/id_map.h"
-#include "base/memory/scoped_ptr.h"
+#include "base/memory/linked_ptr.h"
 #include "base/prefs/public/pref_member.h"
 #include "base/timer.h"
 #include "chrome/browser/notifications/notification_ui_manager.h"
@@ -34,6 +34,7 @@ class NotificationUIManagerImpl
   // NotificationUIManager:
   virtual void Add(const Notification& notification,
                    Profile* profile) OVERRIDE;
+  virtual bool DoesIdExist(const std::string& notification_id) OVERRIDE;
   virtual bool CancelById(const std::string& notification_id) OVERRIDE;
   virtual bool CancelAllBySourceOrigin(const GURL& source_origin) OVERRIDE;
   virtual bool CancelAllByProfile(Profile* profile) OVERRIDE;
@@ -43,9 +44,9 @@ class NotificationUIManagerImpl
     std::vector<const Notification*>* notifications);
 
  protected:
-  // Attempts to pass a notification from a waiting queue to the sublass
-  // for presentation. Subclass can return 'false' if it can not show
-  // notificaiton right away. In this case it should invoke
+  // Attempts to pass a notification from a waiting queue to the subclass for
+  // presentation. The subclass can return 'false' if it cannot show the
+  // notification right away. In that case it should invoke
   // CheckAndShowNotificaitons() later.
   virtual bool ShowNotification(const Notification& notification,
                                 Profile* profile) = 0;
@@ -79,7 +80,7 @@ class NotificationUIManagerImpl
   void CheckUserState();
 
   // A queue of notifications which are waiting to be shown.
-  typedef std::deque<QueuedNotification*> NotificationDeque;
+  typedef std::deque<linked_ptr<QueuedNotification> > NotificationDeque;
   NotificationDeque show_queue_;
 
   // Registrar for the other kind of notifications (event signaling).

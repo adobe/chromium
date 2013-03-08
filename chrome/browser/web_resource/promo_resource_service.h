@@ -15,8 +15,9 @@ class DictionaryValue;
 }
 
 class NotificationPromo;
-class PrefServiceSimple;
-class PrefServiceSyncable;
+class PrefRegistrySimple;
+class PrefRegistrySyncable;
+class PrefService;
 
 // A PromoResourceService fetches data from a web resource server to be used to
 // dynamically change the appearance of the New Tab Page. For example, it has
@@ -24,8 +25,9 @@ class PrefServiceSyncable;
 // promotional messages to certain groups of Chrome users.
 class PromoResourceService : public WebResourceService {
  public:
-  static void RegisterPrefs(PrefServiceSimple* local_state);
-  static void RegisterUserPrefs(PrefServiceSyncable* prefs);
+  static void RegisterPrefs(PrefRegistrySimple* registry);
+  static void RegisterUserPrefs(PrefRegistrySyncable* registry);
+  static void MigrateUserPrefs(PrefService* user_prefs);
 
   PromoResourceService();
 

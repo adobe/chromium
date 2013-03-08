@@ -33,6 +33,11 @@ class NET_EXPORT_PRIVATE SpdyFrameReader {
   // Empty destructor.
   ~SpdyFrameReader() {}
 
+  // Reads an 8-bit unsigned integer into the given output parameter.
+  // Forwards the internal iterater on success.
+  // Returns true on success, false otherwise.
+  bool ReadUInt8(uint8* result);
+
   // Reads a 16-bit unsigned integer into the given output parameter.
   // Forwards the internal iterater on success.
   // Returns true on success, false otherwise.
@@ -42,6 +47,18 @@ class NET_EXPORT_PRIVATE SpdyFrameReader {
   // Forwards the internal iterater on success.
   // Returns true on success, false otherwise.
   bool ReadUInt32(uint32* result);
+
+  // Reads a 31-bit unsigned integer into the given output parameter. This is
+  // equivalent to ReadUInt32() above except that the highest-order bit is
+  // discarded.
+  // Forwards the internal iterater (by 4B) on success.
+  // Returns true on success, false otherwise.
+  bool ReadUInt31(uint32* result);
+
+  // Reads a 24-bit unsigned integer into the given output parameter.
+  // Forwards the internal iterater (by 3B) on success.
+  // Returns true on success, false otherwise.
+  bool ReadUInt24(uint32* result);
 
   // Reads a string prefixed with 16-bit length into the given output parameter.
   //
@@ -66,6 +83,15 @@ class NET_EXPORT_PRIVATE SpdyFrameReader {
   // Forwards the internal iterater on success.
   // Returns true on success, false otherwise.
   bool ReadBytes(void* result, size_t size);
+
+  // Seeks a given number of bytes into the buffer from the current offset.
+  // Equivelant to an empty read.
+  // Forwards the internal iterator.
+  // Returns true on success, false otherwise.
+  bool Seek(size_t size);
+
+  // Rewinds this reader to the beginning of the frame.
+  void Rewind() { ofs_ = 0; }
 
   // Returns true if the entirety of the underlying buffer has been read via
   // Read*() calls.

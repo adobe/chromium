@@ -4,15 +4,17 @@
 
 #include "chrome/browser/profiles/chrome_version_service.h"
 
+#include "base/prefs/pref_service.h"
 #include "base/version.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/pref_names.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 
 // static
-void ChromeVersionService::RegisterUserPrefs(PrefServiceSyncable* prefs) {
-  prefs->RegisterStringPref(prefs::kProfileCreatedByVersion, "1.0.0.0",
-      PrefServiceSyncable::UNSYNCABLE_PREF);
+void ChromeVersionService::RegisterUserPrefs(PrefRegistrySyncable* registry) {
+  registry->RegisterStringPref(prefs::kProfileCreatedByVersion,
+                               "1.0.0.0",
+                               PrefRegistrySyncable::UNSYNCABLE_PREF);
 }
 
 // static

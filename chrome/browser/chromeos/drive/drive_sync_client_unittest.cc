@@ -8,20 +8,19 @@
 #include <vector>
 
 #include "base/bind.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
+#include "base/prefs/pref_service.h"
 #include "base/test/test_timeouts.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "chrome/browser/chromeos/drive/drive.pb.h"
 #include "chrome/browser/chromeos/drive/drive_file_system_util.h"
-#include "chrome/browser/chromeos/drive/drive_sync_client_observer.h"
 #include "chrome/browser/chromeos/drive/drive_test_util.h"
 #include "chrome/browser/chromeos/drive/mock_drive_file_system.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_profile.h"
@@ -41,19 +40,19 @@ namespace {
 
 // Action used to set mock expectations for GetFileByResourceId().
 ACTION_P4(MockGetFileByResourceId, error, local_path, mime_type, file_type) {
-  arg1.Run(error, local_path, mime_type, file_type);
+  arg2.Run(error, local_path, mime_type, file_type);
 }
 
 // Action used to set mock expectations for UpdateFileByResourceId().
 ACTION_P(MockUpdateFileByResourceId, error) {
-  arg1.Run(error);
+  arg2.Run(error);
 }
 
 // Action used to set mock expectations for GetFileInfoByResourceId().
 ACTION_P2(MockUpdateFileByResourceId, error, md5) {
   scoped_ptr<DriveEntryProto> entry_proto(new DriveEntryProto);
   entry_proto->mutable_file_specific_info()->set_file_md5(md5);
-  arg1.Run(error, FilePath(), entry_proto.Pass());
+  arg1.Run(error, base::FilePath(), entry_proto.Pass());
 }
 
 class MockNetworkChangeNotifier : public net::NetworkChangeNotifier {
@@ -62,32 +61,12 @@ class MockNetworkChangeNotifier : public net::NetworkChangeNotifier {
                      net::NetworkChangeNotifier::ConnectionType());
 };
 
-class TestObserver : public DriveSyncClientObserver {
- public:
-  TestObserver() : start_count_(0), idle_count_(0), stop_count_(0) {}
-
-  // DriveSyncClientObserver overrides.
-  virtual void OnSyncTaskStarted() { ++start_count_; }
-  virtual void OnSyncClientStopped() { ++stop_count_; }
-  virtual void OnSyncClientIdle() { ++idle_count_; }
-
-  int start_count() const { return start_count_; }
-  int stop_count() const { return stop_count_; }
-  int idle_count() const { return idle_count_; }
-
- private:
-  int start_count_;
-  int idle_count_;
-  int stop_count_;
-};
-
 }  // namespace
 
 class DriveSyncClientTest : public testing::Test {
  public:
   DriveSyncClientTest()
       : ui_thread_(content::BrowserThread::UI, &message_loop_),
-        io_thread_(content::BrowserThread::IO),
         profile_(new TestingProfile),
         mock_file_system_(new StrictMock<MockDriveFileSystem>) {
   }
@@ -125,13 +104,11 @@ class DriveSyncClientTest : public testing::Test {
     // Disable delaying so that DoSyncLoop() starts immediately.
     sync_client_->set_delay_for_testing(base::TimeDelta::FromSeconds(0));
     sync_client_->Initialize();
-    sync_client_->AddObserver(&observer_);
   }
 
   virtual void TearDown() OVERRIDE {
     // The sync client should be deleted before NetworkLibrary, as the sync
     // client registers itself as observer of NetworkLibrary.
-    sync_client_->RemoveObserver(&observer_);
     sync_client_.reset();
     cache_->Destroy();
     google_apis::test_util::RunBlockingPoolTask();
@@ -141,7 +118,7 @@ class DriveSyncClientTest : public testing::Test {
   // Sets up cache for tests.
   void SetUpCache() {
     // Prepare a temp file.
-    FilePath temp_file;
+    base::FilePath temp_file;
     EXPECT_TRUE(file_util::CreateTemporaryFileInDir(temp_dir_.path(),
                                                     &temp_file));
     const std::string content = "hello";
@@ -171,7 +148,7 @@ class DriveSyncClientTest : public testing::Test {
     // Prepare a pinned-and-fetched file.
     const std::string resource_id_fetched = "resource_id_fetched";
     const std::string md5_fetched = "md5";
-    FilePath cache_file_path;
+    base::FilePath cache_file_path;
     cache_->Store(resource_id_fetched, md5_fetched, temp_file,
                   DriveCache::FILE_OPERATION_COPY,
                   base::Bind(&test_util::CopyErrorCodeFromFileOperationCallback,
@@ -215,15 +192,13 @@ class DriveSyncClientTest : public testing::Test {
   // that simulates successful retrieval of a file for the given resource ID.
   void SetExpectationForGetFileByResourceId(const std::string& resource_id) {
     EXPECT_CALL(*mock_file_system_,
-                GetFileByResourceId(resource_id, _, _))
-        .WillOnce(DoAll(
-            InvokeWithoutArgs(this,
-                              &DriveSyncClientTest::VerifyStartNotified),
+                GetFileByResourceId(resource_id, _, _, _))
+        .WillOnce(
             MockGetFileByResourceId(
                 DRIVE_FILE_OK,
-                FilePath::FromUTF8Unsafe("local_path_does_not_matter"),
+                base::FilePath::FromUTF8Unsafe("local_path_does_not_matter"),
                 std::string("mime_type_does_not_matter"),
-                REGULAR_FILE)));
+                REGULAR_FILE));
   }
 
   // Sets the expectation for MockDriveFileSystem::UpdateFileByResourceId(),
@@ -231,7 +206,7 @@ class DriveSyncClientTest : public testing::Test {
   void SetExpectationForUpdateFileByResourceId(
       const std::string& resource_id) {
     EXPECT_CALL(*mock_file_system_,
-                UpdateFileByResourceId(resource_id, _))
+                UpdateFileByResourceId(resource_id, _, _))
         .WillOnce(MockUpdateFileByResourceId(DRIVE_FILE_OK));
   }
 
@@ -274,23 +249,15 @@ class DriveSyncClientTest : public testing::Test {
                                           resource_id);
   }
 
-  // Helper function for verifying that observer is correctly notified the
-  // start of sync client in SetExpectationForGetFileByResourceId.
-  void VerifyStartNotified() {
-    EXPECT_GT(observer_.start_count(), 0);
-  }
-
  protected:
   MessageLoopForUI message_loop_;
   content::TestBrowserThread ui_thread_;
-  content::TestBrowserThread io_thread_;
   base::ScopedTempDir temp_dir_;
   scoped_ptr<TestingProfile> profile_;
   scoped_ptr<StrictMock<MockDriveFileSystem> > mock_file_system_;
   DriveCache* cache_;
   scoped_ptr<DriveSyncClient> sync_client_;
   scoped_ptr<MockNetworkChangeNotifier> mock_network_change_notifier_;
-  TestObserver observer_;
 };
 
 TEST_F(DriveSyncClientTest, StartInitialScan) {
@@ -367,20 +334,6 @@ TEST_F(DriveSyncClientTest, ExistingPinnedFiles) {
   SetExpectationForGetFileByResourceId("resource_id_fetched");
 
   google_apis::test_util::RunBlockingPoolTask();
-}
-
-TEST_F(DriveSyncClientTest, ObserveRunAllTaskQueue) {
-  AddResourceIdToFetch("resource_id_foo");
-  AddResourceIdToFetch("resource_id_bar");
-
-  // Starts the sync queue, and eventually notifies the idle state.
-  SetExpectationForGetFileByResourceId("resource_id_foo");
-  SetExpectationForGetFileByResourceId("resource_id_bar");
-
-  google_apis::test_util::RunBlockingPoolTask();
-
-  EXPECT_EQ(1, observer_.idle_count());
-  EXPECT_EQ(2, observer_.start_count());
 }
 
 }  // namespace drive

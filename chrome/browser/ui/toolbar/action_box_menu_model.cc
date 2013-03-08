@@ -17,11 +17,14 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_command_controller.h"
-#include "chrome/browser/ui/browser_tabstrip.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/common/extensions/api/extension_action/action_info.h"
 #include "chrome/common/url_constants.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "ui/base/resource/resource_bundle.h"
+
+using extensions::ActionInfo;
 
 ////////////////////////////////////////////////////////////////////////////////
 // ActionBoxMenuModel
@@ -39,9 +42,11 @@ ActionBoxMenuModel::ActionBoxMenuModel(Browser* browser,
             rb.GetNativeImageNamed(IDR_MOBILE));
   }
 
-  BookmarkTabHelper* bookmark_tab_helper = BookmarkTabHelper::FromWebContents(
-      chrome::GetActiveWebContents(browser_));
-  bool starred = bookmark_tab_helper->is_starred();
+  // In some unit tests, GetActiveWebContents can return NULL.
+  bool starred = browser_->tab_strip_model()->GetActiveWebContents() &&
+      BookmarkTabHelper::FromWebContents(browser_->tab_strip_model()->
+          GetActiveWebContents())->is_starred();
+
   AddItemWithStringId(IDC_BOOKMARK_PAGE_FROM_STAR,
                       starred ? IDS_TOOLTIP_STARRED : IDS_TOOLTIP_STAR);
   SetIcon(GetIndexOfCommandId(IDC_BOOKMARK_PAGE_FROM_STAR),
@@ -56,7 +61,10 @@ void ActionBoxMenuModel::AddExtension(const extensions::Extension& extension,
   if (extension_ids_.empty())
     AddSeparator(ui::NORMAL_SEPARATOR);
   extension_ids_.push_back(extension.id());
-  AddItem(command_id, UTF8ToUTF16(extension.name()));
+  const ActionInfo* page_launcher_info =
+      ActionInfo::GetPageLauncherInfo(&extension);
+  DCHECK(page_launcher_info);
+  AddItem(command_id, UTF8ToUTF16(page_launcher_info->default_title));
 }
 
 bool ActionBoxMenuModel::IsItemExtension(int index) {

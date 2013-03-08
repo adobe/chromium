@@ -14,7 +14,7 @@
 
 #include "base/bind.h"
 #include "base/file_util.h"
-#include "base/file_util_proxy.h"
+#include "base/files/file_util_proxy.h"
 #include "base/logging.h"
 #include "base/message_loop_proxy.h"
 #include "base/utf_string_conversions.h"
@@ -130,21 +130,11 @@ PrintDialogGtk::~PrintDialogGtk() {
 
 void PrintDialogGtk::UseDefaultSettings() {
   DCHECK(!page_setup_);
+  DCHECK(!printer_);
 
   // |gtk_settings_| is a new object.
   gtk_settings_ = gtk_print_settings_new();
-
-  scoped_ptr<GtkPrinterList> printer_list(new GtkPrinterList);
-  printer_ = printer_list->default_printer();
-  if (printer_) {
-    g_object_ref(printer_);
-    gtk_print_settings_set_printer(gtk_settings_,
-                                   gtk_printer_get_name(printer_));
-    page_setup_ = gtk_printer_get_default_page_size(printer_);
-  }
-
-  if (!page_setup_)
-    page_setup_ = gtk_page_setup_new();
+  page_setup_ = gtk_page_setup_new();
 
   // No page range to initialize for default settings.
   PageRanges ranges_vector;
@@ -173,10 +163,12 @@ bool PrintDialogGtk::UpdateSettings(const base::DictionaryValue& job_settings,
     return false;
   }
 
+  bool is_cloud_print = job_settings.HasKey(printing::kSettingCloudPrintId);
+
   if (!gtk_settings_)
     gtk_settings_ = gtk_print_settings_new();
 
-  if (!print_to_pdf) {
+  if (!print_to_pdf && !is_cloud_print) {
     scoped_ptr<GtkPrinterList> printer_list(new GtkPrinterList);
     printer_ = printer_list->GetPrinterWithName(device_name.c_str());
     if (printer_) {

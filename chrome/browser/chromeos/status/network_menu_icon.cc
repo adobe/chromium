@@ -9,6 +9,7 @@
 #include <map>
 #include <utility>
 
+#include "ash/system/chromeos/network/network_icon_animation.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/chromeos/accessibility/accessibility_util.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
@@ -25,15 +26,14 @@
 using std::max;
 using std::min;
 
+using ash::network_icon::NetworkIconAnimation;
+
 namespace chromeos {
 
 namespace {
 
 // Amount to fade icons while connecting.
 const double kConnectingImageAlpha = 0.5;
-
-// Animation cycle length.
-const int kThrobDurationMs = 750;
 
 // Images for strength bars for wired networks.
 const int kNumBarsImages = 5;
@@ -282,6 +282,7 @@ class NetworkIcon {
 
   bool ShouldShowInTray() const;
 
+  ConnectionType type() { return type_; }
   void set_type(ConnectionType type) { type_ = type; }
   void set_state(ConnectionState state) { state_ = state; }
   void set_icon(const gfx::ImageSkia& icon) { icon_ = icon; }
@@ -546,9 +547,10 @@ void NetworkIcon::UpdateIcon(const Network* network) {
 }
 
 void NetworkIcon::GenerateImage() {
-  if (icon_.isNull())
-    return;
-
+  if (icon_.isNull()) {
+    set_icon(NetworkMenuIcon::GetDisconnectedImage(
+        NetworkMenuIcon::ARCS, resource_color_theme_));
+  }
   image_ = NetworkMenuIcon::GenerateImageFromComponents(icon_, top_left_badge_,
       top_right_badge_, bottom_left_badge_, bottom_right_badge_);
 }
@@ -607,17 +609,15 @@ NetworkMenuIcon::NetworkMenuIcon(Delegate* delegate, Mode mode)
     : mode_(mode),
       delegate_(delegate),
       resource_color_theme_(COLOR_DARK),
-      ALLOW_THIS_IN_INITIALIZER_LIST(animation_connecting_(this)),
-      connecting_network_(NULL) {
-  // Set up the connection animation throbber.
-  animation_connecting_.SetThrobDuration(kThrobDurationMs);
-  animation_connecting_.SetTweenType(ui::Tween::LINEAR);
-
+      connecting_index_(-1) {
   // Initialize the icon.
   icon_.reset(new NetworkIcon(resource_color_theme_));
 }
 
 NetworkMenuIcon::~NetworkMenuIcon() {
+  // Remove itself from NetworkIconAnimation's observer list just in case
+  // it has been added before and not been removed yet.
+  NetworkIconAnimation::GetInstance()->RemoveObserver(this);
 }
 
 // Public methods:
@@ -637,7 +637,10 @@ bool NetworkMenuIcon::ShouldShowIconInTray() {
 }
 
 const gfx::ImageSkia NetworkMenuIcon::GetIconAndText(string16* text) {
-  SetIconAndText();
+  if (SetIconAndText())
+    NetworkIconAnimation::GetInstance()->AddObserver(this);
+  else
+    NetworkIconAnimation::GetInstance()->RemoveObserver(this);
   if (text)
     *text = text_;
   icon_->GenerateImage();
@@ -645,53 +648,61 @@ const gfx::ImageSkia NetworkMenuIcon::GetIconAndText(string16* text) {
 }
 
 const gfx::ImageSkia NetworkMenuIcon::GetVpnIconAndText(string16* text) {
-  SetVpnIconAndText();
+  if (SetVpnIconAndText())
+    NetworkIconAnimation::GetInstance()->AddObserver(this);
+  else
+    NetworkIconAnimation::GetInstance()->RemoveObserver(this);
   if (text)
     *text = text_;
   icon_->GenerateImage();
   return icon_->GetImage();
 }
 
-void NetworkMenuIcon::AnimationProgressed(const ui::Animation* animation) {
-  if (animation == &animation_connecting_ && delegate_) {
-    // Only update the connecting network from here.
-    if (GetConnectingNetwork() == connecting_network_)
-      delegate_->NetworkMenuIconChanged();
+void NetworkMenuIcon::NetworkIconChanged() {
+  if (!delegate_ || !icon_.get())
+    return;
+  // Only send a message when the icon would change.
+  int connecting_index = GetConnectingIndex();
+  if (connecting_index != connecting_index_) {
+    connecting_index_ = connecting_index;
+    delegate_->NetworkMenuIconChanged();
   }
 }
 
 // Private methods:
 
-// In menu mode, returns any connecting network.
-// In dropdown mode, only returns connecting network if not connected.
+// If disconnected: returns any connecting non-ethernet network.
+// Otherwise, only return a network if the conenction was user initiated.
 const Network* NetworkMenuIcon::GetConnectingNetwork() {
   NetworkLibrary* cros = CrosLibrary::Get()->GetNetworkLibrary();
-  if ((mode_ == MENU_MODE) ||
-      (mode_ == DROPDOWN_MODE && !cros->connected_network())) {
-    const Network* connecting_network = cros->connecting_network();
-    // Only show connecting icon for wireless networks.
-    if (connecting_network && connecting_network->type() != TYPE_ETHERNET) {
-      return connecting_network;
-    }
+  const Network* connecting_network = cros->connecting_network();
+  if (connecting_network &&
+      connecting_network->type() != TYPE_ETHERNET &&
+      (!cros->connected_network() ||
+       connecting_network->connection_started())) {
+    return connecting_network;
   }
   return NULL;
 }
 
 double NetworkMenuIcon::GetAnimation() {
-  if (!animation_connecting_.is_animating()) {
-    animation_connecting_.Reset();
-    animation_connecting_.StartThrobbing(-1 /*throb indefinitely*/);
-    return 0;
-  }
-  return animation_connecting_.GetCurrentValue();
+  return NetworkIconAnimation::GetInstance()->GetAnimation();
 }
 
-// TODO(stevenjb): move below SetIconAndText.
-void NetworkMenuIcon::SetConnectingIconAndText() {
-  int image_count;
-  ImageType image_type;
-  gfx::ImageSkia** images;
+int NetworkMenuIcon::GetConnectingIndex() {
+  DCHECK(icon_.get());
+  double animation = GetAnimation();
+  int image_count =
+      (icon_->type() == TYPE_WIFI) ? kNumArcsImages - 1 : kNumBarsImages - 1;
+  int index = animation * nextafter(static_cast<float>(image_count), 0);
+  return std::max(std::min(index, image_count - 1), 0);
+}
 
+
+// TODO(stevenjb): move below SetIconAndText.
+void NetworkMenuIcon::SetConnectingIconAndText(
+    const Network* connecting_network) {
+  connecting_network_ = connecting_network;
   ConnectionType type;
   ConnectionState state;
   if (connecting_network_) {
@@ -714,19 +725,18 @@ void NetworkMenuIcon::SetConnectingIconAndText() {
   icon_->set_type(type);
   icon_->set_state(state);
 
+  ImageType image_type;
+  gfx::ImageSkia** images;
   if (type == TYPE_WIFI) {
-    image_count = kNumArcsImages - 1;
     image_type = ARCS;
     images = resource_color_theme_ == COLOR_DARK ? kArcsImagesAnimatingDark :
                                                    kArcsImagesAnimatingLight;
   } else {
-    image_count = kNumBarsImages - 1;
     image_type = BARS;
     images = resource_color_theme_ == COLOR_DARK ? kBarsImagesAnimatingDark :
                                                    kBarsImagesAnimatingLight;
   }
-  int index = GetAnimation() * nextafter(static_cast<float>(image_count), 0);
-  index = std::max(std::min(index, image_count - 1), 0);
+  int index = GetConnectingIndex();
 
   // Lazily cache images.
   if (!images[index]) {
@@ -741,20 +751,18 @@ void NetworkMenuIcon::SetConnectingIconAndText() {
 }
 
 // Sets up the icon and badges for GenerateBitmap().
-void NetworkMenuIcon::SetIconAndText() {
+bool NetworkMenuIcon::SetIconAndText() {
   NetworkLibrary* cros = CrosLibrary::Get()->GetNetworkLibrary();
   DCHECK(cros);
 
-  if (cros->wifi_scanning())
-    return;  // Don't update icon while scanning
-
   icon_->ClearIconAndBadges();
 
-  // If we are connecting to a network, display that.
-  connecting_network_ = GetConnectingNetwork();
-  if (connecting_network_) {
-    SetConnectingIconAndText();
-    return;
+  // If we are connecting to a network and it was user-initiated or we are
+  // not connected, display that.
+  const Network* connecting_network = GetConnectingNetwork();
+  if (connecting_network) {
+    SetConnectingIconAndText(connecting_network);
+    return true;
   }
 
   // If not connecting to a network, show the active or connected network.
@@ -763,46 +771,51 @@ void NetworkMenuIcon::SetIconAndText() {
     network = cros->connected_network();
   else
     network = cros->active_nonvirtual_network();
-  if (network) {
-    SetActiveNetworkIconAndText(network);
-    return;
-  }
+  if (network)
+    return SetActiveNetworkIconAndText(network);
 
   // If no connected network, check if we are initializing Cellular.
-  if (cros->cellular_initializing()) {
-    SetConnectingIconAndText();
-    return;
+  if (mode_ != DROPDOWN_MODE && cros->cellular_initializing()) {
+    initialize_state_time_ = base::Time::Now();
+    SetConnectingIconAndText(NULL);
+    return true;
   }
-
-  // Not connecting, so stop animation.
-  animation_connecting_.Stop();
+  // There can be a delay between leaving the Initializing state and when a
+  // Cellular device shows up, so keep showing the initializing animation
+  // for a few extra seconds to avoid flashing the disconnect icon.
+  const int kInitializingDelaySeconds = 1;
+  base::TimeDelta dtime = base::Time::Now() - initialize_state_time_;
+  if (dtime.InSeconds() < kInitializingDelaySeconds) {
+    SetConnectingIconAndText(NULL);
+    return true;
+  }
 
   // No connecting, connected, or active network.
   SetDisconnectedIconAndText();
+  return false;
 }
 
-void NetworkMenuIcon::SetVpnIconAndText() {
+bool NetworkMenuIcon::SetVpnIconAndText() {
   NetworkLibrary* cros = CrosLibrary::Get()->GetNetworkLibrary();
   DCHECK(cros);
 
   icon_->ClearIconAndBadges();
   const VirtualNetwork* vpn = cros->virtual_network();
   if (!vpn) {
-    NOTREACHED();
+    LOG(WARNING) << "SetVpnIconAndText called with no VPN";
     SetDisconnectedIconAndText();
-    return;
+    return false;
   }
   if (vpn->connecting()) {
-    connecting_network_ = vpn;
-    SetConnectingIconAndText();
-    return;
+    SetConnectingIconAndText(vpn);
+    return true;
   }
 
-  // If not connecting to a network, show the active/connected VPN.
-  SetActiveNetworkIconAndText(vpn);
+  // If not connecting to a VPN, show the active/connected VPN.
+  return SetActiveNetworkIconAndText(vpn);
 }
 
-void NetworkMenuIcon::SetActiveNetworkIconAndText(const Network* network) {
+bool NetworkMenuIcon::SetActiveNetworkIconAndText(const Network* network) {
   NetworkLibrary* cros = CrosLibrary::Get()->GetNetworkLibrary();
   ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
   bool animating = false;
@@ -825,8 +838,6 @@ void NetworkMenuIcon::SetActiveNetworkIconAndText(const Network* network) {
         GetEmptyImage(vpn_badge->size()), *vpn_badge, animation);
     icon_->set_bottom_left_badge(&vpn_connecting_badge_);
   }
-  if (!animating)
-    animation_connecting_.Stop();
 
   // Set the text to display.
   if (network->type() == TYPE_ETHERNET) {
@@ -847,14 +858,17 @@ void NetworkMenuIcon::SetActiveNetworkIconAndText(const Network* network) {
       text_ = UTF8ToUTF16(network->name());
     }
   }
+  return animating;
 }
 
 void NetworkMenuIcon::SetDisconnectedIconAndText() {
   icon_->set_icon(GetDisconnectedImage(ARCS, resource_color_theme_));
-  if (mode_ == MENU_MODE)
-    text_ = l10n_util::GetStringUTF16(IDS_STATUSBAR_NETWORK_NO_NETWORK_TOOLTIP);
-  else
+  if (mode_ == MENU_MODE) {
+    text_ = l10n_util::GetStringUTF16(
+        IDS_ASH_STATUS_TRAY_NETWORK_NOT_CONNECTED);
+  } else {
     text_ = l10n_util::GetStringUTF16(IDS_NETWORK_SELECTION_NONE_SELECTED);
+  }
 }
 
 ////////////////////////////////////////////////////////////////////////////////

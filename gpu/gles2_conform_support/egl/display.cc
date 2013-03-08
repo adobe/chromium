@@ -7,6 +7,7 @@
 #include <vector>
 #include "base/bind.h"
 #include "base/bind_helpers.h"
+#include "gpu/command_buffer/client/gles2_implementation.h"
 #include "gpu/command_buffer/client/gles2_lib.h"
 #include "gpu/command_buffer/client/transfer_buffer.h"
 #include "gpu/command_buffer/service/context_group.h"
@@ -111,10 +112,8 @@ EGLSurface Display::CreateWindowSurface(EGLConfig config,
   if (!command_buffer->Initialize())
     return NULL;
 
-  gpu::gles2::ContextGroup::Ref group(new gpu::gles2::ContextGroup(NULL,
-                                                                   NULL,
-                                                                   NULL,
-                                                                   true));
+  scoped_refptr<gpu::gles2::ContextGroup> group(
+      new gpu::gles2::ContextGroup(NULL, NULL, NULL, true));
 
   decoder_.reset(gpu::gles2::GLES2Decoder::Create(group.get()));
   if (!decoder_.get())

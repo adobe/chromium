@@ -7,11 +7,11 @@
 #include "base/bind.h"
 #include "base/file_util.h"
 #include "base/location.h"
-#include "base/string_split.h"
 #include "base/string_util.h"
+#include "base/strings/string_split.h"
 #include "base/task_runner_util.h"
 #include "base/threading/sequenced_worker_pool.h"
-#include "chrome/browser/system_monitor/udev_util_linux.h"
+#include "chrome/browser/storage_monitor/udev_util_linux.h"
 #include "content/public/browser/browser_thread.h"
 
 namespace chromeos {
@@ -68,9 +68,9 @@ bool CameraDetector::CheckPresence() {
   // device may trigger costly device initialization.
   using file_util::FileEnumerator;
   FileEnumerator file_enum(
-      FilePath(kV4LSubsystemDir), false /* not recursive */,
+      base::FilePath(kV4LSubsystemDir), false /* not recursive */,
       FileEnumerator::FILES | FileEnumerator::SHOW_SYM_LINKS);
-  for (FilePath path = file_enum.Next(); !path.empty();
+  for (base::FilePath path = file_enum.Next(); !path.empty();
        path = file_enum.Next()) {
     std::string v4l_capabilities;
     if (chrome::GetUdevDevicePropertyValueByPath(

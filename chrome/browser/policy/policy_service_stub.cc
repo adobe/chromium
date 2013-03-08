@@ -18,13 +18,16 @@ void PolicyServiceStub::AddObserver(PolicyDomain domain,
 void PolicyServiceStub::RemoveObserver(PolicyDomain domain,
                                        Observer* observer) {}
 
-const PolicyMap& PolicyServiceStub::GetPolicies(
+void PolicyServiceStub::RegisterPolicyDomain(
     PolicyDomain domain,
-    const std::string& component_id) const {
+    const std::set<std::string>& components) {}
+
+const PolicyMap& PolicyServiceStub::GetPolicies(
+    const PolicyNamespace& ns) const {
   return kEmpty_;
 };
 
-bool PolicyServiceStub::IsInitializationComplete() const {
+bool PolicyServiceStub::IsInitializationComplete(PolicyDomain domain) const {
   return true;
 }
 

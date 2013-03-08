@@ -6,7 +6,7 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
-#include "chrome/browser/prefs/pref_service.h"
+#include "base/prefs/pref_service.h"
 #include "chrome/browser/signin/signin_manager.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/signin/signin_manager_fake.h"
@@ -123,7 +123,7 @@ class ProfileSyncServiceStartupTest : public testing::Test {
   DataTypeManagerMock* SetUpDataTypeManager() {
     DataTypeManagerMock* data_type_manager = new DataTypeManagerMock();
     EXPECT_CALL(*sync_->components_factory_mock(),
-                CreateDataTypeManager(_, _, _, _)).
+                CreateDataTypeManager(_, _, _, _, _)).
         WillOnce(Return(data_type_manager));
     return data_type_manager;
   }
@@ -151,7 +151,7 @@ class ProfileSyncServiceStartupCrosTest : public ProfileSyncServiceStartupTest {
           true);
     }
  protected:
-  virtual void CreateSyncService() {
+  virtual void CreateSyncService() OVERRIDE {
     sync_ = static_cast<TestProfileSyncService*>(
         ProfileSyncServiceFactory::GetInstance()->SetTestingFactoryAndUse(
             profile_.get(), BuildCrosService));
@@ -281,7 +281,7 @@ TEST_F(ProfileSyncServiceStartupTest, StartInvalidCredentials) {
 
 TEST_F(ProfileSyncServiceStartupCrosTest, StartCrosNoCredentials) {
   EXPECT_CALL(*sync_->components_factory_mock(),
-              CreateDataTypeManager(_, _, _, _)).Times(0);
+              CreateDataTypeManager(_, _, _, _, _)).Times(0);
   profile_->GetPrefs()->ClearPref(prefs::kSyncHasSetupCompleted);
   EXPECT_CALL(observer_, OnStateChanged()).Times(AnyNumber());
   TokenService* token_service = static_cast<TokenService*>(
@@ -392,7 +392,7 @@ TEST_F(ProfileSyncServiceStartupTest, ManagedStartup) {
   profile_->GetPrefs()->SetBoolean(prefs::kSyncManaged, true);
 
   EXPECT_CALL(*sync_->components_factory_mock(),
-              CreateDataTypeManager(_, _, _, _)).Times(0);
+              CreateDataTypeManager(_, _, _, _, _)).Times(0);
   EXPECT_CALL(observer_, OnStateChanged()).Times(AnyNumber());
 
   // Service should not be started by Initialize() since it's managed.
@@ -424,7 +424,7 @@ TEST_F(ProfileSyncServiceStartupTest, SwitchManaged) {
   // should not start up automatically (kSyncSetupCompleted will be false).
   Mock::VerifyAndClearExpectations(data_type_manager);
   EXPECT_CALL(*sync_->components_factory_mock(),
-              CreateDataTypeManager(_, _, _, _)).Times(0);
+              CreateDataTypeManager(_, _, _, _, _)).Times(0);
   EXPECT_CALL(observer_, OnStateChanged()).Times(AnyNumber());
   profile_->GetPrefs()->ClearPref(prefs::kSyncManaged);
 }

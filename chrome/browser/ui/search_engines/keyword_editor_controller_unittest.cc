@@ -13,7 +13,7 @@
 #include "chrome/browser/ui/search_engines/template_url_table_model.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/test/base/testing_pref_service.h"
+#include "chrome/test/base/testing_pref_service_syncable.h"
 #include "chrome/test/base/testing_profile.h"
 #include "content/public/browser/notification_service.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -36,19 +36,19 @@ class KeywordEditorControllerTest : public testing::Test,
     Init(false);
   }
 
-  virtual void OnModelChanged() {
+  virtual void OnModelChanged() OVERRIDE {
     model_changed_count_++;
   }
 
-  virtual void OnItemsChanged(int start, int length) {
+  virtual void OnItemsChanged(int start, int length) OVERRIDE {
     items_changed_count_++;
   }
 
-  virtual void OnItemsAdded(int start, int length) {
+  virtual void OnItemsAdded(int start, int length) OVERRIDE {
     added_count_++;
   }
 
-  virtual void OnItemsRemoved(int start, int length) {
+  virtual void OnItemsRemoved(int start, int length) OVERRIDE {
     removed_count_++;
   }
 

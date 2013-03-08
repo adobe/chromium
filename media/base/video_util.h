@@ -7,6 +7,7 @@
 
 #include "base/basictypes.h"
 #include "media/base/media_export.h"
+#include "ui/gfx/rect.h"
 #include "ui/gfx/size.h"
 
 namespace media {
@@ -28,9 +29,46 @@ MEDIA_EXPORT void CopyUPlane(const uint8* source, int stride, int rows,
                              VideoFrame* frame);
 MEDIA_EXPORT void CopyVPlane(const uint8* source, int stride, int rows,
                              VideoFrame* frame);
+// |plane| is one of VideoFrame::kYPlane, VideoFrame::kUPlane,
+// or VideoFrame::kVPlane.
+MEDIA_EXPORT void CopyPlane(size_t plane, const uint8* source, int stride,
+                            int rows, VideoFrame* frame);
+
 
 // Fills |frame| containing YUV data to the given color values.
 MEDIA_EXPORT void FillYUV(VideoFrame* frame, uint8 y, uint8 u, uint8 v);
+
+// Rotates |src| plane by |rotation| degree with possible flipping vertically
+// and horizontally.
+// |rotation| is limited to {0, 90, 180, 270}.
+// |width| and |height| are expected to be even numbers.
+// Both |src| and |dest| planes are packed and have same |width| and |height|.
+// When |width| != |height| and rotated by 90/270, only the maximum square
+// portion located in the center is rotated. For example, for width=640 and
+// height=480, the rotated area is 480x480 located from row 0 through 479 and
+// from column 80 through 559. The leftmost and rightmost 80 columns are
+// ignored for both |src| and |dest|.
+// The caller is responsible for blanking out the margin area.
+MEDIA_EXPORT void RotatePlaneByPixels(
+    const uint8* src,
+    uint8* dest,
+    int width,
+    int height,
+    int rotation,  // Clockwise.
+    bool flip_vert,
+    bool flip_horiz);
+
+// Return the largest centered rectangle with the same aspect ratio of |content|
+// that fits entirely inside of |bounds|.
+MEDIA_EXPORT gfx::Rect ComputeLetterboxRegion(const gfx::Rect& bounds,
+                                              const gfx::Size& content);
+
+// Copy an RGB bitmap into the specified |region_in_frame| of a YUV video frame.
+// Fills the regions outside |region_in_frame| with black.
+MEDIA_EXPORT void CopyRGBToVideoFrame(const uint8* source,
+                                      int stride,
+                                      const gfx::Rect& region_in_frame,
+                                      VideoFrame* frame);
 
 }  // namespace media
 

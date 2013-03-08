@@ -22,7 +22,8 @@ class LayerTreeImpl;
 class TopControlsManagerClient;
 
 // Manages the position of the top controls.
-class CC_EXPORT TopControlsManager {
+class CC_EXPORT TopControlsManager
+    : public base::SupportsWeakPtr<TopControlsManager> {
  public:
   enum AnimationDirection {
     NO_ANIMATION,
@@ -30,19 +31,25 @@ class CC_EXPORT TopControlsManager {
     HIDING_CONTROLS
   };
 
-  static scoped_ptr<TopControlsManager> Create(TopControlsManagerClient* client,
-                                               float top_controls_height);
+  static scoped_ptr<TopControlsManager> Create(
+      TopControlsManagerClient* client,
+      float top_controls_height,
+      float top_controls_show_threshold,
+      float top_controls_hide_threshold);
   virtual ~TopControlsManager();
 
-  float controls_top_offset() { return controls_top_offset_; }
-  float content_top_offset() { return content_top_offset_; }
-  float is_overlay_mode() { return is_overlay_mode_; }
+  float controls_top_offset() {
+    return enable_hiding_ ? controls_top_offset_ : 0;
+  }
+  float content_top_offset() {
+    return enable_hiding_ ? content_top_offset_ : top_controls_height_;
+  }
   KeyframedFloatAnimationCurve* animation() {
     return top_controls_animation_.get();
   }
   AnimationDirection animation_direction() { return animation_direction_; }
 
-  void UpdateDrawPositions();
+  void enable_hiding_top_controls(bool enable) { enable_hiding_ = enable; }
 
   void ScrollBegin();
   gfx::Vector2dF ScrollBy(const gfx::Vector2dF pending_delta);
@@ -52,7 +59,9 @@ class CC_EXPORT TopControlsManager {
 
  protected:
   TopControlsManager(TopControlsManagerClient* client,
-                     float top_controls_height);
+                     float top_controls_height,
+                     float top_controls_show_threshold,
+                     float top_controls_hide_threshold);
 
  private:
   gfx::Vector2dF ScrollInternal(const gfx::Vector2dF pending_delta);
@@ -67,12 +76,22 @@ class CC_EXPORT TopControlsManager {
 
   scoped_ptr<KeyframedFloatAnimationCurve> top_controls_animation_;
   AnimationDirection animation_direction_;
-  bool is_overlay_mode_;
-  bool scroll_readjustment_enabled_;
+  bool enable_hiding_;
+  bool in_scroll_gesture_;
   float controls_top_offset_;
   float content_top_offset_;
   float top_controls_height_;
   float previous_root_scroll_offset_;
+  float scroll_start_offset_;
+  float current_scroll_delta_;
+
+  // The height of the visible top control such that it must be shown when
+  // the user stops the scroll.
+  float top_controls_show_height_;
+
+  // The height of the visible top control such that it must be hidden when
+  // the user stops the scroll.
+  float top_controls_hide_height_;
 
   DISALLOW_COPY_AND_ASSIGN(TopControlsManager);
 };

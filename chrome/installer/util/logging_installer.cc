@@ -7,8 +7,8 @@
 #include "chrome/installer/util/logging_installer.h"
 
 #include "base/command_line.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/logging_win.h"
 #include "base/path_service.h"
@@ -30,7 +30,7 @@ namespace installer {
 // InitInstallerLogging() and the beginning of EndInstallerLogging().
 bool installer_logging_ = false;
 
-TruncateResult TruncateLogFileIfNeeded(const FilePath& log_file) {
+TruncateResult TruncateLogFileIfNeeded(const base::FilePath& log_file) {
   TruncateResult result = LOGFILE_UNTOUCHED;
 
   int64 log_size = 0;
@@ -46,7 +46,7 @@ TruncateResult TruncateLogFileIfNeeded(const FilePath& log_file) {
 
     if (old_log_file.IsValid()) {
       result = LOGFILE_DELETED;
-      FilePath tmp_log(log_file.value() + FILE_PATH_LITERAL(".tmp"));
+      base::FilePath tmp_log(log_file.value() + FILE_PATH_LITERAL(".tmp"));
       // Note that file_util::Move will attempt to replace existing files.
       if (file_util::Move(log_file, tmp_log)) {
         int64 offset = log_size - kTruncatedInstallerLogFileSize;
@@ -86,7 +86,7 @@ void InitInstallerLogging(const installer::MasterPreferences& prefs) {
     return;
   }
 
-  FilePath log_file_path(GetLogFilePath(prefs));
+  base::FilePath log_file_path(GetLogFilePath(prefs));
   TruncateLogFileIfNeeded(log_file_path);
 
   logging::InitLogging(
@@ -113,22 +113,22 @@ void EndInstallerLogging() {
   installer_logging_ = false;
 }
 
-FilePath GetLogFilePath(const installer::MasterPreferences& prefs) {
+base::FilePath GetLogFilePath(const installer::MasterPreferences& prefs) {
   std::string path;
   prefs.GetString(installer::master_preferences::kLogFile, &path);
   if (!path.empty()) {
-    return FilePath(UTF8ToWide(path));
+    return base::FilePath(UTF8ToWide(path));
   }
 
   std::wstring log_filename = prefs.install_chrome_frame() ?
       L"chrome_frame_installer.log" : L"chrome_installer.log";
 
-  FilePath log_path;
+  base::FilePath log_path;
   if (PathService::Get(base::DIR_TEMP, &log_path)) {
     log_path = log_path.Append(log_filename);
     return log_path;
   } else {
-    return FilePath(log_filename);
+    return base::FilePath(log_filename);
   }
 }
 

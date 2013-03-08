@@ -41,8 +41,11 @@ class ExtensionSyncEventObserver
       sync_file_system::SyncEventObserver::SyncServiceState state,
       const std::string& description) OVERRIDE;
 
-  virtual void OnFileSynced(const fileapi::FileSystemURL& url,
-                            fileapi::SyncOperationResult result) OVERRIDE;
+  virtual void OnFileSynced(
+      const fileapi::FileSystemURL& url,
+      sync_file_system::SyncFileStatus status,
+      sync_file_system::SyncAction action,
+      sync_file_system::SyncDirection direction) OVERRIDE;
 
  private:
    const std::string& GetExtensionId(const GURL& app_origin);

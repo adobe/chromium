@@ -7,11 +7,11 @@
 #include "base/auto_reset.h"
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/lazy_instance.h"
 #include "base/path_service.h"
-#include "base/string_number_conversions.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/test/test_file_util.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/google/google_util.h"
@@ -21,10 +21,12 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/host_desktop.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
@@ -79,13 +81,13 @@ InProcessBrowserTest::InProcessBrowserTest()
   // what it would be if Chrome was running, because it is used to fork renderer
   // processes, on Linux at least (failure to do so will cause a browser_test to
   // be run instead of a renderer).
-  FilePath chrome_path;
+  base::FilePath chrome_path;
   CHECK(PathService::Get(base::FILE_EXE, &chrome_path));
   chrome_path = chrome_path.DirName();
   chrome_path = chrome_path.Append(chrome::kBrowserProcessExecutablePath);
   CHECK(PathService::Override(base::FILE_EXE, chrome_path));
 #endif  // defined(OS_MACOSX)
-  CreateTestServer(FilePath(FILE_PATH_LITERAL("chrome/test/data")));
+  CreateTestServer(base::FilePath(FILE_PATH_LITERAL("chrome/test/data")));
 }
 
 InProcessBrowserTest::~InProcessBrowserTest() {
@@ -122,7 +124,7 @@ void InProcessBrowserTest::SetUp() {
 
 #if defined(OS_CHROMEOS)
   // Make sure that the log directory exists.
-  FilePath log_dir = logging::GetSessionLogFile(*command_line).DirName();
+  base::FilePath log_dir = logging::GetSessionLogFile(*command_line).DirName();
   file_util::CreateDirectory(log_dir);
 #endif  // defined(OS_CHROMEOS)
 
@@ -173,7 +175,7 @@ void InProcessBrowserTest::PrepareTestCommandLine(CommandLine* command_line) {
 #if defined(OS_MACOSX)
   // Explicitly set the path of the binary used for child processes, otherwise
   // they'll try to use browser_tests which doesn't contain ChromeMain.
-  FilePath subprocess_path;
+  base::FilePath subprocess_path;
   PathService::Get(base::FILE_EXE, &subprocess_path);
   // Recreate the real environment, run the helper within the app bundle.
   subprocess_path = subprocess_path.DirName().DirName();
@@ -195,7 +197,7 @@ void InProcessBrowserTest::PrepareTestCommandLine(CommandLine* command_line) {
 
 bool InProcessBrowserTest::CreateUserDataDirectory() {
   CommandLine* command_line = CommandLine::ForCurrentProcess();
-  FilePath user_data_dir =
+  base::FilePath user_data_dir =
       command_line->GetSwitchValuePath(switches::kUserDataDir);
   if (user_data_dir.empty()) {
     if (temp_user_data_dir_.CreateUniqueTempDir() &&
@@ -245,7 +247,8 @@ bool InProcessBrowserTest::SetUpUserDataDirectory() {
 // Creates a browser with a single tab (about:blank), waits for the tab to
 // finish loading and shows the browser.
 Browser* InProcessBrowserTest::CreateBrowser(Profile* profile) {
-  Browser* browser = new Browser(Browser::CreateParams(profile));
+  Browser* browser = new Browser(
+      Browser::CreateParams(profile, chrome::HOST_DESKTOP_TYPE_NATIVE));
   AddBlankTabAndShow(browser);
   return browser;
 }
@@ -253,14 +256,16 @@ Browser* InProcessBrowserTest::CreateBrowser(Profile* profile) {
 Browser* InProcessBrowserTest::CreateIncognitoBrowser() {
   // Create a new browser with using the incognito profile.
   Browser* incognito = new Browser(
-      Browser::CreateParams(browser()->profile()->GetOffTheRecordProfile()));
+      Browser::CreateParams(browser()->profile()->GetOffTheRecordProfile(),
+                            chrome::HOST_DESKTOP_TYPE_NATIVE));
   AddBlankTabAndShow(incognito);
   return incognito;
 }
 
 Browser* InProcessBrowserTest::CreateBrowserForPopup(Profile* profile) {
   Browser* browser =
-      new Browser(Browser::CreateParams(Browser::TYPE_POPUP, profile));
+      new Browser(Browser::CreateParams(Browser::TYPE_POPUP, profile,
+                  chrome::HOST_DESKTOP_TYPE_NATIVE));
   AddBlankTabAndShow(browser);
   return browser;
 }
@@ -270,7 +275,8 @@ Browser* InProcessBrowserTest::CreateBrowserForApp(
     Profile* profile) {
   Browser* browser = new Browser(
       Browser::CreateParams::CreateForApp(
-          Browser::TYPE_POPUP, app_name, gfx::Rect(), profile));
+          Browser::TYPE_POPUP, app_name, gfx::Rect(), profile,
+          chrome::HOST_DESKTOP_TYPE_NATIVE));
   AddBlankTabAndShow(browser);
   return browser;
 }
@@ -306,7 +312,7 @@ CommandLine InProcessBrowserTest::GetCommandLineForRelaunch() {
   }
 #endif
 
-  FilePath user_data_dir;
+  base::FilePath user_data_dir;
   PathService::Get(chrome::DIR_USER_DATA, &user_data_dir);
   new_command_line.AppendSwitchPath(switches::kUserDataDir, user_data_dir);
 
@@ -326,14 +332,18 @@ void InProcessBrowserTest::RunTestOnMainThreadLoop() {
   autorelease_pool_->Recycle();
 #endif
 
-  if (!BrowserList::empty()) {
-    browser_ = *BrowserList::begin();
+  // Browser tests do not support multi-desktop for now.
+  const BrowserList* native_browser_list =
+      BrowserList::GetInstance(chrome::HOST_DESKTOP_TYPE_NATIVE);
+  if (!native_browser_list->empty()) {
+    browser_ = native_browser_list->get(0);
 #if defined(USE_ASH)
     // There are cases where windows get created maximized by default.
     if (browser_->window()->IsMaximized())
       browser_->window()->Restore();
 #endif
-    content::WaitForLoadStop(chrome::GetActiveWebContents(browser_));
+    content::WaitForLoadStop(
+        browser_->tab_strip_model()->GetActiveWebContents());
   }
 
   // Pump any pending events that were created as a result of creating a
@@ -365,22 +375,22 @@ void InProcessBrowserTest::RunTestOnMainThreadLoop() {
   content::RunAllPendingInMessageLoop();
 
   QuitBrowsers();
-  CHECK(BrowserList::empty());
+  CHECK(native_browser_list->empty());
 }
 
 void InProcessBrowserTest::QuitBrowsers() {
-  if (BrowserList::empty())
+  if (chrome::GetTotalBrowserCount() == 0)
     return;
 
   // Invoke AttemptExit on a running message loop.
   // AttemptExit exits the message loop after everything has been
   // shut down properly.
   MessageLoopForUI::current()->PostTask(FROM_HERE,
-                                        base::Bind(&browser::AttemptExit));
+                                        base::Bind(&chrome::AttemptExit));
   content::RunMessageLoop();
 
 #if defined(OS_MACOSX)
-  // browser::AttemptExit() will attempt to close all browsers by deleting
+  // chrome::AttemptExit() will attempt to close all browsers by deleting
   // their tab contents. The last tab contents being removed triggers closing of
   // the browser window.
   //

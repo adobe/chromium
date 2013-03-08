@@ -45,6 +45,12 @@ const CGFloat kBookmarkHorizontalPadding = 1.0;
 // Vertical frame inset for buttons in the bookmark bar.
 const CGFloat kBookmarkVerticalPadding = 2.0;
 
+// Left margin before the first button in the bookmark bar.
+const CGFloat kBookmarkLeftMargin = 2.0;
+
+// Right margin before the last button in the bookmark bar.
+const CGFloat kBookmarkRightMargin = 2.0;
+
 // Used as a min/max width for buttons on menus (not on the bar).
 const CGFloat kBookmarkMenuButtonMinimumWidth = 100.0;
 const CGFloat kBookmarkMenuButtonMaximumWidth = 485.0;
@@ -153,7 +159,7 @@ willAnimateFromState:(BookmarkBar::State)oldState
  @private
   // The state of the bookmark bar. If an animation is running, this is set to
   // the "destination" and |lastState_| is set to the "original" state.
-  BookmarkBar::State state_;
+  BookmarkBar::State currentState_;
 
   // The "original" state of the bookmark bar if an animation is running.
   BookmarkBar::State lastState_;
@@ -266,16 +272,12 @@ willAnimateFromState:(BookmarkBar::State)oldState
   // The x point on the bar where the left edge of the new item will end
   // up if it is dropped.
   CGFloat insertionPos_;
-
-  // YES if the bookmark bar is empty.
-  BOOL isEmpty_;
 }
 
-@property(readonly, nonatomic) BookmarkBar::State state;
+@property(readonly, nonatomic) BookmarkBar::State currentState;
 @property(readonly, nonatomic) BookmarkBar::State lastState;
 @property(readonly, nonatomic) BOOL isAnimationRunning;
 @property(assign, nonatomic) id<BookmarkBarControllerDelegate> delegate;
-@property(readonly, nonatomic) BOOL isEmpty;
 @property(assign, nonatomic) BOOL stateAnimationsEnabled;
 @property(assign, nonatomic) BOOL innerContentAnimationsEnabled;
 

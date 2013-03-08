@@ -13,6 +13,7 @@
 #include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/favicon/favicon_tab_helper.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/themes/theme_properties.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/gtk/bookmarks/bookmark_utils_gtk.h"
 #include "chrome/browser/ui/gtk/custom_button.h"
@@ -287,7 +288,7 @@ class TabRendererGtk::FaviconCrashAnimation : public ui::LinearAnimation,
   virtual ~FaviconCrashAnimation() {}
 
   // ui::Animation overrides:
-  virtual void AnimateToState(double state) {
+  virtual void AnimateToState(double state) OVERRIDE {
     const double kHidingOffset = 27;
 
     if (state < .5) {
@@ -302,7 +303,7 @@ class TabRendererGtk::FaviconCrashAnimation : public ui::LinearAnimation,
   }
 
   // ui::AnimationDelegate overrides:
-  virtual void AnimationCanceled(const ui::Animation* animation) {
+  virtual void AnimationCanceled(const ui::Animation* animation) OVERRIDE {
     target_->SetFaviconHidingOffset(0);
   }
 
@@ -356,9 +357,9 @@ void TabRendererGtk::Observe(int type,
                              const content::NotificationDetails& details) {
   DCHECK(chrome::NOTIFICATION_BROWSER_THEME_CHANGED);
   selected_title_color_ =
-      theme_service_->GetColor(ThemeService::COLOR_TAB_TEXT);
+      theme_service_->GetColor(ThemeProperties::COLOR_TAB_TEXT);
   unselected_title_color_ =
-      theme_service_->GetColor(ThemeService::COLOR_BACKGROUND_TAB_TEXT);
+      theme_service_->GetColor(ThemeProperties::COLOR_BACKGROUND_TAB_TEXT);
 }
 
 void TabRendererGtk::UpdateData(WebContents* contents,
@@ -698,9 +699,9 @@ void TabRendererGtk::UpdateFaviconOverlay(WebContents* contents) {
         data_.capture_state == PROJECTING ?
             IDR_TAB_CAPTURE_GLOW : IDR_TAB_RECORDING);
 
-    int icon_size = gfx::kFaviconSize;
-    if (data_.capture_state == PROJECTING)
-      icon_size *= kProjectingGlowResizeScale;
+    int icon_size = data_.capture_state == PROJECTING ?
+        gfx::kFaviconSize * kProjectingGlowResizeScale :
+        recording.ToImageSkia()->width();
 
     GdkPixbuf* pixbuf = data_.favicon.isNull() ?
         gfx::GdkPixbufFromSkBitmap(*recording.ToSkBitmap()) :
@@ -814,7 +815,7 @@ void TabRendererGtk::Layout() {
     // If the close button color has changed, generate a new one.
     if (theme_service_) {
       SkColor tab_text_color =
-          theme_service_->GetColor(ThemeService::COLOR_TAB_TEXT);
+          theme_service_->GetColor(ThemeProperties::COLOR_TAB_TEXT);
       if (!close_button_color_ || tab_text_color != close_button_color_) {
         close_button_color_ = tab_text_color;
         ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
@@ -961,6 +962,9 @@ void TabRendererGtk::PaintIcon(GtkWidget* widget, cairo_t* cr) {
     if (data_.capture_state == PROJECTING) {
       favicon_x -= favicon_bounds_.width() * kProjectingGlowShiftScale;
       favicon_y -= favicon_bounds_.height() * kProjectingGlowShiftScale;
+    } else if (data_.capture_state == RECORDING) {
+      favicon_x += favicon_bounds_.width() - data_.cairo_overlay.Width();
+      favicon_y += favicon_bounds_.height() - data_.cairo_overlay.Height();
     }
 
     data_.cairo_overlay.SetSource(cr, widget, favicon_x, favicon_y);

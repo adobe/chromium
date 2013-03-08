@@ -6,7 +6,7 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/message_loop_proxy.h"
 #include "content/browser/dom_storage/session_storage_namespace_impl.h"
 #include "content/public/browser/browser_thread.h"
@@ -66,7 +66,7 @@ void GetSessionStorageUsageHelper(
 }  // namespace
 
 DOMStorageContextImpl::DOMStorageContextImpl(
-    const FilePath& data_path,
+    const base::FilePath& data_path,
     quota::SpecialStoragePolicy* special_storage_policy) {
   base::SequencedWorkerPool* worker_pool = BrowserThread::GetBlockingPool();
   context_ = new dom_storage::DomStorageContext(

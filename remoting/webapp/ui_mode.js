@@ -36,6 +36,7 @@ remoting.AppMode = {
       CLIENT_CONNECT_FAILED_ME2ME: 'home.client.connect-failed.me2me',
       CLIENT_SESSION_FINISHED_IT2ME: 'home.client.session-finished.it2me',
       CLIENT_SESSION_FINISHED_ME2ME: 'home.client.session-finished.me2me',
+      CLIENT_HOST_NEEDS_UPGRADE: 'home.client.host-needs-upgrade',
     HISTORY: 'home.history',
     CONFIRM_HOST_DELETE: 'home.confirm-host-delete',
     HOST_SETUP: 'home.host-setup',
@@ -149,7 +150,7 @@ remoting.showOrHideCallback = function(mode, items) {
   document.getElementById(mode + '-content').hidden = !visited;
 };
 
-remoting.showOrHideIt2MeUi = function() {
+remoting.showOrHideIT2MeUi = function() {
   chrome.storage.local.get('it2me-visited',
                            remoting.showOrHideCallback.bind(null, 'it2me'));
 };
@@ -159,7 +160,7 @@ remoting.showOrHideMe2MeUi = function() {
                            remoting.showOrHideCallback.bind(null, 'me2me'));
 };
 
-remoting.showIt2MeUiAndSave = function() {
+remoting.showIT2MeUiAndSave = function() {
   var items = {};
   items['it2me-visited'] = true;
   chrome.storage.local.set(items);

@@ -6,11 +6,13 @@
 
 #include <map>
 
+#include "base/command_line.h"
 #include "base/logging.h"
 #include "base/memory/scoped_vector.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/common/autofill/web_element_descriptor.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/form_data.h"
 #include "chrome/common/form_field_data.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebString.h"
@@ -55,15 +57,18 @@ using autofill::IsTextInput;
 const size_t kMaxDataLength = 1024;
 
 bool IsOptionElement(const WebElement& element) {
-  return element.hasTagName("option");
+  CR_DEFINE_STATIC_LOCAL(WebString, kOption, ("option"));
+  return element.hasTagName(kOption);
 }
 
 bool IsScriptElement(const WebElement& element) {
-  return element.hasTagName("script");
+  CR_DEFINE_STATIC_LOCAL(WebString, kScript, ("script"));
+  return element.hasTagName(kScript);
 }
 
 bool IsNoScriptElement(const WebElement& element) {
-  return element.hasTagName("noscript");
+  CR_DEFINE_STATIC_LOCAL(WebString, kNoScript, ("noscript"));
+  return element.hasTagName(kNoScript);
 }
 
 bool HasTagName(const WebNode& node, const WebKit::WebString& tag) {
@@ -73,6 +78,16 @@ bool HasTagName(const WebNode& node, const WebKit::WebString& tag) {
 bool IsAutofillableElement(const WebFormControlElement& element) {
   const WebInputElement* input_element = toWebInputElement(&element);
   return IsAutofillableInputElement(input_element) || IsSelectElement(element);
+}
+
+// Check whether the given field satisfies the REQUIRE_AUTOCOMPLETE requirement.
+// When Autocheckout is enabled, this requirement is enforced in the browser
+// process rather than in the renderer process, and hence all fields are
+// considered to satisfy this requirement.
+bool SatisfiesRequireAutocomplete(const WebInputElement& input_element) {
+  return input_element.autoComplete() ||
+      CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableExperimentalFormFilling);
 }
 
 // Appends |suffix| to |prefix| so that any intermediary whitespace is collapsed
@@ -201,9 +216,13 @@ string16 InferLabelFromPrevious(const WebFormControlElement& element) {
     // Coalesce any text contained in multiple consecutive
     //  (a) plain text nodes or
     //  (b) inline HTML elements that are essentially equivalent to text nodes.
+    CR_DEFINE_STATIC_LOCAL(WebString, kBold, ("b"));
+    CR_DEFINE_STATIC_LOCAL(WebString, kStrong, ("strong"));
+    CR_DEFINE_STATIC_LOCAL(WebString, kSpan, ("span"));
+    CR_DEFINE_STATIC_LOCAL(WebString, kFont, ("font"));
     if (previous.isTextNode() ||
-        HasTagName(previous, "b") || HasTagName(previous, "strong") ||
-        HasTagName(previous, "span") || HasTagName(previous, "font")) {
+        HasTagName(previous, kBold) || HasTagName(previous, kStrong) ||
+        HasTagName(previous, kSpan) || HasTagName(previous, kFont)) {
       string16 value = FindChildText(previous);
       // A text node's value will be empty if it is for a line break.
       bool add_space = previous.isTextNode() && value.empty();
@@ -221,11 +240,15 @@ string16 InferLabelFromPrevious(const WebFormControlElement& element) {
 
     // <img> and <br> tags often appear between the input element and its
     // label text, so skip over them.
-    if (HasTagName(previous, "img") || HasTagName(previous, "br"))
+    CR_DEFINE_STATIC_LOCAL(WebString, kImage, ("img"));
+    CR_DEFINE_STATIC_LOCAL(WebString, kBreak, ("br"));
+    if (HasTagName(previous, kImage) || HasTagName(previous, kBreak))
       continue;
 
     // We only expect <p> and <label> tags to contain the full label text.
-    if (HasTagName(previous, "p") || HasTagName(previous, "label"))
+    CR_DEFINE_STATIC_LOCAL(WebString, kPage, ("p"));
+    CR_DEFINE_STATIC_LOCAL(WebString, kLabel, ("label"));
+    if (HasTagName(previous, kPage) || HasTagName(previous, kLabel))
       inferred_label = FindChildText(previous);
 
     break;
@@ -240,12 +263,13 @@ string16 InferLabelFromPrevious(const WebFormControlElement& element) {
 // e.g. <li>Some Text<input ...><input ...><input ...></tr>
 string16 InferLabelFromListItem(const WebFormControlElement& element) {
   WebNode parent = element.parentNode();
+  CR_DEFINE_STATIC_LOCAL(WebString, kListItem, ("li"));
   while (!parent.isNull() && parent.isElementNode() &&
-         !parent.to<WebElement>().hasTagName("li")) {
+         !parent.to<WebElement>().hasTagName(kListItem)) {
     parent = parent.parentNode();
   }
 
-  if (!parent.isNull() && HasTagName(parent, "li"))
+  if (!parent.isNull() && HasTagName(parent, kListItem))
     return FindChildText(parent);
 
   return string16();
@@ -258,9 +282,10 @@ string16 InferLabelFromListItem(const WebFormControlElement& element) {
 // or   <tr><td><b>Some Text</b></td><td><b><input ...></b></td></tr>
 // or   <tr><th><b>Some Text</b></th><td><b><input ...></b></td></tr>
 string16 InferLabelFromTableColumn(const WebFormControlElement& element) {
+  CR_DEFINE_STATIC_LOCAL(WebString, kTableCell, ("td"));
   WebNode parent = element.parentNode();
   while (!parent.isNull() && parent.isElementNode() &&
-         !parent.to<WebElement>().hasTagName("td")) {
+         !parent.to<WebElement>().hasTagName(kTableCell)) {
     parent = parent.parentNode();
   }
 
@@ -271,8 +296,9 @@ string16 InferLabelFromTableColumn(const WebFormControlElement& element) {
   // non-empty text block.
   string16 inferred_label;
   WebNode previous = parent.previousSibling();
+  CR_DEFINE_STATIC_LOCAL(WebString, kTableHeader, ("th"));
   while (inferred_label.empty() && !previous.isNull()) {
-    if (HasTagName(previous, "td") || HasTagName(previous, "th"))
+    if (HasTagName(previous, kTableCell) || HasTagName(previous, kTableHeader))
       inferred_label = FindChildText(previous);
 
     previous = previous.previousSibling();
@@ -285,9 +311,10 @@ string16 InferLabelFromTableColumn(const WebFormControlElement& element) {
 // surrounding table structure,
 // e.g. <tr><td>Some Text</td></tr><tr><td><input ...></td></tr>
 string16 InferLabelFromTableRow(const WebFormControlElement& element) {
+  CR_DEFINE_STATIC_LOCAL(WebString, kTableRow, ("tr"));
   WebNode parent = element.parentNode();
   while (!parent.isNull() && parent.isElementNode() &&
-         !parent.to<WebElement>().hasTagName("tr")) {
+         !parent.to<WebElement>().hasTagName(kTableRow)) {
     parent = parent.parentNode();
   }
 
@@ -299,7 +326,7 @@ string16 InferLabelFromTableRow(const WebFormControlElement& element) {
   string16 inferred_label;
   WebNode previous = parent.previousSibling();
   while (inferred_label.empty() && !previous.isNull()) {
-    if (HasTagName(previous, "tr"))
+    if (HasTagName(previous, kTableRow))
       inferred_label = FindChildText(previous);
 
     previous = previous.previousSibling();
@@ -318,12 +345,15 @@ string16 InferLabelFromDivTable(const WebFormControlElement& element) {
 
   // Search the sibling and parent <div>s until we find a candidate label.
   string16 inferred_label;
+  CR_DEFINE_STATIC_LOCAL(WebString, kDiv, ("div"));
+  CR_DEFINE_STATIC_LOCAL(WebString, kTable, ("table"));
+  CR_DEFINE_STATIC_LOCAL(WebString, kFieldSet, ("fieldset"));
   while (inferred_label.empty() && !node.isNull()) {
-    if (HasTagName(node, "div")) {
+    if (HasTagName(node, kDiv)) {
       looking_for_parent = false;
       inferred_label = FindChildText(node);
     } else if (looking_for_parent &&
-               (HasTagName(node, "table") || HasTagName(node, "fieldset"))) {
+               (HasTagName(node, kTable) || HasTagName(node, kFieldSet))) {
       // If the element is in a table or fieldset, its label most likely is too.
       break;
     }
@@ -347,12 +377,13 @@ string16 InferLabelFromDivTable(const WebFormControlElement& element) {
 // e.g. <dl><dt>Some Text</dt><dd><input ...></dd></dl>
 // e.g. <dl><dt><b>Some Text</b></dt><dd><b><input ...></b></dd></dl>
 string16 InferLabelFromDefinitionList(const WebFormControlElement& element) {
+  CR_DEFINE_STATIC_LOCAL(WebString, kDefinitionData, ("dd"));
   WebNode parent = element.parentNode();
   while (!parent.isNull() && parent.isElementNode() &&
-         !parent.to<WebElement>().hasTagName("dd"))
+         !parent.to<WebElement>().hasTagName(kDefinitionData))
     parent = parent.parentNode();
 
-  if (parent.isNull() || !HasTagName(parent, "dd"))
+  if (parent.isNull() || !HasTagName(parent, kDefinitionData))
     return string16();
 
   // Skip by any intervening text nodes.
@@ -360,7 +391,8 @@ string16 InferLabelFromDefinitionList(const WebFormControlElement& element) {
   while (!previous.isNull() && previous.isTextNode())
     previous = previous.previousSibling();
 
-  if (previous.isNull() || !HasTagName(previous, "dt"))
+  CR_DEFINE_STATIC_LOCAL(WebString, kDefinitionTag, ("dt"));
+  if (previous.isNull() || !HasTagName(previous, kDefinitionTag))
     return string16();
 
   return FindChildText(previous);
@@ -547,6 +579,8 @@ std::string RetrievalMethodToString(
       return "CSS_SELECTOR";
     case autofill::WebElementDescriptor::ID:
       return "ID";
+    case autofill::WebElementDescriptor::NONE:
+      return "NONE";
   }
   NOTREACHED();
   return "UNKNOWN";
@@ -574,27 +608,21 @@ bool IsSelectElement(const WebFormControlElement& element) {
 }
 
 bool IsCheckableElement(const WebInputElement* element) {
-  // Is static for improving performance.
-  CR_DEFINE_STATIC_LOCAL(WebString, kRadio, ("radio"));
-  CR_DEFINE_STATIC_LOCAL(WebString, kCheckbox, ("checkbox"));
-
   if (!element)
     return false;
 
-  WebString formControlType = element->formControlType();
-  return formControlType == kCheckbox || formControlType == kRadio;
+  return element->isCheckbox() || element->isRadioButton();
 }
 
 bool IsAutofillableInputElement(const WebInputElement* element) {
-  // TODO(ramankk): Uncomment IsCheckableElement part once we have solution
-  // for the observed performance regression.
-  return IsTextInput(element); // || IsCheckableElement(element);
+  return IsTextInput(element) || IsCheckableElement(element);
 }
 
 const string16 GetFormIdentifier(const WebFormElement& form) {
   string16 identifier = form.name();
+  CR_DEFINE_STATIC_LOCAL(WebString, kId, ("id"));
   if (identifier.empty())
-    identifier = form.getAttribute(WebString("id"));
+    identifier = form.getAttribute(kId);
 
   return identifier;
 }
@@ -615,6 +643,8 @@ bool ClickElement(const WebDocument& document,
     case WebElementDescriptor::ID:
       element = document.getElementById(web_descriptor);
       break;
+    case WebElementDescriptor::NONE:
+      return true;
   }
 
   if (element.isNull()) {
@@ -650,7 +680,7 @@ void ExtractAutofillableElements(
       // attribute for select control elements, but it probably should.
       WebInputElement* input_element = toWebInputElement(&control_elements[i]);
       if (IsAutofillableInputElement(input_element) &&
-          !input_element->autoComplete())
+          !SatisfiesRequireAutocomplete(*input_element))
         continue;
     }
 
@@ -663,6 +693,7 @@ void WebFormControlElementToFormField(const WebFormControlElement& element,
                                       FormFieldData* field) {
   DCHECK(field);
   DCHECK(!element.isNull());
+  CR_DEFINE_STATIC_LOCAL(WebString, kAutocomplete, ("autocomplete"));
 
   // The label is not officially part of a WebFormControlElement; however, the
   // labels for all form control elements are scraped from the DOM and set in
@@ -670,7 +701,7 @@ void WebFormControlElementToFormField(const WebFormControlElement& element,
   field->name = element.nameForAutofill();
   field->form_control_type = UTF16ToUTF8(element.formControlType());
   field->autocomplete_attribute =
-      UTF16ToUTF8(element.getAttribute("autocomplete"));
+      UTF16ToUTF8(element.getAttribute(kAutocomplete));
   if (field->autocomplete_attribute.size() > kMaxDataLength) {
     // Discard overly long attribute values to avoid DOS-ing the browser
     // process.  However, send over a default string to indicate that the
@@ -741,6 +772,10 @@ bool WebFormElementToFormData(
     ExtractMask extract_mask,
     FormData* form,
     FormFieldData* field) {
+  CR_DEFINE_STATIC_LOCAL(WebString, kLabel, ("label"));
+  CR_DEFINE_STATIC_LOCAL(WebString, kFor, ("for"));
+  CR_DEFINE_STATIC_LOCAL(WebString, kHidden, ("hidden"));
+
   const WebFrame* frame = form_element.document().frame();
   if (!frame)
     return false;
@@ -782,7 +817,7 @@ bool WebFormElementToFormData(
     const WebInputElement* input_element = toWebInputElement(&control_element);
     if (requirements & REQUIRE_AUTOCOMPLETE &&
         IsAutofillableInputElement(input_element) &&
-        !input_element->autoComplete())
+        !SatisfiesRequireAutocomplete(*input_element))
       continue;
 
     // Create a new FormFieldData, fill it out and map it to the field's name.
@@ -806,7 +841,7 @@ bool WebFormElementToFormData(
   // element's name as a key into the <name, FormFieldData> map to find the
   // previously created FormFieldData and set the FormFieldData's label to the
   // label.firstChild().nodeValue() of the label element.
-  WebNodeList labels = form_element.getElementsByTagName("label");
+  WebNodeList labels = form_element.getElementsByTagName(kLabel);
   for (unsigned i = 0; i < labels.length(); ++i) {
     WebLabelElement label = labels.item(i).to<WebLabelElement>();
     WebFormControlElement field_element =
@@ -816,10 +851,10 @@ bool WebFormElementToFormData(
     if (field_element.isNull()) {
       // Sometimes site authors will incorrectly specify the corresponding
       // field element's name rather than its id, so we compensate here.
-      element_name = label.getAttribute("for");
+      element_name = label.getAttribute(kFor);
     } else if (
         !field_element.isFormControlElement() ||
-        field_element.formControlType() == WebString::fromUTF8("hidden")) {
+        field_element.formControlType() == kHidden) {
       continue;
     } else {
       element_name = field_element.nameForAutofill();

@@ -7,6 +7,166 @@
  */
 
 cr.define('login', function() {
+  var ManagerPod = cr.ui.define(function() {
+    var node = $('managed-user-creation-manager-template').cloneNode(true);
+    node.removeAttribute('id');
+    node.removeAttribute('hidden');
+    return node;
+  });
+
+  ManagerPod.userImageSalt_ = {};
+
+  /**
+   * UI element for displaying single account in list of possible managers for
+   * new locally managed user.
+   * @type {Object}
+   */
+  ManagerPod.prototype = {
+    __proto__: HTMLDivElement.prototype,
+
+    /** @override */
+    decorate: function() {
+      // Mousedown has to be used instead of click to be able to prevent 'focus'
+      // event later.
+      this.addEventListener('mousedown',
+                            this.handleMouseDown_.bind(this));
+    },
+
+    /**
+     * Updates UI elements from user data.
+     */
+    update: function() {
+      this.imageElement.src = 'chrome://userimage/' + this.user.username +
+          '?id=' + ManagerPod.userImageSalt_[this.user.username];
+
+      this.nameElement.textContent = this.user.displayName;
+      this.emailElement.textContent = this.user.emailAddress;
+    },
+
+    /**
+     * Brings focus to password field.
+     */
+    focusInput: function() {
+      this.passwordElement.focus();
+    },
+
+    /**
+     * Gets image element.
+     * @type {!HTMLImageElement}
+     */
+    get imageElement() {
+      return this.querySelector('.managed-user-creation-manager-image');
+    },
+
+    /**
+     * Gets name element.
+     * @type {!HTMLDivElement}
+     */
+    get nameElement() {
+      return this.querySelector('.managed-user-creation-manager-name');
+    },
+
+    /**
+     * Gets e-mail element.
+     * @type {!HTMLDivElement}
+     */
+    get emailElement() {
+      return this.querySelector('.managed-user-creation-manager-email');
+    },
+
+    /**
+     * Gets password element.
+     * @type {!HTMLDivElement}
+     */
+    get passwordElement() {
+      return this.querySelector('.managed-user-creation-manager-password');
+    },
+
+    /**
+     * Gets password enclosing block.
+     * @type {!HTMLDivElement}
+     */
+    get passwordBlock() {
+      return this.querySelector(
+          '.managed-user-creation-manager-password-block');
+    },
+
+    /** @override */
+    handleMouseDown_: function(e) {
+      this.parentNode.selectPod(this);
+      // Prevent default so that we don't trigger 'focus' event.
+      e.preventDefault();
+    },
+
+
+    /**
+     * The user that this pod represents.
+     * @type {!Object}
+     */
+    user_: undefined,
+    get user() {
+      return this.user_;
+    },
+    set user(userDict) {
+      this.user_ = userDict;
+      this.update();
+    },
+  };
+
+  var ManagerPodList = cr.ui.define('managerList');
+
+  /**
+   * UI element for selecting manager account for new managed user.
+   * @type {Object}
+   */
+  ManagerPodList.prototype = {
+    __proto__: HTMLDivElement.prototype,
+
+    selectedPod_: null,
+
+    /** @override */
+    decorate: function() {
+    },
+
+    /**
+     * Returns all the pods in this pod list.
+     * @type {NodeList}
+     */
+    get pods() {
+      return this.children;
+    },
+
+    addPod: function(manager) {
+      var managerPod = new ManagerPod({user: manager});
+      this.appendChild(managerPod);
+      managerPod.update();
+    },
+
+    clearPods: function() {
+      this.innerHTML = '';
+      this.selectedPod_ = null;
+    },
+
+    selectPod: function(podToSelect) {
+      if (this.selectedPod_ == podToSelect) {
+        podToSelect.focusInput();
+        return;
+      }
+      this.selectedPod_ = podToSelect;
+      for (var i = 0, pod; pod = this.pods[i]; ++i) {
+        if (pod != podToSelect) {
+          pod.classList.remove('focused');
+          pod.passwordElement.value = '';
+          pod.passwordBlock.hidden = true;
+        }
+      }
+      podToSelect.classList.add('focused');
+      podToSelect.passwordBlock.hidden = false;
+      podToSelect.passwordElement.value = '';
+      podToSelect.focusInput();
+    },
+  };
+
   /**
    * Creates a new managed user creation screen div.
    * @constructor
@@ -18,7 +178,7 @@ cr.define('login', function() {
    * Registers with Oobe.
    */
   ManagedUserCreationScreen.register = function() {
-    var screen = $('managed-user-creation');
+    var screen = $('managed-user-creation-dialog');
     ManagedUserCreationScreen.decorate(screen);
     Oobe.getInstance().registerScreen(screen);
   };
@@ -28,17 +188,20 @@ cr.define('login', function() {
 
     lastVerifiedName_: null,
     lastIncorrectUserName_: null,
+    managerList_: null,
+    useManagerBasedCreationFlow_: false,
 
     /** @override */
     decorate: function() {
+      this.managerList_ = new ManagerPodList();
+      $('managed-user-creation-managers-pane').appendChild(this.managerList_);
+
       var closeButton = $('managed-user-creation-cancel-button');
       var userNameField = $('managed-user-creation-name');
       var passwordField = $('managed-user-creation-password');
       var password2Field = $('managed-user-creation-password-confirm');
 
-      closeButton.addEventListener('click', function(e) {
-        Oobe.goBack();
-      });
+      closeButton.addEventListener('click', this.cancel.bind(this));
       var creationScreen = this;
       userNameField.addEventListener('keydown', function(e) {
         if (e.keyIdentifier == 'Enter') {
@@ -210,10 +373,24 @@ cr.define('login', function() {
 
       if (firstPassword != secondPassword) {
         this.showPasswordError(
-            localStrings.getString('createManagedUserPasswordMismatchError'));
+            loadTimeData.getString('createManagedUserPasswordMismatchError'));
         return;
       }
-      chrome.send('tryCreateLocallyManagedUser', [userName, firstPassword]);
+      if (!this.useManagerBasedCreationFlow_) {
+        this.disabled = true;
+        chrome.send('tryCreateLocallyManagedUser', [userName, firstPassword]);
+      } else {
+        var selectedPod = this.managerList_.selectedPod_;
+        // TODO(antrim) : validation
+        if (null == selectedPod)
+          return;
+
+        var custodianId = selectedPod.user.emailAddress;
+        var custodianPassword = selectedPod.passwordElement.value;
+        this.disabled = true;
+        chrome.send('runLocallyManagedUserCreationFlow',
+            [userName, firstPassword, custodianId, custodianPassword]);
+      }
     },
 
     /**
@@ -226,7 +403,7 @@ cr.define('login', function() {
       var continueButton = this.ownerDocument.createElement('button');
       continueButton.id = 'managed-user-creation-continue-button';
       continueButton.textContent =
-          localStrings.getString('createManagedUserContinueButton');
+          loadTimeData.getString('createManagedUserContinueButton');
       buttons.push(continueButton);
 
       var creationScreen = this;
@@ -243,7 +420,7 @@ cr.define('login', function() {
      */
     onBeforeShow: function(data) {
       $('login-header-bar').signinUIState =
-          SIGNIN_UI_STATE.MANAGED_USER_CREATION;
+          SIGNIN_UI_STATE.MANAGED_USER_CREATION_DIALOG;
     },
 
     /**
@@ -279,6 +456,27 @@ cr.define('login', function() {
       $('login-header-bar').disabled = value;
     },
 
+    /**
+     * Called by backend part to propagate list of possible managers.
+     * @param {Array} userList - list of users that can be managers.
+     */
+    loadManagers: function(userList) {
+      $('managed-user-creation-managers-block').hidden = false;
+      this.useManagerBasedCreationFlow_ = true;
+      this.managerList_.clearPods();
+      for (var i = 0; i < userList.length; ++i)
+        this.managerList_.addPod(userList[i]);
+      if (userList.length > 0)
+        this.managerList_.selectPod(this.managerList_.pods[0]);
+    },
+
+    /**
+     * Called on user creation cancellation.
+     */
+    cancel: function() {
+      if (!this.disabled)
+        Oobe.goBack();
+    },
   };
 
   /**
@@ -286,9 +484,9 @@ cr.define('login', function() {
    */
   ManagedUserCreationScreen.show = function() {
     Oobe.getInstance().headerHidden = false;
-    var screen = $('managed-user-creation');
+    var screen = $('managed-user-creation-dialog');
 
-    Oobe.showScreen({id: SCREEN_CREATE_MANAGED_USER});
+    Oobe.showScreen({id: SCREEN_CREATE_MANAGED_USER_DIALOG});
 
     // Clear all fields.
     $('managed-user-creation-password').value = '';
@@ -303,18 +501,23 @@ cr.define('login', function() {
   };
 
   ManagedUserCreationScreen.managedUserNameOk = function(name) {
-    var screen = $('managed-user-creation');
+    var screen = $('managed-user-creation-dialog');
     screen.managedUserNameOk(name);
   };
 
   ManagedUserCreationScreen.managedUserNameError = function(name, error) {
-    var screen = $('managed-user-creation');
+    var screen = $('managed-user-creation-dialog');
     screen.managedUserNameError(name, error);
   };
 
   ManagedUserCreationScreen.showPasswordError = function(error) {
-    var screen = $('managed-user-creation');
+    var screen = $('managed-user-creation-dialog');
     screen.showPasswordError(error);
+  };
+
+  ManagedUserCreationScreen.loadManagers = function(userList) {
+    var screen = $('managed-user-creation-dialog');
+    screen.loadManagers(userList);
   };
 
   return {

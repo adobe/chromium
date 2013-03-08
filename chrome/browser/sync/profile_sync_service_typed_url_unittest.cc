@@ -15,9 +15,10 @@
 #include "base/threading/thread.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/history/history.h"
 #include "chrome/browser/history/history_backend.h"
+#include "chrome/browser/history/history_db_task.h"
 #include "chrome/browser/history/history_notifications.h"
+#include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/history/history_types.h"
 #include "chrome/browser/profiles/refcounted_profile_keyed_service.h"
@@ -69,7 +70,7 @@ static const int EXPIRED_VISIT = -1;
 
 class HistoryBackendMock : public HistoryBackend {
  public:
-  HistoryBackendMock() : HistoryBackend(FilePath(), 0, NULL, NULL) {}
+  HistoryBackendMock() : HistoryBackend(base::FilePath(), 0, NULL, NULL) {}
   virtual bool IsExpiredVisitTime(const base::Time& time) OVERRIDE {
     return time.ToInternalValue() == EXPIRED_VISIT;
   }
@@ -93,7 +94,7 @@ class HistoryBackendMock : public HistoryBackend {
 class HistoryServiceMock : public HistoryService {
  public:
   explicit HistoryServiceMock(Profile* profile) : HistoryService(profile) {}
-  MOCK_METHOD2(ScheduleDBTask, void(HistoryDBTask*,
+  MOCK_METHOD2(ScheduleDBTask, void(history::HistoryDBTask*,
                                     CancelableRequestConsumerBase*));
 
  private:
@@ -115,18 +116,18 @@ class TestTypedUrlModelAssociator : public TypedUrlModelAssociator {
  protected:
   // Don't clear error stats - that way we can verify their values in our
   // tests.
-  virtual void ClearErrorStats() {}
+  virtual void ClearErrorStats() OVERRIDE {}
 };
 
 void RunOnDBThreadCallback(HistoryBackend* backend,
-                           HistoryDBTask* task) {
+                           history::HistoryDBTask* task) {
   task->RunOnDBThread(backend, NULL);
 }
 
 ACTION_P2(RunTaskOnDBThread, thread, backend) {
   // ScheduleDBTask takes ownership of its task argument, so we
   // should, too.
-  scoped_refptr<HistoryDBTask> task(arg0);
+  scoped_refptr<history::HistoryDBTask> task(arg0);
   thread->message_loop()->PostTask(
       FROM_HERE, base::Bind(&RunOnDBThreadCallback, base::Unretained(backend),
                             task));
@@ -218,7 +219,7 @@ class ProfileSyncServiceTypedUrlTest : public AbstractProfileSyncServiceTest {
                                               data_type_controller,
                                               &error_handler_,
                                               &model_associator));
-      EXPECT_CALL(*components, CreateDataTypeManager(_, _, _, _)).
+      EXPECT_CALL(*components, CreateDataTypeManager(_, _, _, _, _)).
           WillOnce(ReturnNewDataTypeManager());
 
       token_service_->IssueAuthTokenForTest(

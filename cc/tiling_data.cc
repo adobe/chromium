@@ -19,6 +19,11 @@ static int ComputeNumTiles(int max_texture_size, int total_size, int border_texe
   return total_size > 0 ? num_tiles : 0;
 }
 
+TilingData::TilingData()
+    : border_texels_(0) {
+  RecomputeNumTiles();
+}
+
 TilingData::TilingData(
     gfx::Size max_texture_size,
     gfx::Size total_size,
@@ -79,7 +84,7 @@ int TilingData::TileYIndexFromSrcCoord(int src_position) const {
   return std::min(std::max(y, 0), num_tiles_y_ - 1);
 }
 
-int TilingData::BorderTileXIndexFromSrcCoord(int src_position) const {
+int TilingData::FirstBorderTileXIndexFromSrcCoord(int src_position) const {
   if (num_tiles_x_ <= 1)
     return 0;
 
@@ -89,7 +94,7 @@ int TilingData::BorderTileXIndexFromSrcCoord(int src_position) const {
   return std::min(std::max(x, 0), num_tiles_x_ - 1);
 }
 
-int TilingData::BorderTileYIndexFromSrcCoord(int src_position) const {
+int TilingData::FirstBorderTileYIndexFromSrcCoord(int src_position) const {
   if (num_tiles_y_ <= 1)
     return 0;
 
@@ -99,12 +104,57 @@ int TilingData::BorderTileYIndexFromSrcCoord(int src_position) const {
   return std::min(std::max(y, 0), num_tiles_y_ - 1);
 }
 
+int TilingData::LastBorderTileXIndexFromSrcCoord(int src_position) const {
+  if (num_tiles_x_ <= 1)
+    return 0;
+
+  DCHECK_GT(max_texture_size_.width() - 2 * border_texels_, 0);
+  int inner_tile_size = max_texture_size_.width() - 2 * border_texels_;
+  int x = src_position / inner_tile_size;
+  return std::min(std::max(x, 0), num_tiles_x_ - 1);
+}
+
+int TilingData::LastBorderTileYIndexFromSrcCoord(int src_position) const {
+  if (num_tiles_y_ <= 1)
+    return 0;
+
+  DCHECK_GT(max_texture_size_.height() - 2 * border_texels_, 0);
+  int inner_tile_size = max_texture_size_.height() - 2 * border_texels_;
+  int y = src_position / inner_tile_size;
+  return std::min(std::max(y, 0), num_tiles_y_ - 1);
+}
+
 gfx::Rect TilingData::TileBounds(int i, int j) const {
   AssertTile(i, j);
-  int x = TilePositionX(i);
-  int y = TilePositionY(j);
-  int width = TileSizeX(i);
-  int height = TileSizeY(j);
+  int max_texture_size_x = max_texture_size_.width() - 2 * border_texels_;
+  int max_texture_size_y = max_texture_size_.height() - 2 * border_texels_;
+  int total_size_x = total_size_.width();
+  int total_size_y = total_size_.height();
+
+  int lo_x = max_texture_size_x * i;
+  if (i != 0)
+    lo_x += border_texels_;
+
+  int lo_y = max_texture_size_y * j;
+  if (j != 0)
+    lo_y += border_texels_;
+
+  int hi_x = max_texture_size_x * (i + 1) + border_texels_;
+  if (i + 1 == num_tiles_x_)
+    hi_x += border_texels_;
+  if (hi_x > total_size_x)
+    hi_x = total_size_x;
+
+  int hi_y = max_texture_size_y * (j + 1) + border_texels_;
+  if (j + 1 == num_tiles_y_)
+    hi_y += border_texels_;
+  if (hi_y > total_size_y)
+    hi_y = total_size_y;
+
+  int x = lo_x;
+  int y = lo_y;
+  int width = hi_x - lo_x;
+  int height = hi_y - lo_y;
   DCHECK_GE(x, 0);
   DCHECK_GE(y, 0);
   DCHECK_GE(width, 0);
@@ -206,21 +256,33 @@ void TilingData::RecomputeNumTiles() {
   num_tiles_y_ = ComputeNumTiles(max_texture_size_.height(), total_size_.height(), border_texels_);
 }
 
-TilingData::Iterator::Iterator(const TilingData* tiling_data, gfx::Rect rect)
+TilingData::BaseIterator::BaseIterator(const TilingData* tiling_data)
     : tiling_data_(tiling_data),
-      rect_(gfx::IntersectRects(rect, gfx::Rect(tiling_data_->total_size()))) {
+      index_x_(-1),
+      index_y_(-1) {
+}
+
+TilingData::Iterator::Iterator(const TilingData* tiling_data, gfx::Rect rect)
+    : BaseIterator(tiling_data),
+      left_(-1),
+      right_(-1),
+      bottom_(-1) {
   if (tiling_data_->num_tiles_x() <= 0 || tiling_data_->num_tiles_y() <= 0) {
     done();
     return;
   }
 
-  index_x_ = tiling_data_->BorderTileXIndexFromSrcCoord(rect_.x());
-  index_y_ = tiling_data_->BorderTileYIndexFromSrcCoord(rect_.y());
+  rect.Intersect(gfx::Rect(tiling_data_->total_size()));
+  index_x_ = tiling_data_->FirstBorderTileXIndexFromSrcCoord(rect.x());
+  index_y_ = tiling_data_->FirstBorderTileYIndexFromSrcCoord(rect.y());
+  left_ = index_x_;
+  right_ = tiling_data_->LastBorderTileXIndexFromSrcCoord(rect.right() - 1);
+  bottom_ = tiling_data_->LastBorderTileYIndexFromSrcCoord(rect.bottom() - 1);
 
   // Index functions always return valid indices, so explicitly check
   // for non-intersecting rects.
   gfx::Rect new_rect = tiling_data_->TileBoundsWithBorder(index_x_, index_y_);
-  if (!new_rect.Intersects(rect_))
+  if (!new_rect.Intersects(rect))
     done();
 }
 
@@ -229,37 +291,108 @@ TilingData::Iterator& TilingData::Iterator::operator++() {
     return *this;
 
   index_x_++;
-
-  bool new_row = index_x_ >= tiling_data_->num_tiles_x();
-  if (!new_row) {
-    gfx::Rect new_rect = tiling_data_->TileBoundsWithBorder(index_x_, index_y_);
-    new_row = new_rect.x() >= rect_.right();
-  }
-
-  if (new_row) {
-    index_x_ = tiling_data_->BorderTileXIndexFromSrcCoord(rect_.x());
+  if (index_x_ > right_) {
+    index_x_ = left_;
     index_y_++;
-
-    if (index_y_ >= tiling_data_->num_tiles_y()) {
+    if (index_y_ > bottom_)
       done();
-    } else {
-      gfx::Rect new_rect =
-          tiling_data_->TileBoundsWithBorder(index_x_, index_y_);
-      if (new_rect.y() >= rect_.bottom())
-        done();
-    }
   }
 
   return *this;
 }
 
-TilingData::Iterator::operator bool() const {
-  return index_x_ != -1 && index_y_ != -1;
+TilingData::DifferenceIterator::DifferenceIterator(
+    const TilingData* tiling_data,
+    gfx::Rect consider,
+    gfx::Rect ignore)
+    : BaseIterator(tiling_data),
+      consider_left_(-1),
+      consider_top_(-1),
+      consider_right_(-1),
+      consider_bottom_(-1),
+      ignore_left_(-1),
+      ignore_top_(-1),
+      ignore_right_(-1),
+      ignore_bottom_(-1) {
+  if (tiling_data_->num_tiles_x() <= 0 || tiling_data_->num_tiles_y() <= 0) {
+    done();
+    return;
+  }
+
+  gfx::Rect bounds(tiling_data_->total_size());
+  consider.Intersect(bounds);
+  ignore.Intersect(bounds);
+  if (consider.IsEmpty()) {
+    done();
+    return;
+  }
+
+  consider_left_ =
+      tiling_data_->FirstBorderTileXIndexFromSrcCoord(consider.x());
+  consider_top_ =
+      tiling_data_->FirstBorderTileYIndexFromSrcCoord(consider.y());
+  consider_right_ =
+      tiling_data_->LastBorderTileXIndexFromSrcCoord(consider.right() - 1);
+  consider_bottom_ =
+      tiling_data_->LastBorderTileYIndexFromSrcCoord(consider.bottom() - 1);
+
+  if (!ignore.IsEmpty()) {
+    ignore_left_ =
+        tiling_data_->FirstBorderTileXIndexFromSrcCoord(ignore.x());
+    ignore_top_ =
+        tiling_data_->FirstBorderTileYIndexFromSrcCoord(ignore.y());
+    ignore_right_ =
+        tiling_data_->LastBorderTileXIndexFromSrcCoord(ignore.right() - 1);
+    ignore_bottom_ =
+        tiling_data_->LastBorderTileYIndexFromSrcCoord(ignore.bottom() - 1);
+
+    // Clamp ignore indices to consider indices.
+    ignore_left_ = std::max(ignore_left_, consider_left_);
+    ignore_top_ = std::max(ignore_top_, consider_top_);
+    ignore_right_ = std::min(ignore_right_, consider_right_);
+    ignore_bottom_ = std::min(ignore_bottom_, consider_bottom_);
+  }
+
+  if (ignore_left_ == consider_left_ && ignore_right_ == consider_right_ &&
+      ignore_top_ == consider_top_ && ignore_bottom_ == consider_bottom_) {
+    done();
+    return;
+  }
+
+  index_x_ = consider_left_;
+  index_y_ = consider_top_;
+
+  if (in_ignore_rect())
+    ++(*this);
 }
 
-void TilingData::Iterator::done() {
-  index_x_ = -1;
-  index_y_ = -1;
+TilingData::DifferenceIterator& TilingData::DifferenceIterator::operator++() {
+  if (!*this)
+    return *this;
+
+  index_x_++;
+  if (in_ignore_rect())
+    index_x_ = ignore_right_ + 1;
+
+  if (index_x_ > consider_right_) {
+    index_x_ = consider_left_;
+    index_y_++;
+
+    if (in_ignore_rect()) {
+      index_x_ = ignore_right_ + 1;
+      // If the ignore rect spans the whole consider rect horizontally, then
+      // ignore_right + 1 will be out of bounds.
+      if (in_ignore_rect() || index_x_ > consider_right_) {
+        index_y_ = ignore_bottom_ + 1;
+        index_x_ = consider_left_;
+      }
+    }
+
+    if (index_y_ > consider_bottom_)
+      done();
+  }
+
+  return *this;
 }
 
 }  // namespace cc

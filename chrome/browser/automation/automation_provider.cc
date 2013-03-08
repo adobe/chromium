@@ -10,17 +10,18 @@
 #include "base/callback.h"
 #include "base/command_line.h"
 #include "base/debug/trace_event.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/json/json_reader.h"
 #include "base/json/json_string_value_serializer.h"
 #include "base/json/json_writer.h"
 #include "base/json/string_escape.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
+#include "base/prefs/pref_service.h"
 #include "base/process_util.h"
 #include "base/stl_util.h"
-#include "base/string_number_conversions.h"
 #include "base/string_util.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/threading/thread.h"
 #include "base/utf_string_conversions.h"
@@ -40,7 +41,6 @@
 #include "chrome/browser/character_encoding.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/net/url_request_mock_util.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/printing/print_job.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ssl/ssl_blocking_page.h"
@@ -348,6 +348,9 @@ DictionaryValue* AutomationProvider::GetDictionaryFromDownloadItem(
     case content::DOWNLOAD_DANGER_TYPE_USER_VALIDATED:
       download_danger_type_string = "USER_VALIDATED";
       break;
+    case content::DOWNLOAD_DANGER_TYPE_DANGEROUS_HOST:
+      download_danger_type_string = "DANGEROUS_HOST";
+      break;
     case content::DOWNLOAD_DANGER_TYPE_MAX:
       NOTREACHED();
       download_danger_type_string = "UNKNOWN";
@@ -425,7 +428,7 @@ bool AutomationProvider::OnMessageReceived(const IPC::Message& message) {
     IPC_MESSAGE_HANDLER(AutomationMsg_BeginTracing, BeginTracing)
     IPC_MESSAGE_HANDLER_DELAY_REPLY(AutomationMsg_EndTracing, EndTracing)
     IPC_MESSAGE_HANDLER(AutomationMsg_GetTracingOutput, GetTracingOutput)
-#if defined(OS_WIN) && !defined(USE_AURA)
+#if defined(OS_WIN)
     // These are for use with external tabs.
     IPC_MESSAGE_HANDLER(AutomationMsg_CreateExternalTab, CreateExternalTab)
     IPC_MESSAGE_HANDLER(AutomationMsg_ProcessUnhandledAccelerator,
@@ -767,7 +770,10 @@ void AutomationProvider::JavaScriptStressTestControl(int tab_handle,
 void AutomationProvider::BeginTracing(const std::string& categories,
                                       bool* success) {
   tracing_data_.trace_output.clear();
-  *success = TraceController::GetInstance()->BeginTracing(this, categories);
+  *success = TraceController::GetInstance()->BeginTracing(
+      this,
+      categories,
+      base::debug::TraceLog::RECORD_UNTIL_FULL);
 }
 
 void AutomationProvider::EndTracing(IPC::Message* reply_message) {

@@ -4,10 +4,15 @@
 
 #include <sstream>
 
+#include "apps/switches.h"
 #include "base/command_line.h"
 #include "base/file_util.h"
 #include "base/lazy_instance.h"
+#include "base/memory/singleton.h"
+#include "base/memory/weak_ptr.h"
 #include "base/path_service.h"
+#include "base/prefs/pref_service.h"
+#include "base/threading/sequenced_worker_pool.h"
 #include "base/time.h"
 #include "base/timer.h"
 #include "base/utf_string_conversions.h"
@@ -22,25 +27,42 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/shell_integration.h"
 #include "chrome/browser/ui/app_list/app_list_controller_delegate.h"
-#include "chrome/browser/ui/app_list/app_list_util.h"
+#include "chrome/browser/ui/app_list/app_list_service.h"
+#include "chrome/browser/ui/app_list/app_list_service_win.h"
 #include "chrome/browser/ui/app_list/app_list_view_delegate.h"
+#include "chrome/browser/ui/extensions/app_metro_infobar_delegate_win.h"
 #include "chrome/browser/ui/extensions/application_launch.h"
 #include "chrome/browser/ui/views/browser_dialogs.h"
 #include "chrome/common/chrome_constants.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/pref_names.h"
+#include "chrome/installer/launcher_support/chrome_launcher_support.h"
+#include "chrome/installer/util/browser_distribution.h"
+#include "chrome/installer/util/google_update_settings.h"
 #include "chrome/installer/util/util_constants.h"
 #include "content/public/browser/browser_thread.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/google_chrome_strings.h"
+#include "grit/theme_resources.h"
 #include "ui/app_list/pagination_model.h"
 #include "ui/app_list/views/app_list_view.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/resource/resource_bundle.h"
 #include "ui/base/win/shell.h"
 #include "ui/gfx/display.h"
+#include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/screen.h"
 #include "ui/views/bubble/bubble_border.h"
 #include "ui/views/widget/widget.h"
+#include "win8/util/win8_util.h"
+
+#if defined(USE_ASH)
+#include "ash/shell.h"
+#include "ui/aura/root_window.h"
+#include "ui/aura/window.h"
+#endif
 
 namespace {
 
@@ -77,7 +99,7 @@ string16 GetAppModelId() {
   // The AppModelId should be the same for all profiles in a user data directory
   // but different for different user data directories, so base it on the
   // initial profile in the current user data directory.
-  FilePath initial_profile_path;
+  base::FilePath initial_profile_path;
   CommandLine* command_line = CommandLine::ForCurrentProcess();
   if (command_line->HasSwitch(switches::kUserDataDir)) {
     initial_profile_path =
@@ -87,32 +109,19 @@ string16 GetAppModelId() {
   return ShellIntegration::GetAppListAppModelIdForProfile(initial_profile_path);
 }
 
-void LaunchHostedAppInChromeOnUIThread(const std::string app_id,
-                                       Profile* profile) {
-  ExtensionService* service = profile->GetExtensionService();
-  DCHECK(service);
-  const extensions::Extension* extension = service->GetInstalledExtension(
-      app_id);
-  // There is a non-zero chance the extension was uninstalled while we were
-  // checking the default browser.
-  if (!extension)
-    return;
+void SetDidRunForNDayActiveStats() {
+  DCHECK(content::BrowserThread::GetBlockingPool()->RunsTasksOnCurrentThread());
 
-  application_launch::OpenApplication(application_launch::LaunchParams(
-      profile, extension, NEW_FOREGROUND_TAB));
-}
-
-void LaunchHostedAppOnFileThread(const GURL launch_url,
-                                 const std::string app_id,
-                                 Profile* profile) {
-  if (ShellIntegration::GetDefaultBrowser() != ShellIntegration::IS_DEFAULT) {
-    platform_util::OpenExternal(launch_url);
-    return;
+  chrome_launcher_support::InstallationState launcher_state =
+      chrome_launcher_support::GetAppLauncherInstallationState();
+  if (launcher_state != chrome_launcher_support::NOT_INSTALLED) {
+    BrowserDistribution* dist = BrowserDistribution::GetSpecificDistribution(
+        BrowserDistribution::CHROME_APP_HOST);
+    GoogleUpdateSettings::UpdateDidRunStateForDistribution(
+        dist,
+        true /* did_run */,
+        launcher_state == chrome_launcher_support::INSTALLED_AT_SYSTEM_LEVEL);
   }
-
-  content::BrowserThread::PostTask(
-      content::BrowserThread::UI, FROM_HERE,
-      base::Bind(&LaunchHostedAppInChromeOnUIThread, app_id, profile));
 }
 
 class AppListControllerDelegateWin : public AppListControllerDelegate {
@@ -126,6 +135,7 @@ class AppListControllerDelegateWin : public AppListControllerDelegate {
   virtual void ViewClosing() OVERRIDE;
   virtual void ViewActivationChanged(bool active) OVERRIDE;
   virtual gfx::NativeWindow GetAppListWindow() OVERRIDE;
+  virtual gfx::ImageSkia GetWindowIcon() OVERRIDE;
   virtual bool CanPin() OVERRIDE;
   virtual void OnShowExtensionPrompt() OVERRIDE;
   virtual void OnCloseExtensionPrompt() OVERRIDE;
@@ -145,33 +155,84 @@ class AppListControllerDelegateWin : public AppListControllerDelegate {
 
 // The AppListController class manages global resources needed for the app
 // list to operate, and controls when the app list is opened and closed.
-class AppListController {
+// TODO(tapted): Rename this class to AppListServiceWin and move entire file to
+// chrome/browser/ui/app_list/app_list_service_win.cc after removing
+// chrome/browser/ui/views dependency.
+class AppListController : public AppListService {
  public:
-  AppListController()
-      : current_view_(NULL),
-        can_close_app_list_(true),
-        app_list_is_showing_(false) {}
-  ~AppListController() {}
+  virtual ~AppListController();
+
+  static AppListController* GetInstance() {
+    return Singleton<AppListController,
+                     LeakySingletonTraits<AppListController> >::get();
+  }
 
   void set_can_close(bool can_close) { can_close_app_list_ = can_close; }
   bool can_close() { return can_close_app_list_; }
-  void CreateAppList();
-  void ShowAppList();
-  void DismissAppList();
+  Profile* profile() const { return profile_; }
+
+  // Creates the app list view and populates it from |profile|, but doesn't
+  // show it.  Does nothing if the view already exists.
+  void InitView(Profile* profile);
+
   void AppListClosing();
   void AppListActivationChanged(bool active);
+  void ShowAppListDuringModeSwitch(Profile* profile);
+
   app_list::AppListView* GetView() { return current_view_; }
 
+  // AppListService overrides:
+  virtual void Init(Profile* initial_profile) OVERRIDE;
+
+  // Activates the app list at the current mouse cursor location, creating the
+  // app list if necessary.
+  virtual void ShowAppList(Profile* profile) OVERRIDE;
+
+  // Hides the app list.
+  virtual void DismissAppList() OVERRIDE;
+
+  // Update the profile path stored in local prefs, load it (if not already
+  // loaded), and show the app list.
+  virtual void SetAppListProfile(
+      const base::FilePath& profile_file_path) OVERRIDE;
+
+  virtual Profile* GetCurrentAppListProfile() OVERRIDE;
+
+  virtual bool IsAppListVisible() const OVERRIDE;
+
+  // ProfileInfoCacheObserver override:
+  // We need to watch for profile removal to keep kAppListProfile updated.
+  virtual void OnProfileWillBeRemoved(
+      const base::FilePath& profile_path) OVERRIDE;
+
  private:
+  friend struct DefaultSingletonTraits<AppListController>;
+
+  AppListController();
+
+  // Loads a profile asynchronously and calls OnProfileLoaded() when done.
+  void LoadProfileAsync(const base::FilePath& profile_file_path);
+
+  // Callback for asynchronous profile load.
+  void OnProfileLoaded(int profile_load_sequence_id,
+                       Profile* profile,
+                       Profile::CreateStatus status);
+
+  // We need to keep the browser alive while we are loading a profile as that
+  // shows intent to show the app list. These two functions track our pending
+  // profile loads and start or end browser keep alive accordingly.
+  void IncrementPendingProfileLoads();
+  void DecrementPendingProfileLoads();
+
+  // Create or recreate, and initialize |current_view_| from |profile|.
+  void PopulateViewFromProfile(Profile* profile);
+
+  // Save |profile_file_path| as the app list profile in local state.
+  void SaveProfilePathToLocalState(const base::FilePath& profile_file_path);
+
   // Utility methods for showing the app list.
-  void SnapArrowLocationToTaskbarEdge(
-      const gfx::Display& display,
-      views::BubbleBorder::ArrowLocation* arrow,
-      gfx::Point* anchor);
-  void UpdateAnchorLocationForCursor(
-      const gfx::Display& display,
-      views::BubbleBorder::ArrowLocation* arrow,
-      gfx::Point* anchor);
+  gfx::Point FindAnchorPoint(const gfx::Display& display,
+                             const gfx::Point& cursor);
   void UpdateArrowPositionAndAnchorPoint(const gfx::Point& cursor);
   string16 GetAppListIconPath();
 
@@ -181,8 +242,14 @@ class AppListController {
   // periodically whenever the app list does not have focus.
   void CheckTaskbarOrViewHasFocus();
 
+  // Returns the underlying HWND for the AppList.
+  HWND GetAppListHWND() const;
+
   // Weak pointer. The view manages its own lifetime.
   app_list::AppListView* current_view_;
+
+  // Weak pointer. The view owns the view delegate.
+  AppListViewDelegate* view_delegate_;
 
   // Timer used to check if the taskbar or app list is active. Using a timer
   // means we don't need to hook Windows, which is apparently not possible
@@ -191,6 +258,9 @@ class AppListController {
 
   app_list::PaginationModel pagination_model_;
 
+  // The profile the AppList is currently displaying.
+  Profile* profile_;
+
   // True if the controller can close the app list.
   bool can_close_app_list_;
 
@@ -198,31 +268,55 @@ class AppListController {
   // browser process keep-alives active.
   bool app_list_is_showing_;
 
+  // True if we are anticipating that the app list will lose focus, and we want
+  // to take it back. This is used when switching out of Metro mode, and the
+  // browser regains focus after showing the app list.
+  bool regain_first_lost_focus_;
+
+  // Incremented to indicate that pending profile loads are no longer valid.
+  int profile_load_sequence_id_;
+
+  // How many profile loads are pending.
+  int pending_profile_loads_;
+
+  // When the context menu on the app list's taskbar icon is brought up the
+  // app list should not be hidden, but it should be if the taskbar is clicked
+  // on. There can be a period of time when the taskbar gets focus between a
+  // right mouse click and the menu showing; to prevent hiding the app launcher
+  // when this happens it is kept visible if the taskbar is seen briefly without
+  // the right mouse button down, but not if this happens twice in a row.
+  bool preserving_focus_for_taskbar_menu_;
+
+  base::WeakPtrFactory<AppListController> weak_factory_;
+
   DISALLOW_COPY_AND_ASSIGN(AppListController);
 };
-
-base::LazyInstance<AppListController>::Leaky g_app_list_controller =
-    LAZY_INSTANCE_INITIALIZER;
 
 AppListControllerDelegateWin::AppListControllerDelegateWin() {}
 
 AppListControllerDelegateWin::~AppListControllerDelegateWin() {}
 
 void AppListControllerDelegateWin::DismissView() {
-  g_app_list_controller.Get().DismissAppList();
+  AppListController::GetInstance()->DismissAppList();
 }
 
 void AppListControllerDelegateWin::ViewActivationChanged(bool active) {
-  g_app_list_controller.Get().AppListActivationChanged(active);
+  AppListController::GetInstance()->AppListActivationChanged(active);
 }
 
 void AppListControllerDelegateWin::ViewClosing() {
-  g_app_list_controller.Get().AppListClosing();
+  AppListController::GetInstance()->AppListClosing();
 }
 
 gfx::NativeWindow AppListControllerDelegateWin::GetAppListWindow() {
-  app_list::AppListView* view = g_app_list_controller.Get().GetView();
+  app_list::AppListView* view = AppListController::GetInstance()->GetView();
   return view ? view->GetWidget()->GetNativeWindow() : NULL;
+}
+
+gfx::ImageSkia AppListControllerDelegateWin::GetWindowIcon() {
+  gfx::ImageSkia* resource = ResourceBundle::GetSharedInstance().
+      GetImageSkiaNamed(IDR_APP_LIST);
+  return *resource;
 }
 
 bool AppListControllerDelegateWin::CanPin() {
@@ -230,11 +324,11 @@ bool AppListControllerDelegateWin::CanPin() {
 }
 
 void AppListControllerDelegateWin::OnShowExtensionPrompt() {
-  g_app_list_controller.Get().set_can_close(false);
+  AppListController::GetInstance()->set_can_close(false);
 }
 
 void AppListControllerDelegateWin::OnCloseExtensionPrompt() {
-  g_app_list_controller.Get().set_can_close(true);
+  AppListController::GetInstance()->set_can_close(true);
 }
 
 bool AppListControllerDelegateWin::CanShowCreateShortcutsDialog() {
@@ -250,7 +344,7 @@ void AppListControllerDelegateWin::ShowCreateShortcutsDialog(
       extension_id);
   DCHECK(extension);
 
-  app_list::AppListView* view = g_app_list_controller.Get().GetView();
+  app_list::AppListView* view = AppListController::GetInstance()->GetView();
   if (!view)
     return;
 
@@ -266,55 +360,183 @@ void AppListControllerDelegateWin::ActivateApp(
 
 void AppListControllerDelegateWin::LaunchApp(
     Profile* profile, const extensions::Extension* extension, int event_flags) {
-  // Having the app launcher installed does not mean the user has Chrome
-  // installed, or set as the default browser. The behavior for app launch needs
-  // to be consistent but also respect the users default browser choice for apps
-  // which appear as web sites, and never show chrome the browser if it is not
-  // installed.
-  // The launch behavior is:
-  //   - v1 hosted apps: if chrome is not default browser, launch in default
-  //                     browser; otherwise launch in chrome
-  //   - v1 packaged apps : open in an app window
-  //   - v2 packaged apps : launch normally
-  if (extension->is_hosted_app()) {
-    content::BrowserThread::PostTask(
-        content::BrowserThread::FILE,
-        FROM_HERE,
-        base::Bind(&LaunchHostedAppOnFileThread,
-                   extension->GetFullLaunchURL(),
-                   extension->id(),
-                   profile));
-    return;
-  }
-
-  if (extension->is_legacy_packaged_app()) {
-    application_launch::OpenApplication(application_launch::LaunchParams(
-        profile, extension, extension_misc::LAUNCH_WINDOW, NEW_FOREGROUND_TAB));
-    return;
-  }
-
-  application_launch::OpenApplication(application_launch::LaunchParams(
+  chrome::OpenApplication(chrome::AppLaunchParams(
       profile, extension, NEW_FOREGROUND_TAB));
 }
 
-void AppListController::CreateAppList() {
-#if !defined(USE_AURA)
+AppListController::AppListController()
+    : current_view_(NULL),
+      view_delegate_(NULL),
+      profile_(NULL),
+      can_close_app_list_(true),
+      app_list_is_showing_(false),
+      profile_load_sequence_id_(0),
+      pending_profile_loads_(0),
+      preserving_focus_for_taskbar_menu_(false),
+      weak_factory_(this) {
+  ProfileManager* profile_manager = g_browser_process->profile_manager();
+  profile_manager->GetProfileInfoCache().AddObserver(this);
+}
+
+AppListController::~AppListController() {
+}
+
+void AppListController::OnProfileWillBeRemoved(
+    const base::FilePath& profile_path) {
+  // If the profile the app list uses just got deleted, reset it to the last
+  // used profile.
+  PrefService* local_state = g_browser_process->local_state();
+  std::string app_list_last_profile = local_state->GetString(
+      prefs::kAppListProfile);
+  if (profile_path.BaseName().MaybeAsASCII() == app_list_last_profile) {
+    local_state->SetString(prefs::kAppListProfile,
+        local_state->GetString(prefs::kProfileLastUsed));
+  }
+}
+
+void AppListController::SetAppListProfile(
+    const base::FilePath& profile_file_path) {
+  ProfileManager* profile_manager = g_browser_process->profile_manager();
+  Profile* profile = profile_manager->GetProfileByPath(profile_file_path);
+
+  if (!profile) {
+    LoadProfileAsync(profile_file_path);
+    return;
+  }
+
+  ShowAppList(profile);
+}
+
+void AppListController::LoadProfileAsync(
+    const base::FilePath& profile_file_path) {
+  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+
+  // Invalidate any pending profile path loads.
+  profile_load_sequence_id_++;
+
+  IncrementPendingProfileLoads();
+
+  ProfileManager* profile_manager = g_browser_process->profile_manager();
+  profile_manager->CreateProfileAsync(
+      profile_file_path,
+      base::Bind(&AppListController::OnProfileLoaded,
+                 weak_factory_.GetWeakPtr(), profile_load_sequence_id_),
+      string16(), string16(), false);
+}
+
+void AppListController::OnProfileLoaded(int profile_load_sequence_id,
+                                        Profile* profile,
+                                        Profile::CreateStatus status) {
+  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+  switch (status) {
+    case Profile::CREATE_STATUS_CREATED:
+      break;
+    case Profile::CREATE_STATUS_INITIALIZED:
+      // Only show if there has been no other profile shown since this load
+      // started.
+      if (profile_load_sequence_id == profile_load_sequence_id_)
+        ShowAppList(profile);
+      DecrementPendingProfileLoads();
+      break;
+    case Profile::CREATE_STATUS_FAIL:
+      DecrementPendingProfileLoads();
+      break;
+  }
+
+}
+
+void AppListController::IncrementPendingProfileLoads() {
+  pending_profile_loads_++;
+  if (pending_profile_loads_ == 1)
+    chrome::StartKeepAlive();
+}
+
+void AppListController::DecrementPendingProfileLoads() {
+  pending_profile_loads_--;
+  if (pending_profile_loads_ == 0)
+    chrome::EndKeepAlive();
+}
+
+void AppListController::ShowAppList(Profile* profile) {
+  DCHECK(profile);
+
+  content::BrowserThread::PostBlockingPoolTask(
+      FROM_HERE, base::Bind(SetDidRunForNDayActiveStats));
+
+  if (win8::IsSingleWindowMetroMode()) {
+    // This request came from Windows 8 in desktop mode, but chrome is currently
+    // running in Metro mode.
+    chrome::AppMetroInfoBarDelegateWin::CreateAndActivateMetro(profile);
+    return;
+  }
+
+  // Invalidate any pending profile path loads.
+  profile_load_sequence_id_++;
+
+  // If the app list is already displaying |profile| just activate it (in case
+  // we have lost focus).
+  if (app_list_is_showing_ && (profile == profile_)) {
+    current_view_->Show();
+    current_view_->GetWidget()->Activate();
+    return;
+  }
+
+  SaveProfilePathToLocalState(profile->GetPath());
+
+  DismissAppList();
+  PopulateViewFromProfile(profile);
+
+  if (!app_list_is_showing_) {
+    app_list_is_showing_ = true;
+    chrome::StartKeepAlive();
+  }
+
+  DCHECK(current_view_);
+  DCHECK(app_list_is_showing_);
+  gfx::Point cursor = gfx::Screen::GetNativeScreen()->GetCursorScreenPoint();
+  UpdateArrowPositionAndAnchorPoint(cursor);
+  current_view_->Show();
+  current_view_->GetWidget()->GetTopLevelWidget()->UpdateWindowIcon();
+  current_view_->GetWidget()->Activate();
+}
+
+void AppListController::InitView(Profile* profile) {
   if (current_view_)
     return;
+  PopulateViewFromProfile(profile);
+}
 
+void AppListController::ShowAppListDuringModeSwitch(Profile* profile) {
+  regain_first_lost_focus_ = true;
+  ShowAppList(profile);
+}
+
+void AppListController::PopulateViewFromProfile(Profile* profile) {
+#if !defined(USE_AURA)
+  if (profile == profile_)
+    return;
+#endif
+
+  profile_ = profile;
+  gfx::NativeWindow parent = NULL;
+
+#if !defined(USE_AURA)
+  parent = ::GetDesktopWindow();
+#endif
   // The controller will be owned by the view delegate, and the delegate is
   // owned by the app list view. The app list view manages it's own lifetime.
-  current_view_ = new app_list::AppListView(
-      new AppListViewDelegate(new AppListControllerDelegateWin()));
+  view_delegate_ = new AppListViewDelegate(new AppListControllerDelegateWin(),
+                                           profile_);
+  current_view_ = new app_list::AppListView(view_delegate_);
   gfx::Point cursor = gfx::Screen::GetNativeScreen()->GetCursorScreenPoint();
-  current_view_->InitAsBubble(GetDesktopWindow(),
+  current_view_->InitAsBubble(parent,
                               &pagination_model_,
                               NULL,
                               cursor,
-                              views::BubbleBorder::BOTTOM_LEFT);
+                              views::BubbleBorder::FLOAT,
+                              false /* border_accepts_events */);
+  HWND hwnd = GetAppListHWND();
 
-  HWND hwnd =
-      current_view_->GetWidget()->GetTopLevelWidget()->GetNativeWindow();
   ui::win::SetAppIdForWindow(GetAppModelId(), hwnd);
   CommandLine relaunch = GetAppListCommandLine();
   string16 app_name(l10n_util::GetStringUTF16(IDS_APP_LIST_SHORTCUT_NAME));
@@ -323,37 +545,27 @@ void AppListController::CreateAppList() {
   ::SetWindowText(hwnd, app_name.c_str());
   string16 icon_path = GetAppListIconPath();
   ui::win::SetAppIconForWindow(icon_path, hwnd);
-  current_view_->GetWidget()->SetAlwaysOnTop(true);
-#endif
 }
 
-void AppListController::ShowAppList() {
-#if !defined(USE_AURA)
-  if (!current_view_)
-    CreateAppList();
-
-  if (app_list_is_showing_)
-    return;
-  app_list_is_showing_ = true;
-  browser::StartKeepAlive();
-  gfx::Point cursor = gfx::Screen::GetNativeScreen()->GetCursorScreenPoint();
-  UpdateArrowPositionAndAnchorPoint(cursor);
-  current_view_->Show();
-  current_view_->GetWidget()->Activate();
-#endif
+void AppListController::SaveProfilePathToLocalState(
+    const base::FilePath& profile_file_path) {
+  g_browser_process->local_state()->SetString(
+      prefs::kAppListProfile,
+      profile_file_path.BaseName().MaybeAsASCII());
 }
 
 void AppListController::DismissAppList() {
   if (current_view_ && app_list_is_showing_ && can_close_app_list_) {
     current_view_->GetWidget()->Hide();
     timer_.Stop();
-    browser::EndKeepAlive();
+    chrome::EndKeepAlive();
     app_list_is_showing_ = false;
   }
 }
 
 void AppListController::AppListClosing() {
   current_view_ = NULL;
+  view_delegate_ = NULL;
   timer_.Stop();
 }
 
@@ -364,6 +576,7 @@ void AppListController::AppListActivationChanged(bool active) {
     return;
   }
 
+  preserving_focus_for_taskbar_menu_ = false;
   timer_.Start(FROM_HERE,
                base::TimeDelta::FromMilliseconds(kFocusCheckIntervalMS), this,
                &AppListController::CheckTaskbarOrViewHasFocus);
@@ -374,7 +587,6 @@ void AppListController::AppListActivationChanged(bool active) {
 // not visible, |rect| will be outside the current monitor's bounds, except for
 // one pixel of overlap where the edge of the taskbar is shown.
 bool GetTaskbarRect(gfx::Rect* rect) {
-#if !defined(USE_AURA)
   HWND taskbar_hwnd = FindWindow(kTrayClassName, NULL);
   if (!taskbar_hwnd)
     return false;
@@ -385,93 +597,85 @@ bool GetTaskbarRect(gfx::Rect* rect) {
 
   *rect = gfx::Rect(win_rect);
   return true;
-#else
-  return false;
-#endif
 }
 
-void AppListController::SnapArrowLocationToTaskbarEdge(
-    const gfx::Display& display,
-    views::BubbleBorder::ArrowLocation* arrow,
-    gfx::Point* anchor) {
+gfx::Point FindReferencePoint(const gfx::Display& display,
+                              const gfx::Point& cursor) {
   const int kSnapDistance = 50;
-  const int kSnapOffset = 5;
-  const int kEdgeOffset = 60;
-
-  gfx::Rect taskbar_rect;
 
   // If we can't find the taskbar, snap to the bottom left.
   // If the display size is the same as the work area, and does not contain the
   // taskbar, either the taskbar is hidden or on another monitor, so just snap
   // to the bottom left.
+  gfx::Rect taskbar_rect;
   if (!GetTaskbarRect(&taskbar_rect) ||
       (display.work_area() == display.bounds() &&
           !display.work_area().Contains(taskbar_rect))) {
-    anchor->set_x(display.work_area().x() + kEdgeOffset);
-    anchor->set_y(display.work_area().bottom());
-    *arrow = views::BubbleBorder::BOTTOM_CENTER;
-    return;
+    return display.work_area().bottom_left();
   }
-
-  const gfx::Rect& screen_rect = display.bounds();
 
   // Snap to the taskbar edge. If the cursor is greater than kSnapDistance away,
   // also move to the left (for horizontal taskbars) or top (for vertical).
-
+  const gfx::Rect& screen_rect = display.bounds();
   // First handle taskbar on bottom.
   if (taskbar_rect.width() == screen_rect.width()) {
     if (taskbar_rect.bottom() == screen_rect.bottom()) {
-      if (taskbar_rect.y() - anchor->y() > kSnapDistance)
-        anchor->set_x(display.work_area().x() + kEdgeOffset);
+      if (taskbar_rect.y() - cursor.y() > kSnapDistance)
+        return gfx::Point(screen_rect.x(), taskbar_rect.y());
 
-      anchor->set_y(taskbar_rect.y() + kSnapOffset);
-      *arrow = views::BubbleBorder::BOTTOM_CENTER;
-      return;
+      return gfx::Point(cursor.x(), taskbar_rect.y());
     }
 
     // Now try on the top.
-    if (anchor->y() - taskbar_rect.bottom() > kSnapDistance)
-      anchor->set_x(display.work_area().x()+ kEdgeOffset);
+    if (cursor.y() - taskbar_rect.bottom() > kSnapDistance)
+      return gfx::Point(screen_rect.x(), taskbar_rect.bottom());
 
-    anchor->set_y(taskbar_rect.bottom() - kSnapOffset);
-    *arrow = views::BubbleBorder::TOP_CENTER;
-    return;
+    return gfx::Point(cursor.x(), taskbar_rect.bottom());
   }
 
   // Now try the left.
   if (taskbar_rect.x() == screen_rect.x()) {
-    if (anchor->x() - taskbar_rect.right() > kSnapDistance)
-      anchor->set_y(display.work_area().y()+ kEdgeOffset);
+    if (cursor.x() - taskbar_rect.right() > kSnapDistance)
+      return gfx::Point(taskbar_rect.right(), screen_rect.y());
 
-    anchor->set_x(taskbar_rect.right() - kSnapOffset);
-    *arrow = views::BubbleBorder::LEFT_CENTER;
-    return;
+    return gfx::Point(taskbar_rect.right(), cursor.y());
   }
 
   // Finally, try the right.
-  if (taskbar_rect.x() - anchor->x() > kSnapDistance)
-    anchor->set_y(display.work_area().y() + kEdgeOffset);
+  if (taskbar_rect.x() - cursor.x() > kSnapDistance)
+    return gfx::Point(taskbar_rect.x(), screen_rect.y());
 
-  anchor->set_x(taskbar_rect.x() + kSnapOffset);
-  *arrow = views::BubbleBorder::RIGHT_CENTER;
+  return gfx::Point(taskbar_rect.x(), cursor.y());
+}
+
+gfx::Point AppListController::FindAnchorPoint(
+    const gfx::Display& display,
+    const gfx::Point& cursor) {
+  const int kSnapOffset = 3;
+
+  gfx::Rect bounds_rect(display.work_area());
+  gfx::Size view_size(current_view_->GetPreferredSize());
+  bounds_rect.Inset(view_size.width() / 2 + kSnapOffset,
+                    view_size.height() / 2 + kSnapOffset);
+
+  gfx::Point anchor = FindReferencePoint(display, cursor);
+  anchor.ClampToMin(bounds_rect.origin());
+  anchor.ClampToMax(bounds_rect.bottom_right());
+  return anchor;
 }
 
 void AppListController::UpdateArrowPositionAndAnchorPoint(
     const gfx::Point& cursor) {
-  gfx::Point anchor(cursor);
   gfx::Screen* screen =
       gfx::Screen::GetScreenFor(current_view_->GetWidget()->GetNativeView());
-  gfx::Display display = screen->GetDisplayNearestPoint(anchor);
-  views::BubbleBorder::ArrowLocation arrow;
+  gfx::Display display = screen->GetDisplayNearestPoint(cursor);
 
-  SnapArrowLocationToTaskbarEdge(display, &arrow, &anchor);
-
-  current_view_->SetBubbleArrowLocation(arrow);
-  current_view_->SetAnchorPoint(anchor);
+  current_view_->SetBubbleArrowLocation(views::BubbleBorder::FLOAT);
+  current_view_->SetAnchorPoint(FindAnchorPoint(display, cursor));
 }
 
 string16 AppListController::GetAppListIconPath() {
-  FilePath icon_path;
+  base::FilePath icon_path;
   if (!PathService::Get(base::FILE_EXE, &icon_path)) {
     NOTREACHED();
     return string16();
@@ -485,7 +689,11 @@ string16 AppListController::GetAppListIconPath() {
 }
 
 void AppListController::CheckTaskbarOrViewHasFocus() {
-#if !defined(USE_AURA)
+  // Remember if the taskbar had focus without the right mouse button being
+  // down.
+  bool was_preserving_focus = preserving_focus_for_taskbar_menu_;
+  preserving_focus_for_taskbar_menu_ = false;
+
   // Don't bother checking if the view has been closed.
   if (!current_view_)
     return;
@@ -494,25 +702,80 @@ void AppListController::CheckTaskbarOrViewHasFocus() {
   // context menu which the taskbar uses).
   HWND jump_list_hwnd = FindWindow(L"DV2ControlHost", NULL);
   HWND taskbar_hwnd = FindWindow(kTrayClassName, NULL);
-  HWND app_list_hwnd =
-      current_view_->GetWidget()->GetTopLevelWidget()->GetNativeWindow();
 
-  // Get the focused window, and check if it is one of these windows. Keep
-  // checking it's parent until either we find one of these windows, or there
-  // is no parent left.
+  HWND app_list_hwnd = GetAppListHWND();
+
+  // This code is designed to hide the app launcher when it loses focus, except
+  // for the cases necessary to allow the launcher to be pinned or closed via
+  // the taskbar context menu.
+  // First work out if the left or right button is currently down.
+  int swapped = GetSystemMetrics(SM_SWAPBUTTON);
+  int left_button = swapped ? VK_RBUTTON : VK_LBUTTON;
+  bool left_button_down = GetAsyncKeyState(left_button) < 0;
+  int right_button = swapped ? VK_LBUTTON : VK_RBUTTON;
+  bool right_button_down = GetAsyncKeyState(right_button) < 0;
+
+  // Now get the window that currently has focus.
   HWND focused_hwnd = GetForegroundWindow();
+  if (!focused_hwnd) {
+    // Sometimes the focused window is NULL. This can happen when the focus is
+    // changing due to a mouse button press. If the button is still being
+    // pressed the launcher should not be hidden.
+    if (right_button_down || left_button_down)
+      return;
+
+    // If the focused window is NULL, and the mouse button is not being pressed,
+    // then the launcher no longer has focus so hide it.
+    DismissAppList();
+    return;
+  }
+
   while (focused_hwnd) {
+    // If the focused window is the right click menu (called a jump list) or
+    // the app list, don't hide the launcher.
     if (focused_hwnd == jump_list_hwnd ||
-        focused_hwnd == taskbar_hwnd ||
         focused_hwnd == app_list_hwnd) {
       return;
     }
+
+    if (focused_hwnd == taskbar_hwnd) {
+      // If the focused window is the taskbar, and the right button is down,
+      // don't hide the launcher as the user might be bringing up the menu.
+      if (right_button_down)
+        return;
+
+      // There is a short period between the right mouse button being down
+      // and the menu gaining focus, where the taskbar has focus and no button
+      // is down. If the taskbar is observed in this state once the launcher
+      // is not dismissed. If it happens twice in a row it is dismissed.
+      if (!was_preserving_focus) {
+        preserving_focus_for_taskbar_menu_ = true;
+        return;
+      }
+
+      break;
+    }
     focused_hwnd = GetParent(focused_hwnd);
+  }
+
+  if (regain_first_lost_focus_) {
+    regain_first_lost_focus_ = false;
+    current_view_->GetWidget()->Activate();
+    return;
   }
 
   // If we get here, the focused window is not the taskbar, it's context menu,
   // or the app list, so close the app list.
   DismissAppList();
+}
+
+HWND AppListController::GetAppListHWND() const {
+#if defined(USE_AURA)
+  gfx::NativeWindow window =
+      current_view_->GetWidget()->GetTopLevelWidget()->GetNativeWindow();
+  return window->GetRootWindow()->GetAcceleratedWidget();
+#else
+  return current_view_->GetWidget()->GetTopLevelWidget()->GetNativeWindow();
 #endif
 }
 
@@ -525,22 +788,23 @@ void AppListController::CheckTaskbarOrViewHasFocus() {
 // are other tasks running (also on the FILE thread) which fiddle with shortcut
 // icons (ShellIntegration::MigrateWin7ShortcutsOnPath). Having different
 // threads fiddle with the same shortcuts could cause race issues.
-void CheckAppListTaskbarShortcutOnFileThread(const FilePath& user_data_dir,
-                                             const string16& app_model_id) {
+void CheckAppListTaskbarShortcutOnFileThread(
+    const base::FilePath& user_data_dir,
+    const string16& app_model_id) {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::FILE));
 
   const string16 shortcut_name = l10n_util::GetStringUTF16(
       IDS_APP_LIST_SHORTCUT_NAME);
-  const FilePath shortcut_path(user_data_dir.Append(shortcut_name)
+  const base::FilePath shortcut_path(user_data_dir.Append(shortcut_name)
       .AddExtension(installer::kLnkExt));
   const bool should_show =
       CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kShowAppListShortcut);
+          apps::switches::kShowAppListShortcut);
 
   // This will not reshow a shortcut if it has been unpinned manually by the
   // user, as that will not delete the shortcut file.
   if (should_show && !file_util::PathExists(shortcut_path)) {
-    FilePath chrome_exe;
+    base::FilePath chrome_exe;
     if (!PathService::Get(base::FILE_EXE, &chrome_exe)) {
       NOTREACHED();
       return;
@@ -559,7 +823,10 @@ void CheckAppListTaskbarShortcutOnFileThread(const FilePath& user_data_dir,
 
     base::win::CreateOrUpdateShortcutLink(shortcut_path, shortcut_properties,
                                           base::win::SHORTCUT_CREATE_ALWAYS);
-    base::win::TaskbarPinShortcutLink(shortcut_path.value().c_str());
+
+    if (!base::win::TaskbarPinShortcutLink(shortcut_path.value().c_str()))
+      LOG(WARNING) << "Failed to pin AppList using " << shortcut_path.value();
+
     return;
   }
 
@@ -569,24 +836,35 @@ void CheckAppListTaskbarShortcutOnFileThread(const FilePath& user_data_dir,
   }
 }
 
-void CreateAppList() {
-  g_app_list_controller.Get().CreateAppList();
+void InitView(Profile* profile) {
+  if (!g_browser_process || g_browser_process->IsShuttingDown())
+    return;
+  AppListController::GetInstance()->InitView(profile);
 }
 
-}  // namespace
+void AppListController::Init(Profile* initial_profile) {
+  // In non-Ash metro mode, we can not show the app list for this process, so do
+  // not bother performing Init tasks.
+  if (win8::IsSingleWindowMetroMode())
+    return;
 
-namespace chrome {
+  PrefService* prefs = g_browser_process->local_state();
+  if (prefs->HasPrefPath(prefs::kRestartWithAppList) &&
+      prefs->GetBoolean(prefs::kRestartWithAppList)) {
+    prefs->SetBoolean(prefs::kRestartWithAppList, false);
+    AppListController::GetInstance()->
+        ShowAppListDuringModeSwitch(initial_profile);
+  }
 
-void InitAppList() {
-  // Check that the presence of the app list shortcut matches the flag
-  // kShowAppListShortcut. This will either create or delete a shortcut
-  // file in the user data directory.
+  // Check that the app list shortcut matches the flag kShowAppListShortcut.
+  // This will either create or delete a shortcut file in the user data
+  // directory.
   // TODO(benwells): Remove this and the flag once the app list installation
   // is implemented.
   static bool checked_shortcut = false;
   if (!checked_shortcut) {
     checked_shortcut = true;
-    FilePath user_data_dir(
+    base::FilePath user_data_dir(
         g_browser_process->profile_manager()->user_data_dir());
     content::BrowserThread::PostTask(
         content::BrowserThread::FILE, FROM_HERE,
@@ -594,18 +872,32 @@ void InitAppList() {
                    GetAppModelId()));
   }
 
+  // Instantiate AppListController so it listens for profile deletions.
+  AppListController::GetInstance();
+
   // Post a task to create the app list. This is posted to not impact startup
   // time.
   const int kInitWindowDelay = 5;
   MessageLoop::current()->PostDelayedTask(
       FROM_HERE,
-      base::Bind(&CreateAppList),
+      base::Bind(&::InitView, initial_profile),
       base::TimeDelta::FromSeconds(kInitWindowDelay));
 }
 
-void ShowAppList() {
-  // Create the App list.
-  g_app_list_controller.Get().ShowAppList();
+Profile* AppListController::GetCurrentAppListProfile() {
+  return profile();
+}
+
+bool AppListController::IsAppListVisible() const {
+  return app_list_is_showing_;
+}
+
+}  // namespace
+
+namespace chrome {
+
+AppListService* GetAppListServiceWin() {
+  return AppListController::GetInstance();
 }
 
 }  // namespace chrome

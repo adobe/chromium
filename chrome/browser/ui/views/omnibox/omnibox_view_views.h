@@ -13,8 +13,8 @@
 #include "chrome/browser/ui/toolbar/toolbar_model.h"
 #include "ui/base/range/range.h"
 #include "ui/base/window_open_disposition.h"
+#include "ui/views/controls/textfield/textfield.h"
 #include "ui/views/controls/textfield/textfield_controller.h"
-#include "ui/views/view.h"
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/input_method/input_method_manager.h"
@@ -28,16 +28,9 @@ namespace ui {
 class OSExchangeData;
 }  // namespace ui
 
-// Views-implementation of OmniboxView. This is based on gtk implementation.
-// The following features are not yet supported.
-//
-// LTR support.
-// Drag and drop behavior.
-// Adjust paste behavior (should not autocomplete).
-// Custom context menu for omnibox.
-// Instant.
+// Views-implementation of OmniboxView, based on the gtk implementation.
 class OmniboxViewViews
-    : public views::View,
+    : public views::Textfield,
       public OmniboxView,
 #if defined(OS_CHROMEOS)
       public
@@ -62,34 +55,20 @@ class OmniboxViewViews
   // Sets the colors of the text view according to the theme.
   void SetBaseColor();
 
-  // Called after key even is handled either by HandleKeyEvent or by Textfield.
-  bool HandleAfterKeyEvent(const ui::KeyEvent& event, bool handled);
-
-  // Called when KeyRelease event is generated on textfield.
-  bool HandleKeyReleaseEvent(const ui::KeyEvent& event);
-
-  // Called when mouse events are generated on the textfield.
-  // The views::Textfield implementations will be executed first.
-  void HandleMousePressEvent(const ui::MouseEvent& event);
-  void HandleMouseDragEvent(const ui::MouseEvent& event);
-  void HandleMouseReleaseEvent(const ui::MouseEvent& event);
-
-  // Called when Focus is set/unset on textfield.
-  void HandleFocusIn();
-  void HandleFocusOut();
-
-  // Sets whether the location entry can accept focus.
-  void SetLocationEntryFocusable(bool focusable);
-
-  // Returns true if the location entry is focusable and visible in
-  // the root view.
-  bool IsLocationEntryFocusableInRootView() const;
-
-  // Implements views::View
-  virtual void Layout() OVERRIDE;
-  virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;
+  // views::Textfield:
   virtual std::string GetClassName() const OVERRIDE;
+  virtual void OnGestureEvent(ui::GestureEvent* event) OVERRIDE;
+  virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;
   virtual void OnBoundsChanged(const gfx::Rect& previous_bounds) OVERRIDE;
+  virtual bool OnMousePressed(const ui::MouseEvent& event) OVERRIDE;
+  virtual bool OnMouseDragged(const ui::MouseEvent& event) OVERRIDE;
+  virtual void OnMouseReleased(const ui::MouseEvent& event) OVERRIDE;
+  virtual bool OnKeyPressed(const ui::KeyEvent& event) OVERRIDE;
+  virtual bool OnKeyReleased(const ui::KeyEvent& event) OVERRIDE;
+  virtual bool SkipDefaultKeyEventProcessing(
+      const ui::KeyEvent& event) OVERRIDE;
+  virtual void OnFocus() OVERRIDE;
+  virtual void OnBlur() OVERRIDE;
 
   // OmniboxView:
   virtual void SaveStateToTab(content::WebContents* tab) OVERRIDE;
@@ -111,7 +90,8 @@ class OmniboxViewViews
   virtual void ApplyCaretVisibility() OVERRIDE;
   virtual void OnTemporaryTextMaybeChanged(
       const string16& display_text,
-      bool save_original_selection) OVERRIDE;
+      bool save_original_selection,
+      bool notify_text_changed) OVERRIDE;
   virtual bool OnInlineAutocompleteTextMaybeChanged(
       const string16& display_text, size_t user_text_length) OVERRIDE;
   virtual void OnRevertTemporaryText() OVERRIDE;
@@ -158,11 +138,8 @@ class OmniboxViewViews
 #endif
 
  private:
-  class AutocompleteTextfield;
-
   // Return the number of characers in the current buffer.
   virtual int GetOmniboxTextLength() const OVERRIDE;
-  size_t GetTextLength() const;
 
   // Try to parse the current text as a URL and colorize the components.
   virtual void EmphasizeURLComponents() OVERRIDE;
@@ -184,8 +161,6 @@ class OmniboxViewViews
   // It is assumed this is invoked after a call to OnBeforePossibleChange() and
   // that after invoking this OnAfterPossibleChange() is invoked.
   void OnPaste();
-
-  views::Textfield* textfield_;
 
   // When true, the location bar view is read only and also is has a slightly
   // different presentation (smaller font size). This is used for popups.
@@ -218,6 +193,11 @@ class OmniboxViewViews
   // until release, setting this variable back to false if we saw a drag, to
   // allow the user to select just a portion of the text.
   bool select_all_on_mouse_release_;
+
+  // Indicates if we want to select all text in the omnibox when we get a
+  // GESTURE_TAP. We want to select all only when the textfield is not in focus
+  // and gets a tap. So we use this variable to remember focus state before tap.
+  bool select_all_on_gesture_tap_;
 
   DISALLOW_COPY_AND_ASSIGN(OmniboxViewViews);
 };

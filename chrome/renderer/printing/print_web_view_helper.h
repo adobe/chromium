@@ -15,10 +15,8 @@
 #include "content/public/renderer/render_view_observer_tracker.h"
 #include "printing/metafile_impl.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebCanvas.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebFrameClient.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebNode.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPrintParams.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebViewClient.h"
 #include "ui/gfx/size.h"
 
 struct PrintMsg_Print_Params;
@@ -44,18 +42,12 @@ class PrepareFrameAndViewForPrint;
 // of the document and creating a new WebView with the contents.
 class PrintWebViewHelper
     : public content::RenderViewObserver,
-      public content::RenderViewObserverTracker<PrintWebViewHelper>,
-      public WebKit::WebViewClient,
-      public WebKit::WebFrameClient {
+      public content::RenderViewObserverTracker<PrintWebViewHelper> {
  public:
   explicit PrintWebViewHelper(content::RenderView* render_view);
   virtual ~PrintWebViewHelper();
 
   void PrintNode(const WebKit::WebNode& node);
-
- protected:
-  // WebKit::WebViewClient override:
-  virtual void didStopLoading();
 
  private:
   friend class PrintWebViewHelperTestBase;
@@ -92,6 +84,7 @@ class PrintWebViewHelper
 
   enum PrintPreviewRequestType {
     PRINT_PREVIEW_USER_INITIATED_ENTIRE_FRAME,
+    PRINT_PREVIEW_USER_INITIATED_SELECTION,
     PRINT_PREVIEW_USER_INITIATED_CONTEXT_NODE,
     PRINT_PREVIEW_SCRIPTED  // triggered by window.print().
   };
@@ -141,10 +134,16 @@ class PrintWebViewHelper
       const PrintMsg_Print_Params& params);
 
   // Initiate print preview.
-  void OnInitiatePrintPreview();
+  void OnInitiatePrintPreview(bool selection_only);
 
   // Start the process of generating a print preview using |settings|.
   void OnPrintPreview(const base::DictionaryValue& settings);
+
+  // Prepare frame for creating preview document.
+  void PrepareFrameForPreviewDocument();
+
+  // Continue creating preview document.
+  void OnFramePreparedForPreviewDocument();
 
   // Initialize the print preview document.
   bool CreatePreviewDocument();
@@ -203,13 +202,13 @@ class PrintWebViewHelper
 
   // Page Printing / Rendering ------------------------------------------------
 
-  // Prints all the pages listed in |print_pages_params_|.
-  // It will implicitly revert the document to display CSS media type.
-  bool PrintPages(WebKit::WebFrame* frame, const WebKit::WebNode& node);
+  void OnFramePreparedForPrintPages();
+  void PrintPages();
   bool PrintPagesNative(WebKit::WebFrame* frame,
                         const WebKit::WebNode& node,
                         int page_count,
                         const gfx::Size& canvas_size);
+  void FinishFramePrinting();
 
   // Prints the page listed in |params|.
 #if defined(USE_X11)
@@ -259,8 +258,6 @@ class PrintWebViewHelper
                                  WebKit::WebCanvas* canvas);
 
   // Helper methods -----------------------------------------------------------
-
-  bool CopyAndPrint(WebKit::WebFrame* web_frame);
 
   bool CopyMetafileDataToSharedMem(Metafile* metafile,
                                    base::SharedMemoryHandle* shared_mem_handle);
@@ -323,7 +320,8 @@ class PrintWebViewHelper
   bool PreviewPageRendered(int page_number, Metafile* metafile);
 
   // WebView used only to print the selection.
-  WebKit::WebView* print_web_view_;
+  scoped_ptr<PrepareFrameAndViewForPrint> prep_frame_view_;
+  bool reset_prep_frame_view_;
 
   scoped_ptr<PrintMsg_PrintPages_Params> print_pages_params_;
   bool is_preview_enabled_;
@@ -350,6 +348,8 @@ class PrintWebViewHelper
   scoped_ptr<base::DictionaryValue> header_footer_info_;
 
   // Keeps track of the state of print preview between messages.
+  // TODO(vitalybuka): Create PrintPreviewContext when needed and delete after
+  // use. Now it's interaction with various messages is confusing.
   class PrintPreviewContext {
    public:
     PrintPreviewContext();
@@ -364,9 +364,9 @@ class PrintWebViewHelper
     void OnPrintPreview();
 
     // Create the print preview document. |pages| is empty to print all pages.
-    bool CreatePreviewDocument(const PrintMsg_Print_Params& params,
-                               const std::vector<int>& pages,
-                               bool ignore_css_margins);
+    // Takes ownership of |prepared_frame|.
+    bool CreatePreviewDocument(PrepareFrameAndViewForPrint* prepared_frame,
+                               const std::vector<int>& pages);
 
     // Called after a page gets rendered. |page_time| is how long the
     // rendering took.
@@ -388,6 +388,7 @@ class PrintWebViewHelper
     int GetNextPageNumber();
     bool IsRendering() const;
     bool IsModifiable() const;
+    bool HasSelection() const;
     bool IsLastPageOfPrintReadyMetafile() const;
     bool IsFinalPageRendered() const;
 
@@ -396,8 +397,18 @@ class PrintWebViewHelper
     void set_error(enum PrintPreviewErrorBuckets error);
 
     // Getters
-    WebKit::WebFrame* frame();
-    const WebKit::WebNode& node() const;
+    // Original frame for which preview was requested.
+    WebKit::WebFrame* source_frame();
+    // Original node for which preview was requested.
+    const WebKit::WebNode& source_node() const;
+
+    // Frame to be use to render preview. May be the same as source_frame(), or
+    // generated from it, e.g. copy of selected block.
+    WebKit::WebFrame* prepared_frame();
+    // Node to be use to render preview. May be the same as source_node(), or
+    // generated from it, e.g. copy of selected block.
+    const WebKit::WebNode& prepared_node() const;
+
     int total_page_count() const;
     bool generate_draft_pages() const;
     PreviewMetafile* metafile();
@@ -416,8 +427,8 @@ class PrintWebViewHelper
     void ClearContext();
 
     // Specifies what to render for print preview.
-    WebKit::WebFrame* frame_;
-    WebKit::WebNode node_;
+    WebKit::WebFrame* source_frame_;
+    WebKit::WebNode source_node_;
 
     scoped_ptr<PrepareFrameAndViewForPrint> prep_frame_view_;
     scoped_ptr<PreviewMetafile> metafile_;

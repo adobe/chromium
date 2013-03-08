@@ -7,9 +7,12 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "base/sequenced_task_runner.h"
+#include "chrome/browser/chromeos/drive/drive_file_system_interface.h"
 #include "chrome/browser/chromeos/drive/drive_resource_metadata.h"
 
+namespace base {
 class FilePath;
+}
 
 namespace google_apis {
 class DriveUploaderInterface;
@@ -24,6 +27,7 @@ class DriveScheduler;
 namespace file_system {
 
 class CopyOperation;
+class CreateDirectoryOperation;
 class MoveOperation;
 class OperationObserver;
 class RemoveOperation;
@@ -50,49 +54,59 @@ class DriveOperations {
                       RemoveOperation* remove_operation,
                       UpdateOperation* update_operation);
 
+  // Wrapper function for create_directory_operation_.
+  // |callback| must not be null.
+  void CreateDirectory(const base::FilePath& directory_path,
+                       bool is_exclusive,
+                       bool is_recursive,
+                       const FileOperationCallback& callback);
+
   // Wrapper function for copy_operation_.
   // |callback| must not be null.
-  void Copy(const FilePath& src_file_path,
-            const FilePath& dest_file_path,
+  void Copy(const base::FilePath& src_file_path,
+            const base::FilePath& dest_file_path,
             const FileOperationCallback& callback);
 
   // Wrapper function for copy_operation_.
   // |callback| must not be null.
-  void TransferFileFromRemoteToLocal(const FilePath& remote_src_file_path,
-                                     const FilePath& local_dest_file_path,
+  void TransferFileFromRemoteToLocal(const base::FilePath& remote_src_file_path,
+                                     const base::FilePath& local_dest_file_path,
                                      const FileOperationCallback& callback);
 
   // Wrapper function for copy_operation_.
   // |callback| must not be null.
-  void TransferFileFromLocalToRemote(const FilePath& local_src_file_path,
-                                     const FilePath& remote_dest_file_path,
-                                     const FileOperationCallback& callback);
+  void TransferFileFromLocalToRemote(
+      const base::FilePath& local_src_file_path,
+      const base::FilePath& remote_dest_file_path,
+      const FileOperationCallback& callback);
 
   // Wrapper function for copy_operation_.
   // |callback| must not be null.
-  void TransferRegularFile(const FilePath& local_src_file_path,
-                           const FilePath& remote_dest_file_path,
+  void TransferRegularFile(const base::FilePath& local_src_file_path,
+                           const base::FilePath& remote_dest_file_path,
                            const FileOperationCallback& callback);
 
   // Wrapper function for move_operation_.
   // |callback| must not be null.
-  void Move(const FilePath& src_file_path,
-            const FilePath& dest_file_path,
+  void Move(const base::FilePath& src_file_path,
+            const base::FilePath& dest_file_path,
             const FileOperationCallback& callback);
 
   // Wrapper function for remove_operation_.
   // |callback| must not be null.
-  void Remove(const FilePath& file_path,
+  void Remove(const base::FilePath& file_path,
               bool is_recursive,
               const FileOperationCallback& callback);
 
   // Wrapper function for update_operation_.
   // |callback| must not be null.
   void UpdateFileByResourceId(const std::string& resource_id,
+                              DriveClientContext context,
                               const FileOperationCallback& callback);
 
  private:
   scoped_ptr<CopyOperation> copy_operation_;
+  scoped_ptr<CreateDirectoryOperation> create_directory_operation_;
   scoped_ptr<MoveOperation> move_operation_;
   scoped_ptr<RemoveOperation> remove_operation_;
   scoped_ptr<UpdateOperation> update_operation_;

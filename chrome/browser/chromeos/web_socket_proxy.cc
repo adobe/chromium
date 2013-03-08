@@ -35,8 +35,8 @@
 #include "base/sequenced_task_runner_helpers.h"
 #include "base/sha1.h"
 #include "base/stl_util.h"
-#include "base/string_number_conversions.h"
 #include "base/string_util.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/sys_byteorder.h"
 #include "chrome/browser/chromeos/web_socket_proxy_helper.h"
 #include "chrome/browser/internal_auth.h"
@@ -568,7 +568,7 @@ class SSLChan : public MessageLoopForIO::Watcher {
       OnSocketConnect(result);
   }
 
-  ~SSLChan() {
+  virtual ~SSLChan() {
     phase_ = PHASE_CLOSED;
     write_pipe_controller_.StopWatchingFileDescriptor();
     read_pipe_controller_.StopWatchingFileDescriptor();

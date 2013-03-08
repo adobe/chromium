@@ -7,14 +7,14 @@
 #include <windows.h>
 #include <shellapi.h>
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/string16.h"
 
 namespace installer {
 
 namespace test {
 
-bool CopyFileHierarchy(const FilePath& from, const FilePath& to) {
+bool CopyFileHierarchy(const base::FilePath& from, const base::FilePath& to) {
   // In SHFILEOPSTRUCT below, |pFrom| and |pTo| have to be double-null
   // terminated: http://msdn.microsoft.com/library/bb759795.aspx
   string16 double_null_from(from.value());

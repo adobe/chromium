@@ -75,7 +75,7 @@ class RendererResourceDelegate : public content::ResourceDispatcherDelegate {
   virtual webkit_glue::ResourceLoaderBridge::Peer* OnRequestComplete(
       webkit_glue::ResourceLoaderBridge::Peer* current_peer,
       ResourceType::Type resource_type,
-      int error_code) {
+      int error_code) OVERRIDE {
     // Update the browser about our cache.
     // Rate limit informing the host of our cache stats.
     if (!weak_factory_.HasWeakPtrs()) {
@@ -98,7 +98,7 @@ class RendererResourceDelegate : public content::ResourceDispatcherDelegate {
   virtual webkit_glue::ResourceLoaderBridge::Peer* OnReceivedResponse(
       webkit_glue::ResourceLoaderBridge::Peer* current_peer,
       const std::string& mime_type,
-      const GURL& url) {
+      const GURL& url) OVERRIDE {
     return ExtensionLocalizationPeer::CreateExtensionLocalizationPeer(
         current_peer, RenderThread::Get(), mime_type, url);
   }
@@ -156,6 +156,8 @@ DWORD WINAPI GetFontDataPatch(HDC hdc,
 
 bool ChromeRenderProcessObserver::is_incognito_process_ = false;
 
+bool ChromeRenderProcessObserver::extension_activity_log_enabled_ = false;
+
 ChromeRenderProcessObserver::ChromeRenderProcessObserver(
     chrome::ChromeContentRendererClient* client)
     : client_(client),
@@ -169,7 +171,7 @@ ChromeRenderProcessObserver::ChromeRenderProcessObserver(
     base::StatisticsRecorder::set_dump_on_exit(true);
   }
 
-#if defined(TOOLKIT_VIEWS)
+#if defined(ENABLE_AUTOFILL_DIALOG)
   WebRuntimeFeatures::enableRequestAutocomplete(
       command_line.HasSwitch(switches::kEnableInteractiveAutocomplete) ||
       command_line.HasSwitch(switches::kEnableExperimentalWebKitFeatures));
@@ -184,7 +186,7 @@ ChromeRenderProcessObserver::ChromeRenderProcessObserver(
 
 #if defined(OS_WIN)
   // Need to patch a few functions for font loading to work correctly.
-  FilePath pdf;
+  base::FilePath pdf;
   if (PathService::Get(chrome::FILE_PDF_PLUGIN, &pdf) &&
       file_util::PathExists(pdf)) {
     g_iat_patch_createdca.Patch(
@@ -204,7 +206,7 @@ ChromeRenderProcessObserver::ChromeRenderProcessObserver(
   // crypt32.dll is used to decode X509 certificates for Chromoting.
   // Only load this library when the feature is enabled.
   std::string error;
-  base::LoadNativeLibrary(FilePath(L"crypt32.dll"), &error);
+  base::LoadNativeLibrary(base::FilePath(L"crypt32.dll"), &error);
 #endif
   // Setup initial set of crash dump data for Field Trials in this renderer.
   chrome_variations::SetChildProcessLoggingVariationList();
@@ -219,6 +221,8 @@ bool ChromeRenderProcessObserver::OnControlMessageReceived(
   IPC_BEGIN_MESSAGE_MAP(ChromeRenderProcessObserver, message)
     IPC_MESSAGE_HANDLER(ChromeViewMsg_SetIsIncognitoProcess,
                         OnSetIsIncognitoProcess)
+    IPC_MESSAGE_HANDLER(ChromeViewMsg_SetExtensionActivityLogEnabled,
+                        OnSetExtensionActivityLogEnabled)
     IPC_MESSAGE_HANDLER(ChromeViewMsg_SetCacheCapacities, OnSetCacheCapacities)
     IPC_MESSAGE_HANDLER(ChromeViewMsg_ClearCache, OnClearCache)
     IPC_MESSAGE_HANDLER(ChromeViewMsg_SetFieldTrialGroup, OnSetFieldTrialGroup)
@@ -238,6 +242,11 @@ bool ChromeRenderProcessObserver::OnControlMessageReceived(
 void ChromeRenderProcessObserver::OnSetIsIncognitoProcess(
     bool is_incognito_process) {
   is_incognito_process_ = is_incognito_process;
+}
+
+void ChromeRenderProcessObserver::OnSetExtensionActivityLogEnabled(
+    bool extension_activity_log_enabled) {
+  extension_activity_log_enabled_ = extension_activity_log_enabled;
 }
 
 void ChromeRenderProcessObserver::OnSetContentSettingRules(
@@ -279,7 +288,9 @@ void ChromeRenderProcessObserver::OnSetFieldTrialGroup(
 
 void ChromeRenderProcessObserver::OnGetV8HeapStats() {
   v8::HeapStatistics heap_stats;
-  v8::V8::GetHeapStatistics(&heap_stats);
+  // TODO(svenpanne) The call below doesn't take web workers into account, this
+  // has to be done manually by iterating over all Isolates involved.
+  v8::Isolate::GetCurrent()->GetHeapStatistics(&heap_stats);
   RenderThread::Get()->Send(new ChromeViewHostMsg_V8HeapStats(
       heap_stats.total_heap_size(), heap_stats.used_heap_size()));
 }

@@ -9,8 +9,55 @@
 namespace extensions {
 namespace functions {
 
-// Do not reorder this enumeration. If you need to add a new entry, add it just
-// prior to ENUM_BOUNDARY.
+// Short version:
+//  *Never* reorder or delete entries in the |HistogramValue| enumeration.
+//  When creating a new extension function, add a new entry at the end of the
+//  enum, just prior to ENUM_BOUNDARY.
+//
+// Long version:
+//  This enumeration is used to associate a unique integer value to each
+//  extension function so that their usage can be recorded in histogram charts.
+//  Given we want the values recorded in the these charts to remain stable over
+//  time for comparison purposes, once an entry has been added to the
+//  enumeration, it should never be removed or moved to another spot in the
+//  enum.
+//
+//  Here are instructions how to manage entries depending on what you are trying
+//  to achieve.
+//
+//  1) Creating a new extension function:
+//
+//      Add a new entry at the end of the |HistogramValue| enum. The name of the
+//      entry should follow this algorithm:
+//      a) Take the string value passed as first argument to
+//         DECLARE_EXTENSION_FUNCTION.
+//      b) Replace '.' with '_'.
+//      c) Make all letters uppercase.
+//
+//      Example: "tabs.create" -> TABS_CREATE
+//
+//  2) Deleting an existing function:
+//
+//      Given an existing entry should *never* be removed from this enumeration,
+//      it is recommended to add a "DELETED_" prefix to the existing entry.
+//
+//  3) Renaming an existing function:
+//
+//      There are 2 options, depending if you want to keep accruing data in the
+//      *existing* histogram stream or in a *new* one.
+//
+//      a) If you want keep recording usages of the extension function in the
+//         *existing* histogram stream, simply rename the enum entry to match
+//         the new extension function name, following the same naming rule as
+//         mentioned in 1). The enum entry will keep the same underlying integer
+//         value, so the same histogram stream will be used for recording
+//         usages.
+//
+//      b) If you want start recording usages of the extension function to in a
+//         *new* histogram stream, follow the instructions in step 1) and 2)
+//         above. This will effectively deprecate the old histogram stream and
+//         creates a new one for the new function name.
+//
 enum HistogramValue {
   UNKNOWN = 0,
   WEBNAVIGATION_GETALLFRAMES,
@@ -75,7 +122,7 @@ enum HistogramValue {
   APP_CURRENTWINDOWINTERNAL_SHOW,
   WEBSTOREPRIVATE_GETBROWSERLOGIN,
   EXPERIMENTAL_IDENTITY_GETAUTHTOKEN,
-  EXPERIMENTAL_SYSTEMINFO_DISPLAY_GET,
+  SYSTEMINFO_DISPLAY_GETDISPLAYINFO,
   BROWSINGDATA_REMOVEPLUGINDATA,
   SOCKET_LISTEN,
   MEDIAGALLERIES_GETMEDIAFILESYSTEMS,
@@ -113,7 +160,6 @@ enum HistogramValue {
   TABS_RELOAD,
   WINDOWS_CREATE,
   DEVELOPERPRIVATE_LOADUNPACKED,
-  DOWNLOADS_SETDESTINATION,
   EXPERIMENTAL_PROCESSES_GETPROCESSIDFORTAB,
   BOOKMARKS_GETCHILDREN,
   BROWSERACTION_GETTITLE,
@@ -125,6 +171,7 @@ enum HistogramValue {
   TABS_GETCURRENT,
   FONTSETTINGS_CLEARDEFAULTFIXEDFONTSIZE,
   MEDIAPLAYERPRIVATE_CLOSEWINDOW,
+  DOWNLOADSINTERNAL_DETERMINEFILENAME,
   WEBREQUESTINTERNAL_ADDEVENTLISTENER,
   CLOUDPRINTPRIVATE_GETPRINTERS,
   STORAGE_SET,
@@ -259,6 +306,7 @@ enum HistogramValue {
   BROWSERACTION_SETTITLE,
   BOOKMARKMANAGERPRIVATE_CANEDIT,
   WALLPAPERPRIVATE_SETCUSTOMWALLPAPER,
+  WALLPAPERPRIVATE_SETCUSTOMWALLPAPERLAYOUT,
   BOOKMARKS_REMOVE,
   INPUT_IME_SETCANDIDATES,
   TERMINALPRIVATE_CLOSETERMINALPROCESS,
@@ -289,7 +337,7 @@ enum HistogramValue {
   FILEBROWSERPRIVATE_REMOVEMOUNT,
   BLUETOOTH_CONNECT,
   TABCAPTURE_CAPTURE,
-  EXPERIMENTAL_NOTIFICATION_SHOW,
+  EXPERIMENTAL_NOTIFICATION_CREATE,
   TABS_DUPLICATE,
   BLUETOOTH_WRITE,
   PAGEACTION_SHOW,
@@ -345,7 +393,7 @@ enum HistogramValue {
   SCRIPTBADGE_SETPOPUP,
   EXTENSION_ISALLOWEDFILESCHEMEACCESS,
   EXPERIMENTAL_IDENTITY_LAUNCHWEBAUTHFLOW,
-  FILEBROWSERPRIVATE_GETNETWORKCONNECTIONSTATE,
+  FILEBROWSERPRIVATE_GETDRIVECONNECTIONSTATE,
   TABS_DETECTLANGUAGE,
   METRICSPRIVATE_RECORDVALUE,
   BOOKMARKMANAGERPRIVATE_SORTCHILDREN,
@@ -410,6 +458,34 @@ enum HistogramValue {
   MEDIAGALLERIESPRIVATE_ADDGALLERYWATCH,
   MEDIAGALLERIESPRIVATE_REMOVEGALLERYWATCH,
   WEBVIEW_EXECUTESCRIPT,
+  EXPERIMENTAL_NOTIFICATION_UPDATE,
+  EXPERIMENTAL_NOTIFICATION_CLEAR,
+  SESSIONRESTORE_GETRECENTLYCLOSED,
+  SESSIONRESTORE_RESTORE,
+  MANAGEMENT_UNINSTALLSELF,
+  ECHOPRIVATE_GETOOBETIMESTAMP,
+  FILEBROWSERPRIVATE_VALIDATEPATHNAMELENGTH,
+  BROWSINGDATA_SETTINGS,
+  WEBSTOREPRIVATE_GETISLAUNCHERENABLED,
+  NETWORKINGPRIVATE_GETPROPERTIES,
+  NETWORKINGPRIVATE_GETVISIBLENETWORKS,
+  NETWORKINGPRIVATE_STARTCONNECT,
+  NETWORKINGPRIVATE_STARTDISCONNECT,
+  MEDIAGALLERIESPRIVATE_GETALLGALLERYWATCH,
+  MEDIAGALLERIESPRIVATE_REMOVEALLGALLERYWATCH,
+  FILEBROWSERPRIVATE_SEARCHDRIVEMETADATA,
+  ECHOPRIVATE_CHECKALLOWREDEEMOFFERS,
+  MEDIAGALLERIESPRIVATE_EJECTDEVICE,
+  FILEBROWSERPRIVATE_LOGOUTUSER,
+  DEVELOPERPRIVATE_CHOOSEPATH,
+  DEVELOPERPRIVATE_PACKDIRECTORY,
+  NETWORKINGPRIVATE_VERIFYDESTINATION,
+  NETWORKINGPRIVATE_VERIFYANDENCRYPTCREDENTIALS,
+  NETWORKINGPRIVATE_VERIFYANDENCRYPTDATA,
+  DEVELOPERPRIVATE_RESTART,
+  DEVELOPERPRIVATE_ALLOWINCOGNITO,
+  INPUT_IME_DELETESURROUNDINGTEXT,
+  FILEBROWSERPRIVATE_OPENNEWWINDOW,
   ENUM_BOUNDARY // Last entry: Add new entries above.
 };
 

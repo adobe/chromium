@@ -85,6 +85,7 @@
         'gfx/image/image_unittest_util_ios.mm',
         'gfx/image/image_unittest_util_mac.mm',
         'gfx/insets_unittest.cc',
+        'gfx/matrix3_unittest.cc',
         'gfx/point_unittest.cc',
         'gfx/point3_unittest.cc',
         'gfx/quad_unittest.cc',
@@ -124,6 +125,7 @@
         'base/text/utf16_indexing_unittest.cc',
         'base/view_prop_unittest.cc',
         'gfx/blit_unittest.cc',
+        'gfx/break_list_unittest.cc',
         'gfx/canvas_unittest.cc',
         'gfx/codec/jpeg_codec_unittest.cc',
         'gfx/color_analysis_unittest.cc',
@@ -188,6 +190,8 @@
               '-loleacc.lib',
             ],
           },
+          # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
+          'msvs_disabled_warnings': [ 4267, ],
         }],
         ['OS == "linux"', {
           'sources': [
@@ -219,7 +223,6 @@
         ['use_glib == 1', {
           'dependencies': [
             '../build/linux/system.gyp:pangocairo',
-            '../tools/xdisplaycheck/xdisplaycheck.gyp:xdisplaycheck',
           ],
           'conditions': [
             ['linux_use_tcmalloc==1', {
@@ -232,6 +235,11 @@
                 'browser/ui/gtk/gtk_expanded_container_unittest.cc',
               ],
             }],
+          ],
+        }],
+        ['use_x11==1', {
+          'dependencies': [
+            '../tools/xdisplaycheck/xdisplaycheck.gyp:xdisplaycheck',
           ],
         }],
         ['toolkit_uses_gtk == 1', {

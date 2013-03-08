@@ -16,18 +16,15 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/singleton.h"
 #include "base/nix/xdg_util.h"
-#include "base/string_split.h"
 #include "base/string_util.h"
+#include "base/strings/string_split.h"
 #include "base/synchronization/lock.h"
 #include "base/third_party/xdg_mime/xdgmime.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/time.h"
 
-#if defined(TOOLKIT_GTK)
-#include <gtk/gtk.h>  // NOLINT
-
-#include "base/message_loop.h"
-#endif
+namespace base {
+namespace nix {
 
 namespace {
 
@@ -67,12 +64,8 @@ class MimeUtilConstants {
 
   base::TimeTicks last_check_time_;
 
-#if defined(TOOLKIT_GTK)
-  // This is set by DetectGtkTheme(). We cache it so that we can access the
-  // theme name from threads that aren't allowed to call
-  // gtk_settings_get_default().
-  std::string gtk_theme_name_;
-#endif
+  // The current icon theme, usually set through GTK theme integration.
+  std::string icon_theme_name_;
 
  private:
   MimeUtilConstants() {
@@ -165,8 +158,7 @@ class IconTheme {
 };
 
 IconTheme::IconTheme(const std::string& name)
-  : index_theme_loaded_(false),
-    info_array_(NULL) {
+    : index_theme_loaded_(false) {
   base::ThreadRestrictions::AssertIOAllowed();
   // Iterate on all icon directories to find directories of the specified
   // theme and load the first encountered index.theme.
@@ -536,12 +528,10 @@ void InitDefaultThemes() {
     default_themes[1] = IconTheme::LoadTheme(kde_default_theme);
     default_themes[2] = IconTheme::LoadTheme(kde_fallback_theme);
   } else {
-#if defined(TOOLKIT_GTK)
     // Assume it's Gnome and use GTK to figure out the theme.
     default_themes[1] = IconTheme::LoadTheme(
-        MimeUtilConstants::GetInstance()->gtk_theme_name_);
+        MimeUtilConstants::GetInstance()->icon_theme_name_);
     default_themes[2] = IconTheme::LoadTheme("gnome");
-#endif
   }
   // hicolor needs to be last per icon theme spec.
   default_themes[3] = IconTheme::LoadTheme("hicolor");
@@ -584,9 +574,6 @@ MimeUtilConstants::~MimeUtilConstants() {
 
 }  // namespace
 
-namespace base {
-namespace nix {
-
 std::string GetFileMimeType(const FilePath& filepath) {
   if (filepath.empty())
     return std::string();
@@ -601,25 +588,15 @@ std::string GetDataMimeType(const std::string& data) {
   return xdg_mime_get_mime_type_for_data(data.data(), data.length(), NULL);
 }
 
-#if defined(TOOLKIT_GTK)
-void DetectGtkTheme() {
+void SetIconThemeName(const std::string& name) {
   // If the theme name is already loaded, do nothing. Chrome doesn't respond
   // to changes in the system theme, so we never need to set this more than
   // once.
-  if (!MimeUtilConstants::GetInstance()->gtk_theme_name_.empty())
+  if (!MimeUtilConstants::GetInstance()->icon_theme_name_.empty())
     return;
 
-  // We should only be called on the UI thread.
-  DCHECK_EQ(MessageLoop::TYPE_UI, MessageLoop::current()->type());
-
-  gchar* gtk_theme_name;
-  g_object_get(gtk_settings_get_default(),
-               "gtk-icon-theme-name",
-               &gtk_theme_name, NULL);
-  MimeUtilConstants::GetInstance()->gtk_theme_name_.assign(gtk_theme_name);
-  g_free(gtk_theme_name);
+  MimeUtilConstants::GetInstance()->icon_theme_name_ = name;
 }
-#endif
 
 FilePath GetMimeIcon(const std::string& mime_type, size_t size) {
   base::ThreadRestrictions::AssertIOAllowed();

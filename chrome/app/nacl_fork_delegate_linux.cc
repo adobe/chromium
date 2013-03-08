@@ -13,7 +13,7 @@
 
 #include "base/basictypes.h"
 #include "base/command_line.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/path_service.h"
 #include "base/posix/eintr_wrapper.h"
@@ -48,8 +48,8 @@ void NaClForkDelegate::Init(const int sandboxdesc) {
   fds_to_map.push_back(std::make_pair(sandboxdesc, kNaClSandboxDescriptor));
 
   status_ = kNaClHelperUnused;
-  FilePath helper_exe;
-  FilePath helper_bootstrap_exe;
+  base::FilePath helper_exe;
+  base::FilePath helper_bootstrap_exe;
   if (!PathService::Get(chrome::FILE_NACL_HELPER, &helper_exe)) {
     status_ = kNaClHelperMissing;
   } else if (!PathService::Get(chrome::FILE_NACL_HELPER_BOOTSTRAP,

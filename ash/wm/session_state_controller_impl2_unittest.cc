@@ -9,7 +9,6 @@
 #include "ash/shell_window_ids.h"
 #include "ash/test/ash_test_base.h"
 #include "ash/test/test_shell_delegate.h"
-#include "ash/wm/cursor_manager.h"
 #include "ash/wm/power_button_controller.h"
 #include "ash/wm/session_state_animator.h"
 #include "ash/wm/session_state_controller.h"
@@ -137,7 +136,7 @@ class SessionStateControllerImpl2Test : public AshTestBase {
         ash::Shell::GetInstance()->delegate());
   }
 
-  void TearDown() {
+  virtual void TearDown() {
     // TODO(antrim) : restore
     // animator_helper_->AdvanceUntilDone();
     AshTestBase::TearDown();
@@ -863,6 +862,10 @@ TEST_F(SessionStateControllerImpl2Test, LockWithoutButton) {
 
   ExpectPreLockAnimationStarted();
   EXPECT_FALSE(test_api_->is_lock_cancellable());
+
+  // TODO(antrim): After time-faking is fixed, let the pre-lock animation
+  // complete here and check that delegate_->num_lock_requests() is 0 to
+  // prevent http://crbug.com/172487 from regressing.
 }
 
 // When we hear that the process is exiting but we haven't had a chance to

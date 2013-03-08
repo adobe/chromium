@@ -5,9 +5,10 @@
 #ifndef WEBKIT_FILEAPI_TEST_MOUNT_POINT_PROVIDER_H_
 #define WEBKIT_FILEAPI_TEST_MOUNT_POINT_PROVIDER_H_
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
+#include "webkit/fileapi/async_file_util_adapter.h"
 #include "webkit/fileapi/file_system_mount_point_provider.h"
 #include "webkit/fileapi/task_runner_bound_observer_list.h"
 #include "webkit/storage/webkit_storage_export.h"
@@ -18,7 +19,7 @@ class SequencedTaskRunner;
 
 namespace fileapi {
 
-class LocalFileUtil;
+class AsyncFileUtilAdapter;
 class FileSystemQuotaUtil;
 
 // This should be only used for testing.
@@ -29,7 +30,7 @@ class WEBKIT_STORAGE_EXPORT_PRIVATE TestMountPointProvider
  public:
   TestMountPointProvider(
       base::SequencedTaskRunner* task_runner,
-      const FilePath& base_path);
+      const base::FilePath& base_path);
   virtual ~TestMountPointProvider();
 
   // FileSystemMountPointProvider implementation.
@@ -38,12 +39,11 @@ class WEBKIT_STORAGE_EXPORT_PRIVATE TestMountPointProvider
       FileSystemType type,
       bool create,
       const ValidateFileSystemCallback& callback) OVERRIDE;
-  virtual FilePath GetFileSystemRootPathOnFileThread(
+  virtual base::FilePath GetFileSystemRootPathOnFileThread(
       const FileSystemURL& url,
       bool create) OVERRIDE;
-  virtual bool IsAccessAllowed(const FileSystemURL& url) OVERRIDE;
-  virtual bool IsRestrictedFileName(const FilePath& filename) const OVERRIDE;
   virtual FileSystemFileUtil* GetFileUtil(FileSystemType type) OVERRIDE;
+  virtual AsyncFileUtil* GetAsyncFileUtil(FileSystemType type) OVERRIDE;
   virtual FilePermissionPolicy GetPermissionPolicy(
       const FileSystemURL& url,
       int permissions) const OVERRIDE;
@@ -72,9 +72,9 @@ class WEBKIT_STORAGE_EXPORT_PRIVATE TestMountPointProvider
  private:
   class QuotaUtil;
 
-  FilePath base_path_;
+  base::FilePath base_path_;
   scoped_refptr<base::SequencedTaskRunner> task_runner_;
-  scoped_ptr<LocalFileUtil> local_file_util_;
+  scoped_ptr<AsyncFileUtilAdapter> local_file_util_;
   scoped_ptr<QuotaUtil> quota_util_;
   UpdateObserverList observers_;
 };

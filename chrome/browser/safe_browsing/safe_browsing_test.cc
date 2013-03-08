@@ -21,9 +21,9 @@
 #include "base/environment.h"
 #include "base/path_service.h"
 #include "base/process_util.h"
-#include "base/string_number_conversions.h"
-#include "base/string_split.h"
 #include "base/stringprintf.h"
+#include "base/strings/string_number_conversions.h"
+#include "base/strings/string_split.h"
 #include "base/synchronization/lock.h"
 #include "base/test/test_timeouts.h"
 #include "base/threading/platform_thread.h"
@@ -57,7 +57,7 @@ using content::BrowserThread;
 
 namespace {
 
-const FilePath::CharType kDataFile[] =
+const base::FilePath::CharType kDataFile[] =
     FILE_PATH_LITERAL("testing_input_nomac.dat");
 const char kUrlVerifyPath[] = "safebrowsing/verify_urls";
 const char kDBVerifyPath[] = "safebrowsing/verify_database";
@@ -218,7 +218,7 @@ class SafeBrowsingServerTest : public InProcessBrowserTest {
   }
 
   virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
-    FilePath datafile_path;
+    base::FilePath datafile_path;
     ASSERT_TRUE(PathService::Get(base::DIR_SOURCE_ROOT, &datafile_path));
 
     datafile_path = datafile_path.Append(FILE_PATH_LITERAL("third_party"))
@@ -246,6 +246,10 @@ class SafeBrowsingServerTest : public InProcessBrowserTest {
     // client-side phishing whitelist.
     command_line->AppendSwitch(
         switches::kDisableClientSidePhishingDetection);
+
+    // TODO(kalman): Generate new testing data that includes the extension
+    // blacklist.
+    command_line->AppendSwitch(switches::kSbDisableExtensionBlacklist);
 
     // Point to the testing server for all SafeBrowsing requests.
     std::string url_prefix = test_server_->GetURL("safebrowsing").spec();
@@ -397,7 +401,7 @@ class SafeBrowsingServerTestHelper
   }
 
   // Callback for URLFetcher.
-  virtual void OnURLFetchComplete(const net::URLFetcher* source) {
+  virtual void OnURLFetchComplete(const net::URLFetcher* source) OVERRIDE {
     source->GetResponseAsString(&response_data_);
     response_status_ = source->GetStatus().status();
     StopUILoop();

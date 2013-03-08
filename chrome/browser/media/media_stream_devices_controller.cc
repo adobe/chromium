@@ -4,36 +4,34 @@
 
 #include "chrome/browser/media/media_stream_devices_controller.h"
 
+#include "base/command_line.h"
+#include "base/prefs/pref_service.h"
 #include "base/values.h"
 #include "chrome/browser/content_settings/content_settings_provider.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
+#include "chrome/browser/content_settings/tab_specific_content_settings.h"
 #include "chrome/browser/extensions/api/tab_capture/tab_capture_registry.h"
 #include "chrome/browser/extensions/api/tab_capture/tab_capture_registry_factory.h"
 #include "chrome/browser/media/media_capture_devices_dispatcher.h"
-#include "chrome/browser/media/media_internals.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/content_settings.h"
 #include "chrome/common/pref_names.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/common/media_stream_request.h"
 
 using content::BrowserThread;
 
-// TODO(xians): Remove this when the Omnibar UI has been completed.
-// See http://crbug.com/167263 for more details.
-#define ALLOW_STICKY_DENY 0
-
 namespace {
 
 bool HasAnyAvailableDevice() {
-  MediaCaptureDevicesDispatcher* dispatcher =
-      MediaInternals::GetInstance()->GetMediaCaptureDevicesDispatcher();
   const content::MediaStreamDevices& audio_devices =
-      dispatcher->GetAudioCaptureDevices();
+      MediaCaptureDevicesDispatcher::GetInstance()->GetAudioCaptureDevices();
   const content::MediaStreamDevices& video_devices =
-      dispatcher->GetVideoCaptureDevices();
+      MediaCaptureDevicesDispatcher::GetInstance()->GetVideoCaptureDevices();
 
   return !audio_devices.empty() || !video_devices.empty();
 };
@@ -42,28 +40,41 @@ bool HasAnyAvailableDevice() {
 
 MediaStreamDevicesController::MediaStreamDevicesController(
     Profile* profile,
+    TabSpecificContentSettings* content_settings,
     const content::MediaStreamRequest& request,
     const content::MediaResponseCallback& callback)
     : profile_(profile),
+      content_settings_(content_settings),
       request_(request),
       callback_(callback),
-      has_audio_(content::IsAudioMediaType(request.audio_type) &&
-                 !IsAudioDeviceBlockedByPolicy()),
-      has_video_(content::IsVideoMediaType(request.video_type) &&
-                 !IsVideoDeviceBlockedByPolicy()) {
+      microphone_requested_(
+          request.audio_type == content::MEDIA_DEVICE_AUDIO_CAPTURE),
+      webcam_requested_(
+          request.video_type == content::MEDIA_DEVICE_VIDEO_CAPTURE) {
+  // Don't call GetDevicePolicy from the initializer list since the
+  // implementation depends on member variables.
+  if (microphone_requested_ &&
+      GetDevicePolicy(prefs::kAudioCaptureAllowed) == ALWAYS_DENY) {
+    microphone_requested_ = false;
+  }
+
+  if (webcam_requested_ &&
+      GetDevicePolicy(prefs::kVideoCaptureAllowed) == ALWAYS_DENY) {
+    webcam_requested_ = false;
+  }
 }
 
 MediaStreamDevicesController::~MediaStreamDevicesController() {}
 
 // static
 void MediaStreamDevicesController::RegisterUserPrefs(
-    PrefServiceSyncable* prefs) {
+    PrefRegistrySyncable* prefs) {
   prefs->RegisterBooleanPref(prefs::kVideoCaptureAllowed,
                              true,
-                             PrefServiceSyncable::UNSYNCABLE_PREF);
+                             PrefRegistrySyncable::UNSYNCABLE_PREF);
   prefs->RegisterBooleanPref(prefs::kAudioCaptureAllowed,
                              true,
-                             PrefServiceSyncable::UNSYNCABLE_PREF);
+                             PrefRegistrySyncable::UNSYNCABLE_PREF);
 }
 
 
@@ -77,7 +88,7 @@ bool MediaStreamDevicesController::DismissInfoBarAndTakeActionOnSettings() {
 
   if (request_.audio_type == content::MEDIA_TAB_AUDIO_CAPTURE ||
       request_.video_type == content::MEDIA_TAB_VIDEO_CAPTURE) {
-    HandleTapMediaRequest();
+    HandleTabMediaRequest();
     return true;
   }
 
@@ -121,25 +132,31 @@ const std::string& MediaStreamDevicesController::GetSecurityOriginSpec() const {
 }
 
 void MediaStreamDevicesController::Accept(bool update_content_setting) {
+  if (content_settings_)
+    content_settings_->OnMediaStreamAllowed();
+
+  // Get the default devices for the request.
   content::MediaStreamDevices devices;
-  if (has_audio_ || has_video_) {
+  if (microphone_requested_ || webcam_requested_) {
     switch (request_.request_type) {
       case content::MEDIA_OPEN_DEVICE:
         // For open device request pick the desired device or fall back to the
         // first available of the given type.
-        media::GetRequestedDevice(request_.requested_device_id,
-                                  has_audio_,
-                                  has_video_,
-                                  &devices);
+        MediaCaptureDevicesDispatcher::GetInstance()->GetRequestedDevice(
+            request_.requested_device_id,
+            microphone_requested_,
+            webcam_requested_,
+            &devices);
         break;
       case content::MEDIA_DEVICE_ACCESS:
       case content::MEDIA_GENERATE_STREAM:
       case content::MEDIA_ENUMERATE_DEVICES:
         // Get the default devices for the request.
-        media::GetDefaultDevicesForProfile(profile_,
-                                           has_audio_,
-                                           has_video_,
-                                           &devices);
+        MediaCaptureDevicesDispatcher::GetInstance()->
+            GetDefaultDevicesForProfile(profile_,
+                                        microphone_requested_,
+                                        webcam_requested_,
+                                        &devices);
         break;
     }
 
@@ -151,26 +168,29 @@ void MediaStreamDevicesController::Accept(bool update_content_setting) {
 }
 
 void MediaStreamDevicesController::Deny(bool update_content_setting) {
-#if ALLOW_STICKY_DENY
+  // TODO(markusheintz): Replace CONTENT_SETTINGS_TYPE_MEDIA_STREAM with the
+  // appropriate new CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC and
+  // CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA.
+  if (content_settings_) {
+    content_settings_->OnContentBlocked(CONTENT_SETTINGS_TYPE_MEDIASTREAM,
+                                        std::string());
+  }
+
   if (update_content_setting)
     SetPermission(false);
-#endif
 
   callback_.Run(content::MediaStreamDevices());
 }
 
-bool MediaStreamDevicesController::IsAudioDeviceBlockedByPolicy() const {
+MediaStreamDevicesController::DevicePolicy
+MediaStreamDevicesController::GetDevicePolicy(const char* policy_name) const {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  return (!profile_->GetPrefs()->GetBoolean(prefs::kAudioCaptureAllowed) &&
-          profile_->GetPrefs()->IsManagedPreference(
-              prefs::kAudioCaptureAllowed));
-}
 
-bool MediaStreamDevicesController::IsVideoDeviceBlockedByPolicy() const {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  return (!profile_->GetPrefs()->GetBoolean(prefs::kVideoCaptureAllowed) &&
-          profile_->GetPrefs()->IsManagedPreference(
-              prefs::kVideoCaptureAllowed));
+  PrefService* prefs = profile_->GetPrefs();
+  if (!prefs->IsManagedPreference(policy_name))
+    return POLICY_NOT_SET;
+
+  return prefs->GetBoolean(policy_name) ? ALWAYS_ALLOW : ALWAYS_DENY;
 }
 
 bool MediaStreamDevicesController::IsRequestAllowedByDefault() const {
@@ -178,30 +198,39 @@ bool MediaStreamDevicesController::IsRequestAllowedByDefault() const {
   if (ShouldAlwaysAllowOrigin())
     return true;
 
-  if (has_audio_ &&
-      profile_->GetHostContentSettingsMap()->GetContentSetting(
-          request_.security_origin,
-          request_.security_origin,
-          CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC,
-          NO_RESOURCE_IDENTIFIER) != CONTENT_SETTING_ALLOW) {
-    return false;
-  }
+  struct {
+    bool has_capability;
+    const char* policy_name;
+    ContentSettingsType settings_type;
+  } device_checks[] = {
+    { microphone_requested_, prefs::kAudioCaptureAllowed,
+      CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC },
+    { webcam_requested_, prefs::kVideoCaptureAllowed,
+      CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA },
+  };
 
-  if (has_video_ &&
-      profile_->GetHostContentSettingsMap()->GetContentSetting(
-          request_.security_origin,
-          request_.security_origin,
-          CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA,
-          NO_RESOURCE_IDENTIFIER) != CONTENT_SETTING_ALLOW) {
-    return false;
+  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(device_checks); ++i) {
+    if (!device_checks[i].has_capability)
+      continue;
+
+    DevicePolicy policy = GetDevicePolicy(device_checks[i].policy_name);
+    if (policy == ALWAYS_DENY ||
+        (policy == POLICY_NOT_SET &&
+         profile_->GetHostContentSettingsMap()->GetContentSetting(
+            request_.security_origin, request_.security_origin,
+            device_checks[i].settings_type, NO_RESOURCE_IDENTIFIER) !=
+         CONTENT_SETTING_ALLOW)) {
+      return false;
+    }
+    // If we get here, then either policy is set to ALWAYS_ALLOW or the content
+    // settings allow the request by default.
   }
 
   return true;
 }
 
 bool MediaStreamDevicesController::IsRequestBlockedByDefault() const {
-#if ALLOW_STICKY_DENY
-  if (has_audio_ &&
+  if (microphone_requested_ &&
       profile_->GetHostContentSettingsMap()->GetContentSetting(
           request_.security_origin,
           request_.security_origin,
@@ -210,7 +239,7 @@ bool MediaStreamDevicesController::IsRequestBlockedByDefault() const {
     return false;
   }
 
-  if (has_video_ &&
+  if (webcam_requested_ &&
       profile_->GetHostContentSettingsMap()->GetContentSetting(
           request_.security_origin,
           request_.security_origin,
@@ -220,24 +249,23 @@ bool MediaStreamDevicesController::IsRequestBlockedByDefault() const {
   }
 
   return true;
-#else
-  return false;
-#endif
 }
 
 bool MediaStreamDevicesController::IsDefaultMediaAccessBlocked() const {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-#if ALLOW_STICKY_DENY
+  // TODO(markusheintz): Replace CONTENT_SETTINGS_TYPE_MEDIA_STREAM with the
+  // appropriate new CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC and
+  // CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA.
   ContentSetting current_setting =
       profile_->GetHostContentSettingsMap()->GetDefaultContentSetting(
           CONTENT_SETTINGS_TYPE_MEDIASTREAM, NULL);
   return (current_setting == CONTENT_SETTING_BLOCK);
-#else
-  return false;
-#endif
 }
 
-void MediaStreamDevicesController::HandleTapMediaRequest() {
+void MediaStreamDevicesController::HandleTabMediaRequest() {
+#if defined(OS_ANDROID)
+  Deny(false);
+#else
   // For tab media requests, we need to make sure the request came from the
   // extension API, so we check the registry here.
   extensions::TabCaptureRegistry* registry =
@@ -260,6 +288,7 @@ void MediaStreamDevicesController::HandleTapMediaRequest() {
 
     callback_.Run(devices);
   }
+#endif
 }
 
 bool MediaStreamDevicesController::IsSchemeSecure() const {
@@ -267,6 +296,9 @@ bool MediaStreamDevicesController::IsSchemeSecure() const {
 }
 
 bool MediaStreamDevicesController::ShouldAlwaysAllowOrigin() const {
+  // TODO(markusheintz): Replace CONTENT_SETTINGS_TYPE_MEDIA_STREAM with the
+  // appropriate new CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC and
+  // CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA.
   return profile_->GetHostContentSettingsMap()->ShouldAllowAllContent(
       request_.security_origin, request_.security_origin,
       CONTENT_SETTINGS_TYPE_MEDIASTREAM);
@@ -274,6 +306,10 @@ bool MediaStreamDevicesController::ShouldAlwaysAllowOrigin() const {
 
 void MediaStreamDevicesController::SetPermission(bool allowed) const {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+#if defined(OS_ANDROID)
+  // We do not support sticky operations on Android yet.
+  return;
+#endif
   ContentSettingsPattern primary_pattern =
       ContentSettingsPattern::FromURLNoWildcard(request_.security_origin);
   // Check the pattern is valid or not. When the request is from a file access,
@@ -283,15 +319,15 @@ void MediaStreamDevicesController::SetPermission(bool allowed) const {
 
   ContentSetting content_setting = allowed ?
       CONTENT_SETTING_ALLOW : CONTENT_SETTING_BLOCK;
-  if (has_audio_) {
-    profile_->GetHostContentSettingsMap()->SetContentSetting(
+  if (microphone_requested_) {
+      profile_->GetHostContentSettingsMap()->SetContentSetting(
         primary_pattern,
         ContentSettingsPattern::Wildcard(),
         CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC,
         std::string(),
         content_setting);
   }
-  if (has_video_) {
+  if (webcam_requested_) {
     profile_->GetHostContentSettingsMap()->SetContentSetting(
         primary_pattern,
         ContentSettingsPattern::Wildcard(),

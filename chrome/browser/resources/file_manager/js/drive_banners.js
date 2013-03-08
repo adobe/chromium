@@ -7,19 +7,25 @@
  * @param {DirectoryModel} directoryModel The model.
  * @param {VolumeManager} volumeManager The manager.
  * @param {DOMDocument} document HTML document.
+ * @param {boolean} showOffers True if we should show offer banners.
  * @constructor
  */
-function FileListBannerController(directoryModel, volumeManager, document) {
+function FileListBannerController(
+    directoryModel, volumeManager, document, showOffers) {
   this.directoryModel_ = directoryModel;
   this.volumeManager_ = volumeManager;
   this.document_ = document;
+  this.showOffers_ = showOffers;
   this.driveEnabled_ = false;
 
-  var board = str('CHROMEOS_RELEASE_BOARD');
-  if (!board.match(/^x86-(mario|zgb|alex)/i) && !board.match(/^stout/i))
+  if (!util.boardIs('x86-mario') &&
+      !util.boardIs('x86-zgb') &&
+      !util.boardIs('x86-alex') &&
+      !util.boardIs('stout')) {
     this.checkPromoAvailable_();
-  else
+  } else {
     this.newWelcome_ = false;
+  }
 
   var handler = this.checkSpaceAndShowBanner_.bind(this);
   this.directoryModel_.addEventListener('scan-completed', handler);
@@ -28,8 +34,8 @@ function FileListBannerController(directoryModel, volumeManager, document) {
       this.onDirectoryChanged_.bind(this));
 
   this.unmountedPanel_ = this.document_.querySelector('#unmounted-panel');
-  this.volumeManager_.addEventListener('gdata-status-changed',
-        this.updateGDataUnmountedPanel_.bind(this));
+  this.volumeManager_.addEventListener('drive-status-changed',
+        this.updateDriveUnmountedPanel_.bind(this));
 
   util.storage.onChanged.addListener(this.onStorageChange_.bind(this));
   this.welcomeHeaderCounter_ = WELCOME_HEADER_COUNTER_LIMIT;
@@ -52,12 +58,12 @@ FileListBannerController.prototype.__proto__ = cr.EventTarget.prototype;
  * Key in localStorage to keep numer of times the Drive Welcome
  * banner has shown.
  */
-var WELCOME_HEADER_COUNTER_KEY = 'gdataWelcomeHeaderCounter';
+var WELCOME_HEADER_COUNTER_KEY = 'driveWelcomeHeaderCounter';
 
 // If the warning was dismissed before, this key stores the quota value
 // (as of the moment of dismissal).
 // If the warning was never dismissed or was reset this key stores 0.
-var WARNING_DISMISSED_KEY = 'gdriveSpaceWarningDismissed';
+var WARNING_DISMISSED_KEY = 'driveSpaceWarningDismissed';
 
 /**
  * Maximum times Drive Welcome banner could have shown.
@@ -135,41 +141,44 @@ FileListBannerController.prototype.onStorageChange_ = function(changes,
  * @private
  */
 FileListBannerController.prototype.showBanner_ = function(type, messageId) {
-  this.showGDataWelcome_(type);
+  this.showDriveWelcome_(type);
 
-  var container = this.document_.querySelector('.gdrive-welcome.' + type);
+  var container = this.document_.querySelector('.drive-welcome.' + type);
   if (container.firstElementChild)
     return;  // Do not re-create.
 
-  if (!this.document_.querySelector('link[gdrive-welcome-style]')) {
+  if (!this.document_.querySelector('link[drive-welcome-style]')) {
     var style = this.document_.createElement('link');
     style.rel = 'stylesheet';
-    style.href = 'css/gdrive_welcome.css';
-    style.setAttribute('gdrive-welcome-style', '');
+    style.href = 'css/drive_welcome.css';
+    style.setAttribute('drive-welcome-style', '');
     this.document_.head.appendChild(style);
   }
 
-  var wrapper = util.createChild(container, 'gdrive-welcome-wrapper');
-  util.createChild(wrapper, 'gdrive-welcome-icon');
+  var wrapper = util.createChild(container, 'drive-welcome-wrapper');
+  util.createChild(wrapper, 'drive-welcome-icon');
 
   var close = util.createChild(wrapper, 'cr-dialog-close');
   close.addEventListener('click', this.closeBanner_.bind(this));
 
-  var message = util.createChild(wrapper, 'gdrive-welcome-message');
+  var message = util.createChild(wrapper, 'drive-welcome-message');
 
-  var title = util.createChild(message, 'gdrive-welcome-title');
+  var title = util.createChild(message, 'drive-welcome-title');
 
-  var text = util.createChild(message, 'gdrive-welcome-text');
+  var text = util.createChild(message, 'drive-welcome-text');
   text.innerHTML = str(messageId);
 
-  var links = util.createChild(message, 'gdrive-welcome-links');
+  var links = util.createChild(message, 'drive-welcome-links');
 
   var more;
   if (this.newWelcome_) {
-    title.textContent = str('DRIVE_WELCOME_TITLE_ALTERNATIVE');
+    var welcomeTitle = str('DRIVE_WELCOME_TITLE_ALTERNATIVE');
+    if (util.boardIs('link'))
+      welcomeTitle = str('DRIVE_WELCOME_TITLE_ALTERNATIVE_1TB');
+    title.textContent = welcomeTitle;
     more = util.createChild(links,
-        'gdata-welcome-button gdata-welcome-start', 'a');
-    more.textContent = str('DRIVE_WELCOME_GET_STARTED');
+        'drive-welcome-button drive-welcome-start', 'a');
+    more.textContent = str('DRIVE_WELCOME_CHECK_ELIGIBILITY');
     more.href = GOOGLE_DRIVE_REDEEM;
   } else {
     title.textContent = str('DRIVE_WELCOME_TITLE');
@@ -181,15 +190,15 @@ FileListBannerController.prototype.showBanner_ = function(type, messageId) {
 
   var dismiss;
   if (this.newWelcome_)
-    dismiss = util.createChild(links, 'gdata-welcome-button');
+    dismiss = util.createChild(links, 'drive-welcome-button');
   else
     dismiss = util.createChild(links, 'plain-link');
 
-  dismiss.classList.add('gdrive-welcome-dismiss');
+  dismiss.classList.add('drive-welcome-dismiss');
   dismiss.textContent = str('DRIVE_WELCOME_DISMISS');
   dismiss.addEventListener('click', this.closeBanner_.bind(this));
 
-  this.previousDirWasOnGData_ = false;
+  this.previousDirWasOnDrive_ = false;
 };
 
 /**
@@ -197,9 +206,9 @@ FileListBannerController.prototype.showBanner_ = function(type, messageId) {
  * @private
  */
 FileListBannerController.prototype.maybeShowBanner_ = function() {
-  if (!this.isOnGData()) {
-    this.cleanupGDataWelcome_();
-    this.previousDirWasOnGData_ = false;
+  if (!this.isOnDrive()) {
+    this.cleanupDriveWelcome_();
+    this.previousDirWasOnDrive_ = false;
     return;
   }
 
@@ -216,16 +225,16 @@ FileListBannerController.prototype.maybeShowBanner_ = function() {
     var self = this;
     setTimeout(this.preparePromo_.bind(this, function() {
       var container = self.document_.querySelector('.dialog-container');
-      if (self.isOnGData() &&
+      if (self.isOnDrive() &&
           self.welcomeHeaderCounter_ == 0) {
         self.showBanner_('page', 'DRIVE_WELCOME_TEXT_LONG');
       }
     }, 2000));
   } else if (this.welcomeHeaderCounter_ < WELCOME_HEADER_COUNTER_LIMIT) {
     // We do not want to increment the counter when the user navigates
-    // between different directories on GDrive, but we increment the counter
+    // between different directories on Drive, but we increment the counter
     // once anyway to prevent the full page banner from showing.
-     if (!this.previousDirWasOnGData_ || this.welcomeHeaderCounter_ == 0) {
+     if (!this.previousDirWasOnDrive_ || this.welcomeHeaderCounter_ == 0) {
        var self = this;
        this.setWelcomeHeaderCounter_(this.welcomeHeaderCounter_ + 1);
        this.preparePromo_(function() {
@@ -235,24 +244,24 @@ FileListBannerController.prototype.maybeShowBanner_ = function() {
    } else {
      this.closeBanner_();
    }
-   this.previousDirWasOnGData_ = true;
+   this.previousDirWasOnDrive_ = true;
 };
 
 /**
  * Show or hide the "Low Google Drive space" warning.
  * @param {boolean} show True if the box need to be shown.
- * @param {object} sizeStats Size statistics. Should be defined when showing the
+ * @param {Object} sizeStats Size statistics. Should be defined when showing the
  *     warning.
  * @private
  */
-FileListBannerController.prototype.showLowGDriveSpaceWarning_ =
+FileListBannerController.prototype.showLowDriveSpaceWarning_ =
       function(show, sizeStats) {
-  var box = this.document_.querySelector('.gdrive-space-warning');
+  var box = this.document_.querySelector('#volume-space-warning');
 
   // Avoid showing two banners.
   // TODO(kaznacheev): Unify the low space warning and the promo header.
   if (show)
-    this.cleanupGDataWelcome_();
+    this.cleanupDriveWelcome_();
 
   if (box.hidden == !show)
     return;
@@ -273,11 +282,11 @@ FileListBannerController.prototype.showLowGDriveSpaceWarning_ =
   box.textContent = '';
   if (show) {
     var icon = this.document_.createElement('div');
-    icon.className = 'gdrive-icon';
+    icon.className = 'drive-icon';
     box.appendChild(icon);
 
     var text = this.document_.createElement('div');
-    text.className = 'gdrive-text';
+    text.className = 'drive-text';
     text.textContent = strf('DRIVE_SPACE_AVAILABLE_LONG',
         util.bytesToString(sizeStats.remainingSizeKB * 1024));
     box.appendChild(text);
@@ -347,7 +356,7 @@ FileListBannerController.prototype.checkFreeSpace_ = function(currentPath) {
           if (root == RootDirectory.DOWNLOADS)
             self.showLowDownloadsSpaceWarning_(lowDiskSpace);
           else
-            self.showLowGDriveSpaceWarning_(lowDiskSpace, sizeStats);
+            self.showLowDriveSpaceWarning_(lowDiskSpace, sizeStats);
 
           // If disk space is low, check it more often. User can delete files
           // manually and we should not bother her with warning in this case.
@@ -359,15 +368,15 @@ FileListBannerController.prototype.checkFreeSpace_ = function(currentPath) {
   var root = PathUtil.getRootPath(currentPath);
   if (root === RootDirectory.DOWNLOADS) {
     scheduleCheck(500, root, 0.2);
-    this.showLowGDriveSpaceWarning_(false);
-  } else if (root === RootDirectory.GDATA) {
+    this.showLowDriveSpaceWarning_(false);
+  } else if (root === RootDirectory.DRIVE) {
     scheduleCheck(500, root, 0.1);
     this.showLowDownloadsSpaceWarning_(false);
   } else {
     scheduleCheck(0);
 
     this.showLowDownloadsSpaceWarning_(false);
-    this.showLowGDriveSpaceWarning_(false);
+    this.showLowDriveSpaceWarning_(false);
   }
 };
 
@@ -376,24 +385,28 @@ FileListBannerController.prototype.checkFreeSpace_ = function(currentPath) {
  * @private
  */
 FileListBannerController.prototype.closeBanner_ = function() {
-  this.cleanupGDataWelcome_();
+  this.cleanupDriveWelcome_();
   // Stop showing the welcome banner.
   this.setWelcomeHeaderCounter_(WELCOME_HEADER_COUNTER_LIMIT);
 };
 
 /**
- * Shows or hides the Low Disck Space banner.
+ * Shows or hides the Low Disk Space banner.
  * @private
  */
 FileListBannerController.prototype.checkSpaceAndShowBanner_ = function() {
   var self = this;
   this.preparePromo_(function() {
-    if (this.newWelcome_ && this.isOnGData()) {
+    if (self.newWelcome_ && self.isOnDrive()) {
       chrome.fileBrowserPrivate.getSizeStats(
-          util.makeFilesystemUrl(this.directoryModel_.getCurrentRootPath()),
+          util.makeFilesystemUrl(self.directoryModel_.getCurrentRootPath()),
           function(result) {
-            // Already >= 100 GB.
-            if (result && result.totalSizeKB >= 100 * 1024 * 1024)
+            var offerSpaceKb = 100 * 1024 * 1024;  // 100GB.
+            if (util.boardIs('link'))
+              offerSpaceKb = 1024 * 1024 * 1024;  // 1TB.
+            if (result && result.totalSizeKB >= offerSpaceKb)
+              self.newWelcome_ = false;
+            if (!self.showOffers_)
               self.newWelcome_ = false;
             self.maybeShowBanner_();
           });
@@ -406,8 +419,8 @@ FileListBannerController.prototype.checkSpaceAndShowBanner_ = function() {
 /**
  * @return {boolean} True if current directory is on Drive.
  */
-FileListBannerController.prototype.isOnGData = function() {
-  return this.directoryModel_.getCurrentRootType() === RootType.GDATA;
+FileListBannerController.prototype.isOnDrive = function() {
+  return this.directoryModel_.getCurrentRootType() === RootType.DRIVE;
 };
 
 /**
@@ -415,10 +428,10 @@ FileListBannerController.prototype.isOnGData = function() {
  * @param {string} type 'page'|'head'|'none'.
  * @private
  */
-FileListBannerController.prototype.showGDataWelcome_ = function(type) {
+FileListBannerController.prototype.showDriveWelcome_ = function(type) {
   var container = this.document_.querySelector('.dialog-container');
-  if (container.getAttribute('gdrive-welcome') != type) {
-    container.setAttribute('gdrive-welcome', type);
+  if (container.getAttribute('drive-welcome') != type) {
+    container.setAttribute('drive-welcome', type);
     this.requestRelayout_(200);  // Resize only after the animation is done.
   }
 };
@@ -432,11 +445,11 @@ FileListBannerController.prototype.showGDataWelcome_ = function(type) {
 FileListBannerController.prototype.onDirectoryChanged_ = function(event) {
   this.checkFreeSpace_(this.directoryModel_.getCurrentDirPath());
 
-  if (!this.isOnGData())
-    this.cleanupGDataWelcome_();
+  if (!this.isOnDrive())
+    this.cleanupDriveWelcome_();
 
-  this.updateGDataUnmountedPanel_();
-  if (this.isOnGData())
+  this.updateDriveUnmountedPanel_();
+  if (this.isOnDrive())
     this.unmountedPanel_.classList.remove('retry-enabled');
 };
 
@@ -444,8 +457,8 @@ FileListBannerController.prototype.onDirectoryChanged_ = function(event) {
  * removes the Drive Welcome banner.
  * @private
  */
-FileListBannerController.prototype.cleanupGDataWelcome_ = function() {
-  this.showGDataWelcome_('none');
+FileListBannerController.prototype.cleanupDriveWelcome_ = function() {
+  this.showDriveWelcome_('none');
 };
 
 /**
@@ -486,22 +499,22 @@ FileListBannerController.prototype.showLowDownloadsSpaceWarning_ =
 };
 
 /**
- * Creates contents for the GDATA unmounted panel.
+ * Creates contents for the DRIVE unmounted panel.
  * @private
  */
-FileListBannerController.prototype.ensureGDataUnmountedPanelInitialized_ =
+FileListBannerController.prototype.ensureDriveUnmountedPanelInitialized_ =
     function() {
   var panel = this.unmountedPanel_;
   if (panel.firstElementChild)
     return;
 
-  function create(parent, tag, className, opt_textContent) {
+  var create = function(parent, tag, className, opt_textContent) {
     var div = panel.ownerDocument.createElement(tag);
     div.className = className;
     div.textContent = opt_textContent || '';
     parent.appendChild(div);
     return div;
-  }
+  };
 
   var loading = create(panel, 'div', 'loading', str('DRIVE_LOADING'));
   var spinnerBox = create(loading, 'div', 'spinner-box');
@@ -518,7 +531,7 @@ FileListBannerController.prototype.ensureGDataUnmountedPanelInitialized_ =
   retryButton.hidden = true;
   var vm = this.volumeManager_;
   retryButton.onclick = function() {
-    vm.mountGData(function() {}, function() {});
+    vm.mountDrive(function() {}, function() {});
   };
 
   var learnMore = create(panel, 'a', 'learn-more plain-link',
@@ -528,32 +541,32 @@ FileListBannerController.prototype.ensureGDataUnmountedPanelInitialized_ =
 };
 
 /**
- * Shows the panel when current directory is GDATA and it's unmounted.
- * Hides it otherwise. The pannel shows spinner if GDATA is mounting or
+ * Shows the panel when current directory is DRIVE and it's unmounted.
+ * Hides it otherwise. The pannel shows spinner if DRIVE is mounting or
  * an error message if it failed.
  * @private
  */
-FileListBannerController.prototype.updateGDataUnmountedPanel_ = function() {
-  var node = this.document_.querySelector('.dialog-container');
-  if (this.isOnGData()) {
-    var status = this.volumeManager_.getGDataStatus();
-    if (status == VolumeManager.GDataStatus.MOUNTING ||
-        status == VolumeManager.GDataStatus.ERROR) {
-      this.ensureGDataUnmountedPanelInitialized_();
+FileListBannerController.prototype.updateDriveUnmountedPanel_ = function() {
+  var node = this.document_.body;
+  if (this.isOnDrive()) {
+    var status = this.volumeManager_.getDriveStatus();
+    if (status == VolumeManager.DriveStatus.MOUNTING ||
+        status == VolumeManager.DriveStatus.ERROR) {
+      this.ensureDriveUnmountedPanelInitialized_();
     }
-    if (status == VolumeManager.GDataStatus.MOUNTING &&
+    if (status == VolumeManager.DriveStatus.MOUNTING &&
         this.welcomeHeaderCounter_ == 0) {
       // Do not increment banner counter in order to not prevent the full
       // page banner of being shown (otherwise it would never be shown).
       this.showBanner_('header', 'DRIVE_WELCOME_TEXT_SHORT');
     }
-    if (status == VolumeManager.GDataStatus.ERROR)
+    if (status == VolumeManager.DriveStatus.ERROR)
       this.unmountedPanel_.classList.add('retry-enabled');
     else
       this.unmountedPanel_.classList.remove('retry-enabled');
-    node.setAttribute('gdata', status);
+    node.setAttribute('drive', status);
   } else {
-    node.removeAttribute('gdata');
+    node.removeAttribute('drive');
   }
 };
 
@@ -571,7 +584,7 @@ FileListBannerController.prototype.checkPromoAvailable_ = function() {
 };
 
 /**
- * @param {Function} completeCallback To be called (may be directly) when
+ * @param {function} completeCallback To be called (may be directly) when
  *                                    this.newWelcome_ get ready.
  * @private
  */
@@ -581,4 +594,3 @@ FileListBannerController.prototype.preparePromo_ = function(completeCallback) {
   else
     (this.promoCallbacks_ = this.promoCallbacks_ || []).push(completeCallback);
 };
-

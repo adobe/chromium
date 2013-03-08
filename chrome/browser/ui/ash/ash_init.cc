@@ -13,6 +13,8 @@
 #include "ash/wm/event_rewriter_event_filter.h"
 #include "ash/wm/property_util.h"
 #include "base/command_line.h"
+#include "chrome/browser/app_mode/app_mode_utils.h"
+#include "chrome/browser/browser_shutdown.h"
 #include "chrome/browser/chromeos/accessibility/accessibility_util.h"
 #include "chrome/browser/chromeos/accessibility/magnification_manager.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
@@ -20,8 +22,6 @@
 #include "chrome/browser/ui/ash/event_rewriter.h"
 #include "chrome/browser/ui/ash/screenshot_taker.h"
 #include "chrome/common/chrome_switches.h"
-#include "ui/aura/aura_switches.h"
-#include "ui/aura/display_util.h"
 #include "ui/aura/env.h"
 #include "ui/aura/root_window.h"
 #include "ui/compositor/compositor_setup.h"
@@ -42,7 +42,7 @@ bool ShouldOpenAshOnStartup() {
   return true;
 #endif
   // TODO(scottmg): http://crbug.com/133312, will need this for Win8 too.
-  return false;
+  return CommandLine::ForCurrentProcess()->HasSwitch(switches::kOpenAsh);
 }
 
 #if defined(OS_CHROMEOS)
@@ -56,12 +56,8 @@ bool ShouldInitiallyHideCursor() {
 #endif
 
 void OpenAsh() {
-  bool use_fullscreen = CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kAuraHostWindowUseFullscreen);
-
 #if defined(OS_CHROMEOS)
   if (base::chromeos::IsRunningOnChromeOS()) {
-    use_fullscreen = true;
     // Hides the cursor outside of the Aura root window. The cursor will be
     // drawn within the Aura root window, and it'll remain hidden after the
     // Aura window is closed.
@@ -72,9 +68,6 @@ void OpenAsh() {
   if (ShouldInitiallyHideCursor())
     ash::Shell::set_initially_hide_cursor(true);
 #endif
-
-  if (use_fullscreen)
-    aura::SetUseFullscreenHostWindow(true);
 
   // Its easier to mark all windows as persisting and exclude the ones we care
   // about (browser windows), rather than explicitly excluding certain windows.
@@ -106,16 +99,21 @@ void OpenAsh() {
       SetEnabled(magnifier_enabled && magnifier_type == ash::MAGNIFIER_PARTIAL);
 
   if (!CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kDisableZeroBrowsersOpenForTests)) {
-    browser::StartKeepAlive();
+      switches::kDisableZeroBrowsersOpenForTests) &&
+      !chrome::IsRunningInAppMode()) {
+    chrome::StartKeepAlive();
   }
 #endif
   ash::Shell::GetPrimaryRootWindow()->ShowRootWindow();
 }
 
 void CloseAsh() {
-  if (ash::Shell::HasInstance())
+  // If shutdown is initiated by |BrowserX11IOErrorHandler|, don't
+  // try to cleanup resources.
+  if (!browser_shutdown::ShuttingDownWithoutClosingBrowsers() &&
+      ash::Shell::HasInstance()) {
     ash::Shell::DeleteInstance();
+  }
 }
 
 }  // namespace chrome

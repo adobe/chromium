@@ -30,7 +30,7 @@
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/posix/eintr_wrapper.h"
-#include "base/string_number_conversions.h"
+#include "base/strings/string_number_conversions.h"
 
 #if defined(USE_SYMBOLIZE)
 #include "base/third_party/symbolize/symbolize.h"
@@ -374,7 +374,7 @@ class PrintBacktraceOutputHandler : public BacktraceOutputHandler {
  public:
   PrintBacktraceOutputHandler() {}
 
-  virtual void HandleOutput(const char* output) {
+  virtual void HandleOutput(const char* output) OVERRIDE {
     // NOTE: This code MUST be async-signal safe (it's used by in-process
     // stack dumping signal handler). NO malloc or stdio is allowed here.
     PrintToStderr(output);
@@ -389,7 +389,7 @@ class StreamBacktraceOutputHandler : public BacktraceOutputHandler {
   explicit StreamBacktraceOutputHandler(std::ostream* os) : os_(os) {
   }
 
-  virtual void HandleOutput(const char* output) {
+  virtual void HandleOutput(const char* output) OVERRIDE {
     (*os_) << output;
   }
 

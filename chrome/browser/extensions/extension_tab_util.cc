@@ -5,16 +5,18 @@
 #include "chrome/browser/extensions/extension_tab_util.h"
 
 #include "chrome/browser/extensions/api/tabs/tabs_constants.h"
+#include "chrome/browser/extensions/shell_window_registry.h"
 #include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/extensions/window_controller.h"
+#include "chrome/browser/extensions/window_controller_list.h"
 #include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sessions/session_id.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
-#include "chrome/browser/ui/browser_list.h"
-#include "chrome/browser/ui/browser_tabstrip.h"
+#include "chrome/browser/ui/browser_iterator.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/extensions/shell_window.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_iterator.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/extensions/extension.h"
@@ -27,11 +29,31 @@
 #include "googleurl/src/gurl.h"
 
 namespace keys = extensions::tabs_constants;
+namespace tabs = extensions::api::tabs;
 
 using content::NavigationEntry;
 using content::WebContents;
 using extensions::APIPermission;
 using extensions::Extension;
+
+namespace {
+
+extensions::WindowController* GetShellWindowController(
+    const WebContents* contents) {
+  Profile* profile = Profile::FromBrowserContext(contents->GetBrowserContext());
+  extensions::ShellWindowRegistry* registry =
+      extensions::ShellWindowRegistry::Get(profile);
+  if (!registry)
+    return NULL;
+  ShellWindow* shell_window =
+      registry->GetShellWindowForRenderViewHost(contents->GetRenderViewHost());
+  if (!shell_window)
+    return NULL;
+  return extensions::WindowControllerList::GetInstance()->
+      FindWindowById(shell_window->session_id().id());
+}
+
+}  // namespace
 
 int ExtensionTabUtil::GetWindowId(const Browser* browser) {
   return browser->session_id().id();
@@ -39,9 +61,8 @@ int ExtensionTabUtil::GetWindowId(const Browser* browser) {
 
 int ExtensionTabUtil::GetWindowIdOfTabStripModel(
     const TabStripModel* tab_strip_model) {
-  for (BrowserList::const_iterator it = BrowserList::begin();
-       it != BrowserList::end(); ++it) {
-    if ((*it)->tab_strip_model() == tab_strip_model)
+  for (chrome::BrowserIterator it; !it.done(); it.Next()) {
+    if (it->tab_strip_model() == tab_strip_model)
       return GetWindowId(*it);
   }
   return -1;
@@ -64,6 +85,13 @@ DictionaryValue* ExtensionTabUtil::CreateTabValue(
     TabStripModel* tab_strip,
     int tab_index,
     const Extension* extension) {
+  // If we have a matching ShellWindow with a controller, get the tab value
+  // from its controller instead.
+  extensions::WindowController* controller = GetShellWindowController(contents);
+  if (controller &&
+      (!extension || controller->IsVisibleToExtension(extension))) {
+    return controller->CreateTabValue(extension, tab_index);
+  }
   DictionaryValue *result = CreateTabValue(contents, tab_strip, tab_index);
   ScrubTabValueForExtension(contents, extension, result);
   return result;
@@ -88,6 +116,12 @@ DictionaryValue* ExtensionTabUtil::CreateTabValue(
     const WebContents* contents,
     TabStripModel* tab_strip,
     int tab_index) {
+  // If we have a matching ShellWindow with a controller, get the tab value
+  // from its controller instead.
+  extensions::WindowController* controller = GetShellWindowController(contents);
+  if (controller)
+    return controller->CreateTabValue(NULL, tab_index);
+
   if (!tab_strip)
     ExtensionTabUtil::GetTabStripModel(contents, &tab_strip, &tab_index);
 
@@ -140,6 +174,18 @@ void ExtensionTabUtil::ScrubTabValueForExtension(const WebContents* contents,
   }
 }
 
+void ExtensionTabUtil::ScrubTabForExtension(const Extension* extension,
+                                            tabs::Tab* tab) {
+  bool has_permission = extension && extension->HasAPIPermission(
+      APIPermission::kTab);
+
+  if (!has_permission) {
+    tab->url.reset();
+    tab->title.reset();
+    tab->fav_icon_url.reset();
+  }
+}
+
 bool ExtensionTabUtil::GetTabStripModel(const WebContents* web_contents,
                                         TabStripModel** tab_strip_model,
                                         int* tab_index) {
@@ -147,9 +193,8 @@ bool ExtensionTabUtil::GetTabStripModel(const WebContents* web_contents,
   DCHECK(tab_strip_model);
   DCHECK(tab_index);
 
-  for (BrowserList::const_iterator it = BrowserList::begin();
-      it != BrowserList::end(); ++it) {
-    TabStripModel* tab_strip = (*it)->tab_strip_model();
+  for (chrome::BrowserIterator it; !it.done(); it.Next()) {
+    TabStripModel* tab_strip = it->tab_strip_model();
     int index = tab_strip->GetIndexOfWebContents(web_contents);
     if (index != -1) {
       *tab_strip_model = tab_strip;
@@ -167,7 +212,7 @@ bool ExtensionTabUtil::GetDefaultTab(Browser* browser,
   DCHECK(browser);
   DCHECK(contents);
 
-  *contents = chrome::GetActiveWebContents(browser);
+  *contents = browser->tab_strip_model()->GetActiveWebContents();
   if (*contents) {
     if (tab_id)
       *tab_id = GetTabId(*contents);
@@ -187,9 +232,8 @@ bool ExtensionTabUtil::GetTabById(int tab_id,
   Profile* incognito_profile =
       include_incognito && profile->HasOffTheRecordProfile() ?
           profile->GetOffTheRecordProfile() : NULL;
-  for (BrowserList::const_iterator iter = BrowserList::begin();
-       iter != BrowserList::end(); ++iter) {
-    Browser* target_browser = *iter;
+  for (chrome::BrowserIterator it; !it.done(); it.Next()) {
+    Browser* target_browser = *it;
     if (target_browser->profile() == profile ||
         target_browser->profile() == incognito_profile) {
       TabStripModel* target_tab_strip = target_browser->tab_strip_model();
@@ -266,7 +310,7 @@ void ExtensionTabUtil::CreateTab(WebContents* web_contents,
 // static
 void ExtensionTabUtil::ForEachTab(
     const base::Callback<void(WebContents*)>& callback) {
-  for (TabContentsIterator iterator; !iterator.done(); ++iterator)
+  for (TabContentsIterator iterator; !iterator.done(); iterator.Next())
     callback.Run(*iterator);
 }
 

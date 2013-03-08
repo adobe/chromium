@@ -12,6 +12,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/extension_install_prompt.h"
+#include "chrome/browser/extensions/webstore_data_fetcher_delegate.h"
 #include "chrome/browser/extensions/webstore_install_helper.h"
 #include "chrome/browser/extensions/webstore_installer.h"
 #include "content/public/browser/web_contents_observer.h"
@@ -26,7 +27,7 @@ class URLFetcher;
 
 namespace extensions {
 class Extension;
-class SafeWebstoreResponseParser;
+class WebstoreDataFetcher;
 
 // Manages inline installs requested by a page (downloads and parses metadata
 // from the webstore, shows the install UI, starts the download once the user
@@ -38,7 +39,7 @@ class WebstoreStandaloneInstaller
     : public base::RefCountedThreadSafe<WebstoreStandaloneInstaller>,
       public ExtensionInstallPrompt::Delegate,
       public content::WebContentsObserver,
-      public net::URLFetcherDelegate,
+      public WebstoreDataFetcherDelegate,
       public WebstoreInstaller::Delegate,
       public WebstoreInstallHelper::Delegate {
  public:
@@ -49,7 +50,8 @@ class WebstoreStandaloneInstaller
 
   enum PromptType {
     STANDARD_PROMPT,
-    INLINE_PROMPT
+    INLINE_PROMPT,
+    SKIP_PROMPT
   };
 
   // A callback for when the install process completes successfully or not. If
@@ -57,20 +59,31 @@ class WebstoreStandaloneInstaller
   // developer-readable error message about why it failed.
   typedef base::Callback<void(bool success, const std::string& error)> Callback;
 
-  WebstoreStandaloneInstaller(content::WebContents* web_contents,
-                              std::string webstore_item_id,
+  // Two use cases are supported:
+  //
+  // 1) Basic ("standard") prompt: the dialog that pops up has no additional
+  // links:
+  // |prompt_type| - should be set to STANDARD_PROMPT;
+  // |profile| - points to the profile to install the app for;
+  // |web_contents| - must be NULL.
+  //
+  // 2) Extended ("inline") prompt: the dialog contains a 'View Details' link
+  // pointing to the app's page in the webstore:
+  // |prompt_type| - should be set to INLINE_PROMPT;
+  // |profile| - points to the profile to install the app for;
+  // |web_contents| - must be non-NULL and specify a WebContents to be used to
+  // navigate to the link's target if the link is clicked.
+  WebstoreStandaloneInstaller(std::string webstore_item_id,
                               VerifiedSiteRequired require_verified_site,
                               PromptType prompt_type,
                               GURL requestor_url,
-                              Callback callback);
-
-  void set_skip_post_install_ui(bool skip) { skip_post_install_ui_ = skip; }
-
+                              Profile* profile,
+                              content::WebContents* web_contents,
+                              const Callback& callback);
   void BeginInstall();
 
  private:
   friend class base::RefCountedThreadSafe<WebstoreStandaloneInstaller>;
-  friend class SafeWebstoreResponseParser;
   FRIEND_TEST_ALL_PREFIXES(WebstoreStandaloneInstallerTest, DomainVerification);
 
   virtual ~WebstoreStandaloneInstaller();
@@ -88,12 +101,12 @@ class WebstoreStandaloneInstaller
   // All flows (whether successful or not) end up in CompleteInstall, which
   // informs our delegate of success/failure.
 
-  // net::URLFetcherDelegate interface implementation.
-  virtual void OnURLFetchComplete(const net::URLFetcher* source) OVERRIDE;
-
-  // Client callbacks for SafeWebstoreResponseParser when parsing is complete.
-  void OnWebstoreResponseParseSuccess(DictionaryValue* webstore_data);
-  void OnWebstoreResponseParseFailure(const std::string& error);
+  // WebstoreDataFetcherDelegate interface implementation.
+  virtual void OnWebstoreRequestFailure() OVERRIDE;
+  virtual void OnWebstoreResponseParseSuccess(
+      base::DictionaryValue* webstore_data) OVERRIDE;
+  virtual void OnWebstoreResponseParseFailure(
+      const std::string& error) OVERRIDE;
 
   // WebstoreInstallHelper::Delegate interface implementation.
   virtual void OnWebstoreParseSuccess(
@@ -127,16 +140,19 @@ class WebstoreStandaloneInstaller
   static bool IsRequestorURLInVerifiedSite(const GURL& requestor_url,
                                            const std::string& verified_site);
 
+  // Input configuration.
   std::string id_;
   bool require_verified_site_;
-  bool use_inline_prompt_;
+  PromptType prompt_type_;
   GURL requestor_url_;
+  Profile* profile_;
   Callback callback_;
+
+  // Installation dialog.
   scoped_ptr<ExtensionInstallPrompt> install_ui_;
-  bool skip_post_install_ui_;
 
   // For fetching webstore JSON data.
-  scoped_ptr<net::URLFetcher> webstore_data_url_fetcher_;
+  scoped_ptr<WebstoreDataFetcher> webstore_data_fetcher_;
 
   // Extracted from the webstore JSON data response.
   std::string localized_name_;

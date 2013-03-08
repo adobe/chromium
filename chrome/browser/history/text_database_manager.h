@@ -11,13 +11,13 @@
 
 #include "base/basictypes.h"
 #include "base/containers/mru_cache.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/weak_ptr.h"
 #include "base/string16.h"
 #include "chrome/browser/history/history_types.h"
-#include "chrome/browser/history/text_database.h"
 #include "chrome/browser/history/query_parser.h"
+#include "chrome/browser/history/text_database.h"
 #include "chrome/browser/history/url_database.h"
 
 namespace history {
@@ -74,7 +74,7 @@ class TextDatabaseManager {
   // The visit database is a pointer owned by the caller for the main database
   // (of recent visits). The visit database will be updated to refer to the
   // added text database entries.
-  TextDatabaseManager(const FilePath& dir,
+  TextDatabaseManager(const base::FilePath& dir,
                       URLDatabase* url_database,
                       VisitDatabase* visit_database);
   ~TextDatabaseManager();
@@ -84,7 +84,7 @@ class TextDatabaseManager {
   bool Init(const HistoryPublisher* history_publisher);
 
   // Returns the directory that holds the full text database files.
-  const FilePath& GetDir() { return dir_; }
+  const base::FilePath& GetDir() { return dir_; }
 
   // Allows scoping updates. This also allows things to go faster since every
   // page add doesn't need to be committed to disk (slow). Note that files will
@@ -256,7 +256,7 @@ class TextDatabaseManager {
   void FlushOldChangesForTime(base::TimeTicks now);
 
   // Directory holding our index files.
-  const FilePath dir_;
+  const base::FilePath dir_;
 
   // Non-owning pointers to the recent history databases for URLs and visits.
   URLDatabase* url_database_;

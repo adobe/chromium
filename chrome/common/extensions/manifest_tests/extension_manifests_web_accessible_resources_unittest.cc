@@ -3,7 +3,6 @@
 // found in the LICENSE file.
 
 #include "chrome/common/extensions/extension_manifest_constants.h"
-#include "chrome/common/extensions/manifest_handler.h"
 #include "chrome/common/extensions/manifest_tests/extension_manifest_test.h"
 #include "chrome/common/extensions/web_accessible_resources_handler.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -11,16 +10,14 @@
 using extensions::Extension;
 using extensions::WebAccessibleResourcesInfo;
 
-class WebAccesibleResourcesManifestTest : public ExtensionManifestTest {
+class WebAccessibleResourcesManifestTest : public ExtensionManifestTest {
   virtual void SetUp() OVERRIDE {
     ExtensionManifestTest::SetUp();
-    extensions::ManifestHandler::Register(
-        extension_manifest_keys::kWebAccessibleResources,
-        new extensions::WebAccessibleResourcesHandler);
+    (new extensions::WebAccessibleResourcesHandler)->Register();
   }
 };
 
-TEST_F(WebAccesibleResourcesManifestTest, WebAccessibleResources) {
+TEST_F(WebAccessibleResourcesManifestTest, WebAccessibleResources) {
   // Manifest version 2 with web accessible resources specified.
   scoped_refptr<Extension> extension1(
       LoadAndExpectSuccess("web_accessible_resources_1.json"));

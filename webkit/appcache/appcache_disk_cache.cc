@@ -6,7 +6,7 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/stl_util.h"
 #include "base/string_number_conversions.h"
@@ -56,7 +56,7 @@ class AppCacheDiskCache::EntryImpl : public Entry {
 
   // Entry implementation.
   virtual int Read(int index, int64 offset, net::IOBuffer* buf, int buf_len,
-                   const net::CompletionCallback& callback) {
+                   const net::CompletionCallback& callback) OVERRIDE {
     if (offset < 0 || offset > kint32max)
       return net::ERR_INVALID_ARGUMENT;
     return disk_cache_entry_->ReadData(
@@ -64,7 +64,7 @@ class AppCacheDiskCache::EntryImpl : public Entry {
   }
 
   virtual int Write(int index, int64 offset, net::IOBuffer* buf, int buf_len,
-                    const net::CompletionCallback& callback) {
+                    const net::CompletionCallback& callback) OVERRIDE {
     if (offset < 0 || offset > kint32max)
       return net::ERR_INVALID_ARGUMENT;
     const bool kTruncate = true;
@@ -72,11 +72,11 @@ class AppCacheDiskCache::EntryImpl : public Entry {
         index, static_cast<int>(offset), buf, buf_len, callback, kTruncate);
   }
 
-  virtual int64 GetSize(int index) {
+  virtual int64 GetSize(int index) OVERRIDE {
     return disk_cache_entry_->GetDataSize(index);
   }
 
-  virtual void Close() {
+  virtual void Close() OVERRIDE {
     disk_cache_entry_->Close();
     delete this;
   }
@@ -164,7 +164,7 @@ AppCacheDiskCache::~AppCacheDiskCache() {
 }
 
 int AppCacheDiskCache::InitWithDiskBackend(
-    const FilePath& disk_cache_directory, int disk_cache_size, bool force,
+    const base::FilePath& disk_cache_directory, int disk_cache_size, bool force,
     base::MessageLoopProxy* cache_thread,
     const net::CompletionCallback& callback) {
   return Init(net::APP_CACHE, disk_cache_directory,
@@ -173,7 +173,7 @@ int AppCacheDiskCache::InitWithDiskBackend(
 
 int AppCacheDiskCache::InitWithMemBackend(
     int mem_cache_size, const net::CompletionCallback& callback) {
-  return Init(net::MEMORY_CACHE, FilePath(), mem_cache_size, false, NULL,
+  return Init(net::MEMORY_CACHE, base::FilePath(), mem_cache_size, false, NULL,
               callback);
 }
 
@@ -262,7 +262,7 @@ AppCacheDiskCache::PendingCall::PendingCall(PendingCallType call_type,
 AppCacheDiskCache::PendingCall::~PendingCall() {}
 
 int AppCacheDiskCache::Init(net::CacheType cache_type,
-                            const FilePath& cache_directory,
+                            const base::FilePath& cache_directory,
                             int cache_size, bool force,
                             base::MessageLoopProxy* cache_thread,
                             const net::CompletionCallback& callback) {

@@ -6,10 +6,10 @@
 
 #include "base/command_line.h"
 #include "base/logging.h"
+#include "base/prefs/pref_service.h"
 #include "base/prefs/public/pref_member.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/spellchecker/spellcheck_service.h"
 #include "chrome/browser/tab_contents/render_view_context_menu.h"
 #include "chrome/common/chrome_switches.h"
@@ -104,7 +104,6 @@ bool SpellCheckerSubMenuObserver::IsCommandIdSupported(int command_id) {
     case IDC_CHECK_SPELLING_WHILE_TYPING:
     case IDC_SPELLPANEL_TOGGLE:
     case IDC_SPELLCHECK_MENU:
-    case IDC_CONTENT_CONTEXT_AUTOCORRECT_SPELLING_TOGGLE:
       return true;
   }
 
@@ -144,7 +143,6 @@ bool SpellCheckerSubMenuObserver::IsCommandIdEnabled(int command_id) {
     case IDC_CHECK_SPELLING_WHILE_TYPING:
     case IDC_SPELLPANEL_TOGGLE:
     case IDC_SPELLCHECK_MENU:
-    case IDC_CONTENT_CONTEXT_AUTOCORRECT_SPELLING_TOGGLE:
       return true;
   }
 

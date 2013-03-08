@@ -61,8 +61,6 @@ class VIEWS_EXPORT WidgetDelegate {
 
   virtual ui::AccessibilityTypes::Role GetAccessibleWindowRole() const;
 
-  virtual ui::AccessibilityTypes::State GetAccessibleWindowState() const;
-
   // Returns the title to be read with screen readers.
   virtual string16 GetAccessibleWindowTitle() const;
 
@@ -164,13 +162,15 @@ class VIEWS_EXPORT WidgetDelegate {
 
 // A WidgetDelegate implementation that is-a View. Used to override GetWidget()
 // to call View's GetWidget() for the common case where a WidgetDelegate
-// implementation is-a View.
+// implementation is-a View. Note that WidgetDelegateView is not owned by
+// view's hierarchy and is expected to be deleted on DeleteDelegate call.
 class VIEWS_EXPORT WidgetDelegateView : public WidgetDelegate, public View {
  public:
   WidgetDelegateView();
   virtual ~WidgetDelegateView();
 
   // Overridden from WidgetDelegate:
+  virtual void DeleteDelegate() OVERRIDE;
   virtual Widget* GetWidget() OVERRIDE;
   virtual const Widget* GetWidget() const OVERRIDE;
 

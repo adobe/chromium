@@ -5,7 +5,7 @@
 #include "chrome/browser/autofill/wallet/full_wallet.h"
 
 #include "base/logging.h"
-#include "base/string_number_conversions.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/values.h"
 
 namespace {
@@ -16,6 +16,7 @@ const size_t kCvnSize = 3;
 
 }  // anonymous namespace
 
+namespace autofill {
 namespace wallet {
 
 FullWallet::FullWallet(int expiration_month,
@@ -98,7 +99,7 @@ scoped_ptr<FullWallet>
   }
 
   scoped_ptr<Address> billing_address =
-      Address::CreateAddressWithID(*billing_address_dict);
+      Address::CreateAddress(*billing_address_dict);
   if (!billing_address.get()) {
     DLOG(ERROR) << "Response from Google wallet has malformed billing address";
     return scoped_ptr<FullWallet>();
@@ -120,6 +121,13 @@ scoped_ptr<FullWallet>
                                                billing_address.Pass(),
                                                shipping_address.Pass(),
                                                required_actions));
+}
+
+bool FullWallet::HasRequiredAction(RequiredAction action) const {
+  DCHECK(ActionAppliesToFullWallet(action));
+  return std::find(required_actions_.begin(),
+                   required_actions_.end(),
+                   action) != required_actions_.end();
 }
 
 bool FullWallet::operator==(const FullWallet& other) const {
@@ -159,19 +167,19 @@ bool FullWallet::operator!=(const FullWallet& other) const {
   return !(*this == other);
 }
 
-const std::string& FullWallet::GetPan(void* otp, size_t length) {
-  if (cvn_.empty())
-    DecryptCardInfo(reinterpret_cast<uint8*>(otp), length);
+const std::string& FullWallet::GetPan() {
+  if (pan_.empty())
+    DecryptCardInfo();
   return pan_;
 }
 
-const std::string& FullWallet::GetCvn(void* otp, size_t length) {
-  if (pan_.empty())
-    DecryptCardInfo(reinterpret_cast<uint8*>(otp), length);
+const std::string& FullWallet::GetCvn() {
+  if (cvn_.empty())
+    DecryptCardInfo();
   return cvn_;
 }
 
-void FullWallet::DecryptCardInfo(uint8* otp, size_t length) {
+void FullWallet::DecryptCardInfo() {
   std::vector<uint8> operating_data;
   // Convert |encrypted_rest_| to bytes so we can decrypt it with |otp|.
   if (!base::HexStringToBytes(encrypted_rest_, &operating_data)) {
@@ -179,18 +187,18 @@ void FullWallet::DecryptCardInfo(uint8* otp, size_t length) {
     return;
   }
 
-  // Ensure |otp| and |encrypted_rest_| are of the same length otherwise
-  // something has gone wrong and we can't decrypt the data.
-  DCHECK_EQ(length, operating_data.size());
+  // Ensure |one_time_pad_| and |encrypted_rest_| are of the same length
+  // otherwise something has gone wrong and we can't decrypt the data.
+  DCHECK_EQ(one_time_pad_.size(), operating_data.size());
 
-  scoped_array<uint8> result(new uint8[length]);
+  std::vector<uint8> results;
   // XOR |otp| with the encrypted data to decrypt.
-  for (size_t i = 0; i < length; ++i)
-    result.get()[i] = otp[i] ^ operating_data[i];
+  for (size_t i = 0; i < one_time_pad_.size(); ++i)
+    results.push_back(one_time_pad_[i] ^ operating_data[i]);
 
   // There is no uint8* to int64 so convert the decrypted data to hex and then
   // parse the hex to an int64 before getting the int64 as a string.
-  std::string hex_decrypted = base::HexEncode(result.get(), length);
+  std::string hex_decrypted = base::HexEncode(&(results[0]), results.size());
 
   int64 decrypted;
   if (!base::HexStringToInt64(hex_decrypted, &decrypted)) {
@@ -213,4 +221,4 @@ void FullWallet::DecryptCardInfo(uint8* otp, size_t length) {
 }
 
 }  // namespace wallet
-
+}  // namespace autofill

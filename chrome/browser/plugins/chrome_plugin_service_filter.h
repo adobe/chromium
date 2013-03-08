@@ -6,9 +6,10 @@
 #define CHROME_BROWSER_PLUGINS_CHROME_PLUGIN_SERVICE_FILTER_H_
 
 #include <map>
+#include <set>
 #include <vector>
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/hash_tables.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/singleton.h"
@@ -43,15 +44,22 @@ class ChromePluginServiceFilter : public content::PluginServiceFilter,
 
   // Restricts the given plugin to the given profile and origin of the given
   // URL.
-  void RestrictPluginToProfileAndOrigin(const FilePath& plugin_path,
+  void RestrictPluginToProfileAndOrigin(const base::FilePath& plugin_path,
                                         Profile* profile,
                                         const GURL& url);
 
   // Lifts a restriction on a plug-in.
-  void UnrestrictPlugin(const FilePath& plugin_path);
+  void UnrestrictPlugin(const base::FilePath& plugin_path);
+
+  // Authorizes a given plug-in for a given process.
+  void AuthorizePlugin(int render_process_id,
+                       const base::FilePath& plugin_path);
+
+  // Authorizes all plug-ins for a given process.
+  void AuthorizeAllPlugins(int render_process_id);
 
   // PluginServiceFilter implementation:
-  virtual bool ShouldUsePlugin(
+  virtual bool IsPluginAvailable(
       int render_process_id,
       int render_view_id,
       const void* context,
@@ -59,14 +67,30 @@ class ChromePluginServiceFilter : public content::PluginServiceFilter,
       const GURL& policy_url,
       webkit::WebPluginInfo* plugin) OVERRIDE;
 
+  // CanLoadPlugin always grants permission to the browser
+  // (render_process_id == 0)
+  virtual bool CanLoadPlugin(
+      int render_process_id,
+      const base::FilePath& path) OVERRIDE;
+
  private:
   friend struct DefaultSingletonTraits<ChromePluginServiceFilter>;
 
   struct OverriddenPlugin {
-    int render_process_id;
+    OverriddenPlugin();
+    ~OverriddenPlugin();
+
     int render_view_id;
     GURL url;  // If empty, the override applies to all urls in render_view.
     webkit::WebPluginInfo plugin;
+  };
+
+  struct ProcessDetails {
+    ProcessDetails();
+    ~ProcessDetails();
+
+    std::vector<OverriddenPlugin> overridden_plugins;
+    std::set<base::FilePath> authorized_plugins;
   };
 
   ChromePluginServiceFilter();
@@ -77,17 +101,21 @@ class ChromePluginServiceFilter : public content::PluginServiceFilter,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE;
 
+  ProcessDetails* GetOrRegisterProcess(int render_process_id);
+  const ProcessDetails* GetProcess(int render_process_id) const;
+
   content::NotificationRegistrar registrar_;
 
   base::Lock lock_;  // Guards access to member variables.
   // Map of plugin paths to the origin they are restricted to.
   typedef std::pair<const void*, GURL> RestrictedPluginPair;
-  typedef base::hash_map<FilePath, RestrictedPluginPair> RestrictedPluginMap;
+  typedef base::hash_map<base::FilePath,
+                         RestrictedPluginPair> RestrictedPluginMap;
   RestrictedPluginMap restricted_plugins_;
   typedef std::map<const void*, scoped_refptr<PluginPrefs> > ResourceContextMap;
   ResourceContextMap resource_context_map_;
 
-  std::vector<OverriddenPlugin> overridden_plugins_;
+  std::map<int, ProcessDetails> plugin_details_;
 };
 
 #endif  // CHROME_BROWSER_PLUGINS_CHROME_PLUGIN_SERVICE_FILTER_H_

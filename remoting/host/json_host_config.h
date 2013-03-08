@@ -7,7 +7,7 @@
 
 #include <string>
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "remoting/host/in_memory_host_config.h"
 
 namespace base {
@@ -19,7 +19,7 @@ namespace remoting {
 // JsonHostConfig implements MutableHostConfig for JSON file.
 class JsonHostConfig : public InMemoryHostConfig {
  public:
-  JsonHostConfig(const FilePath& filename);
+  JsonHostConfig(const base::FilePath& filename);
   virtual ~JsonHostConfig();
 
   virtual bool Read();
@@ -34,7 +34,7 @@ class JsonHostConfig : public InMemoryHostConfig {
   bool SetSerializedData(const std::string& config);
 
  private:
-  FilePath filename_;
+  base::FilePath filename_;
 
   DISALLOW_COPY_AND_ASSIGN(JsonHostConfig);
 };

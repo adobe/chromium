@@ -5,10 +5,14 @@
 #ifndef CHROME_BROWSER_POLICY_CONFIGURATION_POLICY_PROVIDER_H_
 #define CHROME_BROWSER_POLICY_CONFIGURATION_POLICY_PROVIDER_H_
 
+#include <set>
+#include <string>
+
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/observer_list.h"
 #include "chrome/browser/policy/policy_bundle.h"
+#include "chrome/browser/policy/policy_service.h"
 
 namespace policy {
 
@@ -47,10 +51,10 @@ class ConfigurationPolicyProvider {
   // Returns the current PolicyBundle.
   const PolicyBundle& policies() const { return policy_bundle_; }
 
-  // Check whether this provider has completed initialization. This is used to
-  // detect whether initialization is done in case providers implementations
-  // need to do asynchronous operations for initialization.
-  virtual bool IsInitializationComplete() const;
+  // Check whether this provider has completed initialization for the given
+  // policy |domain|. This is used to detect whether initialization is done in
+  // case implementations need to do asynchronous operations for initialization.
+  virtual bool IsInitializationComplete(PolicyDomain domain) const;
 
   // Asks the provider to refresh its policies. All the updates caused by this
   // call will be visible on the next call of OnUpdatePolicy on the observers,
@@ -62,6 +66,15 @@ class ConfigurationPolicyProvider {
   // Observers must detach themselves before the provider is deleted.
   virtual void AddObserver(Observer* observer);
   virtual void RemoveObserver(Observer* observer);
+
+  // Notifies the provider that there is interest in loading policy for the
+  // listed components of the given |domain|. The list is complete; all the
+  // components that matter for the domain are included, and components not
+  // included can be discarded. The provider can ignore this information or use
+  // it to selectively load the corresponding policy from its sources.
+  virtual void RegisterPolicyDomain(
+      PolicyDomain domain,
+      const std::set<std::string>& component_ids);
 
  protected:
   // Subclasses must invoke this to update the policies currently served by

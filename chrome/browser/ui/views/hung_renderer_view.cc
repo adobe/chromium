@@ -22,6 +22,7 @@
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_view.h"
 #include "content/public/common/result_codes.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
@@ -29,9 +30,9 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas.h"
+#include "ui/views/controls/button/label_button.h"
 #include "ui/views/controls/image_view.h"
 #include "ui/views/controls/label.h"
-#include "ui/views/controls/table/group_table_model.h"
 #include "ui/views/layout/grid_layout.h"
 #include "ui/views/layout/layout_constants.h"
 #include "ui/views/widget/widget.h"
@@ -89,7 +90,7 @@ void HungPagesTableModel::InitForWebContents(WebContents* hung_contents) {
       tab_observers_.push_back(new WebContentsObserverImpl(this,
                                                            hung_contents));
     }
-    for (TabContentsIterator it; !it.done(); ++it) {
+    for (TabContentsIterator it; !it.done(); it.Next()) {
       if (*it != hung_contents &&
           it->GetRenderProcessHost() == hung_contents->GetRenderProcessHost())
         tab_observers_.push_back(new WebContentsObserverImpl(this, *it));
@@ -101,7 +102,7 @@ void HungPagesTableModel::InitForWebContents(WebContents* hung_contents) {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// HungPagesTableModel, views::GroupTableModel implementation:
+// HungPagesTableModel, ui::TableModel implementation:
 
 int HungPagesTableModel::RowCount() {
   return static_cast<int>(tab_observers_.size());
@@ -206,7 +207,7 @@ HungRendererDialogView* HungRendererDialogView::GetInstance() {
 // static
 bool HungRendererDialogView::IsFrameActive(WebContents* contents) {
   gfx::NativeView frame_view =
-      platform_util::GetTopLevel(contents->GetNativeView());
+      platform_util::GetTopLevel(contents->GetView()->GetNativeView());
   return platform_util::IsWindowActive(frame_view);
 }
 
@@ -222,7 +223,6 @@ void HungRendererDialogView::KillRendererProcess(
 HungRendererDialogView::HungRendererDialogView()
     : hung_pages_table_(NULL),
       kill_button_(NULL),
-      kill_button_container_(NULL),
       initialized_(false) {
   InitClass();
 }
@@ -245,7 +245,7 @@ void HungRendererDialogView::ShowForWebContents(WebContents* contents) {
     gfx::Rect bounds = GetDisplayBounds(contents);
 
     gfx::NativeView frame_view =
-        platform_util::GetTopLevel(contents->GetNativeView());
+        platform_util::GetTopLevel(contents->GetView()->GetNativeView());
 
     views::Widget* insert_after =
         views::Widget::GetWidgetForNativeView(frame_view);
@@ -302,11 +302,15 @@ string16 HungRendererDialogView::GetDialogButtonLabel(
     ui::DialogButton button) const {
   if (button == ui::DIALOG_BUTTON_OK)
     return l10n_util::GetStringUTF16(IDS_BROWSER_HANGMONITOR_RENDERER_WAIT);
-  return string16();
+  return views::DialogDelegateView::GetDialogButtonLabel(button);
 }
 
-views::View* HungRendererDialogView::GetExtraView() {
-  return kill_button_container_;
+views::View* HungRendererDialogView::CreateExtraView() {
+  DCHECK(!kill_button_);
+  kill_button_ = new views::LabelButton(this,
+      l10n_util::GetStringUTF16(IDS_BROWSER_HANGMONITOR_RENDERER_END));
+  kill_button_->SetStyle(views::Button::STYLE_NATIVE_TEXTBUTTON);
+  return kill_button_;
 }
 
 bool HungRendererDialogView::Accept(bool window_closing) {
@@ -373,8 +377,6 @@ void HungRendererDialogView::Init() {
       false, true);
   hung_pages_table_->SetGrouper(hung_pages_table_model_.get());
 
-  CreateKillButtonView();
-
   using views::GridLayout;
   using views::ColumnSet;
 
@@ -407,35 +409,13 @@ void HungRendererDialogView::Init() {
   initialized_ = true;
 }
 
-void HungRendererDialogView::CreateKillButtonView() {
-  kill_button_ = new views::NativeTextButton(this,
-      l10n_util::GetStringUTF16(IDS_BROWSER_HANGMONITOR_RENDERER_END));
-
-  kill_button_container_ = new View;
-
-  using views::GridLayout;
-  using views::ColumnSet;
-
-  GridLayout* layout = new GridLayout(kill_button_container_);
-  kill_button_container_->SetLayoutManager(layout);
-
-  const int single_column_set_id = 0;
-  ColumnSet* column_set = layout->AddColumnSet(single_column_set_id);
-  column_set->AddPaddingColumn(0, frozen_icon_->width() +
-      kCentralColumnPadding);
-  column_set->AddColumn(GridLayout::LEADING, GridLayout::LEADING, 0,
-                        GridLayout::USE_PREF, 0, 0);
-
-  layout->StartRow(0, single_column_set_id);
-  layout->AddView(kill_button_);
-}
-
 gfx::Rect HungRendererDialogView::GetDisplayBounds(
     WebContents* contents) {
 #if defined(USE_AURA)
-  gfx::Rect contents_bounds(contents->GetNativeView()->GetBoundsInRootWindow());
+  gfx::Rect contents_bounds(
+      contents->GetView()->GetNativeView()->GetBoundsInRootWindow());
 #elif defined(OS_WIN)
-  HWND contents_hwnd = contents->GetNativeView();
+  HWND contents_hwnd = contents->GetView()->GetNativeView();
   RECT contents_bounds_rect;
   GetWindowRect(contents_hwnd, &contents_bounds_rect);
   gfx::Rect contents_bounds(contents_bounds_rect);

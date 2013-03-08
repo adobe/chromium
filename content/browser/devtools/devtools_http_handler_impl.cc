@@ -112,10 +112,10 @@ class DevToolsClientHostImpl : public DevToolsClientHost {
         detach_reason_("target_closed") {
   }
 
-  ~DevToolsClientHostImpl() {}
+  virtual ~DevToolsClientHostImpl() {}
 
   // DevToolsClientHost interface
-  virtual void InspectedContentsClosing() {
+  virtual void InspectedContentsClosing() OVERRIDE {
     if (is_closed_)
       return;
     is_closed_ = true;
@@ -135,7 +135,7 @@ class DevToolsClientHostImpl : public DevToolsClientHost {
         base::Bind(&net::HttpServer::Close, server_, connection_id_));
   }
 
-  virtual void DispatchOnInspectorFrontend(const std::string& data) {
+  virtual void DispatchOnInspectorFrontend(const std::string& data) OVERRIDE {
     message_loop_->PostTask(
         FROM_HERE,
         base::Bind(&net::HttpServer::SendOverWebSocket,
@@ -144,7 +144,7 @@ class DevToolsClientHostImpl : public DevToolsClientHost {
                    data));
   }
 
-  virtual void ReplacedWithAnotherClient() {
+  virtual void ReplacedWithAnotherClient() OVERRIDE {
     detach_reason_ = "replaced_with_devtools";
   }
 
@@ -242,6 +242,10 @@ GURL DevToolsHttpHandlerImpl::GetFrontendURL(DevToolsAgentHost* agent_host) {
   net::IPEndPoint ip_address;
   if (server_->GetLocalAddress(&ip_address))
     return GURL();
+  if (!agent_host) {
+    return GURL(std::string("http://") + ip_address.ToString() +
+        overridden_frontend_url_);
+  }
   std::string host = ip_address.ToString();
   std::string id = binding_->GetIdentifier(agent_host);
   return GURL(std::string("http://") +
@@ -334,9 +338,9 @@ void DevToolsHttpHandlerImpl::OnHttpRequest(
   std::string filename = PathWithoutParams(info.path.substr(10));
   std::string mime_type = GetMimeType(filename);
 
-  FilePath frontend_dir = delegate_->GetDebugFrontendDir();
+  base::FilePath frontend_dir = delegate_->GetDebugFrontendDir();
   if (!frontend_dir.empty()) {
-    FilePath path = frontend_dir.AppendASCII(filename);
+    base::FilePath path = frontend_dir.AppendASCII(filename);
     std::string data;
     file_util::ReadFileToString(path, &data);
     server_->Send200(connection_id, data, mime_type);
@@ -508,11 +512,13 @@ void DevToolsHttpHandlerImpl::OnJsonRequestUI(
   }
 
   if (command == "version") {
-    DictionaryValue version;
+    base::DictionaryValue version;
     version.SetString("Protocol-Version",
                       WebKit::WebDevToolsAgent::inspectorProtocolVersion());
     version.SetString("WebKit-Version",
                       webkit_glue::GetWebKitVersion());
+    version.SetString("Browser",
+                      content::GetContentClient()->GetProduct());
     version.SetString("User-Agent",
                       webkit_glue::GetUserAgent(GURL(chrome::kAboutBlankURL)));
     SendJson(connection_id, net::HTTP_OK, &version, "", jsonp);
@@ -521,7 +527,7 @@ void DevToolsHttpHandlerImpl::OnJsonRequestUI(
 
   if (command == "list") {
     PageList page_list = GeneratePageList();
-    ListValue json_pages_list;
+    base::ListValue json_pages_list;
     std::string host = info.headers["Host"];
     for (PageList::iterator i = page_list.begin(); i != page_list.end(); ++i)
       json_pages_list.Append(SerializePageInfo(*i, host));
@@ -539,11 +545,11 @@ void DevToolsHttpHandlerImpl::OnJsonRequestUI(
                jsonp);
       return;
     }
-    PageInfo page_info = CreatePageInfo(
-        rvh,
-        DevToolsHttpHandlerDelegate::kTargetTypeTab);
+    PageInfo page_info =
+        CreatePageInfo(rvh, DevToolsHttpHandlerDelegate::kTargetTypeTab);
     std::string host = info.headers["Host"];
-    scoped_ptr<DictionaryValue> dictionary(SerializePageInfo(page_info, host));
+    scoped_ptr<base::DictionaryValue> dictionary(
+        SerializePageInfo(page_info, host));
     SendJson(connection_id, net::HTTP_OK, dictionary.get(), "", jsonp);
     return;
   }
@@ -617,7 +623,8 @@ void DevToolsHttpHandlerImpl::OnWebSocketRequestUI(
     }
     browser_target_.reset(new DevToolsBrowserTarget(
         thread_->message_loop_proxy().get(), server_.get(), connection_id));
-    browser_target_->RegisterDomainHandler(new DevToolsTracingHandler());
+    browser_target_->RegisterDomainHandler(
+        DevToolsTracingHandler::kDomain, new DevToolsTracingHandler());
     AcceptWebSocket(connection_id, request);
     return;
   }
@@ -742,7 +749,7 @@ void DevToolsHttpHandlerImpl::StopHandlerThread() {
 
 void DevToolsHttpHandlerImpl::SendJson(int connection_id,
                                        net::HttpStatusCode status_code,
-                                       Value* value,
+                                       base::Value* value,
                                        const std::string& message,
                                        const std::string& jsonp) {
   if (!thread_.get())
@@ -756,7 +763,7 @@ void DevToolsHttpHandlerImpl::SendJson(int connection_id,
                                        &json_value);
   }
   std::string json_message;
-  scoped_ptr<Value> message_object(Value::CreateStringValue(message));
+  scoped_ptr<base::Value> message_object(new base::StringValue(message));
   base::JSONWriter::Write(message_object.get(), &json_message);
 
   std::string response;
@@ -866,13 +873,14 @@ DevToolsHttpHandlerImpl::CreatePageInfo(RenderViewHost* rvh,
   return page_info;
 }
 
-DictionaryValue* DevToolsHttpHandlerImpl::SerializePageInfo(
+base::DictionaryValue* DevToolsHttpHandlerImpl::SerializePageInfo(
     const PageInfo& page_info,
     const std::string& host) {
-  DictionaryValue* dictionary = new DictionaryValue;
+  base::DictionaryValue* dictionary = new base::DictionaryValue;
   dictionary->SetString("title", page_info.title);
   dictionary->SetString("url", page_info.url);
   dictionary->SetString("type", page_info.type);
+  dictionary->SetString("id", page_info.id);
   dictionary->SetString("thumbnailUrl", page_info.thumbnail_url);
   dictionary->SetString("faviconUrl", page_info.favicon_url);
   if (!page_info.attached) {

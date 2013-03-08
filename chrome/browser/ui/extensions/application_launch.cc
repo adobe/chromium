@@ -4,8 +4,11 @@
 
 #include "chrome/browser/ui/extensions/application_launch.h"
 
+#include <string>
+
 #include "base/command_line.h"
 #include "base/metrics/histogram.h"
+#include "chrome/browser/app_mode/app_mode_utils.h"
 #include "chrome/browser/extensions/extension_prefs.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
@@ -17,6 +20,7 @@
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/host_desktop.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/web_applications/web_app.h"
 #include "chrome/common/chrome_switches.h"
@@ -30,6 +34,10 @@
 #include "content/public/common/renderer_preferences.h"
 #include "ui/base/window_open_disposition.h"
 #include "ui/gfx/rect.h"
+
+#if defined(OS_MACOSX)
+#include "chrome/browser/ui/browser_commands_mac.h"
+#endif
 
 #if defined(OS_WIN)
 #include "win8/util/win8_util.h"
@@ -68,6 +76,35 @@ GURL UrlForExtension(const Extension* extension,
   return url;
 }
 
+ui::WindowShowState DetermineWindowShowState(
+    Profile* profile,
+    extension_misc::LaunchContainer container,
+    const Extension* extension) {
+  if (!extension ||
+      container != extension_misc::LAUNCH_WINDOW) {
+    return ui::SHOW_STATE_DEFAULT;
+  }
+
+  if (chrome::ShouldForceFullscreenApp())
+    return ui::SHOW_STATE_FULLSCREEN;
+
+#if defined(USE_ASH)
+  // In ash, LAUNCH_FULLSCREEN launches in a maximized app window and
+  // LAUNCH_WINDOW launches in a normal app window.
+  ExtensionService* service =
+      extensions::ExtensionSystem::Get(profile)->extension_service();
+  ExtensionPrefs::LaunchType launch_type =
+      service->extension_prefs()->GetLaunchType(
+          extension, ExtensionPrefs::LAUNCH_DEFAULT);
+  if (launch_type == ExtensionPrefs::LAUNCH_FULLSCREEN)
+    return ui::SHOW_STATE_MAXIMIZED;
+  else if (launch_type == ExtensionPrefs::LAUNCH_WINDOW)
+    return ui::SHOW_STATE_NORMAL;
+#endif
+
+  return ui::SHOW_STATE_DEFAULT;
+}
+
 WebContents* OpenApplicationWindow(
     Profile* profile,
     const Extension* extension,
@@ -96,23 +133,9 @@ WebContents* OpenApplicationWindow(
   Browser::CreateParams params(type, profile, chrome::GetActiveDesktop());
   params.app_name = app_name;
   params.initial_bounds = window_bounds;
-
-#if defined(USE_ASH)
-  if (extension &&
-      container == extension_misc::LAUNCH_WINDOW) {
-    // In ash, LAUNCH_FULLSCREEN launches in a maximized app window and
-    // LAUNCH_WINDOW launches in a normal app window.
-    ExtensionService* service =
-        extensions::ExtensionSystem::Get(profile)->extension_service();
-    ExtensionPrefs::LaunchType launch_type =
-        service->extension_prefs()->GetLaunchType(
-            extension, ExtensionPrefs::LAUNCH_DEFAULT);
-    if (launch_type == ExtensionPrefs::LAUNCH_FULLSCREEN)
-      params.initial_show_state = ui::SHOW_STATE_MAXIMIZED;
-    else if (launch_type == ExtensionPrefs::LAUNCH_WINDOW)
-      params.initial_show_state = ui::SHOW_STATE_NORMAL;
-  }
-#endif
+  params.initial_show_state = DetermineWindowShowState(profile,
+                                                       container,
+                                                       extension);
 
   Browser* browser = NULL;
 #if defined(OS_WIN)
@@ -160,7 +183,8 @@ WebContents* OpenApplicationTab(Profile* profile,
     // There's no current tab in this browser window, so add a new one.
     disposition = NEW_FOREGROUND_TAB;
   } else {
-    // For existing browser, ensure its window is activated.
+    // For existing browser, ensure its window is shown and activated.
+    browser->window()->Show();
     browser->window()->Activate();
   }
 
@@ -187,7 +211,8 @@ WebContents* OpenApplicationTab(Profile* profile,
   params.disposition = disposition;
 
   if (disposition == CURRENT_TAB) {
-    WebContents* existing_tab = chrome::GetActiveWebContents(browser);
+    WebContents* existing_tab =
+        browser->tab_strip_model()->GetActiveWebContents();
     TabStripModel* model = browser->tab_strip_model();
     int tab_index = model->GetIndexOfWebContents(existing_tab);
 
@@ -197,7 +222,7 @@ WebContents* OpenApplicationTab(Profile* profile,
                             WebKit::WebReferrerPolicyDefault),
           disposition, content::PAGE_TRANSITION_LINK, false));
     // Reset existing_tab as OpenURL() may have clobbered it.
-    existing_tab = chrome::GetActiveWebContents(browser);
+    existing_tab = browser->tab_strip_model()->GetActiveWebContents();
     if (params.tabstrip_add_types & TabStripModel::ADD_PINNED) {
       model->SetTabPinned(tab_index, true);
       // Pinning may have moved the tab.
@@ -212,32 +237,38 @@ WebContents* OpenApplicationTab(Profile* profile,
     contents = params.target_contents;
   }
 
-#if defined(USE_ASH)
-  // In ash, LAUNCH_FULLSCREEN launches in a maximized app window and it should
-  // not reach here.
-  DCHECK(launch_type != ExtensionPrefs::LAUNCH_FULLSCREEN);
+  // On Chrome OS the host desktop type for a browser window is always set to
+  // HOST_DESKTOP_TYPE_ASH. On Windows 8 it is only the case for Chrome ASH
+  // in metro mode.
+  if (browser->host_desktop_type() == chrome::HOST_DESKTOP_TYPE_ASH) {
+    // In ash, LAUNCH_FULLSCREEN launches in the OpenApplicationWindow function
+    // i.e. it should not reach here.
+    DCHECK(launch_type != ExtensionPrefs::LAUNCH_FULLSCREEN);
+  } else {
+    // TODO(skerner):  If we are already in full screen mode, and the user
+    // set the app to open as a regular or pinned tab, what should happen?
+    // Today we open the tab, but stay in full screen mode.  Should we leave
+    // full screen mode in this case?
+    if (launch_type == ExtensionPrefs::LAUNCH_FULLSCREEN &&
+        !browser->window()->IsFullscreen()) {
+#if defined(OS_MACOSX)
+      chrome::ToggleFullscreenWithChromeOrFallback(browser);
 #else
-  // TODO(skerner):  If we are already in full screen mode, and the user
-  // set the app to open as a regular or pinned tab, what should happen?
-  // Today we open the tab, but stay in full screen mode.  Should we leave
-  // full screen mode in this case?
-  if (launch_type == ExtensionPrefs::LAUNCH_FULLSCREEN &&
-      !browser->window()->IsFullscreen()) {
-    chrome::ToggleFullscreenMode(browser);
-  }
+      chrome::ToggleFullscreenMode(browser);
 #endif
-
+    }
+  }
   return contents;
 }
 
 }  // namespace
 
-namespace application_launch {
+namespace chrome {
 
-LaunchParams::LaunchParams(Profile* profile,
-                           const extensions::Extension* extension,
-                           extension_misc::LaunchContainer container,
-                           WindowOpenDisposition disposition)
+AppLaunchParams::AppLaunchParams(Profile* profile,
+                                 const extensions::Extension* extension,
+                                 extension_misc::LaunchContainer container,
+                                 WindowOpenDisposition disposition)
     : profile(profile),
       extension(extension),
       container(container),
@@ -245,9 +276,9 @@ LaunchParams::LaunchParams(Profile* profile,
       override_url(),
       command_line(NULL) {}
 
-LaunchParams::LaunchParams(Profile* profile,
-                           const extensions::Extension* extension,
-                           WindowOpenDisposition disposition)
+AppLaunchParams::AppLaunchParams(Profile* profile,
+                                 const extensions::Extension* extension,
+                                 WindowOpenDisposition disposition)
     : profile(profile),
       extension(extension),
       container(extension_misc::LAUNCH_NONE),
@@ -264,9 +295,9 @@ LaunchParams::LaunchParams(Profile* profile,
       extension, extensions::ExtensionPrefs::LAUNCH_REGULAR);
 }
 
-LaunchParams::LaunchParams(Profile* profile,
-                           const extensions::Extension* extension,
-                           int event_flags)
+AppLaunchParams::AppLaunchParams(Profile* profile,
+                                 const extensions::Extension* extension,
+                                 int event_flags)
     : profile(profile),
       extension(extension),
       container(extension_misc::LAUNCH_NONE),
@@ -290,7 +321,7 @@ LaunchParams::LaunchParams(Profile* profile,
   }
 }
 
-WebContents* OpenApplication(const LaunchParams& params) {
+WebContents* OpenApplication(const AppLaunchParams& params) {
   Profile* profile = params.profile;
   const extensions::Extension* extension = params.extension;
   extension_misc::LaunchContainer container = params.container;
@@ -358,4 +389,4 @@ WebContents* OpenAppShortcutWindow(Profile* profile,
   return tab;
 }
 
-}  // namespace application_launch
+}  // namespace chrome

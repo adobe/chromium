@@ -46,6 +46,8 @@
         "VeriSignClass3_G3",
         "Google1024",
         "Google2048",
+        "GoogleBackup1024",
+        "GoogleBackup2048",
         "EquifaxSecureCA",
         "GeoTrustGlobal"
       ],
@@ -171,6 +173,7 @@
     { "name": "talk.google.com", "include_subdomains": true, "mode": "force-https", "pins": "google" },
     { "name": "hostedtalkgadget.google.com", "include_subdomains": true, "mode": "force-https", "pins": "google" },
     { "name": "plus.google.com", "include_subdomains": true, "mode": "force-https", "pins": "google" },
+    { "name": "plus.sandbox.google.com", "include_subdomains": true, "mode": "force-https", "pins": "google" },
     { "name": "script.google.com", "include_subdomains": true, "mode": "force-https", "pins": "google" },
     { "name": "history.google.com", "include_subdomains": true, "mode": "force-https", "pins": "google" },
 
@@ -186,6 +189,7 @@
     { "name": "codereview.chromium.org", "include_subdomains": true, "mode": "force-https", "pins": "google" },
     { "name": "code.google.com", "include_subdomains": true, "mode": "force-https", "pins": "google" },
     { "name": "googlecode.com", "include_subdomains": true, "pins": "google" },
+    { "name": "dl.google.com", "include_subdomains": true, "mode": "force-https", "pins": "google" },
 
     // chart.apis.google.com is *not* HSTS because the certificate doesn't match
     // and there are lots of links out there that still use the name. The correct
@@ -551,7 +555,6 @@
     { "name": "dm.mylookout.com", "mode": "force-https" },
     { "name": "itriskltd.com", "include_subdomains": true, "mode": "force-https" },
     { "name": "stocktrade.de", "include_subdomains": true, "mode": "force-https" },
-    { "name": "rhcloud.com", "include_subdomains": true, "mode": "force-https" },
     { "name": "openshift.redhat.com", "include_subdomains": true, "mode": "force-https" },
     { "name": "therapynotes.com", "mode": "force-https" },
     { "name": "www.therapynotes.com", "mode": "force-https" },
@@ -565,6 +568,18 @@
     { "name": "serverdensity.io", "include_subdomains": true, "mode": "force-https" },
     { "name": "my.alfresco.com", "include_subdomains": true, "mode": "force-https" },
     { "name": "webmail.gigahost.dk", "include_subdomains": true, "mode": "force-https" },
+    { "name": "paymill.com", "include_subdomains": true, "mode": "force-https" },
+    { "name": "paymill.de", "include_subdomains": true, "mode": "force-https" },
+    { "name": "gocardless.com", "include_subdomains": true, "mode": "force-https" },
+    { "name": "espra.com", "include_subdomains": true, "mode": "force-https" },
+    { "name": "zoo24.de", "include_subdomains": true, "mode": "force-https" },
+    { "name": "mega.co.nz", "mode": "force-https" },
+    { "name": "api.mega.co.nz", "include_subdomains": true, "mode": "force-https" },
+    { "name": "lockify.com", "include_subdomains": true, "mode": "force-https" },
+    { "name": "writeapp.me", "mode": "force-https" },
+    { "name": "bugzilla.mozilla.org", "include_subdomains": true, "mode": "force-https" },
+    { "name": "members.nearlyfreespeech.net", "mode": "force-https" },
+    { "name": "ssl.panoramio.com", "mode": "force-https" },
 
     // Entries that are only valid if the client supports SNI.
     { "name": "gmail.com", "mode": "force-https", "pins": "google", "snionly": true },

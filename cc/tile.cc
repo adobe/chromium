@@ -4,6 +4,7 @@
 
 #include "cc/tile.h"
 
+#include "base/stringprintf.h"
 #include "cc/tile_manager.h"
 #include "third_party/khronos/GLES2/gl2.h"
 
@@ -14,13 +15,17 @@ Tile::Tile(TileManager* tile_manager,
            gfx::Size tile_size,
            GLenum format,
            gfx::Rect content_rect,
-           float contents_scale)
+           gfx::Rect opaque_rect,
+           float contents_scale,
+           int layer_id)
   : tile_manager_(tile_manager),
-    picture_pile_(picture_pile),
     tile_size_(tile_size),
     format_(format),
     content_rect_(content_rect),
-    contents_scale_(contents_scale) {
+    opaque_rect_(opaque_rect),
+    contents_scale_(contents_scale),
+    layer_id_(layer_id) {
+  set_picture_pile(picture_pile);
   tile_manager_->RegisterTile(this);
 }
 
@@ -28,23 +33,16 @@ Tile::~Tile() {
   tile_manager_->UnregisterTile(this);
 }
 
-void Tile::set_priority(WhichTree tree, const TilePriority& priority) {
-  tile_manager_->WillModifyTilePriority(this, tree, priority);
-  priority_[tree] = priority;
-}
-
-ResourceProvider::ResourceId Tile::GetResourceId() const {
-  if (!managed_state_.resource)
-    return 0;
-  if (managed_state_.resource_is_being_initialized)
-    return 0;
-
-  return managed_state_.resource->id();
-}
-
-size_t Tile::bytes_consumed_if_allocated() const {
-  DCHECK(format_ == GL_RGBA);
-  return 4 * tile_size_.width() * tile_size_.height();
+scoped_ptr<base::Value> Tile::AsValue() const {
+  scoped_ptr<base::DictionaryValue> res(new base::DictionaryValue());
+  res->SetString("id", base::StringPrintf("%p", this));
+  res->SetString("picture_pile", base::StringPrintf("%p",
+                                                    picture_pile_.get()));
+  res->SetDouble("contents_scale", contents_scale_);
+  res->Set("priority.0", priority_[ACTIVE_TREE].AsValue().release());
+  res->Set("priority.1", priority_[PENDING_TREE].AsValue().release());
+  res->Set("managed_state", managed_state_.AsValue().release());
+  return res.PassAs<base::Value>();
 }
 
 }  // namespace cc

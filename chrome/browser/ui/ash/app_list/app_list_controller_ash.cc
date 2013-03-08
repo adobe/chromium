@@ -5,7 +5,6 @@
 #include "chrome/browser/ui/ash/app_list/app_list_controller_ash.h"
 
 #include "ash/shell.h"
-#include "chrome/browser/ui/app_list/app_list_util.h"
 #include "chrome/browser/ui/ash/launcher/chrome_launcher_controller.h"
 
 AppListControllerDelegateAsh::AppListControllerDelegateAsh() {}
@@ -65,12 +64,6 @@ void AppListControllerDelegateAsh::LaunchApp(
   DismissView();
 }
 
-namespace chrome {
-
-#if defined(OS_CHROMEOS)
-void ShowAppList() {
-  ash::Shell::GetInstance()->ToggleAppList(NULL);
+bool AppListControllerDelegateAsh::ShouldShowUserIcon() {
+  return false;
 }
-#endif
-
-}  // namespace chrome

@@ -18,7 +18,7 @@
         '<(DEPTH)/third_party/WebKit/Source/WebKit/chromium/WebKit.gyp:webkit',
         '<(DEPTH)/ui/gl/gl.gyp:gl',
         '<(DEPTH)/ui/ui.gyp:ui',
-        '<(DEPTH)/webkit/support/webkit_support.gyp:webkit_gpu',
+        '<(DEPTH)/webkit/gpu/webkit_gpu.gyp:webkit_gpu',
       ],
       'defines': [
         'COMPOSITOR_IMPLEMENTATION',
@@ -118,6 +118,8 @@
         'layer_animator_unittest.cc',
         'layer_unittest.cc',
         'run_all_unittests.cc',
+        'test/layer_animator_test_controller.cc',
+        'test/layer_animator_test_controller.h',
         'test/test_compositor_host.h',
         'test/test_compositor_host_linux.cc',
         'test/test_compositor_host_mac.mm',

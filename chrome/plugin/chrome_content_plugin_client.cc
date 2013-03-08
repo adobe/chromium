@@ -5,8 +5,8 @@
 #include "chrome/plugin/chrome_content_plugin_client.h"
 
 #if defined(ENABLE_REMOTING)
+#include "base/files/file_path.h"
 #include "base/path_service.h"
-#include "base/file_path.h"
 #include "content/public/common/content_paths.h"
 #include "media/base/media.h"
 #if defined(OS_WIN)
@@ -39,12 +39,12 @@ void ChromeContentPluginClient::PreSandboxInitialization() {
 #elif defined(OS_WIN)
   // crypt32.dll is used to decode X509 certificates for Chromoting.
   std::string error;
-  if (base::LoadNativeLibrary(FilePath(L"crypt32.dll"), &error) == NULL)
+  if (base::LoadNativeLibrary(base::FilePath(L"crypt32.dll"), &error) == NULL)
     LOG(ERROR) << "Failed to load crypto32.dll: " << error;
 #endif // defined(OS_WIN)
 
   // Load media libraries for the Chromoting client plugin.
-  FilePath media_path;
+  base::FilePath media_path;
   PathService::Get(content::DIR_MEDIA_LIBS, &media_path);
   if (!media_path.empty())
     media::InitializeMediaLibrary(media_path);

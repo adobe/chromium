@@ -17,6 +17,11 @@
 #include "base/win/scoped_com_initializer.h"
 #endif
 
+#if defined(OS_ANDROID)
+#include "base/android/jni_android.h"
+#include "media/video/capture/android/video_capture_device_android.h"
+#endif
+
 #if defined(OS_MACOSX)
 // Mac/QTKit will always give you the size you ask for and this case will fail.
 #define MAYBE_AllocateBadSize DISABLED_AllocateBadSize
@@ -26,6 +31,18 @@
 #define MAYBE_AllocateBadSize AllocateBadSize
 // Windows currently uses DirectShow to convert from MJPEG and a raw format is
 // always delivered.
+#define MAYBE_CaptureMjpeg DISABLED_CaptureMjpeg
+#elif defined(OS_ANDROID)
+// TODO(wjia): enable those tests on Android.
+// On Android, native camera (JAVA) delivers frames on UI thread which is the
+// main thread for tests. This results in no frame received by
+// VideoCaptureAndroid.
+#define CaptureVGA DISABLED_CaptureVGA
+#define Capture720p DISABLED_Capture720p
+#define MAYBE_AllocateBadSize DISABLED_AllocateBadSize
+#define ReAllocateCamera DISABLED_ReAllocateCamera
+#define DeAllocateCameraWhileRunning DISABLED_DeAllocateCameraWhileRunning
+#define DeAllocateCameraWhileRunning DISABLED_DeAllocateCameraWhileRunning
 #define MAYBE_CaptureMjpeg DISABLED_CaptureMjpeg
 #else
 #define MAYBE_AllocateBadSize AllocateBadSize
@@ -57,8 +74,18 @@ class MockFrameObserver : public media::VideoCaptureDevice::EventHandler {
     OnFrameInfo(info.width, info.height, info.frame_rate, info.color);
   }
 
-  virtual void OnIncomingCapturedFrame(const uint8* data, int length,
-                                       base::Time timestamp) OVERRIDE {
+  virtual void OnIncomingCapturedFrame(
+      const uint8* data,
+      int length,
+      base::Time timestamp,
+      int rotation,
+      bool flip_vert,
+      bool flip_horiz) OVERRIDE {
+    wait_event_->Signal();
+  }
+
+  virtual void OnIncomingCapturedVideoFrame(media::VideoFrame* frame,
+                                            base::Time timestamp) OVERRIDE {
     wait_event_->Signal();
   }
 
@@ -79,6 +106,10 @@ class VideoCaptureDeviceTest : public testing::Test {
   virtual void SetUp() {
     frame_observer_.reset(new MockFrameObserver(&wait_event_));
     loop_.reset(new MessageLoopForUI());
+#if defined(OS_ANDROID)
+    media::VideoCaptureDeviceAndroid::RegisterVideoCaptureDevice(
+        base::android::AttachCurrentThread());
+#endif
   }
 
   virtual void TearDown() {

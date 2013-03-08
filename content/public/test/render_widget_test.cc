@@ -5,16 +5,16 @@
 #include "content/public/test/render_widget_test.h"
 
 #include "base/basictypes.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/stringprintf.h"
 #include "content/common/view_messages.h"
 #include "content/renderer/render_view_impl.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebSize.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
-#include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/codec/jpeg_codec.h"
 #include "ui/gfx/size.h"
 #include "ui/surface/transport_dib.h"
@@ -131,7 +131,7 @@ bool RenderWidgetTest::ImageContainsColor(const SkBitmap& bitmap,
 }
 
 void RenderWidgetTest::OutputBitmapToFile(const SkBitmap& bitmap,
-                                          const FilePath& file_path) {
+                                          const base::FilePath& file_path) {
   scoped_refptr<base::RefCountedBytes> bitmap_data(new base::RefCountedBytes());
   SkAutoLockPixels lock(bitmap);
   ASSERT_TRUE(gfx::JPEGCodec::Encode(

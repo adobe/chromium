@@ -11,20 +11,21 @@
 #include "base/bind.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
+#include "base/prefs/pref_service.h"
 #include "base/rand_util.h"
 #include "base/stl_util.h"
-#include "base/string_number_conversions.h"
-#include "base/string_split.h"
+#include "base/strings/string_number_conversions.h"
+#include "base/strings/string_split.h"
 #include "chrome/browser/extensions/blacklist.h"
 #include "chrome/browser/extensions/crx_installer.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/pending_extension_manager.h"
 #include "chrome/browser/extensions/updater/extension_downloader.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_set.h"
+#include "chrome/common/extensions/manifest.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_details.h"
@@ -97,7 +98,7 @@ ExtensionUpdater::CheckParams::~CheckParams() {}
 
 ExtensionUpdater::FetchedCRXFile::FetchedCRXFile(
     const std::string& i,
-    const FilePath& p,
+    const base::FilePath& p,
     const GURL& u,
     const std::set<int>& request_ids)
     : extension_id(i),
@@ -304,7 +305,7 @@ void ExtensionUpdater::AddToDownloader(
   for (ExtensionSet::const_iterator extension_iter = extensions->begin();
        extension_iter != extensions->end(); ++extension_iter) {
     const Extension& extension = **extension_iter;
-    if (!Extension::IsAutoUpdateableLocation(extension.location())) {
+    if (!Manifest::IsAutoUpdateableLocation(extension.location())) {
       VLOG(2) << "Extension " << extension.id() << " is not auto updateable";
       continue;
     }
@@ -354,7 +355,7 @@ void ExtensionUpdater::CheckNow(const CheckParams& params) {
     for (iter = pending_ids.begin(); iter != pending_ids.end(); ++iter) {
       const PendingExtensionInfo* info = pending_extension_manager->GetById(
           *iter);
-      if (!Extension::IsAutoUpdateableLocation(info->install_source())) {
+      if (!Manifest::IsAutoUpdateableLocation(info->install_source())) {
         VLOG(2) << "Extension " << *iter << " is not auto updateable";
         continue;
       }
@@ -481,7 +482,7 @@ void ExtensionUpdater::OnExtensionDownloadFailed(
 
 void ExtensionUpdater::OnExtensionDownloadFinished(
     const std::string& id,
-    const FilePath& path,
+    const base::FilePath& path,
     const GURL& download_url,
     const std::string& version,
     const PingResult& ping,

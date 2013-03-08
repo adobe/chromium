@@ -5,8 +5,8 @@
 #include "chrome/browser/google_apis/mock_drive_service.h"
 
 #include "base/bind.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/json/json_file_value_serializer.h"
 #include "base/location.h"
 #include "base/message_loop_proxy.h"
@@ -29,11 +29,8 @@ MockDriveService::MockDriveService() {
       .WillByDefault(Invoke(this, &MockDriveService::GetResourceListStub));
   ON_CALL(*this, GetAccountMetadata(_))
       .WillByDefault(Invoke(this, &MockDriveService::GetAccountMetadataStub));
-  ON_CALL(*this, DeleteResource(_, _))
+  ON_CALL(*this, DeleteResource(_, _, _))
       .WillByDefault(Invoke(this, &MockDriveService::DeleteResourceStub));
-  ON_CALL(*this, DownloadHostedDocument(_, _, _, _, _))
-      .WillByDefault(
-          Invoke(this, &MockDriveService::DownloadHostedDocumentStub));
   ON_CALL(*this, CopyHostedDocument(_, _, _))
       .WillByDefault(Invoke(this, &MockDriveService::CopyHostedDocumentStub));
   ON_CALL(*this, RenameResource(_, _, _))
@@ -90,8 +87,8 @@ void MockDriveService::GetResourceListStub(
 
 void MockDriveService::GetAccountMetadataStub(
     const GetAccountMetadataCallback& callback) {
-  scoped_ptr<AccountMetadataFeed> account_metadata =
-      AccountMetadataFeed::CreateFrom(*account_metadata_data_);
+  scoped_ptr<AccountMetadata> account_metadata =
+      AccountMetadata::CreateFrom(*account_metadata_data_);
   base::MessageLoopProxy::current()->PostTask(
       FROM_HERE,
       base::Bind(callback, HTTP_SUCCESS,
@@ -99,22 +96,12 @@ void MockDriveService::GetAccountMetadataStub(
 }
 
 void MockDriveService::DeleteResourceStub(
-    const GURL& edit_url,
+    const std::string& resource_id,
+    const std::string& etag,
     const EntryActionCallback& callback) {
   base::MessageLoopProxy::current()->PostTask(
       FROM_HERE,
       base::Bind(callback, HTTP_SUCCESS));
-}
-
-void MockDriveService::DownloadHostedDocumentStub(
-    const FilePath& virtual_path,
-    const FilePath& local_tmp_path,
-    const GURL& content_url,
-    DocumentExportFormat format,
-    const DownloadActionCallback& callback) {
-  base::MessageLoopProxy::current()->PostTask(
-      FROM_HERE,
-      base::Bind(callback, HTTP_SUCCESS, local_tmp_path));
 }
 
 void MockDriveService::CopyHostedDocumentStub(
@@ -130,7 +117,7 @@ void MockDriveService::CopyHostedDocumentStub(
 }
 
 void MockDriveService::RenameResourceStub(
-    const GURL& edit_url,
+    const std::string& resource_id,
     const std::string& new_name,
     const EntryActionCallback& callback) {
   base::MessageLoopProxy::current()->PostTask(
@@ -139,8 +126,8 @@ void MockDriveService::RenameResourceStub(
 }
 
 void MockDriveService::AddResourceToDirectoryStub(
-    const GURL& parent_content_url,
-    const GURL& edit_url,
+    const std::string& parent_resource_id,
+    const std::string& resource_id,
     const EntryActionCallback& callback) {
   base::MessageLoopProxy::current()->PostTask(
       FROM_HERE,
@@ -148,7 +135,7 @@ void MockDriveService::AddResourceToDirectoryStub(
 }
 
 void MockDriveService::RemoveResourceFromDirectoryStub(
-    const GURL& parent_content_url,
+    const std::string& parent_resource_id,
     const std::string& resource_id,
     const EntryActionCallback& callback) {
   base::MessageLoopProxy::current()->PostTask(
@@ -157,7 +144,7 @@ void MockDriveService::RemoveResourceFromDirectoryStub(
 }
 
 void MockDriveService::CreateDirectoryStub(
-    const GURL& parent_content_url,
+    const std::string& parent_resource_id,
     const std::string& directory_name,
     const GetResourceEntryCallback& callback) {
   scoped_ptr<ResourceEntry> resource_entry =
@@ -169,9 +156,9 @@ void MockDriveService::CreateDirectoryStub(
 }
 
 void MockDriveService::DownloadFileStub(
-    const FilePath& virtual_path,
-    const FilePath& local_tmp_path,
-    const GURL& content_url,
+    const base::FilePath& virtual_path,
+    const base::FilePath& local_tmp_path,
+    const GURL& download_url,
     const DownloadActionCallback& download_action_callback,
     const GetContentCallback& get_content_callback) {
   GDataErrorCode error = HTTP_SUCCESS;

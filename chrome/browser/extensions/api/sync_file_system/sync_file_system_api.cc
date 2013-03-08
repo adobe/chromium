@@ -28,7 +28,9 @@
 
 using content::BrowserContext;
 using content::BrowserThread;
+using sync_file_system::SyncFileStatus;
 using sync_file_system::SyncFileSystemServiceFactory;
+using sync_file_system::SyncStatusCode;
 
 namespace extensions {
 
@@ -39,25 +41,23 @@ const char* const kDriveCloudService =
     sync_file_system::DriveFileSyncService::kServiceName;
 
 // Error messages.
-const char kNotSupportedService[] = "Cloud service %s not supported.";
 const char kFileError[] = "File error %d.";
 const char kQuotaError[] = "Quota error %d.";
 
-api::sync_file_system::FileSyncStatus FileSyncStatusEnumToExtensionEnum(
-    const fileapi::SyncFileStatus state) {
+api::sync_file_system::FileStatus FileSyncStatusEnumToExtensionEnum(
+    const SyncFileStatus state) {
   switch (state) {
-    case fileapi::SYNC_FILE_STATUS_UNKNOWN:
-      return api::sync_file_system::FILE_SYNC_STATUS_NONE;
-    case fileapi::SYNC_FILE_STATUS_SYNCED:
-      return api::sync_file_system::FILE_SYNC_STATUS_SYNCED;
-    case fileapi::SYNC_FILE_STATUS_HAS_PENDING_CHANGES:
-      return api::sync_file_system::FILE_SYNC_STATUS_PENDING;
-    case fileapi::SYNC_FILE_STATUS_CONFLICTING:
-      return api::sync_file_system::
-          FILE_SYNC_STATUS_CONFLICTING;
+    case sync_file_system::SYNC_FILE_STATUS_UNKNOWN:
+      return api::sync_file_system::FILE_STATUS_NONE;
+    case sync_file_system::SYNC_FILE_STATUS_SYNCED:
+      return api::sync_file_system::FILE_STATUS_SYNCED;
+    case sync_file_system::SYNC_FILE_STATUS_HAS_PENDING_CHANGES:
+      return api::sync_file_system::FILE_STATUS_PENDING;
+    case sync_file_system::SYNC_FILE_STATUS_CONFLICTING:
+      return api::sync_file_system::FILE_STATUS_CONFLICTING;
   }
   NOTREACHED();
-  return api::sync_file_system::FILE_SYNC_STATUS_NONE;
+  return api::sync_file_system::FILE_STATUS_NONE;
 }
 
 sync_file_system::SyncFileSystemService* GetSyncFileSystemService(
@@ -72,29 +72,19 @@ sync_file_system::SyncFileSystemService* GetSyncFileSystemService(
   return service;
 }
 
-bool IsValidServiceName(const std::string& service_name, std::string* error) {
-  DCHECK(error);
-  if (service_name != std::string(kDriveCloudService)) {
-    *error = base::StringPrintf(kNotSupportedService, service_name.c_str());
-    return false;
-  }
-  return true;
-}
-
 }  // namespace
 
 bool SyncFileSystemDeleteFileSystemFunction::RunImpl() {
   std::string url;
   EXTENSION_FUNCTION_VALIDATE(args_->GetString(0, &url));
-  fileapi::FileSystemURL file_system_url((GURL(url)));
-  if (!IsValidServiceName(file_system_url.filesystem_id(), &error_)) {
-    return false;
-  }
 
   scoped_refptr<fileapi::FileSystemContext> file_system_context =
       BrowserContext::GetStoragePartition(
           profile(),
           render_view_host()->GetSiteInstance())->GetFileSystemContext();
+  fileapi::FileSystemURL file_system_url(
+      file_system_context->CrackURL(GURL(url)));
+
   BrowserThread::PostTask(
       BrowserThread::IO,
       FROM_HERE,
@@ -133,12 +123,12 @@ void SyncFileSystemDeleteFileSystemFunction::DidDeleteFileSystem(
 }
 
 bool SyncFileSystemRequestFileSystemFunction::RunImpl() {
-  std::string service_name;
-  EXTENSION_FUNCTION_VALIDATE(args_->GetString(0, &service_name));
-  if (!IsValidServiceName(service_name, &error_)) {
-    return false;
-  }
-
+  // Please note that Google Drive is the only supported cloud backend at this
+  // time. However other functions which have already been written to
+  // accommodate different service names are being left as is to allow easier
+  // future support for other backend services. (http://crbug.com/172562).
+  const std::string service_name = sync_file_system::DriveFileSyncService::
+      kServiceName;
   // Initializes sync context for this extension and continue to open
   // a new file system.
   GetSyncFileSystemService(profile())->
@@ -160,9 +150,9 @@ SyncFileSystemRequestFileSystemFunction::GetFileSystemContext() {
 
 void SyncFileSystemRequestFileSystemFunction::DidInitializeFileSystemContext(
     const std::string& service_name,
-    fileapi::SyncStatusCode status) {
-  if (status != fileapi::SYNC_STATUS_OK) {
-    error_ = fileapi::SyncStatusCodeToString(status);
+    SyncStatusCode status) {
+  if (status != sync_file_system::SYNC_STATUS_OK) {
+    error_ = sync_file_system::SyncStatusCodeToString(status);
     SendResponse(false);
     return;
   }
@@ -209,10 +199,13 @@ void SyncFileSystemRequestFileSystemFunction::DidOpenFileSystem(
 bool SyncFileSystemGetUsageAndQuotaFunction::RunImpl() {
   std::string url;
   EXTENSION_FUNCTION_VALIDATE(args_->GetString(0, &url));
-  fileapi::FileSystemURL file_system_url((GURL(url)));
-  if (!IsValidServiceName(file_system_url.filesystem_id(), &error_)) {
-    return false;
-  }
+
+  scoped_refptr<fileapi::FileSystemContext> file_system_context =
+      BrowserContext::GetStoragePartition(
+          profile(),
+          render_view_host()->GetSiteInstance())->GetFileSystemContext();
+  fileapi::FileSystemURL file_system_url(
+      file_system_context->CrackURL(GURL(url)));
 
   scoped_refptr<quota::QuotaManager> quota_manager =
       BrowserContext::GetStoragePartition(
@@ -232,41 +225,47 @@ bool SyncFileSystemGetUsageAndQuotaFunction::RunImpl() {
   return true;
 }
 
-bool SyncFileSystemGetFileSyncStatusFunction::RunImpl() {
+bool SyncFileSystemGetFileStatusFunction::RunImpl() {
   std::string url;
   EXTENSION_FUNCTION_VALIDATE(args_->GetString(0, &url));
-  fileapi::FileSystemURL file_system_url((GURL(url)));
+
+  scoped_refptr<fileapi::FileSystemContext> file_system_context =
+      BrowserContext::GetStoragePartition(
+          profile(),
+          render_view_host()->GetSiteInstance())->GetFileSystemContext();
+  fileapi::FileSystemURL file_system_url(
+      file_system_context->CrackURL(GURL(url)));
 
   SyncFileSystemServiceFactory::GetForProfile(profile())->GetFileSyncStatus(
       file_system_url,
-      Bind(&SyncFileSystemGetFileSyncStatusFunction::DidGetFileSyncStatus,
+      Bind(&SyncFileSystemGetFileStatusFunction::DidGetFileStatus,
            this));
   return true;
 }
 
-void SyncFileSystemGetFileSyncStatusFunction::DidGetFileSyncStatus(
-    const fileapi::SyncStatusCode sync_service_status,
-    const fileapi::SyncFileStatus sync_file_status) {
+void SyncFileSystemGetFileStatusFunction::DidGetFileStatus(
+    const SyncStatusCode sync_service_status,
+    const SyncFileStatus sync_file_status) {
   // Repost to switch from IO thread to UI thread for SendResponse().
   if (!BrowserThread::CurrentlyOn(BrowserThread::UI)) {
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
     BrowserThread::PostTask(
         BrowserThread::UI,
         FROM_HERE,
-        Bind(&SyncFileSystemGetFileSyncStatusFunction::DidGetFileSyncStatus,
+        Bind(&SyncFileSystemGetFileStatusFunction::DidGetFileStatus,
              this, sync_service_status, sync_file_status));
     return;
   }
 
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  if (sync_service_status != fileapi::SYNC_STATUS_OK) {
-    error_ = fileapi::SyncStatusCodeToString(sync_service_status);
+  if (sync_service_status != sync_file_system::SYNC_STATUS_OK) {
+    error_ = sync_file_system::SyncStatusCodeToString(sync_service_status);
     SendResponse(false);
     return;
   }
 
   // Convert from C++ to JavaScript enum.
-  results_ = api::sync_file_system::GetFileSyncStatus::Results::Create(
+  results_ = api::sync_file_system::GetFileStatus::Results::Create(
       FileSyncStatusEnumToExtensionEnum(sync_file_status));
   SendResponse(true);
 }

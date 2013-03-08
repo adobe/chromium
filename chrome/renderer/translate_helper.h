@@ -7,6 +7,7 @@
 
 #include <string>
 
+#include "base/gtest_prod_util.h"
 #include "base/memory/weak_ptr.h"
 #include "chrome/common/translate_errors.h"
 #include "content/public/renderer/render_view_observer.h"
@@ -65,6 +66,25 @@ class TranslateHelper : public content::RenderViewObserver {
   virtual bool DontDelayTasks();
 
  private:
+  FRIEND_TEST_ALL_PREFIXES(TranslateHelperTest, LanguageCodeTypoCorrection);
+  FRIEND_TEST_ALL_PREFIXES(TranslateHelperTest, LanguageCodeSynonyms);
+  FRIEND_TEST_ALL_PREFIXES(TranslateHelperTest, ResetInvalidLanguageCode);
+  FRIEND_TEST_ALL_PREFIXES(TranslateHelperTest,
+                           CLDDisagreeWithWrongLanguageCode);
+
+  // Correct language code if it contains well-known mistakes.
+  static void CorrectLanguageCodeTypo(std::string* code);
+
+  // Convert language code to the one used in server supporting list.
+  static void ConvertLanguageCodeSynonym(std::string* code);
+
+  // Reset language code if the specified string is apparently invalid.
+  static void ResetInvalidLanguageCode(std::string* code);
+
+  // Determine content page language from Content-Language code and contents.
+  static std::string DeterminePageLanguage(const std::string& code,
+                                           const string16& contents);
+
   // Returns whether the page associated with |document| is a candidate for
   // translation.  Some pages can explictly specify (via a meta-tag) that they
   // should not be translated.

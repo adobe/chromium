@@ -3,7 +3,6 @@
 // found in the LICENSE file.
 
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/automation/automation_util.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/extensions/extension_host.h"
 #include "chrome/browser/extensions/extension_process_manager.h"
@@ -30,7 +29,7 @@ namespace {
 class ProcessManagementTest : public ExtensionBrowserTest {
  private:
   // This is needed for testing isolated apps, which are still experimental.
-  virtual void SetUpCommandLine(CommandLine* command_line) {
+  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
     ExtensionBrowserTest::SetUpCommandLine(command_line);
     command_line->AppendSwitch(switches::kEnableExperimentalExtensionApis);
   }
@@ -38,10 +37,19 @@ class ProcessManagementTest : public ExtensionBrowserTest {
 
 }  // namespace
 
+
+// TODO(nasko): Timeouts on Windows: crbug.com/173137
+// V8 error on Linux: https://code.google.com/p/v8/issues/detail?id=2533
+#if defined(OS_WIN) || defined(OS_LINUX)
+#define MAYBE_ProcessOverflow DISABLED_ProcessOverflow
+#else
+#define MAYBE_ProcessOverflow ProcessOverflow
+#endif
+
 // Ensure that an isolated app never shares a process with WebUIs, non-isolated
 // extensions, and normal webpages.  None of these should ever comingle
 // RenderProcessHosts even if we hit the process limit.
-IN_PROC_BROWSER_TEST_F(ProcessManagementTest, ProcessOverflow) {
+IN_PROC_BROWSER_TEST_F(ProcessManagementTest, MAYBE_ProcessOverflow) {
   // Set max renderers to 1 to force running out of processes.
   content::RenderProcessHost::SetMaxRendererProcessCount(1);
 

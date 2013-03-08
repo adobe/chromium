@@ -14,15 +14,15 @@
 #include <map>
 
 #include "base/bind.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/json/json_reader.h"
 #include "base/logging.h"
 #include "base/md5.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "base/rand_util.h"
-#include "base/string_number_conversions.h"
 #include "base/string_util.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/common/child_process_logging.h"
@@ -106,7 +106,7 @@ class PrintSystemCUPS : public PrintSystem {
 
   // Helper functions.
   PlatformJobId SpoolPrintJob(const std::string& print_ticket,
-                              const FilePath& print_data_file_path,
+                              const base::FilePath& print_data_file_path,
                               const std::string& print_data_mime_type,
                               const std::string& printer_name,
                               const std::string& job_title,
@@ -289,7 +289,8 @@ class PrinterWatcherCUPS
     return true;
   }
 
-  bool GetCurrentPrinterInfo(printing::PrinterBasicInfo* printer_info) {
+  virtual bool GetCurrentPrinterInfo(
+      printing::PrinterBasicInfo* printer_info) OVERRIDE {
     DCHECK(printer_info);
     return print_system_->GetPrinterInfo(printer_name_, printer_info);
   }
@@ -380,7 +381,7 @@ class JobSpoolerCUPS : public PrintSystem::JobSpooler {
 
   // PrintSystem::JobSpooler implementation.
   virtual bool Spool(const std::string& print_ticket,
-                     const FilePath& print_data_file_path,
+                     const base::FilePath& print_data_file_path,
                      const std::string& print_data_mime_type,
                      const std::string& printer_name,
                      const std::string& job_title,
@@ -758,7 +759,7 @@ int PrintSystemCUPS::GetJobs(cups_job_t** jobs, const GURL& url,
 
 PlatformJobId PrintSystemCUPS::SpoolPrintJob(
     const std::string& print_ticket,
-    const FilePath& print_data_file_path,
+    const base::FilePath& print_data_file_path,
     const std::string& print_data_mime_type,
     const std::string& printer_name,
     const std::string& job_title,

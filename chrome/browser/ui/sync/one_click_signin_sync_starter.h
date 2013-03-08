@@ -10,6 +10,7 @@
 #include "chrome/browser/signin/signin_tracker.h"
 
 class Browser;
+class ProfileSyncService;
 
 // Waits for successful singin notification from the signin manager and then
 // starts the sync machine.  Instances of this class delete themselves once
@@ -24,14 +25,21 @@ class OneClickSigninSyncStarter : public SigninTracker::Observer {
     // Starts the process of signing the user in with the SigninManager, and
     // once completed redirects the user to the settings page to allow them
     // to configure which data types to sync before sync is enabled.
-    CONFIGURE_SYNC_FIRST
+    CONFIGURE_SYNC_FIRST,
+
+    // The process should be aborted because the undo button has been pressed.
+    UNDO_SYNC
   };
 
-  OneClickSigninSyncStarter(Browser* browser,
+  // |profile| must not be NULL, however |browser| can be. When using the
+  // OneClickSigninSyncStarter from a browser, provide both.
+  OneClickSigninSyncStarter(Profile* profile,
+                            Browser* browser,
                             const std::string& session_index,
                             const std::string& email,
                             const std::string& password,
-                            StartSyncMode start_mode);
+                            StartSyncMode start_mode,
+                            bool force_same_tab_navigation);
 
  private:
   virtual ~OneClickSigninSyncStarter();
@@ -41,9 +49,15 @@ class OneClickSigninSyncStarter : public SigninTracker::Observer {
   virtual void SigninFailed(const GoogleServiceAuthError& error) OVERRIDE;
   virtual void SigninSuccess() OVERRIDE;
 
+  ProfileSyncService* GetProfileSyncService();
+
+  void ShowSyncSettingsPageOnSameTab();
+
+  Profile* profile_;
   Browser* browser_;
   SigninTracker signin_tracker_;
   StartSyncMode start_mode_;
+  bool force_same_tab_navigation_;
 
   DISALLOW_COPY_AND_ASSIGN(OneClickSigninSyncStarter);
 };

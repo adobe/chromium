@@ -10,6 +10,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "chrome/common/extensions/command.h"
 #include "chrome/common/extensions/extension.h"
+#include "chrome/common/extensions/manifest.h"
 #include "chrome/common/extensions/manifest_handler.h"
 
 namespace extensions {
@@ -39,11 +40,8 @@ class CommandsHandler : public ManifestHandler {
   CommandsHandler();
   virtual ~CommandsHandler();
 
-  virtual bool Parse(const base::Value* value,
-                     Extension* extension,
-                     string16* error) OVERRIDE;
-
-  virtual bool HasNoKey(Extension* extension, string16* error) OVERRIDE;
+  virtual bool Parse(Extension* extension, string16* error) OVERRIDE;
+  virtual bool AlwaysParseForType(Manifest::Type type) const OVERRIDE;
 
  private:
   // If the extension defines a browser action, but no command for it, then
@@ -51,6 +49,10 @@ class CommandsHandler : public ManifestHandler {
   // No keyboard shortcut will be assigned to it, until the user selects one.
   void MaybeSetBrowserActionDefault(const Extension* extension,
                                     CommandsInfo* info);
+
+  virtual const std::vector<std::string> Keys() const OVERRIDE;
+
+  DISALLOW_COPY_AND_ASSIGN(CommandsHandler);
 };
 
 }  // namespace extensions

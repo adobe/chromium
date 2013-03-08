@@ -7,6 +7,7 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/logging.h"
+#include "base/prefs/pref_service.h"
 #include "base/stl_util.h"
 #include "base/threading/worker_pool.h"
 #include "build/build_config.h"
@@ -18,9 +19,7 @@
 #include "chrome/browser/net/chrome_net_log.h"
 #include "chrome/browser/net/chrome_network_delegate.h"
 #include "chrome/browser/net/chrome_url_request_context.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/webui/chrome_url_data_manager_backend.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/pref_names.h"
@@ -34,6 +33,7 @@
 #include "net/http/http_cache.h"
 #include "net/http/http_network_session.h"
 #include "net/http/http_server_properties_impl.h"
+#include "net/url_request/protocol_intercept_job_factory.h"
 #include "net/url_request/url_request_job_factory_impl.h"
 #include "webkit/database/database_tracker.h"
 
@@ -50,15 +50,6 @@ OffTheRecordProfileIOData::Handle::Handle(Profile* profile)
 OffTheRecordProfileIOData::Handle::~Handle() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   io_data_->ShutdownOnUIThread();
-}
-
-base::Callback<ChromeURLDataManagerBackend*(void)>
-OffTheRecordProfileIOData::Handle::
-GetChromeURLDataManagerBackendGetter() const {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  LazyInitialize();
-  return base::Bind(&ProfileIOData::GetChromeURLDataManagerBackend,
-                    base::Unretained(io_data_));
 }
 
 content::ResourceContext*
@@ -78,17 +69,30 @@ OffTheRecordProfileIOData::Handle::GetResourceContextNoInit() const {
 }
 
 scoped_refptr<ChromeURLRequestContextGetter>
-OffTheRecordProfileIOData::Handle::GetMainRequestContextGetter() const {
+OffTheRecordProfileIOData::Handle::CreateMainRequestContextGetter(
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        blob_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        file_system_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        developer_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        chrome_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        chrome_devtools_protocol_handler) const {
   // TODO(oshima): Re-enable when ChromeOS only accesses the profile on the UI
   // thread.
 #if !defined(OS_CHROMEOS)
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 #endif  // defined(OS_CHROMEOS)
   LazyInitialize();
-  if (!main_request_context_getter_) {
-    main_request_context_getter_ =
-        ChromeURLRequestContextGetter::CreateOffTheRecord(profile_, io_data_);
-  }
+  DCHECK(!main_request_context_getter_);
+  main_request_context_getter_ =
+      ChromeURLRequestContextGetter::CreateOffTheRecord(
+          profile_, io_data_, blob_protocol_handler.Pass(),
+          file_system_protocol_handler.Pass(),
+          developer_protocol_handler.Pass(), chrome_protocol_handler.Pass(),
+          chrome_devtools_protocol_handler.Pass());
   return main_request_context_getter_;
 }
 
@@ -106,7 +110,7 @@ OffTheRecordProfileIOData::Handle::GetExtensionsRequestContextGetter() const {
 
 scoped_refptr<ChromeURLRequestContextGetter>
 OffTheRecordProfileIOData::Handle::GetIsolatedAppRequestContextGetter(
-    const FilePath& partition_path,
+    const base::FilePath& partition_path,
     bool in_memory) const {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(!partition_path.empty());
@@ -116,8 +120,31 @@ OffTheRecordProfileIOData::Handle::GetIsolatedAppRequestContextGetter(
   StoragePartitionDescriptor descriptor(partition_path, in_memory);
   ChromeURLRequestContextGetterMap::iterator iter =
       app_request_context_getter_map_.find(descriptor);
-  if (iter != app_request_context_getter_map_.end())
-    return iter->second;
+  CHECK(iter != app_request_context_getter_map_.end());
+  return iter->second;
+}
+
+scoped_refptr<ChromeURLRequestContextGetter>
+OffTheRecordProfileIOData::Handle::CreateIsolatedAppRequestContextGetter(
+    const base::FilePath& partition_path,
+    bool in_memory,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        blob_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        file_system_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        developer_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        chrome_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        chrome_devtools_protocol_handler) const {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK(!partition_path.empty());
+  LazyInitialize();
+
+  // Keep a map of request context getters, one per requested app ID.
+  StoragePartitionDescriptor descriptor(partition_path, in_memory);
+  DCHECK_EQ(app_request_context_getter_map_.count(descriptor), 0u);
 
   scoped_ptr<ProtocolHandlerRegistry::JobInterceptorFactory>
       protocol_handler_interceptor(
@@ -125,8 +152,10 @@ OffTheRecordProfileIOData::Handle::GetIsolatedAppRequestContextGetter(
               CreateJobInterceptorFactory());
   ChromeURLRequestContextGetter* context =
       ChromeURLRequestContextGetter::CreateOffTheRecordForIsolatedApp(
-          profile_, io_data_, descriptor,
-          protocol_handler_interceptor.Pass());
+          profile_, io_data_, descriptor, protocol_handler_interceptor.Pass(),
+          blob_protocol_handler.Pass(), file_system_protocol_handler.Pass(),
+          developer_protocol_handler.Pass(), chrome_protocol_handler.Pass(),
+          chrome_devtools_protocol_handler.Pass());
   app_request_context_getter_map_[descriptor] = context;
 
   return context;
@@ -154,8 +183,18 @@ OffTheRecordProfileIOData::~OffTheRecordProfileIOData() {
   DestroyResourceContext();
 }
 
-void OffTheRecordProfileIOData::LazyInitializeInternal(
-    ProfileParams* profile_params) const {
+void OffTheRecordProfileIOData::InitializeInternal(
+    ProfileParams* profile_params,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        blob_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        file_system_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        developer_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        chrome_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        chrome_devtools_protocol_handler) const {
   ChromeURLRequestContext* main_context = main_request_context();
 
   IOThread* const io_thread = profile_params->io_thread;
@@ -215,12 +254,27 @@ void OffTheRecordProfileIOData::LazyInitializeInternal(
   scoped_ptr<net::URLRequestJobFactoryImpl> main_job_factory(
       new net::URLRequestJobFactoryImpl());
 
+  bool set_protocol = main_job_factory->SetProtocolHandler(
+      chrome::kBlobScheme, blob_protocol_handler.release());
+  DCHECK(set_protocol);
+  set_protocol = main_job_factory->SetProtocolHandler(
+      chrome::kFileSystemScheme, file_system_protocol_handler.release());
+  DCHECK(set_protocol);
+  set_protocol = main_job_factory->SetProtocolHandler(
+      chrome::kChromeUIScheme, chrome_protocol_handler.release());
+  DCHECK(set_protocol);
+  set_protocol = main_job_factory->SetProtocolHandler(
+      chrome::kChromeDevToolsScheme,
+      chrome_devtools_protocol_handler.release());
+  DCHECK(set_protocol);
   main_job_factory_ = SetUpJobFactoryDefaults(
       main_job_factory.Pass(),
       profile_params->protocol_handler_interceptor.Pass(),
       network_delegate(),
       main_context->ftp_transaction_factory(),
       main_context->ftp_auth_cache());
+  main_job_factory_.reset(new net::ProtocolInterceptJobFactory(
+      main_job_factory_.Pass(), developer_protocol_handler.Pass()));
   main_context->set_job_factory(main_job_factory_.get());
 
 #if defined(ENABLE_EXTENSIONS)
@@ -281,7 +335,17 @@ OffTheRecordProfileIOData::InitializeAppRequestContext(
     ChromeURLRequestContext* main_context,
     const StoragePartitionDescriptor& partition_descriptor,
     scoped_ptr<ProtocolHandlerRegistry::JobInterceptorFactory>
-        protocol_handler_interceptor) const {
+        protocol_handler_interceptor,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        blob_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        file_system_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        developer_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        chrome_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        chrome_devtools_protocol_handler) const {
   AppRequestContext* context = new AppRequestContext(load_time_stats());
 
   // Copy most state from the main context.
@@ -304,12 +368,27 @@ OffTheRecordProfileIOData::InitializeAppRequestContext(
 
   scoped_ptr<net::URLRequestJobFactoryImpl> job_factory(
       new net::URLRequestJobFactoryImpl());
+  bool set_protocol = job_factory->SetProtocolHandler(
+      chrome::kBlobScheme, blob_protocol_handler.release());
+  DCHECK(set_protocol);
+  set_protocol = job_factory->SetProtocolHandler(
+      chrome::kFileSystemScheme, file_system_protocol_handler.release());
+  DCHECK(set_protocol);
+  set_protocol = job_factory->SetProtocolHandler(
+      chrome::kChromeUIScheme, chrome_protocol_handler.release());
+  DCHECK(set_protocol);
+  set_protocol = job_factory->SetProtocolHandler(
+      chrome::kChromeDevToolsScheme,
+      chrome_devtools_protocol_handler.release());
+  DCHECK(set_protocol);
   scoped_ptr<net::URLRequestJobFactory> top_job_factory;
   top_job_factory = SetUpJobFactoryDefaults(job_factory.Pass(),
                                             protocol_handler_interceptor.Pass(),
                                             network_delegate(),
                                             context->ftp_transaction_factory(),
                                             context->ftp_auth_cache());
+  top_job_factory.reset(new net::ProtocolInterceptJobFactory(
+      top_job_factory.Pass(), developer_protocol_handler.Pass()));
   context->SetJobFactory(top_job_factory.Pass());
   return context;
 }
@@ -333,11 +412,26 @@ OffTheRecordProfileIOData::AcquireIsolatedAppRequestContext(
     ChromeURLRequestContext* main_context,
     const StoragePartitionDescriptor& partition_descriptor,
     scoped_ptr<ProtocolHandlerRegistry::JobInterceptorFactory>
-        protocol_handler_interceptor) const {
+        protocol_handler_interceptor,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        blob_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        file_system_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        developer_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        chrome_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        chrome_devtools_protocol_handler) const {
   // We create per-app contexts on demand, unlike the others above.
   ChromeURLRequestContext* app_request_context =
       InitializeAppRequestContext(main_context, partition_descriptor,
-                                  protocol_handler_interceptor.Pass());
+                                  protocol_handler_interceptor.Pass(),
+                                  blob_protocol_handler.Pass(),
+                                  file_system_protocol_handler.Pass(),
+                                  developer_protocol_handler.Pass(),
+                                  chrome_protocol_handler.Pass(),
+                                  chrome_devtools_protocol_handler.Pass());
   DCHECK(app_request_context);
   return app_request_context;
 }

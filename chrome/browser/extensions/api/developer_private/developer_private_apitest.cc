@@ -12,27 +12,27 @@ using extensions::Manifest;
 
 class DeveloperPrivateApiTest : public ExtensionApiTest {
  public:
-  virtual void SetUpCommandLine(CommandLine* command_line) {
+  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
     ExtensionApiTest::SetUpCommandLine(command_line);
-    command_line->AppendSwitch(switches::kAppsDebugger);
+    command_line->AppendSwitch(switches::kAppsDevtool);
   }
 
   virtual void LoadExtensions() {
-    FilePath base_dir = test_data_dir_.AppendASCII("developer");
+    base::FilePath base_dir = test_data_dir_.AppendASCII("developer");
     LoadNamedExtension(base_dir, "hosted_app");
   }
 
  protected:
-  void LoadNamedExtension(const FilePath& path,
+  void LoadNamedExtension(const base::FilePath& path,
                           const std::string& name) {
     const Extension* extension = LoadExtension(path.AppendASCII(name));
     ASSERT_TRUE(extension);
     extension_name_to_ids_[name] = extension->id();
   }
 
-  void InstallNamedExtension(const FilePath& path,
+  void InstallNamedExtension(const base::FilePath& path,
                              const std::string& name,
-                             Extension::Location install_source) {
+                             Manifest::Location install_source) {
     const Extension* extension = InstallExtension(path.AppendASCII(name), 1,
                                                   install_source);
     ASSERT_TRUE(extension);
@@ -45,10 +45,10 @@ class DeveloperPrivateApiTest : public ExtensionApiTest {
 IN_PROC_BROWSER_TEST_F(DeveloperPrivateApiTest, Basics) {
   LoadExtensions();
 
-  FilePath basedir = test_data_dir_.AppendASCII("developer");
-  InstallNamedExtension(basedir, "packaged_app", Extension::INTERNAL);
+  base::FilePath basedir = test_data_dir_.AppendASCII("developer");
+  InstallNamedExtension(basedir, "packaged_app", Manifest::INTERNAL);
 
-  InstallNamedExtension(basedir, "simple_extension", Extension::INTERNAL);
+  InstallNamedExtension(basedir, "simple_extension", Manifest::INTERNAL);
 
   ASSERT_TRUE(RunExtensionSubtest(
       "developer/test", "basics.html", kFlagLoadAsComponent));

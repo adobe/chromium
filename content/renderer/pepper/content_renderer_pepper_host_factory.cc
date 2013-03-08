@@ -6,9 +6,9 @@
 
 #include "base/logging.h"
 #include "content/renderer/pepper/pepper_audio_input_host.h"
+#include "content/renderer/pepper/pepper_directory_reader_host.h"
 #include "content/renderer/pepper/pepper_file_chooser_host.h"
 #include "content/renderer/pepper/pepper_file_io_host.h"
-#include "content/renderer/pepper/pepper_flash_clipboard_host.h"
 #include "content/renderer/pepper/pepper_graphics_2d_host.h"
 #include "content/renderer/pepper/pepper_video_capture_host.h"
 #include "content/renderer/pepper/pepper_websocket_host.h"
@@ -66,6 +66,9 @@ scoped_ptr<ResourceHost> ContentRendererPepperHostFactory::CreateResourceHost(
       case PpapiHostMsg_AudioInput_Create::ID:
         return scoped_ptr<ResourceHost>(new PepperAudioInputHost(
             host_, instance, params.pp_resource()));
+      case PpapiHostMsg_DirectoryReader_Create::ID:
+        return scoped_ptr<ResourceHost>(new PepperDirectoryReaderHost(
+            host_, instance, params.pp_resource()));
       case PpapiHostMsg_FileChooser_Create::ID:
         return scoped_ptr<ResourceHost>(new PepperFileChooserHost(
             host_, instance, params.pp_resource()));
@@ -78,15 +81,6 @@ scoped_ptr<ResourceHost> ContentRendererPepperHostFactory::CreateResourceHost(
         }
         return scoped_ptr<ResourceHost>(host);
       }
-    }
-  }
-
-  // Flash interfaces.
-  if (GetPermissions().HasPermission(ppapi::PERMISSION_FLASH)) {
-    switch (message.type()) {
-      case PpapiHostMsg_FlashClipboard_Create::ID:
-        return scoped_ptr<ResourceHost>(new PepperFlashClipboardHost(
-            host_, instance, params.pp_resource()));
     }
   }
 

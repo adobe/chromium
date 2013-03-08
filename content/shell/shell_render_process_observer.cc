@@ -5,13 +5,14 @@
 #include "content/shell/shell_render_process_observer.h"
 
 #include "base/command_line.h"
+#include "content/public/common/content_client.h"
 #include "content/public/renderer/render_view.h"
 #include "content/public/renderer/render_thread.h"
 #include "content/public/test/layouttest_support.h"
+#include "content/shell/shell_content_renderer_client.h"
 #include "content/shell/shell_messages.h"
 #include "content/shell/shell_switches.h"
 #include "content/shell/webkit_test_runner.h"
-#include "content/shell/webkit_test_runner_bindings.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebRuntimeFeatures.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebTestingSupport.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
@@ -50,7 +51,10 @@ ShellRenderProcessObserver::ShellRenderProcessObserver()
   WebRuntimeFeatures::enableInputTypeMonth(true);
   WebRuntimeFeatures::enableInputTypeTime(true);
   WebRuntimeFeatures::enableInputTypeWeek(true);
+  WebRuntimeFeatures::enableCanvasPath(true);
   DisableAppCacheLogging();
+  EnableDevToolsFrontendTesting();
+  EnableShortCircuitSizeUpdates();
 }
 
 ShellRenderProcessObserver::~ShellRenderProcessObserver() {
@@ -58,16 +62,16 @@ ShellRenderProcessObserver::~ShellRenderProcessObserver() {
   g_instance = NULL;
 }
 
-void ShellRenderProcessObserver::SetMainWindow(
-    RenderView* view,
-    WebKitTestRunner* test_runner,
-    WebTestDelegate* delegate) {
+void ShellRenderProcessObserver::SetTestDelegate(WebTestDelegate* delegate) {
   test_interfaces_->setDelegate(delegate);
-  test_interfaces_->setWebView(view->GetWebView());
-  test_interfaces_->setTestRunner(test_runner);
+  test_delegate_ = delegate;
+}
+
+void ShellRenderProcessObserver::SetMainWindow(RenderView* view) {
+  WebKitTestRunner* test_runner = WebKitTestRunner::Get(view);
+  test_interfaces_->setWebView(view->GetWebView(), test_runner->proxy());
   main_render_view_ = view;
   main_test_runner_ = test_runner;
-  test_delegate_ = delegate;
 }
 
 void ShellRenderProcessObserver::BindTestRunnersToWindow(WebFrame* frame) {
@@ -79,15 +83,12 @@ void ShellRenderProcessObserver::WebKitInitialized() {
   if (!CommandLine::ForCurrentProcess()->HasSwitch(switches::kDumpRenderTree))
     return;
 
-  // To implement a catch-all for not yet implemented controller properties.
-  webkit_glue::SetJavaScriptFlags(" --harmony_proxies");
-  RenderThread::Get()->RegisterExtension(new WebKitTestRunnerBindings());
-
   // We always expose GC to layout tests.
   webkit_glue::SetJavaScriptFlags(" --expose-gc");
   RenderThread::Get()->RegisterExtension(extensions_v8::GCExtension::Get());
 
   test_interfaces_.reset(new WebTestInterfaces);
+  test_interfaces_->resetAll();
 }
 
 bool ShellRenderProcessObserver::OnControlMessageReceived(
@@ -96,6 +97,8 @@ bool ShellRenderProcessObserver::OnControlMessageReceived(
   IPC_BEGIN_MESSAGE_MAP(ShellRenderProcessObserver, message)
     IPC_MESSAGE_HANDLER(ShellViewMsg_ResetAll, OnResetAll)
     IPC_MESSAGE_HANDLER(ShellViewMsg_SetWebKitSourceDir, OnSetWebKitSourceDir)
+    IPC_MESSAGE_HANDLER(ShellViewMsg_LoadHyphenDictionary,
+                        OnLoadHyphenDictionary)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
 
@@ -109,12 +112,20 @@ void ShellRenderProcessObserver::OnResetAll() {
     WebTestingSupport::resetInternalsObject(
         main_render_view_->GetWebView()->mainFrame());
   }
-  WebKitTestRunnerBindings::Reset();
 }
 
 void ShellRenderProcessObserver::OnSetWebKitSourceDir(
-    const FilePath& webkit_source_dir) {
+    const base::FilePath& webkit_source_dir) {
   webkit_source_dir_ = webkit_source_dir;
+}
+
+void ShellRenderProcessObserver::OnLoadHyphenDictionary(
+    const IPC::PlatformFileForTransit& dict_file) {
+  ShellContentRendererClient* renderer_client =
+      static_cast<content::ShellContentRendererClient*>(
+          content::GetContentClient()->renderer());
+  renderer_client->LoadHyphenDictionary(
+      IPC::PlatformFileForTransitToPlatformFile(dict_file));
 }
 
 }  // namespace content

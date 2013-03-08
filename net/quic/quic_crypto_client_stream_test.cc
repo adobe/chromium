@@ -4,6 +4,8 @@
 
 #include "net/quic/quic_crypto_client_stream.h"
 
+#include "net/quic/crypto/quic_decrypter.h"
+#include "net/quic/crypto/quic_encrypter.h"
 #include "net/quic/test_tools/quic_test_utils.h"
 
 using base::StringPiece;
@@ -13,12 +15,14 @@ namespace net {
 namespace test {
 namespace {
 
+const char kServerHostname[] = "localhost";
+
 class TestQuicVisitor : public NoOpFramerVisitor {
  public:
   TestQuicVisitor() {}
 
   // NoOpFramerVisitor
-  virtual void OnStreamFrame(const QuicStreamFrame& frame) {
+  virtual void OnStreamFrame(const QuicStreamFrame& frame) OVERRIDE {
     frame_ = frame;
   }
 
@@ -36,12 +40,13 @@ class TestCryptoVisitor : public CryptoFramerVisitorInterface {
       : error_count_(0) {
   }
 
-  virtual void OnError(CryptoFramer* framer) {
+  virtual void OnError(CryptoFramer* framer) OVERRIDE {
     DLOG(ERROR) << "CryptoFramer Error: " << framer->error();
     ++error_count_;
   }
 
-  virtual void OnHandshakeMessage(const CryptoHandshakeMessage& message) {
+  virtual void OnHandshakeMessage(
+      const CryptoHandshakeMessage& message) OVERRIDE {
     messages_.push_back(message);
   }
 
@@ -59,7 +64,7 @@ class TestMockHelper : public MockHelper  {
   virtual ~TestMockHelper() {}
 
   virtual int WritePacketToWire(const QuicEncryptedPacket& packet,
-                                int* error) {
+                                int* error) OVERRIDE {
     packet_count_++;
 
     // The first packet should be ClientHello.
@@ -78,12 +83,12 @@ class TestMockHelper : public MockHelper  {
 
 void TestMockHelper::CheckClientHelloPacket(
     const QuicEncryptedPacket& packet) {
-  QuicFramer quic_framer(QuicDecrypter::Create(kNULL),
+  QuicFramer quic_framer(kQuicVersion1,
+                         QuicDecrypter::Create(kNULL),
                          QuicEncrypter::Create(kNULL));
   TestQuicVisitor quic_visitor;
   quic_framer.set_visitor(&quic_visitor);
-  ASSERT_TRUE(quic_framer.ProcessPacket(IPEndPoint(), IPEndPoint(),
-                                        packet));
+  ASSERT_TRUE(quic_framer.ProcessPacket(packet));
   EXPECT_EQ(kCryptoStreamId, quic_visitor.frame()->stream_id);
   EXPECT_FALSE(quic_visitor.frame()->fin);
   EXPECT_EQ(0u, quic_visitor.frame()->offset);
@@ -99,7 +104,10 @@ void TestMockHelper::CheckClientHelloPacket(
 
   CryptoTagValueMap& tag_value_map =
       crypto_visitor.messages_[0].tag_value_map;
-  ASSERT_EQ(7u, tag_value_map.size());
+  ASSERT_EQ(8u, tag_value_map.size());
+
+  // kSNI
+  EXPECT_EQ(kServerHostname, tag_value_map[kSNI]);
 
   // kNONC
   // TODO(wtc): check the nonce.
@@ -154,8 +162,10 @@ class TestMockSession : public MockSession {
   }
   virtual ~TestMockSession() {}
 
-  virtual QuicConsumedData WriteData(QuicStreamId id, StringPiece data,
-                                     QuicStreamOffset offset, bool fin) {
+  virtual QuicConsumedData WriteData(QuicStreamId id,
+                                     StringPiece data,
+                                     QuicStreamOffset offset,
+                                     bool fin) OVERRIDE {
     return QuicSession::WriteData(id, data, offset, fin);
   }
 };
@@ -165,7 +175,7 @@ class QuicCryptoClientStreamTest : public ::testing::Test {
   QuicCryptoClientStreamTest()
       : connection_(new MockConnection(1, addr_, new TestMockHelper())),
         session_(connection_, true),
-        stream_(&session_) {
+        stream_(&session_, kServerHostname) {
     message_.tag = kSHLO;
     message_.tag_value_map[1] = "abc";
     message_.tag_value_map[2] = "def";

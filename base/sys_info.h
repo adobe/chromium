@@ -9,7 +9,7 @@
 
 #include "base/base_export.h"
 #include "base/basictypes.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "build/build_config.h"
 
 namespace base {
@@ -104,6 +104,7 @@ class BASE_EXPORT SysInfo {
   static std::string GetDeviceName();
 
   static int DalvikHeapSizeMB();
+  static int DalvikHeapGrowthLimitMB();
 #endif  // defined(OS_ANDROID)
 };
 

@@ -34,8 +34,8 @@
 
 #include "base/bind.h"
 #include "base/compiler_specific.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
 #include "base/message_loop.h"
@@ -93,14 +93,14 @@ namespace {
 
 struct TestShellRequestContextParams {
   TestShellRequestContextParams(
-      const FilePath& in_cache_path,
+      const base::FilePath& in_cache_path,
       net::HttpCache::Mode in_cache_mode,
       bool in_no_proxy)
       : cache_path(in_cache_path),
         cache_mode(in_cache_mode),
         no_proxy(in_no_proxy) {}
 
-  FilePath cache_path;
+  base::FilePath cache_path;
   net::HttpCache::Mode cache_mode;
   bool no_proxy;
 };
@@ -177,7 +177,7 @@ class TestShellNetworkDelegate : public net::NetworkDelegate {
     return rv == net::OK;
   }
   virtual bool OnCanAccessFile(const net::URLRequest& request,
-                               const FilePath& path) const OVERRIDE {
+                               const base::FilePath& path) const OVERRIDE {
     return true;
   }
   virtual bool OnCanThrottleRequest(
@@ -252,7 +252,7 @@ class IOThread : public base::Thread {
  public:
   IOThread() : base::Thread("IOThread") {}
 
-  ~IOThread() {
+  virtual ~IOThread() {
     Stop();
   }
 
@@ -475,7 +475,7 @@ class RequestProxy
 
     download_to_file_ = params->download_to_file;
     if (download_to_file_) {
-      FilePath path;
+      base::FilePath path;
       if (file_util::CreateTemporaryFile(&path)) {
         downloaded_file_ = ShareableFileReference::GetOrCreate(
             path, ShareableFileReference::DELETE_ON_FINAL_RELEASE,
@@ -755,7 +755,7 @@ class RequestProxy
     // Get the File URL.
     original_request.replace(0, http_prefix.size(), file_url_prefix_);
 
-    FilePath file_path;
+    base::FilePath file_path;
     if (!net::FileURLToFilePath(GURL(original_request), &file_path)) {
       NOTREACHED();
     }
@@ -921,13 +921,13 @@ class ResourceLoaderBridgeImpl : public ResourceLoaderBridge {
   // --------------------------------------------------------------------------
   // ResourceLoaderBridge implementation:
 
-  virtual void SetRequestBody(ResourceRequestBody* request_body) {
+  virtual void SetRequestBody(ResourceRequestBody* request_body) OVERRIDE {
     DCHECK(params_.get());
     DCHECK(!params_->request_body);
     params_->request_body = request_body;
   }
 
-  virtual bool Start(Peer* peer) {
+  virtual bool Start(Peer* peer) OVERRIDE {
     DCHECK(!proxy_);
 
     if (!SimpleResourceLoaderBridge::EnsureIOThread())
@@ -941,16 +941,16 @@ class ResourceLoaderBridgeImpl : public ResourceLoaderBridge {
     return true;  // Any errors will be reported asynchronously.
   }
 
-  virtual void Cancel() {
+  virtual void Cancel() OVERRIDE {
     DCHECK(proxy_);
     proxy_->Cancel();
   }
 
-  virtual void SetDefersLoading(bool value) {
+  virtual void SetDefersLoading(bool value) OVERRIDE {
     // TODO(darin): implement me
   }
 
-  virtual void SyncLoad(SyncLoadResponse* response) {
+  virtual void SyncLoad(SyncLoadResponse* response) OVERRIDE {
     DCHECK(!proxy_);
 
     if (!SimpleResourceLoaderBridge::EnsureIOThread())
@@ -965,6 +965,10 @@ class ResourceLoaderBridgeImpl : public ResourceLoaderBridge {
     proxy_->Start(NULL, params_.release());
 
     static_cast<SyncRequestProxy*>(proxy_)->WaitForCompletion();
+  }
+
+  virtual void DidChangePriority(net::RequestPriority new_priority) {
+    // Not really needed for DRT.
   }
 
  private:
@@ -1027,7 +1031,7 @@ class CookieGetter : public base::RefCountedThreadSafe<CookieGetter> {
 
 // static
 void SimpleResourceLoaderBridge::Init(
-    const FilePath& cache_path,
+    const base::FilePath& cache_path,
     net::HttpCache::Mode cache_mode,
     bool no_proxy) {
   // Make sure to stop any existing IO thread since it may be using the

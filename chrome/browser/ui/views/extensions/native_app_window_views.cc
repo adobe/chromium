@@ -4,16 +4,18 @@
 
 #include "chrome/browser/ui/views/extensions/native_app_window_views.h"
 
+#include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/extensions/extension_host.h"
 #include "chrome/browser/favicon/favicon_tab_helper.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/views/extensions/extension_keybinding_registry_views.h"
 #include "chrome/browser/ui/views/extensions/shell_window_frame_view.h"
-#include "chrome/common/extensions/draggable_region.h"
 #include "chrome/common/extensions/extension.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
+#include "extensions/common/draggable_region.h"
 #include "ui/views/controls/webview/webview.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/window/non_client_view.h"
@@ -26,17 +28,46 @@
 #endif
 
 #if defined(USE_ASH)
+#include "ash/screen_ash.h"
+#include "ash/shell.h"
 #include "ash/wm/custom_frame_view_ash.h"
 #include "ash/wm/panel_frame_view.h"
 #include "chrome/browser/ui/ash/ash_util.h"
+#include "ui/aura/root_window.h"
 #endif
 
 namespace {
+
 const int kMinPanelWidth = 100;
 const int kMinPanelHeight = 100;
 const int kDefaultPanelWidth = 200;
 const int kDefaultPanelHeight = 300;
 const int kResizeInsideBoundsSize = 5;
+
+struct AcceleratorMapping {
+  ui::KeyboardCode keycode;
+  int modifiers;
+  int command_id;
+};
+const AcceleratorMapping kAppWindowAcceleratorMap[] = {
+  { ui::VKEY_W, ui::EF_CONTROL_DOWN, IDC_CLOSE_WINDOW },
+  { ui::VKEY_W, ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN, IDC_CLOSE_WINDOW },
+  { ui::VKEY_F4, ui::EF_ALT_DOWN, IDC_CLOSE_WINDOW },
+};
+
+const std::map<ui::Accelerator, int>& GetAcceleratorTable() {
+  typedef std::map<ui::Accelerator, int> AcceleratorMap;
+  CR_DEFINE_STATIC_LOCAL(AcceleratorMap, accelerators, ());
+  if (accelerators.empty()) {
+    for (size_t i = 0; i < arraysize(kAppWindowAcceleratorMap); ++i) {
+      ui::Accelerator accelerator(kAppWindowAcceleratorMap[i].keycode,
+                                  kAppWindowAcceleratorMap[i].modifiers);
+      accelerators[accelerator] = kAppWindowAcceleratorMap[i].command_id;
+    }
+  }
+  return accelerators;
+}
+
 }
 
 NativeAppWindowViews::NativeAppWindowViews(
@@ -47,17 +78,19 @@ NativeAppWindowViews::NativeAppWindowViews(
       window_(NULL),
       is_fullscreen_(false),
       frameless_(create_params.frame == ShellWindow::FRAME_NONE),
-      transparent_background_(create_params.transparent_background) {
-  Observe(shell_window_->web_contents());
-  minimum_size_ = create_params.minimum_size;
-  maximum_size_ = create_params.maximum_size;
+      transparent_background_(create_params.transparent_background),
+      minimum_size_(create_params.minimum_size),
+      maximum_size_(create_params.maximum_size),
+      resizable_(create_params.resizable) {
+  Observe(web_contents());
 
   window_ = new views::Widget;
-  if (create_params.window_type == ShellWindow::WINDOW_TYPE_PANEL)
+  if (create_params.window_type == ShellWindow::WINDOW_TYPE_PANEL ||
+      create_params.window_type == ShellWindow::WINDOW_TYPE_V1_PANEL) {
     InitializePanelWindow(create_params);
-  else
+  } else {
     InitializeDefaultWindow(create_params);
-
+  }
   extension_keybinding_registry_.reset(
       new ExtensionKeybindingRegistryViews(
           profile(),
@@ -89,8 +122,20 @@ void NativeAppWindowViews::InitializeDefaultWindow(
   if (create_params.bounds.x() == INT_MIN ||
       create_params.bounds.y() == INT_MIN) {
     window_->CenterWindow(window_bounds.size());
-  } else {
+  } else if (!window_bounds.IsEmpty()) {
     window_->SetBounds(window_bounds);
+  }
+
+  // Register accelarators supported by app windows.
+  // TODO(jeremya/stevenjb): should these be registered for panels too?
+  views::FocusManager* focus_manager = GetFocusManager();
+  const std::map<ui::Accelerator, int>& accelerator_table =
+      GetAcceleratorTable();
+  for (std::map<ui::Accelerator, int>::const_iterator iter =
+           accelerator_table.begin();
+       iter != accelerator_table.end(); ++iter) {
+    focus_manager->RegisterAccelerator(
+        iter->first, ui::AcceleratorManager::kNormalPriority, this);
   }
 
 #if defined(OS_WIN) && !defined(USE_AURA)
@@ -119,14 +164,34 @@ void NativeAppWindowViews::InitializePanelWindow(
     preferred_size_.set_height(kDefaultPanelHeight);
   else if (preferred_size_.height() < kMinPanelHeight)
     preferred_size_.set_height(kMinPanelHeight);
-
-  params.bounds = gfx::Rect(preferred_size_.width(), preferred_size_.height());
+#if defined(USE_ASH)
+  if (ash::Shell::HasInstance()) {
+    // Open a new panel on the active root window where
+    // a current active/focused window is on.
+    aura::RootWindow* active = ash::Shell::GetActiveRootWindow();
+    params.bounds = ash::ScreenAsh::ConvertRectToScreen(
+        active, gfx::Rect(preferred_size_));
+  } else {
+    params.bounds = gfx::Rect(preferred_size_);
+  }
+#else
+  params.bounds = gfx::Rect(preferred_size_);
+#endif
+  // TODO(erg): Conceptually, these are toplevel windows, but we theoretically
+  // could plumb context through to here in some cases.
+  params.top_level = true;
   window_->Init(params);
 
+#if !defined(USE_ASH)
+  // TODO(oshima|stevenjb): Ideally, we should be able to just pre-determine
+  // the exact location and size, but this doesn't work well
+  // on non-ash environment where we don't have full control over
+  // window management.
   gfx::Rect window_bounds =
       window_->non_client_view()->GetWindowBoundsForClientBounds(
           create_params.bounds);
   window_->SetBounds(window_bounds);
+#endif
 }
 
 // BaseWindow implementation.
@@ -211,7 +276,7 @@ void NativeAppWindowViews::FlashFrame(bool flash) {
 }
 
 bool NativeAppWindowViews::IsAlwaysOnTop() const {
-  return shell_window_->window_type() == ShellWindow::WINDOW_TYPE_PANEL;
+  return shell_window_->window_type_is_panel();
 }
 
 gfx::Insets NativeAppWindowViews::GetFrameInsets() const {
@@ -263,7 +328,8 @@ void NativeAppWindowViews::OnViewWasResized() {
     path.lineTo(0, height - radius - 1);
     path.close();
   }
-  SetWindowRgn(web_contents()->GetNativeView(), path.CreateNativeRegion(), 1);
+  SetWindowRgn(web_contents()->GetView()->GetNativeView(),
+               path.CreateNativeRegion(), 1);
 
   SkRegion* rgn = new SkRegion;
   if (!window_->IsFullscreen()) {
@@ -295,11 +361,12 @@ views::View* NativeAppWindowViews::GetInitiallyFocusedView() {
 }
 
 bool NativeAppWindowViews::CanResize() const {
-  return maximum_size_.IsEmpty() || minimum_size_ != maximum_size_;
+  return resizable_ &&
+      (maximum_size_.IsEmpty() || minimum_size_ != maximum_size_);
 }
 
 bool NativeAppWindowViews::CanMaximize() const {
-  return maximum_size_.IsEmpty();
+  return resizable_ && maximum_size_.IsEmpty();
 }
 
 string16 NativeAppWindowViews::GetWindowTitle() const {
@@ -307,7 +374,7 @@ string16 NativeAppWindowViews::GetWindowTitle() const {
 }
 
 bool NativeAppWindowViews::ShouldShowWindowTitle() const {
-  return false;
+  return shell_window_->window_type() == ShellWindow::WINDOW_TYPE_V1_PANEL;
 }
 
 gfx::ImageSkia NativeAppWindowViews::GetWindowAppIcon() {
@@ -328,6 +395,10 @@ gfx::ImageSkia NativeAppWindowViews::GetWindowIcon() {
       return *app_icon.ToImageSkia();
   }
   return gfx::ImageSkia();
+}
+
+bool NativeAppWindowViews::ShouldShowWindowIcon() const {
+  return shell_window_->window_type() == ShellWindow::WINDOW_TYPE_V1_PANEL;
 }
 
 void NativeAppWindowViews::SaveWindowPlacement(const gfx::Rect& bounds,
@@ -353,7 +424,7 @@ views::NonClientFrameView* NativeAppWindowViews::CreateNonClientFrameView(
     views::Widget* widget) {
 #if defined(USE_ASH)
   if (chrome::IsNativeViewInAsh(widget->GetNativeView())) {
-    if (shell_window_->window_type() == ShellWindow::WINDOW_TYPE_PANEL) {
+    if (shell_window_->window_type_is_panel()) {
       ash::PanelFrameView::FrameType frame_type = frameless_ ?
           ash::PanelFrameView::FRAME_NONE : ash::PanelFrameView::FRAME_ASH;
       return new ash::PanelFrameView(widget, frame_type);
@@ -421,8 +492,9 @@ void NativeAppWindowViews::Layout() {
   OnViewWasResized();
 }
 
-void NativeAppWindowViews::ViewHierarchyChanged(
-    bool is_add, views::View *parent, views::View *child) {
+void NativeAppWindowViews::ViewHierarchyChanged(bool is_add,
+                                                views::View* parent,
+                                                views::View* child) {
   if (is_add && child == this) {
     web_view_ = new views::WebView(NULL);
     AddChildView(web_view_);
@@ -448,11 +520,29 @@ void NativeAppWindowViews::OnFocus() {
   web_view_->RequestFocus();
 }
 
+bool NativeAppWindowViews::AcceleratorPressed(
+    const ui::Accelerator& accelerator) {
+  const std::map<ui::Accelerator, int>& accelerator_table =
+      GetAcceleratorTable();
+  std::map<ui::Accelerator, int>::const_iterator iter =
+      accelerator_table.find(accelerator);
+  DCHECK(iter != accelerator_table.end());
+  int command_id = iter->second;
+  switch (command_id) {
+    case IDC_CLOSE_WINDOW:
+      Close();
+      return true;
+    default:
+      NOTREACHED() << "Unknown accelerator sent to app window.";
+  }
+  return false;
+}
+
 // NativeAppWindow implementation.
 
 void NativeAppWindowViews::SetFullscreen(bool fullscreen) {
   // Fullscreen not supported by panels.
-  if (shell_window_->window_type() == ShellWindow::WINDOW_TYPE_PANEL)
+  if (shell_window_->window_type_is_panel())
     return;
   is_fullscreen_ = fullscreen;
   window_->SetFullscreen(fullscreen);

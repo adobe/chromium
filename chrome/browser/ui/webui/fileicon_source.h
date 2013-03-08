@@ -7,7 +7,7 @@
 
 #include <string>
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "chrome/browser/icon_manager.h"
 #include "chrome/common/cancelable_task_tracker.h"
 #include "content/public/browser/url_data_source.h"
@@ -38,7 +38,7 @@ class FileIconSource : public content::URLDataSource {
   // function is called to perform the actual fetch. Declared as virtual for
   // testing.
   virtual void FetchFileIcon(
-      const FilePath& path,
+      const base::FilePath& path,
       ui::ScaleFactor scale_factor,
       IconLoader::IconSize icon_size,
       const content::URLDataSource::GotDataCallback& callback);

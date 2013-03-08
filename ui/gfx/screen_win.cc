@@ -7,6 +7,7 @@
 #include <windows.h>
 
 #include "base/logging.h"
+#include "ui/base/win/dpi.h"
 #include "ui/gfx/display.h"
 
 namespace {
@@ -20,8 +21,10 @@ MONITORINFO GetMonitorInfoForMonitor(HMONITOR monitor) {
 
 gfx::Display GetDisplay(MONITORINFO& monitor_info) {
   // TODO(oshima): Implement ID and Observer.
-  gfx::Display display(0, gfx::Rect(monitor_info.rcMonitor));
+  gfx::Rect bounds = gfx::Rect(monitor_info.rcMonitor);
+  gfx::Display display(0, bounds);
   display.set_work_area(gfx::Rect(monitor_info.rcWork));
+  display.SetScaleAndBounds(ui::win::GetDeviceScaleFactor(), bounds);
   return display;
 }
 
@@ -36,7 +39,11 @@ ScreenWin::~ScreenWin() {
 }
 
 bool ScreenWin::IsDIPEnabled() {
+#if defined(ENABLE_HIDPI)
+  return true;
+#else
   return false;
+#endif
 }
 
 gfx::Point ScreenWin::GetCursorScreenPoint() {
@@ -92,8 +99,12 @@ gfx::Display ScreenWin::GetPrimaryDisplay() const {
   MONITORINFO mi = GetMonitorInfoForMonitor(
       MonitorFromWindow(NULL, MONITOR_DEFAULTTOPRIMARY));
   gfx::Display display = GetDisplay(mi);
+#if !defined(ENABLE_HIDPI)
+  // TODO(kevers|girard): Test if these checks can be reintroduced for high-DIP
+  // once more of the app is DIP-aware.
   DCHECK_EQ(GetSystemMetrics(SM_CXSCREEN), display.size().width());
   DCHECK_EQ(GetSystemMetrics(SM_CYSCREEN), display.size().height());
+#endif
   return display;
 }
 

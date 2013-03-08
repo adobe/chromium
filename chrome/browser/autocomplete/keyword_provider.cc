@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "base/string16.h"
+#include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
 #include "chrome/browser/autocomplete/autocomplete_provider_listener.h"
@@ -136,29 +137,49 @@ string16 KeywordProvider::SplitReplacementStringFromInput(
 
 // static
 const TemplateURL* KeywordProvider::GetSubstitutingTemplateURLForInput(
-    Profile* profile,
-    const AutocompleteInput& input,
-    string16* remaining_input) {
-  if (!input.allow_exact_keyword_match())
+    TemplateURLService* model,
+    AutocompleteInput* input) {
+  if (!input->allow_exact_keyword_match())
     return NULL;
 
-  string16 keyword;
-  if (!ExtractKeywordFromInput(input, &keyword, remaining_input))
+  string16 keyword, remaining_input;
+  if (!ExtractKeywordFromInput(*input, &keyword, &remaining_input))
     return NULL;
 
-  // Make sure the model is loaded. This is cheap and quickly bails out if
-  // the model is already loaded.
-  TemplateURLService* model = TemplateURLServiceFactory::GetForProfile(profile);
   DCHECK(model);
-  model->Load();
-
   const TemplateURL* template_url = model->GetTemplateURLForKeyword(keyword);
-  return (template_url && template_url->SupportsReplacement()) ?
-      template_url : NULL;
+  if (template_url && template_url->SupportsReplacement()) {
+    // Adjust cursor position iff it was set before, otherwise leave it as is.
+    size_t cursor_position = string16::npos;
+    // The adjustment assumes that the keyword was stripped from the beginning
+    // of the original input.
+    if (input->cursor_position() != string16::npos &&
+        !remaining_input.empty() &&
+        EndsWith(input->text(), remaining_input, true)) {
+      int offset = input->text().length() - input->cursor_position();
+      // The cursor should never be past the last character.
+      DCHECK_GE(offset, 0);
+      // The cursor should never be in the keyword part, which is guaranteed
+      // by OmniboxEditModel implementation (see omnibox_edit_model.cc).
+      DCHECK_LE(offset, static_cast<int>(remaining_input.length()));
+      if (offset <= 0) {
+        // Normalize the cursor to be exactly after the last character.
+        cursor_position = remaining_input.length();
+      } else {
+        // If somehow the cursor was before the remaining text, set it to 0,
+        // otherwise adjust it relative to the remaining text.
+        cursor_position = offset > static_cast<int>(remaining_input.length()) ?
+            0u : remaining_input.length() - offset;
+      }
+    }
+    input->UpdateText(remaining_input, cursor_position, input->parts());
+    return template_url;
+  }
+
+  return NULL;
 }
 
-string16 KeywordProvider::GetKeywordForText(
-    const string16& text) const {
+string16 KeywordProvider::GetKeywordForText(const string16& text) const {
   const string16 keyword(TemplateURLService::CleanUserInputKeyword(text));
 
   if (keyword.empty())
@@ -285,14 +306,24 @@ void KeywordProvider::Start(const AutocompleteInput& input,
   // Any exact match is going to be the highest quality match, and thus at the
   // front of our vector.
   if (keyword_matches.front() == keyword) {
-    const TemplateURL* template_url(model->GetTemplateURLForKeyword(keyword));
+    const TemplateURL* template_url = model->GetTemplateURLForKeyword(keyword);
+    const bool is_extension_keyword = template_url->IsExtensionKeyword();
+
+    // Only create an exact match if |remaining_input| is empty or if
+    // this is an extension keyword.  If |remaining_input| is a
+    // non-empty non-extension keyword (i.e., a regular keyword that
+    // supports replacement and that has extra text following it),
+    // then SearchProvider creates the exact (a.k.a. verbatim) match.
+    if (!remaining_input.empty() && !is_extension_keyword)
+      return;
+
     // TODO(pkasting): We should probably check that if the user explicitly
     // typed a scheme, that scheme matches the one in |template_url|.
     matches_.push_back(CreateAutocompleteMatch(model, keyword, input,
                                                keyword.length(),
                                                remaining_input, -1));
 
-    if (profile_ && template_url->IsExtensionKeyword()) {
+    if (profile_ && is_extension_keyword) {
       if (input.matches_requested() == AutocompleteInput::ALL_MATCHES) {
         if (template_url->GetExtensionId() != current_keyword_extension_id_)
           MaybeEndExtensionKeywordMode();
@@ -426,6 +457,15 @@ int KeywordProvider::CalculateRelevance(AutocompleteInput::Type type,
                                         bool supports_replacement,
                                         bool prefer_keyword,
                                         bool allow_exact_keyword_match) {
+  // This function is responsible for scoring suggestions of keywords
+  // themselves and the suggestion of the verbatim query on an
+  // extension keyword.  SearchProvider::CalculateRelevanceForKeywordVerbatim()
+  // scores verbatim query suggestions for non-extension keywords.
+  // These two functions are currently in sync, but there's no reason
+  // we couldn't decide in the future to score verbatim matches
+  // differently for extension and non-extension keywords.  If you
+  // make such a change, however, you should update this comment to
+  // describe it, so it's clear why the functions diverge.
   if (!complete)
     return (type == AutocompleteInput::URL) ? 700 : 450;
   if (!supports_replacement || (allow_exact_keyword_match && prefer_keyword))

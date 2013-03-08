@@ -7,12 +7,13 @@
 
 class GURL;
 
+namespace autofill {
 namespace wallet {
 
-extern const char kApiKey[];
 GURL GetGetWalletItemsUrl();
 GURL GetGetFullWalletUrl();
 GURL GetAcceptLegalDocumentsUrl();
+GURL GetAuthenticateInstrumentUrl();
 GURL GetEncryptionUrl();
 GURL GetEscrowUrl();
 GURL GetSendStatusUrl();
@@ -29,7 +30,8 @@ GURL GetSignInContinueUrl();
 // Returns true if |url| is an acceptable variant of the sign-in continue
 // url.  Can be used for detection of navigation to the continue url.
 bool IsSignInContinueUrl(const GURL& url);
+
 }  // namespace wallet
+}  // namespace autofill
 
 #endif  // CHROME_BROWSER_AUTOFILL_WALLET_WALLET_SERVICE_URL_H_
-

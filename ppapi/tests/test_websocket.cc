@@ -240,8 +240,13 @@ void TestWebSocket::RunTests(const std::string& filter) {
 }
 
 std::string TestWebSocket::GetFullURL(const char* url) {
-  std::string rv = "ws://localhost";
-  // Some WebSocket tests don't start the server so there'll be no port.
+  std::string rv = "ws://";
+  // Some WebSocket tests don't start the server so there'll be no host and
+  // port.
+  if (instance_->websocket_host().empty())
+    rv += "127.0.0.1";
+  else
+    rv += instance_->websocket_host();
   if (instance_->websocket_port() != -1) {
     char buffer[10];
     sprintf(buffer, ":%d", instance_->websocket_port());
@@ -464,6 +469,7 @@ std::string TestWebSocket::TestValidConnect() {
   PP_Var extensions = websocket_interface_->GetExtensions(ws);
   ASSERT_TRUE(AreEqualWithString(extensions, ""));
   core_interface_->ReleaseResource(ws);
+  ReleaseVar(extensions);
 
   PASS();
 }

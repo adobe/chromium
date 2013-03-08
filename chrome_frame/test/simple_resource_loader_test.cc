@@ -4,15 +4,15 @@
 
 #include "chrome_frame/simple_resource_loader.h"
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/win/windows_version.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/resource/data_pack.h"
 
 TEST(SimpleResourceLoaderTest, LoadLocaleDll) {
   std::vector<std::wstring> language_tags;
-  FilePath locales_path;
-  FilePath file_path;
+  base::FilePath locales_path;
+  base::FilePath file_path;
   HMODULE dll_handle = NULL;
 
   SimpleResourceLoader::DetermineLocalesDirectory(&locales_path);

@@ -6,6 +6,7 @@
 
 #include "base/command_line.h"
 #include "base/metrics/histogram.h"
+#include "base/prefs/pref_service.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
@@ -21,9 +22,10 @@
 #include "chrome/browser/favicon/favicon_tab_helper.h"
 #include "chrome/browser/google/google_util.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
+#include "chrome/browser/managed_mode/managed_user_service.h"
+#include "chrome/browser/managed_mode/managed_user_service_factory.h"
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/printing/print_preview_dialog_controller.h"
 #include "chrome/browser/printing/print_view_manager.h"
 #include "chrome/browser/profiles/profile.h"
@@ -46,31 +48,30 @@
 #include "chrome/browser/ui/find_bar/find_tab_helper.h"
 #include "chrome/browser/ui/fullscreen/fullscreen_controller.h"
 #include "chrome/browser/ui/omnibox/location_bar.h"
-#include "chrome/browser/ui/search/search.h"
-#include "chrome/browser/ui/search/search_model.h"
 #include "chrome/browser/ui/status_bubble.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/web_contents_modal_dialog_manager.h"
 #include "chrome/browser/ui/webui/ntp/app_launcher_handler.h"
+#include "chrome/browser/upgrade_detector.h"
 #include "chrome/browser/web_applications/web_app.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/devtools_agent_host.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
+#include "content/public/browser/notification_service.h"
 #include "content/public/browser/page_navigator.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
-#include "content/public/browser/web_intents_dispatcher.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_restriction.h"
 #include "content/public/common/renderer_preferences.h"
 #include "content/public/common/url_constants.h"
 #include "net/base/escape.h"
 #include "webkit/glue/glue_serialize.h"
-#include "webkit/glue/web_intent_data.h"
 #include "webkit/user_agent/user_agent_util.h"
 
 #if defined(OS_MACOSX)
@@ -167,7 +168,7 @@ void ReloadInternal(Browser* browser,
   WebContents* web_contents = GetOrCloneTabForDisposition(browser, disposition);
   web_contents->UserGestureDone();
   if (!web_contents->FocusLocationBarByDefault())
-    web_contents->Focus();
+    web_contents->GetView()->Focus();
   if (ignore_cache)
     web_contents->GetController().ReloadIgnoringCache(true);
   else
@@ -189,14 +190,8 @@ bool PrintPreviewShowing(const Browser* browser) {
   WebContents* contents = browser->tab_strip_model()->GetActiveWebContents();
   printing::PrintPreviewDialogController* controller =
       printing::PrintPreviewDialogController::GetInstance();
-  return controller && (controller->GetPrintPreviewForTab(contents) ||
-                        controller->is_creating_print_preview_tab());
-}
-
-bool IsNTPModeForInstantExtendedAPI(const Browser* browser) {
-  return browser->search_model() &&
-      search::IsInstantExtendedAPIEnabled(browser->profile()) &&
-          browser->search_model()->mode().is_ntp();
+  return controller && (controller->GetPrintPreviewForContents(contents) ||
+                        controller->is_creating_print_preview_dialog());
 }
 
 }  // namespace
@@ -276,6 +271,13 @@ void NewEmptyWindow(Profile* profile, HostDesktopType desktop_type) {
     }
   }
 
+  ManagedUserService* service =
+      ManagedUserServiceFactory::GetForProfile(profile);
+  if (service->ProfileIsManaged()) {
+    content::RecordAction(
+        UserMetricsAction("ManagedMode_NewManagedUserWindow"));
+  }
+
   if (incognito) {
     content::RecordAction(UserMetricsAction("NewIncognitoWindow"));
     OpenEmptyWindow(profile->GetOffTheRecordProfile(), desktop_type);
@@ -290,24 +292,12 @@ void NewEmptyWindow(Profile* profile, HostDesktopType desktop_type) {
   }
 }
 
-void NewEmptyWindow(Profile* profile) {
-  NewEmptyWindow(profile, HOST_DESKTOP_TYPE_NATIVE);
-}
-
 Browser* OpenEmptyWindow(Profile* profile, HostDesktopType desktop_type) {
-  // TODO(scottmg): http://crbug.com/128578
-  // This is necessary because WebContentsViewAura doesn't have enough context
-  // to get the right StackingClient (and therefore parent window) otherwise.
-  ScopedForceDesktopType force_desktop_type(desktop_type);
   Browser* browser = new Browser(
       Browser::CreateParams(Browser::TYPE_TABBED, profile, desktop_type));
   AddBlankTabAt(browser, -1, true);
   browser->window()->Show();
   return browser;
-}
-
-Browser* OpenEmptyWindow(Profile* profile) {
-  return OpenEmptyWindow(profile, HOST_DESKTOP_TYPE_NATIVE);
 }
 
 void OpenWindowWithRestoredTabs(Profile* profile,
@@ -380,7 +370,7 @@ void ReloadIgnoringCache(Browser* browser, WindowOpenDisposition disposition) {
 }
 
 bool CanReload(const Browser* browser) {
-  return !browser->is_devtools() && !IsNTPModeForInstantExtendedAPI(browser);
+  return !browser->is_devtools();
 }
 
 void Home(Browser* browser, WindowOpenDisposition disposition) {
@@ -447,11 +437,13 @@ void Stop(Browser* browser) {
 
 #if !defined(OS_WIN)
 void NewWindow(Browser* browser) {
-  NewEmptyWindow(browser->profile()->GetOriginalProfile());
+  NewEmptyWindow(browser->profile()->GetOriginalProfile(),
+                 browser->host_desktop_type());
 }
 
 void NewIncognitoWindow(Browser* browser) {
-  NewEmptyWindow(browser->profile()->GetOffTheRecordProfile());
+  NewEmptyWindow(browser->profile()->GetOffTheRecordProfile(),
+                 browser->host_desktop_type());
 }
 #endif  // OS_WIN
 
@@ -499,10 +491,15 @@ void RestoreTab(Browser* browser) {
                                     browser->host_desktop_type());
 }
 
-bool CanRestoreTab(const Browser* browser) {
+TabStripModelDelegate::RestoreTabType GetRestoreTabType(
+    const Browser* browser) {
   TabRestoreService* service =
       TabRestoreServiceFactory::GetForProfile(browser->profile());
-  return service && !service->entries().empty();
+  if (!service || service->entries().empty())
+    return TabStripModelDelegate::RESTORE_NONE;
+  if (service->entries().front()->type == TabRestoreService::WINDOW)
+    return TabStripModelDelegate::RESTORE_WINDOW;
+  return TabStripModelDelegate::RESTORE_TAB;
 }
 
 void SelectNextTab(Browser* browser) {
@@ -586,7 +583,8 @@ WebContents* DuplicateTabAt(Browser* browser, int index) {
           Browser::CreateParams::CreateForApp(Browser::TYPE_POPUP,
                                               browser->app_name(),
                                               gfx::Rect(),
-                                              browser->profile()));
+                                              browser->profile(),
+                                              browser->host_desktop_type()));
     } else if (browser->is_type_popup()) {
       browser = new Browser(
           Browser::CreateParams(Browser::TYPE_POPUP, browser->profile(),
@@ -635,7 +633,7 @@ void ConvertPopupToTabbedBrowser(Browser* browser) {
 
 void Exit() {
   content::RecordAction(UserMetricsAction("Exit"));
-  browser::AttemptUserExit();
+  chrome::AttemptUserExit();
 }
 
 void BookmarkCurrentPage(Browser* browser) {
@@ -722,17 +720,15 @@ void Print(Browser* browser) {
       prefs::kPrintPreviewDisabled))
     print_view_manager->PrintNow();
   else
-    print_view_manager->PrintPreviewNow();
+    print_view_manager->PrintPreviewNow(false);
 }
 
 bool CanPrint(const Browser* browser) {
   // Do not print when printing is disabled via pref or policy.
   // Do not print when a constrained window is showing. It's confusing.
-  // Do not print if instant extended API is enabled and mode is NTP.
   return browser->profile()->GetPrefs()->GetBoolean(prefs::kPrintingEnabled) &&
       !(IsShowingWebContentsModalDialog(browser) ||
-      GetContentRestrictions(browser) & content::CONTENT_RESTRICTION_PRINT ||
-      IsNTPModeForInstantExtendedAPI(browser));
+      GetContentRestrictions(browser) & content::CONTENT_RESTRICTION_PRINT);
 }
 
 void AdvancedPrint(Browser* browser) {
@@ -909,8 +905,15 @@ void ShowAvatarMenu(Browser* browser) {
 }
 
 void OpenUpdateChromeDialog(Browser* browser) {
-  content::RecordAction(UserMetricsAction("UpdateChrome"));
-  browser->window()->ShowUpdateChromeDialog();
+  if (UpgradeDetector::GetInstance()->is_outdated_install()) {
+    content::NotificationService::current()->Notify(
+        chrome::NOTIFICATION_OUTDATED_INSTALL,
+        content::NotificationService::AllSources(),
+        content::NotificationService::NoDetails());
+  } else {
+    content::RecordAction(UserMetricsAction("UpdateChrome"));
+    browser->window()->ShowUpdateChromeDialog();
+  }
 }
 
 void ToggleSpeechInput(Browser* browser) {
@@ -1083,7 +1086,8 @@ void ConvertTabToAppWindow(Browser* browser,
 
   Browser* app_browser = new Browser(
       Browser::CreateParams::CreateForApp(
-          Browser::TYPE_POPUP, app_name, gfx::Rect(), browser->profile()));
+          Browser::TYPE_POPUP, app_name, gfx::Rect(), browser->profile(),
+          browser->host_desktop_type()));
   app_browser->tab_strip_model()->AppendWebContents(contents, true);
 
   contents->GetMutableRendererPrefs()->can_accept_load_drops = false;

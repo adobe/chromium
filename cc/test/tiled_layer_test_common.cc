@@ -27,7 +27,7 @@ FakeLayerUpdater::Resource::~Resource()
 {
 }
 
-void FakeLayerUpdater::Resource::update(ResourceUpdateQueue& queue, const gfx::Rect&, const gfx::Vector2d&, bool partialUpdate, RenderingStats&)
+void FakeLayerUpdater::Resource::update(ResourceUpdateQueue& queue, const gfx::Rect&, const gfx::Vector2d&, bool partialUpdate, RenderingStats*)
 {
     const gfx::Rect rect(0, 0, 10, 10);
     ResourceUpdate upload = ResourceUpdate::Create(
@@ -50,7 +50,7 @@ FakeLayerUpdater::~FakeLayerUpdater()
 {
 }
 
-void FakeLayerUpdater::prepareToUpdate(const gfx::Rect& contentRect, const gfx::Size&, float, float, gfx::Rect& resultingOpaqueRect, RenderingStats&)
+void FakeLayerUpdater::prepareToUpdate(const gfx::Rect& contentRect, const gfx::Size&, float, float, gfx::Rect& resultingOpaqueRect, RenderingStats*)
 {
     m_prepareCount++;
     m_lastUpdateRect = contentRect;
@@ -138,6 +138,7 @@ void FakeTiledLayer::updateContentsScale(float idealContentsScale)
 {
     calculateContentsScale(
         idealContentsScale,
+        false,  // animating_transform_to_screen
         &drawProperties().contents_scale_x,
         &drawProperties().contents_scale_y,
         &drawProperties().content_bounds);
@@ -156,6 +157,7 @@ void FakeTiledLayerWithScaledBounds::setContentBounds(const gfx::Size& contentBo
 
 void FakeTiledLayerWithScaledBounds::calculateContentsScale(
     float idealContentsScale,
+    bool animatingTransformToScreen,
     float* contentsScaleX,
     float* contentsScaleY,
     gfx::Size* contentBounds)
@@ -163,11 +165,6 @@ void FakeTiledLayerWithScaledBounds::calculateContentsScale(
     *contentsScaleX = static_cast<float>(m_forcedContentBounds.width()) / bounds().width();
     *contentsScaleY = static_cast<float>(m_forcedContentBounds.height()) / bounds().height();
     *contentBounds = m_forcedContentBounds;
-}
-
-void FakeTiledLayerWithScaledBounds::didUpdateBounds()
-{
-    drawProperties().content_bounds = m_forcedContentBounds;
 }
 
 }  // namespace cc

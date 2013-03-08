@@ -58,12 +58,14 @@
             '<@(webkit_fileapi_chromeos_sources)',
           ],
         }],
-        ['OS=="linux" or chromeos==1 or OS=="win"', {
+        ['OS=="mac" or OS=="win" or OS=="linux" or chromeos==1', {
           'sources': [
             '<@(webkit_fileapi_media_sources)',
           ],
         }],
       ],
+      # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
+      'msvs_disabled_warnings': [ 4267, ],
     },
   ],
 }

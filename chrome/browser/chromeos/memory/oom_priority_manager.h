@@ -42,6 +42,9 @@ class OomPriorityManager : public content::NotificationObserver {
   // Number of discard events since Chrome started.
   int discard_count() const { return discard_count_; }
 
+  // See member comment.
+  bool recent_tab_discard() const { return recent_tab_discard_; }
+
   void Start();
   void Stop();
 
@@ -69,6 +72,7 @@ class OomPriorityManager : public content::NotificationObserver {
     ~TabStats();
     bool is_app;  // browser window is an app
     bool is_reloadable_ui;  // Reloadable web UI page, like NTP or Settings.
+    bool is_playing_audio;
     bool is_pinned;
     bool is_selected;  // selected in the currently active browser window
     bool is_discarded;
@@ -90,6 +94,10 @@ class OomPriorityManager : public content::NotificationObserver {
   // for user triggered discards via chrome://discards/ because that allows us
   // to manually test the system.
   void RecordDiscardStatistics();
+
+  // Record whether we ran out of memory during a recent time interval.
+  // This allows us to normalize low memory statistics versus usage.
+  void RecordRecentTabDiscard();
 
   // Purges data structures in the browser that can be easily recomputed.
   void PurgeBrowserMemory();
@@ -119,6 +127,7 @@ class OomPriorityManager : public content::NotificationObserver {
 
   base::RepeatingTimer<OomPriorityManager> timer_;
   base::OneShotTimer<OomPriorityManager> focus_tab_score_adjust_timer_;
+  base::RepeatingTimer<OomPriorityManager> recent_tab_discard_timer_;
   content::NotificationRegistrar registrar_;
 
   // This lock is for pid_to_oom_score_ and focus_tab_pid_.
@@ -145,6 +154,10 @@ class OomPriorityManager : public content::NotificationObserver {
 
   // Number of times we have discarded a tab, for statistics.
   int discard_count_;
+
+  // Whether a tab discard event has occurred during the last time interval,
+  // used for statistics normalized by usage.
+  bool recent_tab_discard_;
 
   DISALLOW_COPY_AND_ASSIGN(OomPriorityManager);
 };

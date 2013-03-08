@@ -9,7 +9,7 @@
 #include "content/browser/site_instance_impl.h"
 #include "content/browser/web_contents/interstitial_page_impl.h"
 #include "content/browser/web_contents/navigation_entry_impl.h"
-#include "content/browser/web_contents/test_web_contents.h"
+#include "content/browser/webui/web_ui_controller_factory_registry.h"
 #include "content/common/view_messages.h"
 #include "content/public/browser/interstitial_page_delegate.h"
 #include "content/public/browser/navigation_details.h"
@@ -19,7 +19,6 @@
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/browser/web_ui_controller.h"
-#include "content/public/browser/web_ui_controller_factory.h"
 #include "content/public/common/bindings_policy.h"
 #include "content/public/common/content_constants.h"
 #include "content/public/common/url_constants.h"
@@ -28,19 +27,21 @@
 #include "content/public/test/test_utils.h"
 #include "content/test/test_content_browser_client.h"
 #include "content/test/test_content_client.h"
-#include "googleurl/src/url_util.h"
+#include "content/test/test_web_contents.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "webkit/glue/webkit_glue.h"
 
 namespace content {
 namespace {
 
+const char kTestWebUIUrl[] = "chrome://blah";
+
 class WebContentsImplTestWebUIControllerFactory
     : public WebUIControllerFactory {
  public:
   virtual WebUIController* CreateWebUIControllerForURL(
       WebUI* web_ui, const GURL& url) const OVERRIDE {
-   if (!GetContentClient()->HasWebUIScheme(url))
+   if (!UseWebUI(url))
      return NULL;
 
    return new WebUIController(web_ui);
@@ -53,43 +54,18 @@ class WebContentsImplTestWebUIControllerFactory
 
   virtual bool UseWebUIForURL(BrowserContext* browser_context,
                               const GURL& url) const OVERRIDE {
-    return GetContentClient()->HasWebUIScheme(url);
+    return UseWebUI(url);
   }
 
   virtual bool UseWebUIBindingsForURL(BrowserContext* browser_context,
                                       const GURL& url) const OVERRIDE {
-    return GetContentClient()->HasWebUIScheme(url);
-  }
-
-  virtual bool IsURLAcceptableForWebUI(
-      BrowserContext* browser_context,
-      const GURL& url,
-      bool data_urls_allowed) const {
-    return GetContentClient()->HasWebUIScheme(url);
-  }
-};
-
-class WebContentsImplTestContentClient : public TestContentClient {
- public:
-  WebContentsImplTestContentClient() {
-  }
-
-  virtual bool HasWebUIScheme(const GURL& url) const OVERRIDE {
-    return url.SchemeIs("webcontentsimpltest");
-  }
-};
-
-class WebContentsImplTestBrowserClient : public TestContentBrowserClient {
- public:
-  WebContentsImplTestBrowserClient() {
-  }
-
-  virtual WebUIControllerFactory* GetWebUIControllerFactory() OVERRIDE {
-    return &factory_;
+    return UseWebUI(url);
   }
 
  private:
-  WebContentsImplTestWebUIControllerFactory factory_;
+  bool UseWebUI(const GURL& url) const {
+    return url == GURL(kTestWebUIUrl);
+  }
 };
 
 class TestInterstitialPage;
@@ -109,7 +85,8 @@ class TestInterstitialPageDelegate : public InterstitialPageDelegate {
 class TestInterstitialPage : public InterstitialPageImpl {
  public:
   enum InterstitialState {
-    UNDECIDED = 0,  // No decision taken yet.
+    INVALID = 0,    // Hasn't yet been initialized.
+    UNDECIDED,      // Initialized, but no decision taken yet.
     OKED,           // Proceed was called.
     CANCELED        // DontProceed was called.
   };
@@ -240,12 +217,13 @@ class TestInterstitialPageStateGuard : public TestInterstitialPage::Delegate {
     DCHECK(interstitial_page_);
     interstitial_page_->set_delegate(this);
   }
-  ~TestInterstitialPageStateGuard() {
+  virtual ~TestInterstitialPageStateGuard() {
     if (interstitial_page_)
       interstitial_page_->ClearStates();
   }
 
-  virtual void TestInterstitialPageDeleted(TestInterstitialPage* interstitial) {
+  virtual void TestInterstitialPageDeleted(
+      TestInterstitialPage* interstitial) OVERRIDE {
     DCHECK(interstitial_page_ == interstitial);
     interstitial_page_ = NULL;
   }
@@ -257,37 +235,24 @@ class TestInterstitialPageStateGuard : public TestInterstitialPage::Delegate {
 class WebContentsImplTest : public RenderViewHostImplTestHarness {
  public:
   WebContentsImplTest()
-      : old_client_(NULL),
-        old_browser_client_(NULL),
-        ui_thread_(BrowserThread::UI, &message_loop_),
+      : ui_thread_(BrowserThread::UI, &message_loop_),
         file_user_blocking_thread_(
             BrowserThread::FILE_USER_BLOCKING, &message_loop_),
         io_thread_(BrowserThread::IO, &message_loop_) {
   }
 
   virtual void SetUp() {
-    // These tests treat webcontentsimpltest as a privileged WebUI scheme.
-    // We must register it similarly to kChromeUIScheme.
-    url_util::AddStandardScheme("webcontentsimpltest");
-
-    old_client_ = GetContentClient();
-    old_browser_client_ = GetContentClient()->browser();
-    SetContentClient(&client_);
-    GetContentClient()->set_browser_for_testing(&browser_client_);
     RenderViewHostImplTestHarness::SetUp();
+    WebUIControllerFactory::RegisterFactory(&factory_);
   }
 
   virtual void TearDown() {
-    GetContentClient()->set_browser_for_testing(old_browser_client_);
-    SetContentClient(old_client_);
     RenderViewHostImplTestHarness::TearDown();
+    WebUIControllerFactory::UnregisterFactoryForTesting(&factory_);
   }
 
  private:
-  WebContentsImplTestContentClient client_;
-  WebContentsImplTestBrowserClient browser_client_;
-  ContentClient* old_client_;
-  ContentBrowserClient* old_browser_client_;
+  WebContentsImplTestWebUIControllerFactory factory_;
   TestBrowserThread ui_thread_;
   TestBrowserThread file_user_blocking_thread_;
   TestBrowserThread io_thread_;
@@ -345,7 +310,7 @@ TEST_F(WebContentsImplTest, UpdateTitle) {
 TEST_F(WebContentsImplTest, NTPViewSource) {
   NavigationControllerImpl& cont =
       static_cast<NavigationControllerImpl&>(controller());
-  const char kUrl[] = "view-source:webcontentsimpltest://blah";
+  const char kUrl[] = "view-source:chrome://blah";
   const GURL kGURL(kUrl);
 
   process()->sink().ClearMessages();
@@ -615,6 +580,36 @@ TEST_F(WebContentsImplTest, NavigateTwoTabsCrossSite) {
   EXPECT_EQ(instance2a, instance2b);
 }
 
+// Test that we can find an opener RVH even if it's pending.
+// http://crbug.com/176252.
+TEST_F(WebContentsImplTest, FindOpenerRVHWhenPending) {
+  contents()->transition_cross_site = true;
+  TestRenderViewHost* orig_rvh = test_rvh();
+
+  // Navigate to a URL.
+  const GURL url("http://www.google.com");
+  controller().LoadURL(
+      url, Referrer(), PAGE_TRANSITION_TYPED, std::string());
+  contents()->TestDidNavigate(orig_rvh, 1, url, PAGE_TRANSITION_TYPED);
+
+  // Start to navigate first tab to a new site, so that it has a pending RVH.
+  const GURL url2("http://www.yahoo.com");
+  controller().LoadURL(
+      url2, Referrer(), PAGE_TRANSITION_TYPED, std::string());
+  orig_rvh->SendShouldCloseACK(true);
+  TestRenderViewHost* pending_rvh =
+      static_cast<TestRenderViewHost*>(contents()->GetPendingRenderViewHost());
+
+  // While it is still pending, simulate opening a new tab with the first tab
+  // as its opener.  This will call WebContentsImpl::CreateOpenerRenderViews
+  // on the opener to ensure that an RVH exists.
+  int opener_routing_id = contents()->CreateOpenerRenderViews(
+      pending_rvh->GetSiteInstance());
+
+  // We should find the pending RVH and not create a new one.
+  EXPECT_EQ(pending_rvh->GetRoutingID(), opener_routing_id);
+}
+
 // Tests that WebContentsImpl uses the current URL, not the SiteInstance's site,
 // to determine whether a navigation is cross-site.
 TEST_F(WebContentsImplTest, CrossSiteComparesAgainstCurrentPage) {
@@ -759,7 +754,7 @@ TEST_F(WebContentsImplTest, CrossSiteNavigationBackPreempted) {
   contents()->transition_cross_site = true;
 
   // Start with a web ui page, which gets a new RVH with WebUI bindings.
-  const GURL url1("webcontentsimpltest://blah");
+  const GURL url1("chrome://blah");
   controller().LoadURL(
       url1, Referrer(), PAGE_TRANSITION_TYPED, std::string());
   TestRenderViewHost* ntp_rvh = test_rvh();
@@ -896,7 +891,7 @@ TEST_F(WebContentsImplTest, CrossSiteNotPreemptedDuringBeforeUnload) {
   contents()->transition_cross_site = true;
 
   // Navigate to NTP URL.
-  const GURL url("webcontentsimpltest://blah");
+  const GURL url("chrome://blah");
   controller().LoadURL(
       url, Referrer(), PAGE_TRANSITION_TYPED, std::string());
   TestRenderViewHost* orig_rvh = test_rvh();
@@ -914,7 +909,7 @@ TEST_F(WebContentsImplTest, CrossSiteNotPreemptedDuringBeforeUnload) {
   // Suppose the first navigation tries to commit now, with a
   // ViewMsg_Stop in flight.  This should not cancel the pending navigation,
   // but it should act as if the beforeunload ack arrived.
-  orig_rvh->SendNavigate(1, GURL("webcontentsimpltest://blah"));
+  orig_rvh->SendNavigate(1, GURL("chrome://blah"));
   EXPECT_TRUE(contents()->cross_navigation_pending());
   EXPECT_EQ(orig_rvh, contents()->GetRenderViewHost());
   EXPECT_FALSE(orig_rvh->is_waiting_for_beforeunload_ack());
@@ -1109,7 +1104,7 @@ TEST_F(WebContentsImplTest,
 
   // Show an interstitial.
   TestInterstitialPage::InterstitialState state =
-      TestInterstitialPage::UNDECIDED;
+      TestInterstitialPage::INVALID;
   bool deleted = false;
   GURL url2("http://interstitial");
   TestInterstitialPage* interstitial =
@@ -1156,7 +1151,7 @@ TEST_F(WebContentsImplTest,
   // Show an interstitial (no pending entry, the interstitial would have been
   // triggered by clicking on a link).
   TestInterstitialPage::InterstitialState state =
-      TestInterstitialPage::UNDECIDED;
+      TestInterstitialPage::INVALID;
   bool deleted = false;
   GURL url2("http://interstitial");
   TestInterstitialPage* interstitial =
@@ -1201,7 +1196,7 @@ TEST_F(WebContentsImplTest, ShowInterstitialNoNewNavigationDontProceed) {
 
   // Show an interstitial.
   TestInterstitialPage::InterstitialState state =
-      TestInterstitialPage::UNDECIDED;
+      TestInterstitialPage::INVALID;
   bool deleted = false;
   GURL url2("http://interstitial");
   TestInterstitialPage* interstitial =
@@ -1252,7 +1247,7 @@ TEST_F(WebContentsImplTest,
 
   // Show an interstitial.
   TestInterstitialPage::InterstitialState state =
-      TestInterstitialPage::UNDECIDED;
+      TestInterstitialPage::INVALID;
   bool deleted = false;
   GURL url2("http://interstitial");
   TestInterstitialPage* interstitial =
@@ -1310,7 +1305,7 @@ TEST_F(WebContentsImplTest,
 
   // Show an interstitial.
   TestInterstitialPage::InterstitialState state =
-      TestInterstitialPage::UNDECIDED;
+      TestInterstitialPage::INVALID;
   bool deleted = false;
   GURL url2("http://interstitial");
   TestInterstitialPage* interstitial =
@@ -1367,7 +1362,7 @@ TEST_F(WebContentsImplTest, ShowInterstitialNoNewNavigationProceed) {
 
   // Show an interstitial.
   TestInterstitialPage::InterstitialState state =
-      TestInterstitialPage::UNDECIDED;
+      TestInterstitialPage::INVALID;
   bool deleted = false;
   GURL url2("http://interstitial");
   TestInterstitialPage* interstitial =
@@ -1409,7 +1404,7 @@ TEST_F(WebContentsImplTest, ShowInterstitialNoNewNavigationProceed) {
 TEST_F(WebContentsImplTest, ShowInterstitialThenNavigate) {
   // Show interstitial.
   TestInterstitialPage::InterstitialState state =
-      TestInterstitialPage::UNDECIDED;
+      TestInterstitialPage::INVALID;
   bool deleted = false;
   GURL url("http://interstitial");
   TestInterstitialPage* interstitial =
@@ -1437,7 +1432,7 @@ TEST_F(WebContentsImplTest, ShowInterstitialThenGoBack) {
 
   // Show interstitial.
   TestInterstitialPage::InterstitialState state =
-      TestInterstitialPage::UNDECIDED;
+      TestInterstitialPage::INVALID;
   bool deleted = false;
   GURL interstitial_url("http://interstitial");
   TestInterstitialPage* interstitial =
@@ -1472,7 +1467,7 @@ TEST_F(WebContentsImplTest, ShowInterstitialCrashRendererThenGoBack) {
 
   // Show interstitial.
   TestInterstitialPage::InterstitialState state =
-      TestInterstitialPage::UNDECIDED;
+      TestInterstitialPage::INVALID;
   bool deleted = false;
   GURL interstitial_url("http://interstitial");
   TestInterstitialPage* interstitial =
@@ -1512,7 +1507,7 @@ TEST_F(WebContentsImplTest, ShowInterstitialCrashRendererThenNavigate) {
 
   // Show interstitial.
   TestInterstitialPage::InterstitialState state =
-      TestInterstitialPage::UNDECIDED;
+      TestInterstitialPage::INVALID;
   bool deleted = false;
   GURL interstitial_url("http://interstitial");
   TestInterstitialPage* interstitial =
@@ -1534,7 +1529,7 @@ TEST_F(WebContentsImplTest, ShowInterstitialCrashRendererThenNavigate) {
 TEST_F(WebContentsImplTest, ShowInterstitialThenCloseTab) {
   // Show interstitial.
   TestInterstitialPage::InterstitialState state =
-      TestInterstitialPage::UNDECIDED;
+      TestInterstitialPage::INVALID;
   bool deleted = false;
   GURL url("http://interstitial");
   TestInterstitialPage* interstitial =
@@ -1551,6 +1546,36 @@ TEST_F(WebContentsImplTest, ShowInterstitialThenCloseTab) {
   EXPECT_TRUE(deleted);
 }
 
+// Test navigating to a page that shows an interstitial, then close the
+// contents.
+TEST_F(WebContentsImplTest, ShowInterstitialThenCloseAndShutdown) {
+  // Show interstitial.
+  TestInterstitialPage::InterstitialState state =
+      TestInterstitialPage::INVALID;
+  bool deleted = false;
+  GURL url("http://interstitial");
+  TestInterstitialPage* interstitial =
+      new TestInterstitialPage(contents(), true, url, &state, &deleted);
+  TestInterstitialPageStateGuard state_guard(interstitial);
+  interstitial->Show();
+  interstitial->TestDidNavigate(1, url);
+  RenderViewHostImpl* rvh = static_cast<RenderViewHostImpl*>(
+      interstitial->GetRenderViewHostForTesting());
+
+  // Now close the contents.
+  DeleteContents();
+  EXPECT_EQ(TestInterstitialPage::CANCELED, state);
+
+  // Before the interstitial has a chance to process its shutdown task,
+  // simulate quitting the browser.  This goes through all processes and
+  // tells them to destruct.
+  rvh->OnMessageReceived(
+        ViewHostMsg_RenderViewGone(0, 0, 0));
+
+  RunAllPendingInMessageLoop();
+  EXPECT_TRUE(deleted);
+}
+
 // Test that after Proceed is called and an interstitial is still shown, no more
 // commands get executed.
 TEST_F(WebContentsImplTest, ShowInterstitialProceedMultipleCommands) {
@@ -1561,7 +1586,7 @@ TEST_F(WebContentsImplTest, ShowInterstitialProceedMultipleCommands) {
 
   // Show an interstitial.
   TestInterstitialPage::InterstitialState state =
-      TestInterstitialPage::UNDECIDED;
+      TestInterstitialPage::INVALID;
   bool deleted = false;
   GURL url2("http://interstitial");
   TestInterstitialPage* interstitial =
@@ -1596,7 +1621,7 @@ TEST_F(WebContentsImplTest, ShowInterstitialOnInterstitial) {
 
   // Show an interstitial.
   TestInterstitialPage::InterstitialState state1 =
-      TestInterstitialPage::UNDECIDED;
+      TestInterstitialPage::INVALID;
   bool deleted1 = false;
   GURL url1("http://interstitial1");
   TestInterstitialPage* interstitial1 =
@@ -1607,7 +1632,7 @@ TEST_F(WebContentsImplTest, ShowInterstitialOnInterstitial) {
 
   // Now show another interstitial.
   TestInterstitialPage::InterstitialState state2 =
-      TestInterstitialPage::UNDECIDED;
+      TestInterstitialPage::INVALID;
   bool deleted2 = false;
   GURL url2("http://interstitial2");
   TestInterstitialPage* interstitial2 =
@@ -1649,7 +1674,7 @@ TEST_F(WebContentsImplTest, ShowInterstitialProceedShowInterstitial) {
 
   // Show an interstitial.
   TestInterstitialPage::InterstitialState state1 =
-      TestInterstitialPage::UNDECIDED;
+      TestInterstitialPage::INVALID;
   bool deleted1 = false;
   GURL url1("http://interstitial1");
   TestInterstitialPage* interstitial1 =
@@ -1666,7 +1691,7 @@ TEST_F(WebContentsImplTest, ShowInterstitialProceedShowInterstitial) {
   // Now show another interstitial (simulating the navigation causing another
   // interstitial).
   TestInterstitialPage::InterstitialState state2 =
-      TestInterstitialPage::UNDECIDED;
+      TestInterstitialPage::INVALID;
   bool deleted2 = false;
   GURL url2("http://interstitial2");
   TestInterstitialPage* interstitial2 =
@@ -1701,7 +1726,7 @@ TEST_F(WebContentsImplTest, ShowInterstitialProceedShowInterstitial) {
 TEST_F(WebContentsImplTest, NavigateBeforeInterstitialShows) {
   // Show an interstitial.
   TestInterstitialPage::InterstitialState state =
-      TestInterstitialPage::UNDECIDED;
+      TestInterstitialPage::INVALID;
   bool deleted = false;
   GURL interstitial_url("http://interstitial");
   TestInterstitialPage* interstitial =
@@ -1735,7 +1760,7 @@ TEST_F(WebContentsImplTest, TwoQuickInterstitials) {
 
   // Show a first interstitial.
   TestInterstitialPage::InterstitialState state1 =
-      TestInterstitialPage::UNDECIDED;
+      TestInterstitialPage::INVALID;
   bool deleted1 = false;
   TestInterstitialPage* interstitial1 =
       new TestInterstitialPage(contents(), true, interstitial_url,
@@ -1746,7 +1771,7 @@ TEST_F(WebContentsImplTest, TwoQuickInterstitials) {
   // Show another interstitial on that same contents before the first one had
   // time to load.
   TestInterstitialPage::InterstitialState state2 =
-      TestInterstitialPage::UNDECIDED;
+      TestInterstitialPage::INVALID;
   bool deleted2 = false;
   TestInterstitialPage* interstitial2 =
       new TestInterstitialPage(contents(), true, interstitial_url,
@@ -1772,7 +1797,7 @@ TEST_F(WebContentsImplTest, TwoQuickInterstitials) {
 TEST_F(WebContentsImplTest, InterstitialCrasher) {
   // Show an interstitial.
   TestInterstitialPage::InterstitialState state =
-      TestInterstitialPage::UNDECIDED;
+      TestInterstitialPage::INVALID;
   bool deleted = false;
   GURL url("http://interstitial");
   TestInterstitialPage* interstitial =
@@ -1814,7 +1839,7 @@ TEST_F(WebContentsImplTest, NewInterstitialDoesNotCancelPendingEntry) {
 
   // Simulate that navigation triggering an interstitial.
   TestInterstitialPage::InterstitialState state =
-      TestInterstitialPage::UNDECIDED;
+      TestInterstitialPage::INVALID;
   bool deleted = false;
   TestInterstitialPage* interstitial =
       new TestInterstitialPage(contents(), true, kGURL, &state, &deleted);
@@ -1827,10 +1852,10 @@ TEST_F(WebContentsImplTest, NewInterstitialDoesNotCancelPendingEntry) {
   contents()->GetController().LoadURL(
       kGURL, Referrer(), PAGE_TRANSITION_TYPED, std::string());
   TestInterstitialPage::InterstitialState state2 =
-      TestInterstitialPage::UNDECIDED;
+      TestInterstitialPage::INVALID;
   bool deleted2 = false;
   TestInterstitialPage* interstitial2 =
-      new TestInterstitialPage(contents(), true, kGURL, &state, &deleted);
+      new TestInterstitialPage(contents(), true, kGURL, &state2, &deleted2);
   TestInterstitialPageStateGuard state_guard2(interstitial2);
   interstitial2->Show();
   interstitial2->TestDidNavigate(1, kGURL);
@@ -1862,7 +1887,7 @@ TEST_F(WebContentsImplTest, NoJSMessageOnInterstitials) {
 
   // Simulate showing an interstitial while the page is showing.
   TestInterstitialPage::InterstitialState state =
-      TestInterstitialPage::UNDECIDED;
+      TestInterstitialPage::INVALID;
   bool deleted = false;
   TestInterstitialPage* interstitial =
       new TestInterstitialPage(contents(), true, kGURL, &state, &deleted);
@@ -1895,7 +1920,7 @@ TEST_F(WebContentsImplTest, CopyStateFromAndPruneSourceInterstitial) {
 
   // Show an interstitial.
   TestInterstitialPage::InterstitialState state =
-      TestInterstitialPage::UNDECIDED;
+      TestInterstitialPage::INVALID;
   bool deleted = false;
   GURL url2("http://interstitial");
   TestInterstitialPage* interstitial =
@@ -1946,7 +1971,7 @@ TEST_F(WebContentsImplTest, CopyStateFromAndPruneTargetInterstitial) {
 
   // Show an interstitial.
   TestInterstitialPage::InterstitialState state =
-      TestInterstitialPage::UNDECIDED;
+      TestInterstitialPage::INVALID;
   bool deleted = false;
   GURL url3("http://interstitial");
   TestInterstitialPage* interstitial =

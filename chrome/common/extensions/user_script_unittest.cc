@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/pickle.h"
 #include "chrome/common/extensions/user_script.h"
 #include "googleurl/src/gurl.h"
@@ -170,16 +170,16 @@ TEST(ExtensionUserScriptTest, Pickle) {
 
   UserScript script1;
   script1.js_scripts().push_back(UserScript::File(
-      FilePath(FILE_PATH_LITERAL("c:\\foo\\")),
-      FilePath(FILE_PATH_LITERAL("foo.user.js")),
+      base::FilePath(FILE_PATH_LITERAL("c:\\foo\\")),
+      base::FilePath(FILE_PATH_LITERAL("foo.user.js")),
       GURL("chrome-extension://abc/foo.user.js")));
   script1.css_scripts().push_back(UserScript::File(
-      FilePath(FILE_PATH_LITERAL("c:\\foo\\")),
-      FilePath(FILE_PATH_LITERAL("foo.user.css")),
+      base::FilePath(FILE_PATH_LITERAL("c:\\foo\\")),
+      base::FilePath(FILE_PATH_LITERAL("foo.user.css")),
       GURL("chrome-extension://abc/foo.user.css")));
   script1.css_scripts().push_back(UserScript::File(
-      FilePath(FILE_PATH_LITERAL("c:\\foo\\")),
-      FilePath(FILE_PATH_LITERAL("foo2.user.css")),
+      base::FilePath(FILE_PATH_LITERAL("c:\\foo\\")),
+      base::FilePath(FILE_PATH_LITERAL("foo2.user.css")),
       GURL("chrome-extension://abc/foo2.user.css")));
   script1.set_run_location(UserScript::DOCUMENT_START);
 

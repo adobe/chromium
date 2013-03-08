@@ -10,6 +10,7 @@
 #include "base/debug/trace_event.h"
 #include "base/metrics/histogram.h"
 #include "base/pickle.h"
+#include "base/prefs/pref_service.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
@@ -17,12 +18,11 @@
 #include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/browser_shutdown.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/themes/theme_properties.h"
 #include "chrome/browser/ui/bookmarks/bookmark_bar_constants.h"
 #include "chrome/browser/ui/bookmarks/bookmark_utils.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/browser/ui/gtk/bookmarks/bookmark_bar_instructions_gtk.h"
 #include "chrome/browser/ui/gtk/bookmarks/bookmark_menu_controller_gtk.h"
@@ -39,6 +39,7 @@
 #include "chrome/browser/ui/gtk/tabstrip_origin_provider.h"
 #include "chrome/browser/ui/gtk/view_id_util.h"
 #include "chrome/browser/ui/ntp_background_util.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/webui/ntp/app_launcher_handler.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension_constants.h"
@@ -196,7 +197,7 @@ void BookmarkBarGtk::Init() {
   paint_box_ = gtk_event_box_new();
   gtk_container_add(GTK_CONTAINER(ntp_padding_box_), paint_box_);
   GdkColor paint_box_color =
-      theme_service_->GetGdkColor(ThemeService::COLOR_TOOLBAR);
+      theme_service_->GetGdkColor(ThemeProperties::COLOR_TOOLBAR);
   gtk_widget_modify_bg(paint_box_, GTK_STATE_NORMAL, &paint_box_color);
   gtk_widget_add_events(paint_box_, GDK_POINTER_MOTION_MASK |
                                     GDK_BUTTON_PRESS_MASK);
@@ -564,6 +565,13 @@ int BookmarkBarGtk::GetBookmarkButtonCount() {
   return count;
 }
 
+bookmark_utils::BookmarkLaunchLocation
+    BookmarkBarGtk::GetBookmarkLaunchLocation() const {
+  return bookmark_bar_state_ == BookmarkBar::DETACHED ?
+      bookmark_utils::LAUNCH_DETACHED_BAR :
+      bookmark_utils::LAUNCH_ATTACHED_BAR;
+}
+
 void BookmarkBarGtk::SetOverflowButtonAppearance() {
   GtkWidget* former_child = gtk_bin_get_child(GTK_BIN(overflow_button_));
   if (former_child)
@@ -636,7 +644,7 @@ void BookmarkBarGtk::UpdateDetachedState(BookmarkBar::State old_state) {
     gtk_event_box_set_visible_window(GTK_EVENT_BOX(paint_box_), TRUE);
     GdkColor stroke_color = theme_service_->UsingNativeTheme() ?
         theme_service_->GetBorderColor() :
-        theme_service_->GetGdkColor(ThemeService::COLOR_NTP_HEADER);
+        theme_service_->GetGdkColor(ThemeProperties::COLOR_NTP_HEADER);
     gtk_util::ActAsRoundedWindow(paint_box_, stroke_color, kNTPRoundedness,
                                  gtk_util::ROUNDED_ALL, gtk_util::BORDER_ALL);
 
@@ -694,7 +702,8 @@ bool BookmarkBarGtk::GetWebContentsSize(gfx::Size* size) {
     NOTREACHED();
     return false;
   }
-  WebContents* web_contents = chrome::GetActiveWebContents(browser);
+  WebContents* web_contents =
+      browser->tab_strip_model()->GetActiveWebContents();
   if (!web_contents) {
     // It is possible to have a browser but no WebContents while under testing,
     // so don't NOTREACHED() and error the program.
@@ -973,13 +982,13 @@ void BookmarkBarGtk::Observe(int type,
     UpdateEventBoxPaintability();
 
     GdkColor paint_box_color =
-        theme_service_->GetGdkColor(ThemeService::COLOR_TOOLBAR);
+        theme_service_->GetGdkColor(ThemeProperties::COLOR_TOOLBAR);
     gtk_widget_modify_bg(paint_box_, GTK_STATE_NORMAL, &paint_box_color);
 
     if (bookmark_bar_state_ == BookmarkBar::DETACHED) {
       GdkColor stroke_color = theme_service_->UsingNativeTheme() ?
           theme_service_->GetBorderColor() :
-          theme_service_->GetGdkColor(ThemeService::COLOR_NTP_HEADER);
+          theme_service_->GetGdkColor(ThemeProperties::COLOR_NTP_HEADER);
       gtk_util::SetRoundedWindowBorderColor(paint_box_, stroke_color);
     }
 
@@ -1151,7 +1160,7 @@ void BookmarkBarGtk::OnClicked(GtkWidget* sender) {
                   event_utils::DispositionForCurrentButtonPressEvent(),
                   browser_->profile());
 
-  content::RecordAction(UserMetricsAction("ClickedBookmarkBarURLButton"));
+  bookmark_utils::RecordBookmarkLaunch(GetBookmarkLaunchLocation());
 }
 
 void BookmarkBarGtk::OnButtonDragBegin(GtkWidget* button,
@@ -1231,6 +1240,7 @@ void BookmarkBarGtk::OnFolderClicked(GtkWidget* sender) {
   GdkEvent* event = gtk_get_current_event();
   if (event->button.button == 1 ||
       (event->button.button == 2 && sender == overflow_button_)) {
+    bookmark_utils::RecordBookmarkFolderOpen(GetBookmarkLaunchLocation());
     PopupForButton(sender);
   } else if (event->button.button == 2) {
     const BookmarkNode* node = GetNodeForToolButton(sender);

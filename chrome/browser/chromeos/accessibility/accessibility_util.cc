@@ -15,6 +15,7 @@
 #include "base/bind_helpers.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
+#include "base/prefs/pref_service.h"
 #include "chrome/browser/accessibility/accessibility_extension_api.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/accessibility/magnification_manager.h"
@@ -22,10 +23,9 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/file_reader.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/speech/extension_api/tts_extension_api_controller.h"
+#include "chrome/browser/speech/tts_controller.h"
 #include "chrome/browser/ui/singleton_tabs.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_messages.h"
@@ -163,10 +163,12 @@ void EnableSpokenFeedback(bool enabled,
       IDS_CHROMEOS_ACC_SPOKEN_FEEDBACK_DISABLED).c_str());
 
   // Load/Unload ChromeVox
-  Profile* profile = ProfileManager::GetDefaultProfile();
+  Profile* profile = login_web_ui ?
+                         Profile::FromWebUI(login_web_ui) :
+                         ProfileManager::GetDefaultProfile();
   ExtensionService* extension_service =
       extensions::ExtensionSystem::Get(profile)->extension_service();
-  FilePath path = FilePath(extension_misc::kChromeVoxExtensionPath);
+  base::FilePath path = base::FilePath(extension_misc::kChromeVoxExtensionPath);
   if (enabled) {  // Load ChromeVox
     std::string extension_id =
         extension_service->component_loader()->Add(IDR_CHROMEVOX_MANIFEST,
@@ -256,7 +258,7 @@ void Speak(const std::string& text) {
   utterance->set_can_enqueue(false);
   utterance->set_options(new DictionaryValue());
 
-  ExtensionTtsController* controller = ExtensionTtsController::GetInstance();
+  TtsController* controller = TtsController::GetInstance();
   controller->SpeakOrEnqueue(utterance);
 }
 

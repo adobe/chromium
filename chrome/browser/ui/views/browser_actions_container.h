@@ -8,6 +8,7 @@
 #include "chrome/browser/extensions/extension_keybinding_registry.h"
 #include "chrome/browser/extensions/extension_toolbar_model.h"
 #include "chrome/browser/ui/views/browser_action_view.h"
+#include "chrome/browser/ui/views/chrome_views_export.h"
 #include "chrome/browser/ui/views/extensions/browser_action_overflow_menu_controller.h"
 #include "chrome/browser/ui/views/extensions/extension_keybinding_registry_views.h"
 #include "chrome/browser/ui/views/extensions/extension_popup.h"
@@ -197,7 +198,7 @@ class BrowserActionsContainer
       BrowserActionOverflowMenuController* controller) OVERRIDE;
 
   // Overridden from views::WidgetObserver:
-  virtual void OnWidgetClosing(views::Widget* widget) OVERRIDE;
+  virtual void OnWidgetDestroying(views::Widget* widget) OVERRIDE;
 
   // Overridden from BrowserActionView::Delegate:
   virtual void InspectPopup(ExtensionAction* action) OVERRIDE;

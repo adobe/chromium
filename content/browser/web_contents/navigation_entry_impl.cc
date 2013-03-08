@@ -4,6 +4,7 @@
 
 #include "content/browser/web_contents/navigation_entry_impl.h"
 
+#include "base/metrics/histogram.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "content/public/common/content_constants.h"
@@ -19,6 +20,8 @@ static int GetUniqueIDInConstructor() {
 }
 
 namespace content {
+
+int NavigationEntryImpl::kInvalidBindings = -1;
 
 NavigationEntry* NavigationEntry::Create() {
   return new NavigationEntryImpl();
@@ -36,6 +39,7 @@ NavigationEntryImpl* NavigationEntryImpl::FromNavigationEntry(
 NavigationEntryImpl::NavigationEntryImpl()
     : unique_id_(GetUniqueIDInConstructor()),
       site_instance_(NULL),
+      bindings_(kInvalidBindings),
       page_type_(PAGE_TYPE_NORMAL),
       update_virtual_url_with_url_(false),
       page_id_(-1),
@@ -58,6 +62,7 @@ NavigationEntryImpl::NavigationEntryImpl(SiteInstanceImpl* instance,
                                          bool is_renderer_initiated)
     : unique_id_(GetUniqueIDInConstructor()),
       site_instance_(instance),
+      bindings_(kInvalidBindings),
       page_type_(PAGE_TYPE_NORMAL),
       url_(url),
       referrer_(referrer),
@@ -146,6 +151,13 @@ int32 NavigationEntryImpl::GetPageID() const {
 
 void NavigationEntryImpl::set_site_instance(SiteInstanceImpl* site_instance) {
   site_instance_ = site_instance;
+}
+
+void NavigationEntryImpl::SetBindings(int bindings) {
+  // Ensure this is set to a valid value, and that it stays the same once set.
+  CHECK_NE(bindings, kInvalidBindings);
+  CHECK(bindings_ == kInvalidBindings || bindings_ == bindings);
+  bindings_ = bindings;
 }
 
 const string16& NavigationEntryImpl::GetTitleForDisplay(
@@ -279,9 +291,29 @@ const std::string& NavigationEntryImpl::GetFrameToNavigate() const {
   return frame_to_navigate_;
 }
 
+void NavigationEntryImpl::SetExtraData(const std::string& key,
+                                       const string16& data) {
+  extra_data_[key] = data;
+}
+
+bool NavigationEntryImpl::GetExtraData(const std::string& key,
+                                       string16* data) const {
+  std::map<std::string, string16>::const_iterator iter = extra_data_.find(key);
+  if (iter == extra_data_.end())
+    return false;
+  *data = iter->second;
+  return true;
+}
+
+void NavigationEntryImpl::ClearExtraData(const std::string& key) {
+  extra_data_.erase(key);
+}
+
 void NavigationEntryImpl::SetScreenshotPNGData(
     const std::vector<unsigned char>& png_data) {
   screenshot_ = png_data.empty() ? NULL : new base::RefCountedBytes(png_data);
+  if (screenshot_)
+    UMA_HISTOGRAM_MEMORY_KB("Overscroll.ScreenshotSize", screenshot_->size());
 }
 
 }  // namespace content

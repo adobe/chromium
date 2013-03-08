@@ -8,9 +8,9 @@
 
 #include "base/command_line.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/net/url_util.h"
 #include "google_apis/gaia/gaia_urls.h"
 #include "googleurl/src/gurl.h"
+#include "net/base/url_util.h"
 
 namespace {
 
@@ -29,7 +29,7 @@ GURL GetBaseWalletUrl() {
 }
 
 GURL GetBaseAutocheckoutUrl() {
-  return GetBaseWalletUrl().Resolve("wallet/autocheckout/");
+  return GetBaseWalletUrl().Resolve("wallet/autocheckout/v1/");
 }
 
 GURL GetBaseSecureUrl() {
@@ -42,11 +42,8 @@ GURL GetBaseSecureUrl() {
 
 }  // anonymous namespace
 
+namespace autofill {
 namespace wallet {
-
-// TODO(ahutter): This shouldn't live in this class. See
-// http://crbug.com/164281.
-const char kApiKey[] = "abcdefg";
 
 GURL GetGetWalletItemsUrl() {
   return GetBaseAutocheckoutUrl().Resolve("getWalletItemsJwtless");
@@ -57,7 +54,11 @@ GURL GetGetFullWalletUrl() {
 }
 
 GURL GetAcceptLegalDocumentsUrl() {
-  return GetBaseAutocheckoutUrl().Resolve("acceptLegalDocuments");
+  return GetBaseAutocheckoutUrl().Resolve("acceptLegalDocument");
+}
+
+GURL GetAuthenticateInstrumentUrl() {
+  return GetBaseAutocheckoutUrl().Resolve("authenticateInstrument");
 }
 
 GURL GetSendStatusUrl() {
@@ -82,12 +83,11 @@ GURL GetEscrowUrl() {
 
 GURL GetSignInUrl() {
   GURL url(GaiaUrls::GetInstance()->service_login_url());
-  url = chrome_common_net::AppendQueryParameter(url, "service", "sierra");
-  url = chrome_common_net::AppendQueryParameter(url, "btmpl", "popup");
-  url = chrome_common_net::AppendQueryParameter(
-      url,
-      "continue",
-      GetSignInContinueUrl().spec());
+  url = net::AppendQueryParameter(url, "service", "sierra");
+  url = net::AppendQueryParameter(url, "btmpl", "popup");
+  url = net::AppendQueryParameter(url,
+                                  "continue",
+                                  GetSignInContinueUrl().spec());
   return url;
 }
 
@@ -104,3 +104,4 @@ bool IsSignInContinueUrl(const GURL& url) {
 }
 
 }  // namespace wallet
+}  // namespace autofill

@@ -75,7 +75,7 @@ static void ToInterleavedInternal(const AudioBus* source, int start_frame,
   int channels = source->channels();
   for (int ch = 0; ch < channels; ++ch) {
     const float* channel_data = source->channel(ch);
-    for (int i = start_frame, offset = ch; i < frames;
+    for (int i = start_frame, offset = ch; i < start_frame + frames;
          ++i, offset += channels) {
       float v = channel_data[i];
       Fixed sample = v * (v < 0 ? -kMinValue : kMaxValue);
@@ -121,6 +121,8 @@ AudioBus::AudioBus(int channels, int frames)
 AudioBus::AudioBus(int channels, int frames, float* data)
     : frames_(frames),
       can_set_channel_data_(false) {
+  // Since |data| may have come from an external source, ensure it's valid.
+  CHECK(data);
   ValidateConfig(channels, frames_);
 
   int aligned_frames = 0;
@@ -187,6 +189,7 @@ scoped_ptr<AudioBus> AudioBus::WrapMemory(const AudioParameters& params,
 
 void AudioBus::SetChannelData(int channel, float* data) {
   CHECK(can_set_channel_data_);
+  CHECK(data);
   CHECK_GE(channel, 0);
   CHECK_LT(static_cast<size_t>(channel), channel_data_.size());
   DCHECK(IsAligned(data));

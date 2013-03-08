@@ -6,12 +6,12 @@
 
 #include <string>
 
+#include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/json/json_file_value_serializer.h"
 #include "base/message_loop.h"
+#include "chrome/browser/chromeos/drive/change_list_loader.h"
 #include "chrome/browser/chromeos/drive/drive.pb.h"
-#include "chrome/browser/chromeos/drive/drive_feed_loader.h"
-#include "chrome/browser/chromeos/drive/drive_file_system.h"
 #include "chrome/browser/google_apis/drive_api_parser.h"
 
 namespace drive {
@@ -44,9 +44,9 @@ void CopyErrorCodeFromFileOperationCallback(DriveFileError* output,
 
 void CopyResultsFromFileMoveCallback(
     DriveFileError* out_error,
-    FilePath* out_file_path,
+    base::FilePath* out_file_path,
     DriveFileError error,
-    const FilePath& moved_file_path) {
+    const base::FilePath& moved_file_path) {
   DCHECK(out_error);
   DCHECK(out_file_path);
 
@@ -93,10 +93,10 @@ void CopyResultsFromReadDirectoryByPathCallback(
 
 void CopyResultsFromGetEntryInfoWithFilePathCallback(
     DriveFileError* out_error,
-    FilePath* out_drive_file_path,
+    base::FilePath* out_drive_file_path,
     scoped_ptr<DriveEntryProto>* out_entry_proto,
     DriveFileError error,
-    const FilePath& drive_file_path,
+    const base::FilePath& drive_file_path,
     scoped_ptr<DriveEntryProto> entry_proto) {
   DCHECK(out_error);
   DCHECK(out_drive_file_path);
@@ -121,10 +121,11 @@ void CopyResultFromInitializeCacheCallback(bool* out_success,
   *out_success = success;
 }
 
-void CopyResultsFromGetFileFromCacheCallback(DriveFileError* out_error,
-                                             FilePath* out_cache_file_path,
-                                             DriveFileError error,
-                                             const FilePath& cache_file_path) {
+void CopyResultsFromGetFileFromCacheCallback(
+    DriveFileError* out_error,
+    base::FilePath* out_cache_file_path,
+    DriveFileError error,
+    const base::FilePath& cache_file_path) {
   DCHECK(out_error);
   DCHECK(out_cache_file_path);
   *out_error = error;
@@ -142,10 +143,10 @@ void CopyResultsFromGetCacheEntryCallback(bool* out_success,
 }
 
 void CopyResultsFromGetFileCallback(DriveFileError* out_error,
-                                    FilePath* out_file_path,
+                                    base::FilePath* out_file_path,
                                     DriveFileType* out_file_type,
                                     DriveFileError error,
-                                    const FilePath& file_path,
+                                    const base::FilePath& file_path,
                                     const std::string& /*mime_type*/,
                                     DriveFileType file_type) {
   DCHECK(out_error);
@@ -170,10 +171,22 @@ void CopyResultsFromGetAvailableSpaceCallback(DriveFileError* out_error,
   *out_bytes_used = bytes_used;
 }
 
+void CopyResultsFromSearchMetadataCallback(
+    DriveFileError* out_error,
+    scoped_ptr<MetadataSearchResultVector>* out_result,
+    DriveFileError error,
+    scoped_ptr<MetadataSearchResultVector> result) {
+  DCHECK(out_error);
+  DCHECK(out_result);
+
+  *out_error = error;
+  *out_result = result.Pass();
+}
+
 void CopyResultsFromOpenFileCallbackAndQuit(DriveFileError* out_error,
-                                            FilePath* out_file_path,
+                                            base::FilePath* out_file_path,
                                             DriveFileError error,
-                                            const FilePath& file_path) {
+                                            const base::FilePath& file_path) {
   *out_error = error;
   *out_file_path = file_path;
   MessageLoop::current()->Quit();
@@ -186,7 +199,7 @@ void CopyResultsFromCloseFileCallbackAndQuit(DriveFileError* out_error,
 }
 
 bool LoadChangeFeed(const std::string& relative_path,
-                    DriveFileSystem* file_system,
+                    ChangeListLoader* change_list_loader,
                     bool is_delta_feed,
                     int64 root_feed_changestamp) {
   scoped_ptr<Value> document =
@@ -204,12 +217,12 @@ bool LoadChangeFeed(const std::string& relative_path,
   ScopedVector<google_apis::ResourceList> feed_list;
   feed_list.push_back(document_feed.release());
 
-  file_system->feed_loader()->UpdateFromFeed(
+  change_list_loader->UpdateFromFeed(
       feed_list,
       is_delta_feed,
       root_feed_changestamp,
       base::Bind(&base::DoNothing));
-  // DriveFeedLoader::UpdateFromFeed is asynchronous, so wait for it to finish.
+  // ChangeListLoader::UpdateFromFeed is asynchronous, so wait for it to finish.
   google_apis::test_util::RunBlockingPoolTask();
 
   return true;

@@ -26,18 +26,18 @@ TrayBubbleWrapper::TrayBubbleWrapper(TrayBackgroundView* tray,
   tray_->UpdateBubbleViewArrow(bubble_view_);
   bubble_view_->InitializeAndShowBubble();
 
-  tray_event_filter_.reset(new TrayEventFilter(this));
+  tray->tray_event_filter()->AddWrapper(this);
 }
 
 TrayBubbleWrapper::~TrayBubbleWrapper() {
-  tray_event_filter_.reset();
+  tray_->tray_event_filter()->RemoveWrapper(this);
   if (bubble_widget_) {
     bubble_widget_->RemoveObserver(this);
     bubble_widget_->Close();
   }
 }
 
-void TrayBubbleWrapper::OnWidgetClosing(views::Widget* widget) {
+void TrayBubbleWrapper::OnWidgetDestroying(views::Widget* widget) {
   CHECK_EQ(bubble_widget_, widget);
   bubble_widget_ = NULL;
   tray_->HideBubbleWithView(bubble_view_);  // May destroy |bubble_view_|

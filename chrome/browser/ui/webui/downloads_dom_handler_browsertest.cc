@@ -5,9 +5,9 @@
 #include "base/auto_reset.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/json/json_reader.h"
+#include "base/prefs/pref_service.h"
 #include "base/values.h"
 #include "chrome/browser/history/download_row.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/webui/downloads_dom_handler.h"
@@ -77,11 +77,11 @@ class MockDownloadsDOMHandler : public DownloadsDOMHandler {
   void reset_download_updated() { download_updated_.reset(); }
 
  protected:
-  virtual content::WebContents* GetWebUIWebContents() {
+  virtual content::WebContents* GetWebUIWebContents() OVERRIDE {
     return NULL;
   }
 
-  virtual void CallDownloadsList(const base::ListValue& downloads) {
+  virtual void CallDownloadsList(const base::ListValue& downloads) OVERRIDE {
     downloads_list_.reset(downloads.DeepCopy());
     if (waiting_list_) {
       content::BrowserThread::PostTask(
@@ -89,7 +89,7 @@ class MockDownloadsDOMHandler : public DownloadsDOMHandler {
     }
   }
 
-  virtual void CallDownloadUpdated(const base::ListValue& download) {
+  virtual void CallDownloadUpdated(const base::ListValue& download) OVERRIDE {
     download_updated_.reset(download.DeepCopy());
     if (waiting_updated_) {
       content::BrowserThread::PostTask(
@@ -140,16 +140,21 @@ IN_PROC_BROWSER_TEST_F(DownloadsDOMHandlerTest,
   MockDownloadsDOMHandler mddh(download_manager());
 
   GURL url = test_server()->GetURL("files/downloads/image.jpg");
+  std::vector<GURL> url_chain;
+  url_chain.push_back(url);
   base::Time current(base::Time::Now());
   download_manager()->CreateDownloadItem(
-      FilePath(FILE_PATH_LITERAL("/path/to/file")),
-      url,
+      base::FilePath(FILE_PATH_LITERAL("/path/to/file")),
+      base::FilePath(FILE_PATH_LITERAL("/path/to/file")),
+      url_chain,
       GURL(""),
-      current - base::TimeDelta::FromMinutes(5),
+      current,
       current,
       128,
       128,
       content::DownloadItem::COMPLETE,
+      content::DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS,
+      content::DOWNLOAD_INTERRUPT_REASON_NONE,
       false);
 
   mddh.WaitForDownloadsList();

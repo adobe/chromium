@@ -4,8 +4,8 @@
 
 #import "chrome/browser/ui/cocoa/extensions/extension_install_prompt_test_utils.h"
 
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/json/json_file_value_serializer.h"
 #include "base/path_service.h"
 #include "chrome/common/chrome_paths.h"
@@ -26,7 +26,7 @@ void MockExtensionInstallPromptDelegate::InstallUIAbort(bool user_initiated) {
 scoped_refptr<Extension> LoadInstallPromptExtension() {
   scoped_refptr<Extension> extension;
 
-  FilePath path;
+  base::FilePath path;
   PathService::Get(chrome::DIR_TEST_DATA, &path);
   path = path.AppendASCII("extensions")
              .AppendASCII("install_prompt")
@@ -41,8 +41,9 @@ scoped_refptr<Extension> LoadInstallPromptExtension() {
     return extension;
   }
 
-  extension = Extension::Create(path.DirName(), Extension::INVALID, *value,
-                                Extension::NO_FLAGS, &error);
+  extension = Extension::Create(
+      path.DirName(), extensions::Manifest::INVALID_LOCATION, *value,
+      Extension::NO_FLAGS, &error);
   if (!extension.get())
     LOG(ERROR) << error;
 
@@ -50,7 +51,7 @@ scoped_refptr<Extension> LoadInstallPromptExtension() {
 }
 
 gfx::Image LoadInstallPromptIcon() {
-  FilePath path;
+  base::FilePath path;
   PathService::Get(chrome::DIR_TEST_DATA, &path);
   path = path.AppendASCII("extensions")
              .AppendASCII("install_prompt")
@@ -67,6 +68,15 @@ gfx::Image LoadInstallPromptIcon() {
 ExtensionInstallPrompt::Prompt BuildExtensionInstallPrompt(
     Extension* extension) {
   ExtensionInstallPrompt::Prompt prompt(ExtensionInstallPrompt::INSTALL_PROMPT);
+  prompt.set_extension(extension);
+  prompt.set_icon(LoadInstallPromptIcon());
+  return prompt;
+}
+
+ExtensionInstallPrompt::Prompt BuildExtensionPostInstallPermissionsPrompt(
+    Extension* extension) {
+  ExtensionInstallPrompt::Prompt prompt(
+      ExtensionInstallPrompt::POST_INSTALL_PERMISSIONS_PROMPT);
   prompt.set_extension(extension);
   prompt.set_icon(LoadInstallPromptIcon());
   return prompt;

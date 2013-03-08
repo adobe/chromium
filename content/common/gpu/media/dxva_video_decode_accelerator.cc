@@ -528,11 +528,6 @@ void DXVAVideoDecodeAccelerator::Decode(
                                 state_ == kFlushing),
       "Invalid state: " << state_, ILLEGAL_STATE,);
 
-  if (!pending_output_samples_.empty() || !pending_input_buffers_.empty()) {
-    pending_input_buffers_.push_back(bitstream_buffer);
-    return;
-  }
-
   base::win::ScopedComPtr<IMFSample> sample;
   sample.Attach(CreateSampleFromInputBuffer(bitstream_buffer,
                                             input_stream_info_.cbSize,
@@ -543,54 +538,16 @@ void DXVAVideoDecodeAccelerator::Decode(
   RETURN_AND_NOTIFY_ON_HR_FAILURE(sample->SetSampleTime(bitstream_buffer.id()),
       "Failed to associate input buffer id with sample", PLATFORM_FAILURE,);
 
-  if (!inputs_before_decode_) {
-    TRACE_EVENT_BEGIN_ETW("DXVAVideoDecodeAccelerator.Decoding", this, "");
-  }
-  inputs_before_decode_++;
-
-  HRESULT hr = decoder_->ProcessInput(0, sample, 0);
-  // As per msdn if the decoder returns MF_E_NOTACCEPTING then it means that it
-  // has enough data to produce an output sample. In this case the recommended
-  // options are to
-  // 1. Generate new output by calling IMFTransform::ProcessOutput
-  // 2. Flush the input data
-  // We implement the first option, i.e to retrieve the output sample and then
-  // process the input again. Failure in either of these steps is treated as a
-  // decoder failure.
-  if (hr == MF_E_NOTACCEPTING) {
-    DoDecode();
-    RETURN_AND_NOTIFY_ON_FAILURE((state_ == kStopped || state_ == kNormal),
-        "Failed to process output. Unexpected decoder state: " << state_,
-        PLATFORM_FAILURE,);
-    hr = decoder_->ProcessInput(0, sample, 0);
-  }
-  RETURN_AND_NOTIFY_ON_HR_FAILURE(hr, "Failed to process input sample",
-      PLATFORM_FAILURE,);
-
-  DoDecode();
-
-  RETURN_AND_NOTIFY_ON_FAILURE((state_ == kStopped || state_ == kNormal),
-      "Failed to process output. Unexpected decoder state: " << state_,
-      ILLEGAL_STATE,);
-
-  // The Microsoft Media foundation decoder internally buffers up to 30 frames
-  // before returning a decoded frame. We need to inform the client that this
-  // input buffer is processed as it may stop sending us further input.
-  // Note: This may break clients which expect every input buffer to be
-  // associated with a decoded output buffer.
-  // TODO(ananta)
-  // Do some more investigation into whether it is possible to get the MFT
-  // decoder to emit an output packet for every input packet.
-  // http://code.google.com/p/chromium/issues/detail?id=108121
-  // http://code.google.com/p/chromium/issues/detail?id=150925
-  MessageLoop::current()->PostTask(FROM_HERE, base::Bind(
-      &DXVAVideoDecodeAccelerator::NotifyInputBufferRead,
-      base::AsWeakPtr(this), bitstream_buffer.id()));
+  DecodeInternal(sample);
 }
 
 void DXVAVideoDecodeAccelerator::AssignPictureBuffers(
     const std::vector<media::PictureBuffer>& buffers) {
   DCHECK(CalledOnValidThread());
+
+  RETURN_AND_NOTIFY_ON_FAILURE((state_ != kUninitialized),
+      "Invalid state: " << state_, ILLEGAL_STATE,);
+
   // Copy the picture buffers provided by the client to the available list,
   // and mark these buffers as available for use.
   for (size_t buffer_index = 0; buffer_index < buffers.size();
@@ -612,6 +569,9 @@ void DXVAVideoDecodeAccelerator::AssignPictureBuffers(
 void DXVAVideoDecodeAccelerator::ReusePictureBuffer(
     int32 picture_buffer_id) {
   DCHECK(CalledOnValidThread());
+
+  RETURN_AND_NOTIFY_ON_FAILURE((state_ != kUninitialized),
+      "Invalid state: " << state_, ILLEGAL_STATE,);
 
   OutputBuffers::iterator it = output_picture_buffers_.find(picture_buffer_id);
   RETURN_AND_NOTIFY_ON_FAILURE(it != output_picture_buffers_.end(),
@@ -1057,22 +1017,27 @@ void DXVAVideoDecodeAccelerator::NotifyInputBuffersDropped() {
 
   for (PendingInputs::iterator it = pending_input_buffers_.begin();
        it != pending_input_buffers_.end(); ++it) {
-    client_->NotifyEndOfBitstreamBuffer(it->id());
+    LONGLONG input_buffer_id = 0;
+    RETURN_ON_HR_FAILURE((*it)->GetSampleTime(&input_buffer_id),
+                         "Failed to get buffer id associated with sample",);
+    client_->NotifyEndOfBitstreamBuffer(input_buffer_id);
   }
   pending_input_buffers_.clear();
 }
 
 void DXVAVideoDecodeAccelerator::DecodePendingInputBuffers() {
+  RETURN_AND_NOTIFY_ON_FAILURE((state_ != kUninitialized),
+      "Invalid state: " << state_, ILLEGAL_STATE,);
+
   if (pending_input_buffers_.empty() || !pending_output_samples_.empty())
     return;
 
-  PendingInputs pending_input_buffers_copy = pending_input_buffers_;
-
-  pending_input_buffers_.clear();
+  PendingInputs pending_input_buffers_copy;
+  std::swap(pending_input_buffers_, pending_input_buffers_copy);
 
   for (PendingInputs::iterator it = pending_input_buffers_copy.begin();
-          it != pending_input_buffers_copy.end(); ++it) {
-    Decode(*it);
+       it != pending_input_buffers_copy.end(); ++it) {
+    DecodeInternal(*it);
   }
 }
 
@@ -1092,6 +1057,77 @@ void DXVAVideoDecodeAccelerator::FlushInternal() {
       &DXVAVideoDecodeAccelerator::NotifyFlushDone, base::AsWeakPtr(this)));
 
   state_ = kNormal;
+}
+
+void DXVAVideoDecodeAccelerator::DecodeInternal(
+    const base::win::ScopedComPtr<IMFSample>& sample) {
+  DCHECK(CalledOnValidThread());
+  
+  if (state_ == kUninitialized)
+    return;
+
+  if (!pending_output_samples_.empty() || !pending_input_buffers_.empty()) {
+    pending_input_buffers_.push_back(sample);
+    return;
+  }
+
+  if (!inputs_before_decode_) {
+    TRACE_EVENT_BEGIN_ETW("DXVAVideoDecodeAccelerator.Decoding", this, "");
+  }
+  inputs_before_decode_++;
+
+  HRESULT hr = decoder_->ProcessInput(0, sample, 0);
+  // As per msdn if the decoder returns MF_E_NOTACCEPTING then it means that it
+  // has enough data to produce one or more output samples. In this case the
+  // recommended options are to
+  // 1. Generate new output by calling IMFTransform::ProcessOutput until it
+  //    returns MF_E_TRANSFORM_NEED_MORE_INPUT.
+  // 2. Flush the input data
+  // We implement the first option, i.e to retrieve the output sample and then
+  // process the input again. Failure in either of these steps is treated as a
+  // decoder failure.
+  if (hr == MF_E_NOTACCEPTING) {
+    DoDecode();
+    RETURN_AND_NOTIFY_ON_FAILURE((state_ == kStopped || state_ == kNormal),
+        "Failed to process output. Unexpected decoder state: " << state_,
+        PLATFORM_FAILURE,);
+    hr = decoder_->ProcessInput(0, sample, 0);
+    // If we continue to get the MF_E_NOTACCEPTING error and there is an output
+    // sample waiting to be consumed, we add the input sample to the queue and
+    // return. This is because we only support 1 pending output sample at any
+    // given time due to the limitation with the Microsoft media foundation
+    // decoder where it recycles the output Decoder surfaces.
+    // This input sample will be processed once the output sample is processed.
+    if (hr == MF_E_NOTACCEPTING && !pending_output_samples_.empty()) {
+      pending_input_buffers_.push_back(sample);
+      return;
+    }
+  }
+  RETURN_AND_NOTIFY_ON_HR_FAILURE(hr, "Failed to process input sample",
+      PLATFORM_FAILURE,);
+
+  DoDecode();
+
+  RETURN_AND_NOTIFY_ON_FAILURE((state_ == kStopped || state_ == kNormal),
+      "Failed to process output. Unexpected decoder state: " << state_,
+      ILLEGAL_STATE,);
+
+  LONGLONG input_buffer_id = 0;
+  RETURN_ON_HR_FAILURE(sample->GetSampleTime(&input_buffer_id),
+                       "Failed to get input buffer id associated with sample",);
+  // The Microsoft Media foundation decoder internally buffers up to 30 frames
+  // before returning a decoded frame. We need to inform the client that this
+  // input buffer is processed as it may stop sending us further input.
+  // Note: This may break clients which expect every input buffer to be
+  // associated with a decoded output buffer.
+  // TODO(ananta)
+  // Do some more investigation into whether it is possible to get the MFT
+  // decoder to emit an output packet for every input packet.
+  // http://code.google.com/p/chromium/issues/detail?id=108121
+  // http://code.google.com/p/chromium/issues/detail?id=150925
+  MessageLoop::current()->PostTask(FROM_HERE, base::Bind(
+      &DXVAVideoDecodeAccelerator::NotifyInputBufferRead,
+      base::AsWeakPtr(this), input_buffer_id));
 }
 
 }  // namespace content

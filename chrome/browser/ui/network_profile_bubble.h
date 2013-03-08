@@ -8,9 +8,12 @@
 #include "base/basictypes.h"
 
 class Browser;
-class FilePath;
-class PrefServiceSyncable;
+class PrefRegistrySyncable;
 class Profile;
+
+namespace base {
+class FilePath;
+}
 
 // This class will try to detect if the profile is on a network share and if
 // this is the case notify the user with an info bubble.
@@ -47,7 +50,7 @@ class NetworkProfileBubble {
 
   // Verifies that the profile folder is not located on a network share, and if
   // it is shows the warning bubble to the user.
-  static void CheckNetworkProfile(const FilePath& profile_folder);
+  static void CheckNetworkProfile(const base::FilePath& profile_folder);
 
   // Shows the notification bubble using the provided |browser|.
   static void ShowNotification(Browser* browser);
@@ -55,7 +58,7 @@ class NetworkProfileBubble {
   static void SetNotificationShown(bool shown);
 
   // Register the pref that controls whether the bubble should be shown anymore.
-  static void RegisterUserPrefs(PrefServiceSyncable* prefs);
+  static void RegisterUserPrefs(PrefRegistrySyncable* registry);
 
   // Helper function wrapping the UMA_HISTOGRAM_ENUMERATION macro.
   static void RecordUmaEvent(MetricNetworkedProfileCheck event);

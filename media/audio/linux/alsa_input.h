@@ -29,7 +29,7 @@ class AlsaPcmInputStream : public AudioInputStreamImpl {
  public:
   // Pass this to the constructor if you want to attempt auto-selection
   // of the audio recording device.
-  static const char* kAutoSelectDevice;
+  static const char kAutoSelectDevice[];
 
   // Create a PCM Output stream for the ALSA device identified by
   // |device_name|. If unsure of what to use for |device_name|, use
@@ -74,7 +74,7 @@ class AlsaPcmInputStream : public AudioInputStreamImpl {
   AudioParameters params_;
   int bytes_per_buffer_;
   AlsaWrapper* wrapper_;
-  int buffer_duration_ms_;  // Length of each recorded buffer in milliseconds.
+  base::TimeDelta buffer_duration_;  // Length of each recorded buffer.
   AudioInputCallback* callback_;  // Valid during a recording session.
   base::Time next_read_time_;  // Scheduled time for the next read callback.
   snd_pcm_t* device_handle_;  // Handle to the ALSA PCM recording device.

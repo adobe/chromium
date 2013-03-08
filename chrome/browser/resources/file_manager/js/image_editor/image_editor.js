@@ -99,8 +99,8 @@ ImageEditor.prototype.onContentUpdate_ = function() {
  * Open the editing session for a new image.
  *
  * @param {string} url Image url.
- * @param {object} metadata Metadata.
- * @param {object} effect Transition effect object.
+ * @param {Object} metadata Metadata.
+ * @param {Object} effect Transition effect object.
  * @param {function(function)} saveFunction Image save function.
  * @param {function} displayCallback Display callback.
  * @param {function} loadCallback Load callback.
@@ -150,6 +150,7 @@ ImageEditor.prototype.closeSession = function(callback) {
   }
 
   this.executeWhenReady(callback);
+  this.commandQueue_.close();
   this.commandQueue_ = null;
 };
 
@@ -176,7 +177,7 @@ ImageEditor.prototype.canUndo = function() {
   return this.commandQueue_ && this.commandQueue_.canUndo();
 };
 
-  /**
+/**
  * Undo the recently executed command.
  */
 ImageEditor.prototype.undo = function() {
@@ -246,7 +247,7 @@ ImageEditor.prototype.getPrompt = function() { return this.prompt_ };
 
 /**
  * Handle the toolbar controls update.
- * @param {object} options A map of options.
+ * @param {Object} options A map of options.
  */
 ImageEditor.prototype.onOptionsChange = function(options) {
   ImageUtil.trace.resetTimer('update');
@@ -334,7 +335,7 @@ ImageEditor.Mode.prototype.cleanUpCaches = function() {};
 
 /**
  * Called when any of the controls changed its value.
- * @param {object} options A map of options.
+ * @param {Object} options A map of options.
  */
 ImageEditor.Mode.prototype.update = function(options) {
   this.markUpdated();
@@ -375,7 +376,7 @@ ImageEditor.Mode.OneClick = function(name, command) {
 ImageEditor.Mode.OneClick.prototype = {__proto__: ImageEditor.Mode.prototype};
 
 /**
- * @return {Command} command
+ * @return {Command} command.
  */
 ImageEditor.Mode.OneClick.prototype.getCommand = function() {
   return this.command_;
@@ -406,6 +407,7 @@ ImageEditor.prototype.createToolButtons = function() {
     var mode = this.modes_[i];
     mode.bind(this, createButton(mode.name, this.enterMode.bind(this, mode)));
   }
+
   this.undoButton_ = createButton('undo', this.undo.bind(this));
   this.registerAction_('undo');
 
@@ -629,7 +631,7 @@ ImageEditor.MouseControl = function(rootContainer, container, buffer) {
     'touchcancel': this.onTouchCancel,
     'touchmove': this.onTouchMove,
     'mousedown': this.onMouseDown,
-    'mouseup': this.onMouseUp,
+    'mouseup': this.onMouseUp
   };
 
   for (var eventName in handlers) {
@@ -671,7 +673,7 @@ ImageEditor.MouseControl.MAX_DOUBLE_TAP_DURATION_ = 1000;
  * Convert the event position from the event object to client coordinates.
  *
  * @param {MouseEvent|Touch} e Pointer position.
- * @return {object} A pair of x,y in client coordinates.
+ * @return {Object} A pair of x,y in client coordinates.
  * @private
  */
 ImageEditor.MouseControl.getPosition_ = function(e) {
@@ -854,7 +856,7 @@ ImageEditor.MouseControl.prototype.lockMouse_ = function(on) {
 /**
  * Update the cursor.
  *
- * @param {object} position An object holding x and y properties.
+ * @param {Object} position An object holding x and y properties.
  * @private
  */
 ImageEditor.MouseControl.prototype.updateCursor_ = function(position) {
@@ -920,14 +922,17 @@ ImageEditor.Toolbar.prototype.addLabel = function(name) {
  * Add a button.
  * @param {string} name Button name.
  * @param {function} handler onClick handler.
- * @param {string} opt_class Extra class name.
+ * @param {string=} opt_class Extra class name.
  * @return {HTMLElement} The added button.
  */
 ImageEditor.Toolbar.prototype.addButton = function(
     name, handler, opt_class) {
   var button = this.create_('button');
   if (opt_class) button.classList.add(opt_class);
-  button.textContent = this.displayStringFunction_(name);
+  var label = this.create_('span');
+  label.textContent = this.displayStringFunction_(name);
+  button.appendChild(label);
+  button.label = this.displayStringFunction_(name);
   button.addEventListener('click', handler, false);
   return this.add(button);
 };
@@ -941,7 +946,7 @@ ImageEditor.Toolbar.prototype.addButton = function(
  * @param {number} max Max value of the options.
  * @param {number} scale A number to multiply by when setting
  *                       min/value/max in DOM.
- * @param {boolean} opt_showNumeric True if numeric value should be displayed.
+ * @param {boolean=} opt_showNumeric True if numeric value should be displayed.
  * @return {HTMLElement} Range element.
  */
 ImageEditor.Toolbar.prototype.addRange = function(
@@ -997,7 +1002,7 @@ ImageEditor.Toolbar.prototype.addRange = function(
 };
 
 /**
- * @return {object} options A map of options.
+ * @return {Object} options A map of options.
  */
 ImageEditor.Toolbar.prototype.getOptions = function() {
   var values = {};
@@ -1032,6 +1037,7 @@ ImageEditor.Toolbar.prototype.show = function(on) {
  *
  * @param {HTMLElement} container Container element.
  * @param {function} displayStringFunction A formatting function.
+ * @constructor
  */
 ImageEditor.Prompt = function(container, displayStringFunction) {
   this.container_ = container;
@@ -1079,7 +1085,7 @@ ImageEditor.Prompt.prototype.setTimer = function(callback, timeout) {
  *
  * @param {string} text The prompt text.
  * @param {number} timeout Timeout in ms.
- * @param {object} formatArgs varArgs for the formatting fuction.
+ * @param {Object} formatArgs varArgs for the formatting fuction.
  */
 ImageEditor.Prompt.prototype.show = function(text, timeout, formatArgs) {
   this.showAt.apply(this,
@@ -1091,7 +1097,7 @@ ImageEditor.Prompt.prototype.show = function(text, timeout, formatArgs) {
  * @param {string} pos The 'pos' attribute value.
  * @param {string} text The prompt text.
  * @param {number} timeout Timeout in ms.
- * @param {object} formatArgs varArgs for the formatting fuction.
+ * @param {Object} formatArgs varArgs for the formatting fuction.
  */
 ImageEditor.Prompt.prototype.showAt = function(pos, text, timeout, formatArgs) {
   this.reset();

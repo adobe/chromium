@@ -7,8 +7,8 @@
 
 #include <string>
 
-#include "base/file_path.h"
-#include "base/file_util.h"
+#include "base/files/file_path.h"
+#include "base/files/memory_mapped_file.h"
 #include "media/base/data_source.h"
 
 namespace media {
@@ -19,7 +19,7 @@ class MEDIA_EXPORT FileDataSource : public DataSource {
  public:
   FileDataSource();
 
-  bool Initialize(const FilePath& file_path);
+  bool Initialize(const base::FilePath& file_path);
 
   // Implementation of DataSource.
   virtual void set_host(DataSourceHost* host) OVERRIDE;
@@ -41,7 +41,7 @@ class MEDIA_EXPORT FileDataSource : public DataSource {
   // Informs the host of changes in total and buffered bytes.
   void UpdateHostBytes();
 
-  file_util::MemoryMappedFile file_;
+  base::MemoryMappedFile file_;
 
   bool force_read_errors_;
   bool force_streaming_;

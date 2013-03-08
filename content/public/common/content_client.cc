@@ -52,7 +52,7 @@ ContentClient::ContentClient()
 ContentClient::~ContentClient() {
 }
 
-bool ContentClient::HasWebUIScheme(const GURL& url) const {
+bool ContentClient::CanSendWhileSwappedOut(const IPC::Message* message) {
   return false;
 }
 

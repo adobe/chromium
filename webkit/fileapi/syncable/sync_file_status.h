@@ -5,7 +5,7 @@
 #ifndef WEBKIT_FILEAPI_SYNCABLE_SYNC_FILE_STATUS_H_
 #define WEBKIT_FILEAPI_SYNCABLE_SYNC_FILE_STATUS_H_
 
-namespace fileapi {
+namespace sync_file_system {
 
 enum SyncFileStatus {
   // The file has unknown sync status (e.g. the file is missing or there

@@ -17,7 +17,7 @@
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/favicon/favicon_service.h"
 #include "chrome/browser/favicon/favicon_service_factory.h"
-#include "chrome/browser/history/history.h"
+#include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/importer/firefox2_importer.h"
 #include "chrome/test/base/testing_profile.h"
@@ -119,7 +119,7 @@ class BookmarkHTMLWriterTest : public testing::Test {
   }
 
   base::ScopedTempDir temp_dir_;
-  FilePath path_;
+  base::FilePath path_;
 };
 
 // Class that will notify message loop when file is written.
@@ -129,7 +129,7 @@ class BookmarksObserver : public BookmarksExportObserver {
     DCHECK(loop);
   }
 
-  virtual void OnExportFinished() {
+  virtual void OnExportFinished() OVERRIDE {
     loop_->Quit();
   }
 

@@ -178,6 +178,11 @@ gpu::CommandBuffer::State CommandBufferProxyImpl::GetLastState() {
   return last_state_;
 }
 
+int32 CommandBufferProxyImpl::GetLastToken() {
+  TryUpdateState();
+  return last_state_.token;
+}
+
 void CommandBufferProxyImpl::Flush(int32 put_offset) {
   if (last_state_.error != gpu::error::kNoError)
     return;
@@ -393,10 +398,6 @@ uint32 CommandBufferProxyImpl::InsertSyncPoint() {
   return sync_point;
 }
 
-void CommandBufferProxyImpl::WaitSyncPoint(uint32 sync_point) {
-  Send(new GpuCommandBufferMsg_WaitSyncPoint(route_id_, sync_point));
-}
-
 bool CommandBufferProxyImpl::SignalSyncPoint(uint32 sync_point,
                                              const base::Closure& callback) {
   if (last_state_.error != gpu::error::kNoError) {
@@ -418,7 +419,7 @@ bool CommandBufferProxyImpl::SignalSyncPoint(uint32 sync_point,
 
 bool CommandBufferProxyImpl::GenerateMailboxNames(
     unsigned num,
-    std::vector<std::string>* names) {
+    std::vector<gpu::Mailbox>* names) {
   return channel_->GenerateMailboxNames(num, names);
 }
 

@@ -10,17 +10,16 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/logging.h"
-#include "base/string_number_conversions.h"
 #include "base/string_piece.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/cros/network_library.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/webui/chrome_url_data_manager.h"
-#include "chrome/browser/ui/webui/chrome_web_ui_data_source.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
+#include "content/public/browser/web_ui_data_source.h"
 #include "content/public/browser/web_ui_message_handler.h"
 #include "grit/browser_resources.h"
 #include "grit/generated_resources.h"
@@ -49,8 +48,8 @@ const char kStatusProperty[] = "status";
 const char kTechnologyProperty[] = "technology";
 
 content::WebUIDataSource* CreateChooseMobileNetworkUIHTMLSource() {
-  content::WebUIDataSource* source =
-      ChromeWebUIDataSource::Create(chrome::kChromeUIChooseMobileNetworkHost);
+  content::WebUIDataSource* source = content::WebUIDataSource::Create(
+      chrome::kChromeUIChooseMobileNetworkHost);
 
   source->AddLocalizedString("chooseNetworkTitle",
                              IDS_NETWORK_CHOOSE_MOBILE_NETWORK);
@@ -215,7 +214,7 @@ ChooseMobileNetworkUI::ChooseMobileNetworkUI(content::WebUI* web_ui)
   web_ui->AddMessageHandler(handler);
   // Set up the "chrome://choose-mobile-network" source.
   Profile* profile = Profile::FromWebUI(web_ui);
-  ChromeURLDataManager::AddWebUIDataSource(
+  content::WebUIDataSource::Add(
       profile, CreateChooseMobileNetworkUIHTMLSource());
 }
 

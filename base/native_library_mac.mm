@@ -6,8 +6,8 @@
 
 #include <dlfcn.h>
 
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/mac/scoped_cftyperef.h"
 #include "base/string_util.h"
 #include "base/threading/thread_restrictions.h"
@@ -16,7 +16,7 @@
 namespace base {
 
 // static
-NativeLibrary LoadNativeLibrary(const FilePath& library_path,
+NativeLibrary LoadNativeLibrary(const base::FilePath& library_path,
                                 std::string* error) {
   // dlopen() etc. open the file off disk.
   if (library_path.Extension() == "dylib" ||

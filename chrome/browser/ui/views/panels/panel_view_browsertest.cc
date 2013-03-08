@@ -16,6 +16,10 @@
 #include "ui/views/controls/link.h"
 #include "ui/views/controls/textfield/textfield.h"
 
+#if defined(OS_WIN)
+#include "ui/views/win/hwnd_util.h"
+#endif
+
 // BasePanelBrowserTest now creates refactored Panels. Refactor
 // has only been done for Mac panels so far.
 class PanelViewTest : public BasePanelBrowserTest {
@@ -26,10 +30,6 @@ class PanelViewTest : public BasePanelBrowserTest {
   PanelView* GetPanelView(Panel* panel) const {
     return static_cast<PanelView*>(panel->native_panel());
   }
-
-  gfx::NativeWindow GetNativeWindow(Panel* panel) const {
-    return GetPanelView(panel)->GetNativePanelWindow();
-  }
 };
 
 IN_PROC_BROWSER_TEST_F(PanelViewTest, ActivePanelWindowProperties) {
@@ -39,8 +39,8 @@ IN_PROC_BROWSER_TEST_F(PanelViewTest, ActivePanelWindowProperties) {
 
   // Validate window styles. We want to ensure that the window is created
   // with expected styles regardless of its active state.
-#if defined(OS_WIN) && !defined(USE_AURA)
-  HWND native_window = GetNativeWindow(panel);
+#if defined(OS_WIN)
+  HWND native_window = views::HWNDForWidget(GetPanelView(panel)->window());
 
   LONG styles = ::GetWindowLong(native_window, GWL_STYLE);
   EXPECT_EQ(0, styles & WS_MAXIMIZEBOX);
@@ -67,8 +67,8 @@ IN_PROC_BROWSER_TEST_F(PanelViewTest, InactivePanelWindowProperties) {
 
   // Validate window styles. We want to ensure that the window is created
   // with expected styles regardless of its active state.
-#if defined(OS_WIN) && !defined(USE_AURA)
-  HWND native_window = GetNativeWindow(panel);
+#if defined(OS_WIN)
+  HWND native_window = views::HWNDForWidget(GetPanelView(panel)->window());
 
   LONG styles = ::GetWindowLong(native_window, GWL_STYLE);
   EXPECT_EQ(0, styles & WS_MAXIMIZEBOX);
@@ -140,12 +140,14 @@ IN_PROC_BROWSER_TEST_F(PanelViewTest, CheckTitleOnlyHeight) {
   Panel* panel = CreatePanelWithBounds("PanelTest", bounds);
 
   // Change panel to title-only and check its height.
-  bounds.set_height(panel->TitleOnlyHeight());
-  panel->SetPanelBoundsInstantly(bounds);
+  panel->SetExpansionState(Panel::TITLE_ONLY);
+  WaitForBoundsAnimationFinished(panel);
   EXPECT_EQ(panel->TitleOnlyHeight(), panel->GetBounds().height());
   EXPECT_EQ(0, GetPanelView(panel)->height()); // client area height.
+#if defined(OS_WIN) && !defined(USE_AURA)
   EXPECT_EQ(panel->TitleOnlyHeight(),
             GetPanelView(panel)->GetFrameView()->height());
+#endif
 
   panel->Close();
 }
@@ -159,8 +161,10 @@ IN_PROC_BROWSER_TEST_F(PanelViewTest, CheckMinimizedHeight) {
   panel->SetPanelBoundsInstantly(bounds);
   EXPECT_EQ(panel::kMinimizedPanelHeight, panel->GetBounds().height());
   EXPECT_EQ(0, GetPanelView(panel)->height()); // client area height.
+#if defined(OS_WIN) && !defined(USE_AURA)
   EXPECT_EQ(panel::kMinimizedPanelHeight,
             GetPanelView(panel)->GetFrameView()->height());
+#endif
 
   panel->Close();
 }

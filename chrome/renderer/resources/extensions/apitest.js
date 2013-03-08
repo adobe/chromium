@@ -45,7 +45,11 @@
   chrome.test.callbackAdded = function() {
     pendingCallbacks++;
 
+    var called = false;
     return function() {
+      chrome.test.assertFalse(called, 'callback has already been run');
+      called = true;
+
       pendingCallbacks--;
       if (pendingCallbacks == 0) {
         chrome.test.succeed();
@@ -196,10 +200,10 @@
     chrome.test.assertEq(expectedError, chrome.runtime.lastError.message);
   }
 
-  function safeFunctionApply(func, arguments) {
+  function safeFunctionApply(func, args) {
     try {
       if (func)
-        func.apply(null, arguments);
+        func.apply(null, args);
     } catch (e) {
       var msg = "uncaught exception " + e;
       chrome.test.fail(msg);

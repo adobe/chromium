@@ -1,5 +1,5 @@
 {
-  'TOOLS': ['newlib', 'glibc', 'win', 'linux', 'pnacl'],
+  'TOOLS': ['newlib', 'glibc', 'pnacl', 'linux', 'win'],
   'SEARCH': [
     '.',
     '../../../../testing/gmock/include/gmock',
@@ -50,9 +50,6 @@
       ],
       'DEST': 'include/gmock/internal',
     },
-  ],
-  'DATA': [
-    'Makefile'
   ],
   'DEST': 'testlibs',
   'NAME': 'gmock',

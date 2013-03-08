@@ -2,11 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "hunspell_engine.h"
+#include "chrome/renderer/spellchecker/hunspell_engine.h"
 
 #include <algorithm>
 #include <iterator>
 
+#include "base/files/memory_mapped_file.h"
 #include "base/metrics/histogram.h"
 #include "base/time.h"
 #include "chrome/common/spellcheck_common.h"
@@ -46,16 +47,11 @@ HunspellEngine::HunspellEngine()
 HunspellEngine::~HunspellEngine() {
 }
 
-void HunspellEngine::Init(base::PlatformFile file,
-                          const std::vector<std::string>& custom_words) {
+void HunspellEngine::Init(base::PlatformFile file) {
   initialized_ = true;
   hunspell_.reset();
   bdict_file_.reset();
   file_ = file;
-
-  custom_words_.insert(custom_words_.end(),
-                       custom_words.begin(), custom_words.end());
-
   // Delay the actual initialization of hunspell until it is needed.
 }
 
@@ -63,16 +59,13 @@ void HunspellEngine::InitializeHunspell() {
   if (hunspell_.get())
     return;
 
-  bdict_file_.reset(new file_util::MemoryMappedFile);
+  bdict_file_.reset(new base::MemoryMappedFile);
 
   if (bdict_file_->Initialize(file_)) {
     TimeTicks debug_start_time = base::Histogram::DebugNow();
 
     hunspell_.reset(
         new Hunspell(bdict_file_->data(), bdict_file_->length()));
-
-    // Add custom words to Hunspell.
-    AddWordsToHunspell(custom_words_);
 
     DHISTOGRAM_TIMES("Spellcheck.InitTime",
                      base::Histogram::DebugNow() - debug_start_time);
@@ -81,48 +74,20 @@ void HunspellEngine::InitializeHunspell() {
   }
 }
 
-void HunspellEngine::AddWordsToHunspell(const std::vector<std::string>& words) {
-  std::string word;
-  for (chrome::spellcheck_common::WordList::const_iterator it = words.begin();
-       it != words.end();
-       ++it) {
-    word = *it;
-    if (!word.empty() &&
-        word.length() <=
-            chrome::spellcheck_common::MAX_CUSTOM_DICTIONARY_WORD_BYTES) {
-      hunspell_->add(word.c_str());
-    }
-  }
-}
-
-void HunspellEngine::RemoveWordsFromHunspell(
-    const std::vector<std::string>& words) {
-  std::string word;
-  for (std::vector<std::string>::const_iterator it = words.begin();
-       it != words.end();
-       ++it) {
-    word = *it;
-    if (!word.empty() &&
-        word.length() <=
-            chrome::spellcheck_common::MAX_CUSTOM_DICTIONARY_WORD_BYTES) {
-      hunspell_->remove(word.c_str());
-    }
-  }
-}
-
 bool HunspellEngine::CheckSpelling(const string16& word_to_check, int tag) {
-  bool word_correct = false;
+  // Assume all words that cannot be checked are valid. Since Chrome can't
+  // offer suggestions on them, either, there's no point in flagging them to
+  // the user.
+  bool word_correct = true;
   std::string word_to_check_utf8(UTF16ToUTF8(word_to_check));
-  // Hunspell shouldn't let us exceed its max, but check just in case
-  if (word_to_check_utf8.length() < kMaxCheckedLen) {
+
+  // Limit the size of checked words.
+  if (word_to_check_utf8.length() <= kMaxCheckedLen) {
+    // If |hunspell_| is NULL here, an error has occurred, but it's better
+    // to check rather than crash.
     if (hunspell_.get()) {
-      // |hunspell_->spell| returns 0 if the word is spelled correctly and
-      // non-zero otherwise.
+      // |hunspell_->spell| returns 0 if the word is misspelled.
       word_correct = (hunspell_->spell(word_to_check_utf8.c_str()) != 0);
-    } else {
-      // If |hunspell_| is NULL here, an error has occurred, but it's better
-      // to check rather than crash.
-      word_correct = true;
     }
   }
 
@@ -154,31 +119,6 @@ void HunspellEngine::FillSuggestionList(
   }
   if (suggestions != NULL)
     free(suggestions);
-}
-
-void HunspellEngine::OnCustomDictionaryChanged(
-    const std::vector<std::string>& words_added,
-    const std::vector<std::string>& words_removed) {
-  if (!hunspell_.get()) {
-    // Save it for later---add it when hunspell is initialized.
-    custom_words_.insert(custom_words_.end(),
-                         words_added.begin(),
-                         words_added.end());
-    // Remove words.
-    std::vector<std::string> words_removed_copy(words_removed);
-    std::sort(words_removed_copy.begin(), words_removed_copy.end());
-    std::sort(custom_words_.begin(), custom_words_.end());
-    std::vector<std::string> updated_custom_words;
-    std::set_difference(custom_words_.begin(),
-                        custom_words_.end(),
-                        words_removed_copy.begin(),
-                        words_removed_copy.end(),
-                        std::back_inserter(updated_custom_words));
-    std::swap(custom_words_, updated_custom_words);
-  } else {
-    AddWordsToHunspell(words_added);
-    RemoveWordsFromHunspell(words_removed);
-  }
 }
 
 bool HunspellEngine::InitializeIfNeeded() {

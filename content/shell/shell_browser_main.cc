@@ -7,8 +7,8 @@
 #include <iostream>
 
 #include "base/command_line.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
@@ -25,7 +25,7 @@
 namespace {
 
 GURL GetURLForLayoutTest(const std::string& test_name,
-                         FilePath* current_working_directory,
+                         base::FilePath* current_working_directory,
                          bool* enable_pixel_dumping,
                          std::string* expected_pixel_hash) {
   // A test name is formated like file:///path/to/test'--pixel-test'pixelhash
@@ -55,14 +55,14 @@ GURL GetURLForLayoutTest(const std::string& test_name,
 #if defined(OS_WIN)
     std::wstring wide_path_or_url =
         base::SysNativeMBToWide(path_or_url);
-    FilePath local_file(wide_path_or_url);
+    base::FilePath local_file(wide_path_or_url);
 #else
-    FilePath local_file(path_or_url);
+    base::FilePath local_file(path_or_url);
 #endif
     file_util::AbsolutePath(&local_file);
     test_url = net::FilePathToFileURL(local_file);
   }
-  FilePath local_path;
+  base::FilePath local_path;
   if (current_working_directory) {
     // We're outside of the message loop here, and this is a test.
     base::ThreadRestrictions::ScopedAllowIO allow_io;
@@ -123,6 +123,13 @@ int ShellBrowserMain(const content::MainFunctionParams& parameters) {
 
   if (layout_test_mode) {
     content::WebKitTestController test_controller;
+    {
+      // We're outside of the message loop here, and this is a test.
+      base::ThreadRestrictions::ScopedAllowIO allow_io;
+      base::FilePath temp_path;
+      file_util::GetTempDir(&temp_path);
+      test_controller.SetTempPath(temp_path);
+    }
     std::string test_string;
     CommandLine::StringVector args =
         CommandLine::ForCurrentProcess()->GetArgs();
@@ -142,7 +149,7 @@ int ShellBrowserMain(const content::MainFunctionParams& parameters) {
 
       bool enable_pixel_dumps;
       std::string pixel_hash;
-      FilePath cwd;
+      base::FilePath cwd;
       GURL test_url = GetURLForLayoutTest(
           test_string, &cwd, &enable_pixel_dumps, &pixel_hash);
       if (!content::WebKitTestController::Get()->PrepareForLayoutTest(

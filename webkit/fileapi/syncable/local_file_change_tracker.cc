@@ -18,10 +18,16 @@
 #include "webkit/fileapi/syncable/local_file_sync_status.h"
 #include "webkit/fileapi/syncable/syncable_file_system_util.h"
 
-namespace fileapi {
+using fileapi::FileSystemContext;
+using fileapi::FileSystemFileUtil;
+using fileapi::FileSystemOperationContext;
+using fileapi::FileSystemURL;
+using fileapi::FileSystemURLSet;
+
+namespace sync_file_system {
 
 namespace {
-const FilePath::CharType kDatabaseName[] =
+const base::FilePath::CharType kDatabaseName[] =
     FILE_PATH_LITERAL("LocalFileChangeTracker");
 const char kMark[] = "d";
 }  // namespace
@@ -30,11 +36,12 @@ const char kMark[] = "d";
 // object must be destructed on file_task_runner.
 class LocalFileChangeTracker::TrackerDB {
  public:
-  explicit TrackerDB(const FilePath& base_path);
+  explicit TrackerDB(const base::FilePath& base_path);
 
   SyncStatusCode MarkDirty(const std::string& url);
   SyncStatusCode ClearDirty(const std::string& url);
-  SyncStatusCode GetDirtyEntries(std::queue<FileSystemURL>* dirty_files);
+  SyncStatusCode GetDirtyEntries(
+      std::queue<FileSystemURL>* dirty_files);
 
  private:
   enum RecoveryOption {
@@ -47,7 +54,7 @@ class LocalFileChangeTracker::TrackerDB {
   void HandleError(const tracked_objects::Location& from_here,
                    const leveldb::Status& status);
 
-  const FilePath base_path_;
+  const base::FilePath base_path_;
   scoped_ptr<leveldb::DB> db_;
   SyncStatusCode db_status_;
 
@@ -60,7 +67,7 @@ LocalFileChangeTracker::ChangeInfo::~ChangeInfo() {}
 // LocalFileChangeTracker ------------------------------------------------------
 
 LocalFileChangeTracker::LocalFileChangeTracker(
-    const FilePath& base_path,
+    const base::FilePath& base_path,
     base::SequencedTaskRunner* file_task_runner)
     : initialized_(false),
       file_task_runner_(file_task_runner),
@@ -211,18 +218,18 @@ SyncStatusCode LocalFileChangeTracker::CollectLastDirtyChanges(
     return status;
 
   FileSystemFileUtil* file_util =
-      file_system_context->GetFileUtil(kFileSystemTypeSyncable);
+      file_system_context->GetFileUtil(fileapi::kFileSystemTypeSyncable);
   DCHECK(file_util);
   scoped_ptr<FileSystemOperationContext> context(
       new FileSystemOperationContext(file_system_context));
 
   base::PlatformFileInfo file_info;
-  FilePath platform_path;
+  base::FilePath platform_path;
 
   while (!dirty_files.empty()) {
     const FileSystemURL url = dirty_files.front();
     dirty_files.pop();
-    DCHECK_EQ(url.type(), kFileSystemTypeSyncable);
+    DCHECK_EQ(url.type(), fileapi::kFileSystemTypeSyncable);
 
     switch (file_util->GetFileInfo(context.get(), url,
                                    &file_info, &platform_path)) {
@@ -233,15 +240,16 @@ SyncStatusCode LocalFileChangeTracker::CollectLastDirtyChanges(
           break;
         }
 
-        RecordChange(url, FileChange(FileChange::FILE_CHANGE_ADD_OR_UPDATE,
-                                     SYNC_FILE_TYPE_DIRECTORY));
+        RecordChange(url, FileChange(
+            FileChange::FILE_CHANGE_ADD_OR_UPDATE,
+            SYNC_FILE_TYPE_DIRECTORY));
 
         // Push files and directories in this directory into |dirty_files|.
         scoped_ptr<FileSystemFileUtil::AbstractFileEnumerator> enumerator(
             file_util->CreateFileEnumerator(context.get(),
                                             url,
                                             false /* recursive */));
-        FilePath path_each;
+        base::FilePath path_each;
         while (!(path_each = enumerator->Next()).empty()) {
           dirty_files.push(CreateSyncableFileSystemURL(
               url.origin(), url.filesystem_id(), path_each));
@@ -288,7 +296,7 @@ void LocalFileChangeTracker::RecordChange(
 
 // TrackerDB -------------------------------------------------------------------
 
-LocalFileChangeTracker::TrackerDB::TrackerDB(const FilePath& base_path)
+LocalFileChangeTracker::TrackerDB::TrackerDB(const base::FilePath& base_path)
   : base_path_(base_path),
     db_status_(SYNC_STATUS_OK) {}
 
@@ -297,7 +305,8 @@ SyncStatusCode LocalFileChangeTracker::TrackerDB::Init(
   if (db_.get() && db_status_ == SYNC_STATUS_OK)
     return SYNC_STATUS_OK;
 
-  std::string path = FilePathToString(base_path_.Append(kDatabaseName));
+  std::string path = fileapi::FilePathToString(
+      base_path_.Append(kDatabaseName));
   leveldb::Options options;
   options.create_if_missing = true;
   leveldb::DB* db;
@@ -416,4 +425,4 @@ SyncStatusCode LocalFileChangeTracker::TrackerDB::GetDirtyEntries(
   return SYNC_STATUS_OK;
 }
 
-}  // namespace fileapi
+}  // namespace sync_file_system

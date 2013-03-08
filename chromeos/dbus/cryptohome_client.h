@@ -90,6 +90,12 @@ class CHROMEOS_EXPORT CryptohomeClient {
   // The original content of |salt| is lost.
   virtual bool GetSystemSalt(std::vector<uint8>* salt) = 0;
 
+  // Calls GetSanitizedUsername method.  |callback| is called after the method
+  // call succeeds.
+  virtual void GetSanitizedUsername(
+      const std::string& username,
+      const StringDBusMethodCallback& callback) = 0;
+
   // Calls the AsyncMount method to asynchronously mount the cryptohome for
   // |username|, using |key| to unlock it. For supported |flags|, see the
   // documentation of AsyncMethodCaller::AsyncMount().
@@ -111,28 +117,41 @@ class CHROMEOS_EXPORT CryptohomeClient {
 
   // Calls TpmIsEnabled method and returns true when the call succeeds.
   // This method blocks until the call returns.
-  // TODO(hashimoto): Remove this method. crosbug.com/28500
+  // TODO(hashimoto): Remove this method. crbug.com/141006
   virtual bool CallTpmIsEnabledAndBlock(bool* enabled) = 0;
 
   // Calls TpmGetPassword method.
   virtual void TpmGetPassword(const StringDBusMethodCallback& callback) = 0;
 
+  // Calls TpmIsOwned method.
+  virtual void TpmIsOwned(const BoolDBusMethodCallback& callback) = 0;
+
   // Calls TpmIsOwned method and returns true when the call succeeds.
   // This method blocks until the call returns.
-  virtual bool TpmIsOwned(bool* owned) = 0;
+  // TODO(hashimoto): Remove this method. crbug.com/141012
+  virtual bool CallTpmIsOwnedAndBlock(bool* owned) = 0;
+
+  // Calls TpmIsBeingOwned method.
+  virtual void TpmIsBeingOwned(const BoolDBusMethodCallback& callback) = 0;
 
   // Calls TpmIsBeingOwned method and returns true when the call succeeds.
   // This method blocks until the call returns.
-  virtual bool TpmIsBeingOwned(bool* owning) = 0;
+  // TODO(hashimoto): Remove this method. crbug.com/141011
+  virtual bool CallTpmIsBeingOwnedAndBlock(bool* owning) = 0;
 
   // Calls TpmCanAttemptOwnership method.
   // This method tells the service that it is OK to attempt ownership.
   virtual void TpmCanAttemptOwnership(
       const VoidDBusMethodCallback& callback) = 0;
 
+  // Calls TpmClearStoredPasswordMethod.
+  virtual void TpmClearStoredPassword(
+      const VoidDBusMethodCallback& callback) = 0;
+
   // Calls TpmClearStoredPassword method and returns true when the call
   // succeeds.  This method blocks until the call returns.
-  virtual bool TpmClearStoredPassword() = 0;
+  // TODO(hashimoto): Remove this method. crbug.com/141010
+  virtual bool CallTpmClearStoredPasswordAndBlock() = 0;
 
   // Calls Pkcs11IsTpmTokenReady method.
   virtual void Pkcs11IsTpmTokenReady(

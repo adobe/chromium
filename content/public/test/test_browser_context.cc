@@ -4,7 +4,7 @@
 
 #include "content/public/test/test_browser_context.h"
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/test/null_task_runner.h"
 #include "content/public/test/mock_resource_context.h"
 #include "net/url_request/url_request_context.h"
@@ -48,7 +48,7 @@ TestBrowserContext::TestBrowserContext() {
 TestBrowserContext::~TestBrowserContext() {
 }
 
-FilePath TestBrowserContext::TakePath() {
+base::FilePath TestBrowserContext::TakePath() {
   return browser_context_dir_.Take();
 }
 
@@ -57,7 +57,7 @@ void TestBrowserContext::SetSpecialStoragePolicy(
   special_storage_policy_ = policy;
 }
 
-FilePath TestBrowserContext::GetPath() {
+base::FilePath TestBrowserContext::GetPath() {
   return browser_context_dir_.path();
 }
 
@@ -82,14 +82,6 @@ TestBrowserContext::GetRequestContextForRenderProcess(int renderer_child_id) {
   return NULL;
 }
 
-
-net::URLRequestContextGetter*
-TestBrowserContext::GetRequestContextForStoragePartition(
-    const FilePath& partition_path,
-    bool in_memory) {
-  return NULL;
-}
-
 net::URLRequestContextGetter* TestBrowserContext::GetMediaRequestContext() {
   return NULL;
 }
@@ -102,7 +94,7 @@ TestBrowserContext::GetMediaRequestContextForRenderProcess(
 
 net::URLRequestContextGetter*
 TestBrowserContext::GetMediaRequestContextForStoragePartition(
-    const FilePath& partition_path,
+    const base::FilePath& partition_path,
     bool in_memory) {
   return NULL;
 }

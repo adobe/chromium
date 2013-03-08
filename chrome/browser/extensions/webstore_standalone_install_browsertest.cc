@@ -11,8 +11,8 @@
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/startup_helper.h"
 #include "chrome/browser/extensions/webstore_standalone_installer.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
@@ -85,10 +85,29 @@ class WebstoreStandaloneInstallTest : public InProcessBrowserTest {
     std::string script = StringPrintf("%s('%s')", test_function_name.c_str(),
         test_gallery_url_.c_str());
     ASSERT_TRUE(content::ExecuteScriptAndExtractBool(
-        chrome::GetActiveWebContents(browser()),
+        browser()->tab_strip_model()->GetActiveWebContents(),
         script,
         &result));
     EXPECT_TRUE(result);
+  }
+
+  // Passes |i| to |test_function_name|, and expects that function to
+  // return one of "FAILED", "KEEPGOING" or "DONE". KEEPGOING should be
+  // returned if more tests remain to be run and the current test succeeded,
+  // FAILED is returned when a test fails, and DONE is returned by the last
+  // test if it succeeds.
+  // This methods returns true iff there are more tests that need to be run.
+  bool RunIndexedTest(const std::string& test_function_name,
+                      int i) {
+    std::string result = "FAILED";
+    std::string script = StringPrintf("%s('%s', %d)",
+        test_function_name.c_str(), test_gallery_url_.c_str(), i);
+    EXPECT_TRUE(content::ExecuteScriptAndExtractString(
+        browser()->tab_strip_model()->GetActiveWebContents(),
+        script,
+        &result));
+    EXPECT_TRUE(result != "FAILED");
+    return result == "KEEPGOING";
   }
 
   std::string test_gallery_url_;
@@ -130,9 +149,27 @@ IN_PROC_BROWSER_TEST_F(WebstoreStandaloneInstallTest, FindLink) {
 IN_PROC_BROWSER_TEST_F(WebstoreStandaloneInstallTest, ArgumentValidation) {
   CommandLine::ForCurrentProcess()->AppendSwitchASCII(
       switches::kAppsGalleryInstallAutoConfirmForTests, "cancel");
-  ui_test_utils::NavigateToURL(
-      browser(), GenerateTestServerUrl(kAppDomain, "argument_validation.html"));
 
+  // Each of these tests has to run separately, since one page/tab can
+  // only have one in-progress install request. These tests don't all pass
+  // callbacks to install, so they have no way to wait for the installation
+  // to complete before starting the next test.
+  bool is_finished = false;
+  for (int i = 0; !is_finished; ++i) {
+    ui_test_utils::NavigateToURL(
+        browser(),
+        GenerateTestServerUrl(kAppDomain, "argument_validation.html"));
+    is_finished = !RunIndexedTest("runTest", i);
+  }
+}
+
+IN_PROC_BROWSER_TEST_F(WebstoreStandaloneInstallTest, MultipleInstallCalls) {
+  CommandLine::ForCurrentProcess()->AppendSwitchASCII(
+      switches::kAppsGalleryInstallAutoConfirmForTests, "cancel");
+
+  ui_test_utils::NavigateToURL(
+      browser(),
+      GenerateTestServerUrl(kAppDomain, "multiple_install_calls.html"));
   RunTest("runTest");
 }
 
@@ -150,7 +187,8 @@ IN_PROC_BROWSER_TEST_F(WebstoreStandaloneInstallTest, InstallNotSupported) {
 
   // The inline install should fail, and a store-provided URL should be opened
   // in a new tab.
-  WebContents* web_contents = chrome::GetActiveWebContents(browser());
+  WebContents* web_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
   EXPECT_EQ(GURL("http://cws.com/show-me-the-money"), web_contents->GetURL());
 }
 
@@ -203,7 +241,7 @@ class WebstoreStandaloneInstallUnpackFailureTest
         switches::kAppsGalleryUpdateURL, crx_url.spec());
   }
 
-  void SetUpInProcessBrowserTestFixture() OVERRIDE {
+  virtual void SetUpInProcessBrowserTestFixture() OVERRIDE {
     WebstoreStandaloneInstallTest::SetUpInProcessBrowserTestFixture();
     ExtensionInstallUI::DisableFailureUIForTests();
   }
@@ -232,8 +270,6 @@ class CommandLineWebstoreInstall : public WebstoreStandaloneInstallTest,
                    content::NotificationService::AllSources());
     registrar_.Add(this, chrome::NOTIFICATION_BROWSER_OPENED,
                    content::NotificationService::AllSources());
-    CommandLine::ForCurrentProcess()->AppendSwitchASCII(
-        switches::kInstallFromWebstore, kTestExtensionId);
   }
 
   bool saw_install() { return saw_install_; }
@@ -243,7 +279,7 @@ class CommandLineWebstoreInstall : public WebstoreStandaloneInstallTest,
   // NotificationObserver interface.
   virtual void Observe(int type,
                        const content::NotificationSource& source,
-                       const content::NotificationDetails& details)  OVERRIDE {
+                       const content::NotificationDetails& details) OVERRIDE {
     if (type == chrome::NOTIFICATION_EXTENSION_INSTALLED) {
       const Extension* extension = content::Details<Extension>(details).ptr();
       ASSERT_TRUE(extension != NULL);
@@ -268,6 +304,8 @@ class CommandLineWebstoreInstall : public WebstoreStandaloneInstallTest,
 IN_PROC_BROWSER_TEST_F(CommandLineWebstoreInstall, Accept) {
   CommandLine* command_line = CommandLine::ForCurrentProcess();
   command_line->AppendSwitchASCII(
+      switches::kInstallFromWebstore, kTestExtensionId);
+  command_line->AppendSwitchASCII(
       switches::kAppsGalleryInstallAutoConfirmForTests, "accept");
   extensions::StartupHelper helper;
   EXPECT_TRUE(helper.InstallFromWebstore(*command_line, browser()->profile()));
@@ -278,9 +316,56 @@ IN_PROC_BROWSER_TEST_F(CommandLineWebstoreInstall, Accept) {
 IN_PROC_BROWSER_TEST_F(CommandLineWebstoreInstall, Cancel) {
   CommandLine* command_line = CommandLine::ForCurrentProcess();
   command_line->AppendSwitchASCII(
+      switches::kInstallFromWebstore, kTestExtensionId);
+  command_line->AppendSwitchASCII(
       switches::kAppsGalleryInstallAutoConfirmForTests, "cancel");
   extensions::StartupHelper helper;
   EXPECT_FALSE(helper.InstallFromWebstore(*command_line, browser()->profile()));
+  EXPECT_FALSE(saw_install());
+  EXPECT_EQ(0, browser_open_count());
+}
+
+IN_PROC_BROWSER_TEST_F(CommandLineWebstoreInstall, LimitedAccept) {
+  extensions::StartupHelper helper;
+
+  // Small test of "WebStoreIdFromLimitedInstallCmdLine" which made more
+  // sense together with the rest of the test for "LimitedInstallFromWebstore".
+  CommandLine command_line_test1(CommandLine::NO_PROGRAM);
+  command_line_test1.AppendSwitchASCII(switches::kLimitedInstallFromWebstore,
+      "1");
+  EXPECT_EQ("nckgahadagoaajjgafhacjanaoiihapd",
+      helper.WebStoreIdFromLimitedInstallCmdLine(command_line_test1));
+
+  CommandLine command_line_test2(CommandLine::NO_PROGRAM);
+  command_line_test1.AppendSwitchASCII(switches::kLimitedInstallFromWebstore,
+      "2");
+  EXPECT_EQ(kTestExtensionId,
+      helper.WebStoreIdFromLimitedInstallCmdLine(command_line_test1));
+
+  // Now, on to the real test for LimitedInstallFromWebstore.
+  CommandLine* command_line = CommandLine::ForCurrentProcess();
+  command_line->AppendSwitchASCII(
+      switches::kLimitedInstallFromWebstore, "2");
+  command_line->AppendSwitchASCII(
+      switches::kAppsGalleryInstallAutoConfirmForTests, "accept");
+  helper.LimitedInstallFromWebstore(*command_line, browser()->profile(),
+      MessageLoop::QuitWhenIdleClosure());
+  MessageLoop::current()->Run();
+
+  EXPECT_TRUE(saw_install());
+  EXPECT_EQ(0, browser_open_count());
+}
+
+IN_PROC_BROWSER_TEST_F(CommandLineWebstoreInstall, LimitedCancel) {
+  CommandLine* command_line = CommandLine::ForCurrentProcess();
+  command_line->AppendSwitchASCII(
+      switches::kLimitedInstallFromWebstore, "2");
+  command_line->AppendSwitchASCII(
+      switches::kAppsGalleryInstallAutoConfirmForTests, "cancel");
+  extensions::StartupHelper helper;
+  helper.LimitedInstallFromWebstore(*command_line, browser()->profile(),
+      MessageLoop::QuitWhenIdleClosure());
+  MessageLoop::current()->Run();
   EXPECT_FALSE(saw_install());
   EXPECT_EQ(0, browser_open_count());
 }

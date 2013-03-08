@@ -63,6 +63,8 @@ class PluginInfoMessageFilter : public content::BrowserMessageFilter {
                                  const std::string& resource,
                                  ContentSetting* setting,
                                  bool* is_default) const;
+    void MaybeGrantAccess(const ChromeViewHostMsg_GetPluginInfo_Status& status,
+                          const base::FilePath& path) const;
 
    private:
     int render_process_id_;

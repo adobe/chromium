@@ -64,7 +64,7 @@ OmniboxPopupView* OmniboxPopupContentsView::Create(
     OmniboxView* omnibox_view,
     OmniboxEditModel* edit_model,
     views::View* location_bar) {
-  if (chrome::search::IsInstantExtendedAPIEnabled(edit_model->profile()))
+  if (chrome::search::IsInstantExtendedAPIEnabled())
     return new OmniboxPopupNonView(edit_model);
 
   OmniboxPopupContentsView* view = NULL;
@@ -87,19 +87,13 @@ OmniboxPopupContentsView::OmniboxPopupContentsView(
     views::View* location_bar)
     : model_(new OmniboxPopupModel(this, edit_model)),
       omnibox_view_(omnibox_view),
-      profile_(edit_model->profile()),
       location_bar_(location_bar),
-      result_font_(font.DeriveFont(kEditFontAdjust)),
-      result_bold_font_(result_font_.DeriveFont(0, gfx::Font::BOLD)),
+      font_(font.DeriveFont(kEditFontAdjust)),
       ignore_mouse_drag_(false),
       ALLOW_THIS_IN_INITIALIZER_LIST(size_animation_(this)) {
-  // The following little dance is required because set_border() requires a
-  // pointer to a non-const object.
-  views::BubbleBorder* bubble_border =
-      new views::BubbleBorder(views::BubbleBorder::NONE,
-                              views::BubbleBorder::NO_SHADOW);
-  bubble_border_ = bubble_border;
-  set_border(bubble_border);
+  bubble_border_ = new views::BubbleBorder(views::BubbleBorder::NONE,
+      views::BubbleBorder::NO_SHADOW, SK_ColorWHITE);
+  set_border(const_cast<views::BubbleBorder*>(bubble_border_));
   // The contents is owned by the LocationBarView.
   set_owned_by_client();
 }
@@ -109,8 +103,7 @@ void OmniboxPopupContentsView::Init() {
   // necessarily our final class yet, and we may have subclasses
   // overriding CreateResultView.
   for (size_t i = 0; i < AutocompleteResult::kMaxMatches; ++i) {
-    OmniboxResultView* result_view =
-        CreateResultView(this, i, result_font_, result_bold_font_);
+    OmniboxResultView* result_view = CreateResultView(this, i, font_);
     result_view->SetVisible(false);
     AddChildViewAt(result_view, static_cast<int>(i));
   }
@@ -393,9 +386,8 @@ int OmniboxPopupContentsView::CalculatePopupHeight() {
 OmniboxResultView* OmniboxPopupContentsView::CreateResultView(
     OmniboxResultViewModel* model,
     int model_index,
-    const gfx::Font& font,
-    const gfx::Font& bold_font) {
-  return new OmniboxResultView(model, model_index, font, bold_font);
+    const gfx::Font& font) {
+  return new OmniboxResultView(model, model_index, font);
 }
 
 ////////////////////////////////////////////////////////////////////////////////

@@ -20,10 +20,10 @@
 #include "base/metrics/statistics_recorder.h"
 #include "base/metrics/stats_table.h"
 #include "base/path_service.h"
-#include "base/string_number_conversions.h"
 #include "base/string_piece.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/threading/thread.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
@@ -43,6 +43,7 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
+#include "content/public/browser/url_data_source.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/process_type.h"
@@ -80,7 +81,7 @@
 
 #if defined(USE_ASH)
 #include "ash/wm/frame_painter.h"
-#include "base/string_split.h"
+#include "base/strings/string_split.h"
 #endif
 
 using base::Time;
@@ -124,7 +125,7 @@ class AboutMemoryHandler : public MemoryDetails {
   virtual void OnDetailsAvailable() OVERRIDE;
 
  private:
-  ~AboutMemoryHandler() {}
+  virtual ~AboutMemoryHandler() {}
 
   void BindProcessMetrics(DictionaryValue* data,
                           ProcessMemoryInformation* info);
@@ -172,7 +173,7 @@ class ChromeOSTermsHandler
       const chromeos::StartupCustomizationDocument* customization =
           chromeos::StartupCustomizationDocument::GetInstance();
       if (customization->IsReady()) {
-        FilePath oem_eula_file_path;
+        base::FilePath oem_eula_file_path;
         if (net::FileURLToFilePath(GURL(customization->GetEULAPage(locale_)),
                                    &oem_eula_file_path)) {
           if (!file_util::ReadFileToString(oem_eula_file_path, &contents_)) {
@@ -183,10 +184,11 @@ class ChromeOSTermsHandler
     } else {
       std::string file_path =
           StringPrintf(chrome::kEULAPathFormat, locale_.c_str());
-      if (!file_util::ReadFileToString(FilePath(file_path), &contents_)) {
+      if (!file_util::ReadFileToString(base::FilePath(file_path), &contents_)) {
         // No EULA for given language - try en-US as default.
         file_path = StringPrintf(chrome::kEULAPathFormat, "en-US");
-        if (!file_util::ReadFileToString(FilePath(file_path), &contents_)) {
+        if (!file_util::ReadFileToString(base::FilePath(file_path),
+                                         &contents_)) {
           // File with EULA not found, ResponseOnUIThread will load EULA from
           // resources if contents_ is empty.
           contents_.clear();
@@ -336,13 +338,13 @@ std::string AboutDiscards(const std::string& path) {
   chromeos::OomPriorityManager* oom = g_browser_process->oom_priority_manager();
   std::vector<string16> titles = oom->GetTabTitles();
   if (!titles.empty()) {
-    output.append("<ol>");
+    output.append("<ul>");
     std::vector<string16>::iterator it = titles.begin();
     for ( ; it != titles.end(); ++it) {
       std::string title = UTF16ToUTF8(*it);
       output.append(WrapWithTag("li", title));
     }
-    output.append("</ol>");
+    output.append("</ul>");
   } else {
     output.append("<p>None found.  Wait 10 seconds, then refresh.</p>");
   }
@@ -381,10 +383,8 @@ std::string AboutDiscards(const std::string& path) {
       "Inactive Anon", base::IntToString(meminfo.inactive_anon / 1024)));
   output.append(AddStringRow(
       "Shared", base::IntToString(meminfo.shmem / 1024)));
-  if (meminfo.gem_size != -1) {
-    output.append(AddStringRow(
-        "Graphics", base::IntToString(meminfo.gem_size / 1024 / 1024)));
-  }
+  output.append(AddStringRow(
+      "Graphics", base::IntToString(meminfo.gem_size / 1024 / 1024)));
   output.append("</table>");
 
   AppendFooter(&output);
@@ -745,7 +745,7 @@ std::string AboutLinuxProxyConfig() {
                l10n_util::GetStringUTF8(IDS_ABOUT_LINUX_PROXY_CONFIG_TITLE));
   data.append("<style>body { max-width: 70ex; padding: 2ex 5ex; }</style>");
   AppendBody(&data);
-  FilePath binary = CommandLine::ForCurrentProcess()->GetProgram();
+  base::FilePath binary = CommandLine::ForCurrentProcess()->GetProgram();
   data.append(l10n_util::GetStringFUTF8(
       IDS_ABOUT_LINUX_PROXY_CONFIG_BODY,
       l10n_util::GetStringUTF16(IDS_PRODUCT_NAME),
@@ -797,12 +797,14 @@ std::string AboutSandbox() {
 
   data.append("</table>");
 
-  // The setuid sandbox is required as our first-layer sandbox.  We do still
-  // consider ourselves adequately sandboxed without the second-layer
-  // seccomp-bpf sandbox at the moment.
-  bool good = status & content::kSandboxLinuxSUID &&
-              status & content::kSandboxLinuxPIDNS &&
-              status & content::kSandboxLinuxNetNS;
+  // The setuid sandbox is required as our first-layer sandbox.
+  bool good_layer1 = status & content::kSandboxLinuxSUID &&
+                     status & content::kSandboxLinuxPIDNS &&
+                     status & content::kSandboxLinuxNetNS;
+  // A second-layer sandbox is also required to be adequately sandboxed.
+  bool good_layer2 = status & content::kSandboxLinuxSeccompLegacy;
+  bool good = good_layer1 && good_layer2;
+
   if (good) {
     data.append("<p style=\"color: green\">");
     data.append(l10n_util::GetStringUTF8(IDS_ABOUT_SANDBOX_OK));
@@ -1060,9 +1062,8 @@ AboutUI::AboutUI(content::WebUI* web_ui, const std::string& name)
 #if defined(ENABLE_THEMES)
   // Set up the chrome://theme/ source.
   ThemeSource* theme = new ThemeSource(profile);
-  ChromeURLDataManager::AddDataSource(profile, theme);
+  content::URLDataSource::Add(profile, theme);
 #endif
 
-  ChromeURLDataManager::AddDataSource(
-      profile, new AboutUIHTMLSource(name, profile));
+  content::URLDataSource::Add(profile, new AboutUIHTMLSource(name, profile));
 }

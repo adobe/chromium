@@ -7,12 +7,12 @@
 #include <cstring>
 
 #include "base/logging.h"
-#include "base/string_number_conversions.h"
 #include "base/string_util.h"
+#include "base/strings/string_number_conversions.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/test/integration/sync_datatype_helper.h"
 #include "chrome/browser/sync/test/integration/sync_extension_helper.h"
-#include "chrome/common/extensions/extension.h"
+#include "chrome/common/extensions/manifest.h"
 
 using sync_datatype_helper::test;
 
@@ -53,7 +53,7 @@ std::string InstallExtension(Profile* profile, int index) {
   return SyncExtensionHelper::GetInstance()->InstallExtension(
       profile,
       CreateFakeExtensionName(index),
-      extensions::Extension::TYPE_EXTENSION);
+      extensions::Manifest::TYPE_EXTENSION);
 }
 
 std::string InstallExtensionForAllProfiles(int index) {

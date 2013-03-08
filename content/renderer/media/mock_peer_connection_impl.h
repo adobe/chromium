@@ -10,6 +10,7 @@
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
+#include "testing/gmock/include/gmock/gmock.h"
 #include "third_party/libjingle/source/talk/app/webrtc/peerconnectioninterface.h"
 
 namespace content {
@@ -31,18 +32,36 @@ class MockPeerConnectionImpl : public webrtc::PeerConnectionInterface {
       const webrtc::MediaConstraintsInterface* constraints) OVERRIDE;
   virtual void RemoveStream(
       webrtc::MediaStreamInterface* local_stream) OVERRIDE;
-  virtual bool CanSendDtmf(const webrtc::AudioTrackInterface* track) OVERRIDE;
-  virtual bool SendDtmf(const webrtc::AudioTrackInterface* send_track,
-                        const std::string& tones, int duration,
-                        const webrtc::AudioTrackInterface* play_track) OVERRIDE;
+  virtual talk_base::scoped_refptr<webrtc::DtmfSenderInterface>
+      CreateDtmfSender(webrtc::AudioTrackInterface* track) OVERRIDE;
   virtual talk_base::scoped_refptr<webrtc::DataChannelInterface>
       CreateDataChannel(const std::string& label,
                         const webrtc::DataChannelInit* config) OVERRIDE;
 
   virtual bool GetStats(webrtc::StatsObserver* observer,
                         webrtc::MediaStreamTrackInterface* track) OVERRIDE;
-  virtual ReadyState ready_state() OVERRIDE;
-  virtual SignalingState signaling_state() OVERRIDE;
+  // Set Call this function to make sure next call to GetStats fail.
+  void SetGetStatsResult(bool result) { getstats_result_ = result; }
+
+  virtual SignalingState signaling_state() OVERRIDE {
+    NOTIMPLEMENTED();
+    return PeerConnectionInterface::kStable;
+  }
+  virtual IceState ice_state() OVERRIDE {
+    NOTIMPLEMENTED();
+    return PeerConnectionInterface::kIceNew;
+  }
+  virtual IceConnectionState ice_connection_state() OVERRIDE {
+    NOTIMPLEMENTED();
+    return PeerConnectionInterface::kIceConnectionNew;
+  }
+  virtual IceGatheringState ice_gathering_state() OVERRIDE {
+    NOTIMPLEMENTED();
+    return PeerConnectionInterface::kIceGatheringNew;
+  }
+  virtual void Close() OVERRIDE {
+    NOTIMPLEMENTED();
+  }
 
   virtual const webrtc::SessionDescriptionInterface* local_description()
       const OVERRIDE;
@@ -56,9 +75,12 @@ class MockPeerConnectionImpl : public webrtc::PeerConnectionInterface {
   virtual void CreateAnswer(
       webrtc::CreateSessionDescriptionObserver* observer,
       const webrtc::MediaConstraintsInterface* constraints) OVERRIDE;
-  virtual void SetLocalDescription(
+  MOCK_METHOD2(SetLocalDescription,
+               void(webrtc::SetSessionDescriptionObserver* observer,
+                    webrtc::SessionDescriptionInterface* desc));
+  void SetLocalDescriptionWorker(
       webrtc::SetSessionDescriptionObserver* observer,
-      webrtc::SessionDescriptionInterface* desc) OVERRIDE;
+      webrtc::SessionDescriptionInterface* desc) ;
   virtual void SetRemoteDescription(
       webrtc::SetSessionDescriptionObserver* observer,
       webrtc::SessionDescriptionInterface* desc) OVERRIDE;
@@ -67,11 +89,8 @@ class MockPeerConnectionImpl : public webrtc::PeerConnectionInterface {
       const webrtc::MediaConstraintsInterface* constraints) OVERRIDE;
   virtual bool AddIceCandidate(
       const webrtc::IceCandidateInterface* candidate) OVERRIDE;
-  virtual IceState ice_state() OVERRIDE;
 
   void AddRemoteStream(webrtc::MediaStreamInterface* stream);
-  void SetSignalingState(SignalingState state) { signaling_state_ = state; }
-  void SetIceState(IceState state) { ice_state_ = state; }
 
   const std::string& stream_label() const { return stream_label_; }
   bool hint_audio() const { return hint_audio_; }
@@ -101,12 +120,11 @@ class MockPeerConnectionImpl : public webrtc::PeerConnectionInterface {
   scoped_ptr<webrtc::SessionDescriptionInterface> created_sessiondescription_;
   bool hint_audio_;
   bool hint_video_;
+  bool getstats_result_;
   std::string description_sdp_;
   std::string sdp_mid_;
   int sdp_mline_index_;
   std::string ice_sdp_;
-  SignalingState signaling_state_;
-  IceState ice_state_;
 
   DISALLOW_COPY_AND_ASSIGN(MockPeerConnectionImpl);
 };

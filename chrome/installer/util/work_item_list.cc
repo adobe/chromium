@@ -4,17 +4,17 @@
 
 #include "chrome/installer/util/work_item_list.h"
 
+#include "base/files/file_path.h"
 #include "base/logging.h"
-#include "base/file_path.h"
-#include "chrome/installer/util/logging_installer.h"
 #include "chrome/installer/util/callback_work_item.h"
 #include "chrome/installer/util/copy_reg_key_work_item.h"
 #include "chrome/installer/util/copy_tree_work_item.h"
 #include "chrome/installer/util/create_dir_work_item.h"
 #include "chrome/installer/util/create_reg_key_work_item.h"
-#include "chrome/installer/util/delete_tree_work_item.h"
 #include "chrome/installer/util/delete_reg_key_work_item.h"
 #include "chrome/installer/util/delete_reg_value_work_item.h"
+#include "chrome/installer/util/delete_tree_work_item.h"
+#include "chrome/installer/util/logging_installer.h"
 #include "chrome/installer/util/move_tree_work_item.h"
 #include "chrome/installer/util/self_reg_work_item.h"
 #include "chrome/installer/util/set_reg_value_work_item.h"
@@ -98,16 +98,17 @@ WorkItem* WorkItemList::AddCopyTreeWorkItem(
     const std::wstring& temp_dir,
     CopyOverWriteOption overwrite_option,
     const std::wstring& alternative_path) {
-  WorkItem* item = WorkItem::CreateCopyTreeWorkItem(FilePath(source_path),
-                                                    FilePath(dest_path),
-                                                    FilePath(temp_dir),
-                                                    overwrite_option,
-                                                    FilePath(alternative_path));
+  WorkItem* item = WorkItem::CreateCopyTreeWorkItem(
+      base::FilePath(source_path),
+      base::FilePath(dest_path),
+      base::FilePath(temp_dir),
+      overwrite_option,
+      base::FilePath(alternative_path));
   AddWorkItem(item);
   return item;
 }
 
-WorkItem* WorkItemList::AddCreateDirWorkItem(const FilePath& path) {
+WorkItem* WorkItemList::AddCreateDirWorkItem(const base::FilePath& path) {
   WorkItem* item = WorkItem::CreateCreateDirWorkItem(path);
   AddWorkItem(item);
   return item;
@@ -138,18 +139,18 @@ WorkItem* WorkItemList::AddDeleteRegValueWorkItem(
 }
 
 WorkItem* WorkItemList::AddDeleteTreeWorkItem(
-    const FilePath& root_path,
-    const FilePath& temp_path,
-    const std::vector<FilePath>& key_paths) {
+    const base::FilePath& root_path,
+    const base::FilePath& temp_path,
+    const std::vector<base::FilePath>& key_paths) {
   WorkItem* item = WorkItem::CreateDeleteTreeWorkItem(root_path, temp_path,
                                                       key_paths);
   AddWorkItem(item);
   return item;
 }
 
-WorkItem* WorkItemList::AddDeleteTreeWorkItem(const FilePath& root_path,
-                                              const FilePath& temp_path) {
-  std::vector<FilePath> no_key_files;
+WorkItem* WorkItemList::AddDeleteTreeWorkItem(const base::FilePath& root_path,
+                                              const base::FilePath& temp_path) {
+  std::vector<base::FilePath> no_key_files;
   return AddDeleteTreeWorkItem(root_path, temp_path, no_key_files);
 }
 
@@ -157,9 +158,9 @@ WorkItem* WorkItemList::AddMoveTreeWorkItem(const std::wstring& source_path,
                                             const std::wstring& dest_path,
                                             const std::wstring& temp_dir,
                                             MoveTreeOption duplicate_option) {
-  WorkItem* item = WorkItem::CreateMoveTreeWorkItem(FilePath(source_path),
-                                                    FilePath(dest_path),
-                                                    FilePath(temp_dir),
+  WorkItem* item = WorkItem::CreateMoveTreeWorkItem(base::FilePath(source_path),
+                                                    base::FilePath(dest_path),
+                                                    base::FilePath(temp_dir),
                                                     duplicate_option);
   AddWorkItem(item);
   return item;
@@ -244,5 +245,5 @@ bool NoRollbackWorkItemList::Do() {
 }
 
 void NoRollbackWorkItemList::Rollback() {
-  NOTREACHED() << "Can't rollback a NoRollbackWorkItemList";
+  // Ignore rollback.
 }

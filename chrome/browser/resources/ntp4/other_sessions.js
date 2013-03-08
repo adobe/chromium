@@ -47,6 +47,7 @@ cr.define('ntp', function() {
       MenuButton.prototype.decorate.call(this);
       this.menu = new Menu;
       cr.ui.decorate(this.menu, Menu);
+      this.menu.menuItemSelector = '[role=menuitem]';
       this.menu.classList.add('footer-menu');
       this.menu.addEventListener('contextmenu',
                                  this.onContextMenu_.bind(this), true);
@@ -116,11 +117,11 @@ cr.define('ntp', function() {
      * button.
      * @override
      */
-    showMenu: function() {
+    showMenu: function(shouldSetFocus) {
       if (this.sessions_.length == 0)
         chrome.send('getForeignSessions');
       recordUmaEvent_(HISTOGRAM_EVENT.SHOW_MENU);
-      MenuButton.prototype.showMenu.call(this);
+      MenuButton.prototype.showMenu.apply(this, arguments);
 
       // Work around https://bugs.webkit.org/show_bug.cgi?id=85884.
       this.menu.scrollTop = 0;
@@ -219,6 +220,7 @@ cr.define('ntp', function() {
               session.tag, String(window.sessionId), String(tab.sessionId));
           a.addEventListener('click', clickHandler);
           contents.appendChild(a);
+          cr.ui.decorate(a, MenuItem);
         }
       }
 
@@ -245,7 +247,7 @@ cr.define('ntp', function() {
       }
 
       // The menu button is shown iff tab sync is enabled.
-      this.hidden = !isTabSyncEnabled;
+      this.classList.toggle('invisible', !isTabSyncEnabled);
     },
 
     /**
@@ -257,7 +259,7 @@ cr.define('ntp', function() {
       if (signedIn)
         chrome.send('getForeignSessions');
       else
-        this.hidden = true;
+        this.classList.add('invisible');
     },
   };
 

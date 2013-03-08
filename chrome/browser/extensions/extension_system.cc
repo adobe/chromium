@@ -7,8 +7,9 @@
 #include "base/base_switches.h"
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "base/file_path.h"
-#include "base/string_tokenizer.h"
+#include "base/files/file_path.h"
+#include "base/prefs/pref_service.h"
+#include "base/strings/string_tokenizer.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/content_settings/cookie_settings.h"
 #include "chrome/browser/extensions/api/alarms/alarm_manager.h"
@@ -35,17 +36,17 @@
 #include "chrome/browser/extensions/state_store.h"
 #include "chrome/browser/extensions/unpacked_installer.h"
 #include "chrome/browser/extensions/user_script_master.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/ui/webui/chrome_url_data_manager.h"
 #include "chrome/browser/ui/webui/extensions/extension_icon_source.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/features/feature.h"
+#include "chrome/common/extensions/manifest.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/url_data_source.h"
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/login/user_manager.h"
@@ -167,7 +168,7 @@ void ExtensionSystemImpl::Shared::Init(bool extensions_enabled) {
   if (command_line->HasSwitch(switches::kLoadComponentExtension)) {
     CommandLine::StringType path_list = command_line->GetSwitchValueNative(
         switches::kLoadComponentExtension);
-    StringTokenizerT<CommandLine::StringType,
+    base::StringTokenizerT<CommandLine::StringType,
         CommandLine::StringType::const_iterator> t(path_list,
                                                    FILE_PATH_LITERAL(","));
     while (t.GetNext()) {
@@ -176,7 +177,7 @@ void ExtensionSystemImpl::Shared::Init(bool extensions_enabled) {
       // this flag designated for developers.
       base::ThreadRestrictions::ScopedAllowIO allow_io;
       extension_service_->component_loader()->AddOrReplace(
-          FilePath(t.token()));
+          base::FilePath(t.token()));
     }
   }
   extension_service_->Init();
@@ -188,19 +189,18 @@ void ExtensionSystemImpl::Shared::Init(bool extensions_enabled) {
     if (command_line->HasSwitch(switches::kLoadExtension)) {
       CommandLine::StringType path_list = command_line->GetSwitchValueNative(
           switches::kLoadExtension);
-      StringTokenizerT<CommandLine::StringType,
+      base::StringTokenizerT<CommandLine::StringType,
           CommandLine::StringType::const_iterator> t(path_list,
                                                      FILE_PATH_LITERAL(","));
       while (t.GetNext()) {
         UnpackedInstaller::Create(extension_service_.get())->
-            LoadFromCommandLine(FilePath(t.token()));
+            LoadFromCommandLine(base::FilePath(t.token()), false);
       }
     }
   }
 
   // Make the chrome://extension-icon/ resource available.
-  ChromeURLDataManager::AddDataSource(profile_,
-      new ExtensionIconSource(profile_));
+  content::URLDataSource::Add(profile_, new ExtensionIconSource(profile_));
 
   // Initialize extension event routers. Note that on Chrome OS, this will
   // not succeed if the user has not logged in yet, in which case the
@@ -234,6 +234,10 @@ void ExtensionSystemImpl::Shared::Shutdown() {
   }
   if (extension_service_.get())
     extension_service_->Shutdown();
+}
+
+base::Clock* ExtensionSystemImpl::Shared::clock() {
+  return &clock_;
 }
 
 StateStore* ExtensionSystemImpl::Shared::state_store() {
@@ -326,7 +330,7 @@ void ExtensionSystemImpl::InitForRegularProfile(bool extensions_enabled) {
   shared_->info_map();
 
   extension_process_manager_.reset(ExtensionProcessManager::Create(profile_));
-  alarm_manager_.reset(new AlarmManager(profile_, &base::Time::Now));
+  alarm_manager_.reset(new AlarmManager(profile_, shared_->clock()));
 
   serial_connection_manager_.reset(new ApiResourceManager<SerialConnection>(
       BrowserThread::FILE));
@@ -432,7 +436,7 @@ Blacklist* ExtensionSystemImpl::blacklist() {
 void ExtensionSystemImpl::RegisterExtensionWithRequestContexts(
     const Extension* extension) {
   base::Time install_time;
-  if (extension->location() != Extension::COMPONENT) {
+  if (extension->location() != Manifest::COMPONENT) {
     install_time = extension_service()->extension_prefs()->
         GetInstallTime(extension->id());
   }

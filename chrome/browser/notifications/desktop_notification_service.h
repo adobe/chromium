@@ -5,11 +5,13 @@
 #ifndef CHROME_BROWSER_NOTIFICATIONS_DESKTOP_NOTIFICATION_SERVICE_H_
 #define CHROME_BROWSER_NOTIFICATIONS_DESKTOP_NOTIFICATION_SERVICE_H_
 
+#include <set>
 #include <string>
 #include <vector>
 
 #include "base/basictypes.h"
 #include "base/memory/ref_counted.h"
+#include "base/prefs/public/pref_member.h"
 #include "base/string16.h"
 #include "chrome/browser/content_settings/content_settings_provider.h"
 #include "chrome/browser/profiles/profile_keyed_service.h"
@@ -24,6 +26,7 @@ class ContentSettingsPattern;
 class Notification;
 class NotificationDelegate;
 class NotificationUIManager;
+class PrefRegistrySyncable;
 class Profile;
 
 namespace content {
@@ -44,6 +47,9 @@ class DesktopNotificationService : public content::NotificationObserver,
     PageNotification,
     WorkerNotification
   };
+
+  // Register profile-specific prefs of notifications.
+  static void RegisterUserPrefs(PrefRegistrySyncable* prefs);
 
   DesktopNotificationService(Profile* profile,
                              NotificationUIManager* ui_manager);
@@ -99,6 +105,8 @@ class DesktopNotificationService : public content::NotificationObserver,
   // Add a desktop notification. On non-Ash platforms this will generate a HTML
   // notification from the input parameters. On Ash it will generate a normal
   // ash notification. Returns the notification id.
+  // TODO(mukai): remove these methods. HTML notifications are no longer
+  // supported.
   static std::string AddNotification(const GURL& origin_url,
                                      const string16& title,
                                      const string16& message,
@@ -145,6 +153,13 @@ class DesktopNotificationService : public content::NotificationObserver,
   WebKit::WebNotificationPresenter::Permission
       HasPermission(const GURL& origin);
 
+  // Returns true if the extension of the specified |id| is allowed to send
+  // notifications.
+  bool IsExtensionEnabled(const std::string& id);
+
+  // Updates the availability of the extension to send notifications.
+  void SetExtensionEnabled(const std::string& id, bool enabled);
+
  private:
   void StartObserving();
   void StopObserving();
@@ -162,6 +177,9 @@ class DesktopNotificationService : public content::NotificationObserver,
 
   NotificationUIManager* GetUIManager();
 
+  // Called when the disabled_extension_id pref has been changed.
+  void OnDisabledExtensionIdsChanged();
+
   // The profile which owns this object.
   Profile* profile_;
 
@@ -170,6 +188,12 @@ class DesktopNotificationService : public content::NotificationObserver,
   NotificationUIManager* ui_manager_;
 
   content::NotificationRegistrar notification_registrar_;
+
+  // Prefs listener for disabled_extension_id.
+  StringListPrefMember disabled_extension_id_pref_;
+
+  // On-memory data for the availability of extensions.
+  std::set<std::string> disabled_extension_ids_;
 
   DISALLOW_COPY_AND_ASSIGN(DesktopNotificationService);
 };

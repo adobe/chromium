@@ -4,8 +4,10 @@
 
 /**
  * The current selection object.
+ *
  * @param {FileManager} fileManager FileManager instance.
  * @param {Array.<number>} indexes Selected indexes.
+ * @constructor
  */
 function FileSelection(fileManager, indexes) {
   this.fileManager_ = fileManager;
@@ -17,7 +19,7 @@ function FileSelection(fileManager, indexes) {
   this.directoryCount = 0;
   this.bytes = 0;
   this.showBytes = false;
-  this.allGDataFilesPresent = false,
+  this.allDriveFilesPresent = false,
   this.iconType = null;
   this.cancelled_ = false;
   this.bytesKnown = false;
@@ -52,18 +54,19 @@ function FileSelection(fileManager, indexes) {
 
 /**
  * Computes data required to get file tasks and requests the tasks.
+ *
  * @param {function} callback The callback.
  */
 FileSelection.prototype.createTasks = function(callback) {
-  if (!this.fileManager_.isOnGData()) {
+  if (!this.fileManager_.isOnDrive()) {
     this.tasks.init(this.urls);
     callback();
     return;
   }
 
-  this.fileManager_.metadataCache_.get(this.urls, 'gdata', function(props) {
+  this.fileManager_.metadataCache_.get(this.urls, 'drive', function(props) {
     var present = props.filter(function(p) { return p && p.availableOffline });
-    this.allGDataFilesPresent = present.length == props.length;
+    this.allDriveFilesPresent = present.length == props.length;
 
     // Collect all of the mime types and push that info into the selection.
     this.mimeTypes = props.map(function(value) {
@@ -77,6 +80,7 @@ FileSelection.prototype.createTasks = function(callback) {
 
 /**
  * Computes the total size of selected files.
+ *
  * @param {function} callback The callback.
  */
 FileSelection.prototype.computeBytes = function(callback) {
@@ -102,27 +106,30 @@ FileSelection.prototype.computeBytes = function(callback) {
     maybeDone();
   }.bind(this);
 
-  var onEntry = function(entry) {
-    if (entry) {
-      if (entry.isFile) {
-        this.showBytes |= !FileType.isHosted(entry);
-        pendingMetadataCount++;
-        this.fileManager_.metadataCache_.get(entry, 'filesystem', onProps);
-      }
-    } else {
-      countdown--;
-      maybeDone();
-    }
-    return !this.cancelled_;
-  }.bind(this);
-
   for (var index = 0; index < this.entries.length; index++) {
-    util.forEachEntryInTree(this.entries[index], onEntry);
+    if (this.cancelled_)
+      break;
+
+    var entry = this.entries[index];
+    if (entry.isFile) {
+      this.showBytes |= !FileType.isHosted(entry);
+      pendingMetadataCount++;
+      this.fileManager_.metadataCache_.get(entry, 'filesystem', onProps);
+    } else if (entry.isDirectory) {
+      // Don't compute the directory size as it's expensive.
+      // crbug.com/179073.
+      this.showBytes = false;
+      countdown = 0;
+      break;
+    }
+    countdown--;
   }
+  maybeDone();
 };
 
 /**
  * Cancels any async computation.
+ *
  * @private
  */
 FileSelection.prototype.cancelComputing_ = function() {
@@ -131,7 +138,9 @@ FileSelection.prototype.cancelComputing_ = function() {
 
 /**
  * This object encapsulates everything related to current selection.
+ *
  * @param {FileManager} fileManager File manager instance.
+ * @constructor
  */
 function FileSelectionHandler(fileManager) {
   this.fileManager_ = fileManager;
@@ -156,12 +165,18 @@ function FileSelectionHandler(fileManager) {
 
 /**
  * Maximum amount of thumbnails in the preview pane.
+ *
+ * @const
+ * @type {number}
  */
 FileSelectionHandler.MAX_PREVIEW_THUMBNAIL_COUNT = 4;
 
 /**
  * Maximum width or height of an image what pops up when the mouse hovers
  * thumbnail in the bottom panel (in pixels).
+ *
+ * @const
+ * @type {number}
  */
 FileSelectionHandler.IMAGE_HOVER_PREVIEW_SIZE = 200;
 
@@ -235,6 +250,7 @@ FileSelectionHandler.prototype.clearUI = function() {
 
 /**
  * Updates the Ok button enabled state.
+ *
  * @return {boolean} Whether button is enabled.
  */
 FileSelectionHandler.prototype.updateOkButton = function() {
@@ -274,18 +290,20 @@ FileSelectionHandler.prototype.updateOkButton = function() {
 /**
   * Check if all the files in the current selection are available. The only
   * case when files might be not available is when the selection contains
-  * uncached GData files and the browser is offline.
+  * uncached Drive files and the browser is offline.
+  *
   * @return {boolean} True if all files in the current selection are
   *                   available.
   */
 FileSelectionHandler.prototype.isFileSelectionAvailable = function() {
-  return !this.fileManager_.isOnGData() ||
-      !this.fileManager_.isOffline() ||
-      this.selection.allGDataFilesPresent;
+  return !this.fileManager_.isOnDrive() ||
+      !this.fileManager_.isDriveOffline() ||
+      this.selection.allDriveFilesPresent;
 };
 
 /**
  * Animates preview panel show/hide transitions.
+ *
  * @private
  */
 FileSelectionHandler.prototype.updatePreviewPanelVisibility_ = function() {
@@ -347,6 +365,7 @@ FileSelectionHandler.prototype.isPreviewPanelVisibile_ = function() {
 
 /**
  * Update the selection summary in preview panel.
+ *
  * @private
  */
 FileSelectionHandler.prototype.updatePreviewPanelText_ = function() {
@@ -382,6 +401,7 @@ FileSelectionHandler.prototype.updatePreviewPanelText_ = function() {
 
 /**
  * Displays the 'calculating size' label.
+ *
  * @private
  */
 FileSelectionHandler.prototype.showCalculating_ = function() {
@@ -415,6 +435,7 @@ FileSelectionHandler.prototype.showCalculating_ = function() {
 
 /**
  * Hides the 'calculating size' label.
+ *
  * @private
  */
 FileSelectionHandler.prototype.hideCalculating_ = function() {
@@ -427,6 +448,7 @@ FileSelectionHandler.prototype.hideCalculating_ = function() {
 
 /**
  * Calculates async selection stats and updates secondary UI elements.
+ *
  * @param {FileSelection} selection The selection object.
  */
 FileSelectionHandler.prototype.updateFileSelectionAsync = function(selection) {
@@ -478,6 +500,7 @@ FileSelectionHandler.prototype.updateFileSelectionAsync = function(selection) {
 
 /**
  * Renders preview thumbnails in preview panel.
+ *
  * @param {FileSelection} selection The selection object.
  * @private
  */
@@ -489,7 +512,7 @@ FileSelectionHandler.prototype.showPreviewThumbnails_ = function(selection) {
   var thumbnailsHaveZoom = false;
   var self = this;
 
-  function showThumbnails() {
+  var showThumbnails = function() {
     // have-zoom class may be updated twice: then timeout exceeds and then
     // then all images loaded.
     if (self.selection == selection) {
@@ -511,18 +534,18 @@ FileSelectionHandler.prototype.showPreviewThumbnails_ = function(selection) {
       for (var i = 0; i < thumbnails.length; i++)
         self.previewThumbnails_.appendChild(thumbnails[i]);
     }
-  }
+  };
 
-  function onThumbnailLoaded() {
+  var onThumbnailLoaded = function() {
     thumbnailLoaded++;
     if (thumbnailLoaded == thumbnailCount)
       showThumbnails();
-  }
+  };
 
-  function thumbnailClickHandler() {
+  var thumbnailClickHandler = function() {
     if (selection.tasks)
       selection.tasks.executeDefault();
-  }
+  };
 
   var doc = this.fileManager_.document_;
   for (var i = 0; i < selection.entries.length; i++) {
@@ -535,13 +558,13 @@ FileSelectionHandler.prototype.showPreviewThumbnails_ = function(selection) {
         var zoomed = doc.createElement('div');
         zoomed.hidden = true;
         thumbnails.push(zoomed);
-        function onFirstThumbnailLoaded(img, transform) {
+        var onFirstThumbnailLoaded = function(img, transform) {
           if (img && self.decorateThumbnailZoom_(zoomed, img, transform)) {
             zoomed.hidden = false;
             thumbnailsHaveZoom = true;
           }
           onThumbnailLoaded();
-        }
+        };
         var thumbnail = this.renderThumbnail_(entry, onFirstThumbnailLoaded);
         zoomed.addEventListener('click', thumbnailClickHandler);
       } else {
@@ -564,20 +587,26 @@ FileSelectionHandler.prototype.showPreviewThumbnails_ = function(selection) {
 
 /**
  * Renders a thumbnail for the buttom panel.
+ *
  * @param {Entry} entry Entry to render for.
- * @param {Function} callback Callend when image loaded.
+ * @param {function} callback Called when image loaded.
  * @return {HTMLDivElement} Created element.
  * @private
  */
 FileSelectionHandler.prototype.renderThumbnail_ = function(entry, callback) {
   var thumbnail = this.fileManager_.document_.createElement('div');
-  FileGrid.decorateThumbnailBox(thumbnail, entry,
-      this.fileManager_.metadataCache_, true, callback);
+  FileGrid.decorateThumbnailBox(thumbnail,
+                                entry,
+                                this.fileManager_.metadataCache_,
+                                ThumbnailLoader.FillMode.FILL,
+                                ThumbnailLoader.OptimizationMode.NEVER_DISCARD,
+                                callback);
   return thumbnail;
 };
 
 /**
  * Updates the search breadcrumbs.
+ *
  * @private
  */
 FileSelectionHandler.prototype.updateSearchBreadcrumbs_ = function() {

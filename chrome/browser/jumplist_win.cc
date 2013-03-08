@@ -21,10 +21,11 @@
 #include "base/threading/thread.h"
 #include "base/utf_string_conversions.h"
 #include "base/win/scoped_comptr.h"
+#include "base/win/scoped_propvariant.h"
 #include "base/win/windows_version.h"
 #include "chrome/browser/favicon/favicon_service.h"
 #include "chrome/browser/favicon/favicon_service_factory.h"
-#include "chrome/browser/history/history.h"
+#include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/page_usage_data.h"
 #include "chrome/browser/history/top_sites.h"
 #include "chrome/browser/profiles/profile.h"
@@ -140,40 +141,6 @@ const CLSID CLSID_EnumerableObjectCollection = {
 
 namespace {
 
-// Represents a class which encapsulates a PROPVARIANT object containing a
-// string for AddShellLink().
-// This class automatically deletes all the resources attached to the
-// PROPVARIANT object in its destructor.
-class PropVariantString {
- public:
-  PropVariantString() {
-    property_.vt = VT_EMPTY;
-  }
-
-  HRESULT Init(const std::wstring& value) {
-    // Call InitPropVariantFromString() to initialize this PROPVARIANT object.
-    // To read <propvarutil.h>, it seems InitPropVariantFromString() is an
-    // inline function that initialize a PROPVARIANT object and calls
-    // SHStrDupW() to set a copy of its input string.
-    // So, we just calls it without creating a copy.
-    return InitPropVariantFromString(value.c_str(), &property_);
-  }
-
-  ~PropVariantString() {
-    if (property_.vt != VT_EMPTY)
-      PropVariantClear(&property_);
-  }
-
-  const PROPVARIANT& Get() {
-    return property_;
-  }
-
- private:
-  PROPVARIANT property_;
-
-  DISALLOW_COPY_AND_ASSIGN(PropVariantString);
-};
-
 // Creates an IShellLink object.
 // An IShellLink object is almost the same as an application shortcut, and it
 // requires three items: the absolute path to an application, an argument
@@ -233,12 +200,18 @@ HRESULT AddShellLink(base::win::ScopedComPtr<IObjectCollection> collection,
   if (FAILED(result))
     return result;
 
-  PropVariantString property_title;
-  result = property_title.Init(item->title());
+  base::win::ScopedPropVariant property_title;
+  // Call InitPropVariantFromString() to initialize |property_title|. Reading
+  // <propvarutil.h>, it seems InitPropVariantFromString() is an inline function
+  // that initializes a PROPVARIANT object and calls SHStrDupW() to set a copy
+  // of its input string. It is thus safe to call it without first creating a
+  // copy here.
+  result = InitPropVariantFromString(item->title().c_str(),
+                                     property_title.Receive());
   if (FAILED(result))
     return result;
 
-  result = property_store->SetValue(PKEY_Title, property_title.Get());
+  result = property_store->SetValue(PKEY_Title, property_title.get());
   if (FAILED(result))
     return result;
 
@@ -252,12 +225,12 @@ HRESULT AddShellLink(base::win::ScopedComPtr<IObjectCollection> collection,
 
 // Creates a temporary icon file to be shown in JumpList.
 bool CreateIconFile(const SkBitmap& bitmap,
-                    const FilePath& icon_dir,
-                    FilePath* icon_path) {
+                    const base::FilePath& icon_dir,
+                    base::FilePath* icon_path) {
   // Retrieve the path to a temporary file.
   // We don't have to care about the extension of this temporary file because
   // JumpList does not care about it.
-  FilePath path;
+  base::FilePath path;
   if (!file_util::CreateTemporaryFileInDir(icon_dir, &path))
     return false;
 
@@ -426,13 +399,13 @@ bool UpdateJumpList(const wchar_t* app_id,
     return false;
 
   // Retrieve the absolute path to "chrome.exe".
-  FilePath chrome_path;
+  base::FilePath chrome_path;
   if (!PathService::Get(base::FILE_EXE, &chrome_path))
     return false;
 
   // Retrieve the command-line switches of this process.
   CommandLine command_line(CommandLine::NO_PROGRAM);
-  FilePath user_data_dir = CommandLine::ForCurrentProcess()->
+  base::FilePath user_data_dir = CommandLine::ForCurrentProcess()->
       GetSwitchValuePath(switches::kUserDataDir);
   if (!user_data_dir.empty())
     command_line.AppendSwitchPath(switches::kUserDataDir, user_data_dir);
@@ -757,7 +730,7 @@ void JumpList::RunUpdate() {
   // Delete the directory which contains old icon files, rename the current
   // icon directory, and create a new directory which contains new JumpList
   // icon files.
-  FilePath icon_dir_old(icon_dir_.value() + L"Old");
+  base::FilePath icon_dir_old(icon_dir_.value() + L"Old");
   if (file_util::PathExists(icon_dir_old))
     file_util::Delete(icon_dir_old, true);
   file_util::Move(icon_dir_, icon_dir_old);
@@ -780,7 +753,7 @@ void JumpList::RunUpdate() {
 void JumpList::CreateIconFiles(const ShellLinkItemList& item_list) {
   for (ShellLinkItemList::const_iterator item = item_list.begin();
       item != item_list.end(); ++item) {
-    FilePath icon_path;
+    base::FilePath icon_path;
     if (CreateIconFile((*item)->data(), icon_dir_, &icon_path))
       (*item)->SetIcon(icon_path.value(), 0, true);
   }

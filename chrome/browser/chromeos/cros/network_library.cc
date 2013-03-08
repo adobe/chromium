@@ -8,20 +8,19 @@
 #include "base/i18n/icu_string_conversions.h"
 #include "base/i18n/time_formatting.h"
 #include "base/json/json_writer.h"  // for debug output only.
-#include "base/string_number_conversions.h"
-#include "base/utf_string_conversion_utils.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string_number_conversions.h"
+#include "base/strings/utf_string_conversion_utils.h"
 #include "chrome/browser/chromeos/cros/certificate_pattern.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/cros/native_network_constants.h"
 #include "chrome/browser/chromeos/cros/native_network_parser.h"
 #include "chrome/browser/chromeos/cros/network_library_impl_cros.h"
 #include "chrome/browser/chromeos/cros/network_library_impl_stub.h"
-#include "chrome/common/net/url_util.h"
 #include "chrome/common/net/x509_certificate_model.h"
 #include "chromeos/network/cros_network_functions.h"
 #include "content/public/browser/browser_thread.h"
 #include "grit/generated_resources.h"
+#include "net/base/url_util.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -878,6 +877,12 @@ bool CellularNetwork::StartActivation() {
   return true;
 }
 
+void CellularNetwork::CompleteActivation() {
+  if (!EnsureCrosLoaded())
+    return;
+  CrosCompleteCellularActivation(service_path());
+}
+
 void CellularNetwork::SetApn(const CellularApn& apn) {
   if (!apn.apn.empty()) {
     DictionaryValue value;
@@ -898,8 +903,8 @@ bool CellularNetwork::SupportsActivation() const {
 }
 
 bool CellularNetwork::NeedsActivation() const {
-  return (activation_state() != ACTIVATION_STATE_ACTIVATED &&
-          activation_state() != ACTIVATION_STATE_UNKNOWN);
+  return (activation_state() == ACTIVATION_STATE_NOT_ACTIVATED ||
+          activation_state() == ACTIVATION_STATE_PARTIALLY_ACTIVATED);
 }
 
 GURL CellularNetwork::GetAccountInfoUrl() const {
@@ -907,12 +912,12 @@ GURL CellularNetwork::GetAccountInfoUrl() const {
     return GURL(payment_url());
 
   GURL base_url(kRedirectExtensionPage);
-  GURL temp_url = chrome_common_net::AppendQueryParameter(base_url,
-                                                           "post_data",
-                                                           post_data_);
-  GURL redir_url = chrome_common_net::AppendQueryParameter(temp_url,
-                                                            "formUrl",
-                                                            payment_url());
+  GURL temp_url = net::AppendQueryParameter(base_url,
+                                            "post_data",
+                                            post_data_);
+  GURL redir_url = net::AppendQueryParameter(temp_url,
+                                             "formUrl",
+                                             payment_url());
   return redir_url;
 }
 

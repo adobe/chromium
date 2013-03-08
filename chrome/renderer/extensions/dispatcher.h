@@ -12,13 +12,13 @@
 #include "base/shared_memory.h"
 #include "base/timer.h"
 #include "content/public/renderer/render_process_observer.h"
-#include "chrome/common/extensions/event_filter.h"
 #include "chrome/common/extensions/extension_set.h"
 #include "chrome/common/extensions/features/feature.h"
 #include "chrome/renderer/extensions/chrome_v8_context.h"
 #include "chrome/renderer/extensions/chrome_v8_context_set.h"
 #include "chrome/renderer/extensions/v8_schema_registry.h"
 #include "chrome/renderer/resource_bundle_source_map.h"
+#include "extensions/common/event_filter.h"
 #include "v8/include/v8.h"
 
 class GURL;
@@ -39,6 +39,7 @@ class RenderThread;
 }
 
 namespace extensions {
+class ContentWatcher;
 class Extension;
 class FilteredEventRouter;
 class RequestSender;
@@ -65,6 +66,9 @@ class Dispatcher : public content::RenderProcessObserver {
   }
   V8SchemaRegistry* v8_schema_registry() {
     return &v8_schema_registry_;
+  }
+  ContentWatcher* content_watcher() {
+    return content_watcher_.get();
   }
 
   bool IsExtensionActive(const std::string& extension_id) const;
@@ -169,9 +173,9 @@ class Dispatcher : public content::RenderProcessObserver {
       bool adblock,
       bool adblock_plus,
       bool other_webrequest);
-  void OnShouldUnload(const std::string& extension_id, int sequence_id);
-  void OnUnload(const std::string& extension_id);
-  void OnCancelUnload(const std::string& extension_id);
+  void OnShouldSuspend(const std::string& extension_id, int sequence_id);
+  void OnSuspend(const std::string& extension_id);
+  void OnCancelSuspend(const std::string& extension_id);
 
   // Update the list of active extensions that will be reported when we crash.
   void UpdateActiveExtensions();
@@ -220,6 +224,8 @@ class Dispatcher : public content::RenderProcessObserver {
   ChromeV8ContextSet v8_context_set_;
 
   scoped_ptr<UserScriptSlave> user_script_slave_;
+
+  scoped_ptr<ContentWatcher> content_watcher_;
 
   // Same as above, but on a longer timer and will run even if the process is
   // not idle, to ensure that IdleHandle gets called eventually.

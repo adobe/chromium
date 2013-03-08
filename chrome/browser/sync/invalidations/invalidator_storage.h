@@ -15,7 +15,8 @@
 #include "base/threading/thread_checker.h"
 #include "sync/notifier/invalidation_state_tracker.h"
 
-class PrefServiceSyncable;
+class PrefService;
+class PrefRegistrySyncable;
 
 namespace base {
 class DictionaryValue;
@@ -32,9 +33,11 @@ namespace browser_sync {
 class InvalidatorStorage : public base::SupportsWeakPtr<InvalidatorStorage>,
                            public syncer::InvalidationStateTracker {
  public:
+  static void RegisterUserPrefs(PrefRegistrySyncable* registry);
+
   // |pref_service| may be NULL (for unit tests), but in that case no setter
   // methods should be called. Does not own |pref_service|.
-  explicit InvalidatorStorage(PrefServiceSyncable* pref_service);
+  explicit InvalidatorStorage(PrefService* pref_service);
   virtual ~InvalidatorStorage();
 
   // Erases invalidation versions and state stored on disk.
@@ -47,7 +50,8 @@ class InvalidatorStorage : public base::SupportsWeakPtr<InvalidatorStorage>,
                                        int64 max_version,
                                        const std::string& payload) OVERRIDE;
   virtual void Forget(const syncer::ObjectIdSet& ids) OVERRIDE;
-  // TODO(tim): These are not yet used. Bug 124140.
+  virtual void SetInvalidatorClientId(const std::string& client_id) OVERRIDE;
+  virtual std::string GetInvalidatorClientId() const OVERRIDE;
   virtual void SetBootstrapData(const std::string& data) OVERRIDE;
   virtual std::string GetBootstrapData() const OVERRIDE;
   virtual void GenerateAckHandles(
@@ -94,7 +98,7 @@ class InvalidatorStorage : public base::SupportsWeakPtr<InvalidatorStorage>,
                              syncer::InvalidationStateMap* map);
 
   // May be NULL.
-  PrefServiceSyncable* const pref_service_;
+  PrefService* const pref_service_;
 
   DISALLOW_COPY_AND_ASSIGN(InvalidatorStorage);
 };

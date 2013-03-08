@@ -5,14 +5,15 @@
 #include "chrome/browser/webdata/web_data_service.h"
 
 #include "base/bind.h"
+#include "base/command_line.h"
 #include "base/message_loop.h"
 #include "base/stl_util.h"
 #include "base/threading/thread.h"
 #include "chrome/browser/autofill/autofill_country.h"
 #include "chrome/browser/autofill/autofill_profile.h"
 #include "chrome/browser/autofill/credit_card.h"
-#include "chrome/browser/intents/default_web_intent_service.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/ui/profile_error_dialog.h"
 #include "chrome/browser/webdata/autocomplete_syncable_service.h"
@@ -48,7 +49,6 @@
 using base::Bind;
 using base::Time;
 using content::BrowserThread;
-using webkit_glue::WebIntentServiceData;
 
 namespace {
 
@@ -80,6 +80,7 @@ WDKeywordsResult::~WDKeywordsResult() {}
 WebDataService::WebDataService()
     : is_running_(false),
       db_(NULL),
+      request_manager_(new WebDataRequestManager()),
       app_locale_(AutofillCountry::ApplicationLocale()),
       autocomplete_syncable_service_(NULL),
       autofill_profile_syncable_service_(NULL),
@@ -89,6 +90,7 @@ WebDataService::WebDataService()
   // WebDataService requires DB thread if instantiated.
   // Set WebDataServiceFactory::GetInstance()->SetTestingFactory(&profile, NULL)
   // if you do not want to instantiate WebDataService in your test.
+  DCHECK(!ProfileManager::IsImportProcess(*CommandLine::ForCurrentProcess()));
   DCHECK(BrowserThread::IsWellKnownThread(BrowserThread::DB));
 }
 
@@ -112,8 +114,8 @@ void WebDataService::ShutdownOnUIThread() {
   UnloadDatabase();
 }
 
-bool WebDataService::Init(const FilePath& profile_path) {
-  FilePath path = profile_path;
+bool WebDataService::Init(const base::FilePath& profile_path) {
+  base::FilePath path = profile_path;
   path = path.Append(chrome::kWebDataFilename);
   return InitWithPath(path);
 }
@@ -127,7 +129,7 @@ void WebDataService::UnloadDatabase() {
 }
 
 void WebDataService::CancelRequest(Handle h) {
-  request_manager_.CancelRequest(h);
+  request_manager_->CancelRequest(h);
 }
 
 content::NotificationSource WebDataService::GetNotificationSource() {
@@ -210,80 +212,6 @@ WebDataService::Handle WebDataService::GetWebAppImages(
     WebDataServiceConsumer* consumer) {
   return ScheduleDBTaskWithResult(FROM_HERE,
       Bind(&WebDataService::GetWebAppImagesImpl, this, app_url), consumer);
-}
-
-//////////////////////////////////////////////////////////////////////////////
-//
-// Web Intents.
-//
-//////////////////////////////////////////////////////////////////////////////
-
-void WebDataService::AddWebIntentService(const WebIntentServiceData& service) {
-  ScheduleDBTask(FROM_HERE,
-      Bind(&WebDataService::AddWebIntentServiceImpl, this, service));
-}
-
-void WebDataService::RemoveWebIntentService(
-    const WebIntentServiceData& service) {
-  ScheduleDBTask(FROM_HERE, Bind(&WebDataService::RemoveWebIntentServiceImpl,
-                                 this, service));
-}
-
-WebDataService::Handle WebDataService::GetWebIntentServicesForAction(
-    const string16& action,
-    WebDataServiceConsumer* consumer) {
-  return ScheduleDBTaskWithResult(FROM_HERE,
-      Bind(&WebDataService::GetWebIntentServicesImpl, this, action), consumer);
-}
-
-WebDataService::Handle WebDataService::GetWebIntentServicesForURL(
-    const string16& service_url,
-    WebDataServiceConsumer* consumer) {
-  return ScheduleDBTaskWithResult(FROM_HERE,
-      Bind(&WebDataService::GetWebIntentServicesForURLImpl, this, service_url),
-      consumer);
-}
-
-
-WebDataService::Handle WebDataService::GetAllWebIntentServices(
-    WebDataServiceConsumer* consumer) {
-  return ScheduleDBTaskWithResult(FROM_HERE,
-      Bind(&WebDataService::GetAllWebIntentServicesImpl, this), consumer);
-}
-
-void WebDataService::AddDefaultWebIntentService(
-    const DefaultWebIntentService& service) {
-  ScheduleDBTask(FROM_HERE,
-      Bind(&WebDataService::AddDefaultWebIntentServiceImpl, this, service));
-}
-
-void WebDataService::RemoveDefaultWebIntentService(
-    const DefaultWebIntentService& service) {
-  ScheduleDBTask(FROM_HERE,
-      Bind(&WebDataService::RemoveDefaultWebIntentServiceImpl, this, service));
-}
-
-void WebDataService::RemoveWebIntentServiceDefaults(
-    const GURL& service_url) {
-  ScheduleDBTask(FROM_HERE,
-      Bind(&WebDataService::RemoveWebIntentServiceDefaultsImpl, this,
-           service_url));
-}
-
-WebDataService::Handle WebDataService::GetDefaultWebIntentServicesForAction(
-    const string16& action,
-    WebDataServiceConsumer* consumer) {
-  return ScheduleDBTaskWithResult(FROM_HERE,
-      Bind(&WebDataService::GetDefaultWebIntentServicesForActionImpl, this,
-           action),
-      consumer);
-}
-
-WebDataService::Handle WebDataService::GetAllDefaultWebIntentServices(
-    WebDataServiceConsumer* consumer) {
-  return ScheduleDBTaskWithResult(FROM_HERE,
-      Bind(&WebDataService::GetAllDefaultWebIntentServicesImpl, this),
-      consumer);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -406,12 +334,11 @@ void WebDataService::RemoveAutofillProfilesAndCreditCardsModifiedBetween(
 
 WebDataService::~WebDataService() {
   if (is_running_ && db_) {
-    DLOG_ASSERT("WebDataService dtor called without Shutdown");
-    NOTREACHED();
+    NOTREACHED() << "WebDataService dtor called without Shutdown";
   }
 }
 
-bool WebDataService::InitWithPath(const FilePath& path) {
+bool WebDataService::InitWithPath(const base::FilePath& path) {
   path_ = path;
   is_running_ = true;
 
@@ -420,10 +347,6 @@ bool WebDataService::InitWithPath(const FilePath& path) {
   ScheduleTask(FROM_HERE,
                Bind(&WebDataService::InitializeSyncableServices, this));
   return true;
-}
-
-void WebDataService::RequestCompleted(Handle h) {
-  request_manager_.RequestCompleted(h);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -526,11 +449,12 @@ void WebDataService::ScheduleTask(const tracked_objects::Location& from_here,
 void WebDataService::ScheduleDBTask(
       const tracked_objects::Location& from_here,
       const base::Closure& task) {
-  WebDataRequest* request =
-      new WebDataRequest(this, NULL, &request_manager_);
+  scoped_ptr<WebDataRequest> request(
+      new WebDataRequest(NULL, request_manager_.get()));
   if (is_running_) {
     BrowserThread::PostTask(BrowserThread::DB, from_here,
-        base::Bind(&WebDataService::DBTaskWrapper, this, task, request));
+        base::Bind(&WebDataService::DBTaskWrapper, this, task,
+                   base::Passed(&request)));
   } else {
     NOTREACHED() << "Task scheduled after Shutdown()";
   }
@@ -541,33 +465,35 @@ WebDataService::Handle WebDataService::ScheduleDBTaskWithResult(
       const ResultTask& task,
       WebDataServiceConsumer* consumer) {
   DCHECK(consumer);
-  WebDataRequest* request =
-      new WebDataRequest(this, consumer, &request_manager_);
+  scoped_ptr<WebDataRequest> request(
+      new WebDataRequest(consumer, request_manager_.get()));
+  WebDataService::Handle handle = request->GetHandle();
   if (is_running_) {
     BrowserThread::PostTask(BrowserThread::DB, from_here,
-        base::Bind(&WebDataService::DBResultTaskWrapper, this, task, request));
+        base::Bind(&WebDataService::DBResultTaskWrapper, this, task,
+                   base::Passed(&request)));
   } else {
     NOTREACHED() << "Task scheduled after Shutdown()";
   }
-  return request->GetHandle();
+  return handle;
 }
 
 void WebDataService::DBTaskWrapper(const base::Closure& task,
-                                   WebDataRequest* request) {
+                                   scoped_ptr<WebDataRequest> request) {
   InitializeDatabaseIfNecessary();
   if (db_ && !request->IsCancelled()) {
     task.Run();
   }
-  request->RequestComplete();
+  request_manager_->RequestCompleted(request.Pass());
 }
 
 void WebDataService::DBResultTaskWrapper(const ResultTask& task,
-                                         WebDataRequest* request) {
+                                         scoped_ptr<WebDataRequest> request) {
   InitializeDatabaseIfNecessary();
   if (db_ && !request->IsCancelled()) {
-    request->SetResult(task.Run().Pass());
+    request->SetResult(task.Run());
   }
-  request->RequestComplete();
+  request_manager_->RequestCompleted(request.Pass());
 }
 
 void WebDataService::ScheduleCommit() {
@@ -660,87 +586,6 @@ scoped_ptr<WDTypedResult> WebDataService::GetWebAppImagesImpl(
   db_->GetWebAppsTable()->GetWebAppImages(app_url, &result.images);
   return scoped_ptr<WDTypedResult>(
       new WDResult<WDAppImagesResult>(WEB_APP_IMAGES, result));
-}
-
-////////////////////////////////////////////////////////////////////////////////
-//
-// Web Intents implementation.
-//
-////////////////////////////////////////////////////////////////////////////////
-
-void WebDataService::RemoveWebIntentServiceImpl(
-    const webkit_glue::WebIntentServiceData& service) {
-  db_->GetWebIntentsTable()->RemoveWebIntentService(service);
-  ScheduleCommit();
-}
-
-void WebDataService::AddWebIntentServiceImpl(
-    const webkit_glue::WebIntentServiceData& service) {
-  db_->GetWebIntentsTable()->SetWebIntentService(service);
-  ScheduleCommit();
-}
-
-
-scoped_ptr<WDTypedResult> WebDataService::GetWebIntentServicesImpl(
-    const string16& action) {
-  std::vector<WebIntentServiceData> result;
-  db_->GetWebIntentsTable()->GetWebIntentServicesForAction(action, &result);
-  return scoped_ptr<WDTypedResult>(
-      new WDResult<std::vector<WebIntentServiceData> >(
-          WEB_INTENTS_RESULT, result));
-}
-
-scoped_ptr<WDTypedResult> WebDataService::GetWebIntentServicesForURLImpl(
-    const string16& service_url) {
-  std::vector<WebIntentServiceData> result;
-  db_->GetWebIntentsTable()->GetWebIntentServicesForURL(service_url, &result);
-  return scoped_ptr<WDTypedResult>(
-      new WDResult<std::vector<WebIntentServiceData> >(
-          WEB_INTENTS_RESULT, result));
-}
-
-scoped_ptr<WDTypedResult> WebDataService::GetAllWebIntentServicesImpl() {
-  std::vector<WebIntentServiceData> result;
-  db_->GetWebIntentsTable()->GetAllWebIntentServices(&result);
-  return scoped_ptr<WDTypedResult>(
-      new WDResult<std::vector<WebIntentServiceData> >(
-          WEB_INTENTS_RESULT, result));
-}
-
-void WebDataService::AddDefaultWebIntentServiceImpl(
-    const DefaultWebIntentService& service) {
-  db_->GetWebIntentsTable()->SetDefaultService(service);
-  ScheduleCommit();
-}
-
-void WebDataService::RemoveDefaultWebIntentServiceImpl(
-    const DefaultWebIntentService& service) {
-  db_->GetWebIntentsTable()->RemoveDefaultService(service);
-  ScheduleCommit();
-}
-
-void WebDataService::RemoveWebIntentServiceDefaultsImpl(
-    const GURL& service_url) {
-  db_->GetWebIntentsTable()->RemoveServiceDefaults(service_url);
-  ScheduleCommit();
-}
-
-scoped_ptr<WDTypedResult>
-    WebDataService::GetDefaultWebIntentServicesForActionImpl(
-    const string16& action) {
-  std::vector<DefaultWebIntentService> result;
-  db_->GetWebIntentsTable()->GetDefaultServices(action, &result);
-  return scoped_ptr<WDTypedResult>(
-      new WDResult<std::vector<DefaultWebIntentService> >(
-          WEB_INTENTS_DEFAULTS_RESULT, result));
-}
-
-scoped_ptr<WDTypedResult> WebDataService::GetAllDefaultWebIntentServicesImpl() {
-  std::vector<DefaultWebIntentService> result;
-  db_->GetWebIntentsTable()->GetAllDefaultServices(&result);
-  return scoped_ptr<WDTypedResult>(
-      new WDResult<std::vector<DefaultWebIntentService> >(
-          WEB_INTENTS_DEFAULTS_RESULT, result));
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -922,11 +767,11 @@ scoped_ptr<WDTypedResult> WebDataService::GetAutofillProfilesImpl() {
   std::vector<AutofillProfile*> profiles;
   db_->GetAutofillTable()->GetAutofillProfiles(&profiles);
   return scoped_ptr<WDTypedResult>(
-      new WDResult<std::vector<AutofillProfile*> >(
+      new WDDestroyableResult<std::vector<AutofillProfile*> >(
           AUTOFILL_PROFILES_RESULT,
+          profiles,
           base::Bind(&WebDataService::DestroyAutofillProfileResult,
-              base::Unretained(this)),
-          profiles));
+              base::Unretained(this))));
 }
 
 void WebDataService::EmptyMigrationTrashImpl(bool notify_sync) {
@@ -1035,11 +880,11 @@ scoped_ptr<WDTypedResult> WebDataService::GetCreditCardsImpl() {
   std::vector<CreditCard*> credit_cards;
   db_->GetAutofillTable()->GetCreditCards(&credit_cards);
   return scoped_ptr<WDTypedResult>(
-      new WDResult<std::vector<CreditCard*> >(
+      new WDDestroyableResult<std::vector<CreditCard*> >(
           AUTOFILL_CREDITCARDS_RESULT,
+          credit_cards,
           base::Bind(&WebDataService::DestroyAutofillCreditCardResult,
-              base::Unretained(this)),
-          credit_cards));
+              base::Unretained(this))));
 }
 
 void WebDataService::RemoveAutofillProfilesAndCreditCardsModifiedBetweenImpl(

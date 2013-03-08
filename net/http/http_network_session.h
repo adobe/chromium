@@ -36,6 +36,7 @@ class NetLog;
 class NetworkDelegate;
 class ServerBoundCertService;
 class ProxyService;
+class QuicClock;
 class SOCKSClientSocketPool;
 class SSLClientSocketPool;
 class SSLConfigService;
@@ -75,12 +76,16 @@ class NET_EXPORT HttpNetworkSession
     bool enable_spdy_compression;
     bool enable_spdy_ping_based_connection_checking;
     NextProto spdy_default_protocol;
-    size_t spdy_initial_recv_window_size;
+    size_t spdy_stream_initial_recv_window_size;
     size_t spdy_initial_max_concurrent_streams;
     size_t spdy_max_concurrent_streams_limit;
     SpdySessionPool::TimeFunc time_func;
     std::string trusted_spdy_proxy;
+    bool enable_quic;
     uint16 origin_port_to_force_quic_on;
+    QuicClock* quic_clock;  // Will be owned by QuicStreamFactory.
+    QuicRandom* quic_random;
+    bool enable_user_alternate_protocol_ports;
   };
 
   enum SocketPoolType {

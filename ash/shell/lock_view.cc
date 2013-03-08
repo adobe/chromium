@@ -6,13 +6,13 @@
 #include "ash/shell_delegate.h"
 #include "ash/shell_window_ids.h"
 #include "ash/shell/example_factory.h"
-#include "ash/tooltips/tooltip_controller.h"
 #include "base/utf_string_conversions.h"
 #include "ui/aura/root_window.h"
 #include "ui/aura/window.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/font.h"
-#include "ui/views/controls/button/text_button.h"
+#include "ui/views/controls/button/label_button.h"
+#include "ui/views/corewm/tooltip_controller.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_delegate.h"
 
@@ -25,7 +25,8 @@ class LockView : public views::WidgetDelegateView,
                  public views::ButtonListener {
  public:
   LockView() : unlock_button_(ALLOW_THIS_IN_INITIALIZER_LIST(
-                   new views::NativeTextButton(this, ASCIIToUTF16("Unlock")))) {
+                   new views::LabelButton(this, ASCIIToUTF16("Unlock")))) {
+    unlock_button_->SetStyle(views::Button::STYLE_NATIVE_TEXTBUTTON);
     AddChildView(unlock_button_);
     unlock_button_->set_focusable(true);
   }
@@ -74,7 +75,7 @@ class LockView : public views::WidgetDelegateView,
   }
 
   gfx::Font font_;
-  views::NativeTextButton* unlock_button_;
+  views::LabelButton* unlock_button_;
 
   DISALLOW_COPY_AND_ASSIGN(LockView);
 };
@@ -100,6 +101,7 @@ void CreateLockScreen() {
   widget->GetNativeView()->SetName("LockView");
   widget->GetNativeView()->Focus();
 
+  // TODO: it shouldn't be necessary to invoke UpdateTooltip() here.
   Shell::GetInstance()->tooltip_controller()->UpdateTooltip(
       widget->GetNativeView());
 }

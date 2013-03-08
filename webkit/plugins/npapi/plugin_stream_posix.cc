@@ -6,8 +6,8 @@
 
 #include <string.h>
 
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "webkit/plugins/npapi/plugin_instance.h"
 
@@ -19,7 +19,7 @@ void PluginStream::ResetTempFileHandle() {
 }
 
 void PluginStream::ResetTempFileName() {
-  temp_file_path_ = FilePath();
+  temp_file_path_ = base::FilePath();
 }
 
 void PluginStream::WriteAsFile() {

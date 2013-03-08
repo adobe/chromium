@@ -11,7 +11,6 @@
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop.h"
 #include "net/base/host_port_pair.h"
-#include "net/base/upload_data_stream.h"
 #include "net/http/http_response_headers.h"
 #include "net/url_request/url_fetcher_delegate.h"
 #include "net/url_request/url_fetcher_impl.h"
@@ -53,15 +52,16 @@ TestURLFetcher::~TestURLFetcher() {
     owner_->RemoveFetcherFromMap(id_);
 }
 
-void TestURLFetcher::SetUploadDataStream(
-    const std::string& upload_content_type,
-    scoped_ptr<UploadDataStream> upload_content) {
-  upload_data_stream_ = upload_content.Pass();
-}
-
 void TestURLFetcher::SetUploadData(const std::string& upload_content_type,
                                    const std::string& upload_content) {
   upload_data_ = upload_content;
+}
+
+void TestURLFetcher::SetUploadFilePath(
+    const std::string& upload_content_type,
+    const base::FilePath& file_path,
+    scoped_refptr<base::TaskRunner> file_task_runner) {
+  upload_file_path_ = file_path;
 }
 
 void TestURLFetcher::SetChunkedUpload(const std::string& upload_content_type) {
@@ -137,7 +137,7 @@ void TestURLFetcher::SetAutomaticallyRetryOnNetworkChanges(int max_retries) {
 }
 
 void TestURLFetcher::SaveResponseToFileAtPath(
-    const FilePath& file_path,
+    const base::FilePath& file_path,
     scoped_refptr<base::TaskRunner> file_task_runner) {
 }
 
@@ -203,7 +203,7 @@ bool TestURLFetcher::GetResponseAsString(
 }
 
 bool TestURLFetcher::GetResponseAsFilePath(
-    bool take_ownership, FilePath* out_response_path) const {
+    bool take_ownership, base::FilePath* out_response_path) const {
   if (fake_response_destination_ != TEMP_FILE)
     return false;
 
@@ -237,7 +237,7 @@ void TestURLFetcher::SetResponseString(const std::string& response) {
   fake_response_string_ = response;
 }
 
-void TestURLFetcher::SetResponseFilePath(const FilePath& path) {
+void TestURLFetcher::SetResponseFilePath(const base::FilePath& path) {
   fake_response_destination_ = TEMP_FILE;
   fake_response_file_path_ = path;
 }
@@ -279,58 +279,57 @@ void TestURLFetcherFactory::SetDelegateForTests(
   delegate_for_tests_ = delegate_for_tests;
 }
 
-// This class is used by the FakeURLFetcherFactory below.
-class FakeURLFetcher : public TestURLFetcher {
- public:
-  // Normal URL fetcher constructor but also takes in a pre-baked response.
-  FakeURLFetcher(const GURL& url,
-                 URLFetcherDelegate* d,
-                 const std::string& response_data, bool success)
-      : TestURLFetcher(0, url, d),
-        ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)) {
-    set_status(URLRequestStatus(
-        success ? URLRequestStatus::SUCCESS : URLRequestStatus::FAILED,
-        0));
-    set_response_code(success ? 200 : 500);
-    SetResponseString(response_data);
-  }
+FakeURLFetcher::FakeURLFetcher(const GURL& url,
+                               URLFetcherDelegate* d,
+                               const std::string& response_data,
+                               bool success)
+    : TestURLFetcher(0, url, d),
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)) {
+  set_status(URLRequestStatus(
+      success ? URLRequestStatus::SUCCESS : URLRequestStatus::FAILED,
+      0));
+  set_response_code(success ? 200 : 500);
+  SetResponseString(response_data);
+}
 
-  // Start the request.  This will call the given delegate asynchronously
-  // with the pre-baked response as parameter.
-  virtual void Start() OVERRIDE {
-    MessageLoop::current()->PostTask(
-        FROM_HERE,
-        base::Bind(&FakeURLFetcher::RunDelegate, weak_factory_.GetWeakPtr()));
-  }
+FakeURLFetcher::~FakeURLFetcher() {}
 
-  virtual const GURL& GetURL() const OVERRIDE {
-    return TestURLFetcher::GetOriginalURL();
-  }
+void FakeURLFetcher::Start() {
+  MessageLoop::current()->PostTask(
+      FROM_HERE,
+      base::Bind(&FakeURLFetcher::RunDelegate, weak_factory_.GetWeakPtr()));
+}
 
- private:
-  virtual ~FakeURLFetcher() {
-  }
+void FakeURLFetcher::RunDelegate() {
+  delegate()->OnURLFetchComplete(this);
+}
 
-  // This is the method which actually calls the delegate that is passed in the
-  // constructor.
-  void RunDelegate() {
-    delegate()->OnURLFetchComplete(this);
-  }
-
-  base::WeakPtrFactory<FakeURLFetcher> weak_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(FakeURLFetcher);
-};
-
-FakeURLFetcherFactory::FakeURLFetcherFactory()
-    : ScopedURLFetcherFactory(ALLOW_THIS_IN_INITIALIZER_LIST(this)),
-      default_factory_(NULL) {
+const GURL& FakeURLFetcher::GetURL() const {
+  return TestURLFetcher::GetOriginalURL();
 }
 
 FakeURLFetcherFactory::FakeURLFetcherFactory(
     URLFetcherFactory* default_factory)
     : ScopedURLFetcherFactory(ALLOW_THIS_IN_INITIALIZER_LIST(this)),
+      creator_(base::Bind(&DefaultFakeURLFetcherCreator)),
       default_factory_(default_factory) {
+}
+
+FakeURLFetcherFactory::FakeURLFetcherFactory(
+    URLFetcherFactory* default_factory,
+    const FakeURLFetcherCreator& creator)
+    : ScopedURLFetcherFactory(ALLOW_THIS_IN_INITIALIZER_LIST(this)),
+      creator_(creator),
+      default_factory_(default_factory) {
+}
+
+scoped_ptr<FakeURLFetcher> FakeURLFetcherFactory::DefaultFakeURLFetcherCreator(
+      const GURL& url,
+      URLFetcherDelegate* delegate,
+      const std::string& response,
+      bool success) {
+  return scoped_ptr<FakeURLFetcher>(new FakeURLFetcher(url, delegate,
+                                                       response, success));
 }
 
 FakeURLFetcherFactory::~FakeURLFetcherFactory() {}
@@ -350,7 +349,11 @@ URLFetcher* FakeURLFetcherFactory::CreateURLFetcher(
       return default_factory_->CreateURLFetcher(id, url, request_type, d);
     }
   }
-  return new FakeURLFetcher(url, d, it->second.first, it->second.second);
+
+  scoped_ptr<FakeURLFetcher> fake_fetcher =
+      creator_.Run(url, d, it->second.first, it->second.second);
+  // TODO: Make URLFetcherFactory::CreateURLFetcher return a scoped_ptr
+  return fake_fetcher.release();
 }
 
 void FakeURLFetcherFactory::SetFakeResponse(const std::string& url,

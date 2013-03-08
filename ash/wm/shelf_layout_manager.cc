@@ -247,15 +247,42 @@ void ShelfLayoutManager::LayoutShelf() {
   UpdateHitTestBounds();
 }
 
+ShelfVisibilityState ShelfLayoutManager::CalculateShelfVisibility() {
+  switch(auto_hide_behavior_) {
+    case SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS:
+      return SHELF_AUTO_HIDE;
+    case SHELF_AUTO_HIDE_BEHAVIOR_NEVER:
+      return SHELF_VISIBLE;
+    case SHELF_AUTO_HIDE_ALWAYS_HIDDEN:
+      return SHELF_HIDDEN;
+  }
+  return SHELF_VISIBLE;
+}
+
+ShelfVisibilityState
+ShelfLayoutManager::CalculateShelfVisibilityWhileDragging() {
+  switch(auto_hide_behavior_) {
+    case SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS:
+    case SHELF_AUTO_HIDE_BEHAVIOR_NEVER:
+      return SHELF_AUTO_HIDE;
+    case SHELF_AUTO_HIDE_ALWAYS_HIDDEN:
+      return SHELF_HIDDEN;
+  }
+  return SHELF_VISIBLE;
+}
+
 void ShelfLayoutManager::UpdateVisibilityState() {
   ShellDelegate* delegate = Shell::GetInstance()->delegate();
   if (delegate && delegate->IsScreenLocked()) {
     SetState(SHELF_VISIBLE);
   } else if (gesture_drag_status_ == GESTURE_DRAG_COMPLETE_IN_PROGRESS) {
-    SetState(SHELF_AUTO_HIDE);
+    // TODO(zelidrag): Verify shelf drag animation still shows on the device
+    // when we are in SHELF_AUTO_HIDE_ALWAYS_HIDDEN.
+    SetState(CalculateShelfVisibilityWhileDragging());
   } else if (GetRootWindowController(root_window_)->IsImmersiveMode()) {
     // The user choosing immersive mode indicates he or she wants to maximize
     // screen real-estate for content, so always auto-hide the shelf.
+    DCHECK_NE(auto_hide_behavior_, SHELF_AUTO_HIDE_ALWAYS_HIDDEN);
     SetState(SHELF_AUTO_HIDE);
   } else {
     WorkspaceWindowState window_state(workspace_controller_->GetWindowState());
@@ -265,14 +292,12 @@ void ShelfLayoutManager::UpdateVisibilityState() {
         break;
 
       case WORKSPACE_WINDOW_STATE_MAXIMIZED:
-          SetState(auto_hide_behavior_ == SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS ?
-                   SHELF_AUTO_HIDE : SHELF_VISIBLE);
+        SetState(CalculateShelfVisibility());
         break;
 
       case WORKSPACE_WINDOW_STATE_WINDOW_OVERLAPS_SHELF:
       case WORKSPACE_WINDOW_STATE_DEFAULT:
-        SetState(auto_hide_behavior_ == SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS ?
-                 SHELF_AUTO_HIDE : SHELF_VISIBLE);
+        SetState(CalculateShelfVisibility());
         SetWindowOverlapsShelf(window_state ==
                                WORKSPACE_WINDOW_STATE_WINDOW_OVERLAPS_SHELF);
         break;
@@ -744,22 +769,14 @@ void ShelfLayoutManager::UpdateTargetBoundsForGesture(
   if (horizontal) {
     // Move the launcher with the gesture.
     target_bounds->launcher_bounds_in_root.Offset(0, translate);
+    target_bounds->status_bounds_in_root.Offset(0, translate);
 
-    if (translate > 0) {
-      // When dragging down, the statusbar should move.
-      target_bounds->status_bounds_in_root.Offset(0, translate);
-    } else {
+    if (translate < 0) {
       // When dragging up, the launcher height should increase.
       float move = std::max(translate,
                             -static_cast<float>(resistance_free_region));
       target_bounds->launcher_bounds_in_root.set_height(
           target_bounds->launcher_bounds_in_root.height() + move - translate);
-
-      // The statusbar should be in the center.
-      gfx::Rect status_y = target_bounds->launcher_bounds_in_root;
-      status_y.ClampToCenteredSize(
-          target_bounds->status_bounds_in_root.size());
-      target_bounds->status_bounds_in_root.set_y(status_y.y());
     }
   } else {
     // Move the launcher with the gesture.

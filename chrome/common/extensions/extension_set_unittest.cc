@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
@@ -19,13 +19,13 @@ scoped_refptr<Extension> CreateTestExtension(const std::string& name,
                                              const std::string& launch_url,
                                              const std::string& extent) {
 #if defined(OS_WIN)
-  FilePath path(FILE_PATH_LITERAL("c:\\"));
+  base::FilePath path(FILE_PATH_LITERAL("c:\\"));
 #else
-  FilePath path(FILE_PATH_LITERAL("/"));
+  base::FilePath path(FILE_PATH_LITERAL("/"));
 #endif
   path = path.AppendASCII(name);
 
-  DictionaryValue manifest;
+  base::DictionaryValue manifest;
   manifest.SetString("name", name);
   manifest.SetString("version", "1");
 
@@ -33,20 +33,20 @@ scoped_refptr<Extension> CreateTestExtension(const std::string& name,
     manifest.SetString("app.launch.web_url", launch_url);
 
   if (!extent.empty()) {
-    ListValue* urls = new ListValue();
+    base::ListValue* urls = new base::ListValue();
     manifest.Set("app.urls", urls);
-    urls->Append(Value::CreateStringValue(extent));
+    urls->Append(new base::StringValue(extent));
   }
 
   std::string error;
   scoped_refptr<Extension> extension(
-      Extension::Create(path, Extension::INTERNAL, manifest,
+      Extension::Create(path, extensions::Manifest::INTERNAL, manifest,
                         Extension::NO_FLAGS, &error));
   EXPECT_TRUE(extension.get()) << error;
   return extension;
 }
 
-} // namespace
+}  // namespace
 
 TEST(ExtensionSetTest, ExtensionSet) {
   scoped_refptr<Extension> ext1(CreateTestExtension(

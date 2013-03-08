@@ -30,6 +30,14 @@ static const char kSPKIHash_Google2048[] =
     "\x01\xb9\x21\xc5\x8d\x0b\xdf\x8d\xe0\x29"
     "\xff\x9c\x92\x2e\xcd\x55\x6a\x7e\xa3\x39";
 
+static const char kSPKIHash_GoogleBackup1024[] =
+    "\x7d\x5b\xa3\xca\x8e\x37\x65\x1d\x7c\x71"
+    "\xc3\xe3\xb7\x74\xcd\xe9\x7b\x1b\x59\x43";
+
+static const char kSPKIHash_GoogleBackup2048[] =
+    "\xbe\xae\xce\xca\x34\xa7\xa8\xe7\x28\xf6"
+    "\x7c\x8c\x08\x31\x9d\xcb\xbe\xde\x8a\x33";
+
 static const char kSPKIHash_EquifaxSecureCA[] =
     "\x48\xe6\x68\xf9\x2b\xd2\xb2\x95\xd7\x47"
     "\xd8\x23\x20\x10\x4f\x33\x98\x90\x9f\xd4";
@@ -240,6 +248,8 @@ static const char* const kGoogleAcceptableCerts[] = {
   kSPKIHash_VeriSignClass3_G3,
   kSPKIHash_Google1024,
   kSPKIHash_Google2048,
+  kSPKIHash_GoogleBackup1024,
+  kSPKIHash_GoogleBackup2048,
   kSPKIHash_EquifaxSecureCA,
   kSPKIHash_GeoTrustGlobal,
   NULL,
@@ -382,6 +392,7 @@ static const struct HSTSPreload kPreloadedSTS[] = {
   {17, true, "\004talk\006google\003com", true, kGooglePins, DOMAIN_GOOGLE_COM },
   {29, true, "\020hostedtalkgadget\006google\003com", true, kGooglePins, DOMAIN_GOOGLE_COM },
   {17, true, "\004plus\006google\003com", true, kGooglePins, DOMAIN_GOOGLE_COM },
+  {25, true, "\004plus\007sandbox\006google\003com", true, kGooglePins, DOMAIN_GOOGLE_COM },
   {19, true, "\006script\006google\003com", true, kGooglePins, DOMAIN_GOOGLE_COM },
   {20, true, "\007history\006google\003com", true, kGooglePins, DOMAIN_GOOGLE_COM },
   {20, true, "\006market\007android\003com", true, kGooglePins, DOMAIN_ANDROID_COM },
@@ -395,6 +406,7 @@ static const struct HSTSPreload kPreloadedSTS[] = {
   {25, true, "\012codereview\010chromium\003org", true, kGooglePins, DOMAIN_CHROMIUM_ORG },
   {17, true, "\004code\006google\003com", true, kGooglePins, DOMAIN_GOOGLE_COM },
   {16, true, "\012googlecode\003com", false, kGooglePins, DOMAIN_GOOGLECODE_COM },
+  {15, true, "\002dl\006google\003com", true, kGooglePins, DOMAIN_GOOGLE_COM },
   {23, true, "\005chart\004apis\006google\003com", false, kGooglePins, DOMAIN_GOOGLE_COM },
   {11, true, "\005ytimg\003com", false, kGooglePins, DOMAIN_YTIMG_COM },
   {23, true, "\021googleusercontent\003com", false, kGooglePins, DOMAIN_GOOGLEUSERCONTENT_COM },
@@ -749,7 +761,6 @@ static const struct HSTSPreload kPreloadedSTS[] = {
   {18, false, "\002dm\011mylookout\003com", true, kNoPins, DOMAIN_NOT_PINNED },
   {15, true, "\011itriskltd\003com", true, kNoPins, DOMAIN_NOT_PINNED },
   {15, true, "\012stocktrade\002de", true, kNoPins, DOMAIN_NOT_PINNED },
-  {13, true, "\007rhcloud\003com", true, kNoPins, DOMAIN_NOT_PINNED },
   {22, true, "\011openshift\006redhat\003com", true, kNoPins, DOMAIN_NOT_PINNED },
   {18, false, "\014therapynotes\003com", true, kNoPins, DOMAIN_NOT_PINNED },
   {22, false, "\003www\014therapynotes\003com", true, kNoPins, DOMAIN_NOT_PINNED },
@@ -763,6 +774,18 @@ static const struct HSTSPreload kPreloadedSTS[] = {
   {18, true, "\015serverdensity\002io", true, kNoPins, DOMAIN_NOT_PINNED },
   {17, true, "\002my\010alfresco\003com", true, kNoPins, DOMAIN_NOT_PINNED },
   {21, true, "\007webmail\010gigahost\002dk", true, kNoPins, DOMAIN_NOT_PINNED },
+  {13, true, "\007paymill\003com", true, kNoPins, DOMAIN_NOT_PINNED },
+  {12, true, "\007paymill\002de", true, kNoPins, DOMAIN_NOT_PINNED },
+  {16, true, "\012gocardless\003com", true, kNoPins, DOMAIN_NOT_PINNED },
+  {11, true, "\005espra\003com", true, kNoPins, DOMAIN_NOT_PINNED },
+  {10, true, "\005zoo24\002de", true, kNoPins, DOMAIN_NOT_PINNED },
+  {12, false, "\004mega\002co\002nz", true, kNoPins, DOMAIN_NOT_PINNED },
+  {16, true, "\003api\004mega\002co\002nz", true, kNoPins, DOMAIN_NOT_PINNED },
+  {13, true, "\007lockify\003com", true, kNoPins, DOMAIN_NOT_PINNED },
+  {13, false, "\010writeapp\002me", true, kNoPins, DOMAIN_NOT_PINNED },
+  {22, true, "\010bugzilla\007mozilla\003org", true, kNoPins, DOMAIN_NOT_PINNED },
+  {30, false, "\007members\020nearlyfreespeech\003net", true, kNoPins, DOMAIN_NOT_PINNED },
+  {19, false, "\003ssl\011panoramio\003com", true, kNoPins, DOMAIN_NOT_PINNED },
 };
 static const size_t kNumPreloadedSTS = ARRAYSIZE_UNSAFE(kPreloadedSTS);
 

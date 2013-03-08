@@ -12,10 +12,10 @@
 #include "ash/wm/property_util.h"
 #include "base/bind.h"
 #include "base/command_line.h"
+#include "base/prefs/pref_service.h"
 #include "chrome/browser/extensions/context_menu_matcher.h"
 #include "chrome/browser/extensions/extension_prefs.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/ash/launcher/chrome_launcher_controller.h"
 #include "chrome/common/chrome_switches.h"
@@ -67,8 +67,10 @@ void LauncherContextMenu::Init() {
   set_delegate(this);
 
   if (is_valid_item()) {
-    if (item_.type == ash::TYPE_APP_SHORTCUT) {
-      DCHECK(controller_->IsPinned(item_.id));
+    if (item_.type == ash::TYPE_APP_SHORTCUT ||
+        item_.type == ash::TYPE_WINDOWED_APP) {
+      DCHECK(item_.type == ash::TYPE_APP_SHORTCUT &&
+             controller_->IsPinned(item_.id));
       // V1 apps can be started from the menu - but V2 apps should not.
       if  (!controller_->IsPlatformApp(item_.id)) {
         AddItem(MENU_OPEN_NEW, string16());
@@ -76,7 +78,9 @@ void LauncherContextMenu::Init() {
       }
       AddItem(
           MENU_PIN,
-          l10n_util::GetStringUTF16(IDS_LAUNCHER_CONTEXT_MENU_UNPIN));
+          l10n_util::GetStringUTF16(controller_->IsPinned(item_.id) ?
+                                    IDS_LAUNCHER_CONTEXT_MENU_UNPIN :
+                                    IDS_LAUNCHER_CONTEXT_MENU_PIN));
       if (controller_->IsOpen(item_.id)) {
         AddItem(MENU_CLOSE,
                 l10n_util::GetStringUTF16(IDS_LAUNCHER_CONTEXT_MENU_CLOSE));
@@ -118,13 +122,14 @@ void LauncherContextMenu::Init() {
     }
     AddSeparator(ui::NORMAL_SEPARATOR);
     if (item_.type == ash::TYPE_APP_SHORTCUT ||
+        item_.type == ash::TYPE_WINDOWED_APP ||
         item_.type == ash::TYPE_PLATFORM_APP) {
       std::string app_id = controller_->GetAppIDForLauncherID(item_.id);
       if (!app_id.empty()) {
         int index = 0;
         extension_items_->AppendExtensionItems(
             app_id, string16(), &index);
-        AddSeparatorIfNecessary(ui::NORMAL_SEPARATOR);
+        AddSeparator(ui::NORMAL_SEPARATOR);
       }
     }
   }
@@ -144,8 +149,10 @@ void LauncherContextMenu::Init() {
                            IDS_AURA_LAUNCHER_CONTEXT_MENU_POSITION,
                            &launcher_alignment_menu_);
   }
+#if defined(OS_CHROMEOS) && defined(OFFICIAL_BUILD)
   AddItem(MENU_CHANGE_WALLPAPER,
        l10n_util::GetStringUTF16(IDS_AURA_SET_DESKTOP_WALLPAPER));
+#endif
 }
 
 LauncherContextMenu::~LauncherContextMenu() {
@@ -200,9 +207,11 @@ bool LauncherContextMenu::IsCommandIdEnabled(int command_id) const {
     case MENU_PIN:
       return item_.type == ash::TYPE_PLATFORM_APP ||
           controller_->IsPinnable(item_.id);
+#if defined(OS_CHROMEOS) && defined(OFFICIAL_BUILD)
     case MENU_CHANGE_WALLPAPER:
       return ash::Shell::GetInstance()->user_wallpaper_delegate()->
           CanOpenSetWallpaperPage();
+#endif
     case MENU_NEW_WINDOW:
       // "Normal" windows are not allowed when incognito is enforced.
       return IncognitoModePrefs::GetAvailability(
@@ -262,10 +271,12 @@ void LauncherContextMenu::ExecuteCommand(int command_id) {
       break;
     case MENU_ALIGNMENT_MENU:
       break;
+#if defined(OS_CHROMEOS) && defined(OFFICIAL_BUILD)
     case MENU_CHANGE_WALLPAPER:
       ash::Shell::GetInstance()->user_wallpaper_delegate()->
           OpenSetWallpaperPage();
       break;
+#endif
     default:
       extension_items_->ExecuteCommand(command_id, NULL,
                                        content::ContextMenuParams());

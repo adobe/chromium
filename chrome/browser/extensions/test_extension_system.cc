@@ -5,6 +5,7 @@
 #include "chrome/browser/extensions/test_extension_system.h"
 
 #include "base/command_line.h"
+#include "base/prefs/pref_service.h"
 #include "chrome/browser/extensions/api/alarms/alarm_manager.h"
 #include "chrome/browser/extensions/api/messaging/message_service.h"
 #include "chrome/browser/extensions/blacklist.h"
@@ -20,7 +21,6 @@
 #include "chrome/browser/extensions/standard_management_policy_provider.h"
 #include "chrome/browser/extensions/state_store.h"
 #include "chrome/browser/extensions/user_script_master.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/value_store/testing_value_store.h"
 #include "chrome/common/chrome_switches.h"
@@ -46,9 +46,8 @@ void TestExtensionSystem::CreateExtensionProcessManager() {
   extension_process_manager_.reset(ExtensionProcessManager::Create(profile_));
 }
 
-void TestExtensionSystem::CreateAlarmManager(
-    AlarmManager::TimeProvider now) {
-  alarm_manager_.reset(new AlarmManager(profile_, now));
+void TestExtensionSystem::CreateAlarmManager(base::Clock* clock) {
+  alarm_manager_.reset(new AlarmManager(profile_, clock));
 }
 
 void TestExtensionSystem::CreateSocketManager() {
@@ -64,7 +63,7 @@ void TestExtensionSystem::CreateSocketManager() {
 
 ExtensionService* TestExtensionSystem::CreateExtensionService(
     const CommandLine* command_line,
-    const FilePath& install_directory,
+    const base::FilePath& install_directory,
     bool autoupdate_enabled) {
   bool extensions_disabled =
       command_line && command_line->HasSwitch(switches::kDisableExtensions);

@@ -38,6 +38,13 @@ class GL_EXPORT GLShareGroup : public base::RefCounted<GLShareGroup> {
   void SetSharedContext(GLContext* context);
   GLContext* GetSharedContext();
 
+#if defined(OS_MACOSX)
+  // Sets and returns the ID of the renderer that all contexts in this share
+  // group should be on.
+  void SetRendererID(int renderer_id);
+  int GetRendererID();
+#endif
+
  private:
   friend class base::RefCounted<GLShareGroup>;
 
@@ -48,7 +55,11 @@ class GL_EXPORT GLShareGroup : public base::RefCounted<GLShareGroup> {
   typedef std::set<GLContext*> ContextSet;
   ContextSet contexts_;
 
-  GLContext* shared_context_;
+  scoped_refptr<GLContext> shared_context_;
+
+#if defined(OS_MACOSX)
+  int renderer_id_;
+#endif
 
   DISALLOW_COPY_AND_ASSIGN(GLShareGroup);
 };

@@ -36,7 +36,7 @@ class MockIBusEngineHandler : public IBusEngineHandlerInterface {
   MOCK_METHOD0(Enable, void());
   MOCK_METHOD0(Disable, void());
   MOCK_METHOD2(PropertyActivate, void(const std::string& property_name,
-                                      IBusPropertyState property_state));
+                                      ibus::IBusPropertyState property_state));
   MOCK_METHOD1(PropertyShow, void(const std::string& property_name));
   MOCK_METHOD1(PropertyHide, void(const std::string& property_name));
   MOCK_METHOD1(SetCapability, void(IBusCapability capability));
@@ -56,7 +56,11 @@ class MockIBusEngineHandler : public IBusEngineHandlerInterface {
 
 class MockResponseSender {
  public:
-  MOCK_METHOD1(Run, void(dbus::Response* reponse));
+  // GMock doesn't support mocking methods which take scoped_ptr<>.
+  MOCK_METHOD1(MockRun, void(dbus::Response* reponse));
+  void Run(scoped_ptr<dbus::Response> response) {
+    MockRun(response.get());
+  }
 };
 
 // Used for method call empty response evaluation.
@@ -67,7 +71,6 @@ class EmptyResponseExpectation {
 
   // Evaluates the given |response| has no argument.
   void Evaluate(dbus::Response* response) {
-    scoped_ptr<dbus::Response> response_deleter(response);
     EXPECT_EQ(serial_no_, response->GetReplySerial());
     dbus::MessageReader reader(response);
     EXPECT_FALSE(reader.HasMoreData());
@@ -89,7 +92,6 @@ class BoolResponseExpectation {
   // Evaluates the given |response| has only one boolean and which is equals to
   // |result_| which is given in ctor.
   void Evaluate(dbus::Response* response) {
-    scoped_ptr<dbus::Response> response_deleter(response);
     EXPECT_EQ(serial_no_, response->GetReplySerial());
     dbus::MessageReader reader(response);
     bool result = false;
@@ -109,16 +111,16 @@ class BoolResponseExpectation {
 class RegisterPropertiesExpectation {
  public:
   explicit RegisterPropertiesExpectation(
-      const ibus::IBusPropertyList& property_list)
+      const IBusPropertyList& property_list)
       : property_list_(property_list) {}
 
   // Evaluates the given |signal| is a valid message.
   void Evaluate(dbus::Signal* signal) {
-    ibus::IBusPropertyList property_list;
+    IBusPropertyList property_list;
 
     // Read a signal argument.
     dbus::MessageReader reader(signal);
-    EXPECT_TRUE(ibus::PopIBusPropertyList(&reader, &property_list));
+    EXPECT_TRUE(PopIBusPropertyList(&reader, &property_list));
     EXPECT_FALSE(reader.HasMoreData());
 
     // Check an argument.
@@ -134,7 +136,7 @@ class RegisterPropertiesExpectation {
   }
 
  private:
-  const ibus::IBusPropertyList& property_list_;
+  const IBusPropertyList& property_list_;
 
   DISALLOW_COPY_AND_ASSIGN(RegisterPropertiesExpectation);
 };
@@ -188,7 +190,7 @@ class DelayProcessKeyEventHandler {
 class UpdatePreeditExpectation {
  public:
   UpdatePreeditExpectation(
-      const ibus::IBusText& ibus_text,
+      const IBusText& ibus_text,
       uint32 cursor_pos,
       bool is_visible,
       IBusEngineService::IBusEnginePreeditFocusOutMode mode)
@@ -199,14 +201,14 @@ class UpdatePreeditExpectation {
 
   // Evaluates the given |signal| is a valid message.
   void Evaluate(dbus::Signal* signal) {
-    ibus::IBusText ibus_text;
+    IBusText ibus_text;
     uint32 cursor_pos = 0;
     bool is_visible = false;
     uint32 preedit_mode = 0;
 
     // Read signal arguments.
     dbus::MessageReader reader(signal);
-    EXPECT_TRUE(ibus::PopIBusText(&reader, &ibus_text));
+    EXPECT_TRUE(PopIBusText(&reader, &ibus_text));
     EXPECT_TRUE(reader.PopUint32(&cursor_pos));
     EXPECT_TRUE(reader.PopBool(&is_visible));
     EXPECT_TRUE(reader.PopUint32(&preedit_mode));
@@ -222,7 +224,7 @@ class UpdatePreeditExpectation {
   }
 
  private:
-  const ibus::IBusText& ibus_text_;
+  const IBusText& ibus_text_;
   uint32 cursor_pos_;
   bool is_visible_;
   IBusEngineService::IBusEnginePreeditFocusOutMode mode_;
@@ -233,18 +235,18 @@ class UpdatePreeditExpectation {
 // Used for UpdateAuxiliaryText signal message evaluation.
 class UpdateAuxiliaryTextExpectation {
  public:
-  UpdateAuxiliaryTextExpectation(const ibus::IBusText& ibus_text,
+  UpdateAuxiliaryTextExpectation(const IBusText& ibus_text,
                                  bool is_visible)
       : ibus_text_(ibus_text), is_visible_(is_visible) {}
 
   // Evaluates the given |signal| is a valid message.
   void Evaluate(dbus::Signal* signal) {
-    ibus::IBusText ibus_text;
+    IBusText ibus_text;
     bool is_visible = false;
 
     // Read signal arguments.
     dbus::MessageReader reader(signal);
-    EXPECT_TRUE(ibus::PopIBusText(&reader, &ibus_text));
+    EXPECT_TRUE(PopIBusText(&reader, &ibus_text));
     EXPECT_TRUE(reader.PopBool(&is_visible));
     EXPECT_FALSE(reader.HasMoreData());
 
@@ -254,7 +256,7 @@ class UpdateAuxiliaryTextExpectation {
   }
 
  private:
-  const ibus::IBusText& ibus_text_;
+  const IBusText& ibus_text_;
   bool is_visible_;
 
   DISALLOW_COPY_AND_ASSIGN(UpdateAuxiliaryTextExpectation);
@@ -263,13 +265,13 @@ class UpdateAuxiliaryTextExpectation {
 // Used for UpdateLookupTable signal message evaluation.
 class UpdateLookupTableExpectation {
  public:
-  UpdateLookupTableExpectation(const ibus::IBusLookupTable& lookup_table,
+  UpdateLookupTableExpectation(const IBusLookupTable& lookup_table,
                                bool is_visible)
       : lookup_table_(lookup_table), is_visible_(is_visible) {}
 
   // Evaluates the given |signal| is a valid message.
   void Evaluate(dbus::Signal* signal) {
-    ibus::IBusLookupTable lookup_table;
+    IBusLookupTable lookup_table;
     bool is_visible = false;
 
     // Read signal arguments.
@@ -287,7 +289,7 @@ class UpdateLookupTableExpectation {
   }
 
  private:
-  const ibus::IBusLookupTable& lookup_table_;
+  const IBusLookupTable& lookup_table_;
   bool is_visible_;
 
   DISALLOW_COPY_AND_ASSIGN(UpdateLookupTableExpectation);
@@ -296,12 +298,12 @@ class UpdateLookupTableExpectation {
 // Used for UpdateProperty signal message evaluation.
 class UpdatePropertyExpectation {
  public:
-  explicit UpdatePropertyExpectation(const ibus::IBusProperty& property)
+  explicit UpdatePropertyExpectation(const IBusProperty& property)
       : property_(property) {}
 
   // Evaluates the given |signal| is a valid message.
   void Evaluate(dbus::Signal* signal) {
-    ibus::IBusProperty property;
+    IBusProperty property;
 
     // Read a signal argument.
     dbus::MessageReader reader(signal);
@@ -318,7 +320,7 @@ class UpdatePropertyExpectation {
   }
 
  private:
-  const ibus::IBusProperty& property_;
+  const IBusProperty& property_;
 
   DISALLOW_COPY_AND_ASSIGN(UpdatePropertyExpectation);
 };
@@ -519,7 +521,7 @@ TEST_F(IBusEngineServiceTest, FocusInTest) {
   EXPECT_CALL(*engine_handler_, FocusIn());
   MockResponseSender response_sender;
   EmptyResponseExpectation response_expectation(kSerialNo);
-  EXPECT_CALL(response_sender, Run(_))
+  EXPECT_CALL(response_sender, MockRun(_))
       .WillOnce(Invoke(&response_expectation,
                        &EmptyResponseExpectation::Evaluate));
 
@@ -539,7 +541,7 @@ TEST_F(IBusEngineServiceTest, FocusInTest) {
   // Call exported function without engine.
   service_->UnsetEngine();
   EXPECT_CALL(*engine_handler_, FocusIn()).Times(0);
-  EXPECT_CALL(response_sender, Run(_)).Times(0);
+  EXPECT_CALL(response_sender, MockRun(_)).Times(0);
   method_callback_map_[ibus::engine::kFocusInMethod].Run(
       &method_call,
       base::Bind(&MockResponseSender::Run,
@@ -552,7 +554,7 @@ TEST_F(IBusEngineServiceTest, FocusOutTest) {
   EXPECT_CALL(*engine_handler_, FocusOut());
   MockResponseSender response_sender;
   EmptyResponseExpectation response_expectation(kSerialNo);
-  EXPECT_CALL(response_sender, Run(_))
+  EXPECT_CALL(response_sender, MockRun(_))
       .WillOnce(Invoke(&response_expectation,
                        &EmptyResponseExpectation::Evaluate));
 
@@ -572,7 +574,7 @@ TEST_F(IBusEngineServiceTest, FocusOutTest) {
   // Call exported function without engine.
   service_->UnsetEngine();
   EXPECT_CALL(*engine_handler_, FocusOut()).Times(0);
-  EXPECT_CALL(response_sender, Run(_)).Times(0);
+  EXPECT_CALL(response_sender, MockRun(_)).Times(0);
   method_callback_map_[ibus::engine::kFocusOutMethod].Run(
       &method_call,
       base::Bind(&MockResponseSender::Run,
@@ -585,7 +587,7 @@ TEST_F(IBusEngineServiceTest, EnableTest) {
   EXPECT_CALL(*engine_handler_, Enable());
   MockResponseSender response_sender;
   EmptyResponseExpectation response_expectation(kSerialNo);
-  EXPECT_CALL(response_sender, Run(_))
+  EXPECT_CALL(response_sender, MockRun(_))
       .WillOnce(Invoke(&response_expectation,
                        &EmptyResponseExpectation::Evaluate));
 
@@ -605,7 +607,7 @@ TEST_F(IBusEngineServiceTest, EnableTest) {
   // Call exported function without engine.
   service_->UnsetEngine();
   EXPECT_CALL(*engine_handler_, Enable()).Times(0);
-  EXPECT_CALL(response_sender, Run(_)).Times(0);
+  EXPECT_CALL(response_sender, MockRun(_)).Times(0);
   method_callback_map_[ibus::engine::kEnableMethod].Run(
       &method_call,
       base::Bind(&MockResponseSender::Run,
@@ -618,7 +620,7 @@ TEST_F(IBusEngineServiceTest, DisableTest) {
   EXPECT_CALL(*engine_handler_, Disable());
   MockResponseSender response_sender;
   EmptyResponseExpectation response_expectation(kSerialNo);
-  EXPECT_CALL(response_sender, Run(_))
+  EXPECT_CALL(response_sender, MockRun(_))
       .WillOnce(Invoke(&response_expectation,
                        &EmptyResponseExpectation::Evaluate));
 
@@ -638,7 +640,7 @@ TEST_F(IBusEngineServiceTest, DisableTest) {
   // Call exported function without engine.
   service_->UnsetEngine();
   EXPECT_CALL(*engine_handler_, Disable()).Times(0);
-  EXPECT_CALL(response_sender, Run(_)).Times(0);
+  EXPECT_CALL(response_sender, MockRun(_)).Times(0);
   method_callback_map_[ibus::engine::kDisableMethod].Run(
       &method_call,
       base::Bind(&MockResponseSender::Run,
@@ -649,13 +651,13 @@ TEST_F(IBusEngineServiceTest, PropertyActivateTest) {
   // Set expectations.
   const uint32 kSerialNo = 1;
   const std::string kPropertyName = "Property Name";
-  const IBusEngineHandlerInterface::IBusPropertyState kIBusPropertyState =
-      IBusEngineHandlerInterface::IBUS_PROPERTY_STATE_UNCHECKED;
+  const ibus::IBusPropertyState kIBusPropertyState =
+      ibus::IBUS_PROPERTY_STATE_UNCHECKED;
   EXPECT_CALL(*engine_handler_, PropertyActivate(kPropertyName,
                                                  kIBusPropertyState));
   MockResponseSender response_sender;
   EmptyResponseExpectation response_expectation(kSerialNo);
-  EXPECT_CALL(response_sender, Run(_))
+  EXPECT_CALL(response_sender, MockRun(_))
       .WillOnce(Invoke(&response_expectation,
                        &EmptyResponseExpectation::Evaluate));
 
@@ -679,7 +681,7 @@ TEST_F(IBusEngineServiceTest, PropertyActivateTest) {
   service_->UnsetEngine();
   EXPECT_CALL(*engine_handler_, PropertyActivate(kPropertyName,
                                                  kIBusPropertyState)).Times(0);
-  EXPECT_CALL(response_sender, Run(_)).Times(0);
+  EXPECT_CALL(response_sender, MockRun(_)).Times(0);
   method_callback_map_[ibus::engine::kPropertyActivateMethod].Run(
       &method_call,
       base::Bind(&MockResponseSender::Run,
@@ -692,7 +694,7 @@ TEST_F(IBusEngineServiceTest, ResetTest) {
   EXPECT_CALL(*engine_handler_, Reset());
   MockResponseSender response_sender;
   EmptyResponseExpectation response_expectation(kSerialNo);
-  EXPECT_CALL(response_sender, Run(_))
+  EXPECT_CALL(response_sender, MockRun(_))
       .WillOnce(Invoke(&response_expectation,
                        &EmptyResponseExpectation::Evaluate));
 
@@ -712,7 +714,7 @@ TEST_F(IBusEngineServiceTest, ResetTest) {
   // Call exported function without engine.
   service_->UnsetEngine();
   EXPECT_CALL(*engine_handler_, Reset()).Times(0);
-  EXPECT_CALL(response_sender, Run(_)).Times(0);
+  EXPECT_CALL(response_sender, MockRun(_)).Times(0);
   method_callback_map_[ibus::engine::kResetMethod].Run(
       &method_call,
       base::Bind(&MockResponseSender::Run,
@@ -726,7 +728,7 @@ TEST_F(IBusEngineServiceTest, PropertyShowTest) {
   EXPECT_CALL(*engine_handler_, PropertyShow(kPropertyName));
   MockResponseSender response_sender;
   EmptyResponseExpectation response_expectation(kSerialNo);
-  EXPECT_CALL(response_sender, Run(_))
+  EXPECT_CALL(response_sender, MockRun(_))
       .WillOnce(Invoke(&response_expectation,
                        &EmptyResponseExpectation::Evaluate));
 
@@ -748,7 +750,7 @@ TEST_F(IBusEngineServiceTest, PropertyShowTest) {
   // Call exported function without engine.
   service_->UnsetEngine();
   EXPECT_CALL(*engine_handler_, PropertyShow(kPropertyName)).Times(0);
-  EXPECT_CALL(response_sender, Run(_)).Times(0);
+  EXPECT_CALL(response_sender, MockRun(_)).Times(0);
   method_callback_map_[ibus::engine::kPropertyShowMethod].Run(
       &method_call,
       base::Bind(&MockResponseSender::Run,
@@ -762,7 +764,7 @@ TEST_F(IBusEngineServiceTest, PropertyHideTest) {
   EXPECT_CALL(*engine_handler_, PropertyHide(kPropertyName));
   MockResponseSender response_sender;
   EmptyResponseExpectation response_expectation(kSerialNo);
-  EXPECT_CALL(response_sender, Run(_))
+  EXPECT_CALL(response_sender, MockRun(_))
       .WillOnce(Invoke(&response_expectation,
                        &EmptyResponseExpectation::Evaluate));
 
@@ -784,7 +786,7 @@ TEST_F(IBusEngineServiceTest, PropertyHideTest) {
   // Call exported function without engine.
   service_->UnsetEngine();
   EXPECT_CALL(*engine_handler_, PropertyHide(kPropertyName)).Times(0);
-  EXPECT_CALL(response_sender, Run(_)).Times(0);
+  EXPECT_CALL(response_sender, MockRun(_)).Times(0);
   method_callback_map_[ibus::engine::kPropertyHideMethod].Run(
       &method_call,
       base::Bind(&MockResponseSender::Run,
@@ -799,7 +801,7 @@ TEST_F(IBusEngineServiceTest, SetCapabilityTest) {
   EXPECT_CALL(*engine_handler_, SetCapability(kIBusCapability));
   MockResponseSender response_sender;
   EmptyResponseExpectation response_expectation(kSerialNo);
-  EXPECT_CALL(response_sender, Run(_))
+  EXPECT_CALL(response_sender, MockRun(_))
       .WillOnce(Invoke(&response_expectation,
                        &EmptyResponseExpectation::Evaluate));
 
@@ -821,7 +823,7 @@ TEST_F(IBusEngineServiceTest, SetCapabilityTest) {
   // Call exported function without engine.
   service_->UnsetEngine();
   EXPECT_CALL(*engine_handler_, SetCapability(kIBusCapability)).Times(0);
-  EXPECT_CALL(response_sender, Run(_)).Times(0);
+  EXPECT_CALL(response_sender, MockRun(_)).Times(0);
   method_callback_map_[ibus::engine::kSetCapabilityMethod].Run(
       &method_call,
       base::Bind(&MockResponseSender::Run,
@@ -842,7 +844,7 @@ TEST_F(IBusEngineServiceTest, ProcessKeyEventTest) {
                        &ProcessKeyEventHandler::ProcessKeyEvent));
   MockResponseSender response_sender;
   BoolResponseExpectation response_expectation(kSerialNo, kResult);
-  EXPECT_CALL(response_sender, Run(_))
+  EXPECT_CALL(response_sender, MockRun(_))
       .WillOnce(Invoke(&response_expectation,
                        &BoolResponseExpectation::Evaluate));
 
@@ -867,7 +869,7 @@ TEST_F(IBusEngineServiceTest, ProcessKeyEventTest) {
   service_->UnsetEngine();
   EXPECT_CALL(*engine_handler_,
               ProcessKeyEvent(kKeySym, kKeyCode, kState, _)).Times(0);
-  EXPECT_CALL(response_sender, Run(_)).Times(0);
+  EXPECT_CALL(response_sender, MockRun(_)).Times(0);
   method_callback_map_[ibus::engine::kProcessKeyEventMethod].Run(
       &method_call,
       base::Bind(&MockResponseSender::Run,
@@ -888,7 +890,7 @@ TEST_F(IBusEngineServiceTest, DelayProcessKeyEventTest) {
                        &DelayProcessKeyEventHandler::ProcessKeyEvent));
   MockResponseSender response_sender;
   BoolResponseExpectation response_expectation(kSerialNo, kResult);
-  EXPECT_CALL(response_sender, Run(_))
+  EXPECT_CALL(response_sender, MockRun(_))
       .WillOnce(Invoke(&response_expectation,
                        &BoolResponseExpectation::Evaluate));
 
@@ -916,7 +918,7 @@ TEST_F(IBusEngineServiceTest, DelayProcessKeyEventTest) {
   service_->UnsetEngine();
   EXPECT_CALL(*engine_handler_,
               ProcessKeyEvent(kKeySym, kKeyCode, kState, _)).Times(0);
-  EXPECT_CALL(response_sender, Run(_)).Times(0);
+  EXPECT_CALL(response_sender, MockRun(_)).Times(0);
   method_callback_map_[ibus::engine::kProcessKeyEventMethod].Run(
       &method_call,
       base::Bind(&MockResponseSender::Run,
@@ -933,7 +935,7 @@ TEST_F(IBusEngineServiceTest, CandidateClickedTest) {
                                                  kState));
   MockResponseSender response_sender;
   EmptyResponseExpectation response_expectation(kSerialNo);
-  EXPECT_CALL(response_sender, Run(_))
+  EXPECT_CALL(response_sender, MockRun(_))
       .WillOnce(Invoke(&response_expectation,
                        &EmptyResponseExpectation::Evaluate));
 
@@ -958,7 +960,7 @@ TEST_F(IBusEngineServiceTest, CandidateClickedTest) {
   service_->UnsetEngine();
   EXPECT_CALL(*engine_handler_, CandidateClicked(kIndex, kIBusMouseButton,
                                                  kState)).Times(0);
-  EXPECT_CALL(response_sender, Run(_)).Times(0);
+  EXPECT_CALL(response_sender, MockRun(_)).Times(0);
   method_callback_map_[ibus::engine::kCandidateClickedMethod].Run(
       &method_call,
       base::Bind(&MockResponseSender::Run,
@@ -975,7 +977,7 @@ TEST_F(IBusEngineServiceTest, SetSurroundingTextTest) {
                                                    kAnchorPos));
   MockResponseSender response_sender;
   EmptyResponseExpectation response_expectation(kSerialNo);
-  EXPECT_CALL(response_sender, Run(_))
+  EXPECT_CALL(response_sender, MockRun(_))
       .WillOnce(Invoke(&response_expectation,
                        &EmptyResponseExpectation::Evaluate));
 
@@ -984,7 +986,7 @@ TEST_F(IBusEngineServiceTest, SetSurroundingTextTest) {
                                ibus::engine::kSetSurroundingTextMethod);
   method_call.SetSerial(kSerialNo);
   dbus::MessageWriter writer(&method_call);
-  writer.AppendString(kText);
+  AppendStringAsIBusText(kText, &writer);
   writer.AppendUint32(kCursorPos);
   writer.AppendUint32(kAnchorPos);
 
@@ -1000,7 +1002,7 @@ TEST_F(IBusEngineServiceTest, SetSurroundingTextTest) {
   service_->UnsetEngine();
   EXPECT_CALL(*engine_handler_, SetSurroundingText(kText, kCursorPos,
                                                    kAnchorPos)).Times(0);
-  EXPECT_CALL(response_sender, Run(_)).Times(0);
+  EXPECT_CALL(response_sender, MockRun(_)).Times(0);
   method_callback_map_[ibus::engine::kSetSurroundingTextMethod].Run(
       &method_call,
       base::Bind(&MockResponseSender::Run,
@@ -1009,10 +1011,10 @@ TEST_F(IBusEngineServiceTest, SetSurroundingTextTest) {
 
 TEST_F(IBusEngineServiceTest, RegisterProperties) {
   // Set expectations.
-  ibus::IBusPropertyList property_list;
-  property_list.push_back(new ibus::IBusProperty());
+  IBusPropertyList property_list;
+  property_list.push_back(new IBusProperty());
   property_list[0]->set_key("Sample Key");
-  property_list[0]->set_type(ibus::IBusProperty::IBUS_PROPERTY_TYPE_MENU);
+  property_list[0]->set_type(IBusProperty::IBUS_PROPERTY_TYPE_MENU);
   property_list[0]->set_label("Sample Label");
   property_list[0]->set_tooltip("Sample Tooltip");
   property_list[0]->set_visible(true);
@@ -1028,7 +1030,7 @@ TEST_F(IBusEngineServiceTest, RegisterProperties) {
 
 TEST_F(IBusEngineServiceTest, UpdatePreeditTest) {
   // Set expectations.
-  ibus::IBusText ibus_text;
+  IBusText ibus_text;
   ibus_text.set_text("Sample Text");
   const uint32 kCursorPos = 9;
   const bool kIsVisible = false;
@@ -1044,7 +1046,7 @@ TEST_F(IBusEngineServiceTest, UpdatePreeditTest) {
 }
 
 TEST_F(IBusEngineServiceTest, UpdateAuxiliaryText) {
-  ibus::IBusText ibus_text;
+  IBusText ibus_text;
   ibus_text.set_text("Sample Text");
   const bool kIsVisible = false;
   UpdateAuxiliaryTextExpectation expectation(ibus_text, kIsVisible);
@@ -1058,7 +1060,7 @@ TEST_F(IBusEngineServiceTest, UpdateAuxiliaryText) {
 }
 
 TEST_F(IBusEngineServiceTest, UpdateLookupTableTest) {
-  ibus::IBusLookupTable lookup_table;
+  IBusLookupTable lookup_table;
   lookup_table.set_page_size(10);
   lookup_table.set_cursor_position(2);
   lookup_table.set_is_cursor_visible(false);
@@ -1074,9 +1076,9 @@ TEST_F(IBusEngineServiceTest, UpdateLookupTableTest) {
 }
 
 TEST_F(IBusEngineServiceTest, UpdatePropertyTest) {
-  ibus::IBusProperty property;
+  IBusProperty property;
   property.set_key("Sample Key");
-  property.set_type(ibus::IBusProperty::IBUS_PROPERTY_TYPE_MENU);
+  property.set_type(IBusProperty::IBUS_PROPERTY_TYPE_MENU);
   property.set_label("Sample Label");
   property.set_tooltip("Sample Tooltip");
   property.set_visible(true);

@@ -1,4 +1,5 @@
 {
+  "x-version": 2,
   "google-talk": {
     "mime_types": [
     ],
@@ -50,7 +51,7 @@
     ],
     "versions": [
       {
-        "version": "1.6.0.37",
+        "version": "1.6.0.41",
         "status": "requires_authorization"
       },
       {
@@ -58,7 +59,7 @@
         "status": "out_of_date"
       },
       {
-        "version": "1.7.0.11",
+        "version": "1.7.0.15",
         "status": "requires_authorization"
       }
     ],

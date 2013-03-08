@@ -7,13 +7,19 @@
 #include "chrome/browser/ui/ash/launcher/chrome_launcher_controller_per_app.h"
 
 LauncherApplicationMenuItemModel::LauncherApplicationMenuItemModel(
-    scoped_ptr<ChromeLauncherAppMenuItems> item_list)
-    : ALLOW_THIS_IN_INITIALIZER_LIST(ui::SimpleMenuModel(this)),
-      launcher_items_(item_list.get()) {
+    ChromeLauncherAppMenuItems item_list)
+    : ALLOW_THIS_IN_INITIALIZER_LIST(ash::LauncherMenuModel(this)),
+      launcher_items_(item_list.Pass()) {
   Build();
 }
 
 LauncherApplicationMenuItemModel::~LauncherApplicationMenuItemModel() {
+}
+
+bool LauncherApplicationMenuItemModel::IsCommandActive(int command_id) const {
+  DCHECK(command_id >= 0);
+  DCHECK(static_cast<size_t>(command_id) < launcher_items_.size());
+  return launcher_items_[command_id]->IsActive();
 }
 
 bool LauncherApplicationMenuItemModel::IsCommandIdChecked(
@@ -39,17 +45,20 @@ void LauncherApplicationMenuItemModel::ExecuteCommand(int command_id) {
 }
 
 void LauncherApplicationMenuItemModel::Build() {
+  AddSeparator(ui::SPACING_SEPARATOR);
   for (size_t i = 0; i < launcher_items_.size(); i++) {
     ChromeLauncherAppMenuItem* item = launcher_items_[i];
+
+    // Check for a separator requirement in front of this item.
+    if (item->HasLeadingSeparator())
+      AddSeparator(ui::NORMAL_SEPARATOR);
+
     // The first item is the context menu, the others are the running apps.
     AddItem(i, item->title());
 
     if (!item->icon().IsEmpty())
       SetIcon(GetIndexOfCommandId(i), item->icon());
-    // The first item is most likely the application name which should get
-    // separated from the rest.
-    if (!i && launcher_items_.size() > 1)
-      AddSeparator(ui::NORMAL_SEPARATOR);
   }
+  RemoveTrailingSeparators();
 }
 

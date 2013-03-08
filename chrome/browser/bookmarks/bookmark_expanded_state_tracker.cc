@@ -4,12 +4,13 @@
 
 #include "chrome/browser/bookmarks/bookmark_expanded_state_tracker.h"
 
-#include "base/prefs/public/pref_service_base.h"
-#include "base/string_number_conversions.h"
+#include "base/prefs/pref_service.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/common/pref_names.h"
+#include "components/user_prefs/user_prefs.h"
 
 BookmarkExpandedStateTracker::BookmarkExpandedStateTracker(
     content::BrowserContext* browser_context,
@@ -32,8 +33,7 @@ BookmarkExpandedStateTracker::GetExpandedNodes() {
   if (!bookmark_model_->IsLoaded())
     return nodes;
 
-  PrefServiceBase* prefs =
-      PrefServiceBase::FromBrowserContext(browser_context_);
+  PrefService* prefs = components::UserPrefs::Get(browser_context_);
   if (!prefs)
     return nodes;
 
@@ -89,8 +89,7 @@ void BookmarkExpandedStateTracker::BookmarkNodeRemoved(
 }
 
 void BookmarkExpandedStateTracker::UpdatePrefs(const Nodes& nodes) {
-  PrefServiceBase* prefs =
-      PrefServiceBase::FromBrowserContext(browser_context_);
+  PrefService* prefs = components::UserPrefs::Get(browser_context_);
   if (!prefs)
     return;
 

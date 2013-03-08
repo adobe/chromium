@@ -21,15 +21,12 @@
 
 class Browser;
 class BrowserWindow;
-class PrefServiceSyncable;
+class DevToolsControllerTest;
+class PrefRegistrySyncable;
 class Profile;
 
 namespace base {
 class Value;
-}
-
-namespace chrome {
-class BrowserListImpl;
 }
 
 namespace content {
@@ -55,7 +52,8 @@ class DevToolsWindow : private content::NotificationObserver,
                        private content::DevToolsFrontendHostDelegate {
  public:
   static const char kDevToolsApp[];
-  static void RegisterUserPrefs(PrefServiceSyncable* prefs);
+  static std::string GetDevToolsWindowPlacementPrefKey();
+  static void RegisterUserPrefs(PrefRegistrySyncable* registry);
   static DevToolsWindow* GetDockedInstanceForInspectedTab(
       content::WebContents* inspected_tab);
   static bool IsDevToolsWindow(content::RenderViewHost* window_rvh);
@@ -111,6 +109,7 @@ class DevToolsWindow : private content::NotificationObserver,
   void SetHeight(int height);
 
  private:
+  friend class DevToolsControllerTest;
   static DevToolsWindow* Create(Profile* profile,
                                 content::RenderViewHost* inspected_rvh,
                                 DevToolsDockSide dock_side,
@@ -122,10 +121,6 @@ class DevToolsWindow : private content::NotificationObserver,
 
   void CreateDevToolsBrowser();
   bool FindInspectedBrowserAndTabIndex(Browser**, int* tab);
-  bool FindInspectedBrowserAndTabIndexFromBrowserList(
-    chrome::BrowserListImpl* browser_list,
-    Browser** browser,
-    int* tab);
   BrowserWindow* GetInspectedBrowserWindow();
   bool IsInspectedBrowserPopupOrPanel();
   void UpdateFrontendDockSide();
@@ -163,8 +158,8 @@ class DevToolsWindow : private content::NotificationObserver,
   virtual void HandleKeyboardEvent(
       content::WebContents* source,
       const content::NativeWebKeyboardEvent& event) OVERRIDE;
-  virtual content::JavaScriptDialogCreator*
-      GetJavaScriptDialogCreator() OVERRIDE;
+  virtual content::JavaScriptDialogManager*
+      GetJavaScriptDialogManager() OVERRIDE;
   virtual void RunFileChooser(
       content::WebContents* web_contents,
       const content::FileChooserParams& params) OVERRIDE;
@@ -175,6 +170,7 @@ class DevToolsWindow : private content::NotificationObserver,
 
   // content::DevToolsFrontendHostDelegate overrides.
   virtual void ActivateWindow() OVERRIDE;
+  virtual void ChangeAttachedWindowHeight(unsigned height) OVERRIDE;
   virtual void CloseWindow() OVERRIDE;
   virtual void MoveWindow(int x, int y) OVERRIDE;
   virtual void SetDockSide(const std::string& side) OVERRIDE;

@@ -21,10 +21,10 @@
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/rect_f.h"
 
-class FilePath;
 class GURL;
 
 namespace base {
+class FilePath;
 class ListValue;
 }
 
@@ -32,11 +32,10 @@ namespace content {
 class BrowserContext;
 class ColorChooser;
 class DownloadItem;
-class JavaScriptDialogCreator;
+class JavaScriptDialogManager;
 class RenderViewHost;
 class WebContents;
 class WebContentsImpl;
-class WebIntentsDispatcher;
 struct ContextMenuParams;
 struct FileChooserParams;
 struct NativeWebKeyboardEvent;
@@ -47,11 +46,6 @@ namespace gfx {
 class Point;
 class Rect;
 class Size;
-}
-
-namespace webkit_glue {
-struct WebIntentData;
-struct WebIntentServiceData;
 }
 
 namespace WebKit {
@@ -178,7 +172,7 @@ class CONTENT_EXPORT WebContentsDelegate {
   // Add a message to the console. Returning true indicates that the delegate
   // handled the message. If false is returned the default logging mechanism
   // will be used for the message.
-  virtual bool AddMessageToConsole(WebContents* soruce,
+  virtual bool AddMessageToConsole(WebContents* source,
                                    int32 level,
                                    const string16& message,
                                    int32 line_no,
@@ -192,6 +186,12 @@ class CONTENT_EXPORT WebContentsDelegate {
   virtual void BeforeUnloadFired(WebContents* tab,
                                  bool proceed,
                                  bool* proceed_to_fire_unload);
+
+  // Returns true if the location bar should be focused by default rather than
+  // the page contents. NOTE: this is only used if WebContents can't determine
+  // for itself whether the location bar should be focused by default. For a
+  // complete check, you should use WebContents::FocusLocationBarByDefault().
+  virtual bool ShouldFocusLocationBarByDefault(WebContents* source);
 
   // Sets focus to the location bar or some other place that is appropriate.
   // This is called when the tab wants to encourage user input, like for the
@@ -210,7 +210,7 @@ class CONTENT_EXPORT WebContentsDelegate {
   // This is called when WebKit tells us that it is done tabbing through
   // controls on the page. Provides a way for WebContentsDelegates to handle
   // this. Returns true if the delegate successfully handled it.
-  virtual bool TakeFocus(WebContents* soruce,
+  virtual bool TakeFocus(WebContents* source,
                          bool reverse);
 
   // Invoked when the page loses mouse capture.
@@ -223,9 +223,6 @@ class CONTENT_EXPORT WebContentsDelegate {
   virtual bool CanDownload(RenderViewHost* render_view_host,
                            int request_id,
                            const std::string& request_method);
-
-  // Notifies the delegate that a download is starting.
-  virtual void OnStartDownload(WebContents* source, DownloadItem* download) {}
 
   // Return much extra vertical space should be allotted to the
   // render view widget during various animations (e.g. infobar closing).
@@ -315,9 +312,9 @@ class CONTENT_EXPORT WebContentsDelegate {
   // been committed.
   virtual void DidNavigateToPendingEntry(WebContents* source) {}
 
-  // Returns a pointer to a service to create JavaScript dialogs. May return
+  // Returns a pointer to a service to manage JavaScript dialogs. May return
   // NULL in which case dialogs aren't shown.
-  virtual JavaScriptDialogCreator* GetJavaScriptDialogCreator();
+  virtual JavaScriptDialogManager* GetJavaScriptDialogManager();
 
   // Called when color chooser should open. Returns the opened color chooser.
   // Ownership of the returned pointer is transferred to the caller.
@@ -336,7 +333,7 @@ class CONTENT_EXPORT WebContentsDelegate {
   // directory.
   virtual void EnumerateDirectory(WebContents* web_contents,
                                   int request_id,
-                                  const FilePath& path) {}
+                                  const base::FilePath& path) {}
 
   // Called when the renderer puts a tab into or out of fullscreen mode.
   virtual void ToggleFullscreenModeForTab(WebContents* web_contents,
@@ -355,20 +352,6 @@ class CONTENT_EXPORT WebContentsDelegate {
                                        const GURL& url,
                                        const string16& title,
                                        bool user_gesture) {}
-
-  // Register a new Web Intents service.
-  // |user_gesture| is true if the registration is made in the context of a user
-  // gesture. |web_contents| is the context in which the registration was
-  // performed, and |data| is the service record being registered.
-  virtual void RegisterIntentHandler(
-      WebContents* web_contents,
-      const webkit_glue::WebIntentServiceData& data,
-      bool user_gesture) {}
-
-  // Web Intents notification handler. See WebIntentsDispatcher for
-  // documentation of callee responsibility for the dispatcher.
-  virtual void WebIntentDispatch(WebContents* web_contents,
-                                 WebIntentsDispatcher* intents_dispatcher);
 
   // Result of string search in the page. This includes the number of matches
   // found and the selection rect (in screen coordinates) for the string found.
@@ -429,7 +412,7 @@ class CONTENT_EXPORT WebContentsDelegate {
   virtual bool RequestPpapiBrokerPermission(
       WebContents* web_contents,
       const GURL& url,
-      const FilePath& plugin_path,
+      const base::FilePath& plugin_path,
       const base::Callback<void(bool)>& callback);
 
  protected:

@@ -10,7 +10,8 @@ var RootType = {
   DOWNLOADS: 'downloads',
   ARCHIVE: 'archive',
   REMOVABLE: 'removable',
-  GDATA: 'gdata'
+  DRIVE: 'drive',
+  DRIVE_OFFLINE: 'drive_offline'  // A fake root. Not the actual filesystem.
 };
 
 /**
@@ -21,7 +22,8 @@ var RootDirectory = {
   DOWNLOADS: '/Downloads',
   ARCHIVE: '/archive',
   REMOVABLE: '/removable',
-  GDATA: '/drive'
+  DRIVE: '/drive',
+  DRIVE_OFFLINE: '/drive_offline'  // A fake root. Not the actual filesystem.
 };
 
 var PathUtil = {};
@@ -37,7 +39,7 @@ PathUtil.getRootDirectory = function(path) {
 
 /**
  * @param {string} path Any unix-style path (may start or not start from root).
- * @return {Array.<string>} path components
+ * @return {Array.<string>} Path components.
  */
 PathUtil.split = function(path) {
   var fromRoot = false;
@@ -87,7 +89,7 @@ PathUtil.join = function() {
 
 /**
  * @param {string} path Path starting with '/'.
- * @return {RootType} RootType.DOWNLOADS, RootType.GDATA etc.
+ * @return {RootType} RootType.DOWNLOADS, RootType.DRIVE etc.
  */
 PathUtil.getRootType = function(path) {
   var rootDir = PathUtil.getRootDirectory(path);
@@ -104,7 +106,8 @@ PathUtil.getRootType = function(path) {
 PathUtil.getRootPath = function(path) {
   var type = PathUtil.getRootType(path);
 
-  if (type == RootType.DOWNLOADS || type == RootType.GDATA)
+  if (type == RootType.DOWNLOADS || type == RootType.DRIVE ||
+      type == RootType.DRIVE_OFFLINE)
     return PathUtil.getRootDirectory(path);
 
   if (type == RootType.ARCHIVE || type == RootType.REMOVABLE) {
@@ -152,9 +155,9 @@ PathUtil.isParentPath = function(parent_path, child_path) {
  * @return {string} The localized name.
  */
 PathUtil.getRootLabel = function(path) {
-  function str(id) {
+  var str = function(id) {
     return loadTimeData.getString(id);
-  }
+  };
 
   if (path === RootDirectory.DOWNLOADS)
     return str('DOWNLOADS_DIRECTORY_LABEL');
@@ -169,10 +172,11 @@ PathUtil.getRootLabel = function(path) {
   if (PathUtil.isParentPath(RootDirectory.REMOVABLE, path))
     return path.substring(RootDirectory.REMOVABLE.length + 1);
 
-  if (path === RootDirectory.GDATA)
+  if (path === RootDirectory.DRIVE)
     return str('DRIVE_DIRECTORY_LABEL');
+
+  if (path === RootDirectory.DRIVE_OFFLINE)
+    return str('DRIVE_OFFLINE_COLLECTION_LABEL');
 
   return path;
 };
-
-

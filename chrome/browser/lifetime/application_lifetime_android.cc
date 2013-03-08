@@ -8,9 +8,9 @@
 
 #include "base/android/jni_android.h"
 #include "base/logging.h"
+#include "base/prefs/pref_service.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
@@ -18,7 +18,7 @@
 #include "content/public/browser/browser_context.h"
 #include "jni/ApplicationLifetime_jni.h"
 
-namespace browser {
+namespace chrome {
 
 void AttemptRestart() {
   // Set the flag to restart Chrome after it is shutdown.
@@ -26,6 +26,7 @@ void AttemptRestart() {
   pref_service->SetBoolean(prefs::kRestartLastSessionOnShutdown, true);
   AttemptExit();
 }
+
 
 void TerminateAndroid() {
   bool restart = false;

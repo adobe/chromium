@@ -62,14 +62,14 @@ struct TestCacheResource {
 const int64 kLotsOfSpace = kMinFreeSpace * 10;
 
 struct PathToVerify {
-  PathToVerify(const FilePath& in_path_to_scan,
-               const FilePath& in_expected_existing_path) :
+  PathToVerify(const base::FilePath& in_path_to_scan,
+               const base::FilePath& in_expected_existing_path) :
       path_to_scan(in_path_to_scan),
       expected_existing_path(in_expected_existing_path) {
   }
 
-  FilePath path_to_scan;
-  FilePath expected_existing_path;
+  base::FilePath path_to_scan;
+  base::FilePath expected_existing_path;
 };
 
 // Copies results from Iterate().
@@ -92,7 +92,6 @@ class DriveCacheTest : public testing::Test {
  protected:
   DriveCacheTest()
       : ui_thread_(content::BrowserThread::UI, &message_loop_),
-        io_thread_(content::BrowserThread::IO),
         cache_(NULL),
         expected_error_(DRIVE_FILE_OK),
         expected_cache_state_(0),
@@ -103,8 +102,6 @@ class DriveCacheTest : public testing::Test {
   }
 
   virtual void SetUp() OVERRIDE {
-    io_thread_.StartIOThread();
-
     profile_.reset(new TestingProfile);
 
     fake_free_disk_space_getter_.reset(new FakeFreeDiskSpaceGetter);
@@ -144,7 +141,7 @@ class DriveCacheTest : public testing::Test {
       const struct TestCacheResource& resource = test_cache_resources[i];
       // Copy file from data dir to cache.
       if (!std::string(resource.source_file).empty()) {
-        FilePath source_path =
+        base::FilePath source_path =
             google_apis::test_util::GetTestFilePath(resource.source_file);
 
         DriveFileError error = DRIVE_FILE_OK;
@@ -201,7 +198,7 @@ class DriveCacheTest : public testing::Test {
       DriveFileError expected_error,
       const std::string& expected_file_extension) {
     DriveFileError error = DRIVE_FILE_OK;
-    FilePath cache_file_path;
+    base::FilePath cache_file_path;
     cache_->GetFile(
         resource_id, md5,
         base::Bind(&test_util::CopyResultsFromGetFileFromCacheCallback,
@@ -211,9 +208,9 @@ class DriveCacheTest : public testing::Test {
     EXPECT_EQ(expected_error, error);
     if (error == DRIVE_FILE_OK) {
       // Verify filename of |cache_file_path|.
-      FilePath base_name = cache_file_path.BaseName();
+      base::FilePath base_name = cache_file_path.BaseName();
       EXPECT_EQ(util::EscapeCacheFileName(resource_id) +
-                FilePath::kExtensionSeparator +
+                base::FilePath::kExtensionSeparator +
                 util::EscapeCacheFileName(
                     expected_file_extension.empty() ?
                     md5 : expected_file_extension),
@@ -226,7 +223,7 @@ class DriveCacheTest : public testing::Test {
   void TestStoreToCache(
       const std::string& resource_id,
       const std::string& md5,
-      const FilePath& source_path,
+      const base::FilePath& source_path,
       DriveFileError expected_error,
       int expected_cache_state,
       DriveCache::CacheSubDirectoryType expected_sub_dir_type) {
@@ -274,19 +271,15 @@ class DriveCacheTest : public testing::Test {
     paths_to_verify.push_back(  // Index 0: CACHE_TYPE_TMP.
         PathToVerify(cache_->GetCacheFilePath(resource_id, "*",
                      DriveCache::CACHE_TYPE_TMP,
-                     DriveCache::CACHED_FILE_FROM_SERVER), FilePath()));
+                     DriveCache::CACHED_FILE_FROM_SERVER), base::FilePath()));
     paths_to_verify.push_back(  // Index 1: CACHE_TYPE_PERSISTENT.
         PathToVerify(cache_->GetCacheFilePath(resource_id, "*",
                      DriveCache::CACHE_TYPE_PERSISTENT,
-                     DriveCache::CACHED_FILE_FROM_SERVER), FilePath()));
-    paths_to_verify.push_back(  // Index 2: CACHE_TYPE_TMP, but STATE_PINNED.
-        PathToVerify(cache_->GetCacheFilePath(resource_id, "",
-                     DriveCache::CACHE_TYPE_PINNED,
-                     DriveCache::CACHED_FILE_FROM_SERVER), FilePath()));
-    paths_to_verify.push_back(  // Index 3: CACHE_TYPE_OUTGOING.
+                     DriveCache::CACHED_FILE_FROM_SERVER), base::FilePath()));
+    paths_to_verify.push_back(  // Index 2: CACHE_TYPE_OUTGOING.
         PathToVerify(cache_->GetCacheFilePath(resource_id, "",
                      DriveCache::CACHE_TYPE_OUTGOING,
-                     DriveCache::CACHED_FILE_FROM_SERVER), FilePath()));
+                     DriveCache::CACHED_FILE_FROM_SERVER), base::FilePath()));
     if (!cache_entry_found) {
       for (size_t i = 0; i < paths_to_verify.size(); ++i) {
         file_util::FileEnumerator enumerator(
@@ -310,22 +303,12 @@ class DriveCacheTest : public testing::Test {
                            DriveCache::CACHE_TYPE_PERSISTENT,
                            DriveCache::CACHED_FILE_LOCALLY_MODIFIED);
 
-      // Change expected_existing_path of CACHE_TYPE_OUTGOING (index 3).
-      paths_to_verify[3].expected_existing_path =
+      // Change expected_existing_path of CACHE_TYPE_OUTGOING (index 2).
+      paths_to_verify[2].expected_existing_path =
           GetCacheFilePath(resource_id,
                            std::string(),
                            DriveCache::CACHE_TYPE_OUTGOING,
                            DriveCache::CACHED_FILE_FROM_SERVER);
-
-      if (cache_entry.is_pinned()) {
-         // Change expected_existing_path of CACHE_TYPE_TMP but STATE_PINNED
-         // (index 2).
-         paths_to_verify[2].expected_existing_path =
-             GetCacheFilePath(resource_id,
-                              std::string(),
-                              DriveCache::CACHE_TYPE_PINNED,
-                              DriveCache::CACHED_FILE_FROM_SERVER);
-      }
 
       for (size_t i = 0; i < paths_to_verify.size(); ++i) {
         const struct PathToVerify& verify = paths_to_verify[i];
@@ -335,7 +318,7 @@ class DriveCacheTest : public testing::Test {
             file_util::FileEnumerator::SHOW_SYM_LINKS,
             verify.path_to_scan.BaseName().value());
         size_t num_files_found = 0;
-        for (FilePath current = enumerator.Next(); !current.empty();
+        for (base::FilePath current = enumerator.Next(); !current.empty();
              current = enumerator.Next()) {
           ++num_files_found;
           EXPECT_EQ(verify.expected_existing_path, current);
@@ -404,7 +387,7 @@ class DriveCacheTest : public testing::Test {
 
     // Verify filename.
     if (error == DRIVE_FILE_OK) {
-      FilePath cache_file_path;
+      base::FilePath cache_file_path;
       cache_->GetFile(
           resource_id, md5,
           base::Bind(&test_util::CopyResultsFromGetFileFromCacheCallback,
@@ -412,9 +395,9 @@ class DriveCacheTest : public testing::Test {
       google_apis::test_util::RunBlockingPoolTask();
 
       EXPECT_EQ(DRIVE_FILE_OK, error);
-      FilePath base_name = cache_file_path.BaseName();
+      base::FilePath base_name = cache_file_path.BaseName();
       EXPECT_EQ(util::EscapeCacheFileName(resource_id) +
-                FilePath::kExtensionSeparator +
+                base::FilePath::kExtensionSeparator +
                 "local",
                 base_name.value());
     }
@@ -461,7 +444,6 @@ class DriveCacheTest : public testing::Test {
   void TestMarkAsMounted(
       const std::string& resource_id,
       const std::string& md5,
-      const FilePath& file_path,
       DriveFileError expected_error,
       int expected_cache_state,
       DriveCache::CacheSubDirectoryType expected_sub_dir_type) {
@@ -471,9 +453,10 @@ class DriveCacheTest : public testing::Test {
     expect_outgoing_symlink_ = false;
 
     DriveFileError error = DRIVE_FILE_OK;
-    FilePath cache_file_path;
+    base::FilePath cache_file_path;
     cache_->MarkAsMounted(
-        file_path,
+        resource_id,
+        md5,
         base::Bind(&test_util::CopyResultsFromGetFileFromCacheCallback,
                    &error, &cache_file_path));
     google_apis::test_util::RunBlockingPoolTask();
@@ -489,7 +472,7 @@ class DriveCacheTest : public testing::Test {
   void TestMarkAsUnmounted(
       const std::string& resource_id,
       const std::string& md5,
-      const FilePath& file_path,
+      const base::FilePath& file_path,
       DriveFileError expected_error,
       int expected_cache_state,
       DriveCache::CacheSubDirectoryType expected_sub_dir_type) {
@@ -504,7 +487,7 @@ class DriveCacheTest : public testing::Test {
         base::Bind(&test_util::CopyErrorCodeFromFileOperationCallback, &error));
     google_apis::test_util::RunBlockingPoolTask();
 
-    FilePath cache_file_path;
+    base::FilePath cache_file_path;
     cache_->GetFile(
         resource_id, md5,
         base::Bind(&test_util::CopyResultsFromGetFileFromCacheCallback,
@@ -542,7 +525,7 @@ class DriveCacheTest : public testing::Test {
     }
 
     // Verify actual cache file.
-    FilePath dest_path = cache_->GetCacheFilePath(
+    base::FilePath dest_path = cache_->GetCacheFilePath(
         resource_id,
         md5,
         test_util::ToCacheEntry(expected_cache_state_).is_pinned() ||
@@ -558,28 +541,8 @@ class DriveCacheTest : public testing::Test {
     else
       EXPECT_FALSE(exists);
 
-    // Verify symlink in pinned dir.
-    FilePath symlink_path = cache_->GetCacheFilePath(
-        resource_id,
-        std::string(),
-        DriveCache::CACHE_TYPE_PINNED,
-        DriveCache::CACHED_FILE_FROM_SERVER);
-    // Check that pin symlink exists, without dereferencing to target path.
-    exists = file_util::IsLink(symlink_path);
-    if (test_util::ToCacheEntry(expected_cache_state_).is_pinned()) {
-      EXPECT_TRUE(exists);
-      FilePath target_path;
-      EXPECT_TRUE(file_util::ReadSymbolicLink(symlink_path, &target_path));
-      if (test_util::ToCacheEntry(expected_cache_state_).is_present())
-        EXPECT_EQ(dest_path, target_path);
-      else
-        EXPECT_EQ(kSymLinkToDevNull, target_path.value());
-    } else {
-      EXPECT_FALSE(exists);
-    }
-
     // Verify symlink in outgoing dir.
-    symlink_path = cache_->GetCacheFilePath(
+    base::FilePath symlink_path = cache_->GetCacheFilePath(
         resource_id,
         std::string(),
         DriveCache::CACHE_TYPE_OUTGOING,
@@ -589,7 +552,7 @@ class DriveCacheTest : public testing::Test {
     if (expect_outgoing_symlink_ &&
         test_util::ToCacheEntry(expected_cache_state_).is_dirty()) {
       EXPECT_TRUE(exists);
-      FilePath target_path;
+      base::FilePath target_path;
       EXPECT_TRUE(file_util::ReadSymbolicLink(symlink_path, &target_path));
       EXPECT_TRUE(target_path.value() != kSymLinkToDevNull);
       if (test_util::ToCacheEntry(expected_cache_state_).is_present())
@@ -599,7 +562,7 @@ class DriveCacheTest : public testing::Test {
     }
   }
 
-  FilePath GetCacheFilePath(const std::string& resource_id,
+  base::FilePath GetCacheFilePath(const std::string& resource_id,
                             const std::string& md5,
                             DriveCache::CacheSubDirectoryType sub_dir_type,
                             DriveCache::CachedFileOrigin file_origin) {
@@ -630,19 +593,19 @@ class DriveCacheTest : public testing::Test {
   void TestGetCacheFilePath(const std::string& resource_id,
                             const std::string& md5,
                             const std::string& expected_filename) {
-    FilePath actual_path = cache_->GetCacheFilePath(
+    base::FilePath actual_path = cache_->GetCacheFilePath(
         resource_id,
         md5,
         DriveCache::CACHE_TYPE_TMP,
         DriveCache::CACHED_FILE_FROM_SERVER);
-    FilePath expected_path =
+    base::FilePath expected_path =
         cache_->GetCacheDirectoryPath(DriveCache::CACHE_TYPE_TMP);
     expected_path = expected_path.Append(expected_filename);
     EXPECT_EQ(expected_path, actual_path);
 
-    FilePath base_name = actual_path.BaseName();
+    base::FilePath base_name = actual_path.BaseName();
 
-    // FilePath::Extension returns ".", so strip it.
+    // base::FilePath::Extension returns ".", so strip it.
     std::string unescaped_md5 = util::UnescapeCacheFileName(
         base_name.Extension().substr(1));
     EXPECT_EQ(md5, unescaped_md5);
@@ -655,7 +618,7 @@ class DriveCacheTest : public testing::Test {
   // that they have the <md5>. This should return 1 or 0.
   size_t CountCacheFiles(const std::string& resource_id,
                          const std::string& md5) {
-    FilePath path = GetCacheFilePath(
+    base::FilePath path = GetCacheFilePath(
         resource_id, "*",
         (test_util::ToCacheEntry(expected_cache_state_).is_pinned() ?
          DriveCache::CACHE_TYPE_PERSISTENT :
@@ -665,11 +628,11 @@ class DriveCacheTest : public testing::Test {
                                          file_util::FileEnumerator::FILES,
                                          path.BaseName().value());
     size_t num_files_found = 0;
-    for (FilePath current = enumerator.Next(); !current.empty();
+    for (base::FilePath current = enumerator.Next(); !current.empty();
          current = enumerator.Next()) {
       ++num_files_found;
       EXPECT_EQ(util::EscapeCacheFileName(resource_id) +
-                FilePath::kExtensionSeparator +
+                base::FilePath::kExtensionSeparator +
                 util::EscapeCacheFileName(md5),
                 current.BaseName().value());
     }
@@ -680,7 +643,6 @@ class DriveCacheTest : public testing::Test {
   // The order of the test threads is important, do not change the order.
   // See also content/browser/browser_thread_imple.cc.
   content::TestBrowserThread ui_thread_;
-  content::TestBrowserThread io_thread_;
   scoped_refptr<base::SequencedTaskRunner> blocking_task_runner_;
   scoped_ptr<TestingProfile> profile_;
   DriveCache* cache_;
@@ -701,7 +663,7 @@ TEST_F(DriveCacheTest, GetCacheFilePath) {
   std::string resource_id("pdf:1a2b");
   std::string md5("abcdef0123456789");
   TestGetCacheFilePath(resource_id, md5,
-                       resource_id + FilePath::kExtensionSeparator + md5);
+                       resource_id + base::FilePath::kExtensionSeparator + md5);
 
   // Use non-alphanumeric characters for resource id, including '.' which is an
   // extension separator, to test that the characters are escaped and unescaped
@@ -709,9 +671,9 @@ TEST_F(DriveCacheTest, GetCacheFilePath) {
   resource_id = "pdf:`~!@#$%^&*()-_=+[{|]}\\;',<.>/?";
   std::string escaped_resource_id = util::EscapeCacheFileName(resource_id);
   std::string escaped_md5 = util::EscapeCacheFileName(md5);
-  TestGetCacheFilePath(resource_id, md5,
-                       escaped_resource_id + FilePath::kExtensionSeparator +
-                       escaped_md5);
+  TestGetCacheFilePath(
+      resource_id, md5, escaped_resource_id +
+      base::FilePath::kExtensionSeparator + escaped_md5);
 }
 
 TEST_F(DriveCacheTest, StoreToCacheSimple) {
@@ -728,7 +690,7 @@ TEST_F(DriveCacheTest, StoreToCacheSimple) {
       DriveCache::CACHE_TYPE_TMP);
 
   // Store a non-existent file to the same |resource_id| and |md5|.
-  TestStoreToCache(resource_id, md5, FilePath("./non_existent.json"),
+  TestStoreToCache(resource_id, md5, base::FilePath("./non_existent.json"),
                    DRIVE_FILE_ERROR_FAILED,
                    test_util::TEST_CACHE_STATE_PRESENT,
                    DriveCache::CACHE_TYPE_TMP);
@@ -888,7 +850,7 @@ TEST_F(DriveCacheTest, StoreToCachePinned) {
       DriveCache::CACHE_TYPE_PERSISTENT);
 
   // Store a non-existent file to a previously pinned and stored file.
-  TestStoreToCache(resource_id, md5, FilePath("./non_existent.json"),
+  TestStoreToCache(resource_id, md5, base::FilePath("./non_existent.json"),
                    DRIVE_FILE_ERROR_FAILED,
                    test_util::TEST_CACHE_STATE_PRESENT |
                    test_util::TEST_CACHE_STATE_PINNED |
@@ -1070,7 +1032,7 @@ TEST_F(DriveCacheTest, PinAndUnpinDirtyCache) {
                 DriveCache::CACHE_TYPE_PERSISTENT);
 
   // Verifies dirty file exists.
-  FilePath dirty_path = GetCacheFilePath(
+  base::FilePath dirty_path = GetCacheFilePath(
       resource_id,
       md5,
       DriveCache::CACHE_TYPE_PERSISTENT,
@@ -1263,7 +1225,7 @@ TEST_F(DriveCacheTest, RemoveFromDirtyCache) {
 TEST_F(DriveCacheTest, MountUnmount) {
   fake_free_disk_space_getter_->set_fake_free_disk_space(kLotsOfSpace);
 
-  FilePath file_path;
+  base::FilePath file_path;
   std::string resource_id("pdf:1a2b");
   std::string md5("abcdef0123456789");
 
@@ -1275,10 +1237,8 @@ TEST_F(DriveCacheTest, MountUnmount) {
       DriveCache::CACHE_TYPE_TMP);
 
   // Mark the file mounted.
-  file_path = cache_->GetCacheFilePath(resource_id, md5,
-                                       DriveCache::CACHE_TYPE_TMP,
-                                       DriveCache::CACHED_FILE_FROM_SERVER);
-  TestMarkAsMounted(resource_id, md5, file_path,
+  TestMarkAsMounted(resource_id,
+                    md5,
                     DRIVE_FILE_OK,
                     test_util::TEST_CACHE_STATE_PRESENT |
                     test_util::TEST_CACHE_STATE_MOUNTED |
@@ -1385,7 +1345,7 @@ TEST(DriveCacheExtraTest, InitializationFailure) {
 
   // Set the cache root to a non existent path, so the initialization fails.
   DriveCache* cache = new DriveCache(
-      FilePath::FromUTF8Unsafe("/somewhere/nonexistent/blah/blah"),
+      base::FilePath::FromUTF8Unsafe("/somewhere/nonexistent/blah/blah"),
       pool->GetSequencedTaskRunner(pool->GetSequenceToken()),
       NULL /* free_disk_space_getter */);
 

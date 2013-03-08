@@ -11,11 +11,11 @@
 #include "base/format_macros.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
+#include "base/prefs/testing_pref_service.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/test/base/testing_pref_service.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "content/public/test/test_browser_thread.h"
 #include "net/proxy/proxy_config_service_common_unittest.h"
@@ -235,11 +235,11 @@ class ProxyConfigServiceImplTestBase : public TESTBASE {
       : ui_thread_(BrowserThread::UI, &loop_),
         io_thread_(BrowserThread::IO, &loop_) {}
 
-  virtual void Init(PrefServiceSimple* pref_service) {
+  virtual void Init(TestingPrefServiceSimple* pref_service) {
     ASSERT_TRUE(pref_service);
     DBusThreadManager::Initialize();
-    PrefProxyConfigTrackerImpl::RegisterPrefs(pref_service);
-    ProxyConfigServiceImpl::RegisterPrefs(pref_service);
+    PrefProxyConfigTrackerImpl::RegisterPrefs(pref_service->registry());
+    ProxyConfigServiceImpl::RegisterPrefs(pref_service->registry());
     proxy_config_service_.reset(new ChromeProxyConfigService(NULL));
     config_service_impl_.reset(new ProxyConfigServiceImpl(pref_service));
     config_service_impl_->SetChromeProxyConfigService(

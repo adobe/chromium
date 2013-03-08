@@ -44,7 +44,6 @@
       'gtalk.test_basic',
       'imports',
       'infobars',
-      'instant',
       'media.media_basic_playback',
       'multiprofile',
       'nacl_sdk',
@@ -67,6 +66,10 @@
       # ==================================================
       # crbug.com/145006
       '-about_plugins_ui.ChromeAboutPluginsUITest.testEnableAndDisableFlashPlugin',
+      # crbug.com/100365
+      '-autofill.AutofillTest.testDisplayLineItemForEntriesWithNoCCNum',
+      # crbug.com/171828
+      '-autofill.AutofillTest.testNoDuplicatePhoneNumsInPrefs',
       # crbug.com/124280
       '-downloads.DownloadsTest.testPauseAndResume',
       # The source is behind.  Waiting for dev to automate the update.
@@ -83,17 +86,24 @@
       '-fullscreen_mouselock.FullscreenMouselockTest.testNoTabFSExitWhenJSExitMouseLock',
       # crosbug.com/136875
       '-fullscreen_mouselock.FullscreenMouselockTest.testTabFSDoesNotExitForAnchorLinks',
+      # crbug.com/179263
+      '-gtalk.test_basic.BasicTest.testCurrentVersion',
+      '-gtalk.test_basic.BasicTest.testRCVersion',
       # crbug.com/165796
       '-infobars.OneClickInfobarTest',
       # crbug.com/131874
       '-infobars.OneClickInfobarTest.testNoOneClickInfobarAfterCancel',
       # crbug.com/133315
       '-infobars.OneClickInfobarTest.testDisplayOneClickInfobarAfterDismiss',
-      # crbug.com/165843
-      '-instant.InstantTest.testInstantWithNonInstantSearchEngine',
       # Mysteriously broken?
       # crbug.com/138857
       '-multiprofile.MultiprofileTest.testMakeSearchEngineDefaultInMultiprofile',
+      # crbug.com/179268
+      '-ntp.NTPTest.testCannotUninstallWebStore',
+      '-ntp.NTPTest.testGetAppsInNewProfile',
+      '-ntp.NTPTest.testGetAppsWhenInstallApp',
+      '-ntp.NTPTest.testGetAppsWhenInstallNonApps',
+      '-ntp.NTPTest.testUninstallApp',
       # crbug.com/143308
       '-omnibox.OmniboxLiveTest.testGoogleSearch',
       # crbug.com/71715
@@ -141,7 +151,6 @@
       # Disabled tests that need to be investigated/fixed.
       # ==================================================
       # crbug.com/105948
-      '-autofill.AutofillTest.testDisplayLineItemForEntriesWithNoCCNum',
       '-autofill.AutofillTest.testPostalCodeAndStateLabelsBasedOnCountry',
       # crbug.com/169512
       '-downloads.DownloadsTest.testDownloadsPersistence',
@@ -157,10 +166,8 @@
       # -imports.ImportsTest.testFirefoxImportFromPrefs
       # Disabled on vista in the actual test. crbug.com/89767
       # -imports.ImportsTest.testImportFirefoxPasswordsFromPrefs
-      # crbug.com/168809
-      '-instant.InstantTest.testInstantCaseSensitivity',
-      # crbug.com/125424
-      '-media.media_basic_playback.MediaBasicPlaybackTest.testBasicPlaybackMatrix',
+      # crbug.com/171490
+      '-passwords.PasswordTest.testPasswdInfoNotStoredWhenAutocompleteOff',
       # crbug.com/117569
       '-passwords.PasswordTest.testSavedPasswordInTabsAndWindows',
       # crbug.com/98526
@@ -217,8 +224,6 @@
       # ==================================================
       # Disabled tests that need to be investigated/fixed.
       # ==================================================
-      # crbug.com/100365
-      '-autofill.AutofillTest.testDisplayLineItemForEntriesWithNoCCNum',
       # crbug.com/111289
       '-extensions.ExtensionsTest.testAllowAccessFileURLs',
       # crbug.com/91033
@@ -499,6 +504,9 @@
       'media_stream_infobar',
       'webrtc_brutality_test',
       'webrtc_call',
+    ],
+    'linux': [
+      'webrtc_audio_call',
     ],
   },
 

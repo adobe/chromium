@@ -15,14 +15,11 @@
 #include "ui/views/controls/link.h"
 #include "ui/views/controls/native/native_view_host.h"
 #include "ui/views/controls/scroll_view.h"
+#include "ui/views/controls/tabbed_pane/tabbed_pane.h"
 #include "ui/views/controls/textfield/textfield.h"
 #include "ui/views/focus/focus_manager_test.h"
 #include "ui/views/widget/root_view.h"
 #include "ui/views/widget/widget.h"
-
-#if !defined(USE_AURA)
-#include "ui/views/controls/tabbed_pane/tabbed_pane.h"
-#endif
 
 namespace views {
 
@@ -68,14 +65,12 @@ const int kOKButtonID = count++;
 const int kCancelButtonID = count++;
 const int kHelpButtonID = count++;
 
-#if !defined(USE_AURA)
 const int kStyleContainerID = count++;  // 35
 const int kBoldCheckBoxID = count++;
 const int kItalicCheckBoxID = count++;
 const int kUnderlinedCheckBoxID = count++;
 const int kStyleHelpLinkID = count++;
 const int kStyleTextEditID = count++;  // 40
-#endif
 
 const int kSearchContainerID = count++;
 const int kSearchTextfieldID = count++;
@@ -108,7 +103,7 @@ class PaneView : public View, public FocusTraversable {
   }
 
   // Overridden from views::View:
-  virtual FocusTraversable* GetPaneFocusTraversable() {
+  virtual FocusTraversable* GetPaneFocusTraversable() OVERRIDE {
     if (focus_search_)
       return this;
     else
@@ -116,13 +111,13 @@ class PaneView : public View, public FocusTraversable {
   }
 
   // Overridden from views::FocusTraversable:
-  virtual views::FocusSearch* GetFocusSearch() {
+  virtual views::FocusSearch* GetFocusSearch() OVERRIDE {
     return focus_search_;
   }
-  virtual FocusTraversable* GetFocusTraversableParent() {
+  virtual FocusTraversable* GetFocusTraversableParent() OVERRIDE {
     return NULL;
   }
-  virtual View* GetFocusTraversableParentView() {
+  virtual View* GetFocusTraversableParentView() OVERRIDE {
     return NULL;
   }
 
@@ -146,11 +141,13 @@ class BorderView : public NativeViewHost {
     return static_cast<internal::RootView*>(widget_->GetRootView());
   }
 
-  virtual FocusTraversable* GetFocusTraversable() {
+  virtual FocusTraversable* GetFocusTraversable() OVERRIDE {
     return static_cast<internal::RootView*>(widget_->GetRootView());
   }
 
-  virtual void ViewHierarchyChanged(bool is_add, View *parent, View *child) {
+  virtual void ViewHierarchyChanged(bool is_add,
+                                    View *parent,
+                                    View *child) OVERRIDE {
     NativeViewHost::ViewHierarchyChanged(is_add, parent, child);
 
     if (child == this && is_add) {
@@ -186,7 +183,7 @@ class BorderView : public NativeViewHost {
 
 class FocusTraversalTest : public FocusManagerTest {
  public:
-  ~FocusTraversalTest();
+  virtual ~FocusTraversalTest();
 
   virtual void InitContentView() OVERRIDE;
 
@@ -197,10 +194,8 @@ class FocusTraversalTest : public FocusManagerTest {
     View* view = GetContentsView()->GetViewByID(id);
     if (view)
       return view;
-#if !defined(USE_AURA)
     if (style_tab_)
       view = style_tab_->GetSelectedTab()->GetViewByID(id);
-#endif
     if (view)
       return view;
     view = search_border_view_->GetContentsRootView()->GetViewByID(id);
@@ -210,9 +205,7 @@ class FocusTraversalTest : public FocusManagerTest {
   }
 
  protected:
-#if !defined(USE_AURA)
   TabbedPane* style_tab_;
-#endif
   BorderView* search_border_view_;
   DummyComboboxModel combobox_model_;
   PaneView* left_container_;
@@ -222,10 +215,7 @@ class FocusTraversalTest : public FocusManagerTest {
 };
 
 FocusTraversalTest::FocusTraversalTest()
-    :
-#if !defined(USE_AURA)
-      style_tab_(NULL),
-#endif
+    : style_tab_(NULL),
       search_border_view_(NULL) {
 }
 
@@ -274,7 +264,6 @@ void FocusTraversalTest::InitContentView() {
   //   NativeButton        * kOKButtonID
   //   NativeButton        * kCancelButtonID
   //   NativeButton        * kHelpButtonID
-  // #if !defined(USE_AURA)
   //   TabbedPane          * kStyleContainerID
   //     View
   //       Checkbox        * kBoldCheckBoxID
@@ -283,7 +272,6 @@ void FocusTraversalTest::InitContentView() {
   //       Link            * kStyleHelpLinkID
   //       Textfield       * kStyleTextEditID
   //     Other
-  // #endif
   //   BorderView            kSearchContainerID
   //     View
   //       Textfield       * kSearchTextfieldID
@@ -487,7 +475,6 @@ void FocusTraversalTest::InitContentView() {
   View* contents = NULL;
   Link* link = NULL;
 
-#if !defined(USE_AURA)
   // Left bottom box with style checkboxes.
   contents = new View();
   contents->set_background(Background::CreateSolidBackground(SK_ColorWHITE));
@@ -522,7 +509,6 @@ void FocusTraversalTest::InitContentView() {
   style_tab_->SetBounds(10, y, 210, 100);
   style_tab_->AddTab(ASCIIToUTF16("Style"), contents);
   style_tab_->AddTab(ASCIIToUTF16("Other"), new View());
-#endif
 
   // Right bottom box with search.
   contents = new View();
@@ -579,10 +565,8 @@ TEST_F(FocusTraversalTest, NormalTraversal) {
       kDinerGameLinkID, kRidiculeLinkID, kClosetLinkID, kVisitingLinkID,
       kAmelieLinkID, kJoyeuxNoelLinkID, kCampingLinkID, kBriceDeNiceLinkID,
       kTaxiLinkID, kAsterixLinkID, kOKButtonID, kCancelButtonID, kHelpButtonID,
-#if !defined(USE_AURA)
       kStyleContainerID, kBoldCheckBoxID, kItalicCheckBoxID,
       kUnderlinedCheckBoxID, kStyleHelpLinkID, kStyleTextEditID,
-#endif
       kSearchTextfieldID, kSearchButtonID, kHelpLinkID,
       kThumbnailContainerID, kThumbnailStarID, kThumbnailSuperStarID };
 
@@ -620,21 +604,15 @@ TEST_F(FocusTraversalTest, TraversalWithNonEnabledViews) {
   const int kDisabledIDs[] = {
       kBananaTextfieldID, kFruitCheckBoxID, kComboboxID, kAsparagusButtonID,
       kCauliflowerButtonID, kClosetLinkID, kVisitingLinkID, kBriceDeNiceLinkID,
-      kTaxiLinkID, kAsterixLinkID, kHelpButtonID,
-#if !defined(USE_AURA)
-      kBoldCheckBoxID,
-#endif
+      kTaxiLinkID, kAsterixLinkID, kHelpButtonID, kBoldCheckBoxID,
       kSearchTextfieldID, kHelpLinkID };
 
   const int kTraversalIDs[] = { kTopCheckBoxID,  kAppleTextfieldID,
       kOrangeTextfieldID, kKiwiTextfieldID, kFruitButtonID, kBroccoliButtonID,
       kRosettaLinkID, kStupeurEtTremblementLinkID, kDinerGameLinkID,
       kRidiculeLinkID, kAmelieLinkID, kJoyeuxNoelLinkID, kCampingLinkID,
-      kOKButtonID, kCancelButtonID,
-#if !defined(USE_AURA)
-      kStyleContainerID, kItalicCheckBoxID, kUnderlinedCheckBoxID,
-      kStyleHelpLinkID, kStyleTextEditID,
-#endif
+      kOKButtonID, kCancelButtonID, kStyleContainerID, kItalicCheckBoxID,
+      kUnderlinedCheckBoxID, kStyleHelpLinkID, kStyleTextEditID,
       kSearchButtonID, kThumbnailContainerID, kThumbnailStarID,
       kThumbnailSuperStarID };
 
@@ -685,12 +663,9 @@ TEST_F(FocusTraversalTest, TraversalWithInvisibleViews) {
       kStupeurEtTremblementLinkID, kDinerGameLinkID, kRidiculeLinkID,
       kClosetLinkID, kVisitingLinkID, kAmelieLinkID, kJoyeuxNoelLinkID,
       kCampingLinkID, kBriceDeNiceLinkID, kTaxiLinkID, kAsterixLinkID,
-      kCancelButtonID, kHelpButtonID,
-#if !defined(USE_AURA)
-      kStyleContainerID, kBoldCheckBoxID, kItalicCheckBoxID,
-      kUnderlinedCheckBoxID, kStyleHelpLinkID, kStyleTextEditID,
-#endif
-      kSearchTextfieldID, kSearchButtonID, kHelpLinkID };
+      kCancelButtonID, kHelpButtonID, kStyleContainerID, kBoldCheckBoxID,
+      kItalicCheckBoxID, kUnderlinedCheckBoxID, kStyleHelpLinkID,
+      kStyleTextEditID, kSearchTextfieldID, kSearchButtonID, kHelpLinkID };
 
 
   // Let's make some views invisible.

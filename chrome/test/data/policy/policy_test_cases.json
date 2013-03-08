@@ -172,6 +172,14 @@
     ]
   },
 
+  "AllowDeletingBrowserHistory": {
+    "os": [],
+    "test_policy": { "AllowDeletingBrowserHistory": false },
+    "pref_mappings": [
+      { "pref": "history.deleting_enabled" }
+    ]
+  },
+
   "RemoteAccessClientFirewallTraversal": {
   },
 
@@ -348,14 +356,18 @@
     "os": ["win", "linux", "mac", "chromeos"],
     "test_policy": { "SyncDisabled": true },
     "pref_mappings": [
-      { "pref": "sync.managed",
-        "indicator_tests": [
-          { "policy": { "SyncDisabled": true } }
-        ]
-      }
+      { "pref": "sync.managed" }
     ]
   },
 
+  "SigninAllowed": {
+    "os": ["win", "linux", "mac"],
+    "test_policy": { "SigninAllowed": true },
+    "pref_mappings": [
+      { "pref": "signin.allowed" }
+    ]
+  },
+  
   "UserDataDir": {
     "note": "TODO(joaodasilva): To test that this policy works correctly, it would need to be set before the browser is launched. PolicyPrefsTest should be refactored to support this and a test for this policy added."
   },
@@ -1454,6 +1466,14 @@
     ]
   },
 
+  "HideWebStoreIcon": {
+    "os": ["win", "linux", "mac", "chromeos"],
+    "test_policy": { "HideWebStoreIcon": true },
+    "pref_mappings": [
+      { "pref": "hide_web_store_icon" }
+    ]
+  },
+
   "----- Chrome OS policies ------------------------------------------------": {},
 
   "ChromeOsLockOnIdleSuspend": {
@@ -1486,7 +1506,11 @@
     "os": ["chromeos"],
     "test_policy": { "DriveDisabled": true },
     "pref_mappings": [
-      { "pref": "gdata.disabled" }
+      { "pref": "gdata.disabled",
+        "indicator_tests": [
+          { "policy": { "DriveDisabled": true } }
+        ]
+      }
     ]
   },
 
@@ -1559,6 +1583,130 @@
     "pref_mappings": [
       { "pref": "session.length_limit",
         "local_state": true }
+    ]
+  },
+
+  "ScreenDimDelayAC": {
+    "os": ["chromeos"],
+    "test_policy": { "ScreenDimDelayAC": 420000 },
+    "pref_mappings": [
+      { "pref": "power.ac_screen_dim_delay_ms" }
+    ]
+  },
+
+  "ScreenOffDelayAC": {
+    "os": ["chromeos"],
+    "test_policy": { "ScreenOffDelayAC": 480000 },
+    "pref_mappings": [
+      { "pref": "power.ac_screen_off_delay_ms" }
+    ]
+  },
+
+  "ScreenLockDelayAC": {
+    "os": ["chromeos"],
+    "test_policy": { "ScreenLockDelayAC": 600000 },
+    "pref_mappings": [
+      { "pref": "power.ac_screen_lock_delay_ms" }
+    ]
+  },
+
+  "IdleDelayAC": {
+    "os": ["chromeos"],
+    "test_policy": { "IdleDelayAC": 1800000 },
+    "pref_mappings": [
+      { "pref": "power.ac_idle_delay_ms" }
+    ]
+  },
+
+  "ScreenDimDelayBattery": {
+    "os": ["chromeos"],
+    "test_policy": { "ScreenDimDelayBattery": 300000 },
+    "pref_mappings": [
+      { "pref": "power.battery_screen_dim_delay_ms" }
+    ]
+  },
+
+  "ScreenOffDelayBattery": {
+    "os": ["chromeos"],
+    "test_policy": { "ScreenOffDelayBattery": 360000 },
+    "pref_mappings": [
+      { "pref": "power.battery_screen_off_delay_ms" }
+    ]
+  },
+
+  "ScreenLockDelayBattery": {
+    "os": ["chromeos"],
+    "test_policy": { "ScreenLockDelayBattery": 600000 },
+    "pref_mappings": [
+      { "pref": "power.battery_screen_lock_delay_ms"  }
+    ]
+  },
+
+  "IdleDelayBattery": {
+    "os": ["chromeos"],
+    "test_policy": { "IdleDelayBattery": 600000 },
+    "pref_mappings": [
+      { "pref": "power.battery_idle_delay_ms" }
+    ]
+  },
+
+  "IdleAction": {
+    "os": ["chromeos"],
+    "test_policy": { "IdleAction": 0 },
+    "pref_mappings": [
+      { "pref": "power.idle_action" }
+    ]
+  },
+
+  "LidCloseAction": {
+    "os": ["chromeos"],
+    "test_policy": { "LidCloseAction": 0 },
+    "pref_mappings": [
+      { "pref": "power.lid_closed_action" }
+    ]
+  },
+
+  "PowerManagementUsesAudioActivity": {
+    "os": ["chromeos"],
+    "test_policy": { "PowerManagementUsesAudioActivity": true },
+    "pref_mappings": [
+      { "pref": "power.use_audio_activity" }
+    ]
+  },
+
+  "PowerManagementUsesVideoActivity": {
+    "os": ["chromeos"],
+    "test_policy": { "PowerManagementUsesVideoActivity": true },
+    "pref_mappings": [
+      { "pref": "power.use_video_activity" }
+    ]
+  },
+
+  "PresentationIdleDelayScale": {
+    "os": ["chromeos"],
+    "test_policy": { "PresentationIdleDelayScale": 200 },
+    "pref_mappings": [
+      { "pref": "power.presentation_idle_delay_factor" }
+    ]
+  },
+
+  "TermsOfServiceURL": {
+    "os": ["chromeos"],
+    "test_policy": { "TermsOfServiceURL": "http://www.example.com/terms_of_service.txt" },
+    "pref_mappings": [
+      { "pref": "terms_of_service.url" }
+    ]
+  },
+
+  "ShowAccessibilityOptionsInSystemTrayMenu": {
+    "os": ["chromeos"],
+    "test_policy": { "ShowAccessibilityOptionsInSystemTrayMenu": true },
+    "pref_mappings": [
+      { "pref": "settings.a11y.enable_menu",
+        "indicator_tests": [
+          { "policy": { "ShowAccessibilityOptionsInSystemTrayMenu": true } }
+        ]
+      }
     ]
   },
 
@@ -1662,6 +1810,9 @@
   },
 
   "DeviceLocalAccounts": {
+  },
+
+  "DeviceAllowRedeemChromeOsRegistrationOffers": {
   },
 
   "----- Chrome Frame policies -------------------------------------------": {},

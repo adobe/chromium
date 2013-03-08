@@ -12,10 +12,10 @@
 #include "base/bind_helpers.h"
 #include "base/i18n/time_formatting.h"
 #include "base/memory/scoped_vector.h"
-#include "base/string_number_conversions.h"
+#include "base/prefs/pref_service.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sessions/session_restore.h"
@@ -28,17 +28,16 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/time_format.h"
 #include "chrome/common/url_constants.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
+#include "content/public/browser/url_data_source.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_view.h"
 #include "content/public/browser/web_ui.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/webui/web_ui_util.h"
-
-#if !defined(OS_ANDROID)
-#include "chrome/browser/ui/search/other_device_menu_controller.h"
-#endif
 
 namespace browser_sync {
 
@@ -59,9 +58,9 @@ ForeignSessionHandler::ForeignSessionHandler() {
 }
 
 // static
-void ForeignSessionHandler::RegisterUserPrefs(PrefServiceSyncable* prefs) {
-  prefs->RegisterDictionaryPref(prefs::kNtpCollapsedForeignSessions,
-                                PrefServiceSyncable::UNSYNCABLE_PREF);
+void ForeignSessionHandler::RegisterUserPrefs(PrefRegistrySyncable* registry) {
+  registry->RegisterDictionaryPref(prefs::kNtpCollapsedForeignSessions,
+                                   PrefRegistrySyncable::UNSYNCABLE_PREF);
 }
 
 // static
@@ -114,7 +113,7 @@ void ForeignSessionHandler::OpenForeignSessionWindows(
       iter_begin + 1;
   chrome::HostDesktopType host_desktop_type =
       chrome::GetHostDesktopTypeForNativeView(
-          web_ui->GetWebContents()->GetNativeView());
+          web_ui->GetWebContents()->GetView()->GetNativeView());
   SessionRestore::RestoreForeignSessionWindows(
       Profile::FromWebUI(web_ui), host_desktop_type, iter_begin, iter_end);
 }
@@ -174,9 +173,6 @@ void ForeignSessionHandler::RegisterMessages() {
   web_ui()->RegisterMessageCallback("setForeignSessionCollapsed",
       base::Bind(&ForeignSessionHandler::HandleSetForeignSessionCollapsed,
                  base::Unretained(this)));
-  web_ui()->RegisterMessageCallback("showOtherDeviceSessionPopup",
-      base::Bind(&ForeignSessionHandler::HandleShowOtherDeviceSessionPopup,
-                 base::Unretained(this)));
 }
 
 void ForeignSessionHandler::Init() {
@@ -191,8 +187,7 @@ void ForeignSessionHandler::Init() {
                  content::Source<Profile>(profile));
 
   // Add the data source for synced favicons.
-  ChromeURLDataManager::AddDataSource(profile,
-      new SessionFaviconSource(profile));
+  content::URLDataSource::Add(profile, new SessionFaviconSource(profile));
 }
 
 void ForeignSessionHandler::Observe(
@@ -221,7 +216,7 @@ bool ForeignSessionHandler::IsTabSyncEnabled() {
   Profile* profile = Profile::FromWebUI(web_ui());
   ProfileSyncService* service =
       ProfileSyncServiceFactory::GetInstance()->GetForProfile(profile);
-  return service && service->GetPreferredDataTypes().Has(syncer::SESSIONS);
+  return service && service->GetPreferredDataTypes().Has(syncer::PROXY_TABS);
 }
 
 string16 ForeignSessionHandler::FormatSessionTime(const base::Time& time) {
@@ -378,32 +373,6 @@ void ForeignSessionHandler::HandleSetForeignSessionCollapsed(
     update.Get()->SetBoolean(session_tag, true);
   else
     update.Get()->Remove(session_tag, NULL);
-}
-
-void ForeignSessionHandler::HandleShowOtherDeviceSessionPopup(
-    const ListValue* args) {
-  // Exclude Android until an OtherDeviceMenu view is implemented for it.
-  #if !defined(OS_ANDROID)
-  CHECK(args->GetSize() == 3U);
-
-  // Extract the session tag.
-  std::string session_string_value;
-  CHECK(args->GetString(0, &session_string_value));
-
-  // Extract horizontal coordinate of the click relative to the origin of the
-  // screen coordinate system.
-  double screen_x;
-  CHECK(args->GetDouble(1, &screen_x));
-
-  // Extract vertical coordinate of the click relative to the origin of the
-  // screen coordinate system.
-  double screen_y;
-  CHECK(args->GetDouble(2, &screen_y));
-  OtherDeviceMenuController* menu = new OtherDeviceMenuController(
-      web_ui(),
-      session_string_value, gfx::Point(screen_x, screen_y));
-  menu->ShowMenu();
-  #endif
 }
 
 bool ForeignSessionHandler::SessionWindowToValue(

@@ -5,11 +5,14 @@
 #include "chrome/common/extensions/api/file_handlers/file_handlers_parser.h"
 
 #include "base/memory/scoped_ptr.h"
-#include "base/string_number_conversions.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/common/extensions/extension_manifest_constants.h"
+#include "chrome/common/extensions/manifest.h"
 #include "extensions/common/error_utils.h"
+
+namespace keys = extension_manifest_keys;
 
 namespace extensions {
 
@@ -44,17 +47,16 @@ bool LoadFileHandler(const std::string& handler_id,
 
   const ListValue* mime_types = NULL;
   // TODO(benwells): handle file extensions.
-  if (!handler_info.HasKey(extension_manifest_keys::kFileHandlerTypes) ||
-      !handler_info.GetList(extension_manifest_keys::kFileHandlerTypes,
-      &mime_types) || mime_types->GetSize() == 0) {
+  if (!handler_info.HasKey(keys::kFileHandlerTypes) ||
+      !handler_info.GetList(keys::kFileHandlerTypes, &mime_types) ||
+      mime_types->GetSize() == 0) {
     *error = ErrorUtils::FormatErrorMessageUTF16(
         extension_manifest_errors::kInvalidFileHandlerType, handler_id);
     return false;
   }
 
-  if (handler_info.HasKey(extension_manifest_keys::kFileHandlerTitle) &&
-      !handler_info.GetString(extension_manifest_keys::kFileHandlerTitle,
-      &handler.title)) {
+  if (handler_info.HasKey(keys::kFileHandlerTitle) &&
+      !handler_info.GetString(keys::kFileHandlerTitle, &handler.title)) {
     *error = ASCIIToUTF16(extension_manifest_errors::kInvalidFileHandlerTitle);
     return false;
   }
@@ -74,24 +76,23 @@ bool LoadFileHandler(const std::string& handler_id,
   return true;
 }
 
-bool FileHandlersParser::Parse(const base::Value* value,
-                               Extension* extension,
-                               string16* error) {
+bool FileHandlersParser::Parse(Extension* extension, string16* error) {
   scoped_ptr<FileHandlers> info(new FileHandlers);
   const DictionaryValue* all_handlers = NULL;
-  if (!value->GetAsDictionary(&all_handlers)) {
+  if (!extension->manifest()->GetDictionary(keys::kFileHandlers,
+                                            &all_handlers)) {
     *error = ASCIIToUTF16(extension_manifest_errors::kInvalidFileHandlers);
     return false;
   }
 
   DCHECK(extension->is_platform_app());
 
-  for (DictionaryValue::key_iterator iter(all_handlers->begin_keys());
-       iter != all_handlers->end_keys(); ++iter) {
+  for (DictionaryValue::Iterator iter(*all_handlers); !iter.IsAtEnd();
+       iter.Advance()) {
     // A file handler entry is a title and a list of MIME types to handle.
     const DictionaryValue* handler = NULL;
-    if (all_handlers->GetDictionaryWithoutPathExpansion(*iter, &handler)) {
-      if (!LoadFileHandler(*iter, *handler, &info->file_handlers, error))
+    if (iter.value().GetAsDictionary(&handler)) {
+      if (!LoadFileHandler(iter.key(), *handler, &info->file_handlers, error))
         return false;
     } else {
       *error = ASCIIToUTF16(extension_manifest_errors::kInvalidFileHandlers);
@@ -99,9 +100,12 @@ bool FileHandlersParser::Parse(const base::Value* value,
     }
   }
 
-  extension->SetManifestData(extension_manifest_keys::kFileHandlers,
-                             info.release());
+  extension->SetManifestData(keys::kFileHandlers, info.release());
   return true;
+}
+
+const std::vector<std::string> FileHandlersParser::Keys() const {
+  return SingleKey(keys::kFileHandlers);
 }
 
 }  // namespace extensions

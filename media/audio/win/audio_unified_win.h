@@ -117,6 +117,9 @@ class MEDIA_EXPORT WASAPIUnifiedStream
   // True when successfully opened.
   bool opened_;
 
+  // Volume level from 0 to 1.
+  double volume_;
+
   // Size in bytes of each audio frame (4 bytes for 16-bit stereo PCM).
   size_t frame_size_;
 
@@ -126,8 +129,8 @@ class MEDIA_EXPORT WASAPIUnifiedStream
   size_t packet_size_frames_;
 
   // Length of the audio endpoint buffer.
-  size_t endpoint_render_buffer_size_frames_;
-  size_t endpoint_capture_buffer_size_frames_;
+  uint32 endpoint_render_buffer_size_frames_;
+  uint32 endpoint_capture_buffer_size_frames_;
 
   // Counts the number of audio frames written to the endpoint buffer.
   uint64 num_written_frames_;

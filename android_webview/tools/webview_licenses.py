@@ -64,7 +64,7 @@ def GetIncompatibleDirectories():
     except licenses.LicenseError as e:
       print 'Got LicenseError while scanning ' + directory
       raise
-    if metadata.get('License Android Compatible', 'no') == 'yes':
+    if metadata.get('License Android Compatible', 'no').upper() == 'YES':
       continue
     license = re.split(' [Ll]icenses?$', metadata['License'])[0]
     tokens = [x.strip() for x in re.split(' and |,', license) if len(x) > 0]
@@ -74,94 +74,84 @@ def GetIncompatibleDirectories():
         break
   return result
 
+class ScanResult(object):
+  Ok, Warnings, Errors = range(3)
 
-def _CheckLicenseHeaders(directory_list, whitelisted_files):
+def _CheckLicenseHeaders(excluded_dirs_list, whitelisted_files):
   """Checks that all files which are not in a listed third-party directory,
   and which do not use the standard Chromium license, are whitelisted.
   Args:
-    directory_list: The list of directories.
+    excluded_dirs_list: The list of directories to exclude from scanning.
     whitelisted_files: The whitelist of files.
   Returns:
-    True if all files with non-standard license headers are whitelisted and the
-    whitelist contains no stale entries, otherwise false.
+    ScanResult.Ok if all files with non-standard license headers are whitelisted
+    and the whitelist contains no stale entries;
+    ScanResult.Warnings if there are stale entries;
+    ScanResult.Errors if new non-whitelisted entries found.
   """
 
-  # Matches one of ...
-  # - '[Cc]opyright', but not when followed by
-  #   ' 20[0-9][0-9] The Chromium Authors.', with optional (c) and date range
-  # - '([Cc]) (19|20)[0-9][0-9]', but not when preceeded by the word copyright,
-  #   as this is handled above
-  regex = '[Cc]opyright(?!( \(c\))? 20[0-9][0-9](-20[0-9][0-9])? ' \
-          'The Chromium Authors\. All rights reserved\.)' \
-          '|' \
-          '(?<!(pyright |opyright))\([Cc]\) (19|20)[0-9][0-9]'
-
-  args = ['grep',
-          '-rPlI',
-          '--exclude', '*.orig',
-          '--exclude', '*.rej',
-          '--exclude-dir', 'third_party',
-          '--exclude-dir', 'out',
-          '--exclude-dir', '.git',
-          '--exclude-dir', '.svn',
-          regex,
-          '.']
-  p = subprocess.Popen(args=args, cwd=REPOSITORY_ROOT, stdout=subprocess.PIPE)
-  files = p.communicate()[0].splitlines()
-
-  directory_list = directory_list[:]
-  # Ignore these tools.
-  directory_list.append('android_webview/tools/')
-  # This is a build intermediate directory.
-  directory_list.append('chrome/app/theme/google_chrome/')
+  excluded_dirs_list = [d for d in excluded_dirs_list if not 'third_party' in d]
+  # Using a commond pattern for third-partyies makes the ignore regexp shorter
+  excluded_dirs_list.append('third_party')
+  # VCS dirs
+  excluded_dirs_list.append('.git')
+  excluded_dirs_list.append('.svn')
+  # Build output
+  excluded_dirs_list.append('out/Debug')
+  excluded_dirs_list.append('out/Release')
+  # 'Copyright' appears in license agreements
+  excluded_dirs_list.append('chrome/app/resources')
+  # This is a test output directory
+  excluded_dirs_list.append('chrome/tools/test/reference_build')
   # This is tests directory, doesn't exist in the snapshot
-  directory_list.append('content/test/data/')
-  # This is a test output directory.
-  directory_list.append('data/dom_perf/')
-  # This is a test output directory.
-  directory_list.append('data/page_cycler/')
-  # 'Copyright' appears in strings.
-  directory_list.append('chrome/app/resources/')
-  # This is a Chrome on Linux reference build, doesn't exist in the snapshot
-  directory_list.append('chrome/tools/test/reference_build/chrome_linux/')
-  # Remoting internal tools, doesn't exist in the snapshot
-  directory_list.append('remoting/appengine/')
+  excluded_dirs_list.append('content/test/data')
+  # This is a test output directory
+  excluded_dirs_list.append('data/dom_perf')
   # Histogram tools, doesn't exist in the snapshot
-  directory_list.append('tools/histograms/')
+  excluded_dirs_list.append('tools/histograms')
   # Arm sysroot tools, doesn't exist in the snapshot
-  directory_list.append('arm-sysroot/')
-  # Windows-only
-  directory_list.append('tools/win/toolchain/7z/')
+  excluded_dirs_list.append('arm-sysroot')
 
-  # Exclude files under listed directories and some known offenders.
+  args = ['android_webview/tools/find_copyrights.pl',
+          '.'
+          ] + excluded_dirs_list
+  p = subprocess.Popen(args=args, cwd=REPOSITORY_ROOT, stdout=subprocess.PIPE)
+  lines = p.communicate()[0].splitlines()
+
   offending_files = []
-  for x in files:
-    x = os.path.normpath(x)
-    is_in_listed_directory = False
-    for y in directory_list:
-      if x.startswith(y):
-        is_in_listed_directory = True
+  allowed_copyrights = '^(?:\*No copyright\*' \
+      '|20[0-9][0-9](?:-20[0-9][0-9])? The Chromium Authors\. ' \
+      'All rights reserved.*)$'
+  allowed_copyrights_re = re.compile(allowed_copyrights)
+  for l in lines:
+    entries = l.split('\t')
+    if entries[1] == "GENERATED FILE":
+      continue
+    copyrights = entries[1].split(' / ')
+    for c in copyrights:
+      if c and not allowed_copyrights_re.match(c):
+        offending_files.append(os.path.normpath(entries[0]))
         break
-    if not is_in_listed_directory:
-      offending_files.append(x)
 
-  all_files_valid = True
   unknown = set(offending_files) - set(whitelisted_files)
   if unknown:
     print 'The following files contain a third-party license but are not in ' \
           'a listed third-party directory and are not whitelisted. You must ' \
           'add the following files to the whitelist.\n%s' % \
           '\n'.join(sorted(unknown))
-    all_files_valid = False
 
   stale = set(whitelisted_files) - set(offending_files)
   if stale:
     print 'The following files are whitelisted unnecessarily. You must ' \
           ' remove the following files from the whitelist.\n%s' % \
           '\n'.join(sorted(stale))
-    all_files_valid = False
 
-  return all_files_valid
+  if unknown:
+    return ScanResult.Errors
+  elif stale:
+    return ScanResult.Warnings
+  else:
+    return ScanResult.Ok
 
 
 def _ReadFile(path):
@@ -202,9 +192,13 @@ def _FindThirdPartyDirs():
 
 
 def _Scan():
-  """Checks that license meta-data is present for all third-party code.
+  """Checks that license meta-data is present for all third-party code and
+     that all non third-party code doesn't contain external copyrighted code.
   Returns:
-    Whether the check succeeded.
+    ScanResult.Ok if everything is in order;
+    ScanResult.Warnings if there are non-fatal problems (e.g. stale whitelist
+      entries)
+    ScanResult.Errors otherwise.
   """
 
   third_party_dirs = _FindThirdPartyDirs()
@@ -227,8 +221,9 @@ def _Scan():
     match = re.match(r'([^#\s]+)', line)
     if match:
       whitelisted_files.append(match.group(1))
-  return _CheckLicenseHeaders(third_party_dirs, whitelisted_files) \
-      and all_licenses_valid
+  licenses_check = _CheckLicenseHeaders(third_party_dirs, whitelisted_files)
+
+  return licenses_check if all_licenses_valid else ScanResult.Errors
 
 
 def GenerateNoticeFile():
@@ -271,20 +266,19 @@ def main():
   (options, args) = parser.parse_args()
   if len(args) != 1:
     parser.print_help()
-    return 1
+    return ScanResult.Errors
 
   if args[0] == 'scan':
-    if _Scan():
+    scan_result = _Scan()
+    if scan_result == ScanResult.Ok:
       print 'OK!'
-      return 0
-    else:
-      return 1
+    return scan_result
   elif args[0] == 'notice':
     print GenerateNoticeFile()
-    return 0
+    return ScanResult.Ok
 
   parser.print_help()
-  return 1
+  return ScanResult.Errors
 
 if __name__ == '__main__':
   sys.exit(main())

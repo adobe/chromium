@@ -5,20 +5,21 @@
 #include "chrome/browser/prefs/chrome_pref_service_factory.h"
 
 #include "base/bind.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/metrics/histogram.h"
 #include "base/prefs/default_pref_store.h"
 #include "base/prefs/json_pref_store.h"
+#include "base/prefs/pref_notifier_impl.h"
+#include "base/prefs/pref_registry.h"
+#include "base/prefs/pref_service.h"
+#include "base/prefs/pref_value_store.h"
 #include "chrome/browser/policy/configuration_policy_pref_store.h"
 #include "chrome/browser/prefs/command_line_pref_store.h"
 #include "chrome/browser/prefs/pref_model_associator.h"
-#include "chrome/browser/prefs/pref_notifier_impl.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prefs/pref_service_syncable_builder.h"
-#include "chrome/browser/prefs/pref_value_store.h"
-#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/profile_error_dialog.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
 #include "grit/chromium_strings.h"
@@ -53,10 +54,10 @@ void HandleReadError(PersistentPrefStore::PrefReadError error) {
 
 void PrepareBuilder(
     PrefServiceSyncableBuilder* builder,
-    const FilePath& pref_filename,
+    const base::FilePath& pref_filename,
     base::SequencedTaskRunner* pref_io_task_runner,
     policy::PolicyService* policy_service,
-    PrefStore* extension_prefs,
+    const scoped_refptr<PrefStore>& extension_prefs,
     bool async) {
 #if defined(OS_LINUX)
   // We'd like to see what fraction of our users have the preferences
@@ -91,18 +92,14 @@ void PrepareBuilder(
 
 }  // namespace
 
-// TODO(joi): Find a better home for this.
-PrefServiceBase* PrefServiceBase::FromBrowserContext(BrowserContext* context) {
-  return static_cast<Profile*>(context)->GetPrefs();
-}
-
 namespace chrome_prefs {
 
-PrefServiceSimple* CreateLocalState(
-    const FilePath& pref_filename,
+PrefService* CreateLocalState(
+    const base::FilePath& pref_filename,
     base::SequencedTaskRunner* pref_io_task_runner,
     policy::PolicyService* policy_service,
-    PrefStore* extension_prefs,
+    const scoped_refptr<PrefStore>& extension_prefs,
+    const scoped_refptr<PrefRegistry>& pref_registry,
     bool async) {
   PrefServiceSyncableBuilder builder;
   PrepareBuilder(&builder,
@@ -111,14 +108,15 @@ PrefServiceSimple* CreateLocalState(
                  policy_service,
                  extension_prefs,
                  async);
-  return builder.CreateSimple();
+  return builder.Create(pref_registry);
 }
 
 PrefServiceSyncable* CreateProfilePrefs(
-    const FilePath& pref_filename,
+    const base::FilePath& pref_filename,
     base::SequencedTaskRunner* pref_io_task_runner,
     policy::PolicyService* policy_service,
-    PrefStore* extension_prefs,
+    const scoped_refptr<PrefStore>& extension_prefs,
+    const scoped_refptr<PrefRegistrySyncable>& pref_registry,
     bool async) {
   PrefServiceSyncableBuilder builder;
   PrepareBuilder(&builder,
@@ -127,7 +125,7 @@ PrefServiceSyncable* CreateProfilePrefs(
                  policy_service,
                  extension_prefs,
                  async);
-  return builder.CreateSyncable();
+  return builder.CreateSyncable(pref_registry);
 }
 
 }  // namespace chrome_prefs

@@ -61,7 +61,7 @@ class SystemInfoUIHTMLSource : public content::URLDataSource{
   }
 
  private:
-  ~SystemInfoUIHTMLSource() {}
+  virtual ~SystemInfoUIHTMLSource() {}
 
   void SysInfoComplete(scoped_ptr<SystemLogsResponse> response);
   void RequestComplete();
@@ -189,7 +189,7 @@ SystemInfoUI::SystemInfoUI(content::WebUI* web_ui) : WebUIController(web_ui) {
 
   // Set up the chrome://system/ source.
   Profile* profile = Profile::FromWebUI(web_ui);
-  ChromeURLDataManager::AddDataSource(profile, html_source);
+  content::URLDataSource::Add(profile, html_source);
 }
 
 }  // namespace chromeos

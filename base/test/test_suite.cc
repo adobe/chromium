@@ -11,7 +11,7 @@
 #include "base/debug/debug_on_start_win.h"
 #include "base/debug/debugger.h"
 #include "base/debug/stack_trace.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/i18n/icu_util.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
@@ -210,9 +210,9 @@ void TestSuite::Initialize() {
   InitAndroidTest();
 #else
   // Initialize logging.
-  FilePath exe;
+  base::FilePath exe;
   PathService::Get(base::FILE_EXE, &exe);
-  FilePath log_filename = exe.ReplaceExtension(FILE_PATH_LITERAL("log"));
+  base::FilePath log_filename = exe.ReplaceExtension(FILE_PATH_LITERAL("log"));
   logging::InitLogging(
       log_filename.value().c_str(),
       logging::LOG_TO_BOTH_FILE_AND_SYSTEM_DEBUG_LOG,

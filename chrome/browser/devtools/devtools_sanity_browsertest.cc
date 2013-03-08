@@ -60,7 +60,7 @@ class BrowserClosedObserver : public content::NotificationObserver {
 
   virtual void Observe(int type,
                        const content::NotificationSource& source,
-                       const content::NotificationDetails& details) {
+                       const content::NotificationDetails& details) OVERRIDE {
     MessageLoopForUI::current()->Quit();
   }
 
@@ -183,12 +183,12 @@ class DevToolsExtensionTest : public DevToolsSanityTest,
  protected:
   // Load an extension from test\data\devtools\extensions\<extension_name>
   void LoadExtension(const char* extension_name) {
-    FilePath path = test_extensions_dir_.AppendASCII(extension_name);
+    base::FilePath path = test_extensions_dir_.AppendASCII(extension_name);
     ASSERT_TRUE(LoadExtensionFromPath(path)) << "Failed to load extension.";
   }
 
  private:
-  bool LoadExtensionFromPath(const FilePath& path) {
+  bool LoadExtensionFromPath(const base::FilePath& path) {
     ExtensionService* service = extensions::ExtensionSystem::Get(
         browser()->profile())->extension_service();
     size_t num_before = service->extensions()->size();
@@ -241,9 +241,9 @@ class DevToolsExtensionTest : public DevToolsSanityTest,
     return true;
   }
 
-  void Observe(int type,
-               const content::NotificationSource& source,
-               const content::NotificationDetails& details) {
+  virtual void Observe(int type,
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE {
     switch (type) {
       case chrome::NOTIFICATION_EXTENSION_LOADED:
       case chrome::NOTIFICATION_EXTENSION_HOST_DID_STOP_LOADING:
@@ -255,12 +255,12 @@ class DevToolsExtensionTest : public DevToolsSanityTest,
     }
   }
 
-  FilePath test_extensions_dir_;
+  base::FilePath test_extensions_dir_;
 };
 
 class DevToolsExperimentalExtensionTest : public DevToolsExtensionTest {
  public:
-  void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
     command_line->AppendSwitch(switches::kEnableExperimentalExtensionApis);
   }
 };

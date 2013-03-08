@@ -12,9 +12,10 @@
 #include "base/string16.h"
 #include "build/build_config.h"
 
+namespace base {
+
 class FilePath;
 
-namespace base {
 namespace i18n {
 
 const char16 kRightToLeftMark = 0x200F;
@@ -69,6 +70,14 @@ BASE_I18N_EXPORT TextDirection GetTextDirectionForLocale(
 // for more information.
 BASE_I18N_EXPORT TextDirection GetFirstStrongCharacterDirection(
     const string16& text);
+
+// Given the string in |text|, returns LEFT_TO_RIGHT or RIGHT_TO_LEFT if all the
+// strong directionality characters in the string are of the same
+// directionality. It returns UNKNOWN_DIRECTION if the string contains a mix of
+// LTR and RTL strong directionality characters. Defaults to LEFT_TO_RIGHT if
+// the string does not contain directionality characters. Please refer to
+// http://unicode.org/reports/tr9/ for more information.
+BASE_I18N_EXPORT TextDirection GetStringDirection(const string16& text);
 
 // Given the string in |text|, this function modifies the string in place with
 // the appropriate Unicode formatting marks that mark the string direction

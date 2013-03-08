@@ -6,6 +6,7 @@
 #define CHROME_TEST_CHROMEDRIVER_DEVTOOLS_CLIENT_IMPL_H_
 
 #include <list>
+#include <map>
 #include <string>
 
 #include "base/basictypes.h"
@@ -50,9 +51,10 @@ class SyncWebSocket;
 
 class DevToolsClientImpl : public DevToolsClient {
  public:
-  // Listener may be NULL.
+  typedef base::Callback<Status()> FrontendCloserFunc;
   DevToolsClientImpl(const SyncWebSocketFactory& factory,
-                     const std::string& url);
+                     const std::string& url,
+                     const FrontendCloserFunc& frontend_closer_func);
 
   typedef base::Callback<bool(
       const std::string&,
@@ -62,11 +64,15 @@ class DevToolsClientImpl : public DevToolsClient {
       internal::InspectorCommandResponse*)> ParserFunc;
   DevToolsClientImpl(const SyncWebSocketFactory& factory,
                      const std::string& url,
+                     const FrontendCloserFunc& frontend_closer_func,
                      const ParserFunc& parser_func);
 
   virtual ~DevToolsClientImpl();
 
+  void SetParserFuncForTesting(const ParserFunc& parser_func);
+
   // Overridden from DevToolsClient:
+  virtual Status ConnectIfNecessary() OVERRIDE;
   virtual Status SendCommand(const std::string& method,
                              const base::DictionaryValue& params) OVERRIDE;
   virtual Status SendCommandAndGetResult(
@@ -74,19 +80,33 @@ class DevToolsClientImpl : public DevToolsClient {
       const base::DictionaryValue& params,
       scoped_ptr<base::DictionaryValue>* result) OVERRIDE;
   virtual void AddListener(DevToolsEventListener* listener) OVERRIDE;
+  virtual Status HandleEventsUntil(
+      const ConditionalFunc& conditional_func) OVERRIDE;
 
  private:
   Status SendCommandInternal(
       const std::string& method,
       const base::DictionaryValue& params,
       scoped_ptr<base::DictionaryValue>* result);
-  virtual void NotifyEventListeners(const std::string& method,
-                                    const base::DictionaryValue& params);
+  Status ReceiveCommandResponse(
+      int command_id,
+      scoped_ptr<base::DictionaryValue>* result);
+  Status ReceiveNextMessage(
+      int expected_id,
+      internal::InspectorMessageType* type,
+      internal::InspectorEvent* event,
+      internal::InspectorCommandResponse* response);
+  bool HasReceivedCommandResponse(int cmd_id);
+  Status NotifyEventListeners(const std::string& method,
+                              const base::DictionaryValue& params);
   scoped_ptr<SyncWebSocket> socket_;
   GURL url_;
+  FrontendCloserFunc frontend_closer_func_;
   ParserFunc parser_func_;
   std::list<DevToolsEventListener*> listeners_;
-  bool connected_;
+  std::list<DevToolsEventListener*> listeners_for_on_connected_;
+  typedef std::map<int, base::DictionaryValue*> ResponseMap;
+  ResponseMap cmd_response_map_;
   int next_id_;
 
   DISALLOW_COPY_AND_ASSIGN(DevToolsClientImpl);

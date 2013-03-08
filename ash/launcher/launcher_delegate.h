@@ -8,16 +8,31 @@
 #include "ash/ash_export.h"
 #include "ash/launcher/launcher_types.h"
 #include "base/string16.h"
+#include "ui/base/models/simple_menu_model.h"
 
 namespace aura {
 class RootWindow;
 }
 
 namespace ui {
-class MenuModel;
+class Event;
 }
 
 namespace ash {
+
+// A special menu model which keeps track of an "active" menu item.
+class ASH_EXPORT LauncherMenuModel : public ui::SimpleMenuModel {
+ public:
+  explicit LauncherMenuModel(ui::SimpleMenuModel::Delegate* delegate)
+      : ui::SimpleMenuModel(delegate) {}
+
+  // Returns |true| when the given |command_id| is active and needs to be drawn
+  // in a special state.
+  virtual bool IsCommandActive(int command_id) const = 0;
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(LauncherMenuModel);
+};
 
 // Delegate for the Launcher.
 class ASH_EXPORT LauncherDelegate {
@@ -31,8 +46,11 @@ class ASH_EXPORT LauncherDelegate {
   virtual void OnBrowserShortcutClicked(int event_flags) = 0;
 
   // Invoked when the user clicks on a window entry in the launcher.
-  // |event_flags| is the flags of the click event.
-  virtual void ItemClicked(const LauncherItem& item, int event_flags) = 0;
+  // |event| is the click event. The |event| is dispatched by a view
+  // and has an instance of |views::View| as the event target
+  // but not |aura::Window|.
+  virtual void ItemClicked(const LauncherItem& item,
+                           const ui::Event& event) = 0;
 
   // Returns the resource id of the image to show on the browser shortcut
   // button.
@@ -55,7 +73,8 @@ class ASH_EXPORT LauncherDelegate {
   //    Note: This is useful for hover menus which also show context help.
   //  - A list containing the title and the active list of items.
   // The caller takes ownership of the returned model.
-  virtual ui::MenuModel* CreateApplicationMenu(const LauncherItem& item) = 0;
+  virtual LauncherMenuModel* CreateApplicationMenu(
+      const LauncherItem& item) = 0;
 
   // Returns the id of the item associated with the specified window, or 0 if
   // there isn't one.

@@ -10,6 +10,7 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
+#include "base/prefs/pref_service.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
@@ -21,15 +22,14 @@
 #include "chrome/browser/extensions/extension_special_storage_policy.h"
 #include "chrome/browser/notifications/desktop_notification_service.h"
 #include "chrome/browser/notifications/desktop_notification_service_factory.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/content_settings.h"
 #include "chrome/common/content_settings_pattern.h"
-#include "chrome/common/extensions/permissions/api_permission.h"
 #include "chrome/common/extensions/extension_set.h"
+#include "chrome/common/extensions/permissions/api_permission.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/notification_service.h"
@@ -86,7 +86,6 @@ const ContentSettingsTypeNameEntry kContentSettingsTypeGroupNames[] = {
   {CONTENT_SETTINGS_TYPE_POPUPS, "popups"},
   {CONTENT_SETTINGS_TYPE_GEOLOCATION, "location"},
   {CONTENT_SETTINGS_TYPE_NOTIFICATIONS, "notifications"},
-  {CONTENT_SETTINGS_TYPE_INTENTS, "intents"},
   {CONTENT_SETTINGS_TYPE_AUTO_SELECT_CERTIFICATE, "auto-select-certificate"},
   {CONTENT_SETTINGS_TYPE_FULLSCREEN, "fullscreen"},
   {CONTENT_SETTINGS_TYPE_MOUSELOCK, "mouselock"},
@@ -666,10 +665,6 @@ void ContentSettingsHandler::UpdateExceptionsViewFromModel(
     case CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA:
       UpdateMediaExceptionsView();
       break;
-    case CONTENT_SETTINGS_TYPE_INTENTS:
-      // Don't update intents settings at this point.
-      // Turn on when enable_web_intents_tag is enabled.
-      break;
     case CONTENT_SETTINGS_TYPE_MIXEDSCRIPT:
       // We don't yet support exceptions for mixed scripting.
       break;
@@ -696,7 +691,6 @@ void ContentSettingsHandler::UpdateOTRExceptionsViewFromModel(
   switch (type) {
     case CONTENT_SETTINGS_TYPE_GEOLOCATION:
     case CONTENT_SETTINGS_TYPE_NOTIFICATIONS:
-    case CONTENT_SETTINGS_TYPE_INTENTS:
     case CONTENT_SETTINGS_TYPE_AUTO_SELECT_CERTIFICATE:
     case CONTENT_SETTINGS_TYPE_MIXEDSCRIPT:
 #if defined(OS_WIN)
@@ -1201,10 +1195,6 @@ void ContentSettingsHandler::SetContentFilter(const ListValue* args) {
     case CONTENT_SETTINGS_TYPE_GEOLOCATION:
       content::RecordAction(
           UserMetricsAction("Options_DefaultGeolocationSettingChanged"));
-      break;
-    case CONTENT_SETTINGS_TYPE_INTENTS:
-      content::RecordAction(
-          UserMetricsAction("Options_DefaultHandlersSettingChanged"));
       break;
     case CONTENT_SETTINGS_TYPE_MOUSELOCK:
       content::RecordAction(

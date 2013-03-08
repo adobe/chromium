@@ -57,37 +57,13 @@ namespace content {
 
 namespace {
 
-void DeleteDownloadedFile(const FilePath& path) {
+void DeleteDownloadedFile(const base::FilePath& path) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
 
   // Make sure we only delete files.
   if (!file_util::DirectoryExists(path))
     file_util::Delete(path, false);
 }
-
-// Classes to null out request handle calls (for SavePage DownloadItems, which
-// may have, e.g., Cancel() called on them without it doing anything)
-// and to DCHECK on them (for history DownloadItems, which should never have
-// any operation that implies an off-thread component, since they don't
-// have any).
-class NullDownloadRequestHandle : public DownloadRequestHandleInterface {
- public:
-  NullDownloadRequestHandle() {}
-
-  // DownloadRequestHandleInterface calls
-  virtual WebContents* GetWebContents() const OVERRIDE {
-    return NULL;
-  }
-  virtual DownloadManager* GetDownloadManager() const OVERRIDE {
-    return NULL;
-  }
-  virtual void PauseRequest() const OVERRIDE {}
-  virtual void ResumeRequest() const OVERRIDE {}
-  virtual void CancelRequest() const OVERRIDE {}
-  virtual std::string DebugString() const OVERRIDE {
-    return "Null DownloadRequestHandle";
-  }
-};
 
 // Wrapper around DownloadFile::Detach and DownloadFile::Cancel that
 // takes ownership of the DownloadFile and hence implicitly destroys it
@@ -112,32 +88,35 @@ const int DownloadItemImpl::kMaxAutoResumeAttempts = 5;
 // Constructor for reading from the history service.
 DownloadItemImpl::DownloadItemImpl(DownloadItemImplDelegate* delegate,
                                    DownloadId download_id,
-                                   const FilePath& path,
-                                   const GURL& url,
+                                   const base::FilePath& current_path,
+                                   const base::FilePath& target_path,
+                                   const std::vector<GURL>& url_chain,
                                    const GURL& referrer_url,
                                    const base::Time& start_time,
                                    const base::Time& end_time,
                                    int64 received_bytes,
                                    int64 total_bytes,
                                    DownloadItem::DownloadState state,
+                                   DownloadDangerType danger_type,
+                                   DownloadInterruptReason interrupt_reason,
                                    bool opened,
                                    const net::BoundNetLog& bound_net_log)
     : is_save_package_download_(false),
       download_id_(download_id),
-      current_path_(path),
-      target_path_(path),
+      current_path_(current_path),
+      target_path_(target_path),
       target_disposition_(TARGET_DISPOSITION_OVERWRITE),
-      url_chain_(1, url),
+      url_chain_(url_chain),
       referrer_url_(referrer_url),
       transition_type_(PAGE_TRANSITION_LINK),
       has_user_gesture_(false),
       total_bytes_(total_bytes),
       received_bytes_(received_bytes),
       bytes_per_sec_(0),
-      last_reason_(DOWNLOAD_INTERRUPT_REASON_NONE),
+      last_reason_(interrupt_reason),
       start_tick_(base::TimeTicks()),
       state_(ExternalToInternalState(state)),
-      danger_type_(DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS),
+      danger_type_(danger_type),
       start_time_(start_time),
       end_time_(end_time),
       delegate_(delegate),
@@ -147,16 +126,16 @@ DownloadItemImpl::DownloadItemImpl(DownloadItemImplDelegate* delegate,
       file_externally_removed_(false),
       auto_opened_(false),
       is_temporary_(false),
-      all_data_saved_(false),
+      all_data_saved_(state == COMPLETE),
       opened_(opened),
       delegate_delayed_complete_(false),
       bound_net_log_(bound_net_log),
       ALLOW_THIS_IN_INITIALIZER_LIST(weak_ptr_factory_(this)) {
   delegate_->Attach();
-  if (state_ == IN_PROGRESS_INTERNAL)
-    state_ = CANCELLED_INTERNAL;
-  if (state_ == COMPLETE_INTERNAL)
-    all_data_saved_ = true;
+  if (state_ == IN_PROGRESS_INTERNAL) {
+    state_ = INTERRUPTED_INTERNAL;
+    last_reason_ = DOWNLOAD_INTERRUPT_REASON_CRASH;
+  }
   Init(false /* not actively downloading */, SRC_HISTORY_IMPORT);
 }
 
@@ -214,14 +193,16 @@ DownloadItemImpl::DownloadItemImpl(
 }
 
 // Constructing for the "Save Page As..." feature:
-DownloadItemImpl::DownloadItemImpl(DownloadItemImplDelegate* delegate,
-                                   const FilePath& path,
-                                   const GURL& url,
-                                   DownloadId download_id,
-                                   const std::string& mime_type,
-                                   const net::BoundNetLog& bound_net_log)
+DownloadItemImpl::DownloadItemImpl(
+    DownloadItemImplDelegate* delegate,
+    const base::FilePath& path,
+    const GURL& url,
+    DownloadId download_id,
+    const std::string& mime_type,
+    scoped_ptr<DownloadRequestHandleInterface> request_handle,
+    const net::BoundNetLog& bound_net_log)
     : is_save_package_download_(true),
-      request_handle_(new NullDownloadRequestHandle()),
+      request_handle_(request_handle.Pass()),
       download_id_(download_id),
       current_path_(path),
       target_path_(path),
@@ -549,28 +530,28 @@ bool DownloadItemImpl::IsSavePackageDownload() const {
   return is_save_package_download_;
 }
 
-const FilePath& DownloadItemImpl::GetFullPath() const {
+const base::FilePath& DownloadItemImpl::GetFullPath() const {
   return current_path_;
 }
 
-const FilePath& DownloadItemImpl::GetTargetFilePath() const {
+const base::FilePath& DownloadItemImpl::GetTargetFilePath() const {
   return target_path_;
 }
 
-const FilePath& DownloadItemImpl::GetForcedFilePath() const {
+const base::FilePath& DownloadItemImpl::GetForcedFilePath() const {
   // TODO(asanka): Get rid of GetForcedFilePath(). We should instead just
   // require that clients respect GetTargetFilePath() if it is already set.
   return forced_file_path_;
 }
 
 // TODO(asanka): Get rid of GetUserVerifiedFilePath().  http://crbug.com/134237.
-FilePath DownloadItemImpl::GetUserVerifiedFilePath() const {
+base::FilePath DownloadItemImpl::GetUserVerifiedFilePath() const {
   return (IsDangerous() ||
           danger_type_ == DOWNLOAD_DANGER_TYPE_USER_VALIDATED) ?
       GetFullPath() : GetTargetFilePath();
 }
 
-FilePath DownloadItemImpl::GetFileNameToReportUser() const {
+base::FilePath DownloadItemImpl::GetFileNameToReportUser() const {
   if (!display_name_.empty())
     return display_name_;
   return target_path_.BaseName();
@@ -599,7 +580,8 @@ bool DownloadItemImpl::IsDangerous() const {
   return (danger_type_ == DOWNLOAD_DANGER_TYPE_DANGEROUS_FILE ||
           danger_type_ == DOWNLOAD_DANGER_TYPE_DANGEROUS_URL ||
           danger_type_ == DOWNLOAD_DANGER_TYPE_DANGEROUS_CONTENT ||
-          danger_type_ == DOWNLOAD_DANGER_TYPE_UNCOMMON_CONTENT);
+          danger_type_ == DOWNLOAD_DANGER_TYPE_UNCOMMON_CONTENT ||
+          danger_type_ == DOWNLOAD_DANGER_TYPE_DANGEROUS_HOST);
 #else
   return (danger_type_ == DOWNLOAD_DANGER_TYPE_DANGEROUS_FILE ||
           danger_type_ == DOWNLOAD_DANGER_TYPE_DANGEROUS_URL);
@@ -723,7 +705,7 @@ void DownloadItemImpl::SetOpened(bool opened) {
   opened_ = opened;
 }
 
-void DownloadItemImpl::SetDisplayName(const FilePath& name) {
+void DownloadItemImpl::SetDisplayName(const base::FilePath& name) {
   display_name_ = name;
 }
 
@@ -1108,19 +1090,20 @@ void DownloadItemImpl::OnDownloadFileInitialized(
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   if (result != DOWNLOAD_INTERRUPT_REASON_NONE) {
     Interrupt(result);
-    // TODO(rdsmith): It makes no sense to continue along the
-    // regular download path after we've gotten an error.  But it's
-    // the way the code has historically worked, and this allows us
-    // to get the download persisted and observers of the download manager
-    // notified, so tests work.  When we execute all side effects of cancel
-    // (including queue removal) immediately rather than waiting for
-    // persistence we should replace this comment with a "return;".
+    // TODO(rdsmith/asanka): Arguably we should show this in the UI, but
+    // it's not at all clear what to show--we haven't done filename
+    // determination, so we don't know what name to display.  OTOH,
+    // the failure mode of not showing the DI if the file initialization
+    // fails isn't a good one.  Can we hack up a name based on the
+    // URLRequest?  We'll need to make sure that initialization happens
+    // properly.  Possibly the right thing is to have the UI handle
+    // this case specially.
+    return;
   }
 
   // If we're resuming an interrupted download, we may already know
   // the download target so we can skip target name determination.
   if (!GetTargetFilePath().empty() && !GetFullPath().empty()) {
-    delegate_->ShowDownloadInBrowser(this);
     MaybeCompleteDownload();
     return;
   }
@@ -1128,7 +1111,7 @@ void DownloadItemImpl::OnDownloadFileInitialized(
   // The target path might be set and the full path empty if we failed
   // the intermediate rename--re-do file name determination in this case.
   // TODO(rdsmith,asanka): Clean up this logic.
-  target_path_ = FilePath();
+  target_path_ = base::FilePath();
 
   delegate_->DetermineDownloadTarget(
       this, base::Bind(&DownloadItemImpl::OnDownloadTargetDetermined,
@@ -1138,10 +1121,10 @@ void DownloadItemImpl::OnDownloadFileInitialized(
 // Called by delegate_ when the download target path has been
 // determined.
 void DownloadItemImpl::OnDownloadTargetDetermined(
-    const FilePath& target_path,
+    const base::FilePath& target_path,
     TargetDisposition disposition,
     DownloadDangerType danger_type,
-    const FilePath& intermediate_path) {
+    const base::FilePath& intermediate_path) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   // If the |target_path| is empty, then we consider this download to be
@@ -1192,16 +1175,15 @@ void DownloadItemImpl::OnDownloadTargetDetermined(
 
 void DownloadItemImpl::OnDownloadRenamedToIntermediateName(
     DownloadInterruptReason reason,
-    const FilePath& full_path) {
+    const base::FilePath& full_path) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   VLOG(20) << __FUNCTION__ << " download=" << DebugString(true);
-  if (DOWNLOAD_INTERRUPT_REASON_NONE != reason)
+  if (DOWNLOAD_INTERRUPT_REASON_NONE != reason) {
     Interrupt(reason);
-  else
+  } else {
     SetFullPath(full_path);
-  delegate_->ShowDownloadInBrowser(this);
-
-  MaybeCompleteDownload();
+    MaybeCompleteDownload();
+  }
 }
 
 // When SavePackage downloads MHTML to GData (see
@@ -1274,7 +1256,7 @@ void DownloadItemImpl::OnDownloadCompleting() {
 
 void DownloadItemImpl::OnDownloadRenamedToFinalName(
     DownloadInterruptReason reason,
-    const FilePath& full_path) {
+    const base::FilePath& full_path) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(!is_save_package_download_);
 
@@ -1527,7 +1509,7 @@ void DownloadItemImpl::SetDangerType(DownloadDangerType danger_type) {
   danger_type_ = danger_type;
 }
 
-void DownloadItemImpl::SetFullPath(const FilePath& new_path) {
+void DownloadItemImpl::SetFullPath(const base::FilePath& new_path) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   VLOG(20) << __FUNCTION__ << "()"
            << " new_path = \"" << new_path.value() << "\""

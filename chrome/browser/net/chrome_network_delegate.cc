@@ -10,9 +10,10 @@
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
 #include "base/path_service.h"
+#include "base/prefs/pref_service.h"
 #include "base/prefs/public/pref_member.h"
-#include "base/string_number_conversions.h"
-#include "base/string_split.h"
+#include "base/strings/string_number_conversions.h"
+#include "base/strings/string_split.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/content_settings/cookie_settings.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
@@ -27,7 +28,6 @@
 #include "chrome/browser/net/connect_interceptor.h"
 #include "chrome/browser/net/load_time_stats.h"
 #include "chrome/browser/performance_monitor/performance_monitor.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/task_manager/task_manager.h"
 #include "chrome/common/pref_names.h"
@@ -372,7 +372,7 @@ int ChromeNetworkDelegate::OnBeforeURLRequest(
         net::NetLog::TYPE_CHROME_POLICY_ABORTED_REQUEST,
         net::NetLog::StringCallback("url",
                                     &request->url().possibly_invalid_spec()));
-    return net::ERR_NETWORK_ACCESS_DENIED;
+    return net::ERR_BLOCKED_BY_ADMINISTRATOR;
   }
 #endif
 
@@ -582,7 +582,7 @@ bool ChromeNetworkDelegate::OnCanSetCookie(const net::URLRequest& request,
 }
 
 bool ChromeNetworkDelegate::OnCanAccessFile(const net::URLRequest& request,
-                                            const FilePath& path) const {
+                                            const base::FilePath& path) const {
   if (g_allow_file_access_)
     return true;
 
@@ -610,7 +610,7 @@ bool ChromeNetworkDelegate::OnCanAccessFile(const net::URLRequest& request,
   };
 #elif defined(OS_ANDROID)
   // Access to files in external storage is allowed.
-  FilePath external_storage_path;
+  base::FilePath external_storage_path;
   PathService::Get(base::DIR_ANDROID_EXTERNAL_STORAGE, &external_storage_path);
   if (external_storage_path.IsParent(path))
     return true;
@@ -623,8 +623,8 @@ bool ChromeNetworkDelegate::OnCanAccessFile(const net::URLRequest& request,
 #endif
 
   for (size_t i = 0; i < arraysize(kLocalAccessWhiteList); ++i) {
-    const FilePath white_listed_path(kLocalAccessWhiteList[i]);
-    // FilePath::operator== should probably handle trailing separators.
+    const base::FilePath white_listed_path(kLocalAccessWhiteList[i]);
+    // base::FilePath::operator== should probably handle trailing separators.
     if (white_listed_path == path.StripTrailingSeparators() ||
         white_listed_path.IsParent(path)) {
       return true;
@@ -657,7 +657,7 @@ int ChromeNetworkDelegate::OnBeforeSocketStreamConnect(
         net::NetLog::TYPE_CHROME_POLICY_ABORTED_REQUEST,
         net::NetLog::StringCallback("url",
                                     &socket->url().possibly_invalid_spec()));
-    return net::ERR_NETWORK_ACCESS_DENIED;
+    return net::ERR_BLOCKED_BY_ADMINISTRATOR;
   }
 #endif
   return net::OK;

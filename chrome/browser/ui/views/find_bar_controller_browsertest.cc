@@ -4,9 +4,9 @@
 
 #include "chrome/browser/ui/find_bar/find_bar_controller.h"
 
-#include "base/file_path.h"
-#include "chrome/browser/ui/browser_commands.h"
+#include "base/files/file_path.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/find_bar/find_bar_host_unittest_util.h"
 #include "chrome/test/base/in_process_browser_test.h"
@@ -21,8 +21,8 @@ namespace {
 const char kSimple[] = "simple.html";
 
 GURL GetURL(const std::string& filename) {
-  return ui_test_utils::GetTestUrl(FilePath().AppendASCII("find_in_page"),
-                                   FilePath().AppendASCII(filename));
+  return ui_test_utils::GetTestUrl(base::FilePath().AppendASCII("find_in_page"),
+                                   base::FilePath().AppendASCII(filename));
 }
 
 class FindBarControllerTest : public InProcessBrowserTest {

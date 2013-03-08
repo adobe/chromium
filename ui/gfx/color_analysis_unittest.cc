@@ -9,6 +9,8 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkColor.h"
+#include "ui/gfx/canvas.h"
+#include "ui/gfx/rect.h"
 
 using color_utils::FindClosestColor;
 
@@ -131,6 +133,27 @@ class MockKMeanImageSampler : public color_utils::KMeanImageSampler {
 // Return true if a color channel is approximately equal to an expected value.
 bool ChannelApproximatelyEqual(int expected, uint8_t channel) {
   return (abs(expected - static_cast<int>(channel)) <= 1);
+}
+
+// Compute minimal and maximal graylevel (or alphalevel) of the input |bitmap|.
+// |bitmap| has to be allocated and configured to kA8_Config.
+void Calculate8bitBitmapMinMax(const SkBitmap& bitmap,
+                               uint8_t* min_gl,
+                               uint8_t* max_gl) {
+  SkAutoLockPixels bitmap_lock(bitmap);
+  DCHECK(bitmap.getPixels());
+  DCHECK(bitmap.config() == SkBitmap::kA8_Config);
+  DCHECK(min_gl);
+  DCHECK(max_gl);
+  *min_gl = std::numeric_limits<uint8_t>::max();
+  *max_gl = std::numeric_limits<uint8_t>::min();
+  for (int y = 0; y < bitmap.height(); ++y) {
+    uint8_t* current_color = bitmap.getAddr8(0, y);
+    for (int x = 0; x < bitmap.width(); ++x, ++current_color) {
+      *min_gl = std::min(*min_gl, *current_color);
+      *max_gl = std::max(*max_gl, *current_color);
+    }
+  }
 }
 
 } // namespace
@@ -256,4 +279,201 @@ TEST_F(ColorAnalysisTest, CalculateKMeanColorOfBitmap) {
   EXPECT_TRUE(ChannelApproximatelyEqual(100, SkColorGetR(color)));
   EXPECT_TRUE(ChannelApproximatelyEqual(150, SkColorGetG(color)));
   EXPECT_TRUE(ChannelApproximatelyEqual(200, SkColorGetB(color)));
+}
+
+TEST_F(ColorAnalysisTest, ComputeColorCovarianceTrivial) {
+  SkBitmap bitmap;
+  bitmap.setConfig(SkBitmap::kARGB_8888_Config, 100, 200);
+
+  EXPECT_EQ(gfx::Matrix3F::Zeros(),
+            color_utils::ComputeColorCovariance(bitmap));
+  bitmap.allocPixels();
+  bitmap.eraseRGB(50, 150, 200);
+  gfx::Matrix3F covariance = color_utils::ComputeColorCovariance(bitmap);
+  // The answer should be all zeros.
+  EXPECT_TRUE(covariance == gfx::Matrix3F::Zeros());
+}
+
+TEST_F(ColorAnalysisTest, ComputeColorCovarianceWithCanvas) {
+  gfx::Canvas canvas(gfx::Size(250, 200), ui::SCALE_FACTOR_100P, true);
+  // The image consists of vertical stripes, with color bands set to 100
+  // in overlapping stripes 150 pixels wide.
+  canvas.FillRect(gfx::Rect(0, 0, 50, 200), SkColorSetRGB(100, 0, 0));
+  canvas.FillRect(gfx::Rect(50, 0, 50, 200), SkColorSetRGB(100, 100, 0));
+  canvas.FillRect(gfx::Rect(100, 0, 50, 200), SkColorSetRGB(100, 100, 100));
+  canvas.FillRect(gfx::Rect(150, 0, 50, 200), SkColorSetRGB(0, 100, 100));
+  canvas.FillRect(gfx::Rect(200, 0, 50, 200), SkColorSetRGB(0, 0, 100));
+
+  SkBitmap bitmap =
+      skia::GetTopDevice(*canvas.sk_canvas())->accessBitmap(false);
+  gfx::Matrix3F covariance = color_utils::ComputeColorCovariance(bitmap);
+
+  gfx::Matrix3F expected_covariance = gfx::Matrix3F::Zeros();
+  expected_covariance.set(2400, 400, -1600,
+                          400, 2400, 400,
+                          -1600, 400, 2400);
+  EXPECT_EQ(expected_covariance, covariance);
+}
+
+TEST_F(ColorAnalysisTest, ApplyColorReductionSingleColor) {
+  // The test runs color reduction on a single-colot image, where results are
+  // bound to be uninteresting. This is an important edge case, though.
+  SkBitmap source, result;
+  source.setConfig(SkBitmap::kARGB_8888_Config, 300, 200);
+  result.setConfig(SkBitmap::kA8_Config, 300, 200);
+
+  source.allocPixels();
+  result.allocPixels();
+  source.eraseRGB(50, 150, 200);
+
+  gfx::Vector3dF transform(1.0f, .5f, 0.1f);
+  // This transform, if not scaled, should result in GL=145.
+  EXPECT_TRUE(color_utils::ApplyColorReduction(
+      source, transform, false, &result));
+
+  uint8_t min_gl = 0;
+  uint8_t max_gl = 0;
+  Calculate8bitBitmapMinMax(result, &min_gl, &max_gl);
+  EXPECT_EQ(145, min_gl);
+  EXPECT_EQ(145, max_gl);
+
+  // Now scan requesting rescale. Expect all 0.
+  EXPECT_TRUE(color_utils::ApplyColorReduction(
+      source, transform, true, &result));
+  Calculate8bitBitmapMinMax(result, &min_gl, &max_gl);
+  EXPECT_EQ(0, min_gl);
+  EXPECT_EQ(0, max_gl);
+
+  // Test cliping to upper limit.
+  transform.set_z(1.1f);
+  EXPECT_TRUE(color_utils::ApplyColorReduction(
+      source, transform, false, &result));
+  Calculate8bitBitmapMinMax(result, &min_gl, &max_gl);
+  EXPECT_EQ(0xFF, min_gl);
+  EXPECT_EQ(0xFF, max_gl);
+
+  // Test cliping to upper limit.
+  transform.Scale(-1.0f);
+  EXPECT_TRUE(color_utils::ApplyColorReduction(
+      source, transform, false, &result));
+  Calculate8bitBitmapMinMax(result, &min_gl, &max_gl);
+  EXPECT_EQ(0x0, min_gl);
+  EXPECT_EQ(0x0, max_gl);
+}
+
+TEST_F(ColorAnalysisTest, ApplyColorReductionBlackAndWhite) {
+  // Check with images with multiple colors. This is really different only when
+  // the result is scaled.
+  gfx::Canvas canvas(gfx::Size(300, 200), ui::SCALE_FACTOR_100P, true);
+
+  // The image consists of vertical non-overlapping stripes 150 pixels wide.
+  canvas.FillRect(gfx::Rect(0, 0, 150, 200), SkColorSetRGB(0, 0, 0));
+  canvas.FillRect(gfx::Rect(150, 0, 150, 200), SkColorSetRGB(255, 255, 255));
+  SkBitmap source =
+      skia::GetTopDevice(*canvas.sk_canvas())->accessBitmap(false);
+  SkBitmap result;
+  result.setConfig(SkBitmap::kA8_Config, 300, 200);
+  result.allocPixels();
+
+  gfx::Vector3dF transform(1.0f, 0.5f, 0.1f);
+  EXPECT_TRUE(color_utils::ApplyColorReduction(
+      source, transform, true, &result));
+  uint8_t min_gl = 0;
+  uint8_t max_gl = 0;
+  Calculate8bitBitmapMinMax(result, &min_gl, &max_gl);
+
+  EXPECT_EQ(0, min_gl);
+  EXPECT_EQ(255, max_gl);
+  EXPECT_EQ(min_gl, SkColorGetA(result.getColor(0, 0)));
+  EXPECT_EQ(max_gl, SkColorGetA(result.getColor(299, 199)));
+
+  // Reverse test.
+  transform.Scale(-1.0f);
+  EXPECT_TRUE(color_utils::ApplyColorReduction(
+      source, transform, true, &result));
+  min_gl = 0;
+  max_gl = 0;
+  Calculate8bitBitmapMinMax(result, &min_gl, &max_gl);
+
+  EXPECT_EQ(0, min_gl);
+  EXPECT_EQ(255, max_gl);
+  EXPECT_EQ(max_gl, SkColorGetA(result.getColor(0, 0)));
+  EXPECT_EQ(min_gl, SkColorGetA(result.getColor(299, 199)));
+}
+
+TEST_F(ColorAnalysisTest, ApplyColorReductionMultiColor) {
+  // Check with images with multiple colors. This is really different only when
+  // the result is scaled.
+  gfx::Canvas canvas(gfx::Size(300, 200), ui::SCALE_FACTOR_100P, true);
+
+  // The image consists of vertical non-overlapping stripes 100 pixels wide.
+  canvas.FillRect(gfx::Rect(0, 0, 100, 200), SkColorSetRGB(100, 0, 0));
+  canvas.FillRect(gfx::Rect(100, 0, 100, 200), SkColorSetRGB(0, 255, 0));
+  canvas.FillRect(gfx::Rect(200, 0, 100, 200), SkColorSetRGB(0, 0, 128));
+  SkBitmap source =
+      skia::GetTopDevice(*canvas.sk_canvas())->accessBitmap(false);
+  SkBitmap result;
+  result.setConfig(SkBitmap::kA8_Config, 300, 200);
+  result.allocPixels();
+
+  gfx::Vector3dF transform(1.0f, 0.5f, 0.1f);
+  EXPECT_TRUE(color_utils::ApplyColorReduction(
+      source, transform, false, &result));
+  uint8_t min_gl = 0;
+  uint8_t max_gl = 0;
+  Calculate8bitBitmapMinMax(result, &min_gl, &max_gl);
+  EXPECT_EQ(12, min_gl);
+  EXPECT_EQ(127, max_gl);
+  EXPECT_EQ(min_gl, SkColorGetA(result.getColor(299, 199)));
+  EXPECT_EQ(max_gl, SkColorGetA(result.getColor(150, 0)));
+  EXPECT_EQ(100U, SkColorGetA(result.getColor(0, 0)));
+
+  EXPECT_TRUE(color_utils::ApplyColorReduction(
+      source, transform, true, &result));
+  Calculate8bitBitmapMinMax(result, &min_gl, &max_gl);
+  EXPECT_EQ(0, min_gl);
+  EXPECT_EQ(255, max_gl);
+  EXPECT_EQ(min_gl, SkColorGetA(result.getColor(299, 199)));
+  EXPECT_EQ(max_gl, SkColorGetA(result.getColor(150, 0)));
+  EXPECT_EQ(193U, SkColorGetA(result.getColor(0, 0)));
+}
+
+TEST_F(ColorAnalysisTest, ComputePrincipalComponentImageNotComputable) {
+  SkBitmap source, result;
+  source.setConfig(SkBitmap::kARGB_8888_Config, 300, 200);
+  result.setConfig(SkBitmap::kA8_Config, 300, 200);
+
+  source.allocPixels();
+  result.allocPixels();
+  source.eraseRGB(50, 150, 200);
+
+  // This computation should fail since all colors always vary together.
+  EXPECT_FALSE(color_utils::ComputePrincipalComponentImage(source, &result));
+}
+
+TEST_F(ColorAnalysisTest, ComputePrincipalComponentImage) {
+  gfx::Canvas canvas(gfx::Size(300, 200), ui::SCALE_FACTOR_100P, true);
+
+  // The image consists of vertical non-overlapping stripes 100 pixels wide.
+  canvas.FillRect(gfx::Rect(0, 0, 100, 200), SkColorSetRGB(10, 10, 10));
+  canvas.FillRect(gfx::Rect(100, 0, 100, 200), SkColorSetRGB(100, 100, 100));
+  canvas.FillRect(gfx::Rect(200, 0, 100, 200), SkColorSetRGB(255, 255, 255));
+  SkBitmap source =
+      skia::GetTopDevice(*canvas.sk_canvas())->accessBitmap(false);
+  SkBitmap result;
+  result.setConfig(SkBitmap::kA8_Config, 300, 200);
+  result.allocPixels();
+
+  // This computation should fail since all colors always vary together.
+  EXPECT_TRUE(color_utils::ComputePrincipalComponentImage(source, &result));
+
+  uint8_t min_gl = 0;
+  uint8_t max_gl = 0;
+  Calculate8bitBitmapMinMax(result, &min_gl, &max_gl);
+
+  EXPECT_EQ(0, min_gl);
+  EXPECT_EQ(255, max_gl);
+  EXPECT_EQ(min_gl, SkColorGetA(result.getColor(0, 0)));
+  EXPECT_EQ(max_gl, SkColorGetA(result.getColor(299, 199)));
+  EXPECT_EQ(93U, SkColorGetA(result.getColor(150, 0)));
 }

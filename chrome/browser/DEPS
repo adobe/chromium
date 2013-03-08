@@ -7,6 +7,7 @@ include_rules = [
   "+chromeos",
   "+components/auto_login_parser",
   "+components/navigation_interception",
+  "+components/user_prefs",
   "+components/visitedlink/browser",
   "+components/web_contents_delegate_android",
   "+content/public/browser",
@@ -65,7 +66,6 @@ include_rules = [
   "+webkit/glue/webkit_glue.h",
   "+webkit/glue/webmenuitem.h",
   "+webkit/glue/webpreferences.h",
-  "+webkit/glue/window_open_disposition.h",
   # DO NOT ADD ANY MORE ITEMS TO THE ABOVE LIST!
 
   "-chrome/browser/ui/views",
@@ -76,7 +76,6 @@ include_rules = [
   "!chrome/browser/ui/views/location_bar/location_icon_view.h",
   "!chrome/browser/ui/views/notifications/balloon_view.h",
   "!chrome/browser/ui/views/notifications/balloon_view_host.h",
-  "!chrome/browser/ui/views/page_info_bubble_view.h",
   "!chrome/browser/ui/views/reload_button.h",
   "!chrome/browser/ui/views/select_file_dialog_extension.h",
   "!chrome/browser/ui/views/unhandled_keyboard_event_handler.h",

@@ -439,6 +439,15 @@ void NetworkLibraryImplCros::SetCarrier(
   CrosSetCarrier(cellular->device_path(), carrier, completed);
 }
 
+void NetworkLibraryImplCros::ResetModem() {
+  const NetworkDevice* cellular = FindCellularDevice();
+  if (!cellular) {
+    NOTREACHED() << "Calling ResetModem method w/o cellular device.";
+    return;
+  }
+  CrosReset(cellular->device_path());
+}
+
 bool NetworkLibraryImplCros::IsCellularAlwaysInRoaming() {
   const NetworkDevice* cellular = FindCellularDevice();
   if (!cellular) {
@@ -745,15 +754,11 @@ void NetworkLibraryImplCros::NetworkManagerUpdate(
   }
   VLOG(1) << "Received NetworkManagerUpdate.";
 
-  for (DictionaryValue::key_iterator iter = properties->begin_keys();
-       iter != properties->end_keys(); ++iter) {
-    const std::string& key = *iter;
-    const Value* value;
-    bool res = properties->GetWithoutPathExpansion(key, &value);
-    CHECK(res);
-    if (!NetworkManagerStatusChanged(key, value)) {
-      LOG(ERROR) << "Invalid key-value pair, key: " << key << " type: "
-                 << value->GetType();
+  for (DictionaryValue::Iterator iter(*properties); !iter.IsAtEnd();
+       iter.Advance()) {
+    if (!NetworkManagerStatusChanged(iter.key(), &iter.value())) {
+      LOG(ERROR) << "Invalid key-value pair, key: " << iter.key() << " type: "
+                 << iter.value().GetType();
     }
   }
   // If there is no Profiles entry, request remembered networks here.

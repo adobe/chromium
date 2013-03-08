@@ -5,7 +5,9 @@
 #include "chrome_frame/test/test_with_web_server.h"
 
 #include "base/base_paths.h"
+#include "base/file_util.h"
 #include "base/file_version_info.h"
+#include "base/files/memory_mapped_file.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/path_service.h"
 #include "base/stringprintf.h"
@@ -53,7 +55,7 @@ std::string CreateHttpHeaders(CFInvocation invocation,
   return ss.str();
 }
 
-std::string GetMockHttpHeaders(const FilePath& mock_http_headers_path) {
+std::string GetMockHttpHeaders(const base::FilePath& mock_http_headers_path) {
   std::string headers;
   file_util::ReadFileToString(mock_http_headers_path, &headers);
   return headers;
@@ -72,12 +74,12 @@ class ChromeFrameTestEnvironment: public testing::Environment {
 
 }  // namespace
 
-FilePath ChromeFrameTestWithWebServer::test_file_path_;
-FilePath ChromeFrameTestWithWebServer::results_dir_;
-FilePath ChromeFrameTestWithWebServer::CFInstall_path_;
-FilePath ChromeFrameTestWithWebServer::CFInstance_path_;
+base::FilePath ChromeFrameTestWithWebServer::test_file_path_;
+base::FilePath ChromeFrameTestWithWebServer::results_dir_;
+base::FilePath ChromeFrameTestWithWebServer::CFInstall_path_;
+base::FilePath ChromeFrameTestWithWebServer::CFInstance_path_;
 base::ScopedTempDir ChromeFrameTestWithWebServer::temp_dir_;
-FilePath ChromeFrameTestWithWebServer::chrome_user_data_dir_;
+base::FilePath ChromeFrameTestWithWebServer::chrome_user_data_dir_;
 chrome_frame_test::TimedMsgLoop* ChromeFrameTestWithWebServer::loop_;
 std::string ChromeFrameTestWithWebServer::local_address_;
 testing::StrictMock<MockWebServerListener>*
@@ -89,7 +91,7 @@ ChromeFrameTestWithWebServer::ChromeFrameTestWithWebServer() {
 
 // static
 void ChromeFrameTestWithWebServer::SetUpTestCase() {
-  FilePath chrome_frame_source_path;
+  base::FilePath chrome_frame_source_path;
   PathService::Get(base::DIR_SOURCE_ROOT, &chrome_frame_source_path);
   chrome_frame_source_path = chrome_frame_source_path.Append(
       FILE_PATH_LITERAL("chrome_frame"));
@@ -102,8 +104,8 @@ void ChromeFrameTestWithWebServer::SetUpTestCase() {
 
   // Copy the CFInstance.js and CFInstall.js files from src\chrome_frame to
   // src\chrome_frame\test\data.
-  FilePath CFInstance_src_path;
-  FilePath CFInstall_src_path;
+  base::FilePath CFInstance_src_path;
+  base::FilePath CFInstall_src_path;
 
   CFInstance_src_path = chrome_frame_source_path.AppendASCII("CFInstance.js");
   CFInstance_path_ = test_file_path_.AppendASCII("CFInstance.js");
@@ -141,7 +143,8 @@ void ChromeFrameTestWithWebServer::TearDownTestCase() {
 }
 
 // static
-const FilePath& ChromeFrameTestWithWebServer::GetChromeUserDataDirectory() {
+const base::FilePath&
+ChromeFrameTestWithWebServer::GetChromeUserDataDirectory() {
   if (!temp_dir_.IsValid()) {
     EXPECT_TRUE(temp_dir_.CreateUniqueTempDir());
     chrome_user_data_dir_ = temp_dir_.path().AppendASCII("User Data");
@@ -179,7 +182,7 @@ bool ChromeFrameTestWithWebServer::LaunchBrowser(BrowserKind browser,
   if (browser == IE) {
     browser_handle_.Set(chrome_frame_test::LaunchIE(url));
   } else if (browser == CHROME) {
-    const FilePath& user_data_dir = GetChromeUserDataDirectory();
+    const base::FilePath& user_data_dir = GetChromeUserDataDirectory();
     chrome_frame_test::OverrideDataDirectoryForThisTest(user_data_dir.value());
     browser_handle_.Set(chrome_frame_test::LaunchChrome(url, user_data_dir));
   } else {
@@ -287,7 +290,7 @@ void ChromeFrameTestWithWebServer::ExpectAndHandlePostedResult() {
 
 void ChromeFrameTestWithWebServer::VersionTest(BrowserKind browser,
     const wchar_t* page) {
-  FilePath plugin_path;
+  base::FilePath plugin_path;
   PathService::Get(base::DIR_MODULE, &plugin_path);
   plugin_path = plugin_path.Append(kChromeFrameDllName);
 
@@ -309,7 +312,7 @@ void ChromeFrameTestWithWebServer::VersionTest(BrowserKind browser,
     ASSERT_TRUE(ver_system.IsValid() || ver_user.IsValid());
 
     bool system_install = ver_system.IsValid();
-    FilePath cf_dll_path(installer::GetChromeInstallPath(system_install, dist));
+    base::FilePath cf_dll_path(installer::GetChromeInstallPath(system_install, dist));
     cf_dll_path = cf_dll_path.Append(UTF8ToWide(
         ver_system.IsValid() ? ver_system.GetString() : ver_user.GetString()));
     cf_dll_path = cf_dll_path.Append(kChromeFrameDllName);
@@ -390,7 +393,7 @@ void MockWebServer::SendResponseHelper(
   if (query_index != std::string::npos) {
     path = path.erase(query_index);
   }
-  FilePath file_path = root_dir_;
+  base::FilePath file_path = root_dir_;
   if (path.size())
     file_path = file_path.Append(path.substr(1));  // remove first '/'
 
@@ -398,7 +401,7 @@ void MockWebServer::SendResponseHelper(
   std::string content_type;
   if (file_util::PathExists(file_path) &&
       !file_util::DirectoryExists(file_path)) {
-    FilePath mock_http_headers(file_path.value() + L".mock-http-headers");
+    base::FilePath mock_http_headers(file_path.value() + L".mock-http-headers");
     if (file_util::PathExists(mock_http_headers)) {
       headers = GetMockHttpHeaders(mock_http_headers);
       content_type = http_utils::GetHttpHeaderFromHeaderList("Content-type",
@@ -875,7 +878,8 @@ class UaTemplateFileResponse : public test_server::FileResponse {
  public:
   typedef test_server::FileResponse SuperClass;
 
-  UaTemplateFileResponse(const char* request_path, const FilePath& file_path)
+  UaTemplateFileResponse(const char* request_path,
+                         const base::FilePath& file_path)
       : test_server::FileResponse(request_path, file_path), request_id_(0) {
   }
 
@@ -1081,4 +1085,15 @@ TEST_F(ChromeFrameTestWithWebServer, FullTabModeIE_TestDownloadFromForm) {
 
   EXPECT_EQ(1, response->get_request_count());
   EXPECT_EQ(1, response->post_request_count());
+}
+
+// This test loads a large page and ensures that the full page contents are
+// actually loaded via a self-validating HTML page. This is done due to a bug
+// whereby the middle of the response stream would sometimes be truncated when
+// loading a CF document. See http://crbug.com/178421 for details.
+TEST_F(ChromeFrameTestWithWebServer, FullTabModeIE_LargePageLoad) {
+  const wchar_t kLargePageLoadPage[] =
+      L"chrome_frame_large_page.html";
+
+  SimpleBrowserTest(IE, kLargePageLoadPage);
 }

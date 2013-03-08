@@ -6,21 +6,23 @@
 
 #include "base/command_line.h"
 #include "base/message_loop.h"
+#include "base/prefs/pref_service.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/api/infobars/confirm_infobar_delegate.h"
 #include "chrome/browser/api/infobars/infobar_service.h"
 #include "chrome/browser/auto_launch_trial.h"
 #include "chrome/browser/first_run/first_run.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_tabstrip.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/installer/util/auto_launch_util.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/navigation_details.h"
+#include "content/public/browser/web_contents.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
@@ -169,7 +171,7 @@ bool ShowAutolaunchPrompt(Browser* browser) {
   // Only supported on the main profile for now.
   Profile* profile = browser->profile();
   if (profile->GetPath().BaseName() !=
-      FilePath(ASCIIToUTF16(chrome::kInitialProfile))) {
+      base::FilePath(ASCIIToUTF16(chrome::kInitialProfile))) {
     return false;
   }
 
@@ -187,7 +189,8 @@ bool ShowAutolaunchPrompt(Browser* browser) {
     return false;
   }
 
-  content::WebContents* web_contents = chrome::GetActiveWebContents(browser);
+  content::WebContents* web_contents =
+      browser->tab_strip_model()->GetActiveWebContents();
   profile = Profile::FromBrowserContext(web_contents->GetBrowserContext());
   AutolaunchInfoBarDelegate::Create(
       InfoBarService::FromWebContents(web_contents), profile->GetPrefs(),
@@ -195,9 +198,9 @@ bool ShowAutolaunchPrompt(Browser* browser) {
   return true;
 }
 
-void RegisterAutolaunchUserPrefs(PrefServiceSyncable* prefs) {
-  prefs->RegisterIntegerPref(
-      prefs::kShownAutoLaunchInfobar, 0, PrefServiceSyncable::UNSYNCABLE_PREF);
+void RegisterAutolaunchUserPrefs(PrefRegistrySyncable* registry) {
+  registry->RegisterIntegerPref(
+      prefs::kShownAutoLaunchInfobar, 0, PrefRegistrySyncable::UNSYNCABLE_PREF);
 }
 
 }  // namespace chrome

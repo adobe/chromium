@@ -6,11 +6,11 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
-#include "base/string_number_conversions.h"
 #include "base/string_util.h"
+#include "base/strings/string_number_conversions.h"
 #include "chrome/browser/chromeos/boot_times_loader.h"
 #include "chrome/browser/chromeos/cros/cert_library.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
@@ -220,8 +220,7 @@ void ParallelAuthenticator::AuthenticateToLogin(
   // We should not try OAuthLogin check until the profile loads.
   if (!using_oauth_) {
     // Initiate ClientLogin-based post authentication.
-    current_online_.reset(new OnlineAttempt(using_oauth_,
-                                            current_state_.get(),
+    current_online_.reset(new OnlineAttempt(current_state_.get(),
                                             this));
     current_online_->Initiate(profile);
   }
@@ -254,8 +253,7 @@ void ParallelAuthenticator::CompleteLogin(Profile* profile,
     // services not being able to fetch a token, leading to browser crashes.
     // So initiate ClientLogin-based post authentication.
     // TODO(xiyuan): This should not be required.
-    current_online_.reset(new OnlineAttempt(using_oauth_,
-                                            current_state_.get(),
+    current_online_.reset(new OnlineAttempt(current_state_.get(),
                                             this));
     current_online_->Initiate(profile);
   } else {
@@ -403,9 +401,7 @@ void ParallelAuthenticator::RecordOAuthCheckFailure(
   // Mark this account's OAuth token state as invalid in the local state.
   UserManager::Get()->SaveUserOAuthStatus(
       user_name,
-      CommandLine::ForCurrentProcess()->HasSwitch(switches::kForceOAuth1) ?
-          User::OAUTH1_TOKEN_STATUS_INVALID :
-          User::OAUTH2_TOKEN_STATUS_INVALID);
+      User::OAUTH2_TOKEN_STATUS_INVALID);
 }
 
 void ParallelAuthenticator::RecoverEncryptedData(
@@ -480,8 +476,7 @@ void ParallelAuthenticator::RetryAuth(Profile* profile,
   // we are unable to renew oauth token on lock screen currently and will
   // stuck with lock screen if we use OAuthLogin here.
   // TODO(xiyuan): Revisit this after we support Gaia in lock screen.
-  current_online_.reset(new OnlineAttempt(false /* using_oauth */,
-                                          reauth_state_.get(),
+  current_online_.reset(new OnlineAttempt(reauth_state_.get(),
                                           this));
   current_online_->Initiate(profile);
 }

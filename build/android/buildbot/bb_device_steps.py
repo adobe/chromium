@@ -36,27 +36,30 @@ CHROME_SRC = constants.CHROME_DIR
 #   test_apk: apk to run tests on.
 #   test_data: data folder in format destination:source.
 I_TEST = collections.namedtuple('InstrumentationTest', [
-    'name', 'apk', 'apk_package', 'test_apk', 'test_data'])
+    'name', 'apk', 'apk_package', 'test_apk', 'test_data', 'host_driven_root'])
 
 INSTRUMENTATION_TESTS = dict((suite.name, suite) for suite in [
     I_TEST('ContentShell',
            'ContentShell.apk',
-           'org.chromium.content_shell',
+           'org.chromium.content_shell_apk',
            'ContentShellTest',
-           'content:content/test/data/android/device_files'),
+           'content:content/test/data/android/device_files',
+           None),
     I_TEST('ChromiumTestShell',
            'ChromiumTestShell.apk',
            'org.chromium.chrome.testshell',
            'ChromiumTestShellTest',
-           'chrome:chrome/test/data/android/device_files'),
+           'chrome:chrome/test/data/android/device_files',
+           constants.CHROMIUM_TEST_SHELL_HOST_DRIVEN_DIR),
     I_TEST('AndroidWebView',
            'AndroidWebView.apk',
            'org.chromium.android_webview',
            'AndroidWebViewTest',
-           'webview:android_webview/test/data/device_files'),
+           'webview:android_webview/test/data/device_files',
+           None),
     ])
 
-VALID_TESTS = set(['ui', 'unit', 'webkit', 'webkit_layout'])
+VALID_TESTS = set(['chromedriver', 'ui', 'unit', 'webkit', 'webkit_layout'])
 
 
 
@@ -134,6 +137,26 @@ def RunTestSuites(options, suites):
     buildbot_report.PrintNamedStep(suite)
     RunCmd(['build/android/run_tests.py', '-s', suite] + args)
 
+def RunBrowserTestSuite(options):
+  """Manages an invocation of run_browser_tests.py.
+
+  Args:
+    options: options object.
+  """
+  args = ['--verbose']
+  if options.target == 'Release':
+    args.append('--release')
+  if options.asan:
+    args.append('--tool=asan')
+  buildbot_report.PrintNamedStep(constants.BROWSERTEST_SUITE_NAME)
+  RunCmd(['build/android/run_browser_tests.py'] + args)
+
+def RunChromeDriverTests():
+  """Run all the steps for running chromedriver tests."""
+  buildbot_report.PrintNamedStep('chromedriver_annotation')
+  RunCmd(['chrome/test/chromedriver/run_buildbot_steps.py',
+          '--android-package=%s' % constants.CHROMIUM_TEST_SHELL_PACKAGE])
+
 
 def InstallApk(options, test, print_step=False):
   """Install an apk to all phones.
@@ -171,6 +194,8 @@ def RunInstrumentationSuite(options, test):
   if options.upload_to_flakiness_server:
     args.append('--flakiness-dashboard-server=%s' %
                 constants.UPSTREAM_FLAKINESS_SERVER)
+  if test.host_driven_root:
+    args.append('--python_test_root=%s' % test.host_driven_root)
 
   RunCmd(['build/android/run_instrumentation_tests.py'] + args)
 
@@ -209,8 +234,8 @@ def RunWebkitLayoutTests(options):
                        options.factory_properties.get(flag)])
 
   for f in options.factory_properties.get('additional_expectations_files', []):
-    cmd_args.extend(['--additional-expectations-file',
-                     os.path.join(CHROME_SRC, *f)])
+    cmd_args.extend(
+        ['--additional-expectations=%s' % os.path.join(CHROME_SRC, *f)])
 
   RunCmd(['webkit/tools/layout_tests/run_webkit_tests.py'] + cmd_args)
 
@@ -240,6 +265,8 @@ def MainTestWrapper(options):
     test_obj = INSTRUMENTATION_TESTS[options.install]
     InstallApk(options, test_obj, print_step=True)
 
+  if 'chromedriver' in options.test_filter:
+    RunChromeDriverTests()
   if 'unit' in options.test_filter:
     RunTestSuites(options, gtest_config.STABLE_TEST_SUITES)
   if 'ui' in options.test_filter:
@@ -253,6 +280,7 @@ def MainTestWrapper(options):
 
   if options.experimental:
     RunTestSuites(options, gtest_config.EXPERIMENTAL_TEST_SUITES)
+    RunBrowserTestSuite(options)
 
   # Print logcat, kill logcat monitor
   buildbot_report.PrintNamedStep('logcat_dump')

@@ -19,54 +19,70 @@ namespace cc {
 namespace {
 // These constants were chosen empirically for their visually pleasant behavior.
 // Contact tedchoc@chromium.org for questions about changing these values.
-const float kShowHideThreshold = 0.5f;
 const int64 kShowHideMaxDurationMs = 175;
 }
 
 // static
 scoped_ptr<TopControlsManager> TopControlsManager::Create(
-    TopControlsManagerClient* client, float top_controls_height) {
-  return make_scoped_ptr(new TopControlsManager(client, top_controls_height));
+    TopControlsManagerClient* client,
+    float top_controls_height,
+    float top_controls_show_threshold,
+    float top_controls_hide_threshold) {
+  return make_scoped_ptr(new TopControlsManager(client,
+                                                top_controls_height,
+                                                top_controls_show_threshold,
+                                                top_controls_hide_threshold));
 }
 
 TopControlsManager::TopControlsManager(TopControlsManagerClient* client,
-                                       float top_controls_height)
+                                       float top_controls_height,
+                                       float top_controls_show_threshold,
+                                       float top_controls_hide_threshold)
     : client_(client),
       animation_direction_(NO_ANIMATION),
-      is_overlay_mode_(false),
-      scroll_readjustment_enabled_(false),
+      enable_hiding_(true),
+      in_scroll_gesture_(false),
       top_controls_height_(top_controls_height),
       controls_top_offset_(0),
       content_top_offset_(top_controls_height),
-      previous_root_scroll_offset_(0.f) {
+      previous_root_scroll_offset_(0.f),
+      scroll_start_offset_(0.f),
+      current_scroll_delta_(0.f),
+      top_controls_show_height_(
+          top_controls_height * top_controls_hide_threshold),
+      top_controls_hide_height_(
+          top_controls_height * (1.f - top_controls_show_threshold)) {
   CHECK(client_);
 }
 
 TopControlsManager::~TopControlsManager() {
 }
 
-void TopControlsManager::UpdateDrawPositions() {
-  if (!client_->haveRootScrollLayer())
-    return;
-
-  // If the scroll position has changed underneath us (i.e. a javascript
-  // scroll), then simulate a scroll that covers the delta.
-  float scroll_total_y = RootScrollLayerTotalScrollY();
-  if (scroll_readjustment_enabled_
-      && scroll_total_y != previous_root_scroll_offset_) {
-    ScrollBy(gfx::Vector2dF(0, scroll_total_y - previous_root_scroll_offset_));
-    StartAnimationIfNecessary();
-    previous_root_scroll_offset_ = RootScrollLayerTotalScrollY();
-  }
-}
-
 void TopControlsManager::ScrollBegin() {
   ResetAnimations();
-  scroll_readjustment_enabled_ = false;
+  in_scroll_gesture_ = true;
+  scroll_start_offset_ = RootScrollLayerTotalScrollY() + controls_top_offset_;
+  current_scroll_delta_ = 0.f;
 }
 
 gfx::Vector2dF TopControlsManager::ScrollBy(
     const gfx::Vector2dF pending_delta) {
+  if (pending_delta.y() == 0 || !enable_hiding_)
+    return pending_delta;
+
+  current_scroll_delta_ += pending_delta.y();
+
+  float scroll_total_y = RootScrollLayerTotalScrollY();
+
+  if (in_scroll_gesture_ && pending_delta.y() > 0 && controls_top_offset_ == 0)
+    scroll_start_offset_ = scroll_total_y;
+  else if (in_scroll_gesture_ &&
+      ((pending_delta.y() > 0 && scroll_total_y < scroll_start_offset_) ||
+       (pending_delta.y() < 0 &&
+           scroll_total_y > scroll_start_offset_ + top_controls_height_))) {
+    return pending_delta;
+  }
+
   ResetAnimations();
   return ScrollInternal(pending_delta);
 }
@@ -78,34 +94,36 @@ gfx::Vector2dF TopControlsManager::ScrollInternal(
 
   float previous_controls_offset = controls_top_offset_;
   float previous_content_offset = content_top_offset_;
-  bool previous_was_overlay = is_overlay_mode_;
 
   controls_top_offset_ -= scroll_delta_y;
   controls_top_offset_ = std::min(
       std::max(controls_top_offset_, -top_controls_height_), 0.f);
 
-  if (scroll_total_y > 0 || (scroll_total_y == 0
-      && content_top_offset_ < scroll_delta_y)) {
-    is_overlay_mode_ = true;
-    content_top_offset_ = 0;
-  } else if (scroll_total_y <= 0 && (scroll_delta_y < 0
-      || (scroll_delta_y > 0 && content_top_offset_ > 0))) {
-    is_overlay_mode_ = false;
-    content_top_offset_ -= scroll_delta_y;
+  // To determine if the scroll delta should be applied to the content position
+  // as well, we check the following:
+  // 1.) Scrolling down the page and the content position isn't already at 0.
+  //     This case handles corrections where the page content shifts outside of
+  //     the knowledge of the top controls manager.
+  // 2.) Scrolling either direction while the root scroll layer is scrolled to
+  //     the very top.
+  if ((scroll_delta_y > 0 && content_top_offset_ > 0) || scroll_total_y <= 0) {
+    float content_scroll_delta_y = scroll_delta_y;
+    if (content_scroll_delta_y > 0)
+      content_scroll_delta_y -= previous_controls_offset - controls_top_offset_;
+    content_top_offset_ -= content_scroll_delta_y;
   }
+
   content_top_offset_ = std::max(
       std::min(content_top_offset_,
                controls_top_offset_ + top_controls_height_), 0.f);
 
-  gfx::Vector2dF applied_delta;
-  if (!previous_was_overlay)
-    applied_delta.set_y(previous_content_offset - content_top_offset_);
+  gfx::Vector2dF applied_delta(
+      0.f, previous_content_offset - content_top_offset_);
 
-  if (is_overlay_mode_ != previous_was_overlay
-      || previous_controls_offset != controls_top_offset_
-      || previous_content_offset != content_top_offset_) {
+  if (previous_controls_offset != controls_top_offset_ ||
+      previous_content_offset != content_top_offset_) {
     client_->setNeedsRedraw();
-    client_->setNeedsUpdateDrawProperties();
+    client_->setActiveTreeNeedsUpdateDrawProperties();
   }
 
   return pending_delta - applied_delta;
@@ -114,7 +132,8 @@ gfx::Vector2dF TopControlsManager::ScrollInternal(
 void TopControlsManager::ScrollEnd() {
   StartAnimationIfNecessary();
   previous_root_scroll_offset_ = RootScrollLayerTotalScrollY();
-  scroll_readjustment_enabled_ = true;
+  in_scroll_gesture_ = false;
+  current_scroll_delta_ = 0.f;
 }
 
 void TopControlsManager::Animate(base::TimeTicks monotonic_time) {
@@ -159,14 +178,26 @@ void TopControlsManager::SetupAnimation(AnimationDirection direction) {
 }
 
 void TopControlsManager::StartAnimationIfNecessary() {
-  float scroll_total_y = RootScrollLayerTotalScrollY();
-
   if (controls_top_offset_ != 0
       && controls_top_offset_ != -top_controls_height_) {
-    AnimationDirection show_controls =
-        controls_top_offset_ >= -(top_controls_height_ * kShowHideThreshold) ?
-            SHOWING_CONTROLS : HIDING_CONTROLS;
-    if (!top_controls_animation_ || animation_direction_ != show_controls) {
+    AnimationDirection show_controls = NO_ANIMATION;
+
+    if (controls_top_offset_ >= -top_controls_show_height_) {
+      // If we're showing so much that the hide threshold won't trigger, show.
+      show_controls = SHOWING_CONTROLS;
+    } else if (controls_top_offset_ <= -top_controls_hide_height_) {
+      // If we're showing so little that the show threshold won't trigger, hide.
+      show_controls = HIDING_CONTROLS;
+    } else {
+      // If we could be either showing or hiding, we determine which one to
+      // do based on whether or not the total scroll delta was moving up or
+      // down.
+      show_controls = current_scroll_delta_ <= 0.f ?
+          SHOWING_CONTROLS : HIDING_CONTROLS;
+    }
+
+    if (show_controls != NO_ANIMATION &&
+        (!top_controls_animation_ || animation_direction_ != show_controls)) {
       SetupAnimation(show_controls);
       client_->setNeedsRedraw();
     }

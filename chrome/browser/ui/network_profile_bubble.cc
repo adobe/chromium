@@ -12,19 +12,20 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
+#include "base/prefs/pref_service.h"
 #include "base/time.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_list_observer.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/browser_thread.h"
 
 namespace {
@@ -88,7 +89,8 @@ bool NetworkProfileBubble::ShouldCheckNetworkProfile(Profile* profile) {
 }
 
 // static
-void NetworkProfileBubble::CheckNetworkProfile(const FilePath& profile_folder) {
+void NetworkProfileBubble::CheckNetworkProfile(
+    const base::FilePath& profile_folder) {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::FILE));
   // On Windows notify the users if their profiles are located on a network
   // share as we don't officially support this setup yet.
@@ -122,12 +124,12 @@ void NetworkProfileBubble::CheckNetworkProfile(const FilePath& profile_folder) {
   if (*type == WTS_PROTOCOL_TYPE_CONSOLE) {
     bool profile_on_network = false;
     if (!profile_folder.empty()) {
-      FilePath temp_file;
+      base::FilePath temp_file;
       // Try to create some non-empty temp file in the profile dir and use
       // it to check if there is a reparse-point free path to it.
       if (file_util::CreateTemporaryFileInDir(profile_folder, &temp_file) &&
           file_util::WriteFile(temp_file, ".", 1)) {
-        FilePath normalized_temp_file;
+        base::FilePath normalized_temp_file;
         if (!file_util::NormalizeFilePath(temp_file, &normalized_temp_file))
           profile_on_network = true;
       } else {
@@ -155,11 +157,13 @@ void NetworkProfileBubble::SetNotificationShown(bool shown) {
 }
 
 // static
-void NetworkProfileBubble::RegisterUserPrefs(PrefServiceSyncable* prefs) {
-  prefs->RegisterIntegerPref(prefs::kNetworkProfileWarningsLeft, kMaxWarnings,
-                             PrefServiceSyncable::UNSYNCABLE_PREF);
-  prefs->RegisterInt64Pref(prefs::kNetworkProfileLastWarningTime, 0,
-                           PrefServiceSyncable::UNSYNCABLE_PREF);
+void NetworkProfileBubble::RegisterUserPrefs(PrefRegistrySyncable* registry) {
+  registry->RegisterIntegerPref(prefs::kNetworkProfileWarningsLeft,
+                                kMaxWarnings,
+                                PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterInt64Pref(prefs::kNetworkProfileLastWarningTime,
+                              0,
+                              PrefRegistrySyncable::UNSYNCABLE_PREF);
 }
 
 // static
@@ -171,11 +175,8 @@ void NetworkProfileBubble::RecordUmaEvent(MetricNetworkedProfileCheck event) {
 
 // static
 void NetworkProfileBubble::NotifyNetworkProfileDetected() {
-  // TODO(robertshield): Eventually, we will need to figure out the correct
-  //                     desktop type for this for platforms that can have
-  //                     multiple desktop types (win8/metro).
   Browser* browser = chrome::FindLastActiveWithHostDesktopType(
-      chrome::HOST_DESKTOP_TYPE_NATIVE);
+      chrome::GetActiveDesktop());
 
   if (browser)
     ShowNotification(browser);

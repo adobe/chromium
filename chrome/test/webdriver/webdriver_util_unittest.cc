@@ -6,8 +6,8 @@
 #include <string>
 
 #include "base/base64.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
 #include "chrome/test/webdriver/webdriver_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -36,7 +36,7 @@ TEST(ZipFileTest, ZipEntryToZipArchive) {
       "UEsDBBQACAAIAJpyXEAAAAAAAAAAAAAAAAAEAAAAdGVzdHP2D+"
       "cCAFBLBwi/wAzGBgAAAAQAAAA=";
   ASSERT_TRUE(base::Base64Decode(kBase64ZipEntry, &data));
-  FilePath file;
+  base::FilePath file;
   std::string error_msg;
   ASSERT_TRUE(UnzipSoleFile(temp_dir.path(), data, &file, &error_msg))
       << error_msg;

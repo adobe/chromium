@@ -10,7 +10,10 @@
 #include "base/run_loop.h"
 #include "base/stringprintf.h"
 #include "base/threading/thread.h"
+#include "google_apis/gaia/gaia_urls.h"
+#include "net/url_request/url_fetcher.h"
 #include "net/url_request/url_request_context_getter.h"
+#include "remoting/host/service_urls.h"
 #include "remoting/host/setup/host_starter.h"
 #include "remoting/host/setup/oauth_helper.h"
 #include "remoting/host/setup/pin_validator.h"
@@ -151,9 +154,16 @@ int main(int argc, char** argv) {
           g_message_loop->message_loop_proxy(),
           io_thread.message_loop_proxy()));
 
+  if (remoting::ServiceUrls::GetInstance()->ignore_urlfetcher_cert_requests()) {
+    net::URLFetcher::SetIgnoreCertificateRequests(true);
+  }
+
   // Start the host.
   scoped_ptr<HostStarter> host_starter(
-      HostStarter::Create(url_request_context_getter));
+      HostStarter::Create(
+          GaiaUrls::GetInstance()->oauth2_token_url(),
+          remoting::ServiceUrls::GetInstance()->directory_hosts_url(),
+          url_request_context_getter));
   if (redirect_url.empty()) {
     redirect_url = remoting::GetDefaultOauthRedirectUrl();
   }

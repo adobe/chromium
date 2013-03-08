@@ -13,7 +13,7 @@
 
 #include "base/callback_forward.h"
 #include "base/compiler_specific.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
@@ -128,13 +128,13 @@ class ExtensionUpdater : public ExtensionDownloaderDelegate,
   struct FetchedCRXFile {
     FetchedCRXFile();
     FetchedCRXFile(const std::string& id,
-                   const FilePath& path,
+                   const base::FilePath& path,
                    const GURL& download_url,
                    const std::set<int>& request_ids);
     ~FetchedCRXFile();
 
     std::string extension_id;
-    FilePath path;
+    base::FilePath path;
     GURL download_url;
     std::set<int> request_ids;
   };
@@ -181,7 +181,7 @@ class ExtensionUpdater : public ExtensionDownloaderDelegate,
 
   virtual void OnExtensionDownloadFinished(
       const std::string& id,
-      const FilePath& path,
+      const base::FilePath& path,
       const GURL& download_url,
       const std::string& version,
       const PingResult& ping,

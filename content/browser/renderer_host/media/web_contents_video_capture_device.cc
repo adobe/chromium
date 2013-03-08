@@ -57,6 +57,7 @@
 #include "base/time.h"
 #include "content/browser/renderer_host/media/web_contents_capture_util.h"
 #include "content/browser/web_contents/web_contents_impl.h"
+#include "content/port/browser/render_widget_host_view_port.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
@@ -64,14 +65,15 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "media/base/bind_to_loop.h"
+#include "media/base/video_frame.h"
 #include "media/video/capture/video_capture_types.h"
 #include "skia/ext/image_operations.h"
-#include "skia/ext/platform_canvas.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/gfx/rect.h"
+#include "ui/gfx/skia_util.h"
 
-// Used to self-trampoline invocation of methods to the approprate thread.  This
+// Used to self-trampoline invocation of methods to the appropriate thread. This
 // should be used sparingly, only when it's not clear which thread is invoking a
 // method.
 #define ENSURE_INVOKED_ON_THREAD(thread, ...) {  \
@@ -140,29 +142,23 @@ void CalculateFittedSize(int source_width, int source_height,
 // backing store on the UI BrowserThread.
 class BackingStoreCopier : public WebContentsObserver {
  public:
-  // Result status and done callback used with StartCopy().
-  enum Result {
-    OK,
-    TRANSIENT_ERROR,
-    NO_SOURCE,
-  };
-  typedef base::Callback<void(Result result,
-                              scoped_ptr<skia::PlatformBitmap> capture,
-                              const base::Time& capture_time)> DoneCB;
-
   BackingStoreCopier(int render_process_id, int render_view_id);
 
-  // If non-NULL, use the given |override| to access the backing store.
-  // This is used for unit testing.
-  void SetRenderWidgetHostForTesting(RenderWidgetHost* override);
+  virtual ~BackingStoreCopier();
 
-  // Starts the copy from the backing store.  Must be run on the UI
-  // BrowserThread.  |done_cb| is invoked with result status.  When successful
-  // (OK), the bitmap of the capture is transferred to the callback along with
-  // the timestamp at which the capture was completed.
-  void StartCopy(int frame_number, int desired_width, int desired_height,
-                 const DoneCB& done_cb);
+  // Starts the copy from the backing store. Must be run on the UI
+  // BrowserThread. Resulting frame is conveyed back to |consumer|.
+  void StartCopy(const scoped_refptr<CaptureMachine>& consumer,
+                 int frame_number,
+                 int desired_width,
+                 int desired_height);
 
+  // Stops observing an existing WebContents instance, if any.  This must be
+  // called before BackingStoreCopier is destroyed.  Must be run on the UI
+  // BrowserThread.
+  void StopObservingWebContents();
+
+  // content::WebContentsObserver implementation.
   virtual void DidShowFullscreenWidget(int routing_id) OVERRIDE {
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
     fullscreen_widget_id_ = routing_id;
@@ -175,11 +171,24 @@ class BackingStoreCopier : public WebContentsObserver {
   }
 
  private:
+  virtual void WebContentsDestroyed(WebContents* web_contents) OVERRIDE;
+
   void LookUpAndObserveWebContents();
 
-  void CopyFromBackingStoreComplete(int frame_number,
-                                    scoped_ptr<skia::PlatformBitmap> capture,
-                                    const DoneCB& done_cb, bool success);
+  // Response callback for RenderWidgetHost::CopyFromBackingStore.
+  void DidCopyFromBackingStore(const scoped_refptr<CaptureMachine>& consumer,
+                               int frame_number,
+                               const base::Time& start_time,
+                               bool success,
+                               const SkBitmap& frame);
+
+  // Response callback for RWHVP::CopyFromCompositingSurfaceToVideoFrame().
+  void DidCopyFromBackingStoreToVideoFrame(
+      const scoped_refptr<CaptureMachine>& consumer,
+      int frame_number,
+      const base::Time& start_time,
+      const scoped_refptr<media::VideoFrame>& frame,
+      bool success);
 
   // The "starting point" to find the capture source.
   const int render_process_id_;
@@ -191,10 +200,6 @@ class BackingStoreCopier : public WebContentsObserver {
 
   // Last known RenderView size.
   gfx::Size last_view_size_;
-
-  // If the following is NULL (normal behavior), the implementation should
-  // access RenderWidgetHost via web_contents().
-  RenderWidgetHost* rwh_for_testing_;
 
   DISALLOW_COPY_AND_ASSIGN(BackingStoreCopier);
 };
@@ -211,7 +216,7 @@ class VideoFrameRenderer {
   // invoke |done_cb| with a pointer to the result.  The caller must guarantee
   // Release() will be called after the result is no longer needed.
   void Render(int frame_number,
-              scoped_ptr<skia::PlatformBitmap> capture,
+              const SkBitmap& capture,
               int frame_width, int frame_height,
               const DoneCB& done_cb);
 
@@ -220,7 +225,7 @@ class VideoFrameRenderer {
 
  private:
   void RenderOnRenderThread(int frame_number,
-                            scoped_ptr<skia::PlatformBitmap> capture,
+                            const SkBitmap& capture,
                             int frame_width, int frame_height,
                             const DoneCB& done_cb);
 
@@ -247,8 +252,15 @@ class SynchronizedConsumer {
 
   void OnFrameInfo(const media::VideoCaptureCapability& info);
   void OnError();
-  void OnIncomingCapturedFrame(const uint8* pixels, int size,
-                               const base::Time& timestamp);
+  void OnIncomingCapturedFrame(const uint8* pixels,
+                               int size,
+                               const base::Time& timestamp,
+                               int rotation,
+                               bool flip_vert,
+                               bool flip_horiz);
+  void OnIncomingCapturedVideoFrame(
+      const scoped_refptr<media::VideoFrame>& video_frame,
+      const base::Time& timestamp);
 
  private:
   base::Lock consumer_lock_;
@@ -263,15 +275,31 @@ class VideoFrameDeliverer {
  public:
   explicit VideoFrameDeliverer(SynchronizedConsumer* consumer);
 
+  // Deliver a fully rendered ARGB frame, using SkBitmap as a container.
+  // |done_cb| will be invoked after delivery is complete.
   void Deliver(int frame_number,
-               const SkBitmap& frame_buffer, const base::Time& frame_timestamp,
+               const SkBitmap& frame_buffer,
+               const base::Time& frame_timestamp,
                const base::Closure& done_cb);
+  // Deliver a fully rendered frame YV12 frame, using VideoFrame as a container.
+  // A refcount is taken on |frame| until delivery is complete.
+  void Deliver(int frame_number,
+               const scoped_refptr<media::VideoFrame>& frame,
+               const base::Time& frame_timestamp);
 
  private:
   void DeliverOnDeliverThread(int frame_number,
-                              const SkBitmap& frame_buffer,
+                              const SkBitmap& frame,
                               const base::Time& frame_timestamp,
                               const base::Closure& done_cb);
+  void DeliverVideoFrameOnDeliverThread(
+      int frame_number,
+      const scoped_refptr<media::VideoFrame>& frame,
+      const base::Time& frame_timestamp);
+
+  // Treat |frame_number| as having been delivered, and update the
+  // frame rate statistics accordingly.
+  void ChronicleFrameDelivery(int frame_number);
 
   base::Thread deliver_thread_;
   SynchronizedConsumer* const consumer_;
@@ -287,8 +315,28 @@ class VideoFrameDeliverer {
 
 BackingStoreCopier::BackingStoreCopier(int render_process_id,
                                        int render_view_id)
-    : render_process_id_(render_process_id), render_view_id_(render_view_id),
-      fullscreen_widget_id_(MSG_ROUTING_NONE), rwh_for_testing_(NULL) {}
+    : render_process_id_(render_process_id),
+      render_view_id_(render_view_id),
+      fullscreen_widget_id_(MSG_ROUTING_NONE) {}
+
+BackingStoreCopier::~BackingStoreCopier() {
+  DCHECK(!web_contents());
+}
+
+void BackingStoreCopier::StopObservingWebContents() {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
+  if (web_contents()) {
+    web_contents()->DecrementCapturerCount();
+    Observe(NULL);
+  }
+}
+
+void BackingStoreCopier::WebContentsDestroyed(WebContents* web_contents) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
+  web_contents->DecrementCapturerCount();
+}
 
 void BackingStoreCopier::LookUpAndObserveWebContents() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
@@ -309,109 +357,12 @@ void BackingStoreCopier::LookUpAndObserveWebContents() {
                     << render_process_id_ << ", " << render_view_id_
                     << ") returned NULL.";
   Observe(rvh ? WebContents::FromRenderViewHost(rvh) : NULL);
-  DVLOG_IF(1, !web_contents())
-      << "WebContents::FromRenderViewHost(" << rvh << ") returned NULL.";
-
-  if (fullscreen_widget_id_ == MSG_ROUTING_NONE && web_contents()) {
-    fullscreen_widget_id_ = static_cast<WebContentsImpl*>(web_contents())->
-        GetFullscreenWidgetRoutingID();
-  }
-}
-
-void BackingStoreCopier::SetRenderWidgetHostForTesting(
-    RenderWidgetHost* override) {
-  rwh_for_testing_ = override;
-}
-
-void BackingStoreCopier::StartCopy(int frame_number,
-                                   int desired_width, int desired_height,
-                                   const DoneCB& done_cb) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-
-  TRACE_EVENT_ASYNC_BEGIN1("mirroring", "Capture", this,
-                           "frame_number", frame_number);
-
-  RenderWidgetHost* rwh;
-  if (rwh_for_testing_) {
-    rwh = rwh_for_testing_;
+  WebContentsImpl* contents = static_cast<WebContentsImpl*>(web_contents());
+  if (contents) {
+    contents->IncrementCapturerCount();
+    fullscreen_widget_id_ = contents->GetFullscreenWidgetRoutingID();
   } else {
-    if (!web_contents()) {  // No source yet.
-      LookUpAndObserveWebContents();
-      if (!web_contents()) {  // No source ever.
-        done_cb.Run(NO_SOURCE,
-                    scoped_ptr<skia::PlatformBitmap>(NULL), base::Time());
-        return;
-      }
-    }
-
-    if (fullscreen_widget_id_ != MSG_ROUTING_NONE) {
-      RenderProcessHost* process = web_contents()->GetRenderProcessHost();
-      rwh = process ? process->GetRenderWidgetHostByID(fullscreen_widget_id_)
-                    : NULL;
-    } else {
-      rwh = web_contents()->GetRenderViewHost();
-    }
-
-    if (!rwh) {
-      // Transient failure state (e.g., a RenderView is being replaced).
-      done_cb.Run(TRANSIENT_ERROR,
-                  scoped_ptr<skia::PlatformBitmap>(NULL), base::Time());
-      return;
-    }
-  }
-
-  gfx::Size fitted_size;
-  if (RenderWidgetHostView* const view = rwh->GetView()) {
-    const gfx::Size& view_size = view->GetViewBounds().size();
-    if (!view_size.IsEmpty()) {
-      CalculateFittedSize(view_size.width(), view_size.height(),
-                          desired_width, desired_height,
-                          &fitted_size);
-    }
-    if (view_size != last_view_size_) {
-      last_view_size_ = view_size;
-
-      // Measure the number of kilopixels.
-      UMA_HISTOGRAM_COUNTS_10000(
-          "TabCapture.ViewChangeKiloPixels",
-          view_size.width() * view_size.height() / 1024);
-    }
-  }
-
-  // TODO(miu): Look into tweaking the interface to CopyFromBackingStore, since
-  // it seems poor to have to allocate a new skia::PlatformBitmap as an output
-  // buffer for each successive frame (rather than reuse buffers).  Perhaps
-  // PlatformBitmap itself should only re-Allocate when necessary?
-  skia::PlatformBitmap* const bitmap = new skia::PlatformBitmap();
-  scoped_ptr<skia::PlatformBitmap> capture(bitmap);
-  rwh->CopyFromBackingStore(
-      gfx::Rect(),
-      fitted_size,
-      base::Bind(&BackingStoreCopier::CopyFromBackingStoreComplete,
-                 base::Unretained(this),
-                 frame_number, base::Passed(&capture), done_cb),
-      bitmap);
-
-  // TODO(miu): When a tab is not visible to the user, rendering stops.  For
-  // mirroring, however, it's important that rendering continues to happen.
-}
-
-void BackingStoreCopier::CopyFromBackingStoreComplete(
-    int frame_number, scoped_ptr<skia::PlatformBitmap> capture,
-    const DoneCB& done_cb, bool success) {
-  // Note: No restriction on which thread invokes this method but, currently,
-  // it's always the UI BrowserThread.
-
-  TRACE_EVENT_ASYNC_END1("mirroring", "Capture", this,
-                         "frame_number", frame_number);
-
-  if (success) {
-    done_cb.Run(OK, capture.Pass(), base::Time::Now());
-  } else {
-    // Capture can fail due to transient issues, so just skip this frame.
-    DVLOG(1) << "CopyFromBackingStore was not successful; skipping frame.";
-    done_cb.Run(TRANSIENT_ERROR,
-                scoped_ptr<skia::PlatformBitmap>(NULL), base::Time());
+    DVLOG(1) << "WebContents::FromRenderViewHost(" << rvh << ") returned NULL.";
   }
 }
 
@@ -423,27 +374,29 @@ VideoFrameRenderer::VideoFrameRenderer()
 }
 
 void VideoFrameRenderer::Render(int frame_number,
-                                scoped_ptr<skia::PlatformBitmap> capture,
+                                const SkBitmap& capture,
                                 int frame_width, int frame_height,
                                 const DoneCB& done_cb) {
   render_thread_.message_loop()->PostTask(
       FROM_HERE,
       base::Bind(&VideoFrameRenderer::RenderOnRenderThread,
                  base::Unretained(this),
-                 frame_number, base::Passed(&capture),
+                 frame_number, capture,
                  frame_width, frame_height, done_cb));
 }
 
 void VideoFrameRenderer::RenderOnRenderThread(
     int frame_number,
-    scoped_ptr<skia::PlatformBitmap> capture,
+    const SkBitmap& captured_bitmap,
     int frame_width, int frame_height,
     const DoneCB& done_cb) {
   DCHECK_EQ(render_thread_.message_loop(), MessageLoop::current());
 
   TRACE_EVENT1("mirroring", "RenderFrame", "frame_number", frame_number);
 
-  const SkBitmap& captured_bitmap = capture->GetBitmap();
+  base::ScopedClosureRunner failure_handler(
+      base::Bind(done_cb, static_cast<const SkBitmap*>(NULL)));
+
   gfx::Size fitted_size;
   {
     SkAutoLockPixels locker(captured_bitmap);
@@ -532,6 +485,7 @@ void VideoFrameRenderer::RenderOnRenderThread(
   }
 
   // The result is now ready.
+  failure_handler.Release();
   {
     base::AutoLock guard(lock_);
     out->in_use = true;
@@ -574,10 +528,21 @@ void SynchronizedConsumer::OnError() {
 }
 
 void SynchronizedConsumer::OnIncomingCapturedFrame(
-    const uint8* pixels, int size, const base::Time& timestamp) {
+    const uint8* pixels, int size, const base::Time& timestamp,
+    int rotation, bool flip_vert, bool flip_horiz) {
   base::AutoLock guard(consumer_lock_);
   if (wrapped_consumer_) {
-    wrapped_consumer_->OnIncomingCapturedFrame(pixels, size, timestamp);
+    wrapped_consumer_->OnIncomingCapturedFrame(pixels, size, timestamp,
+                                               rotation, flip_vert, flip_horiz);
+  }
+}
+
+void SynchronizedConsumer::OnIncomingCapturedVideoFrame(
+    const scoped_refptr<media::VideoFrame>& video_frame,
+    const base::Time& timestamp) {
+  base::AutoLock guard(consumer_lock_);
+  if (wrapped_consumer_) {
+    wrapped_consumer_->OnIncomingCapturedVideoFrame(video_frame, timestamp);
   }
 }
 
@@ -601,9 +566,20 @@ void VideoFrameDeliverer::Deliver(
                  done_cb));
 }
 
+void VideoFrameDeliverer::Deliver(
+    int frame_number,
+    const scoped_refptr<media::VideoFrame>& frame,
+    const base::Time& frame_timestamp) {
+  deliver_thread_.message_loop()->PostTask(
+      FROM_HERE,
+      base::Bind(&VideoFrameDeliverer::DeliverVideoFrameOnDeliverThread,
+                 base::Unretained(this), frame_number, frame, frame_timestamp));
+}
+
 void VideoFrameDeliverer::DeliverOnDeliverThread(
     int frame_number,
-    const SkBitmap& frame_buffer, const base::Time& frame_timestamp,
+    const SkBitmap& frame_buffer,
+    const base::Time& frame_timestamp,
     const base::Closure& done_cb) {
   DCHECK_EQ(deliver_thread_.message_loop(), MessageLoop::current());
 
@@ -616,8 +592,29 @@ void VideoFrameDeliverer::DeliverOnDeliverThread(
   consumer_->OnIncomingCapturedFrame(
       static_cast<const uint8*>(frame_buffer.getPixels()),
       frame_buffer.getSize(),
-      frame_timestamp);
+      frame_timestamp, 0, false, false);
 
+  ChronicleFrameDelivery(frame_number);
+
+  // All done.
+  done_cb.Run();
+}
+
+void VideoFrameDeliverer::DeliverVideoFrameOnDeliverThread(
+    int frame_number,
+    const scoped_refptr<media::VideoFrame>& frame,
+    const base::Time& frame_timestamp) {
+  DCHECK_EQ(deliver_thread_.message_loop(), MessageLoop::current());
+
+  TRACE_EVENT1("mirroring", "DeliverFrame", "frame_number", frame_number);
+
+  // Send the frame to the consumer.
+  consumer_->OnIncomingCapturedVideoFrame(frame, frame_timestamp);
+
+  ChronicleFrameDelivery(frame_number);
+}
+
+void VideoFrameDeliverer::ChronicleFrameDelivery(int frame_number) {
   // Log frame rate, if verbose logging is turned on.
   static const base::TimeDelta kFrameRateLogInterval =
       base::TimeDelta::FromSeconds(10);
@@ -648,9 +645,6 @@ void VideoFrameDeliverer::DeliverOnDeliverThread(
       last_frame_number_ = frame_number;
     }
   }
-
-  // All done.
-  done_cb.Run();
 }
 
 }  // namespace
@@ -666,13 +660,16 @@ void VideoFrameDeliverer::DeliverOnDeliverThread(
 class CaptureMachine
     : public base::RefCountedThreadSafe<CaptureMachine, CaptureMachine> {
  public:
-  CaptureMachine(int render_process_id, int render_view_id);
+  enum SnapshotError {
+    NO_SOURCE,
+    TRANSIENT_ERROR
+  };
 
-  // Sets the capture source to the given |override| for unit testing.
-  // Also, |destroy_cb| will be invoked after CaptureMachine is fully destroyed
-  // (to synchronize tear-down).
-  void InitializeForTesting(RenderWidgetHost* override,
-                            const base::Closure& destroy_cb);
+  // |destroy_cb| will be invoked after CaptureMachine is fully destroyed,
+  // to synchronize tear-down.
+  CaptureMachine(int render_process_id,
+                 int render_view_id,
+                 const base::Closure& destroy_cb);
 
   // Synchronously sets/unsets the consumer.  Pass |consumer| as NULL to remove
   // the reference to the consumer; then, once this method returns,
@@ -685,6 +682,18 @@ class CaptureMachine
   void Start();
   void Stop();
   void DeAllocate();
+
+  // Snapshot result events.
+  void OnSnapshotComplete(int frame_number,
+                          const base::Time& start_time,
+                          const base::TimeDelta& duration,
+                          const SkBitmap& frame);
+  void OnSnapshotComplete(int frame_number,
+                          const base::Time& start_time,
+                          const base::TimeDelta& duration,
+                          const scoped_refptr<media::VideoFrame>& frame);
+  void OnSnapshotFailed(SnapshotError error,
+                        int frame_number);
 
  private:
   friend class base::RefCountedThreadSafe<CaptureMachine, CaptureMachine>;
@@ -711,15 +720,24 @@ class CaptureMachine
 
   // The glue between the pipeline stages.
   void StartSnapshot();
-  void SnapshotComplete(int frame_number,
-                        const base::Time& start_time,
-                        BackingStoreCopier::Result result,
-                        scoped_ptr<skia::PlatformBitmap> capture,
-                        const base::Time& capture_time);
+  bool FinishSnapshot();
+  void SnapshotCompleteBitmap(int frame_number,
+                              const base::Time& start_time,
+                              const base::TimeDelta& duration,
+                              const SkBitmap& frame);
+  void SnapshotCompleteVideoFrame(
+      int frame_number,
+      const base::Time& start_time,
+      const base::TimeDelta& duration,
+      const scoped_refptr<media::VideoFrame>& frame);
+  void SnapshotFailed(SnapshotError error, int frame_number);
+
   void RenderComplete(int frame_number,
                       const base::Time& capture_time,
                       const SkBitmap* frame_buffer);
   void DeliverComplete(const SkBitmap* frame_buffer);
+
+  void DoShutdownTasksOnUIThread();
 
   // Specialized RefCounted traits for CaptureMachine, so that operator delete
   // is called from an "outside" thread.  See comments for "traits" in
@@ -752,20 +770,17 @@ class CaptureMachine
   DISALLOW_COPY_AND_ASSIGN(CaptureMachine);
 };
 
-CaptureMachine::CaptureMachine(int render_process_id, int render_view_id)
+CaptureMachine::CaptureMachine(int render_process_id,
+                               int render_view_id,
+                               const base::Closure& destroy_cb)
     : manager_thread_("WebContentsVideo_ManagerThread"),
       state_(kIdle),
       is_snapshotting_(false),
       num_renders_pending_(0),
       copier_(render_process_id, render_view_id),
-      deliverer_(&consumer_) {
+      deliverer_(&consumer_),
+      destroy_cb_(destroy_cb) {
   manager_thread_.Start();
-}
-
-void CaptureMachine::InitializeForTesting(RenderWidgetHost* override,
-                                          const base::Closure& destroy_cb) {
-  copier_.SetRenderWidgetHostForTesting(override);
-  destroy_cb_ = destroy_cb;
 }
 
 void CaptureMachine::SetConsumer(
@@ -803,6 +818,8 @@ void CaptureMachine::Allocate(int width, int height, int frame_rate) {
   settings_.width = width;
   settings_.height = height;
   settings_.frame_rate = frame_rate;
+  // Sets the color format used by OnIncomingCapturedFrame().
+  // Does not apply to OnIncomingCapturedVideoFrame().
   settings_.color = media::VideoCaptureCapability::kARGB;
   settings_.expected_capture_delay = 0;
   settings_.interlaced = false;
@@ -847,6 +864,10 @@ void CaptureMachine::DeAllocate() {
     Stop();
   }
   if (state_ == kAllocated) {
+    BrowserThread::PostTask(
+        BrowserThread::UI, FROM_HERE,
+        base::Bind(&CaptureMachine::DoShutdownTasksOnUIThread, this));
+
     TransitionStateTo(kIdle);
   }
 }
@@ -876,9 +897,8 @@ void CaptureMachine::DeleteFromOutsideThread(const CaptureMachine* x) {
   const base::Closure run_after_delete = x->destroy_cb_;
   // Note: Thread joins are about to happen here (in ~CaptureThread()).
   delete x;
-  if (!run_after_delete.is_null()) {
+  if (!run_after_delete.is_null())
     run_after_delete.Run();
-  }
 }
 
 void CaptureMachine::TransitionStateTo(State next_state) {
@@ -947,61 +967,92 @@ void CaptureMachine::StartSnapshot() {
   if (!is_snapshotting_) {
     is_snapshotting_ = true;
 
-    const BackingStoreCopier::DoneCB& done_cb =
-        media::BindToLoop(manager_thread_.message_loop_proxy(),
-                          base::Bind(&CaptureMachine::SnapshotComplete, this,
-                                     frame_number_, base::Time::Now()));
-    const base::Closure& start_cb =
-        base::Bind(&BackingStoreCopier::StartCopy,
-                   base::Unretained(&copier_),
-                   frame_number_, settings_.width, settings_.height, done_cb);
-    BrowserThread::PostTask(BrowserThread::UI, FROM_HERE, start_cb);
+    BrowserThread::PostTask(
+        BrowserThread::UI, FROM_HERE,
+        base::Bind(&BackingStoreCopier::StartCopy, base::Unretained(&copier_),
+                   make_scoped_refptr(this), frame_number_, settings_.width,
+                   settings_.height));
   }
 
   ScheduleNextFrameCapture();
 }
 
-void CaptureMachine::SnapshotComplete(int frame_number,
-                                      const base::Time& start_time,
-                                      BackingStoreCopier::Result result,
-                                      scoped_ptr<skia::PlatformBitmap> capture,
-                                      const base::Time& capture_time) {
+bool CaptureMachine::FinishSnapshot() {
   DCHECK_EQ(manager_thread_.message_loop(), MessageLoop::current());
 
   DCHECK(is_snapshotting_);
   is_snapshotting_ = false;
 
-  if (state_ != kCapturing) {
+  return state_ == kCapturing;
+}
+
+void CaptureMachine::OnSnapshotComplete(int frame_number,
+                                        const base::Time& start_time,
+                                        const base::TimeDelta& duration,
+                                        const SkBitmap& frame) {
+  manager_thread_.message_loop()->PostTask(
+      FROM_HERE,
+      base::Bind(&CaptureMachine::SnapshotCompleteBitmap, this,
+                 frame_number, start_time, duration, frame));
+}
+
+void CaptureMachine::SnapshotCompleteBitmap(int frame_number,
+                                            const base::Time& start_time,
+                                            const base::TimeDelta& duration,
+                                            const SkBitmap& capture) {
+  if (!FinishSnapshot())
     return;
+
+  UMA_HISTOGRAM_TIMES("TabCapture.SnapshotTime", duration);
+  if (num_renders_pending_ <= 1) {
+    ++num_renders_pending_;
+    renderer_.Render(
+        frame_number,
+        capture,
+        settings_.width, settings_.height,
+        media::BindToLoop(manager_thread_.message_loop_proxy(),
+                          base::Bind(&CaptureMachine::RenderComplete, this,
+                                     frame_number, start_time + duration)));
   }
+}
 
-  switch (result) {
-    case BackingStoreCopier::OK:
-      UMA_HISTOGRAM_TIMES("TabCapture.SnapshotTime",
-                          base::Time::Now() - start_time);
-      if (num_renders_pending_ <= 1) {
-        ++num_renders_pending_;
-        DCHECK(capture);
-        DCHECK(!capture_time.is_null());
-        renderer_.Render(
-            frame_number,
-            capture.Pass(),
-            settings_.width, settings_.height,
-            media::BindToLoop(manager_thread_.message_loop_proxy(),
-                              base::Bind(&CaptureMachine::RenderComplete, this,
-                                         frame_number, capture_time)));
-      }
-      break;
+void CaptureMachine::OnSnapshotComplete(
+    int frame_number,
+    const base::Time& start_time,
+    const base::TimeDelta& duration,
+    const scoped_refptr<media::VideoFrame>& frame) {
+  manager_thread_.message_loop()->PostTask(
+      FROM_HERE,
+      base::Bind(&CaptureMachine::SnapshotCompleteVideoFrame, this,
+                 frame_number, start_time, duration, frame));
+}
 
-    case BackingStoreCopier::TRANSIENT_ERROR:
-      // Skip this frame.
-      break;
+void CaptureMachine::SnapshotCompleteVideoFrame(
+    int frame_number,
+    const base::Time& start_time,
+    const base::TimeDelta& duration,
+    const scoped_refptr<media::VideoFrame>& frame) {
+  if (!FinishSnapshot())
+    return;
 
-    case BackingStoreCopier::NO_SOURCE:
-      DVLOG(1) << "no capture source";
-      Error();
-      break;
-  }
+  UMA_HISTOGRAM_TIMES("TabCapture.SnapshotTime", duration);
+
+  deliverer_.Deliver(frame_number, frame, start_time + duration);
+}
+
+void CaptureMachine::OnSnapshotFailed(CaptureMachine::SnapshotError error,
+                                      int frame_number) {
+  manager_thread_.message_loop()->PostTask(FROM_HERE,
+      base::Bind(&CaptureMachine::SnapshotFailed, this, error, frame_number));
+}
+
+void CaptureMachine::SnapshotFailed(CaptureMachine::SnapshotError error,
+                                    int frame_number) {
+  if (!FinishSnapshot())
+    return;
+
+  if (error == NO_SOURCE)
+    Error();
 }
 
 void CaptureMachine::RenderComplete(int frame_number,
@@ -1012,7 +1063,7 @@ void CaptureMachine::RenderComplete(int frame_number,
   --num_renders_pending_;
   DCHECK_LE(0, num_renders_pending_);
 
-  if (state_ != kCapturing) {
+  if (state_ != kCapturing || !frame_buffer) {
     return;
   }
 
@@ -1027,19 +1078,146 @@ void CaptureMachine::DeliverComplete(const SkBitmap* frame_buffer) {
   renderer_.Release(frame_buffer);
 }
 
-WebContentsVideoCaptureDevice::WebContentsVideoCaptureDevice(
-    const media::VideoCaptureDevice::Name& name,
-    int render_process_id, int render_view_id)
-    : device_name_(name),
-      capturer_(new CaptureMachine(render_process_id, render_view_id)) {}
+void CaptureMachine::DoShutdownTasksOnUIThread() {
+  copier_.StopObservingWebContents();
+}
+
+void BackingStoreCopier::StartCopy(
+    const scoped_refptr<CaptureMachine>& consumer,
+    int frame_number,
+    int desired_width,
+    int desired_height) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
+  if (!web_contents()) {  // No source yet.
+    LookUpAndObserveWebContents();
+    if (!web_contents()) {  // No source ever.
+      consumer->OnSnapshotFailed(CaptureMachine::NO_SOURCE, frame_number);
+      return;
+    }
+  }
+
+  RenderWidgetHost* rwh;
+  if (fullscreen_widget_id_ != MSG_ROUTING_NONE) {
+    RenderProcessHost* process = web_contents()->GetRenderProcessHost();
+    rwh = process ? process->GetRenderWidgetHostByID(fullscreen_widget_id_)
+                  : NULL;
+  } else {
+    rwh = web_contents()->GetRenderViewHost();
+  }
+
+  if (!rwh) {
+    // Transient failure state (e.g., a RenderView is being replaced).
+    consumer->OnSnapshotFailed(CaptureMachine::TRANSIENT_ERROR, frame_number);
+    return;
+  }
+
+  RenderWidgetHostViewPort* view =
+      RenderWidgetHostViewPort::FromRWHV(rwh->GetView());
+
+  gfx::Size fitted_size;
+  if (view) {
+    gfx::Size view_size = view->GetViewBounds().size();
+    if (!view_size.IsEmpty()) {
+      CalculateFittedSize(view_size.width(), view_size.height(),
+                          desired_width, desired_height,
+                          &fitted_size);
+    }
+    if (view_size != last_view_size_) {
+      last_view_size_ = view_size;
+
+      // Measure the number of kilopixels.
+      UMA_HISTOGRAM_COUNTS_10000(
+          "TabCapture.ViewChangeKiloPixels",
+          view_size.width() * view_size.height() / 1024);
+    }
+  }
+
+  TRACE_EVENT_ASYNC_BEGIN1("mirroring", "Capture", this,
+                           "frame_number", frame_number);
+
+  if (view && view->CanCopyToVideoFrame()) {
+    gfx::Size view_size = view->GetViewBounds().size();
+    gfx::Size dst_size(desired_width, desired_height);
+    scoped_refptr<media::VideoFrame> video_frame(
+        media::VideoFrame::CreateFrame(
+            media::VideoFrame::YV12,
+            dst_size,
+            gfx::Rect(dst_size),
+            dst_size,
+            base::TimeDelta()));
+
+    view->CopyFromCompositingSurfaceToVideoFrame(
+        gfx::Rect(view_size),
+        video_frame,
+        base::Bind(&BackingStoreCopier::DidCopyFromBackingStoreToVideoFrame,
+                   base::Unretained(this), consumer, frame_number,
+                   base::Time::Now(), video_frame));
+  } else {
+    rwh->CopyFromBackingStore(
+        gfx::Rect(),
+        fitted_size,
+        base::Bind(&BackingStoreCopier::DidCopyFromBackingStore,
+                   base::Unretained(this), consumer, frame_number,
+                   base::Time::Now()));
+  }
+  // TODO(miu): When a tab is not visible to the user, rendering stops.  For
+  // mirroring, however, it's important that rendering continues to happen.
+}
+
+void BackingStoreCopier::DidCopyFromBackingStore(
+    const scoped_refptr<CaptureMachine>& consumer,
+    int frame_number,
+    const base::Time& start_time,
+    bool success,
+    const SkBitmap& frame) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  // Note: No restriction on which thread invokes this method but, currently,
+  // it's always the UI BrowserThread.
+  TRACE_EVENT_ASYNC_END1("mirroring", "Capture", this,
+                         "frame_number", frame_number);
+
+  if (success) {
+    consumer->OnSnapshotComplete(
+        frame_number, start_time, base::Time::Now() - start_time, frame);
+  } else {
+    // Capture can fail due to transient issues, so just skip this frame.
+    DVLOG(1) << "CopyFromBackingStore was not successful; skipping frame.";
+    consumer->OnSnapshotFailed(CaptureMachine::TRANSIENT_ERROR, frame_number);
+  }
+}
+
+void BackingStoreCopier::DidCopyFromBackingStoreToVideoFrame(
+    const scoped_refptr<CaptureMachine>& consumer,
+    int frame_number,
+    const base::Time& start_time,
+    const scoped_refptr<media::VideoFrame>& frame,
+    bool success) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  // Note: No restriction on which thread invokes this method but, currently,
+  // it's always the UI BrowserThread.
+  TRACE_EVENT_ASYNC_END1("mirroring", "Capture", this,
+                         "frame_number", frame_number);
+
+  if (success) {
+    consumer->OnSnapshotComplete(
+        frame_number, start_time, base::Time::Now() - start_time, frame);
+  } else {
+    // Capture can fail due to transient issues, so just skip this frame.
+    DVLOG(1) << "CopyFromBackingStoreToVideoFrame failure; skipping frame.";
+    consumer->OnSnapshotFailed(
+        CaptureMachine::TRANSIENT_ERROR, frame_number);
+  }
+}
 
 WebContentsVideoCaptureDevice::WebContentsVideoCaptureDevice(
-    RenderWidgetHost* test_source, const base::Closure& destroy_cb)
-    : capturer_(new CaptureMachine(-1, -1)) {
-  device_name_.device_name = "WebContentsForTesting";
-  device_name_.unique_id = "-1:-1";
-  capturer_->InitializeForTesting(test_source, destroy_cb);
-}
+    const media::VideoCaptureDevice::Name& name,
+    int render_process_id,
+    int render_view_id,
+    const base::Closure& destroy_cb)
+    : device_name_(name),
+      capturer_(new CaptureMachine(render_process_id, render_view_id,
+                                   destroy_cb)) {}
 
 WebContentsVideoCaptureDevice::~WebContentsVideoCaptureDevice() {
   DVLOG(2) << "WebContentsVideoCaptureDevice@" << this << " destroying.";
@@ -1047,7 +1225,8 @@ WebContentsVideoCaptureDevice::~WebContentsVideoCaptureDevice() {
 
 // static
 media::VideoCaptureDevice* WebContentsVideoCaptureDevice::Create(
-    const std::string& device_id) {
+    const std::string& device_id,
+    const base::Closure& destroy_cb) {
   // Parse device_id into render_process_id and render_view_id.
   int render_process_id = -1;
   int render_view_id = -1;
@@ -1063,13 +1242,7 @@ media::VideoCaptureDevice* WebContentsVideoCaptureDevice::Create(
   name.unique_id = device_id;
 
   return new WebContentsVideoCaptureDevice(
-      name, render_process_id, render_view_id);
-}
-
-// static
-media::VideoCaptureDevice* WebContentsVideoCaptureDevice::CreateForTesting(
-    RenderWidgetHost* test_source, const base::Closure& destroy_cb) {
-  return new WebContentsVideoCaptureDevice(test_source, destroy_cb);
+      name, render_process_id, render_view_id, destroy_cb);
 }
 
 void WebContentsVideoCaptureDevice::Allocate(

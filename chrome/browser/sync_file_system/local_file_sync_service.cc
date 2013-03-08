@@ -22,16 +22,7 @@
 #include "webkit/fileapi/syncable/sync_file_metadata.h"
 
 using content::BrowserThread;
-using fileapi::FileChange;
-using fileapi::FileChangeList;
 using fileapi::FileSystemURL;
-using fileapi::LocalFileSyncContext;
-using fileapi::LocalFileSyncInfo;
-using fileapi::SyncFileCallback;
-using fileapi::SyncFileMetadataCallback;
-using fileapi::SyncStatusCallback;
-using fileapi::SyncStatusCallback;
-using fileapi::SyncStatusCode;
 
 namespace sync_file_system {
 
@@ -54,17 +45,24 @@ bool LocalFileSyncService::OriginChangeMap::NextOriginToProcess(GURL* origin) {
   DCHECK(origin);
   if (change_count_map_.empty())
     return false;
-  if (next_ == change_count_map_.end())
-    next_ = change_count_map_.begin();
-  DCHECK_NE(0, next_->second);
-  *origin = next_++->first;
-  return true;
+  Map::iterator begin = next_;
+  do {
+    if (next_ == change_count_map_.end())
+      next_ = change_count_map_.begin();
+    DCHECK_NE(0, next_->second);
+    *origin = next_++->first;
+    if (!ContainsKey(disabled_origins_, *origin))
+      return true;
+  } while (next_ != begin);
+  return false;
 }
 
 int64 LocalFileSyncService::OriginChangeMap::GetTotalChangeCount() const {
   int64 num_changes = 0;
   for (Map::const_iterator iter = change_count_map_.begin();
        iter != change_count_map_.end(); ++iter) {
+    if (ContainsKey(disabled_origins_, iter->first))
+      continue;
     num_changes += iter->second;
   }
   return num_changes;
@@ -81,6 +79,16 @@ void LocalFileSyncService::OriginChangeMap::SetOriginChangeCount(
     if (next_ == found)
       ++next_;
     change_count_map_.erase(found);
+  }
+}
+
+void LocalFileSyncService::OriginChangeMap::SetOriginEnabled(
+    const GURL& origin, bool enabled) {
+  if (enabled) {
+    DCHECK(ContainsKey(disabled_origins_, origin));
+    disabled_origins_.erase(origin);
+  } else {
+    disabled_origins_.insert(origin);
   }
 }
 
@@ -130,17 +138,17 @@ void LocalFileSyncService::RegisterURLForWaitingSync(
 void LocalFileSyncService::ProcessLocalChange(
     LocalChangeProcessor* processor,
     const SyncFileCallback& callback) {
-  DCHECK(local_sync_callback_.is_null());
-  local_sync_callback_ = callback;
-
   // Pick an origin to process next.
   GURL origin;
   if (!origin_change_map_.NextOriginToProcess(&origin)) {
-    callback.Run(fileapi::SYNC_STATUS_NO_CHANGE_TO_SYNC, FileSystemURL());
+    callback.Run(SYNC_STATUS_NO_CHANGE_TO_SYNC, FileSystemURL());
     return;
   }
+  DCHECK(local_sync_callback_.is_null());
   DCHECK(!origin.is_empty());
   DCHECK(ContainsKey(origin_to_contexts_, origin));
+
+  local_sync_callback_ = callback;
 
   sync_context_->GetFileForLocalSync(
       origin_to_contexts_[origin],
@@ -149,22 +157,26 @@ void LocalFileSyncService::ProcessLocalChange(
 }
 
 void LocalFileSyncService::HasPendingLocalChanges(
-    const fileapi::FileSystemURL& url,
+    const FileSystemURL& url,
     const HasPendingLocalChangeCallback& callback) {
-  DCHECK(ContainsKey(origin_to_contexts_, url.origin()));
+  if (!ContainsKey(origin_to_contexts_, url.origin())) {
+    base::MessageLoopProxy::current()->PostTask(
+        FROM_HERE,
+        base::Bind(callback, SYNC_FILE_ERROR_INVALID_URL, false));
+    return;
+  }
   sync_context_->HasPendingLocalChanges(
       origin_to_contexts_[url.origin()], url, callback);
 }
 
 void LocalFileSyncService::ClearSyncFlagForURL(
-    const fileapi::FileSystemURL& url) {
+    const FileSystemURL& url) {
   DCHECK(ContainsKey(origin_to_contexts_, url.origin()));
   sync_context_->ClearSyncFlagForURL(url);
 }
 
 void LocalFileSyncService::GetLocalFileMetadata(
-    const fileapi::FileSystemURL& url,
-    const SyncFileMetadataCallback& callback) {
+    const FileSystemURL& url, const SyncFileMetadataCallback& callback) {
   DCHECK(ContainsKey(origin_to_contexts_, url.origin()));
   sync_context_->GetFileMetadata(origin_to_contexts_[url.origin()],
                                  url, callback);
@@ -207,7 +219,7 @@ void LocalFileSyncService::PrepareForProcessRemoteChange(
 
 void LocalFileSyncService::ApplyRemoteChange(
     const FileChange& change,
-    const FilePath& local_path,
+    const base::FilePath& local_path,
     const FileSystemURL& url,
     const SyncStatusCallback& callback) {
   DCHECK(ContainsKey(origin_to_contexts_, url.origin()));
@@ -217,7 +229,7 @@ void LocalFileSyncService::ApplyRemoteChange(
 }
 
 void LocalFileSyncService::ClearLocalChanges(
-    const fileapi::FileSystemURL& url,
+    const FileSystemURL& url,
     const base::Closure& completion_callback) {
   DCHECK(ContainsKey(origin_to_contexts_, url.origin()));
   sync_context_->ClearChangesForURL(origin_to_contexts_[url.origin()],
@@ -225,9 +237,9 @@ void LocalFileSyncService::ClearLocalChanges(
 }
 
 void LocalFileSyncService::RecordFakeLocalChange(
-    const fileapi::FileSystemURL& url,
-    const fileapi::FileChange& change,
-    const fileapi::SyncStatusCallback& callback) {
+    const FileSystemURL& url,
+    const FileChange& change,
+    const SyncStatusCallback& callback) {
   DCHECK(ContainsKey(origin_to_contexts_, url.origin()));
   sync_context_->RecordFakeLocalChange(origin_to_contexts_[url.origin()],
                                        url, change, callback);
@@ -241,9 +253,10 @@ void LocalFileSyncService::OnChangesAvailableInOrigins(
     const GURL& origin = *iter;
     if (!ContainsKey(origin_to_contexts_, origin)) {
       // This could happen if this is called for apps/origins that haven't
-      // been initialized yet. (Local change tracker could call this for
-      // uninitialized origins while it's reading dirty files from the
-      // database in the initialization phase.)
+      // been initialized yet, or for apps/origins that are disabled.
+      // (Local change tracker could call this for uninitialized origins
+      // while it's reading dirty files from the database in the
+      // initialization phase.)
       pending_origins_with_changes_.insert(origin);
       continue;
     }
@@ -260,12 +273,18 @@ void LocalFileSyncService::OnChangesAvailableInOrigins(
                     OnLocalChangeAvailable(num_changes));
 }
 
+void LocalFileSyncService::SetOriginEnabled(const GURL& origin, bool enabled) {
+  if (!ContainsKey(origin_to_contexts_, origin))
+    return;
+  origin_change_map_.SetOriginEnabled(origin, enabled);
+}
+
 void LocalFileSyncService::DidInitializeFileSystemContext(
     const GURL& app_origin,
     fileapi::FileSystemContext* file_system_context,
     const SyncStatusCallback& callback,
     SyncStatusCode status) {
-  if (status != fileapi::SYNC_STATUS_OK) {
+  if (status != SYNC_STATUS_OK) {
     callback.Run(status);
     return;
   }
@@ -287,17 +306,16 @@ void LocalFileSyncService::DidInitializeFileSystemContext(
 }
 
 void LocalFileSyncService::DidInitializeForRemoteSync(
-    const fileapi::FileSystemURL& url,
+    const FileSystemURL& url,
     const std::string& service_name,
     fileapi::FileSystemContext* file_system_context,
     const PrepareChangeCallback& callback,
     SyncStatusCode status) {
-  if (status != fileapi::SYNC_STATUS_OK) {
+  if (status != SYNC_STATUS_OK) {
     DVLOG(1) << "FileSystemContext initialization failed for remote sync:"
              << url.DebugString() << " status=" << status
              << " (" << SyncStatusCodeToString(status) << ")";
-    callback.Run(status, fileapi::SyncFileMetadata(),
-                 FileChangeList());
+    callback.Run(status, SyncFileMetadata(), FileChangeList());
     return;
   }
   origin_to_contexts_[url.origin()] = file_system_context;
@@ -305,10 +323,10 @@ void LocalFileSyncService::DidInitializeForRemoteSync(
 }
 
 void LocalFileSyncService::RunLocalSyncCallback(
-    fileapi::SyncStatusCode status,
-    const fileapi::FileSystemURL& url) {
+    SyncStatusCode status,
+    const FileSystemURL& url) {
   DCHECK(!local_sync_callback_.is_null());
-  fileapi::SyncFileCallback callback = local_sync_callback_;
+  SyncFileCallback callback = local_sync_callback_;
   local_sync_callback_.Reset();
   callback.Run(status, url);
 }
@@ -318,13 +336,13 @@ void LocalFileSyncService::DidGetFileForLocalSync(
     SyncStatusCode status,
     const LocalFileSyncInfo& sync_file_info) {
   DCHECK(!local_sync_callback_.is_null());
-  if (status != fileapi::SYNC_STATUS_OK) {
+  if (status != SYNC_STATUS_OK) {
     RunLocalSyncCallback(status, sync_file_info.url);
     return;
   }
   if (sync_file_info.changes.empty()) {
     // There's a slight chance this could happen.
-    fileapi::SyncFileCallback callback = local_sync_callback_;
+    SyncFileCallback callback = local_sync_callback_;
     local_sync_callback_.Reset();
     ProcessLocalChange(processor, callback);
     return;
@@ -356,19 +374,18 @@ void LocalFileSyncService::ProcessNextChangeForURL(
            << " change:" << last_change.DebugString()
            << " status:" << status;
 
-  if (status == fileapi::SYNC_FILE_ERROR_NOT_FOUND &&
+  if (status == SYNC_FILE_ERROR_NOT_FOUND &&
       last_change.change() == FileChange::FILE_CHANGE_DELETE) {
     // This must be ok (and could happen).
-    status = fileapi::SYNC_STATUS_OK;
+    status = SYNC_STATUS_OK;
   }
 
   // TODO(kinuko,tzik): Handle other errors that should not be considered
   // a sync error.
 
   const FileSystemURL& url = sync_file_info.url;
-  if (status != fileapi::SYNC_STATUS_OK || changes.empty()) {
-    if (status == fileapi::SYNC_STATUS_OK ||
-        status == fileapi::SYNC_STATUS_HAS_CONFLICT) {
+  if (status != SYNC_STATUS_OK || changes.empty()) {
+    if (status == SYNC_STATUS_OK || status == SYNC_STATUS_HAS_CONFLICT) {
       // Clear the recorded changes for the URL if the sync was successfull
       // OR has failed due to conflict (so that we won't stick to the same
       // conflicting file again and again).

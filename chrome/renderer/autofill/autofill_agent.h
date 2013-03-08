@@ -23,6 +23,7 @@ struct FormFieldData;
 
 namespace WebKit {
 class WebNode;
+class WebView;
 }
 
 namespace autofill {
@@ -99,6 +100,7 @@ class AutofillAgent : public content::RenderViewObserver,
   virtual void didRequestAutocomplete(
       WebKit::WebFrame* frame,
       const WebKit::WebFormElement& form) OVERRIDE;
+  virtual void setIgnoreTextChanges(bool ignore) OVERRIDE;
 
   void OnSuggestionsReturned(int query_id,
                              const std::vector<string16>& values,
@@ -212,12 +214,18 @@ class AutofillAgent : public content::RenderViewObserver,
   // The form element currently requesting an interactive autocomplete.
   WebKit::WebFormElement in_flight_request_form_;
 
+  // All the form elements seen in the top frame.
+  std::vector<WebKit::WebFormElement> form_elements_;
+
   // The action to take when receiving Autofill data from the AutofillManager.
   AutofillAction autofill_action_;
 
   // Pointer to the current topmost frame.  Used in autocheckout flows so
   // elements can be clicked.
   WebKit::WebFrame* topmost_frame_;
+
+  // Pointer to the WebView. Used to access page scale factor.
+  WebKit::WebView* web_view_;
 
   // Should we display a warning if autofill is disabled?
   bool display_warning_if_disabled_;
@@ -238,6 +246,11 @@ class AutofillAgent : public content::RenderViewObserver,
   // Used to signal that we need to watch for loading failures in an
   // Autocheckout flow.
   bool autocheckout_click_in_progress_;
+
+  // Whether or not to ignore text changes.  Useful for when we're committing
+  // a composition when we are defocusing the WebView and we don't want to
+  // trigger an autofill popup to show.
+  bool ignore_text_changes_;
 
   base::WeakPtrFactory<AutofillAgent> weak_ptr_factory_;
 

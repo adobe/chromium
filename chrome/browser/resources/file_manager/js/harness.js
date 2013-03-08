@@ -27,9 +27,9 @@ var harness = {
         'position: absolute; left: 4px; bottom: 4px; width: 94px;' +
         'z-index: 100; opacity: 0.3';
 
-    function createControl(tag) {
+    var createControl = function(tag) {
       return util.createChild(harnessControls, '', tag);
-    }
+    };
 
     var fileChooser = createControl('input');
     fileChooser.type = 'file';
@@ -57,7 +57,7 @@ var harness = {
   initFileSystem: function(opt_callback) {
     util.installFileErrorToString();
 
-    function onFilesystem(filesystem) {
+    var onFilesystem = function(filesystem) {
       console.log('Filesystem found.');
       harness.filesystem = filesystem;
       chrome.fileBrowserPrivate.getMountPoints(function(mountPoints) {
@@ -67,9 +67,9 @@ var harness = {
         }
         createRoots(roots);
       });
-    }
+    };
 
-    function createRoots(roots) {
+    var createRoots = function(roots) {
       if (roots.length == 0) {
         if (harness.fileManager)
           harness.fileManager.directoryModel_.changeDirectory('/Downloads');
@@ -86,7 +86,7 @@ var harness = {
             console.log('Error creating ' + root + ':' + err.toString());
             createRoots(roots);
           });
-    }
+    };
 
     window.webkitStorageInfo.requestQuota(
         chrome.fileBrowserPrivate.FS_TYPE,
@@ -103,44 +103,44 @@ var harness = {
 
   initPathControls: function() {
     var paramstr = decodeURIComponent(document.location.search.substr(1));
-    this.params = paramstr ? JSON.parse(paramstr) : {};
+    harness.params = paramstr ? JSON.parse(paramstr) : {};
 
     var input = document.querySelector('#default-path');
-    input.value = this.params.defaultPath || '';
-    input.addEventListener('keyup', this.onInputKeyUp.bind(this));
+    input.value = harness.params.defaultPath || '';
+    input.addEventListener('keyup', harness.onInputKeyUp);
   },
 
   initListeners: function() {
     document.querySelector('input[type="file"]').
-        addEventListener('change', this.onFilesChange.bind(this));
+        addEventListener('change', harness.onFilesChange);
     document.querySelector('button#reset').
-        addEventListener('click', this.onClearClick.bind(this));
+        addEventListener('click', harness.onClearClick);
     document.querySelector('button#populate').
-        addEventListener('click', this.onPopulateClick.bind(this));
+        addEventListener('click', harness.onPopulateClick);
   },
 
   onInputKeyUp: function(event) {
     if (event.keyCode != 13)
       return;
 
-    this.changePath();
+    harness.changePath();
   },
 
   changePath: function() {
     var input = document.querySelector('#default-path');
-    this.changeParam('defaultPath', input.value);
+    harness.changeParam('defaultPath', input.value);
   },
 
   changeParam: function(name, value) {
-    this.params[name] = value;
-    document.location.href = '?' + JSON.stringify(this.params);
+    harness.params[name] = value;
+    document.location.href = '?' + JSON.stringify(harness.params);
   },
 
   /**
    * 'Reset Filesystem' button click handler.
    */
   onClearClick: function() {
-    harness.resetFilesystem(this.filesystem, harness.initFileSystem);
+    harness.resetFilesystem(harness.filesystem, harness.initFileSystem);
   },
 
   resetFilesystem: function(filesystem, opt_callback) {
@@ -161,7 +161,7 @@ var harness = {
    * 'Auto-populate' button click handler.
    */
   onPopulateClick: function() {
-    harness.importWebDirectory(this.filesystem,
+    harness.importWebDirectory(harness.filesystem,
         'Downloads', 'harness_files', function() {}, harness.refreshDirectory);
   },
 
@@ -169,7 +169,7 @@ var harness = {
    * Change handler for the 'input type=file' element.
    */
   onFilesChange: function(event) {
-    this.importFiles(harness.filesystem,
+    harness.importFiles(harness.filesystem,
         harness.fileManager.getCurrentDirectory(),
         [].slice.call(event.target.files),
         harness.refreshDirectory.bind(harness));
@@ -207,7 +207,7 @@ var harness = {
    * @param {function} callback Completion callback.
    */
   copyBlob: function(filesystem, dstPath, srcBlob, callback) {
-    function onWriterCreated(entry, writer) {
+    var onWriterCreated = function(entry, writer) {
       writer.onerror =
           util.flog('Error writing: ' + entry.fullPath, callback);
       writer.onwriteend = function() {
@@ -216,12 +216,12 @@ var harness = {
       };
 
       writer.write(srcBlob);
-    }
+    };
 
-    function onFileFound(fileEntry) {
+    var onFileFound = function(fileEntry) {
       fileEntry.createWriter(onWriterCreated.bind(null, fileEntry), util.flog(
           'Error creating writer for: ' + fileEntry.fullPath, callback));
-    }
+    };
 
     util.getOrCreateFile(filesystem.root, dstPath, onFileFound,
         util.flog('Error finding path: ' + dstPath, callback));
@@ -236,7 +236,7 @@ var harness = {
    * @param {function} callback Completion callback.
    */
   importFiles: function(filesystem, dstDir, files, callback) {
-    function processNextFile() {
+    var processNextFile = function() {
       if (files.length == 0) {
         console.log('Import complete');
         callback();
@@ -246,7 +246,7 @@ var harness = {
       var file = files.shift();
       harness.copyBlob(
           filesystem, dstDir + '/' + file.name, file, processNextFile);
-    }
+    };
 
     console.log('Start import: ' + files.length + ' file(s)');
     processNextFile();
@@ -268,7 +268,7 @@ var harness = {
       filesystem, dstDirPath, srcDirUrl, onProgress, onComplete) {
     var childNames = [];
 
-    function readFromUrl(url, type, callback) {
+    var readFromUrl = function(url, type, callback) {
       var xhr = new XMLHttpRequest();
       xhr.open('GET', url, true);
       xhr.responseType = type;
@@ -280,9 +280,9 @@ var harness = {
           callback(null);
       };
       xhr.send();
-    }
+    };
 
-    function processNextChild() {
+    var processNextChild = function() {
       if (childNames.length == 0) {
         onComplete();
         return;
@@ -303,7 +303,7 @@ var harness = {
           harness.copyBlob(filesystem, dstChildPath, blob, processNextChild);
         });
       }
-    }
+    };
 
     readFromUrl(srcDirUrl, 'text', function(text) {
       if (!text) {

@@ -7,7 +7,7 @@
 
 #include <string>
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
@@ -16,9 +16,9 @@
 #include "sync/api/syncable_service.h"
 
 // Defines a custom dictionary where users can add their own words. All words
-// must be UTF8, between 1 and 99 bytes long, and without ASCII whitespace. The
-// dictionary contains its own checksum when saved on disk. Example dictionary
-// file contents:
+// must be UTF8, between 1 and 99 bytes long, and without leading or trailing
+// ASCII whitespace. The dictionary contains its own checksum when saved on
+// disk. Example dictionary file contents:
 //
 //   bar
 //   foo
@@ -74,7 +74,7 @@ class SpellcheckCustomDictionary : public SpellcheckDictionary,
     virtual void OnCustomDictionaryChanged(const Change& dictionary_change) = 0;
   };
 
-  explicit SpellcheckCustomDictionary(Profile* profile);
+  explicit SpellcheckCustomDictionary(const base::FilePath& path);
   virtual ~SpellcheckCustomDictionary();
 
   // Returns the in-memory cache of words in the custom dictionary.
@@ -126,13 +126,13 @@ class SpellcheckCustomDictionary : public SpellcheckDictionary,
   // Makes sure that the custom dictionary file does not have duplicates and
   // contains only valid words.
   static chrome::spellcheck_common::WordList LoadDictionaryFile(
-      const FilePath& path);
+      const base::FilePath& path);
 
   // Applies the change in |dictionary_change| to the custom spellcheck
   // dictionary. Assumes that |dictionary_change| has been sanitized.
   static void UpdateDictionaryFile(
       const Change& dictionary_change,
-      const FilePath& path);
+      const base::FilePath& path);
 
   // The reply point for PostTaskAndReplyWithResult, called when
   // LoadDictionaryFile finishes reading the dictionary file. Does not modify
@@ -160,8 +160,8 @@ class SpellcheckCustomDictionary : public SpellcheckDictionary,
   // In-memory cache of the custom words file.
   chrome::spellcheck_common::WordList words_;
 
-  // A path for custom dictionary per profile.
-  FilePath custom_dictionary_path_;
+  // A path for custom dictionary.
+  base::FilePath custom_dictionary_path_;
 
   // Used to create weak pointers for an instance of this class.
   base::WeakPtrFactory<SpellcheckCustomDictionary> weak_ptr_factory_;

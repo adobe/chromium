@@ -22,7 +22,7 @@ uint64 overriding_content_length = 0;
 
 // This function is used to implement Init().
 template<typename FileStreamDeleter>
-int InitInternal(const FilePath& path,
+int InitInternal(const base::FilePath& path,
                  uint64 range_offset,
                  uint64 range_length,
                  const base::Time& expected_modification_time,
@@ -110,7 +110,7 @@ void UploadFileElementReader::FileStreamDeleter::operator() (
 
 UploadFileElementReader::UploadFileElementReader(
     base::TaskRunner* task_runner,
-    const FilePath& path,
+    const base::FilePath& path,
     uint64 range_offset,
     uint64 range_length,
     const base::Time& expected_modification_time)
@@ -222,7 +222,7 @@ void UploadFileElementReader::OnReadCompleted(
     int result) {
   file_stream_.swap(file_stream);
   if (result > 0) {
-    DCHECK_GE(static_cast<int>(bytes_remaining_), result);
+    DCHECK_GE(bytes_remaining_, static_cast<uint64>(result));
     bytes_remaining_ -= result;
   }
   if (!callback.is_null())
@@ -240,7 +240,7 @@ UploadFileElementReader::ScopedOverridingContentLengthForTests::
 }
 
 UploadFileElementReaderSync::UploadFileElementReaderSync(
-    const FilePath& path,
+    const base::FilePath& path,
     uint64 range_offset,
     uint64 range_length,
     const base::Time& expected_modification_time)
@@ -281,7 +281,7 @@ int UploadFileElementReaderSync::Read(IOBuffer* buf,
   const int result = ReadInternal(buf, buf_length, BytesRemaining(),
                                   file_stream_.get());
   if (result > 0) {
-    DCHECK_GE(static_cast<int>(bytes_remaining_), result);
+    DCHECK_GE(bytes_remaining_, static_cast<uint64>(result));
     bytes_remaining_ -= result;
   }
   return result;

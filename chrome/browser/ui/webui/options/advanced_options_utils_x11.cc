@@ -8,8 +8,8 @@
 
 #include "base/bind.h"
 #include "base/environment.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/nix/xdg_util.h"
 #include "base/process_util.h"
 #include "base/string_util.h"
@@ -81,7 +81,7 @@ bool StartProxyConfigUtil(const char* command[]) {
   Tokenize(path, ":", &paths);
   bool found = false;
   for (size_t i = 0; i < paths.size(); ++i) {
-    FilePath file(paths[i]);
+    base::FilePath file(paths[i]);
     if (file_util::PathExists(file.Append(command[0]))) {
       found = true;
       break;

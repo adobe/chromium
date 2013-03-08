@@ -24,7 +24,7 @@ static const int64 kNoTimestamp = kint64min;
 
 #if defined(CLEAR_KEY_CDM_USE_FFMPEG_DECODER)
 #include "base/at_exit.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/path_service.h"
 #include "media/base/media.h"
 #include "webkit/media/crypto/ppapi/ffmpeg_cdm_audio_decoder.h"
@@ -50,8 +50,8 @@ static base::AtExitManager g_at_exit_manager;
 // are required for running in the sandbox, and should no longer be required
 // after http://crbug.com/91970 is fixed.
 static bool InitializeFFmpegLibraries() {
-  FilePath file_path;
-  CHECK(PathService::Get(base::DIR_EXE, &file_path));
+  base::FilePath file_path;
+  CHECK(PathService::Get(base::DIR_MODULE, &file_path));
   CHECK(media::InitializeMediaLibrary(file_path));
   return true;
 }
@@ -125,18 +125,22 @@ void INITIALIZE_CDM_MODULE() {
 void DeinitializeCdmModule() {
 }
 
-cdm::ContentDecryptionModule* CreateCdmInstance(const char* key_system_arg,
-                                                int key_system_size,
-                                                cdm::Allocator* allocator,
-                                                cdm::Host* host) {
+void* CreateCdmInstance(
+    int cdm_interface_version,
+    const char* key_system, int key_system_size,
+    GetCdmHostFunc get_cdm_host_func, void* user_data) {
   DVLOG(1) << "CreateCdmInstance()";
-  DCHECK_EQ(std::string(key_system_arg, key_system_size), kExternalClearKey);
-  return new webkit_media::ClearKeyCdm(allocator, host);
-}
 
-void DestroyCdmInstance(cdm::ContentDecryptionModule* instance) {
-  DVLOG(1) << "DestroyCdmInstance()";
-  delete instance;
+  if (cdm_interface_version != cdm::kCdmInterfaceVersion)
+    return NULL;
+
+  cdm::Host* host = static_cast<cdm::Host*>(
+      get_cdm_host_func(cdm::kHostInterfaceVersion, user_data));
+  if (!host)
+    return NULL;
+
+  return static_cast<cdm::ContentDecryptionModule*>(
+      new webkit_media::ClearKeyCdm(host));
 }
 
 const char* GetCdmVersion() {
@@ -191,16 +195,14 @@ void ClearKeyCdm::Client::NeedKey(const std::string& key_system,
   NOTREACHED();
 }
 
-ClearKeyCdm::ClearKeyCdm(cdm::Allocator* allocator, cdm::Host* host)
+ClearKeyCdm::ClearKeyCdm(cdm::Host* host)
     : decryptor_(base::Bind(&Client::KeyAdded, base::Unretained(&client_)),
                  base::Bind(&Client::KeyError, base::Unretained(&client_)),
                  base::Bind(&Client::KeyMessage, base::Unretained(&client_)),
                  base::Bind(&Client::NeedKey, base::Unretained(&client_))),
-      allocator_(allocator),
       host_(host),
       timer_delay_ms_(kInitialTimerDelayMs),
       timer_set_(false) {
-  DCHECK(allocator_);
 #if defined(CLEAR_KEY_CDM_USE_FAKE_AUDIO_DECODER)
   channel_count_ = 0;
   bits_per_channel_ = 0;
@@ -314,7 +316,7 @@ cdm::Status ClearKeyCdm::Decrypt(
 
   DCHECK(buffer->GetData());
   decrypted_block->SetDecryptedBuffer(
-      allocator_->Allocate(buffer->GetDataSize()));
+      host_->Allocate(buffer->GetDataSize()));
   memcpy(reinterpret_cast<void*>(decrypted_block->DecryptedBuffer()->Data()),
          buffer->GetData(),
          buffer->GetDataSize());
@@ -328,7 +330,7 @@ cdm::Status ClearKeyCdm::InitializeAudioDecoder(
     const cdm::AudioDecoderConfig& audio_decoder_config) {
 #if defined(CLEAR_KEY_CDM_USE_FFMPEG_DECODER)
   if (!audio_decoder_)
-    audio_decoder_.reset(new webkit_media::FFmpegCdmAudioDecoder(allocator_));
+    audio_decoder_.reset(new webkit_media::FFmpegCdmAudioDecoder(host_));
 
   if (!audio_decoder_->Initialize(audio_decoder_config))
     return cdm::kSessionError;
@@ -353,7 +355,7 @@ cdm::Status ClearKeyCdm::InitializeVideoDecoder(
   }
 
   // Any uninitialized decoder will be replaced.
-  video_decoder_ = CreateVideoDecoder(allocator_, video_decoder_config);
+  video_decoder_ = CreateVideoDecoder(host_, video_decoder_config);
   if (!video_decoder_)
     return cdm::kSessionError;
 
@@ -412,12 +414,16 @@ cdm::Status ClearKeyCdm::DecryptAndDecodeFrame(
   if (status != cdm::kSuccess)
     return status;
 
-  DCHECK(status == cdm::kSuccess);
-  DCHECK(buffer);
-  return video_decoder_->DecodeFrame(buffer.get()->GetData(),
-                                     buffer->GetDataSize(),
-                                     encrypted_buffer.timestamp,
-                                     decoded_frame);
+  const uint8_t* data = NULL;
+  int32_t size = 0;
+  int64_t timestamp = 0;
+  if (!buffer->IsEndOfStream()) {
+    data = buffer->GetData();
+    size = buffer->GetDataSize();
+    timestamp = encrypted_buffer.timestamp;
+  }
+
+  return video_decoder_->DecodeFrame(data, size, timestamp, decoded_frame);
 }
 
 cdm::Status ClearKeyCdm::DecryptAndDecodeSamples(
@@ -432,12 +438,16 @@ cdm::Status ClearKeyCdm::DecryptAndDecodeSamples(
     return status;
 
 #if defined(CLEAR_KEY_CDM_USE_FFMPEG_DECODER)
-  DCHECK(status == cdm::kSuccess);
-  DCHECK(buffer);
-  return audio_decoder_->DecodeBuffer(buffer.get()->GetData(),
-                                      buffer->GetDataSize(),
-                                      encrypted_buffer.timestamp,
-                                      audio_frames);
+  const uint8_t* data = NULL;
+  int32_t size = 0;
+  int64_t timestamp = 0;
+  if (!buffer->IsEndOfStream()) {
+    data = buffer->GetData();
+    size = buffer->GetDataSize();
+    timestamp = encrypted_buffer.timestamp;
+  }
+
+  return audio_decoder_->DecodeBuffer(data, size, timestamp, audio_frames);
 #elif defined(CLEAR_KEY_CDM_USE_FAKE_AUDIO_DECODER)
   int64 timestamp_in_microseconds = kNoTimestamp;
   if (!buffer->IsEndOfStream()) {
@@ -448,6 +458,11 @@ cdm::Status ClearKeyCdm::DecryptAndDecodeSamples(
 #else
   return cdm::kSuccess;
 #endif  // CLEAR_KEY_CDM_USE_FAKE_AUDIO_DECODER
+}
+
+void ClearKeyCdm::Destroy() {
+  DVLOG(1) << "Destroy()";
+  delete this;
 }
 
 void ClearKeyCdm::ScheduleNextHeartBeat() {
@@ -518,7 +533,7 @@ int ClearKeyCdm::GenerateFakeAudioFramesFromDuration(
   int64 timestamp = CurrentTimeStampInMicroseconds();
 
   const int kHeaderSize = sizeof(timestamp) + sizeof(frame_size);
-  audio_frames->SetFrameBuffer(allocator_->Allocate(kHeaderSize + frame_size));
+  audio_frames->SetFrameBuffer(host_->Allocate(kHeaderSize + frame_size));
   uint8_t* data = audio_frames->FrameBuffer()->Data();
 
   memcpy(data, &timestamp, sizeof(timestamp));

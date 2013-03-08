@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2013 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@
 #include "base/message_loop.h"
 #include "content/browser/renderer_host/render_widget_host_delegate.h"
 #include "content/browser/renderer_host/render_widget_host_impl.h"
+#include "content/browser/renderer_host/test_render_view_host.h"
 #include "content/common/view_messages.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/test/mock_render_process_host.h"
@@ -32,8 +33,10 @@ class RenderWidgetHostViewGuestTest : public testing::Test {
         new MockRenderProcessHost(browser_context_.get());
     widget_host_ = new RenderWidgetHostImpl(
         &delegate_, process_host, MSG_ROUTING_NONE);
+    test_platform_view_.reset(new TestRenderWidgetHostView(widget_host_));
     view_ = static_cast<RenderWidgetHostViewGuest*>(
-        new RenderWidgetHostViewGuest(widget_host_, NULL));
+        new RenderWidgetHostViewGuest(
+            widget_host_, NULL, test_platform_view_.get()));
   }
 
   virtual void TearDown() {
@@ -57,6 +60,8 @@ class RenderWidgetHostViewGuestTest : public testing::Test {
   RenderWidgetHostImpl* widget_host_;
   RenderWidgetHostViewGuest* view_;
 
+  scoped_ptr<TestRenderWidgetHostView> test_platform_view_;
+
  private:
   DISALLOW_COPY_AND_ASSIGN(RenderWidgetHostViewGuestTest);
 };
@@ -75,26 +80,6 @@ TEST_F(RenderWidgetHostViewGuestTest, VisibilityTest) {
 
   view_->WasHidden();
   ASSERT_FALSE(view_->IsShowing());
-}
-
-TEST_F(RenderWidgetHostViewGuestTest, SizeTest) {
-  {
-    gfx::Rect bounds(0, 0, 123, 456);
-    view_->SetBounds(bounds);
-
-    gfx::Rect view_bounds = view_->GetViewBounds();
-    EXPECT_EQ(bounds, view_bounds);
-  }
-
-  {
-    gfx::Rect bounds(0, 0, 234, 567);
-    gfx::Size size(234, 567);
-
-    view_->SetSize(size);
-
-    gfx::Rect view_bounds = view_->GetViewBounds();
-    EXPECT_EQ(bounds, view_bounds);
-  }
 }
 
 }  // namespace content

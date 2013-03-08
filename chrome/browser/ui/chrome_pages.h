@@ -32,11 +32,13 @@ enum HelpSource {
 };
 
 
+void ShowAppLauncherPage(Browser* browser);
 void ShowBookmarkManager(Browser* browser);
 void ShowBookmarkManagerForNode(Browser* browser, int64 node_id);
 void ShowHistory(Browser* browser);
 void ShowDownloads(Browser* browser);
-void ShowExtensions(Browser* browser);
+void ShowExtensions(Browser* browser,
+                    const std::string& extension_to_highlight);
 void ShowConflicts(Browser* browser);
 void ShowFeedbackPage(Browser* browser,
                       const std::string& description_template,
@@ -55,7 +57,9 @@ void ShowPasswordManager(Browser* browser);
 void ShowImportDialog(Browser* browser);
 void ShowAboutChrome(Browser* browser);
 void ShowSearchEngineSettings(Browser* browser);
-void ShowSyncSetup(Browser* browser, SyncPromoUI::Source source);
+// If the user is already signed in, shows the "Signin" portion of Settings,
+// otherwise initiates signin.
+void ShowBrowserSignin(Browser* browser, SyncPromoUI::Source source);
 
 // Open a tab to sign into GAIA.
 void ShowGaiaSignin(Browser* browser,

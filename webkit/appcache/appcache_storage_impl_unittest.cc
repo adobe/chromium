@@ -65,13 +65,14 @@ class AppCacheStorageImplTest : public testing::Test {
           found_cache_id_(kNoCacheId), test_(test) {
     }
 
-    void OnCacheLoaded(AppCache* cache, int64 cache_id) {
+    virtual void OnCacheLoaded(AppCache* cache, int64 cache_id) OVERRIDE {
       loaded_cache_ = cache;
       loaded_cache_id_ = cache_id;
       test_->ScheduleNextTask();
     }
 
-    void OnGroupLoaded(AppCacheGroup* group, const GURL& manifest_url) {
+    virtual void OnGroupLoaded(AppCacheGroup* group,
+                               const GURL& manifest_url) OVERRIDE {
       loaded_group_ = group;
       loaded_manifest_url_ = manifest_url;
       loaded_groups_newest_cache_ = group ? group->newest_complete_cache()
@@ -79,26 +80,29 @@ class AppCacheStorageImplTest : public testing::Test {
       test_->ScheduleNextTask();
     }
 
-    void OnGroupAndNewestCacheStored(
+    virtual void OnGroupAndNewestCacheStored(
         AppCacheGroup* group, AppCache* newest_cache, bool success,
-        bool would_exceed_quota) {
+        bool would_exceed_quota) OVERRIDE {
       stored_group_ = group;
       stored_group_success_ = success;
       would_exceed_quota_ = would_exceed_quota;
       test_->ScheduleNextTask();
     }
 
-    void OnGroupMadeObsolete(AppCacheGroup* group, bool success) {
+    virtual void OnGroupMadeObsolete(AppCacheGroup* group,
+                                     bool success) OVERRIDE {
       obsoleted_group_ = group;
       obsoleted_success_ = success;
       test_->ScheduleNextTask();
     }
 
-    void OnMainResponseFound(const GURL& url, const AppCacheEntry& entry,
-                             const GURL& namespace_entry_url,
-                             const AppCacheEntry& fallback_entry,
-                             int64 cache_id, int64 group_id,
-                             const GURL& manifest_url) {
+    virtual void OnMainResponseFound(const GURL& url,
+                                     const AppCacheEntry& entry,
+                                     const GURL& namespace_entry_url,
+                                     const AppCacheEntry& fallback_entry,
+                                     int64 cache_id,
+                                     int64 group_id,
+                                     const GURL& manifest_url) OVERRIDE {
       found_url_ = url;
       found_entry_ = entry;
       found_namespace_entry_url_ = namespace_entry_url;
@@ -132,14 +136,15 @@ class AppCacheStorageImplTest : public testing::Test {
   class MockQuotaManager : public quota::QuotaManager {
    public:
     MockQuotaManager()
-      : QuotaManager(true /* is_incognito */, FilePath(),
+      : QuotaManager(true /* is_incognito */, base::FilePath(),
                      io_thread->message_loop_proxy(),
                      db_thread->message_loop_proxy(),
                      NULL),
         async_(false) {}
 
     virtual void GetUsageAndQuota(
-        const GURL& origin, quota::StorageType type,
+        const GURL& origin,
+        quota::StorageType type,
         const GetUsageAndQuotaCallback& callback) OVERRIDE {
       EXPECT_EQ(kOrigin, origin);
       EXPECT_EQ(quota::kStorageTypeTemporary, type);
@@ -261,7 +266,8 @@ class AppCacheStorageImplTest : public testing::Test {
   void SetUpTest() {
     DCHECK(MessageLoop::current() == io_thread->message_loop());
     service_.reset(new AppCacheService(NULL));
-    service_->Initialize(FilePath(), db_thread->message_loop_proxy(), NULL);
+    service_->Initialize(
+        base::FilePath(), db_thread->message_loop_proxy(), NULL);
     mock_quota_manager_proxy_ = new MockQuotaManagerProxy();
     service_->quota_manager_proxy_ = mock_quota_manager_proxy_;
     delegate_.reset(new MockStorageDelegate(this));
@@ -349,7 +355,7 @@ class AppCacheStorageImplTest : public testing::Test {
     // Setup some preconditions. Make an 'unstored' cache for
     // us to load. The ctor should put it in the working set.
     int64 cache_id = storage()->NewCacheId();
-    scoped_refptr<AppCache> cache(new AppCache(service(), cache_id));
+    scoped_refptr<AppCache> cache(new AppCache(storage(), cache_id));
 
     // Conduct the test.
     storage()->LoadCache(cache_id, delegate());
@@ -467,8 +473,8 @@ class AppCacheStorageImplTest : public testing::Test {
     // Setup some preconditions. Create a group and newest cache that
     // appear to be "unstored".
     group_ = new AppCacheGroup(
-        service(), kManifestUrl, storage()->NewGroupId());
-    cache_ = new AppCache(service(), storage()->NewCacheId());
+        storage(), kManifestUrl, storage()->NewGroupId());
+    cache_ = new AppCache(storage(), storage()->NewCacheId());
     cache_->AddEntry(kEntryUrl, AppCacheEntry(AppCacheEntry::EXPLICIT, 1,
                                               kDefaultEntrySize));
     // Hold a ref to the cache simulate the UpdateJob holding that ref,
@@ -516,7 +522,7 @@ class AppCacheStorageImplTest : public testing::Test {
     EXPECT_EQ(kDefaultEntrySize, storage()->usage_map_[kOrigin]);
 
     // And a newest unstored complete cache.
-    cache2_ = new AppCache(service(), 2);
+    cache2_ = new AppCache(storage(), 2);
     cache2_->AddEntry(kEntryUrl, AppCacheEntry(AppCacheEntry::MASTER, 1,
                                                kDefaultEntrySize + 100));
 
@@ -620,8 +626,8 @@ class AppCacheStorageImplTest : public testing::Test {
     // appear to be "unstored" and big enough to exceed the 5M limit.
     const int64 kTooBig = 10 * 1024 * 1024;  // 10M
     group_ = new AppCacheGroup(
-        service(), kManifestUrl, storage()->NewGroupId());
-    cache_ = new AppCache(service(), storage()->NewCacheId());
+        storage(), kManifestUrl, storage()->NewGroupId());
+    cache_ = new AppCache(storage(), storage()->NewCacheId());
     cache_->AddEntry(kManifestUrl,
                      AppCacheEntry(AppCacheEntry::MANIFEST, 1, kTooBig));
     // Hold a ref to the cache simulate the UpdateJob holding that ref,
@@ -1271,8 +1277,8 @@ class AppCacheStorageImplTest : public testing::Test {
     AppCacheEntry default_entry(
         AppCacheEntry::EXPLICIT, cache_id + kDefaultEntryIdOffset,
         kDefaultEntrySize);
-    group_ = new AppCacheGroup(service(), manifest_url, group_id);
-    cache_ = new AppCache(service(), cache_id);
+    group_ = new AppCacheGroup(storage(), manifest_url, group_id);
+    cache_ = new AppCache(storage(), cache_id);
     cache_->AddEntry(kDefaultEntryUrl, default_entry);
     cache_->set_complete(true);
     group_->AddCache(cache_);

@@ -8,13 +8,13 @@
 #include <string>
 
 #include "base/basictypes.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
 
 static FILE* perf_log_file = NULL;
 
-bool InitPerfLog(const FilePath& log_file) {
+bool InitPerfLog(const base::FilePath& log_file) {
   if (perf_log_file) {
     // trying to initialize twice
     NOTREACHED();

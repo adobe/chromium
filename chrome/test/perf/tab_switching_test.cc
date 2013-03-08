@@ -4,8 +4,8 @@
 
 #include "base/command_line.h"
 #include "base/environment.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
 #include "base/stringprintf.h"
@@ -43,7 +43,7 @@ class TabSwitchingUITest : public UIPerfTest {
     show_window_ = true;
   }
 
-  void SetUp() {
+  virtual void SetUp() {
     // Set the log_file_name_ path according to the selected browser_directory_.
     log_file_name_ = browser_directory_.AppendASCII("chrome_debug.log");
 
@@ -157,7 +157,7 @@ class TabSwitchingUITest : public UIPerfTest {
                                    "ml.wikipedia.org", "www.bbc.co.uk",
                                    "126.com", "www.altavista.com"};
     int number_of_new_tabs_opened = 0;
-    FilePath file_name;
+    base::FilePath file_name;
     for (size_t i = 0; i < arraysize(files); ++i) {
       file_name = path_prefix_;
       file_name = file_name.AppendASCII(files[i]);
@@ -172,8 +172,8 @@ class TabSwitchingUITest : public UIPerfTest {
     return number_of_new_tabs_opened;
   }
 
-  FilePath path_prefix_;
-  FilePath log_file_name_;
+  base::FilePath path_prefix_;
+  base::FilePath log_file_name_;
   scoped_refptr<BrowserProxy> browser_proxy_;
 
  private:

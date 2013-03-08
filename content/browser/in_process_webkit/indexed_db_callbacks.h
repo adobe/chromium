@@ -9,12 +9,12 @@
 #include "base/memory/ref_counted.h"
 #include "content/browser/in_process_webkit/indexed_db_dispatcher_host.h"
 #include "googleurl/src/gurl.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebData.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebString.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBCallbacks.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBCursor.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBDatabase.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBDatabaseError.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBTransaction.h"
 
 namespace content {
 
@@ -23,7 +23,6 @@ class IndexedDBCallbacksBase : public WebKit::WebIDBCallbacks {
   virtual ~IndexedDBCallbacksBase();
 
   virtual void onError(const WebKit::WebIDBDatabaseError& error);
-  virtual void onBlocked();
   virtual void onBlocked(long long old_version);
 
  protected:
@@ -60,11 +59,13 @@ class IndexedDBCallbacksDatabase : public IndexedDBCallbacksBase {
       int64 host_transaction_id,
       const GURL& origin_url);
 
-  virtual void onSuccess(WebKit::WebIDBDatabase* idb_object);
+  virtual void onSuccess(
+      WebKit::WebIDBDatabase* idb_object,
+      const WebKit::WebIDBMetadata& metadata);
   virtual void onUpgradeNeeded(
       long long old_version,
-      WebKit::WebIDBTransaction* transaction,
-      WebKit::WebIDBDatabase* database);
+      WebKit::WebIDBDatabase* database,
+      const WebKit::WebIDBMetadata&);
 
  private:
   int64 host_transaction_id_;
@@ -74,11 +75,11 @@ class IndexedDBCallbacksDatabase : public IndexedDBCallbacksBase {
 };
 
 // WebIDBCursor uses:
-// * onSuccess(WebIDBCursor*, WebIDBKey, WebIDBKey, SerializedScriptValue)
+// * onSuccess(WebIDBCursor*, WebIDBKey, WebIDBKey, WebData)
 //   when an openCursor()/openKeyCursor() call has succeeded,
-// * onSuccess(WebIDBKey, WebIDBKey, SerializedScriptValue)
+// * onSuccess(WebIDBKey, WebIDBKey, WebData)
 //   when an advance()/continue() call has succeeded, or
-// * onSuccess(SerializedScriptValue::nullValue())
+// * onSuccess()
 //   to indicate it does not contain any data, i.e., there is no key within
 //   the key range, or it has reached the end.
 template <>
@@ -96,15 +97,15 @@ class IndexedDBCallbacks<WebKit::WebIDBCursor>
   virtual void onSuccess(WebKit::WebIDBCursor* idb_object,
                          const WebKit::WebIDBKey& key,
                          const WebKit::WebIDBKey& primaryKey,
-                         const WebKit::WebSerializedScriptValue& value);
+                         const WebKit::WebData& value);
   virtual void onSuccess(const WebKit::WebIDBKey& key,
                          const WebKit::WebIDBKey& primaryKey,
-                         const WebKit::WebSerializedScriptValue& value);
-  virtual void onSuccess(const WebKit::WebSerializedScriptValue& value);
+                         const WebKit::WebData& value);
+  virtual void onSuccess(const WebKit::WebData& value);
   virtual void onSuccessWithPrefetch(
       const WebKit::WebVector<WebKit::WebIDBKey>& keys,
       const WebKit::WebVector<WebKit::WebIDBKey>& primaryKeys,
-      const WebKit::WebVector<WebKit::WebSerializedScriptValue>& values);
+      const WebKit::WebVector<WebKit::WebData>& values);
 
  private:
   // The id of the cursor this callback concerns, or -1 if the cursor
@@ -153,11 +154,11 @@ class IndexedDBCallbacks<WebKit::WebDOMStringList>
   DISALLOW_IMPLICIT_CONSTRUCTORS(IndexedDBCallbacks);
 };
 
-// WebSerializedScriptValue is implemented in WebKit as opposed to being an
-// interface Chromium implements.  Thus we pass a const ___& version and thus
-// we need this specialization.
+// WebData is implemented in WebKit as opposed to being an interface
+// Chromium implements.  Thus we pass a const ___& version and thus we
+// need this specialization.
 template <>
-class IndexedDBCallbacks<WebKit::WebSerializedScriptValue>
+class IndexedDBCallbacks<WebKit::WebData>
     : public IndexedDBCallbacksBase {
  public:
   IndexedDBCallbacks(IndexedDBDispatcherHost* dispatcher_host,
@@ -166,8 +167,8 @@ class IndexedDBCallbacks<WebKit::WebSerializedScriptValue>
       : IndexedDBCallbacksBase(dispatcher_host, ipc_thread_id,
                                ipc_response_id) { }
 
-  virtual void onSuccess(const WebKit::WebSerializedScriptValue& value);
-  virtual void onSuccess(const WebKit::WebSerializedScriptValue& value,
+  virtual void onSuccess(const WebKit::WebData& value);
+  virtual void onSuccess(const WebKit::WebData& value,
                          const WebKit::WebIDBKey& key,
                          const WebKit::WebIDBKeyPath& keyPath);
   virtual void onSuccess(long long value);

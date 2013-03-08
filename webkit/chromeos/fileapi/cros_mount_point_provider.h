@@ -10,7 +10,7 @@
 #include <vector>
 
 #include "base/compiler_specific.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/synchronization/lock.h"
 #include "webkit/fileapi/file_system_mount_point_provider.h"
@@ -18,11 +18,11 @@
 #include "webkit/storage/webkit_storage_export.h"
 
 namespace fileapi {
+class AsyncFileUtilAdapter;
 class ExternalMountPoints;
 class FileSystemFileUtil;
 class FileSystemURL;
 class IsolatedContext;
-class LocalFileUtil;
 }
 
 namespace chromeos {
@@ -56,12 +56,12 @@ class WEBKIT_STORAGE_EXPORT CrosMountPointProvider
       fileapi::FileSystemType type,
       bool create,
       const ValidateFileSystemCallback& callback) OVERRIDE;
-  virtual FilePath GetFileSystemRootPathOnFileThread(
+  virtual base::FilePath GetFileSystemRootPathOnFileThread(
       const fileapi::FileSystemURL& url,
       bool create) OVERRIDE;
-  virtual bool IsAccessAllowed(const fileapi::FileSystemURL& url) OVERRIDE;
-  virtual bool IsRestrictedFileName(const FilePath& filename) const OVERRIDE;
   virtual fileapi::FileSystemFileUtil* GetFileUtil(
+      fileapi::FileSystemType type) OVERRIDE;
+  virtual fileapi::AsyncFileUtil* GetAsyncFileUtil(
       fileapi::FileSystemType type) OVERRIDE;
   virtual fileapi::FilePermissionPolicy GetPermissionPolicy(
       const fileapi::FileSystemURL& url,
@@ -87,26 +87,18 @@ class WEBKIT_STORAGE_EXPORT CrosMountPointProvider
       const DeleteFileSystemCallback& callback) OVERRIDE;
 
   // fileapi::ExternalFileSystemMountPointProvider overrides.
-  virtual std::vector<FilePath> GetRootDirectories() const OVERRIDE;
+  virtual bool IsAccessAllowed(const fileapi::FileSystemURL& url)
+      const OVERRIDE;
+  virtual std::vector<base::FilePath> GetRootDirectories() const OVERRIDE;
   virtual void GrantFullAccessToExtension(
       const std::string& extension_id) OVERRIDE;
   virtual void GrantFileAccessToExtension(
-      const std::string& extension_id, const FilePath& virtual_path) OVERRIDE;
+      const std::string& extension_id,
+      const base::FilePath& virtual_path) OVERRIDE;
   virtual void RevokeAccessForExtension(
       const std::string& extension_id) OVERRIDE;
-  // Note: This will ignore |system_mount_points_|. The reasoning behind this is
-  // the method should be used paired with Add/RemoveMountPoint methods, which
-  // don't affect |system_mount_points_|.
-  virtual bool HasMountPoint(const FilePath& mount_point) const OVERRIDE;
-  virtual bool AddLocalMountPoint(const FilePath& mount_point) OVERRIDE;
-  virtual bool AddRestrictedLocalMountPoint(
-      const FilePath& mount_point) OVERRIDE;
-  virtual bool AddRemoteMountPoint(
-      const FilePath& mount_point,
-      fileapi::RemoteFileSystemProxyInterface* remote_proxy) OVERRIDE;
-  virtual void RemoveMountPoint(const FilePath& mount_point) OVERRIDE;
-  virtual bool GetVirtualPath(const FilePath& filesystem_path,
-                              FilePath* virtual_path) OVERRIDE;
+  virtual bool GetVirtualPath(const base::FilePath& filesystem_path,
+                              base::FilePath* virtual_path) OVERRIDE;
 
  private:
   fileapi::RemoteFileSystemProxyInterface* GetRemoteProxy(
@@ -114,7 +106,7 @@ class WEBKIT_STORAGE_EXPORT CrosMountPointProvider
 
   scoped_refptr<quota::SpecialStoragePolicy> special_storage_policy_;
   scoped_ptr<FileAccessPermissions> file_access_permissions_;
-  scoped_ptr<fileapi::LocalFileUtil> local_file_util_;
+  scoped_ptr<fileapi::AsyncFileUtilAdapter> local_file_util_;
 
   // Mount points specific to the owning context.
   //

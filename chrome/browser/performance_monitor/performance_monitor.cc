@@ -12,7 +12,7 @@
 #include "base/logging.h"
 #include "base/process_util.h"
 #include "base/stl_util.h"
-#include "base/string_number_conversions.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/threading/worker_pool.h"
 #include "base/time.h"
 #include "chrome/browser/browser_process.h"
@@ -23,7 +23,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_iterator.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
@@ -35,15 +35,18 @@
 #include "content/public/browser/load_notification_details.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
-#include "content/public/browser/render_widget_host.h"
 #include "content/public/browser/render_view_host.h"
+#include "content/public/browser/render_widget_host.h"
 #include "content/public/browser/web_contents.h"
 #include "net/url_request/url_request.h"
 
 using content::BrowserThread;
 using extensions::Extension;
 
+namespace performance_monitor {
+
 namespace {
+
 const uint32 kAccessFlags = base::kProcessAccessDuplicateHandle |
                             base::kProcessAccessQueryInformation |
                             base::kProcessAccessTerminate |
@@ -81,9 +84,13 @@ bool MaybeGetURLFromRenderView(const content::RenderViewHost* view,
   return true;
 }
 
-}  // namespace
+// Takes ownership of and deletes |database| on the background thread, so as to
+// avoid destruction in the middle of an operation.
+void DeleteDatabaseOnBackgroundThread(Database* database) {
+  delete database;
+}
 
-namespace performance_monitor {
+}  // namespace
 
 bool PerformanceMonitor::initialized_ = false;
 
@@ -96,9 +103,13 @@ PerformanceMonitor::PerformanceMonitor() : database_(NULL),
 }
 
 PerformanceMonitor::~PerformanceMonitor() {
+  BrowserThread::PostBlockingPoolSequencedTask(
+      Database::kDatabaseSequenceToken,
+      FROM_HERE,
+      base::Bind(&DeleteDatabaseOnBackgroundThread, database_.release()));
 }
 
-bool PerformanceMonitor::SetDatabasePath(const FilePath& path) {
+bool PerformanceMonitor::SetDatabasePath(const base::FilePath& path) {
   if (!database_.get()) {
     database_path_ = path;
     return true;
@@ -290,7 +301,7 @@ void PerformanceMonitor::AddEvent(scoped_ptr<Event> event) {
       FROM_HERE,
       base::Bind(&PerformanceMonitor::AddEventOnBackgroundThread,
                  base::Unretained(this),
-                 base::Passed(event.Pass())));
+                 base::Passed(&event)));
 }
 
 void PerformanceMonitor::AddEventOnBackgroundThread(scoped_ptr<Event> event) {
@@ -398,17 +409,15 @@ void PerformanceMonitor::UpdateLiveProfiles() {
   scoped_ptr<std::set<std::string> > active_profiles(
       new std::set<std::string>());
 
-  for (BrowserList::const_iterator iter = BrowserList::begin();
-       iter != BrowserList::end(); ++iter) {
-    active_profiles->insert((*iter)->profile()->GetDebugName());
-  }
+  for (chrome::BrowserIterator it; !it.done(); it.Next())
+    active_profiles->insert(it->profile()->GetDebugName());
 
   BrowserThread::PostBlockingPoolSequencedTask(
       Database::kDatabaseSequenceToken,
       FROM_HERE,
       base::Bind(&PerformanceMonitor::UpdateLiveProfilesHelper,
                  base::Unretained(this),
-                 base::Passed(active_profiles.Pass()),
+                 base::Passed(&active_profiles),
                  time));
 }
 

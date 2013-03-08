@@ -5,10 +5,10 @@
 #include "chrome/browser/spellchecker/spellcheck_service.h"
 
 #include "base/platform_file.h"
+#include "base/prefs/pref_service.h"
 #include "base/prefs/public/pref_member.h"
-#include "base/string_split.h"
+#include "base/strings/string_split.h"
 #include "base/synchronization/waitable_event.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/spellchecker/spellcheck_factory.h"
 #include "chrome/browser/spellchecker/spellcheck_host_metrics.h"
@@ -48,6 +48,10 @@ SpellcheckService::SpellcheckService(Profile* profile)
       prefs::kSpellCheckDictionary,
       base::Bind(&SpellcheckService::OnSpellCheckDictionaryChanged,
                  base::Unretained(this)));
+ pref_change_registrar_.Add(
+     prefs::kSpellCheckUseSpellingService,
+     base::Bind(&SpellcheckService::OnUseSpellingServiceChanged,
+                base::Unretained(this)));
   pref_change_registrar_.Add(
       prefs::kEnableContinuousSpellcheck,
       base::Bind(&SpellcheckService::InitForAllRenderers,
@@ -55,7 +59,7 @@ SpellcheckService::SpellcheckService(Profile* profile)
 
   OnSpellCheckDictionaryChanged();
 
-  custom_dictionary_.reset(new SpellcheckCustomDictionary(profile_));
+  custom_dictionary_.reset(new SpellcheckCustomDictionary(profile_->GetPath()));
   custom_dictionary_->AddObserver(this);
   custom_dictionary_->Load();
 
@@ -127,7 +131,7 @@ void SpellcheckService::GetSpellCheckLanguagesFromAcceptLanguages(
 // static
 bool SpellcheckService::SignalStatusEvent(
     SpellcheckService::EventType status_type) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   if (!g_status_event)
     return false;
@@ -139,17 +143,7 @@ bool SpellcheckService::SignalStatusEvent(
 void SpellcheckService::StartRecordingMetrics(bool spellcheck_enabled) {
   metrics_.reset(new SpellCheckHostMetrics());
   metrics_->RecordEnabledStats(spellcheck_enabled);
-}
-
-void SpellcheckService::InitForAllRenderers() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  for (content::RenderProcessHost::iterator i(
-          content::RenderProcessHost::AllHostsIterator());
-       !i.IsAtEnd(); i.Advance()) {
-    content::RenderProcessHost* process = i.GetCurrentValue();
-    if (process)
-      InitForRenderer(process);
-  }
+  OnUseSpellingServiceChanged();
 }
 
 void SpellcheckService::InitForRenderer(content::RenderProcessHost* process) {
@@ -196,6 +190,10 @@ SpellcheckCustomDictionary* SpellcheckService::GetCustomDictionary() {
   return custom_dictionary_.get();
 }
 
+SpellcheckHunspellDictionary* SpellcheckService::GetHunspellDictionary() {
+  return hunspell_dictionary_.get();
+}
+
 void SpellcheckService::Observe(int type,
                                 const content::NotificationSource& source,
                                 const content::NotificationDetails& details) {
@@ -203,26 +201,6 @@ void SpellcheckService::Observe(int type,
   content::RenderProcessHost* process =
       content::Source<content::RenderProcessHost>(source).ptr();
   InitForRenderer(process);
-}
-
-void SpellcheckService::OnEnableAutoSpellCorrectChanged() {
-  bool enabled = pref_change_registrar_.prefs()->GetBoolean(
-      prefs::kEnableAutoSpellCorrect);
-  for (content::RenderProcessHost::iterator i(
-           content::RenderProcessHost::AllHostsIterator());
-       !i.IsAtEnd(); i.Advance()) {
-    content::RenderProcessHost* process = i.GetCurrentValue();
-    process->Send(new SpellCheckMsg_EnableAutoSpellCorrect(enabled));
-  }
-}
-
-void SpellcheckService::OnSpellCheckDictionaryChanged() {
-  hunspell_dictionary_.reset(new SpellcheckHunspellDictionary(
-      profile_,
-      profile_->GetPrefs()->GetString(prefs::kSpellCheckDictionary),
-      profile_->GetRequestContext(),
-      this));
-  hunspell_dictionary_->Load();
 }
 
 void SpellcheckService::OnCustomDictionaryLoaded() {
@@ -240,6 +218,19 @@ void SpellcheckService::OnCustomDictionaryChanged(
   }
 }
 
+void SpellcheckService::OnHunspellDictionaryInitialized() {
+  InitForAllRenderers();
+}
+
+void SpellcheckService::OnHunspellDictionaryDownloadBegin() {
+}
+
+void SpellcheckService::OnHunspellDictionaryDownloadSuccess() {
+}
+
+void SpellcheckService::OnHunspellDictionaryDownloadFailure() {
+}
+
 // static
 void SpellcheckService::AttachStatusEvent(base::WaitableEvent* status_event) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
@@ -248,10 +239,47 @@ void SpellcheckService::AttachStatusEvent(base::WaitableEvent* status_event) {
 }
 
 // static
-SpellcheckService::EventType SpellcheckService::WaitStatusEvent() {
+SpellcheckService::EventType SpellcheckService::GetStatusEvent() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-
-  if (g_status_event)
-    g_status_event->Wait();
   return g_status_type;
+}
+
+void SpellcheckService::InitForAllRenderers() {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  for (content::RenderProcessHost::iterator i(
+          content::RenderProcessHost::AllHostsIterator());
+       !i.IsAtEnd(); i.Advance()) {
+    content::RenderProcessHost* process = i.GetCurrentValue();
+    if (process && process->GetHandle())
+      InitForRenderer(process);
+  }
+}
+
+void SpellcheckService::OnEnableAutoSpellCorrectChanged() {
+  bool enabled = pref_change_registrar_.prefs()->GetBoolean(
+      prefs::kEnableAutoSpellCorrect);
+  for (content::RenderProcessHost::iterator i(
+           content::RenderProcessHost::AllHostsIterator());
+       !i.IsAtEnd(); i.Advance()) {
+    content::RenderProcessHost* process = i.GetCurrentValue();
+    process->Send(new SpellCheckMsg_EnableAutoSpellCorrect(enabled));
+  }
+}
+
+void SpellcheckService::OnSpellCheckDictionaryChanged() {
+  if (hunspell_dictionary_.get())
+    hunspell_dictionary_->RemoveObserver(this);
+  hunspell_dictionary_.reset(new SpellcheckHunspellDictionary(
+      profile_->GetPrefs()->GetString(prefs::kSpellCheckDictionary),
+      profile_->GetRequestContext(),
+      this));
+  hunspell_dictionary_->AddObserver(this);
+  hunspell_dictionary_->Load();
+}
+
+void SpellcheckService::OnUseSpellingServiceChanged() {
+  bool enabled = pref_change_registrar_.prefs()->GetBoolean(
+      prefs::kSpellCheckUseSpellingService);
+  if (metrics_)
+    metrics_->RecordSpellingServiceStats(enabled);
 }

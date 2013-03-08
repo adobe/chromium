@@ -5,20 +5,20 @@
 #include "chrome/browser/chromeos/drive/drive_file_system_util.h"
 
 #include <string>
-#include <vector>
 #include <utility>
+#include <vector>
 
 #include "base/basictypes.h"
 #include "base/bind.h"
 #include "base/bind_helpers.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/json/json_reader.h"
 #include "base/logging.h"
 #include "base/message_loop_proxy.h"
-#include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
+#include "base/strings/string_number_conversions.h"
 #include "chrome/browser/chromeos/drive/drive.pb.h"
 #include "chrome/browser/chromeos/drive/drive_cache.h"
 #include "chrome/browser/chromeos/drive/drive_file_system_interface.h"
@@ -45,7 +45,7 @@ const char kDriveSpecialRootPath[] = "/special";
 
 const char kDriveMountPointPath[] = "/special/drive";
 
-const FilePath::CharType* kDriveMountPointPathComponents[] = {
+const base::FilePath::CharType* kDriveMountPointPathComponents[] = {
   "/", "special", "drive"
 };
 
@@ -75,7 +75,8 @@ FileWriteHelper* GetFileWriteHelper(Profile* profile) {
   return system_service ? system_service->file_write_helper() : NULL;
 }
 
-GURL GetHostedDocumentURLBlockingThread(const FilePath& drive_cache_path) {
+GURL GetHostedDocumentURLBlockingThread(
+    const base::FilePath& drive_cache_path) {
   std::string json;
   if (!file_util::ReadFileToString(drive_cache_path, &json)) {
     NOTREACHED() << "Unable to read file " << drive_cache_path.value();
@@ -112,7 +113,7 @@ void OpenEditURLUIThread(Profile* profile, const GURL& edit_url) {
 void OnGetEntryInfoByResourceId(Profile* profile,
                                 const std::string& resource_id,
                                 DriveFileError error,
-                                const FilePath& /* drive_file_path */,
+                                const base::FilePath& /* drive_file_path */,
                                 scoped_ptr<DriveEntryProto> entry_proto) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
@@ -128,9 +129,9 @@ void OnGetEntryInfoByResourceId(Profile* profile,
 
 }  // namespace
 
-const FilePath& GetDriveMountPointPath() {
-  CR_DEFINE_STATIC_LOCAL(FilePath, drive_mount_path,
-      (FilePath::FromUTF8Unsafe(kDriveMountPointPath)));
+const base::FilePath& GetDriveMountPointPath() {
+  CR_DEFINE_STATIC_LOCAL(base::FilePath, drive_mount_path,
+      (base::FilePath::FromUTF8Unsafe(kDriveMountPointPath)));
   return drive_mount_path;
 }
 
@@ -140,9 +141,9 @@ const std::string& GetDriveMountPointPathAsString() {
   return drive_mount_path_string;
 }
 
-const FilePath& GetSpecialRemoteRootPath() {
-  CR_DEFINE_STATIC_LOCAL(FilePath, drive_mount_path,
-      (FilePath::FromUTF8Unsafe(kDriveSpecialRootPath)));
+const base::FilePath& GetSpecialRemoteRootPath() {
+  CR_DEFINE_STATIC_LOCAL(base::FilePath, drive_mount_path,
+      (base::FilePath::FromUTF8Unsafe(kDriveSpecialRootPath)));
   return drive_mount_path;
 }
 
@@ -156,7 +157,7 @@ GURL GetFileResourceUrl(const std::string& resource_id,
 }
 
 void ModifyDriveFileResourceUrl(Profile* profile,
-                                const FilePath& drive_cache_path,
+                                const base::FilePath& drive_cache_path,
                                 GURL* url) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
@@ -193,20 +194,20 @@ void ModifyDriveFileResourceUrl(Profile* profile,
   }
 }
 
-bool IsUnderDriveMountPoint(const FilePath& path) {
+bool IsUnderDriveMountPoint(const base::FilePath& path) {
   return GetDriveMountPointPath() == path ||
          GetDriveMountPointPath().IsParent(path);
 }
 
-FilePath ExtractDrivePath(const FilePath& path) {
+base::FilePath ExtractDrivePath(const base::FilePath& path) {
   if (!IsUnderDriveMountPoint(path))
-    return FilePath();
+    return base::FilePath();
 
-  std::vector<FilePath::StringType> components;
+  std::vector<base::FilePath::StringType> components;
   path.GetComponents(&components);
 
   // -1 to include 'drive'.
-  FilePath extracted;
+  base::FilePath extracted;
   for (size_t i = arraysize(kDriveMountPointPathComponents) - 1;
        i < components.size(); ++i) {
     extracted = extracted.Append(components[i]);
@@ -255,7 +256,7 @@ std::string ExtractResourceIdFromUrl(const GURL& url) {
                                    net::UnescapeRule::URL_SPECIAL_CHARS);
 }
 
-void ParseCacheFilePath(const FilePath& path,
+void ParseCacheFilePath(const base::FilePath& path,
                         std::string* resource_id,
                         std::string* md5,
                         std::string* extra_extension) {
@@ -264,13 +265,13 @@ void ParseCacheFilePath(const FilePath& path,
   DCHECK(extra_extension);
 
   // Extract up to two extensions from the right.
-  FilePath base_name = path.BaseName();
+  base::FilePath base_name = path.BaseName();
   const int kNumExtensionsToExtract = 2;
-  std::vector<FilePath::StringType> extensions;
+  std::vector<base::FilePath::StringType> extensions;
   for (int i = 0; i < kNumExtensionsToExtract; ++i) {
-    FilePath::StringType extension = base_name.Extension();
+    base::FilePath::StringType extension = base_name.Extension();
     if (!extension.empty()) {
-      // FilePath::Extension returns ".", so strip it.
+      // base::FilePath::Extension returns ".", so strip it.
       extension = UnescapeCacheFileName(extension.substr(1));
       base_name = base_name.RemoveExtension();
       extensions.push_back(extension);
@@ -291,7 +292,7 @@ void ParseCacheFilePath(const FilePath& path,
 }
 
 void PrepareWritableFileAndRun(Profile* profile,
-                               const FilePath& path,
+                               const base::FilePath& path,
                                const OpenFileCallback& callback) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(!callback.is_null());
@@ -299,7 +300,7 @@ void PrepareWritableFileAndRun(Profile* profile,
     FileWriteHelper* file_write_helper = GetFileWriteHelper(profile);
     if (!file_write_helper)
       return;
-    FilePath remote_path(ExtractDrivePath(path));
+    base::FilePath remote_path(ExtractDrivePath(path));
     file_write_helper->PrepareWritableFileAndRun(remote_path, callback);
   } else {
     content::BrowserThread::GetBlockingPool()->PostTask(
@@ -308,7 +309,7 @@ void PrepareWritableFileAndRun(Profile* profile,
 }
 
 void EnsureDirectoryExists(Profile* profile,
-                           const FilePath& directory,
+                           const base::FilePath& directory,
                            const FileOperationCallback& callback) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI) ||
          BrowserThread::CurrentlyOn(BrowserThread::IO));
@@ -331,6 +332,7 @@ DriveFileError GDataToDriveFileError(google_apis::GDataErrorCode status) {
   switch (status) {
     case google_apis::HTTP_SUCCESS:
     case google_apis::HTTP_CREATED:
+    case google_apis::HTTP_NO_CONTENT:
       return DRIVE_FILE_OK;
     case google_apis::HTTP_UNAUTHORIZED:
     case google_apis::HTTP_FORBIDDEN:
@@ -371,6 +373,9 @@ void ConvertPlatformFileInfoToProto(const base::PlatformFileInfo& file_info,
   proto->set_last_modified(file_info.last_modified.ToInternalValue());
   proto->set_last_accessed(file_info.last_accessed.ToInternalValue());
   proto->set_creation_time(file_info.creation_time.ToInternalValue());
+}
+
+void EmptyFileOperationCallback(DriveFileError error) {
 }
 
 }  // namespace util

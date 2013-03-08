@@ -3,7 +3,9 @@
 // found in the LICENSE file.
 
 #include "base/command_line.h"
+#include "base/memory/ref_counted.h"
 #include "base/message_loop.h"
+#include "base/prefs/pref_service.h"
 #include "base/run_loop.h"
 #include "chrome/browser/policy/browser_policy_connector.h"
 #include "chrome/browser/policy/cloud_policy_constants.h"
@@ -13,7 +15,6 @@
 #include "chrome/browser/policy/user_policy_signin_service.h"
 #include "chrome/browser/policy/user_policy_signin_service_factory.h"
 #include "chrome/browser/prefs/browser_prefs.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/signin/signin_manager.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/signin/signin_manager_fake.h"
@@ -23,7 +24,7 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_browser_process.h"
-#include "chrome/test/base/testing_pref_service.h"
+#include "chrome/test/base/testing_pref_service_syncable.h"
 #include "chrome/test/base/testing_profile.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_service.h"
@@ -32,6 +33,7 @@
 #include "google_apis/gaia/gaia_constants.h"
 #include "net/http/http_status_code.h"
 #include "net/url_request/test_url_fetcher_factory.h"
+#include "net/url_request/url_request_context_getter.h"
 #include "net/url_request/url_request_status.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -61,12 +63,26 @@ static const char kHostedDomainResponse[] =
 class UserPolicySigninServiceTest : public testing::Test {
  public:
   UserPolicySigninServiceTest()
-      : loop_(MessageLoop::TYPE_UI),
+      : loop_(MessageLoop::TYPE_IO),
         ui_thread_(content::BrowserThread::UI, &loop_),
         file_thread_(content::BrowserThread::FILE, &loop_),
-        io_thread_(content::BrowserThread::IO, &loop_) {}
+        io_thread_(content::BrowserThread::IO, &loop_),
+        register_completed_(false) {}
 
   MOCK_METHOD1(OnPolicyRefresh, void(bool));
+  void OnRegisterCompleted(scoped_ptr<CloudPolicyClient> client) {
+    register_completed_ = true;
+    created_client_.swap(client);
+  }
+
+  void RegisterPolicyClientWithCallback(UserPolicySigninService* service) {
+    service->RegisterPolicyClient(
+        "testuser@test.com",
+        "mock_oauth_token",
+        base::Bind(&UserPolicySigninServiceTest::OnRegisterCompleted,
+                   base::Unretained(this)));
+    ASSERT_TRUE(IsRequestActive());
+  }
 
   virtual void SetUp() OVERRIDE {
     device_management_service_ = new MockDeviceManagementService();
@@ -74,21 +90,20 @@ class UserPolicySigninServiceTest : public testing::Test {
         SetDeviceManagementServiceForTesting(
             scoped_ptr<DeviceManagementService>(device_management_service_));
 
-    g_browser_process->browser_policy_connector()->Init();
-
     local_state_.reset(new TestingPrefServiceSimple);
-    chrome::RegisterLocalState(local_state_.get());
+    chrome::RegisterLocalState(local_state_->registry());
     TestingBrowserProcess::GetGlobal()->SetLocalState(
         local_state_.get());
+
+    scoped_refptr<net::URLRequestContextGetter> system_request_context;
+    g_browser_process->browser_policy_connector()->Init(
+        local_state_.get(), system_request_context);
 
     // Create a testing profile with cloud-policy-on-signin enabled, and bring
     // up a UserCloudPolicyManager with a MockUserCloudPolicyStore.
     scoped_ptr<TestingPrefServiceSyncable> prefs(
         new TestingPrefServiceSyncable());
-    Profile::RegisterUserPrefs(prefs.get());
-    chrome::RegisterUserPrefs(prefs.get());
-    prefs->SetUserPref(prefs::kLoadCloudPolicyOnSignin,
-                       Value::CreateBooleanValue(true));
+    chrome::RegisterUserPrefs(prefs->registry());
     TestingProfile::Builder builder;
     builder.SetPrefService(scoped_ptr<PrefServiceSyncable>(prefs.Pass()));
     profile_ = builder.Build().Pass();
@@ -98,8 +113,9 @@ class UserPolicySigninServiceTest : public testing::Test {
     EXPECT_CALL(*mock_store_, Load()).Times(AnyNumber());
     manager_.reset(new UserCloudPolicyManager(
         profile_.get(), scoped_ptr<UserCloudPolicyStore>(mock_store_)));
-    SigninManagerFactory::GetInstance()->SetTestingFactory(
-        profile_.get(), FakeSigninManager::Build);
+    signin_manager_ = static_cast<FakeSigninManager*>(
+        SigninManagerFactory::GetInstance()->SetTestingFactoryAndUse(
+            profile_.get(), FakeSigninManager::Build));
 
     // Make sure the UserPolicySigninService is created.
     UserPolicySigninServiceFactory::GetForProfile(profile_.get());
@@ -140,21 +156,10 @@ class UserPolicySigninServiceTest : public testing::Test {
   }
 
   void TestSuccessfulSignin() {
-    // Set the user as signed in.
-    SigninManagerFactory::GetForProfile(profile_.get())->
-        SetAuthenticatedUsername("testuser@test.com");
-
     UserPolicySigninService* signin_service =
         UserPolicySigninServiceFactory::GetForProfile(profile_.get());
     EXPECT_CALL(*this, OnPolicyRefresh(true)).Times(0);
-    signin_service->FetchPolicyForSignedInUser(
-        "mock_token",
-        base::Bind(&UserPolicySigninServiceTest::OnPolicyRefresh,
-                   base::Unretained(this)));
-
-    // UserCloudPolicyManager should be initialized.
-    ASSERT_TRUE(manager_->core()->service());
-    ASSERT_TRUE(IsRequestActive());
+    RegisterPolicyClientWithCallback(signin_service);
 
     // Mimic successful oauth token fetch.
     MakeOAuthTokenFetchSucceed();
@@ -178,27 +183,43 @@ class UserPolicySigninServiceTest : public testing::Test {
     Mock::VerifyAndClearExpectations(this);
     ASSERT_TRUE(register_request);
 
-    // Mimic successful client registration - this should kick off a policy
-    // fetch.
-    MockDeviceManagementJob* fetch_request = NULL;
-    EXPECT_CALL(*device_management_service_,
-                CreateJob(DeviceManagementRequestJob::TYPE_POLICY_FETCH))
-        .WillOnce(device_management_service_->CreateAsyncJob(&fetch_request));
-    EXPECT_CALL(*device_management_service_, StartJob(_, _, _, _, _, _, _))
-        .Times(1);
+    // Mimic successful client registration - this should register the client
+    // and invoke the callback.
     em::DeviceManagementResponse registration_blob;
     registration_blob.mutable_register_response()->set_device_management_token(
         "dm_token");
     registration_blob.mutable_register_response()->set_enrollment_type(
         em::DeviceRegisterResponse::ENTERPRISE);
     register_request->SendResponse(DM_STATUS_SUCCESS, registration_blob);
+
+    // UserCloudPolicyManager should not be initialized yet.
+    ASSERT_FALSE(manager_->core()->service());
+    EXPECT_TRUE(register_completed_);
+    EXPECT_TRUE(created_client_.get());
+
+    // Now call to fetch policy - this should fire off a fetch request.
+    MockDeviceManagementJob* fetch_request = NULL;
+    EXPECT_CALL(*device_management_service_,
+                CreateJob(DeviceManagementRequestJob::TYPE_POLICY_FETCH))
+        .WillOnce(device_management_service_->CreateAsyncJob(&fetch_request));
+    EXPECT_CALL(*device_management_service_, StartJob(_, _, _, _, _, _, _))
+        .Times(1);
+    signin_service->FetchPolicyForSignedInUser(
+        created_client_.Pass(),
+        base::Bind(&UserPolicySigninServiceTest::OnPolicyRefresh,
+                   base::Unretained(this)));
+
     Mock::VerifyAndClearExpectations(this);
     ASSERT_TRUE(fetch_request);
+
+    // UserCloudPolicyManager should now be initialized.
+    ASSERT_TRUE(manager_->core()->service());
 
     // Make the policy fetch succeed - this should result in a write to the
     // store and ultimately result in a call to OnPolicyRefresh().
     EXPECT_CALL(*mock_store_, Store(_));
     EXPECT_CALL(*this, OnPolicyRefresh(true)).Times(1);
+
     // Create a fake policy blob to deliver to the client.
     em::DeviceManagementResponse policy_blob;
     em::PolicyData policy_data;
@@ -229,6 +250,15 @@ class UserPolicySigninServiceTest : public testing::Test {
   content::TestBrowserThread io_thread_;
 
   net::TestURLFetcherFactory url_factory_;
+
+  FakeSigninManager* signin_manager_;
+
+  // Used in conjunction with OnRegisterCompleted() to test client registration
+  // callbacks.
+  scoped_ptr<CloudPolicyClient> created_client_;
+
+  // True if OnRegisterCompleted() was called.
+  bool register_completed_;
 
   // Weak ptr to the MockDeviceManagementService (object is owned by the
   // BrowserPolicyConnector).
@@ -437,46 +467,33 @@ TEST_F(UserPolicySigninServiceTest, SignOutAfterInit) {
   ASSERT_FALSE(manager_->core()->service());
 }
 
-TEST_F(UserPolicySigninServiceTest, FetchPolicyOAuthFailure) {
-  // Set the user as signed in.
-  SigninManagerFactory::GetForProfile(profile_.get())->SetAuthenticatedUsername(
-      "testuser@test.com");
-
+TEST_F(UserPolicySigninServiceTest, RegisterPolicyClientOAuthFailure) {
   UserPolicySigninService* signin_service =
       UserPolicySigninServiceFactory::GetForProfile(profile_.get());
-  EXPECT_CALL(*this, OnPolicyRefresh(_)).Times(0);
-  signin_service->FetchPolicyForSignedInUser(
-      "mock_token",
-      base::Bind(&UserPolicySigninServiceTest::OnPolicyRefresh,
-                 base::Unretained(this)));
+  RegisterPolicyClientWithCallback(signin_service);
   Mock::VerifyAndClearExpectations(this);
 
-  // UserCloudPolicyManager should be initialized.
-  ASSERT_TRUE(manager_->core()->service());
+  // UserCloudPolicyManager should not be initialized.
+  ASSERT_FALSE(manager_->core()->service());
   ASSERT_TRUE(IsRequestActive());
+  EXPECT_FALSE(register_completed_);
 
   // Cause the access token fetch to fail - callback should be invoked.
-  EXPECT_CALL(*this, OnPolicyRefresh(false)).Times(1);
   net::TestURLFetcher* fetcher = url_factory_.GetFetcherByID(0);
   fetcher->set_status(net::URLRequestStatus(net::URLRequestStatus::FAILED, -1));
   fetcher->delegate()->OnURLFetchComplete(fetcher);
+  EXPECT_TRUE(register_completed_);
+  EXPECT_FALSE(created_client_.get());
+  EXPECT_FALSE(IsRequestActive());
 }
 
-TEST_F(UserPolicySigninServiceTest, FetchPolicyNonHostedDomain) {
-  // Set the user as signed in.
-  SigninManagerFactory::GetForProfile(profile_.get())->SetAuthenticatedUsername(
-      "testuser@test.com");
-
+TEST_F(UserPolicySigninServiceTest, RegisterPolicyClientNonHostedDomain) {
   UserPolicySigninService* signin_service =
       UserPolicySigninServiceFactory::GetForProfile(profile_.get());
-  EXPECT_CALL(*this, OnPolicyRefresh(_)).Times(0);
-  signin_service->FetchPolicyForSignedInUser(
-      "mock_token",
-      base::Bind(&UserPolicySigninServiceTest::OnPolicyRefresh,
-                 base::Unretained(this)));
+  RegisterPolicyClientWithCallback(signin_service);
 
-  // UserCloudPolicyManager should be initialized.
-  ASSERT_TRUE(manager_->core()->service());
+  // UserCloudPolicyManager should not be initialized.
+  ASSERT_FALSE(manager_->core()->service());
   ASSERT_TRUE(IsRequestActive());
 
   // Cause the access token request to succeed.
@@ -485,36 +502,30 @@ TEST_F(UserPolicySigninServiceTest, FetchPolicyNonHostedDomain) {
   // Should be a follow-up fetch to check the hosted-domain status.
   ASSERT_TRUE(IsRequestActive());
   Mock::VerifyAndClearExpectations(this);
+  EXPECT_FALSE(register_completed_);
 
   // Report that the user is not on a hosted domain - callback should be
   // invoked reporting a failed fetch.
-  EXPECT_CALL(*this, OnPolicyRefresh(false)).Times(1);
   ReportHostedDomainStatus(false);
 
   // Since this is not a hosted domain, we should not issue a request for a
   // DMToken.
+  EXPECT_TRUE(register_completed_);
+  EXPECT_FALSE(created_client_.get());
   ASSERT_FALSE(IsRequestActive());
 }
 
-TEST_F(UserPolicySigninServiceTest, FetchPolicyFailedRegistration) {
-  // Set the user as signed in.
-  SigninManagerFactory::GetForProfile(profile_.get())->SetAuthenticatedUsername(
-      "testuser@test.com");
-
+TEST_F(UserPolicySigninServiceTest, RegisterPolicyClientFailedRegistration) {
   UserPolicySigninService* signin_service =
       UserPolicySigninServiceFactory::GetForProfile(profile_.get());
-  EXPECT_CALL(*this, OnPolicyRefresh(true)).Times(0);
-  signin_service->FetchPolicyForSignedInUser(
-      "mock_token",
-      base::Bind(&UserPolicySigninServiceTest::OnPolicyRefresh,
-                 base::Unretained(this)));
+  RegisterPolicyClientWithCallback(signin_service);
 
-  // UserCloudPolicyManager should be initialized.
-  ASSERT_TRUE(manager_->core()->service());
-  ASSERT_TRUE(IsRequestActive());
+  // UserCloudPolicyManager should not be initialized.
+  ASSERT_FALSE(manager_->core()->service());
 
   // Mimic successful oauth token fetch.
   MakeOAuthTokenFetchSucceed();
+  EXPECT_FALSE(register_completed_);
 
   // When the user is from a hosted domain, this should kick off client
   // registration.
@@ -533,29 +544,19 @@ TEST_F(UserPolicySigninServiceTest, FetchPolicyFailedRegistration) {
   ASSERT_FALSE(IsRequestActive());
   Mock::VerifyAndClearExpectations(this);
   ASSERT_TRUE(register_request);
+  EXPECT_FALSE(register_completed_);
 
-  EXPECT_CALL(*this, OnPolicyRefresh(false)).Times(1);
   // Make client registration fail (hosted domain user that is not managed).
   register_request->SendResponse(DM_STATUS_SERVICE_MANAGEMENT_NOT_SUPPORTED,
                                  em::DeviceManagementResponse());
+  EXPECT_TRUE(register_completed_);
+  EXPECT_FALSE(created_client_.get());
 }
 
-TEST_F(UserPolicySigninServiceTest, FetchPolicyPolicyFetchFailed) {
-  // Set the user as signed in.
-  SigninManagerFactory::GetForProfile(profile_.get())->SetAuthenticatedUsername(
-      "testuser@test.com");
-
+TEST_F(UserPolicySigninServiceTest, RegisterPolicyClientSucceeded) {
   UserPolicySigninService* signin_service =
       UserPolicySigninServiceFactory::GetForProfile(profile_.get());
-  EXPECT_CALL(*this, OnPolicyRefresh(true)).Times(0);
-  signin_service->FetchPolicyForSignedInUser(
-      "mock_token",
-      base::Bind(&UserPolicySigninServiceTest::OnPolicyRefresh,
-                 base::Unretained(this)));
-
-  // UserCloudPolicyManager should be initialized.
-  ASSERT_TRUE(manager_->core()->service());
-  ASSERT_TRUE(IsRequestActive());
+  RegisterPolicyClientWithCallback(signin_service);
 
   // Mimic successful oauth token fetch.
   MakeOAuthTokenFetchSucceed();
@@ -577,15 +578,8 @@ TEST_F(UserPolicySigninServiceTest, FetchPolicyPolicyFetchFailed) {
   ASSERT_FALSE(IsRequestActive());
   Mock::VerifyAndClearExpectations(this);
   ASSERT_TRUE(register_request);
+  EXPECT_FALSE(register_completed_);
 
-  // Mimic successful client registration - this should kick off a policy
-  // fetch.
-  MockDeviceManagementJob* fetch_request = NULL;
-  EXPECT_CALL(*device_management_service_,
-              CreateJob(DeviceManagementRequestJob::TYPE_POLICY_FETCH))
-      .WillOnce(device_management_service_->CreateAsyncJob(&fetch_request));
-  EXPECT_CALL(*device_management_service_, StartJob(_, _, _, _, _, _, _))
-      .Times(1);
   em::DeviceManagementResponse registration_blob;
   registration_blob.mutable_register_response()->set_device_management_token(
       "dm_token");
@@ -593,12 +587,39 @@ TEST_F(UserPolicySigninServiceTest, FetchPolicyPolicyFetchFailed) {
       em::DeviceRegisterResponse::ENTERPRISE);
   register_request->SendResponse(DM_STATUS_SUCCESS, registration_blob);
   Mock::VerifyAndClearExpectations(this);
+  EXPECT_TRUE(register_completed_);
+  EXPECT_TRUE(created_client_.get());
+  // UserCloudPolicyManager should not be initialized.
+  ASSERT_FALSE(manager_->core()->service());
+}
+
+TEST_F(UserPolicySigninServiceTest, FetchPolicyFailed) {
+  scoped_ptr<CloudPolicyClient> client =
+      UserCloudPolicyManager::CreateCloudPolicyClient(
+          device_management_service_);
+  client->SetupRegistration("mock_dm_token", "mock_client_id");
+
+  // Initiate a policy fetch request.
+  MockDeviceManagementJob* fetch_request = NULL;
+  EXPECT_CALL(*device_management_service_,
+              CreateJob(DeviceManagementRequestJob::TYPE_POLICY_FETCH))
+      .WillOnce(device_management_service_->CreateAsyncJob(&fetch_request));
+  EXPECT_CALL(*device_management_service_, StartJob(_, _, _, _, _, _, _))
+      .Times(1);
+  UserPolicySigninService* signin_service =
+      UserPolicySigninServiceFactory::GetForProfile(profile_.get());
+  signin_service->FetchPolicyForSignedInUser(
+      client.Pass(),
+      base::Bind(&UserPolicySigninServiceTest::OnPolicyRefresh,
+                 base::Unretained(this)));
   ASSERT_TRUE(fetch_request);
 
   // Make the policy fetch fail.
   EXPECT_CALL(*this, OnPolicyRefresh(false)).Times(1);
   fetch_request->SendResponse(DM_STATUS_REQUEST_FAILED,
                               em::DeviceManagementResponse());
+  // UserCloudPolicyManager should be initialized.
+  ASSERT_TRUE(manager_->core()->service());
 }
 
 TEST_F(UserPolicySigninServiceTest, FetchPolicySuccess) {
@@ -608,8 +629,7 @@ TEST_F(UserPolicySigninServiceTest, FetchPolicySuccess) {
 TEST_F(UserPolicySigninServiceTest, SignOutThenSignInAgain) {
   TestSuccessfulSignin();
 
-  // Now sign out.
-  SigninManagerFactory::GetForProfile(profile_.get())->SignOut();
+  signin_manager_->ForceSignOut();
   ASSERT_FALSE(manager_->core()->service());
 
   // Now sign in again.

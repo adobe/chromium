@@ -10,19 +10,17 @@
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/command_line.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
+#include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
-#include "base/scoped_native_library.h"
 #include "base/single_thread_task_runner.h"
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
-#include "base/stringize_macros.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/threading/thread.h"
 #include "base/utf_string_conversions.h"
-#include "base/win/windows_version.h"
 #include "build/build_config.h"
 #include "crypto/nss_util.h"
 #include "ipc/ipc_channel.h"
@@ -30,10 +28,10 @@
 #include "ipc/ipc_listener.h"
 #include "net/base/network_change_notifier.h"
 #include "net/socket/ssl_server_socket.h"
+#include "net/url_request/url_fetcher.h"
 #include "remoting/base/auto_thread_task_runner.h"
 #include "remoting/base/breakpad.h"
 #include "remoting/base/constants.h"
-#include "remoting/capturer/video_frame_capturer.h"
 #include "remoting/host/basic_desktop_environment.h"
 #include "remoting/host/branding.h"
 #include "remoting/host/chromoting_host.h"
@@ -48,18 +46,22 @@
 #include "remoting/host/dns_blackhole_checker.h"
 #include "remoting/host/event_executor.h"
 #include "remoting/host/heartbeat_sender.h"
+#include "remoting/host/host_change_notification_listener.h"
 #include "remoting/host/host_config.h"
 #include "remoting/host/host_event_logger.h"
 #include "remoting/host/host_exit_codes.h"
+#include "remoting/host/host_main.h"
 #include "remoting/host/host_user_interface.h"
 #include "remoting/host/ipc_constants.h"
 #include "remoting/host/ipc_desktop_environment.h"
+#include "remoting/host/ipc_host_event_logger.h"
 #include "remoting/host/json_host_config.h"
 #include "remoting/host/log_to_server.h"
 #include "remoting/host/logging.h"
 #include "remoting/host/network_settings.h"
 #include "remoting/host/policy_hack/policy_watcher.h"
 #include "remoting/host/resizing_host_observer.h"
+#include "remoting/host/service_urls.h"
 #include "remoting/host/session_manager_factory.h"
 #include "remoting/host/signaling_connector.h"
 #include "remoting/host/ui_strings.h"
@@ -77,7 +79,6 @@
 
 #if defined(OS_MACOSX)
 #include "base/mac/scoped_cftyperef.h"
-#include "base/mac/scoped_nsautorelease_pool.h"
 #endif  // defined(OS_MACOSX)
 
 #if defined(OS_LINUX)
@@ -98,9 +99,6 @@ namespace {
 
 // This is used for tagging system event logs.
 const char kApplicationName[] = "chromoting";
-
-// The command line switch used to get version of the daemon.
-const char kVersionSwitchName[] = "version";
 
 // The command line switch used to pass name of the pipe to capture audio on
 // linux.
@@ -146,6 +144,7 @@ namespace remoting {
 class HostProcess
     : public ConfigFileWatcher::Delegate,
       public HeartbeatSender::Listener,
+      public HostChangeNotificationListener::Listener,
       public IPC::Listener,
       public base::RefCountedThreadSafe<HostProcess> {
  public:
@@ -162,6 +161,9 @@ class HostProcess
 
   // HeartbeatSender::Listener overrides.
   virtual void OnUnknownHostIdError() OVERRIDE;
+
+  // HostChangeNotificationListener::Listener overrides.
+  virtual void OnHostDeleted() OVERRIDE;
 
  private:
   enum HostState {
@@ -267,7 +269,13 @@ class HostProcess
 
   // Accessed on the UI thread.
   scoped_ptr<IPC::ChannelProxy> daemon_channel_;
-  FilePath host_config_path_;
+
+  // XMPP server/remoting bot configuration (initialized from the command line).
+  XmppSignalStrategy::XmppServerConfig xmpp_server_config_;
+  std::string directory_bot_jid_;
+
+  // Created on the UI thread but used from the network thread.
+  base::FilePath host_config_path_;
   scoped_ptr<DesktopEnvironmentFactory> desktop_environment_factory_;
 
   // Accessed on the network thread.
@@ -283,7 +291,6 @@ class HostProcess
   std::string xmpp_login_;
   std::string xmpp_auth_token_;
   std::string xmpp_auth_service_;
-
   scoped_ptr<policy_hack::PolicyWatcher> policy_watcher_;
   bool allow_nat_traversal_;
   std::string talkgadget_prefix_;
@@ -297,6 +304,7 @@ class HostProcess
   scoped_ptr<XmppSignalStrategy> signal_strategy_;
   scoped_ptr<SignalingConnector> signaling_connector_;
   scoped_ptr<HeartbeatSender> heartbeat_sender_;
+  scoped_ptr<HostChangeNotificationListener> host_change_notification_listener_;
   scoped_ptr<LogToServer> log_to_server_;
   scoped_ptr<HostEventLogger> host_event_logger_;
 
@@ -396,13 +404,27 @@ bool HostProcess::InitWithCommandLine(const CommandLine* cmd_line) {
         context_->network_task_runner()));
   }
 
-  FilePath default_config_dir = remoting::GetConfigDir();
+  base::FilePath default_config_dir = remoting::GetConfigDir();
   host_config_path_ = default_config_dir.Append(kDefaultHostConfigFile);
   if (cmd_line->HasSwitch(kHostConfigSwitchName)) {
     host_config_path_ = cmd_line->GetSwitchValuePath(kHostConfigSwitchName);
   }
 #endif  // !defined(REMOTING_MULTI_PROCESS)
 
+  ServiceUrls* service_urls = ServiceUrls::GetInstance();
+  if (service_urls->ignore_urlfetcher_cert_requests()) {
+    net::URLFetcher::SetIgnoreCertificateRequests(true);
+  }
+  bool xmpp_server_valid = net::ParseHostAndPort(
+      service_urls->xmpp_server_address(),
+      &xmpp_server_config_.host, &xmpp_server_config_.port);
+  if (!xmpp_server_valid) {
+    LOG(ERROR) << "Invalid XMPP server: " <<
+        service_urls->xmpp_server_address();
+    return false;
+  }
+  xmpp_server_config_.use_tls = service_urls->xmpp_server_use_tls();
+  directory_bot_jid_ = service_urls->directory_bot_jid();
   return true;
 }
 
@@ -421,7 +443,7 @@ void HostProcess::OnConfigUpdated(
   LOG(INFO) << "Processing new host configuration.";
 
   serialized_config_ = serialized_config;
-  scoped_ptr<JsonHostConfig> config(new JsonHostConfig(FilePath()));
+  scoped_ptr<JsonHostConfig> config(new JsonHostConfig(base::FilePath()));
   if (!config->SetSerializedData(serialized_config)) {
     LOG(ERROR) << "Invalid configuration.";
     ShutdownHost(kInvalidHostConfigurationExitCode);
@@ -526,7 +548,10 @@ bool HostProcess::OnMessageReceived(const IPC::Message& message) {
                         DesktopSessionConnector::OnTerminalDisconnected)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
+
+  CHECK(handled) << "Received unexpected IPC type: " << message.type();
   return handled;
+
 #else  // !defined(REMOTING_MULTI_PROCESS)
   return false;
 #endif  // !defined(REMOTING_MULTI_PROCESS)
@@ -545,18 +570,17 @@ void HostProcess::StartOnUiThread() {
   DCHECK(context_->ui_task_runner()->BelongsToCurrentThread());
 
   if (!InitWithCommandLine(CommandLine::ForCurrentProcess())) {
-    OnConfigWatcherError();
+    // Shutdown the host if the command line is invalid.
+    context_->network_task_runner()->PostTask(
+        FROM_HERE, base::Bind(&HostProcess::ShutdownHost, this,
+                              kInvalidHostConfigurationExitCode));
     return;
   }
 
 #if defined(OS_LINUX)
-  // TODO(sergeyu): Pass configuration parameters to the Linux-specific version
-  // of DesktopEnvironmentFactory when we have it.
-  remoting::VideoFrameCapturer::EnableXDamage(true);
-
   // If an audio pipe is specific on the command-line then initialize
   // AudioCapturerLinux to capture from it.
-  FilePath audio_pipe_name = CommandLine::ForCurrentProcess()->
+  base::FilePath audio_pipe_name = CommandLine::ForCurrentProcess()->
       GetSwitchValuePath(kAudioPipeSwitchName);
   if (!audio_pipe_name.empty()) {
     remoting::AudioCapturerLinux::InitializePipeReader(
@@ -572,6 +596,7 @@ void HostProcess::StartOnUiThread() {
   IpcDesktopEnvironmentFactory* desktop_environment_factory =
       new IpcDesktopEnvironmentFactory(
           context_->network_task_runner(),
+          context_->network_task_runner(),
           daemon_channel_.get());
   desktop_session_connector_ = desktop_environment_factory;
 #else // !defined(REMOTING_MULTI_PROCESS)
@@ -582,7 +607,7 @@ void HostProcess::StartOnUiThread() {
 
 #else  // !defined(OS_WIN)
   DesktopEnvironmentFactory* desktop_environment_factory =
-      new BasicDesktopEnvironmentFactory();
+      new BasicDesktopEnvironmentFactory(true);
 #endif  // !defined(OS_WIN)
 
   desktop_environment_factory_.reset(desktop_environment_factory);
@@ -639,13 +664,18 @@ void HostProcess::ShutdownOnUiThread() {
   // thread will remain in-use and prevent the process from exiting.
   // TODO(wez): DesktopEnvironmentFactory should own the pipe reader.
   // See crbug.com/161373 and crbug.com/104544.
-  AudioCapturerLinux::InitializePipeReader(NULL, FilePath());
+  AudioCapturerLinux::InitializePipeReader(NULL, base::FilePath());
 #endif
 }
 
 // Overridden from HeartbeatSender::Listener
 void HostProcess::OnUnknownHostIdError() {
   LOG(ERROR) << "Host ID not found.";
+  ShutdownHost(kInvalidHostIdExitCode);
+}
+
+void HostProcess::OnHostDeleted() {
+  LOG(ERROR) << "Host was deleted from the directory.";
   ShutdownHost(kInvalidHostIdExitCode);
 }
 
@@ -774,6 +804,7 @@ bool HostProcess::OnUsernamePolicyUpdate(bool host_username_match_required) {
 #endif
 
     if (shutdown) {
+      LOG(ERROR) << "The host username does not match.";
       ShutdownHost(kUsernameMismatchExitCode);
     }
   } else {
@@ -814,6 +845,8 @@ bool HostProcess::OnCurtainPolicyUpdate(bool curtain_required) {
     // TODO(jamiewalch): Fix this once we have implemented the multi-process
     // daemon architecture (crbug.com/134894)
     if (getuid() == 0) {
+      LOG(ERROR) << "Running the host in the console login session is yet not "
+                    "supported.";
       ShutdownHost(kLoginScreenNotSupportedExitCode);
       return false;
     }
@@ -822,12 +855,18 @@ bool HostProcess::OnCurtainPolicyUpdate(bool curtain_required) {
 
   if (curtain_required_ != curtain_required) {
     if (curtain_required)
-      LOG(ERROR) << "Policy requires curtain-mode.";
+      LOG(INFO) << "Policy requires curtain-mode.";
     else
-      LOG(ERROR) << "Policy does not require curtain-mode.";
+      LOG(INFO) << "Policy does not require curtain-mode.";
     curtain_required_ = curtain_required;
     if (curtaining_host_observer_)
       curtaining_host_observer_->SetEnableCurtaining(curtain_required_);
+
+    // The current Windows curtain mode implementation relies on this code
+    // restarting the host when the curtain mode policy changes. For example if
+    // the policy is enabled while someone is already connected to the console
+    // that session should be either curtained or disconnected. This code makes
+    // sure that the session will be disconnected by restarting the host.
     return true;
   }
   return false;
@@ -857,7 +896,7 @@ void HostProcess::StartHost() {
   signal_strategy_.reset(
       new XmppSignalStrategy(context_->url_request_context_getter(),
                              xmpp_login_, xmpp_auth_token_,
-                             xmpp_auth_service_));
+                             xmpp_auth_service_, xmpp_server_config_));
 
   scoped_ptr<DnsBlackholeChecker> dns_blackhole_checker(
       new DnsBlackholeChecker(context_->url_request_context_getter(),
@@ -903,19 +942,39 @@ void HostProcess::StartHost() {
 #endif
 
   heartbeat_sender_.reset(new HeartbeatSender(
-      this, host_id_, signal_strategy_.get(), &key_pair_));
+      this, host_id_, signal_strategy_.get(), &key_pair_, directory_bot_jid_));
+
+  host_change_notification_listener_.reset(new HostChangeNotificationListener(
+      this, host_id_, signal_strategy_.get(), directory_bot_jid_));
 
   log_to_server_.reset(
-      new LogToServer(host_, ServerLogEntry::ME2ME, signal_strategy_.get()));
-  host_event_logger_ = HostEventLogger::Create(host_, kApplicationName);
+      new LogToServer(host_->AsWeakPtr(), ServerLogEntry::ME2ME,
+                      signal_strategy_.get(), directory_bot_jid_));
+
+  // Set up repoting the host status notifications.
+#if defined(REMOTING_MULTI_PROCESS)
+  host_event_logger_.reset(
+      new IpcHostEventLogger(host_->AsWeakPtr(), daemon_channel_.get()));
+#else  // !defined(REMOTING_MULTI_PROCESS)
+  host_event_logger_ =
+      HostEventLogger::Create(host_->AsWeakPtr(), kApplicationName);
+#endif  // !defined(REMOTING_MULTI_PROCESS)
 
   resizing_host_observer_.reset(
-      new ResizingHostObserver(desktop_resizer_.get(), host_));
+      new ResizingHostObserver(desktop_resizer_.get(), host_->AsWeakPtr()));
+
+#if defined(REMOTING_RDP_SESSION)
+  // TODO(alexeypa): do not create |curtain_| in this case.
+  CurtainMode* curtain = static_cast<IpcDesktopEnvironmentFactory*>(
+      desktop_environment_factory_.get());
+#else  // !defined(REMOTING_RDP_SESSION)
+  CurtainMode* curtain = curtain_.get();
+#endif  // !defined(REMOTING_RDP_SESSION)
 
   // Create a host observer to enable/disable curtain mode as clients connect
   // and disconnect.
   curtaining_host_observer_.reset(new CurtainingHostObserver(
-                                  curtain_.get(), host_));
+      curtain, host_->AsWeakPtr()));
   curtaining_host_observer_->SetEnableCurtaining(curtain_required_);
 
   if (host_user_interface_.get()) {
@@ -1001,6 +1060,7 @@ void HostProcess::ShutdownOnNetworkThread() {
   host_event_logger_.reset();
   log_to_server_.reset();
   heartbeat_sender_.reset();
+  host_change_notification_listener_.reset();
   signaling_connector_.reset();
   signal_strategy_.reset();
   resizing_host_observer_.reset();
@@ -1036,43 +1096,12 @@ void HostProcess::OnCrash(const std::string& function_name,
   CHECK(false);
 }
 
-}  // namespace remoting
-
-int main(int argc, char** argv) {
-#if defined(OS_MACOSX)
-  // Needed so we don't leak objects when threads are created.
-  base::mac::ScopedNSAutoreleasePool pool;
-#endif
-
-  CommandLine::Init(argc, argv);
-
-  // Initialize Breakpad as early as possible. On Windows, this happens in
-  // WinMain(), so it shouldn't also be done here. The command-line needs to be
-  // initialized first, so that the preference for crash-reporting can be looked
-  // up in the config file.
-#if defined(MAC_BREAKPAD)
-  if (remoting::IsUsageStatsAllowed()) {
-    remoting::InitializeCrashReporting();
-  }
-#endif  // MAC_BREAKPAD
-
-  // This object instance is required by Chrome code (for example,
-  // LazyInstance, MessageLoop).
-  base::AtExitManager exit_manager;
-
-  if (CommandLine::ForCurrentProcess()->HasSwitch(kVersionSwitchName)) {
-    printf("%s\n", STRINGIZE(VERSION));
-    return 0;
-  }
-
-  remoting::InitHostLogging();
-
+int HostProcessMain() {
 #if defined(TOOLKIT_GTK)
   // Required for any calls into GTK functions, such as the Disconnect and
   // Continue windows, though these should not be used for the Me2Me case
   // (crbug.com/104377).
-  const CommandLine* cmd_line = CommandLine::ForCurrentProcess();
-  gfx::GtkInitFromCommandLine(*cmd_line);
+  gfx::GtkInitFromCommandLine(*CommandLine::ForCurrentProcess());
 #endif  // TOOLKIT_GTK
 
   // Enable support for SSL server sockets, which must be done while still
@@ -1081,18 +1110,18 @@ int main(int argc, char** argv) {
 
   // Create the main message loop and start helper threads.
   MessageLoop message_loop(MessageLoop::TYPE_UI);
-  scoped_ptr<remoting::ChromotingHostContext> context =
-      remoting::ChromotingHostContext::Create(
-          new remoting::AutoThreadTaskRunner(message_loop.message_loop_proxy(),
-                                             MessageLoop::QuitClosure()));
+  scoped_ptr<ChromotingHostContext> context =
+      ChromotingHostContext::Create(
+          new AutoThreadTaskRunner(message_loop.message_loop_proxy(),
+                                   MessageLoop::QuitClosure()));
   if (!context)
-    return remoting::kInitializationFailed;
+    return kInitializationFailed;
 
   // Create & start the HostProcess using these threads.
   // TODO(wez): The HostProcess holds a reference to itself until Shutdown().
   // Remove this hack as part of the multi-process refactoring.
-  int exit_code = remoting::kSuccessExitCode;
-  new remoting::HostProcess(context.Pass(), &exit_code);
+  int exit_code = kSuccessExitCode;
+  new HostProcess(context.Pass(), &exit_code);
 
   // Run the main (also UI) message loop until the host no longer needs it.
   message_loop.Run();
@@ -1100,44 +1129,10 @@ int main(int argc, char** argv) {
   return exit_code;
 }
 
-#if defined(OS_WIN)
-HMODULE g_hModule = NULL;
+}  // namespace remoting
 
-int CALLBACK WinMain(HINSTANCE instance,
-                     HINSTANCE previous_instance,
-                     LPSTR command_line,
-                     int show_command) {
-#if defined(OFFICIAL_BUILD)
-  if (remoting::IsUsageStatsAllowed()) {
-    remoting::InitializeCrashReporting();
-  }
-#endif  // OFFICIAL_BUILD
-
-  g_hModule = instance;
-
-  // Register and initialize common controls.
-  INITCOMMONCONTROLSEX info;
-  info.dwSize = sizeof(info);
-  info.dwICC = ICC_STANDARD_CLASSES;
-  InitCommonControlsEx(&info);
-
-  // Mark the process as DPI-aware, so Windows won't scale coordinates in APIs.
-  // N.B. This API exists on Vista and above.
-  if (base::win::GetVersion() >= base::win::VERSION_VISTA) {
-    FilePath path(base::GetNativeLibraryName(UTF8ToUTF16("user32")));
-    base::ScopedNativeLibrary user32(path);
-    CHECK(user32.is_valid());
-
-    typedef BOOL (WINAPI * SetProcessDPIAwareFn)();
-    SetProcessDPIAwareFn set_process_dpi_aware =
-        static_cast<SetProcessDPIAwareFn>(
-            user32.GetFunctionPointer("SetProcessDPIAware"));
-    set_process_dpi_aware();
-  }
-
-  // CommandLine::Init() ignores the passed |argc| and |argv| on Windows getting
-  // the command line from GetCommandLineW(), so we can safely pass NULL here.
-  return main(0, NULL);
+#if !defined(OS_WIN)
+int main(int argc, char** argv) {
+  return remoting::HostMain(argc, argv);
 }
-
-#endif  // defined(OS_WIN)
+#endif  // !defined(OS_WIN)

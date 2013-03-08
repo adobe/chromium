@@ -10,7 +10,7 @@
 #include "base/bind.h"
 #include "base/compiler_specific.h"
 #include "base/debug/alias.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/message_loop.h"
 #include "base/metrics/histogram.h"
 #include "base/shared_memory.h"
@@ -22,6 +22,7 @@
 #include "content/public/common/resource_response.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_util.h"
+#include "net/base/request_priority.h"
 #include "net/http/http_response_headers.h"
 #include "webkit/glue/resource_request_body.h"
 #include "webkit/glue/resource_type.h"
@@ -58,11 +59,12 @@ class IPCResourceLoaderBridge : public ResourceLoaderBridge {
   virtual ~IPCResourceLoaderBridge();
 
   // ResourceLoaderBridge
-  virtual void SetRequestBody(ResourceRequestBody* request_body);
-  virtual bool Start(Peer* peer);
-  virtual void Cancel();
-  virtual void SetDefersLoading(bool value);
-  virtual void SyncLoad(SyncLoadResponse* response);
+  virtual void SetRequestBody(ResourceRequestBody* request_body) OVERRIDE;
+  virtual bool Start(Peer* peer) OVERRIDE;
+  virtual void Cancel() OVERRIDE;
+  virtual void SetDefersLoading(bool value) OVERRIDE;
+  virtual void DidChangePriority(net::RequestPriority new_priority) OVERRIDE;
+  virtual void SyncLoad(SyncLoadResponse* response) OVERRIDE;
 
  private:
   ResourceLoaderBridge::Peer* peer_;
@@ -102,6 +104,7 @@ IPCResourceLoaderBridge::IPCResourceLoaderBridge(
   request_.load_flags = request_info.load_flags;
   request_.origin_pid = request_info.requestor_pid;
   request_.resource_type = request_info.request_type;
+  request_.priority = request_info.priority;
   request_.request_context = request_info.request_context;
   request_.appcache_host_id = request_info.appcache_host_id;
   request_.download_to_file = request_info.download_to_file;
@@ -190,6 +193,16 @@ void IPCResourceLoaderBridge::SetDefersLoading(bool value) {
   }
 
   dispatcher_->SetDefersLoading(request_id_, value);
+}
+
+void IPCResourceLoaderBridge::DidChangePriority(
+    net::RequestPriority new_priority) {
+  if (request_id_ < 0) {
+    NOTREACHED() << "Trying to change priority of an unstarted request";
+    return;
+  }
+
+  dispatcher_->DidChangePriority(routing_id_, request_id_, new_priority);
 }
 
 void IPCResourceLoaderBridge::SyncLoad(SyncLoadResponse* response) {
@@ -546,6 +559,13 @@ void ResourceDispatcher::SetDefersLoading(int request_id, bool value) {
         base::Bind(&ResourceDispatcher::FlushDeferredMessages,
                    weak_factory_.GetWeakPtr(), request_id));
   }
+}
+
+void ResourceDispatcher::DidChangePriority(
+    int routing_id, int request_id, net::RequestPriority new_priority) {
+  DCHECK(ContainsKey(pending_requests_, request_id));
+  message_sender()->Send(new ResourceHostMsg_DidChangePriority(
+      routing_id, request_id, new_priority));
 }
 
 ResourceDispatcher::PendingRequestInfo::PendingRequestInfo()

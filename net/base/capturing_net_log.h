@@ -54,6 +54,10 @@ class CapturingNetLog : public NetLog {
     // log entry.
     bool GetNetErrorCode(int* value) const;
 
+    // Returns the parameters as a JSON string, or empty string if there are no
+    // parameters.
+    std::string GetParamsJson() const;
+
     EventType type;
     base::TimeTicks time;
     Source source;
@@ -69,6 +73,10 @@ class CapturingNetLog : public NetLog {
 
   // Returns the list of all entries in the log.
   void GetEntries(CapturedEntryList* entry_list) const;
+
+  // Fills |entry_list| with all entries in the log from the specified Source.
+  void GetEntriesForSource(NetLog::Source source,
+                           CapturedEntryList* entry_list) const;
 
   // Returns number of entries in the log.
   size_t GetSize() const;
@@ -116,6 +124,11 @@ class CapturingBoundNetLog {
 
   // Fills |entry_list| with all entries in the log.
   void GetEntries(CapturingNetLog::CapturedEntryList* entry_list) const;
+
+  // Fills |entry_list| with all entries in the log from the specified Source.
+  void GetEntriesForSource(
+      NetLog::Source source,
+      CapturingNetLog::CapturedEntryList* entry_list) const;
 
   // Returns number of entries in the log.
   size_t GetSize() const;

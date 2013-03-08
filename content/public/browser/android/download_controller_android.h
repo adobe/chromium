@@ -5,6 +5,8 @@
 #ifndef CONTENT_PUBLIC_BROWSER_ANDROID_DOWNLOAD_CONTROLLER_ANDROID_H_
 #define CONTENT_PUBLIC_BROWSER_ANDROID_DOWNLOAD_CONTROLLER_ANDROID_H_
 
+#include "content/common/content_export.h"
+
 namespace content {
 class DownloadItem;
 class RenderViewHost;
@@ -12,7 +14,7 @@ class WebContents;
 
 // Interface to request GET downloads and send notifications for POST
 // downloads.
-class DownloadControllerAndroid {
+class CONTENT_EXPORT DownloadControllerAndroid {
  public:
   // Returns the singleton instance of the DownloadControllerAndroid.
   static DownloadControllerAndroid* Get();
@@ -23,8 +25,7 @@ class DownloadControllerAndroid {
 
   // Should be called when a POST download is started. Notifies the embedding
   // app about the download. Should be called on the UI thread.
-  virtual void OnPostDownloadStarted(WebContents* web_contents,
-                                     DownloadItem* download_item) = 0;
+  virtual void OnPostDownloadStarted(DownloadItem* download_item) = 0;
  protected:
   virtual ~DownloadControllerAndroid() {};
 };

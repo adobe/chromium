@@ -5,6 +5,7 @@
 #ifndef ASH_TOUCH_TOUCH_OBSERVER_HUD_H_
 #define ASH_TOUCH_TOUCH_OBSERVER_HUD_H_
 
+#include "ash/ash_export.h"
 #include "ash/shell.h"
 #include "ui/base/events/event_handler.h"
 #include "ui/gfx/point.h"
@@ -26,8 +27,8 @@ namespace internal {
 class TouchHudCanvas;
 
 // An event filter which handles system level gesture events.
-class TouchObserverHUD : public ui::EventHandler,
-                         public views::WidgetObserver {
+class ASH_EXPORT TouchObserverHUD : public ui::EventHandler,
+                                    public views::WidgetObserver {
  public:
   TouchObserverHUD();
   virtual ~TouchObserverHUD();
@@ -36,6 +37,12 @@ class TouchObserverHUD : public ui::EventHandler,
   // cycles between a fixed number of display modes.
   void ChangeToNextMode();
 
+  // Removes all existing touch points from the screen (only if the HUD is
+  // visible).
+  void Clear();
+
+  std::string GetLogAsString() const;
+
  private:
   void UpdateTouchPointLabel(int index);
 
@@ -43,7 +50,7 @@ class TouchObserverHUD : public ui::EventHandler,
   virtual void OnTouchEvent(ui::TouchEvent* event) OVERRIDE;
 
   // Overridden from views::WidgetObserver:
-  virtual void OnWidgetClosing(views::Widget* widget) OVERRIDE;
+  virtual void OnWidgetDestroying(views::Widget* widget) OVERRIDE;
 
   static const int kMaxTouchPoints = 32;
 
@@ -52,6 +59,7 @@ class TouchObserverHUD : public ui::EventHandler,
   views::View* label_container_;
   views::Label* touch_labels_[kMaxTouchPoints];
   gfx::Point touch_positions_[kMaxTouchPoints];
+  float touch_radius_[kMaxTouchPoints];
   ui::EventType touch_status_[kMaxTouchPoints];
 
   DISALLOW_COPY_AND_ASSIGN(TouchObserverHUD);

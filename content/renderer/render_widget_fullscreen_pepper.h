@@ -89,6 +89,7 @@ class RenderWidgetFullscreenPepper :
       gfx::Rect* clip,
       float* scale_factor) OVERRIDE;
   virtual void OnResize(const gfx::Size& new_size,
+                        const gfx::Size& physical_backing_size,
                         const gfx::Rect& resizer_rect,
                         bool is_fullscreen) OVERRIDE;
 
@@ -97,6 +98,7 @@ class RenderWidgetFullscreenPepper :
 
   // RenderWidget overrides.
   virtual bool SupportsAsynchronousSwapBuffers() OVERRIDE;
+  virtual void Composite() OVERRIDE;
 
  private:
   // Creates the GL context for compositing.

@@ -11,6 +11,7 @@
 #include "base/debug/leak_tracker.h"
 #include "base/lazy_instance.h"
 #include "base/path_service.h"
+#include "base/prefs/pref_service.h"
 #include "base/prefs/public/pref_change_registrar.h"
 #include "base/stl_util.h"
 #include "base/string_util.h"
@@ -19,7 +20,6 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/metrics/metrics_service.h"
 #include "chrome/browser/net/sqlite_persistent_cookie_store.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/safe_browsing/client_side_detection_service.h"
@@ -52,15 +52,29 @@ using content::BrowserThread;
 namespace {
 
 // Filename suffix for the cookie database.
-const FilePath::CharType kCookiesFile[] = FILE_PATH_LITERAL(" Cookies");
+const base::FilePath::CharType kCookiesFile[] = FILE_PATH_LITERAL(" Cookies");
 
 // The default URL prefix where browser fetches chunk updates, hashes,
 // and reports safe browsing hits and malware details.
 const char* const kSbDefaultURLPrefix =
     "https://safebrowsing.google.com/safebrowsing";
 
-FilePath CookieFilePath() {
-  return FilePath(
+// The backup URL prefix used when there are issues establishing a connection
+// with the server at the primary URL.
+const char* const kSbBackupConnectErrorURLPrefix =
+    "https://alt1-safebrowsing.google.com/safebrowsing";
+
+// The backup URL prefix used when there are HTTP-specific issues with the
+// server at the primary URL.
+const char* const kSbBackupHttpErrorURLPrefix =
+    "https://alt2-safebrowsing.google.com/safebrowsing";
+
+// The backup URL prefix used when there are local network specific issues.
+const char* const kSbBackupNetworkErrorURLPrefix =
+    "https://alt3-safebrowsing.google.com/safebrowsing";
+
+base::FilePath CookieFilePath() {
+  return base::FilePath(
       SafeBrowsingService::GetBaseFilename().value() + kCookiesFile);
 }
 
@@ -116,7 +130,7 @@ SafeBrowsingServiceFactory* SafeBrowsingService::factory_ = NULL;
 // don't leak it.
 class SafeBrowsingServiceFactoryImpl : public SafeBrowsingServiceFactory {
  public:
-  virtual SafeBrowsingService* CreateSafeBrowsingService() {
+  virtual SafeBrowsingService* CreateSafeBrowsingService() OVERRIDE {
     return new SafeBrowsingService();
   }
 
@@ -132,13 +146,13 @@ static base::LazyInstance<SafeBrowsingServiceFactoryImpl>
     g_safe_browsing_service_factory_impl = LAZY_INSTANCE_INITIALIZER;
 
 // static
-FilePath SafeBrowsingService::GetCookieFilePathForTesting() {
+base::FilePath SafeBrowsingService::GetCookieFilePathForTesting() {
   return CookieFilePath();
 }
 
 // static
-FilePath SafeBrowsingService::GetBaseFilename() {
-  FilePath path;
+base::FilePath SafeBrowsingService::GetBaseFilename() {
+  base::FilePath path;
   bool result = PathService::Get(chrome::DIR_USER_DATA, &path);
   DCHECK(result);
   return path.Append(chrome::kSafeBrowsingBaseFilename);
@@ -291,7 +305,12 @@ void SafeBrowsingService::InitURLRequestContextOnIOThread(
   DCHECK(!url_request_context_.get());
 
   scoped_refptr<net::CookieStore> cookie_store = new net::CookieMonster(
-      new SQLitePersistentCookieStore(CookieFilePath(), false, NULL),
+      new SQLitePersistentCookieStore(
+          CookieFilePath(),
+          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO),
+          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::DB),
+          false,
+          NULL),
       NULL);
 
   url_request_context_.reset(new net::URLRequestContext);
@@ -345,6 +364,9 @@ void SafeBrowsingService::StartOnIOThread() {
       cmdline->HasSwitch(switches::kSbURLPrefix) ?
       cmdline->GetSwitchValueASCII(switches::kSbURLPrefix) :
       kSbDefaultURLPrefix;
+  config.backup_connect_error_url_prefix = kSbBackupConnectErrorURLPrefix;
+  config.backup_http_error_url_prefix = kSbBackupHttpErrorURLPrefix;
+  config.backup_network_error_url_prefix = kSbBackupNetworkErrorURLPrefix;
 
 #if defined(FULL_SAFE_BROWSING)
   DCHECK(database_manager_);

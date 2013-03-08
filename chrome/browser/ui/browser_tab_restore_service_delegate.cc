@@ -94,7 +94,8 @@ TabRestoreServiceDelegate* TabRestoreServiceDelegate::Create(
   } else {
     browser = new Browser(
         Browser::CreateParams::CreateForApp(
-            Browser::TYPE_POPUP, app_name, gfx::Rect(), profile));
+            Browser::TYPE_POPUP, app_name, gfx::Rect(), profile,
+            host_desktop_type));
   }
   if (browser)
     return browser->tab_restore_service_delegate();
@@ -112,7 +113,9 @@ TabRestoreServiceDelegate*
 
 // static
 TabRestoreServiceDelegate* TabRestoreServiceDelegate::FindDelegateWithID(
-    SessionID::id_type desired_id) {
+    SessionID::id_type desired_id,
+    chrome::HostDesktopType host_desktop_type) {
   Browser* browser = chrome::FindBrowserWithID(desired_id);
-  return browser ? browser->tab_restore_service_delegate() : NULL;
+  return (browser && browser->host_desktop_type() == host_desktop_type) ?
+             browser->tab_restore_service_delegate() : NULL;
 }

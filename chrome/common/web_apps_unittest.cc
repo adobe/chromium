@@ -4,8 +4,8 @@
 
 #include "chrome/common/web_apps.h"
 
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/json/json_file_value_serializer.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
@@ -18,7 +18,7 @@
 namespace {
 
 DictionaryValue* LoadDefinitionFile(const std::string& name) {
-  FilePath path;
+  base::FilePath path;
   if (!PathService::Get(chrome::DIR_TEST_DATA, &path)) {
     ADD_FAILURE() << "Could not get test data dir.";
     return NULL;

@@ -5,9 +5,10 @@
 #ifndef CHROME_BROWSER_PREFS_PREF_SERVICE_SYNCABLE_BUILDER_H_
 #define CHROME_BROWSER_PREFS_PREF_SERVICE_SYNCABLE_BUILDER_H_
 
-#include "chrome/browser/prefs/pref_service_builder.h"
+#include "base/prefs/pref_service_builder.h"
 
 class CommandLine;
+class PrefRegistrySyncable;
 class PrefServiceSyncable;
 
 namespace policy {
@@ -33,7 +34,7 @@ class PrefServiceSyncableBuilder : public PrefServiceBuilder {
   // Specifies to use an actual command-line backed command-line pref store.
   PrefServiceSyncableBuilder& WithCommandLine(CommandLine* command_line);
 
-  virtual PrefServiceSyncable* CreateSyncable();
+  virtual PrefServiceSyncable* CreateSyncable(PrefRegistrySyncable* registry);
 
  private:
   DISALLOW_COPY_AND_ASSIGN(PrefServiceSyncableBuilder);

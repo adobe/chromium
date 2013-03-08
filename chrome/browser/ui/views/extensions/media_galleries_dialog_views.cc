@@ -5,17 +5,21 @@
 #include "chrome/browser/ui/views/extensions/media_galleries_dialog_views.h"
 
 #include "chrome/browser/ui/views/constrained_window_views.h"
+#include "chrome/browser/ui/web_contents_modal_dialog_manager.h"
+#include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_view.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/views/controls/button/checkbox.h"
-#include "ui/views/controls/button/text_button.h"
+#include "ui/views/controls/button/label_button.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/layout/box_layout.h"
 #include "ui/views/layout/grid_layout.h"
 #include "ui/views/layout/layout_constants.h"
 #include "ui/views/view.h"
+#include "ui/views/widget/widget.h"
 #include "ui/views/window/dialog_client_view.h"
 
 
@@ -30,14 +34,20 @@ MediaGalleriesDialogViews::MediaGalleriesDialogViews(
       window_(NULL),
       contents_(new views::View()),
       checkbox_container_(NULL),
-      add_gallery_container_(NULL),
+      add_gallery_button_(NULL),
       confirm_available_(false),
       accepted_(false) {
   InitChildViews();
 
   // Ownership of |contents_| is handed off by this call. |window_| will take
   // care of deleting itself after calling DeleteDelegate().
-  window_ = new ConstrainedWindowViews(controller->web_contents(), this);
+  window_ = CreateWebContentsModalDialogViews(
+      this,
+      controller->web_contents()->GetView()->GetNativeView());
+  WebContentsModalDialogManager* web_contents_modal_dialog_manager =
+      WebContentsModalDialogManager::FromWebContents(
+          controller->web_contents());
+  web_contents_modal_dialog_manager->ShowDialog(window_->GetNativeView());
 }
 
 MediaGalleriesDialogViews::~MediaGalleriesDialogViews() {}
@@ -103,23 +113,38 @@ void MediaGalleriesDialogViews::UpdateGallery(
     GetWidget()->SetSize(GetWidget()->non_client_view()->GetPreferredSize());
 }
 
+void MediaGalleriesDialogViews::ForgetGallery(
+    const MediaGalleryPrefInfo* gallery) {
+  CheckboxMap::iterator iter = checkbox_map_.find(gallery);
+  if (iter == checkbox_map_.end())
+    return;
+
+  views::Checkbox* checkbox = iter->second;
+  checkbox_container_->RemoveChildView(checkbox);
+  delete checkbox;
+  checkbox_map_.erase(iter);
+  GetWidget()->SetSize(GetWidget()->non_client_view()->GetPreferredSize());
+}
+
 bool MediaGalleriesDialogViews::AddOrUpdateGallery(
     const MediaGalleryPrefInfo* gallery,
     bool permitted) {
   string16 label =
       MediaGalleriesDialogController::GetGalleryDisplayName(*gallery);
+  string16 tooltip_text =
+      MediaGalleriesDialogController::GetGalleryTooltip(*gallery);
   CheckboxMap::iterator iter = checkbox_map_.find(gallery);
   if (iter != checkbox_map_.end()) {
     views::Checkbox* checkbox = iter->second;
     checkbox->SetChecked(permitted);
     checkbox->SetText(label);
+    checkbox->SetTooltipText(tooltip_text);
     return false;
   }
 
   views::Checkbox* checkbox = new views::Checkbox(label);
   checkbox->set_listener(this);
-  checkbox->SetTooltipText(
-      MediaGalleriesDialogController::GetGalleryTooltip(*gallery));
+  checkbox->SetTooltipText(tooltip_text);
   checkbox_container_->AddChildView(checkbox);
   checkbox->SetChecked(permitted);
   checkbox_map_[gallery] = checkbox;
@@ -171,17 +196,12 @@ ui::ModalType MediaGalleriesDialogViews::GetModalType() const {
 #endif
 }
 
-views::View* MediaGalleriesDialogViews::GetExtraView() {
-  if (!add_gallery_container_) {
-    views::View* button = new views::NativeTextButton(this,
-        l10n_util::GetStringUTF16(IDS_MEDIA_GALLERIES_DIALOG_ADD_GALLERY));
-    add_gallery_container_ = new views::View();
-    add_gallery_container_->SetLayoutManager(
-        new views::BoxLayout(views::BoxLayout::kHorizontal, 0, 0, 0));
-    add_gallery_container_->AddChildView(button);
-  }
-
-  return add_gallery_container_;
+views::View* MediaGalleriesDialogViews::CreateExtraView() {
+  DCHECK(!add_gallery_button_);
+  add_gallery_button_ = new views::LabelButton(this,
+      l10n_util::GetStringUTF16(IDS_MEDIA_GALLERIES_DIALOG_ADD_GALLERY));
+  add_gallery_button_->SetStyle(views::Button::STYLE_NATIVE_TEXTBUTTON);
+  return add_gallery_button_;
 }
 
 bool MediaGalleriesDialogViews::Cancel() {
@@ -193,12 +213,21 @@ bool MediaGalleriesDialogViews::Accept() {
   return true;
 }
 
+// TODO(wittman): Remove this override once we move to the new style frame view
+// on all dialogs.
+views::NonClientFrameView* MediaGalleriesDialogViews::CreateNonClientFrameView(
+    views::Widget* widget) {
+  return CreateConstrainedStyleNonClientFrameView(
+      widget,
+      controller_->web_contents()->GetBrowserContext());
+}
+
 void MediaGalleriesDialogViews::ButtonPressed(views::Button* sender,
                                               const ui::Event& event) {
   confirm_available_ = true;
   GetWidget()->client_view()->AsDialogClientView()->UpdateDialogButtons();
 
-  if (sender->parent() == add_gallery_container_) {
+  if (sender == add_gallery_button_) {
     controller_->OnAddFolderClicked();
     return;
   }

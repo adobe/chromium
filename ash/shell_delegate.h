@@ -5,7 +5,7 @@
 #ifndef ASH_SHELL_DELEGATE_H_
 #define ASH_SHELL_DELEGATE_H_
 
-#include <vector>
+#include <string>
 
 #include "ash/ash_export.h"
 #include "ash/magnifier/magnifier_constants.h"
@@ -90,6 +90,9 @@ class ASH_EXPORT ShellDelegate {
   // restarted, typically due to logging in as a guest or logging out.
   virtual bool IsFirstRunAfterBoot() const = 0;
 
+  // Returns true if we're running in forced app mode.
+  virtual bool IsRunningInForcedAppMode() const = 0;
+
   // Returns true if a user is logged in whose session can be locked (i.e. the
   // user has a password with which to unlock the session).
   virtual bool CanLockScreen() const = 0;
@@ -118,8 +121,8 @@ class ASH_EXPORT ShellDelegate {
   // Invoked when the user uses F4 to toggle window maximized state.
   virtual void ToggleMaximized() = 0;
 
-  // Invoked when the user uses Ctrl-O to open file manager.
-  virtual void OpenFileManager() = 0;
+  // Invoked when an accelerator is used to open the file manager.
+  virtual void OpenFileManager(bool as_dialog) = 0;
 
   // Invoked when the user opens Crosh.
   virtual void OpenCrosh() = 0;
@@ -229,6 +232,9 @@ class ASH_EXPORT ShellDelegate {
   // Creates a root window host factory. Shell takes ownership of the returned
   // value.
   virtual RootWindowHostFactory* CreateRootWindowHostFactory() = 0;
+
+  // Get the product name.
+  virtual string16 GetProductName() const = 0;
 };
 
 }  // namespace ash

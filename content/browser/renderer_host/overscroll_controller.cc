@@ -125,6 +125,7 @@ bool OverscrollController::DispatchEventCompletesAction (
           return false;
         break;
       case OVERSCROLL_NONE:
+      case OVERSCROLL_COUNT:
         NOTREACHED();
     }
   }
@@ -145,7 +146,14 @@ bool OverscrollController::DispatchEventCompletesAction (
 bool OverscrollController::DispatchEventResetsState(
     const WebKit::WebInputEvent& event) const {
   switch (event.type) {
-    case WebKit::WebInputEvent::MouseWheel:
+    case WebKit::WebInputEvent::MouseWheel: {
+      // Only wheel events with precise deltas (i.e. from trackpad) contribute
+      // to the overscroll gesture.
+      const WebKit::WebMouseWheelEvent& wheel =
+          static_cast<const WebKit::WebMouseWheelEvent&>(event);
+      return !wheel.hasPreciseScrollingDeltas;
+    }
+
     case WebKit::WebInputEvent::GestureScrollUpdate:
     case WebKit::WebInputEvent::GestureFlingCancel:
       return false;
@@ -163,7 +171,10 @@ void OverscrollController::ProcessEventForOverscroll(
     case WebKit::WebInputEvent::MouseWheel: {
       const WebKit::WebMouseWheelEvent& wheel =
           static_cast<const WebKit::WebMouseWheelEvent&>(event);
-      ProcessOverscroll(wheel.deltaX, wheel.deltaY);
+      if (wheel.hasPreciseScrollingDeltas) {
+        ProcessOverscroll(wheel.deltaX * wheel.accelerationRatioX,
+                          wheel.deltaY * wheel.accelerationRatioY);
+      }
       break;
     }
     case WebKit::WebInputEvent::GestureScrollUpdate: {
@@ -216,14 +227,21 @@ void OverscrollController::ProcessOverscroll(float delta_x, float delta_y) {
     return;
   }
 
-  // The scroll may have changed the overscroll mode. Set the mode correctly
-  // first before informing the delegate about the update in overscroll amount.
-  if (fabs(overscroll_delta_x_) > fabs(overscroll_delta_y_)) {
-    SetOverscrollMode(overscroll_delta_x_ > 0.f ? OVERSCROLL_EAST :
-                                                  OVERSCROLL_WEST);
-  } else {
-    SetOverscrollMode(overscroll_delta_y_ > 0.f ? OVERSCROLL_SOUTH :
-                                                  OVERSCROLL_NORTH);
+  // Compute the current overscroll direction. If the direction is different
+  // from the current direction, then always switch to no-overscroll mode first
+  // to make sure that subsequent scroll events go through to the page first.
+  OverscrollMode new_mode = OVERSCROLL_NONE;
+  const float kMinRatio = 2.5;
+  if (fabs(overscroll_delta_x_) > fabs(overscroll_delta_y_) * kMinRatio)
+    new_mode = overscroll_delta_x_ > 0.f ? OVERSCROLL_EAST : OVERSCROLL_WEST;
+  else if (fabs(overscroll_delta_y_) > fabs(overscroll_delta_x_) * kMinRatio)
+    new_mode = overscroll_delta_y_ > 0.f ? OVERSCROLL_SOUTH : OVERSCROLL_NORTH;
+
+  if (overscroll_mode_ == OVERSCROLL_NONE) {
+    SetOverscrollMode(new_mode);
+  } else if (new_mode != overscroll_mode_) {
+    SetOverscrollMode(OVERSCROLL_NONE);
+    return;
   }
 
   // Tell the delegate about the overscroll update so that it can update

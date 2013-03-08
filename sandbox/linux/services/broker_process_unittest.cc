@@ -15,12 +15,18 @@
 #if defined(OS_ANDROID)
 #include "base/android/path_utils.h"
 #endif
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "sandbox/linux/tests/unit_tests.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace sandbox {
+
+#if defined(OS_ANDROID)
+  #define DISABLE_ON_ANDROID(function) DISABLED_##function
+#else
+  #define DISABLE_ON_ANDROID(function) function
+#endif
 
 TEST(BrokerProcess, CreateAndDestroy) {
   std::vector<std::string> read_whitelist;
@@ -188,11 +194,12 @@ TEST(BrokerProcess, OpenCpuinfoNoClientCheck) {
   // expected.
 }
 
-TEST(BrokerProcess, OpenFileRW) {
+// Disabled until we implement a mkstemp that doesn't require JNI.
+TEST(BrokerProcess, DISABLE_ON_ANDROID(OpenFileRW)) {
   const char basename[] = "BrokerProcessXXXXXX";
   char template_name[2048];
 #if defined(OS_ANDROID)
-  FilePath cache_directory;
+  base::FilePath cache_directory;
   ASSERT_TRUE(base::android::GetCacheDirectory(&cache_directory));
   ssize_t length = snprintf(template_name, sizeof(template_name),
                             "%s%s",

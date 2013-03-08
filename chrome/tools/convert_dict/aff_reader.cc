@@ -9,7 +9,7 @@
 #include "base/file_util.h"
 #include "base/i18n/icu_string_conversions.h"
 #include "base/stringprintf.h"
-#include "base/string_split.h"
+#include "base/strings/string_split.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/tools/convert_dict/hunspell_reader.h"
 
@@ -47,7 +47,7 @@ void CollapseDuplicateSpaces(std::string* str) {
 
 }  // namespace
 
-AffReader::AffReader(const FilePath& path)
+AffReader::AffReader(const base::FilePath& path)
     : has_indexed_affixes_(false) {
   file_ = file_util::OpenFile(path, "r");
 

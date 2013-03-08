@@ -21,6 +21,7 @@
 }
 
 .language-options-contents  {
+  min-height: 28px;
   padding: 0 12px 4px;
 }
 
@@ -72,11 +73,14 @@
   margin-top: 24px;
 }
 
-.language-options-notification {
-  background-color: rgb(255, 242, 158);
-  border-bottom: 1px solid #ccc;
-  border-top: 1px solid #ccc;
+.language-options-notification  {
+  background-color: rgb(255, 247, 193);
+  margin: 0 0 4px;
   padding: 8px 30px 8px 12px;
+}
+
+.language-options-notification > div {
+  margin-bottom: 4px;
 }
 
 #language-options-input-method-list button {
@@ -90,7 +94,7 @@
 #language-options-list {
   -webkit-box-flex: 1;
   outline: none;
-  padding: 1px 0 0;
+  padding: 0;
   width: 100%;
 }
 
@@ -122,38 +126,6 @@
   position: fixed;
   z-index: 10;
 }
-
-#language-options-ui-restart-button {
-  margin-top: 4px;
-}
-
-/* In ChromeOS we present the language choices as a big page of links. */
-<if expr="pp_ifdef('chromeos')">
-#add-language-overlay-language-list {
-  -webkit-column-count: 2;
-  -webkit-column-gap: 20px;
-}
-
-#add-language-overlay-language-list > li > button.link-button {
-  padding-bottom: 8px;
-  padding-top: 8px;
-}
-
-#add-language-overlay-page {
-  width: 800px;
-}
-
-#add-language-overlay-page button.link-button {
-  padding-left: 0;
-  padding-right: 0;
-  text-align: left;
-}
-
-#add-language-overlay-page ul {
-  margin: 0;
-  padding: 0;
-}
-</if>
 
 /* TODO(kochi): This is temporary copy from new_tab.css */
 /* Notification */
@@ -212,6 +184,11 @@
 
 #add-language-overlay-page .content-area {
   padding-bottom: 10px;
+}
+
+/* TODO(hshi): Remove this temporary hack once the bug is fixed in Chrome. */
+#add-language-overlay-language-list {
+  width: -webkit-calc(100% - 4px);
 }
 
 .standalone-link-button {

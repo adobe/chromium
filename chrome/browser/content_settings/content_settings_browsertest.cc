@@ -10,16 +10,18 @@
 #include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
 #include "chrome/browser/net/url_request_mock_util.h"
+#include "chrome/browser/plugins/chrome_plugin_service_filter.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
-#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/plugin_service.h"
+#include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_switches.h"
@@ -41,7 +43,7 @@ class ContentSettingsTest : public InProcessBrowserTest {
       : https_server_(
             net::TestServer::TYPE_HTTPS,
             net::TestServer::SSLOptions(net::TestServer::SSLOptions::CERT_OK),
-            FilePath(FILE_PATH_LITERAL("chrome/test/data"))) {
+            base::FilePath(FILE_PATH_LITERAL("chrome/test/data"))) {
   }
 
   virtual void SetUpOnMainThread() OVERRIDE {
@@ -197,7 +199,7 @@ IN_PROC_BROWSER_TEST_F(ContentSettingsTest,
   // NOTE: don't use test_server here, since we need the port to be the same
   // across the restart.
   GURL url = URLRequestMockHTTPJob::GetMockUrl(
-      FilePath(FILE_PATH_LITERAL("setcookie.html")));
+      base::FilePath(FILE_PATH_LITERAL("setcookie.html")));
   CookieSettings* settings =
       CookieSettings::Factory::GetForProfile(browser()->profile());
   settings->SetDefaultCookieSetting(CONTENT_SETTING_BLOCK);
@@ -215,7 +217,7 @@ IN_PROC_BROWSER_TEST_F(ContentSettingsTest,
 IN_PROC_BROWSER_TEST_F(ContentSettingsTest,
                        AllowCookiesForASessionUsingExceptions) {
   GURL url = URLRequestMockHTTPJob::GetMockUrl(
-      FilePath(FILE_PATH_LITERAL("setcookie.html")));
+      base::FilePath(FILE_PATH_LITERAL("setcookie.html")));
   ASSERT_TRUE(GetCookies(browser()->profile(), url).empty());
 }
 
@@ -232,7 +234,8 @@ IN_PROC_BROWSER_TEST_F(ContentSettingsTest, RedirectLoopCookies) {
 
   ui_test_utils::NavigateToURL(browser(), test_url);
 
-  content::WebContents* web_contents = chrome::GetActiveWebContents(browser());
+  content::WebContents* web_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
   ASSERT_EQ(UTF8ToUTF16(test_url.spec() + " failed to load"),
             web_contents->GetTitle());
 
@@ -248,7 +251,8 @@ IN_PROC_BROWSER_TEST_F(ContentSettingsTest, ContentSettingsBlockDataURLs) {
 
   ui_test_utils::NavigateToURL(browser(), url);
 
-  content::WebContents* web_contents = chrome::GetActiveWebContents(browser());
+  content::WebContents* web_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
   ASSERT_EQ(UTF8ToUTF16("Data URL"), web_contents->GetTitle());
 
   EXPECT_TRUE(TabSpecificContentSettings::FromWebContents(web_contents)->
@@ -273,7 +277,8 @@ IN_PROC_BROWSER_TEST_F(ContentSettingsTest, RedirectCrossOrigin) {
 
   ui_test_utils::NavigateToURL(browser(), test_url);
 
-  content::WebContents* web_contents = chrome::GetActiveWebContents(browser());
+  content::WebContents* web_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
 
   EXPECT_TRUE(TabSpecificContentSettings::FromWebContents(web_contents)->
       IsContentBlocked(CONTENT_SETTINGS_TYPE_COOKIES));
@@ -287,7 +292,7 @@ class ClickToPlayPluginTest : public ContentSettingsTest {
 
 #if defined(OS_MACOSX)
   virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
-    FilePath plugin_dir;
+    base::FilePath plugin_dir;
     PathService::Get(base::DIR_MODULE, &plugin_dir);
     plugin_dir = plugin_dir.AppendASCII("plugins");
     // The plugins directory isn't read by default on the Mac, so it needs to be
@@ -302,15 +307,21 @@ IN_PROC_BROWSER_TEST_F(ClickToPlayPluginTest, Basic) {
       CONTENT_SETTINGS_TYPE_PLUGINS, CONTENT_SETTING_BLOCK);
 
   GURL url = ui_test_utils::GetTestUrl(
-      FilePath(), FilePath().AppendASCII("clicktoplay.html"));
+      base::FilePath(), base::FilePath().AppendASCII("clicktoplay.html"));
   ui_test_utils::NavigateToURL(browser(), url);
 
   string16 expected_title(ASCIIToUTF16("OK"));
   content::TitleWatcher title_watcher(
-      chrome::GetActiveWebContents(browser()), expected_title);
+      browser()->tab_strip_model()->GetActiveWebContents(), expected_title);
 
   content::RenderViewHost* host =
-      chrome::GetActiveWebContents(browser())->GetRenderViewHost();
+      browser()->tab_strip_model()->GetActiveWebContents()->GetRenderViewHost();
+  ChromePluginServiceFilter* filter = ChromePluginServiceFilter::GetInstance();
+  int process_id = host->GetProcess()->GetID();
+  base::FilePath path(FILE_PATH_LITERAL("blah"));
+  EXPECT_FALSE(filter->CanLoadPlugin(process_id, path));
+  filter->AuthorizeAllPlugins(process_id);
+  EXPECT_TRUE(filter->CanLoadPlugin(process_id, path));
   host->Send(new ChromeViewMsg_LoadBlockedPlugins(
       host->GetRoutingID(), std::string()));
 
@@ -320,7 +331,7 @@ IN_PROC_BROWSER_TEST_F(ClickToPlayPluginTest, Basic) {
 // Verify that plugins can be allowed on a domain by adding an exception
 IN_PROC_BROWSER_TEST_F(ClickToPlayPluginTest, AllowException) {
   GURL url = ui_test_utils::GetTestUrl(
-      FilePath(), FilePath().AppendASCII("clicktoplay.html"));
+      base::FilePath(), base::FilePath().AppendASCII("clicktoplay.html"));
 
   browser()->profile()->GetHostContentSettingsMap()->SetDefaultContentSetting(
       CONTENT_SETTINGS_TYPE_PLUGINS, CONTENT_SETTING_BLOCK);
@@ -333,7 +344,7 @@ IN_PROC_BROWSER_TEST_F(ClickToPlayPluginTest, AllowException) {
 
   string16 expected_title(ASCIIToUTF16("OK"));
   content::TitleWatcher title_watcher(
-      chrome::GetActiveWebContents(browser()), expected_title);
+      browser()->tab_strip_model()->GetActiveWebContents(), expected_title);
   ui_test_utils::NavigateToURL(browser(), url);
   EXPECT_EQ(expected_title, title_watcher.WaitAndGetTitle());
 }
@@ -341,7 +352,7 @@ IN_PROC_BROWSER_TEST_F(ClickToPlayPluginTest, AllowException) {
 // Verify that plugins can be blocked on a domain by adding an exception.
 IN_PROC_BROWSER_TEST_F(ClickToPlayPluginTest, BlockException) {
   GURL url = ui_test_utils::GetTestUrl(
-      FilePath(), FilePath().AppendASCII("clicktoplay.html"));
+      base::FilePath(), base::FilePath().AppendASCII("clicktoplay.html"));
 
   browser()->profile()->GetHostContentSettingsMap()->SetContentSetting(
       ContentSettingsPattern::FromURL(url),
@@ -352,7 +363,7 @@ IN_PROC_BROWSER_TEST_F(ClickToPlayPluginTest, BlockException) {
 
   string16 expected_title(ASCIIToUTF16("Click To Play"));
   content::TitleWatcher title_watcher(
-      chrome::GetActiveWebContents(browser()), expected_title);
+      browser()->tab_strip_model()->GetActiveWebContents(), expected_title);
   ui_test_utils::NavigateToURL(browser(), url);
   EXPECT_EQ(expected_title, title_watcher.WaitAndGetTitle());
 }
@@ -362,25 +373,28 @@ IN_PROC_BROWSER_TEST_F(ClickToPlayPluginTest, LoadAllBlockedPlugins) {
       CONTENT_SETTINGS_TYPE_PLUGINS, CONTENT_SETTING_BLOCK);
 
   GURL url = ui_test_utils::GetTestUrl(
-      FilePath(), FilePath().AppendASCII("load_all_blocked_plugins.html"));
+      base::FilePath(),
+      base::FilePath().AppendASCII("load_all_blocked_plugins.html"));
   ui_test_utils::NavigateToURL(browser(), url);
 
   string16 expected_title1(ASCIIToUTF16("1"));
   content::TitleWatcher title_watcher1(
-      chrome::GetActiveWebContents(browser()), expected_title1);
+      browser()->tab_strip_model()->GetActiveWebContents(), expected_title1);
 
   content::RenderViewHost* host =
-      chrome::GetActiveWebContents(browser())->GetRenderViewHost();
+      browser()->tab_strip_model()->GetActiveWebContents()->GetRenderViewHost();
+  ChromePluginServiceFilter::GetInstance()->AuthorizeAllPlugins(
+      host->GetProcess()->GetID());
   host->Send(new ChromeViewMsg_LoadBlockedPlugins(
       host->GetRoutingID(), std::string()));
   EXPECT_EQ(expected_title1, title_watcher1.WaitAndGetTitle());
 
   string16 expected_title2(ASCIIToUTF16("2"));
   content::TitleWatcher title_watcher2(
-      chrome::GetActiveWebContents(browser()), expected_title2);
+      browser()->tab_strip_model()->GetActiveWebContents(), expected_title2);
 
   ASSERT_TRUE(content::ExecuteScript(
-      chrome::GetActiveWebContents(browser()), "window.inject()"));
+      browser()->tab_strip_model()->GetActiveWebContents(), "window.inject()"));
 
   EXPECT_EQ(expected_title2, title_watcher2.WaitAndGetTitle());
 }
@@ -395,15 +409,17 @@ IN_PROC_BROWSER_TEST_F(ClickToPlayPluginTest, NoCallbackAtLoad) {
 
   // Inject the callback function into the HTML page generated by the browser.
   ASSERT_TRUE(content::ExecuteScript(
-      chrome::GetActiveWebContents(browser()),
+      browser()->tab_strip_model()->GetActiveWebContents(),
       "CallOnStartup = function() { document.title = \"OK\"; }"));
 
   string16 expected_title(ASCIIToUTF16("OK"));
   content::TitleWatcher title_watcher(
-      chrome::GetActiveWebContents(browser()), expected_title);
+      browser()->tab_strip_model()->GetActiveWebContents(), expected_title);
 
   content::RenderViewHost* host =
-      chrome::GetActiveWebContents(browser())->GetRenderViewHost();
+      browser()->tab_strip_model()->GetActiveWebContents()->GetRenderViewHost();
+  ChromePluginServiceFilter::GetInstance()->AuthorizeAllPlugins(
+      host->GetProcess()->GetID());
   host->Send(new ChromeViewMsg_LoadBlockedPlugins(
       host->GetRoutingID(), std::string()));
 
@@ -415,15 +431,18 @@ IN_PROC_BROWSER_TEST_F(ClickToPlayPluginTest, DeleteSelfAtLoad) {
       CONTENT_SETTINGS_TYPE_PLUGINS, CONTENT_SETTING_BLOCK);
 
   GURL url = ui_test_utils::GetTestUrl(
-      FilePath(), FilePath().AppendASCII("plugin_delete_self_at_load.html"));
+      base::FilePath(),
+      base::FilePath().AppendASCII("plugin_delete_self_at_load.html"));
   ui_test_utils::NavigateToURL(browser(), url);
 
   string16 expected_title(ASCIIToUTF16("OK"));
   content::TitleWatcher title_watcher(
-      chrome::GetActiveWebContents(browser()), expected_title);
+      browser()->tab_strip_model()->GetActiveWebContents(), expected_title);
 
   content::RenderViewHost* host =
-      chrome::GetActiveWebContents(browser())->GetRenderViewHost();
+      browser()->tab_strip_model()->GetActiveWebContents()->GetRenderViewHost();
+  ChromePluginServiceFilter::GetInstance()->AuthorizeAllPlugins(
+      host->GetProcess()->GetID());
   host->Send(new ChromeViewMsg_LoadBlockedPlugins(
       host->GetRoutingID(), std::string()));
 

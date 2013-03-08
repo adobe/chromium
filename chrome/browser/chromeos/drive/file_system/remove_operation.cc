@@ -40,7 +40,7 @@ RemoveOperation::~RemoveOperation() {
 }
 
 void RemoveOperation::Remove(
-    const FilePath& file_path,
+    const base::FilePath& file_path,
     bool is_recursive,
     const FileOperationCallback& callback) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
@@ -68,15 +68,8 @@ void RemoveOperation::RemoveAfterGetEntryInfo(
   }
   DCHECK(entry_proto.get());
 
-  // The edit URL can be empty for non-editable files (such as files shared with
-  // read-only privilege).
-  if (entry_proto->edit_url().empty()) {
-    callback.Run(DRIVE_FILE_ERROR_ACCESS_DENIED);
-    return;
-  }
-
   drive_scheduler_->DeleteResource(
-      GURL(entry_proto->edit_url()),
+      entry_proto->resource_id(),
       base::Bind(&RemoveOperation::RemoveResourceLocally,
                  weak_ptr_factory_.GetWeakPtr(),
                  callback,
@@ -108,7 +101,7 @@ void RemoveOperation::RemoveResourceLocally(
 void RemoveOperation::NotifyDirectoryChanged(
     const FileOperationCallback& callback,
     DriveFileError error,
-    const FilePath& directory_path) {
+    const base::FilePath& directory_path) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(!callback.is_null());
 

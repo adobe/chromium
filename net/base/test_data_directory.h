@@ -5,22 +5,24 @@
 #ifndef NET_BASE_TEST_DATA_DIRECTORY_H_
 #define NET_BASE_TEST_DATA_DIRECTORY_H_
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 
 namespace net {
 
 // Returns the FilePath object representing the absolute path in the source
 // tree that contains certificates for testing.
-FilePath GetTestCertsDirectory();
+base::FilePath GetTestCertsDirectory();
 
-// Returns the FilePath object representing the path to the certificate
-// directory in relation to the source root.
-FilePath GetTestCertsDirectoryRelative();
+// Returns the base::FilePath object representing the path to client
+// certificate files to be used in the |client_authorities| list
+// of a net::SSLConfig object. For all other uses, use
+// GetTestCertsDirectory() instead.
+base::FilePath GetTestClientCertsDirectory();
 
-// Returns the FilePath object representing the relative path containing
+// Returns the base::FilePath object representing the relative path containing
 // resource files for testing WebSocket. Typically the FilePath will be used as
 // document root argument for net::TestServer with TYPE_WS or TYPE_WSS.
-FilePath GetWebSocketTestDataDirectory();
+base::FilePath GetWebSocketTestDataDirectory();
 
 }  // namespace net
 

@@ -10,7 +10,7 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_navigator.h"
-#include "chrome/browser/ui/browser_tabstrip.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
@@ -38,7 +38,7 @@ void SimulateGPUCrash(Browser* browser) {
   // constraints, so we use chrome::Navigate directly.
   chrome::NavigateParams params(
       browser,
-      GURL(chrome::kChromeUIGpuCrashURL),
+      GURL(content::kChromeUIGpuCrashURL),
       static_cast<content::PageTransition>(
           content::PAGE_TRANSITION_TYPED |
           content::PAGE_TRANSITION_FROM_ADDRESS_BAR));
@@ -50,22 +50,23 @@ void SimulateGPUCrash(Browser* browser) {
 
 class WebGLInfobarTest : public InProcessBrowserTest {
  protected:
-  virtual void SetUpCommandLine(CommandLine* command_line) {
+  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
     // GPU tests require gpu acceleration.
-    // We do not care which GL backend is used.
-    command_line->AppendSwitchASCII(switches::kUseGL, "any");
+#if !defined(OS_MACOSX)
+    command_line->AppendSwitchASCII(
+        switches::kUseGL, gfx::kGLImplementationOSMesaName);
+#endif
   }
-  virtual void SetUpInProcessBrowserTestFixture() {
-    FilePath test_dir;
+  virtual void SetUpInProcessBrowserTestFixture() OVERRIDE {
+    base::FilePath test_dir;
     ASSERT_TRUE(PathService::Get(content::DIR_TEST_DATA, &test_dir));
     gpu_test_dir_ = test_dir.AppendASCII("gpu");
   }
-  FilePath gpu_test_dir_;
+  base::FilePath gpu_test_dir_;
 };
 
 IN_PROC_BROWSER_TEST_F(WebGLInfobarTest, ContextLossRaisesInfobar) {
-  // crbug.com/162982, flaky on Mac Retina Release.
-  if (GPUTestBotConfig::CurrentConfigMatches("MAC NVIDIA 0x0fd5 RELEASE"))
+  if (GPUTestBotConfig::CurrentConfigMatches("XP"))
     return;
 
   // Load page and wait for it to load.
@@ -85,12 +86,12 @@ IN_PROC_BROWSER_TEST_F(WebGLInfobarTest, ContextLossRaisesInfobar) {
   infobar_added.Wait();
   EXPECT_EQ(1u,
             InfoBarService::FromWebContents(
-                chrome::GetActiveWebContents(browser()))->GetInfoBarCount());
+                browser()->tab_strip_model()->GetActiveWebContents())->
+                    GetInfoBarCount());
 }
 
 IN_PROC_BROWSER_TEST_F(WebGLInfobarTest, ContextLossInfobarReload) {
-  // crbug.com/162982, flaky on Mac Retina Release, timeout on Debug.
-  if (GPUTestBotConfig::CurrentConfigMatches("MAC NVIDIA 0x0fd5"))
+  if (GPUTestBotConfig::CurrentConfigMatches("XP"))
     return;
 
   content::DOMMessageQueue message_queue;
@@ -117,12 +118,13 @@ IN_PROC_BROWSER_TEST_F(WebGLInfobarTest, ContextLossInfobarReload) {
         content::NotificationService::AllSources());
   SimulateGPUCrash(browser());
   infobar_added.Wait();
-  ASSERT_EQ(1u,
+  EXPECT_EQ(1u,
             InfoBarService::FromWebContents(
-                chrome::GetActiveWebContents(browser()))->GetInfoBarCount());
-  InfoBarDelegate* delegate =
-      InfoBarService::FromWebContents(
-          chrome::GetActiveWebContents(browser()))->GetInfoBarDelegateAt(0);
+                browser()->tab_strip_model()->GetActiveWebContents())->
+                    GetInfoBarCount());
+  InfoBarDelegate* delegate = InfoBarService::FromWebContents(
+      browser()->tab_strip_model()->GetActiveWebContents())->
+          GetInfoBarDelegateAt(0);
   ASSERT_TRUE(delegate);
   ASSERT_TRUE(delegate->AsThreeDAPIInfoBarDelegate());
   delegate->AsConfirmInfoBarDelegate()->Cancel();

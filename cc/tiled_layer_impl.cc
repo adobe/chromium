@@ -161,8 +161,8 @@ void TiledLayerImpl::appendQuads(QuadSink& quadSink, AppendQuadsData& appendQuad
                     borderColor = DebugColors::MissingTileBorderColor();
                     borderWidth = DebugColors::MissingTileBorderWidth(layerTreeImpl());
                 } else {
-                    borderColor = DebugColors::TileBorderColor();
-                    borderWidth = DebugColors::TileBorderWidth(layerTreeImpl());
+                    borderColor = DebugColors::HighResTileBorderColor();
+                    borderWidth = DebugColors::HighResTileBorderWidth(layerTreeImpl());
                 }
                 scoped_ptr<DebugBorderDrawQuad> debugBorderQuad = DebugBorderDrawQuad::Create();
                 debugBorderQuad->SetNew(sharedQuadState, tileRect, borderColor, borderWidth);
@@ -218,18 +218,8 @@ void TiledLayerImpl::appendQuads(QuadSink& quadSink, AppendQuadsData& appendQuad
             float tileHeight = static_cast<float>(m_tiler->tileSize().height());
             gfx::Size textureSize(tileWidth, tileHeight);
 
-            bool clipped = false;
-            gfx::QuadF visibleContentInTargetQuad = MathUtil::mapQuad(drawTransform(), gfx::QuadF(visibleContentRect()), clipped);
-            bool isAxisAlignedInTarget = !clipped && visibleContentInTargetQuad.IsRectilinear();
-            bool useAA = m_tiler->hasBorderTexels() && !isAxisAlignedInTarget;
-
-            bool leftEdgeAA = !i && useAA;
-            bool topEdgeAA = !j && useAA;
-            bool rightEdgeAA = i == m_tiler->numTilesX() - 1 && useAA;
-            bool bottomEdgeAA = j == m_tiler->numTilesY() - 1 && useAA;
-
             scoped_ptr<TileDrawQuad> quad = TileDrawQuad::Create();
-            quad->SetNew(sharedQuadState, tileRect, tileOpaqueRect, tile->resourceId(), texCoordRect, textureSize, tile->contentsSwizzled(), leftEdgeAA, topEdgeAA, rightEdgeAA, bottomEdgeAA);
+            quad->SetNew(sharedQuadState, tileRect, tileOpaqueRect, tile->resourceId(), texCoordRect, textureSize, tile->contentsSwizzled());
             quadSink.append(quad.PassAs<DrawQuad>(), appendQuadsData);
         }
     }

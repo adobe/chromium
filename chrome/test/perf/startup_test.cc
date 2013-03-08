@@ -5,10 +5,10 @@
 #include "base/environment.h"
 #include "base/file_util.h"
 #include "base/path_service.h"
-#include "base/stringprintf.h"
-#include "base/string_number_conversions.h"
-#include "base/string_split.h"
 #include "base/string_util.h"
+#include "base/stringprintf.h"
+#include "base/strings/string_number_conversions.h"
+#include "base/strings/string_split.h"
 #include "base/sys_info.h"
 #include "base/test/test_file_util.h"
 #include "base/test/test_timeouts.h"
@@ -19,8 +19,8 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/env_vars.h"
 #include "chrome/test/automation/automation_proxy.h"
-#include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/test_switches.h"
+#include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "chrome/test/perf/perf_test.h"
 #include "chrome/test/ui/ui_perf_test.h"
@@ -36,10 +36,10 @@ class StartupTest : public UIPerfTest {
   StartupTest() {
     show_window_ = true;
   }
-  void SetUp() {
+  virtual void SetUp() {
     collect_profiling_stats_ = false;
   }
-  void TearDown() {}
+  virtual void TearDown() {}
 
   enum TestColdness {
     WARM,
@@ -54,9 +54,9 @@ class StartupTest : public UIPerfTest {
   // Load a file on startup rather than about:blank.  This tests a longer
   // startup path, including resource loading.
   void SetUpWithFileURL() {
-    const FilePath file_url = ui_test_utils::GetTestFilePath(
-        FilePath(FilePath::kCurrentDirectory),
-        FilePath(FILE_PATH_LITERAL("simple.html")));
+    const base::FilePath file_url = ui_test_utils::GetTestFilePath(
+        base::FilePath(base::FilePath::kCurrentDirectory),
+        base::FilePath(FILE_PATH_LITERAL("simple.html")));
     ASSERT_TRUE(file_util::PathExists(file_url));
     launch_arguments_.AppendArgPath(file_url);
   }
@@ -64,8 +64,8 @@ class StartupTest : public UIPerfTest {
   // Setup the command line arguments to capture profiling data for tasks.
   void SetUpWithProfiling() {
     profiling_file_ = ui_test_utils::GetTestFilePath(
-        FilePath(FilePath::kCurrentDirectory),
-        FilePath(FILE_PATH_LITERAL("task_profile.json")));
+        base::FilePath(base::FilePath::kCurrentDirectory),
+        base::FilePath(FILE_PATH_LITERAL("task_profile.json")));
     launch_arguments_.AppendSwitchPath(switches::kProfilingOutputFile,
                                        profiling_file_);
     collect_profiling_stats_ = true;
@@ -80,7 +80,7 @@ class StartupTest : public UIPerfTest {
     unsigned int which_el = which_tab % arraysize(kTestPageCyclerDomains);
     const char* this_domain = kTestPageCyclerDomains[which_el];
 
-    FilePath page_cycler_path;
+    base::FilePath page_cycler_path;
     PathService::Get(base::DIR_SOURCE_ROOT, &page_cycler_path);
     page_cycler_path = page_cycler_path.AppendASCII("data")
         .AppendASCII("page_cycler").AppendASCII("moz")
@@ -92,7 +92,7 @@ class StartupTest : public UIPerfTest {
   // Use the given profile in the test data extensions/profiles dir.  This tests
   // startup with extensions installed.
   void SetUpWithExtensionsProfile(const char* profile) {
-    FilePath data_dir;
+    base::FilePath data_dir;
     PathService::Get(chrome::DIR_TEST_DATA, &data_dir);
     data_dir = data_dir.AppendASCII("extensions").AppendASCII("profiles").
         AppendASCII(profile);
@@ -100,15 +100,15 @@ class StartupTest : public UIPerfTest {
   }
 
   // Rewrite the preferences file to point to the proper image directory.
-  virtual void SetUpProfile() {
+  virtual void SetUpProfile() OVERRIDE {
     UIPerfTest::SetUpProfile();
     if (profile_type_ != UITestBase::COMPLEX_THEME)
       return;
 
-    const FilePath pref_template_path(user_data_dir().
+    const base::FilePath pref_template_path(user_data_dir().
         AppendASCII("Default").
         AppendASCII("PreferencesTemplate"));
-    const FilePath pref_path(user_data_dir().
+    const base::FilePath pref_path(user_data_dir().
         AppendASCII(TestingProfile::kTestUserProfileDir).
         AppendASCII("Preferences"));
 
@@ -193,14 +193,15 @@ class StartupTest : public UIPerfTest {
 
     for (int i = 0; i < numCycles; ++i) {
       if (test_cold == COLD) {
-        FilePath dir_app;
+        base::FilePath dir_app;
         ASSERT_TRUE(PathService::Get(chrome::DIR_APP, &dir_app));
 
-        FilePath chrome_exe(dir_app.Append(GetExecutablePath()));
+        base::FilePath chrome_exe(dir_app.Append(GetExecutablePath()));
         ASSERT_TRUE(EvictFileFromSystemCacheWrapper(chrome_exe));
 #if defined(OS_WIN)
         // chrome.dll is windows specific.
-        FilePath chrome_dll(dir_app.Append(FILE_PATH_LITERAL("chrome.dll")));
+        base::FilePath chrome_dll(
+            dir_app.Append(FILE_PATH_LITERAL("chrome.dll")));
         ASSERT_TRUE(EvictFileFromSystemCacheWrapper(chrome_dll));
 #endif
       }
@@ -242,7 +243,7 @@ class StartupTest : public UIPerfTest {
         clear_profile_ = false;
         // Clear template_user_data_ so we don't try to copy it over each time
         // through.
-        set_template_user_data(FilePath());
+        set_template_user_data(base::FilePath());
       }
     }
 
@@ -294,7 +295,7 @@ class StartupTest : public UIPerfTest {
     }
   }
 
-  FilePath profiling_file_;
+  base::FilePath profiling_file_;
   bool collect_profiling_stats_;
 };
 

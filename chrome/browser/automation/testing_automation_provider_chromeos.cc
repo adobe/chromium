@@ -9,6 +9,7 @@
 #include "ash/system/tray/system_tray_delegate.h"
 #include "base/command_line.h"
 #include "base/i18n/time_formatting.h"
+#include "base/prefs/pref_service.h"
 #include "base/stringprintf.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
@@ -38,7 +39,6 @@
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/chromeos/settings/cros_settings_names.h"
 #include "chrome/browser/chromeos/system/timezone_settings.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/webui/chromeos/login/oobe_ui.h"
@@ -404,14 +404,17 @@ void TestingAutomationProvider::PickUserImage(DictionaryValue* args,
 
 void TestingAutomationProvider::SkipToLogin(DictionaryValue* args,
                                             IPC::Message* reply_message) {
-  bool skip_image_selection;
-  if (!args->GetBoolean("skip_image_selection", &skip_image_selection)) {
+  bool skip_post_login_screens;
+  // The argument name is a legacy. If set to |true|, this argument causes any
+  // screens that may otherwise be shown after login (registration, Terms of
+  // Service, user image selection) to be skipped.
+  if (!args->GetBoolean("skip_image_selection", &skip_post_login_screens)) {
     AutomationJSONReply reply(this, reply_message);
     reply.SendError("Invalid or missing args.");
     return;
   }
-  if (skip_image_selection)
-    WizardController::SkipImageSelectionForTesting();
+  if (skip_post_login_screens)
+    WizardController::SkipPostLoginScreensForTesting();
 
   WizardController* wizard_controller = WizardController::default_controller();
   if (!wizard_controller) {

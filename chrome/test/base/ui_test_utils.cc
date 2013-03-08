@@ -12,12 +12,13 @@
 #include "base/bind_helpers.h"
 #include "base/callback.h"
 #include "base/command_line.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/json/json_reader.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
+#include "base/prefs/pref_service.h"
 #include "base/test/test_timeouts.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
@@ -27,7 +28,6 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/extension_action.h"
 #include "chrome/browser/history/history_service_factory.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/search_engines/template_url_service_test_util.h"
@@ -36,6 +36,7 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_finder.h"
+#include "chrome/browser/ui/browser_iterator.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/browser/ui/browser_window.h"
@@ -113,7 +114,7 @@ class FindInPageNotificationObserver : public content::NotificationObserver {
   gfx::Rect selection_rect() const { return selection_rect_; }
 
   virtual void Observe(int type, const content::NotificationSource& source,
-                       const content::NotificationDetails& details) {
+                       const content::NotificationDetails& details) OVERRIDE {
     if (type == chrome::NOTIFICATION_FIND_RESULT_AVAILABLE) {
       content::Details<FindNotificationDetails> find_details(details);
       if (find_details->request_id() == current_find_request_id_) {
@@ -153,7 +154,7 @@ class FindInPageNotificationObserver : public content::NotificationObserver {
 const char kSnapshotBaseName[] = "ChromiumSnapshot";
 const char kSnapshotExtension[] = ".png";
 
-FilePath GetSnapshotFileName(const FilePath& snapshot_directory) {
+base::FilePath GetSnapshotFileName(const base::FilePath& snapshot_directory) {
   base::Time::Exploded the_time;
 
   base::Time::Now().LocalExplode(&the_time);
@@ -161,11 +162,11 @@ FilePath GetSnapshotFileName(const FilePath& snapshot_directory) {
       kSnapshotBaseName, the_time.year, the_time.month, the_time.day_of_month,
       the_time.hour, the_time.minute, the_time.second, kSnapshotExtension));
 
-  FilePath snapshot_file = snapshot_directory.AppendASCII(filename);
+  base::FilePath snapshot_file = snapshot_directory.AppendASCII(filename);
   if (file_util::PathExists(snapshot_file)) {
     int index = 0;
     std::string suffix;
-    FilePath trial_file;
+    base::FilePath trial_file;
     do {
       suffix = StringPrintf(" (%d)", ++index);
       trial_file = snapshot_file.InsertBeforeExtensionASCII(suffix);
@@ -260,11 +261,8 @@ static void NavigateToURLWithDispositionBlockUntilNavigationsComplete(
       number_of_navigations);
 
   std::set<Browser*> initial_browsers;
-  for (std::vector<Browser*>::const_iterator iter = BrowserList::begin();
-       iter != BrowserList::end();
-       ++iter) {
-    initial_browsers.insert(*iter);
-  }
+  for (chrome::BrowserIterator it; !it.done(); it.Next())
+    initial_browsers.insert(*it);
 
   content::WindowedNotificationObserver tab_added_observer(
       chrome::NOTIFICATION_TAB_ADDED,
@@ -335,22 +333,24 @@ void NavigateToURLBlockUntilNavigationsComplete(Browser* browser,
       BROWSER_TEST_WAIT_FOR_NAVIGATION);
 }
 
-FilePath GetTestFilePath(const FilePath& dir, const FilePath& file) {
-  FilePath path;
+base::FilePath GetTestFilePath(const base::FilePath& dir,
+                               const base::FilePath& file) {
+  base::FilePath path;
   PathService::Get(chrome::DIR_TEST_DATA, &path);
   return path.Append(dir).Append(file);
 }
 
-GURL GetTestUrl(const FilePath& dir, const FilePath& file) {
+GURL GetTestUrl(const base::FilePath& dir, const base::FilePath& file) {
   return net::FilePathToFileURL(GetTestFilePath(dir, file));
 }
 
-bool GetRelativeBuildDirectory(FilePath* build_dir) {
+bool GetRelativeBuildDirectory(base::FilePath* build_dir) {
   // This function is used to find the build directory so TestServer can serve
   // built files (nexes, etc).  TestServer expects a path relative to the source
   // root.
-  FilePath exe_dir = CommandLine::ForCurrentProcess()->GetProgram().DirName();
-  FilePath src_dir;
+  base::FilePath exe_dir =
+      CommandLine::ForCurrentProcess()->GetProgram().DirName();
+  base::FilePath src_dir;
   if (!PathService::Get(base::DIR_SOURCE_ROOT, &src_dir))
     return false;
 
@@ -366,7 +366,7 @@ bool GetRelativeBuildDirectory(FilePath* build_dir) {
     return false;
 
   size_t match, exe_size, src_size;
-  std::vector<FilePath::StringType> src_parts, exe_parts;
+  std::vector<base::FilePath::StringType> src_parts, exe_parts;
 
   // Determine point at which src and exe diverge.
   exe_dir.GetComponents(&exe_parts);
@@ -379,7 +379,7 @@ bool GetRelativeBuildDirectory(FilePath* build_dir) {
   }
 
   // Create a relative path.
-  *build_dir = FilePath();
+  *build_dir = base::FilePath();
   for (size_t tmp_itr = match; tmp_itr < src_size; ++tmp_itr)
     *build_dir = build_dir->Append(FILE_PATH_LITERAL(".."));
   for (; match < exe_size; ++match)
@@ -475,13 +475,10 @@ void SendToOmniboxAndSubmit(LocationBar* location_bar,
 }
 
 Browser* GetBrowserNotInSet(std::set<Browser*> excluded_browsers) {
-  for (BrowserList::const_iterator iter = BrowserList::begin();
-       iter != BrowserList::end();
-       ++iter) {
-    if (excluded_browsers.find(*iter) == excluded_browsers.end())
-      return *iter;
+  for (chrome::BrowserIterator it; !it.done(); it.Next()) {
+    if (excluded_browsers.find(*it) == excluded_browsers.end())
+      return *it;
   }
-
   return NULL;
 }
 
@@ -523,7 +520,8 @@ BrowserAddedObserver::BrowserAddedObserver()
     : notification_observer_(
           chrome::NOTIFICATION_BROWSER_OPENED,
           content::NotificationService::AllSources()) {
-  original_browsers_.insert(BrowserList::begin(), BrowserList::end());
+  for (chrome::BrowserIterator it; !it.done(); it.Next())
+    original_browsers_.insert(*it);
 }
 
 BrowserAddedObserver::~BrowserAddedObserver() {
@@ -532,7 +530,7 @@ BrowserAddedObserver::~BrowserAddedObserver() {
 Browser* BrowserAddedObserver::WaitForSingleNewBrowser() {
   notification_observer_.Wait();
   // Ensure that only a single new browser has appeared.
-  EXPECT_EQ(original_browsers_.size() + 1, BrowserList::size());
+  EXPECT_EQ(original_browsers_.size() + 1, chrome::GetTotalBrowserCount());
   return GetBrowserNotInSet(original_browsers_);
 }
 
@@ -615,10 +613,10 @@ bool TakeEntirePageSnapshot(RenderViewHost* rvh, SkBitmap* bitmap) {
 
 #if defined(OS_WIN)
 
-bool SaveScreenSnapshotToDirectory(const FilePath& directory,
-                                   FilePath* screenshot_path) {
+bool SaveScreenSnapshotToDirectory(const base::FilePath& directory,
+                                   base::FilePath* screenshot_path) {
   bool succeeded = false;
-  FilePath out_path(GetSnapshotFileName(directory));
+  base::FilePath out_path(GetSnapshotFileName(directory));
 
   MONITORINFO monitor_info = {};
   monitor_info.cbSize = sizeof(monitor_info);
@@ -644,8 +642,8 @@ bool SaveScreenSnapshotToDirectory(const FilePath& directory,
   return succeeded;
 }
 
-bool SaveScreenSnapshotToDesktop(FilePath* screenshot_path) {
-  FilePath desktop;
+bool SaveScreenSnapshotToDesktop(base::FilePath* screenshot_path) {
+  base::FilePath desktop;
 
   return PathService::Get(base::DIR_USER_DESKTOP, &desktop) &&
       SaveScreenSnapshotToDirectory(desktop, screenshot_path);

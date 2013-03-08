@@ -330,7 +330,7 @@ void SwizzleInit() {
 // must be redirected.
 //
 // When the last browser has been destroyed, the BrowserList calls
-// browser::OnAppExiting(), which is the point of no return. That will cause
+// chrome::OnAppExiting(), which is the point of no return. That will cause
 // the NSApplicationWillTerminateNotification to be posted, which ends the
 // NSApplication event loop, so final post- MessageLoop::Run() work is done
 // before exiting.
@@ -501,7 +501,7 @@ void SwizzleInit() {
   if ([attribute isEqualToString:@"AXEnhancedUserInterface"] &&
       [value intValue] == 1) {
     content::BrowserAccessibilityState::GetInstance()->OnScreenReaderDetected();
-    for (TabContentsIterator it; !it.done(); ++it) {
+    for (TabContentsIterator it; !it.done(); it.Next()) {
       if (content::WebContents* contents = *it)
         if (content::RenderViewHost* rvh = contents->GetRenderViewHost())
           rvh->EnableFullAccessibilityMode();

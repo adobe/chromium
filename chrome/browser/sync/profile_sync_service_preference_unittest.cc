@@ -26,8 +26,9 @@
 #include "chrome/browser/sync/profile_sync_test_util.h"
 #include "chrome/browser/sync/test_profile_sync_service.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/test/base/testing_pref_service.h"
+#include "chrome/test/base/testing_pref_service_syncable.h"
 #include "chrome/test/base/testing_profile.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 #include "google_apis/gaia/gaia_constants.h"
 #include "sync/api/sync_data.h"
 #include "sync/internal_api/public/base/model_type.h"
@@ -65,7 +66,8 @@ ACTION_P(ReturnNewDataTypeManagerWithDebugListener, debug_listener) {
       debug_listener,
       arg1,
       arg2,
-      arg3);
+      arg3,
+      arg4);
 }
 
 // TODO(zea): Refactor to remove the ProfileSyncService usage.
@@ -99,10 +101,10 @@ class ProfileSyncServicePreferenceTest
 
   // DataTypeDebugInfoListener implementation.
   virtual void OnDataTypeAssociationComplete(
-      const syncer::DataTypeAssociationStats& association_stats) {
+      const syncer::DataTypeAssociationStats& association_stats) OVERRIDE {
     association_stats_ = association_stats;
   }
-  virtual void OnConfigureComplete() {
+  virtual void OnConfigureComplete() OVERRIDE {
     // Do nothing.
   }
 
@@ -122,9 +124,10 @@ class ProfileSyncServicePreferenceTest
     profile_->CreateRequestContext();
     prefs_ = profile_->GetTestingPrefService();
 
-    prefs_->RegisterStringPref(not_synced_preference_name_.c_str(),
-                               not_synced_preference_default_value_,
-                               PrefServiceSyncable::UNSYNCABLE_PREF);
+    prefs_->registry()->RegisterStringPref(
+        not_synced_preference_name_.c_str(),
+        not_synced_preference_default_value_,
+        PrefRegistrySyncable::UNSYNCABLE_PREF);
   }
 
   virtual void TearDown() {
@@ -161,7 +164,7 @@ class ProfileSyncServicePreferenceTest
     EXPECT_CALL(*components, GetSyncableServiceForType(syncer::PREFERENCES)).
         WillOnce(Return(pref_sync_service_->AsWeakPtr()));
 
-    EXPECT_CALL(*components, CreateDataTypeManager(_, _, _, _)).
+    EXPECT_CALL(*components, CreateDataTypeManager(_, _, _, _, _)).
         WillOnce(ReturnNewDataTypeManagerWithDebugListener(
                      syncer::MakeWeakHandle(debug_ptr_factory_.GetWeakPtr())));
     dtc_ = new UIDataTypeController(syncer::PREFERENCES,
@@ -368,8 +371,7 @@ TEST_F(ProfileSyncServicePreferenceTest, ModelAssociationCloudHasData) {
   scoped_ptr<const Value> value(GetSyncedValue(prefs::kHomePage));
   ASSERT_TRUE(value.get());
   std::string string_value;
-  EXPECT_TRUE(static_cast<const StringValue*>(value.get())->
-              GetAsString(&string_value));
+  EXPECT_TRUE(value->GetAsString(&string_value));
   EXPECT_EQ(example_url1_, string_value);
   EXPECT_EQ(example_url1_, prefs_->GetString(prefs::kHomePage));
 
@@ -385,8 +387,7 @@ TEST_F(ProfileSyncServicePreferenceTest, ModelAssociationCloudHasData) {
 
   value.reset(GetSyncedValue(prefs::kDefaultCharset));
   ASSERT_TRUE(value.get());
-  EXPECT_TRUE(static_cast<const StringValue*>(value.get())->
-              GetAsString(&string_value));
+  EXPECT_TRUE(value->GetAsString(&string_value));
   EXPECT_EQ(non_default_charset_value_, string_value);
   EXPECT_EQ(non_default_charset_value_,
             prefs_->GetString(prefs::kDefaultCharset));

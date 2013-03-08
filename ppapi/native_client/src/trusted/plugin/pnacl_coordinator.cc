@@ -284,7 +284,7 @@ PnaclCoordinator* PnaclCoordinator::BitcodeToNative(
   coordinator->off_the_record_ =
       plugin->nacl_interface()->IsOffTheRecord();
   PLUGIN_PRINTF(("PnaclCoordinator::BitcodeToNative (manifest=%p, "
-                 "off_the_record=%b)\n",
+                 "off_the_record=%d)\n",
                  reinterpret_cast<const void*>(coordinator->manifest_.get()),
                  coordinator->off_the_record_));
 
@@ -345,7 +345,9 @@ PnaclCoordinator::PnaclCoordinator(
     error_already_reported_(false),
     off_the_record_(false),
     pnacl_init_time_(0),
-    pexe_size_(0) {
+    pexe_size_(0),
+    pexe_bytes_compiled_(0),
+    expected_pexe_size_(-1) {
   PLUGIN_PRINTF(("PnaclCoordinator::PnaclCoordinator (this=%p, plugin=%p)\n",
                  static_cast<void*>(this), static_cast<void*>(plugin)));
   callback_factory_.Initialize(this);
@@ -595,29 +597,48 @@ void PnaclCoordinator::DidCopyNexeToCachePartial(int32_t pp_error,
 
 void PnaclCoordinator::NexeWasCopiedToCache(int32_t pp_error) {
   if (pp_error != PP_OK) {
-    // TODO(jvoung): This should try to delete the partially written
-    // cache file before returning...
-    if (pp_error == PP_ERROR_NOQUOTA) {
-      ReportPpapiError(ERROR_PNACL_CACHE_FINALIZE_COPY_NOQUOTA,
-                       pp_error,
-                       "Failed to copy translated nexe to cache (no quota).");
-      return;
-    }
-    if (pp_error == PP_ERROR_NOSPACE) {
-      ReportPpapiError(ERROR_PNACL_CACHE_FINALIZE_COPY_NOSPACE,
-                       pp_error,
-                       "Failed to copy translated nexe to cache (no space).");
-      return;
-    }
-    ReportPpapiError(ERROR_PNACL_CACHE_FINALIZE_COPY_OTHER,
-                     pp_error,
-                     "Failed to copy translated nexe to cache.");
+    // Try to delete the partially written not-yet-committed cache file before
+    // returning. We pass the current pp_error along so that it can be reported
+    // before returning.
+    pp::CompletionCallback cb = callback_factory_.NewCallback(
+        &PnaclCoordinator::CorruptCacheFileWasDeleted, pp_error);
+    cached_nexe_file_->Delete(cb);
     return;
   }
   // Rename the cached_nexe_file_ file to the cache id, to finalize.
   pp::CompletionCallback cb =
       callback_factory_.NewCallback(&PnaclCoordinator::NexeFileWasRenamed);
   cached_nexe_file_->Rename(cache_identity_, cb);
+}
+
+void PnaclCoordinator::CorruptCacheFileWasDeleted(int32_t delete_pp_error,
+                                                  int32_t orig_pp_error) {
+  if (delete_pp_error != PP_OK) {
+    // The cache file was certainly already opened by the time we tried
+    // to write to it, so it should certainly be deletable.
+    PLUGIN_PRINTF(("PnaclCoordinator::CorruptCacheFileWasDeleted "
+                   "delete failed with pp_error=%"NACL_PRId32"\n",
+                   delete_pp_error));
+    // fall through and report the original error.
+  }
+  // Report the original error that caused us to consider the
+  // cache file corrupted.
+  if (orig_pp_error == PP_ERROR_NOQUOTA) {
+    ReportPpapiError(ERROR_PNACL_CACHE_FINALIZE_COPY_NOQUOTA,
+                     orig_pp_error,
+                     "Failed to copy translated nexe to cache (no quota).");
+    return;
+  }
+  if (orig_pp_error == PP_ERROR_NOSPACE) {
+    ReportPpapiError(ERROR_PNACL_CACHE_FINALIZE_COPY_NOSPACE,
+                     orig_pp_error,
+                     "Failed to copy translated nexe to cache (no space).");
+      return;
+  }
+  ReportPpapiError(ERROR_PNACL_CACHE_FINALIZE_COPY_OTHER,
+                   orig_pp_error,
+                   "Failed to copy translated nexe to cache.");
+  return;
 }
 
 void PnaclCoordinator::NexeFileWasRenamed(int32_t pp_error) {
@@ -638,9 +659,7 @@ void PnaclCoordinator::NexeFileWasRenamed(int32_t pp_error) {
       // NOTE: if the file already existed, it looks like the rename will
       // happily succeed.  However, we should add a test for this.
       // Could be a hash collision, or it could also be two tabs racing to
-      // translate the same pexe.  The file could also be a corrupt left-over,
-      // but that case can be removed by doing the TODO for cleanup.
-      // We may want UMA stats to know if this happens.
+      // translate the same pexe. We may want UMA stats to know if this happens.
       // For now, assume that it is a race and try to continue.
       // If there is truly a corrupted file, then sel_ldr should prevent the
       // file from loading due to the file size not matching the ELF header.
@@ -691,7 +710,6 @@ void PnaclCoordinator::NexeReadDidOpen(int32_t pp_error) {
   } else {
     translated_fd_.reset(temp_nexe_file_->release_read_wrapper());
   }
-  plugin_->EnqueueProgressEvent(Plugin::kProgressEventProgress);
   translate_notify_callback_.Run(pp_error);
 }
 
@@ -865,6 +883,10 @@ void PnaclCoordinator::BitcodeStreamDidFinish(int32_t pp_error) {
       error_info_.SetReport(ERROR_PNACL_PEXE_FETCH_OTHER, ss.str());
     }
     translate_thread_->AbortSubprocesses();
+  } else {
+    // Compare download completion pct (100% now), to compile completion pct.
+    HistogramRatio("NaCl.Perf.PNaClLoadTime.PctCompiledWhenFullyDownloaded",
+                   pexe_bytes_compiled_, pexe_size_);
   }
 }
 
@@ -883,6 +905,37 @@ void PnaclCoordinator::BitcodeStreamGotData(int32_t pp_error,
 StreamCallback PnaclCoordinator::GetCallback() {
   return callback_factory_.NewCallbackWithOutput(
       &PnaclCoordinator::BitcodeStreamGotData);
+}
+
+void PnaclCoordinator::BitcodeGotCompiled(int32_t pp_error,
+                                          int64_t bytes_compiled) {
+  // If we don't know the expected total yet, ask.
+  pexe_bytes_compiled_ += bytes_compiled;
+  if (expected_pexe_size_ == -1) {
+    int64_t amount_downloaded;  // dummy variable.
+    streaming_downloader_->GetDownloadProgress(&amount_downloaded,
+                                               &expected_pexe_size_);
+  }
+  bool length_computable = (expected_pexe_size_ != -1);
+  plugin_->EnqueueProgressEvent(plugin::Plugin::kProgressEventProgress,
+                                pexe_url_,
+                                (length_computable ?
+                                 plugin::Plugin::LENGTH_IS_COMPUTABLE :
+                                 plugin::Plugin::LENGTH_IS_NOT_COMPUTABLE),
+                                pexe_bytes_compiled_,
+                                expected_pexe_size_);
+}
+
+pp::CompletionCallback PnaclCoordinator::GetCompileProgressCallback(
+    int64_t bytes_compiled) {
+  return callback_factory_.NewCallback(&PnaclCoordinator::BitcodeGotCompiled,
+                                       bytes_compiled);
+}
+
+void PnaclCoordinator::GetCurrentProgress(int64_t* bytes_loaded,
+                                          int64_t* bytes_total) {
+  *bytes_loaded = pexe_bytes_compiled_;
+  *bytes_total = expected_pexe_size_;
 }
 
 void PnaclCoordinator::ObjectFileDidOpen(int32_t pp_error) {
@@ -918,6 +971,7 @@ void PnaclCoordinator::RunTranslate(int32_t pp_error) {
                                   temp_nexe_file_.get(),
                                   &error_info_,
                                   resources_.get(),
+                                  this,
                                   plugin_);
 }
 

@@ -8,8 +8,8 @@
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
@@ -40,10 +40,11 @@ using base::TimeTicks;
 using content::BrowserThread;
 
 // Filename constants.
-static const FilePath::CharType kHistoryFile[] = FILE_PATH_LITERAL("History");
-static const FilePath::CharType kArchivedHistoryFile[] =
+static const base::FilePath::CharType kHistoryFile[] =
+    FILE_PATH_LITERAL("History");
+static const base::FilePath::CharType kArchivedHistoryFile[] =
     FILE_PATH_LITERAL("Archived History");
-static const FilePath::CharType kThumbnailFile[] =
+static const base::FilePath::CharType kThumbnailFile[] =
     FILE_PATH_LITERAL("Thumbnails");
 
 // The test must be in the history namespace for the gtest forward declarations
@@ -93,10 +94,10 @@ class ExpireHistoryTest : public testing::Test,
         bookmark_model_.bookmark_bar_node(), 0, string16(), url);
   }
 
-  static bool IsStringInFile(const FilePath& filename, const char* str);
+  static bool IsStringInFile(const base::FilePath& filename, const char* str);
 
   // Returns the path the db files are created in.
-  const FilePath& path() const { return tmp_dir_.path(); }
+  const base::FilePath& path() const { return tmp_dir_.path(); }
 
   // This must be destroyed last.
   base::ScopedTempDir tmp_dir_;
@@ -127,20 +128,20 @@ class ExpireHistoryTest : public testing::Test,
   NotificationList notifications_;
 
  private:
-  void SetUp() {
+  virtual void SetUp() {
     ASSERT_TRUE(tmp_dir_.CreateUniqueTempDir());
 
-    FilePath history_name = path().Append(kHistoryFile);
+    base::FilePath history_name = path().Append(kHistoryFile);
     main_db_.reset(new HistoryDatabase);
     if (main_db_->Init(history_name, NULL) != sql::INIT_OK)
       main_db_.reset();
 
-    FilePath archived_name = path().Append(kArchivedHistoryFile);
+    base::FilePath archived_name = path().Append(kArchivedHistoryFile);
     archived_db_.reset(new ArchivedDatabase);
     if (!archived_db_->Init(archived_name))
       archived_db_.reset();
 
-    FilePath thumb_name = path().Append(kThumbnailFile);
+    base::FilePath thumb_name = path().Append(kThumbnailFile);
     thumb_db_.reset(new ThumbnailDatabase);
     if (thumb_db_->Init(thumb_name, NULL, main_db_.get()) != sql::INIT_OK)
       thumb_db_.reset();
@@ -157,7 +158,7 @@ class ExpireHistoryTest : public testing::Test,
     top_sites_ = profile_.GetTopSites();
   }
 
-  void TearDown() {
+  virtual void TearDown() {
     top_sites_ = NULL;
 
     ClearLastNotifications();
@@ -171,8 +172,9 @@ class ExpireHistoryTest : public testing::Test,
   }
 
   // BroadcastNotificationDelegate implementation.
-  void BroadcastNotifications(int type,
-                              HistoryDetails* details_deleted) {
+  virtual void BroadcastNotifications(
+      int type,
+      HistoryDetails* details_deleted) OVERRIDE {
     // This gets called when there are notifications to broadcast. Instead, we
     // store them so we can tell that the correct notifications were sent.
     notifications_.push_back(std::make_pair(type, details_deleted));
@@ -433,7 +435,7 @@ TEST_F(ExpireHistoryTest, DeleteFaviconsIfPossible) {
 }
 
 // static
-bool ExpireHistoryTest::IsStringInFile(const FilePath& filename,
+bool ExpireHistoryTest::IsStringInFile(const base::FilePath& filename,
                                        const char* str) {
   std::string contents;
   EXPECT_TRUE(file_util::ReadFileToString(filename, &contents));
@@ -467,7 +469,7 @@ TEST_F(ExpireHistoryTest, DISABLED_DeleteURLAndFavicon) {
                        visits[0].visit_time);
 
   // Compute the text DB filename.
-  FilePath fts_filename = path().Append(
+  base::FilePath fts_filename = path().Append(
       TextDatabase::IDToFileName(text_db_->TimeToID(visit_times[3])));
 
   // When checking the file, the database must be closed. We then re-initialize

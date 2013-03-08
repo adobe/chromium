@@ -13,7 +13,7 @@
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
-#include "chrome/browser/history/history.h"
+#include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/history/in_memory_database.h"
 #include "chrome/browser/history/url_database.h"
@@ -90,13 +90,13 @@ class AutocompleteActionPredictorTest : public testing::Test {
         predictor_(new AutocompleteActionPredictor(profile_.get())) {
   }
 
-  ~AutocompleteActionPredictorTest() {
+  virtual ~AutocompleteActionPredictorTest() {
     predictor_.reset(NULL);
     profile_.reset(NULL);
     loop_.RunUntilIdle();
   }
 
-  void SetUp() {
+  virtual void SetUp() {
     CommandLine::ForCurrentProcess()->AppendSwitchASCII(
         switches::kPrerenderFromOmnibox,
         switches::kPrerenderFromOmniboxSwitchValueEnabled);
@@ -110,7 +110,7 @@ class AutocompleteActionPredictorTest : public testing::Test {
     ASSERT_TRUE(db_id_cache()->empty());
   }
 
-  void TearDown() {
+  virtual void TearDown() {
     profile_->DestroyHistoryService();
     predictor_->Shutdown();
   }

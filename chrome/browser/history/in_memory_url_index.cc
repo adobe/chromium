@@ -4,12 +4,14 @@
 
 #include "chrome/browser/history/in_memory_url_index.h"
 
+#include "base/debug/trace_event.h"
 #include "base/file_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/api/bookmarks/bookmark_service.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/history/history_notifications.h"
+#include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/history/url_database.h"
 #include "chrome/browser/history/url_index_private_data.h"
@@ -27,7 +29,7 @@ namespace history {
 
 // Called by DoSaveToCacheFile to delete any old cache file at |path| when
 // there is no private data to save. Runs on the FILE thread.
-void DeleteCacheFile(const FilePath& path) {
+void DeleteCacheFile(const base::FilePath& path) {
   DCHECK(!content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
   file_util::Delete(path, false);
 }
@@ -88,7 +90,7 @@ InMemoryURLIndex::RebuildPrivateDataFromHistoryDBTask::
 // InMemoryURLIndex ------------------------------------------------------------
 
 InMemoryURLIndex::InMemoryURLIndex(Profile* profile,
-                                   const FilePath& history_dir,
+                                   const base::FilePath& history_dir,
                                    const std::string& languages)
     : profile_(profile),
       history_dir_(history_dir),
@@ -136,7 +138,7 @@ void InMemoryURLIndex::ShutDown() {
   registrar_.RemoveAll();
   cache_reader_consumer_.CancelAllRequests();
   shutdown_ = true;
-  FilePath path;
+  base::FilePath path;
   if (!GetCacheFilePath(&path))
     return;
   URLIndexPrivateData::WritePrivateDataToCacheFileTask(private_data_, path);
@@ -147,7 +149,7 @@ void InMemoryURLIndex::ClearPrivateData() {
   private_data_->Clear();
 }
 
-bool InMemoryURLIndex::GetCacheFilePath(FilePath* file_path) {
+bool InMemoryURLIndex::GetCacheFilePath(base::FilePath* file_path) {
   if (history_dir_.empty())
     return false;
   *file_path = history_dir_.Append(FILE_PATH_LITERAL("History Provider Cache"));
@@ -157,9 +159,13 @@ bool InMemoryURLIndex::GetCacheFilePath(FilePath* file_path) {
 // Querying --------------------------------------------------------------------
 
 ScoredHistoryMatches InMemoryURLIndex::HistoryItemsForTerms(
-    const string16& term_string) {
+    const string16& term_string,
+    size_t cursor_position) {
   return private_data_->HistoryItemsForTerms(
-    term_string, BookmarkModelFactory::GetForProfile(profile_));
+      term_string,
+      cursor_position,
+      languages_,
+      BookmarkModelFactory::GetForProfile(profile_));
 }
 
 // Updating --------------------------------------------------------------------
@@ -222,8 +228,9 @@ void InMemoryURLIndex::OnURLsDeleted(const URLsDeletedDetails* details) {
 
 void InMemoryURLIndex::PostRestoreFromCacheFileTask() {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+  TRACE_EVENT0("browser", "InMemoryURLIndex::PostRestoreFromCacheFileTask");
 
-  FilePath path;
+  base::FilePath path;
   if (!GetCacheFilePath(&path) || shutdown_) {
     restored_ = true;
     if (restore_cache_observer_)
@@ -252,7 +259,7 @@ void InMemoryURLIndex::OnCacheLoadDone(
     // When unable to restore from the cache file delete the cache file, if
     // it exists, and then rebuild from the history database if it's available,
     // otherwise wait until the history database loaded and then rebuild.
-    FilePath path;
+    base::FilePath path;
     if (!GetCacheFilePath(&path) || shutdown_)
       return;
     content::BrowserThread::PostBlockingPoolTask(
@@ -306,7 +313,7 @@ void InMemoryURLIndex::RebuildFromHistory(HistoryDatabase* history_db) {
 // Saving to Cache -------------------------------------------------------------
 
 void InMemoryURLIndex::PostSaveToCacheFileTask() {
-  FilePath path;
+  base::FilePath path;
   if (!GetCacheFilePath(&path))
     return;
   // If there is anything in our private data then make a copy of it and tell

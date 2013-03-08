@@ -5,18 +5,18 @@
 #include "chrome/common/chrome_version_info.h"
 
 #include "base/base_paths.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/path_service.h"
 #include "base/string_util.h"
-#include "chrome/installer/util/install_util.h"
 #include "chrome/installer/util/google_update_settings.h"
+#include "chrome/installer/util/install_util.h"
 
 namespace chrome {
 
 // static
 std::string VersionInfo::GetVersionStringModifier() {
 #if defined(GOOGLE_CHROME_BUILD)
-  FilePath module;
+  base::FilePath module;
   string16 channel;
   if (PathService::Get(base::FILE_MODULE, &module)) {
     bool is_system_install =
@@ -36,7 +36,7 @@ VersionInfo::Channel VersionInfo::GetChannel() {
 #if defined(GOOGLE_CHROME_BUILD)
   std::wstring channel(L"unknown");
 
-  FilePath module;
+  base::FilePath module;
   if (PathService::Get(base::FILE_MODULE, &module)) {
     bool is_system_install =
         !InstallUtil::IsPerUserInstall(module.value().c_str());

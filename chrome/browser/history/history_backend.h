@@ -11,7 +11,7 @@
 #include <vector>
 
 #include "base/containers/mru_cache.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/history/archived_database.h"
@@ -120,7 +120,7 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   // may be NULL.
   //
   // This constructor is fast and does no I/O, so can be called at any time.
-  HistoryBackend(const FilePath& history_dir,
+  HistoryBackend(const base::FilePath& history_dir,
                  int id,
                  Delegate* delegate,
                  BookmarkService* bookmark_service);
@@ -320,7 +320,14 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
                          const base::Time from_time,
                          int max_result_count);
   void DeleteOldSegmentData();
-  void SetSegmentPresentationIndex(SegmentID segment_id, int index);
+
+  void IncreaseSegmentDuration(const GURL& url,
+                               base::Time time,
+                               base::TimeDelta delta);
+
+  void QuerySegmentDuration(scoped_refptr<QuerySegmentUsageRequest> request,
+                            const base::Time from_time,
+                            int max_result_count);
 
   // Keyword search terms ------------------------------------------------------
 
@@ -438,6 +445,11 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   // Calls ExpireHistoryBackend::ExpireHistoryForTimes and commits the change.
   void ExpireHistoryForTimes(const std::vector<base::Time>& times);
 
+  // Calls ExpireHistoryBetween() once for each element in the vector.
+  // The fields of |ExpireHistoryArgs| map directly to the arguments of
+  // of ExpireHistoryBetween().
+  void ExpireHistory(const std::vector<ExpireHistoryArgs>& expire_list);
+
   // Bookmarks -----------------------------------------------------------------
 
   // Notification that a URL is no longer bookmarked. If there are no visits
@@ -540,17 +552,17 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   friend class ::TestingProfile;
 
   // Computes the name of the specified database on disk.
-  FilePath GetThumbnailFileName() const;
+  base::FilePath GetThumbnailFileName() const;
 
   // Returns the name of the Favicons database. This is the new name
   // of the Thumbnails database.
   // See ThumbnailDatabase::RenameAndDropThumbnails.
-  FilePath GetFaviconsFileName() const;
-  FilePath GetArchivedFileName() const;
+  base::FilePath GetFaviconsFileName() const;
+  base::FilePath GetArchivedFileName() const;
 
 #if defined(OS_ANDROID)
   // Returns the name of android cache database.
-  FilePath GetAndroidCacheFileName() const;
+  base::FilePath GetAndroidCacheFileName() const;
 #endif
 
   class URLQuerier;
@@ -807,7 +819,7 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   int id_;
 
   // Directory where database files will be stored.
-  FilePath history_dir_;
+  base::FilePath history_dir_;
 
   // The history/thumbnail databases. Either MAY BE NULL if the database could
   // not be opened, all users must first check for NULL and return immediately

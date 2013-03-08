@@ -9,18 +9,18 @@
 #include <string>
 #include <vector>
 
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/i18n/file_util_icu.h"
+#include "base/i18n/time_formatting.h"
 #include "base/lazy_instance.h"
 #include "base/message_loop.h"
-#include "base/stringprintf.h"
 #include "base/string_util.h"
+#include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
-#include "base/i18n/time_formatting.h"
 #include "printing/page_number.h"
-#include "printing/printed_pages_source.h"
 #include "printing/printed_page.h"
+#include "printing/printed_pages_source.h"
 #include "printing/units.h"
 #include "skia/ext/platform_device.h"
 #include "ui/base/text/text_elider.h"
@@ -34,7 +34,7 @@ struct PrintDebugDumpPath {
   }
 
   bool enabled;
-  FilePath debug_dump_path;
+  base::FilePath debug_dump_path;
 };
 
 base::LazyInstance<PrintDebugDumpPath> g_debug_dump_info =
@@ -191,12 +191,13 @@ void PrintedDocument::DebugDump(const PrintedPage& page) {
 #endif  // OS_WIN
 }
 
-void PrintedDocument::set_debug_dump_path(const FilePath& debug_dump_path) {
+void PrintedDocument::set_debug_dump_path(
+    const base::FilePath& debug_dump_path) {
   g_debug_dump_info.Get().enabled = !debug_dump_path.empty();
   g_debug_dump_info.Get().debug_dump_path = debug_dump_path;
 }
 
-const FilePath& PrintedDocument::debug_dump_path() {
+const base::FilePath& PrintedDocument::debug_dump_path() {
   return g_debug_dump_info.Get().debug_dump_path;
 }
 

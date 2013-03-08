@@ -5,33 +5,28 @@
 #include "chrome/browser/process_singleton.h"
 
 #include <shellapi.h>
-#include <shobjidl.h>
 
 #include "base/base_paths.h"
 #include "base/command_line.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/path_service.h"
 #include "base/process_util.h"
 #include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
 #include "base/win/metro.h"
 #include "base/win/registry.h"
-#include "base/win/scoped_com_initializer.h"
-#include "base/win/scoped_comptr.h"
 #include "base/win/scoped_handle.h"
 #include "base/win/win_util.h"
 #include "base/win/windows_version.h"
 #include "base/win/wrapped_window_proc.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/shell_integration.h"
+#include "chrome/browser/ui/metro_chrome_win.h"
 #include "chrome/browser/ui/simple_message_box.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_paths_internal.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/installer/util/browser_distribution.h"
-#include "chrome/installer/util/install_util.h"
-#include "chrome/installer/util/shell_util.h"
 #include "chrome/installer/util/wmi.h"
 #include "content/public/common/result_codes.h"
 #include "grit/chromium_strings.h"
@@ -116,7 +111,7 @@ LRESULT CALLBACK ThunkWndProc(HWND hwnd, UINT message,
 
 bool ParseCommandLine(const COPYDATASTRUCT* cds,
                       CommandLine* parsed_command_line,
-                      FilePath* current_directory) {
+                      base::FilePath* current_directory) {
   // We should have enough room for the shortest command (min_message_size)
   // and also be a multiple of wchar_t bytes. The shortest command
   // possible is L"START\0\0" (empty current directory and command line).
@@ -154,7 +149,7 @@ bool ParseCommandLine(const COPYDATASTRUCT* cds,
     }
 
     // Get current directory.
-    *current_directory = FilePath(msg.substr(first_null + 1,
+    *current_directory = base::FilePath(msg.substr(first_null + 1,
                                              second_null - first_null));
 
     const std::wstring::size_type third_null =
@@ -174,40 +169,6 @@ bool ParseCommandLine(const COPYDATASTRUCT* cds,
   return false;
 }
 
-bool ActivateMetroChrome() {
-  FilePath chrome_exe;
-  if (!PathService::Get(base::FILE_EXE, &chrome_exe)) {
-    NOTREACHED() << "Failed to get chrome exe path";
-    return false;
-  }
-  string16 app_id = ShellUtil::GetBrowserModelId(
-      BrowserDistribution::GetDistribution(),
-      InstallUtil::IsPerUserInstall(chrome_exe.value().c_str()));
-  if (app_id.empty()) {
-    NOTREACHED() << "Failed to get chrome app user model id.";
-    return false;
-  }
-
-  base::win::ScopedComPtr<IApplicationActivationManager> activation_manager;
-  HRESULT hr = activation_manager.CreateInstance(
-      CLSID_ApplicationActivationManager);
-  if (!activation_manager) {
-    NOTREACHED() << "Failed to cocreate activation manager. Error: " << hr;
-    return false;
-  }
-
-  unsigned long pid = 0;
-  hr = activation_manager->ActivateApplication(app_id.c_str(),
-                                               L"open",
-                                               AO_NONE,
-                                               &pid);
-  if (FAILED(hr)) {
-    NOTREACHED() << "Failed to activate metro chrome. Error: " << hr;
-    return false;
-  }
-  return true;
-}
-
 // Returns true if Chrome needs to be relaunched into Windows 8 immersive mode.
 // Following conditions apply:-
 // 1. Windows 8 or greater.
@@ -219,7 +180,7 @@ bool ActivateMetroChrome() {
 // TODO(ananta)
 // Move this function to a common place as the Windows 8 delegate_execute
 // handler can possibly use this.
-bool ShouldLaunchInWindows8ImmersiveMode(const FilePath& user_data_dir) {
+bool ShouldLaunchInWindows8ImmersiveMode(const base::FilePath& user_data_dir) {
 #if defined(USE_AURA)
   return false;
 #endif
@@ -239,7 +200,7 @@ bool ShouldLaunchInWindows8ImmersiveMode(const FilePath& user_data_dir) {
   if (integrity_level == base::HIGH_INTEGRITY)
     return false;
 
-  FilePath default_user_data_dir;
+  base::FilePath default_user_data_dir;
   if (!chrome::GetDefaultUserDataDirectory(&default_user_data_dir))
     return false;
 
@@ -263,7 +224,8 @@ bool ShouldLaunchInWindows8ImmersiveMode(const FilePath& user_data_dir) {
 // So, if we detect the Softricity DLL we use WMI Win32_Process.Create to
 // break out of the virtualization environment.
 // http://code.google.com/p/chromium/issues/detail?id=43650
-bool ProcessSingleton::EscapeVirtualization(const FilePath& user_data_dir) {
+bool ProcessSingleton::EscapeVirtualization(
+    const base::FilePath& user_data_dir) {
   if (::GetModuleHandle(L"sftldr_wow64.dll") ||
       ::GetModuleHandle(L"sftldr.dll")) {
     int process_id;
@@ -290,7 +252,7 @@ bool ProcessSingleton::EscapeVirtualization(const FilePath& user_data_dir) {
   return false;
 }
 
-ProcessSingleton::ProcessSingleton(const FilePath& user_data_dir)
+ProcessSingleton::ProcessSingleton(const base::FilePath& user_data_dir)
     : window_(NULL), locked_(false), foreground_window_(NULL),
       is_virtualized_(false), lock_file_(INVALID_HANDLE_VALUE),
       user_data_dir_(user_data_dir) {
@@ -354,7 +316,7 @@ ProcessSingleton::NotifyResult ProcessSingleton::NotifyOtherProcess() {
   // Non-metro mode, send our command line to the other chrome message window.
   // format is "START\0<<<current directory>>>\0<<<commandline>>>".
   std::wstring to_send(L"START\0", 6);  // want the NULL in the string.
-  FilePath cur_dir;
+  base::FilePath cur_dir;
   if (!PathService::Get(base::DIR_CURRENT, &cur_dir))
     return PROCESS_NONE;
   to_send.append(cur_dir.value());
@@ -368,7 +330,7 @@ ProcessSingleton::NotifyResult ProcessSingleton::NotifyOtherProcess() {
           process_id, PROCESS_QUERY_INFORMATION,
           process_handle.Receive()) &&
       base::win::IsProcessImmersive(process_handle.Get())) {
-    ActivateMetroChrome();
+    chrome::ActivateMetroChrome();
   }
 
   // Allow the current running browser window making itself the foreground
@@ -493,7 +455,7 @@ bool ProcessSingleton::Create(
         // Metro mode: activate and rendez-vous with the activated process.
         metro_activation_event.Set(
             CreateEvent(NULL, TRUE, FALSE, kMetroActivationEventName));
-        if (!ActivateMetroChrome()) {
+        if (!chrome::ActivateMetroChrome()) {
           // Failed to launch immersive Chrome, default to launching on Desktop.
           LOG(ERROR) << "Failed to launch immersive chrome";
           metro_activation_event.Close();
@@ -525,7 +487,7 @@ bool ProcessSingleton::Create(
     if (!remote_window_) {
       // We have to make sure there is no Chrome instance running on another
       // machine that uses the same profile.
-      FilePath lock_file_path = user_data_dir_.AppendASCII(kLockfile);
+      base::FilePath lock_file_path = user_data_dir_.AppendASCII(kLockfile);
       lock_file_ = CreateFile(lock_file_path.value().c_str(),
                               GENERIC_WRITE,
                               FILE_SHARE_READ,
@@ -592,7 +554,7 @@ LRESULT ProcessSingleton::OnCopyData(HWND hwnd, const COPYDATASTRUCT* cds) {
       // Read the command line and store it. It will be replayed when the
       // ProcessSingleton becomes unlocked.
       CommandLine parsed_command_line(CommandLine::NO_PROGRAM);
-      FilePath current_directory;
+      base::FilePath current_directory;
       if (ParseCommandLine(cds, &parsed_command_line, &current_directory))
         saved_startup_messages_.push_back(
             std::make_pair(parsed_command_line.argv(), current_directory));
@@ -602,7 +564,7 @@ LRESULT ProcessSingleton::OnCopyData(HWND hwnd, const COPYDATASTRUCT* cds) {
   }
 
   CommandLine parsed_command_line(CommandLine::NO_PROGRAM);
-  FilePath current_directory;
+  base::FilePath current_directory;
   if (!ParseCommandLine(cds, &parsed_command_line, &current_directory))
     return TRUE;
   return notification_callback_.Run(parsed_command_line, current_directory) ?

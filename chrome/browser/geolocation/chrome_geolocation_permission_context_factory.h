@@ -6,11 +6,12 @@
 #define CHROME_BROWSER_GEOLOCATION_CHROME_GEOLOCATION_PERMISSION_CONTEXT_FACTORY_H_
 
 #include "base/memory/singleton.h"
+#include "base/prefs/pref_service.h"
 #include "base/values.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile_keyed_service_factory.h"
 
 class ChromeGeolocationPermissionContext;
+class PrefRegistrySyncable;
 class Profile;
 
 class ChromeGeolocationPermissionContextFactory
@@ -30,7 +31,7 @@ class ChromeGeolocationPermissionContextFactory
   // |ProfileKeyedBaseFactory| methods:
   virtual ProfileKeyedService*
       BuildServiceInstanceFor(Profile* profile) const OVERRIDE;
-  virtual void RegisterUserPrefs(PrefServiceSyncable* user_prefs) OVERRIDE;
+  virtual void RegisterUserPrefs(PrefRegistrySyncable* registry) OVERRIDE;
   virtual bool ServiceRedirectedInIncognito() const OVERRIDE;
 
   DISALLOW_COPY_AND_ASSIGN(ChromeGeolocationPermissionContextFactory);

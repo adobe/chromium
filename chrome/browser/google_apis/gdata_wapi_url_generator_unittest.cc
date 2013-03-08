@@ -25,9 +25,9 @@ TEST_F(GDataWapiUrlGeneratorTest, AddStandardUrlParams) {
                 GURL("http://www.example.com")).spec());
 }
 
-TEST_F(GDataWapiUrlGeneratorTest, AddMetadataUrlParams) {
-  EXPECT_EQ("http://www.example.com/?v=3&alt=json&include-installed-apps=true",
-            GDataWapiUrlGenerator::AddMetadataUrlParams(
+TEST_F(GDataWapiUrlGeneratorTest, AddInitiateUploadUrlParams) {
+  EXPECT_EQ("http://www.example.com/?convert=false&v=3&alt=json",
+            GDataWapiUrlGenerator::AddInitiateUploadUrlParams(
                 GURL("http://www.example.com")).spec());
 }
 
@@ -160,10 +160,46 @@ TEST_F(GDataWapiUrlGeneratorTest, GenerateResourceListUrl) {
           ).spec());
 }
 
-TEST_F(GDataWapiUrlGeneratorTest, GenerateResourceEntryUrl) {
+TEST_F(GDataWapiUrlGeneratorTest, GenerateEditUrl) {
   EXPECT_EQ(
       "https://docs.google.com/feeds/default/private/full/XXX?v=3&alt=json",
-      url_generator_.GenerateResourceEntryUrl("XXX").spec());
+      url_generator_.GenerateEditUrl("XXX").spec());
+}
+
+TEST_F(GDataWapiUrlGeneratorTest, GenerateEditUrlWithoutParams) {
+  EXPECT_EQ(
+      "https://docs.google.com/feeds/default/private/full/XXX",
+      url_generator_.GenerateEditUrlWithoutParams("XXX").spec());
+}
+
+TEST_F(GDataWapiUrlGeneratorTest, GenerateContentUrl) {
+  EXPECT_EQ(
+      "https://docs.google.com/feeds/default/private/full/"
+      "folder%3Aroot/contents?v=3&alt=json",
+      url_generator_.GenerateContentUrl("folder:root").spec());
+}
+
+TEST_F(GDataWapiUrlGeneratorTest, GenerateResourceUrlForRemoval) {
+  EXPECT_EQ(
+      "https://docs.google.com/feeds/default/private/full/"
+      "folder%3Aroot/contents/file%3AABCDE?v=3&alt=json",
+      url_generator_.GenerateResourceUrlForRemoval(
+          "folder:root", "file:ABCDE").spec());
+}
+
+TEST_F(GDataWapiUrlGeneratorTest, GenerateInitiateUploadNewFileUrl) {
+  EXPECT_EQ(
+      "https://docs.google.com/feeds/upload/create-session/default/private/"
+      "full/folder%3Aabcde/contents?convert=false&v=3&alt=json",
+      url_generator_.GenerateInitiateUploadNewFileUrl("folder:abcde").spec());
+}
+
+TEST_F(GDataWapiUrlGeneratorTest, GenerateInitiateUploadExistingFileUrl) {
+  EXPECT_EQ(
+      "https://docs.google.com/feeds/upload/create-session/default/private/"
+      "full/file%3Aresource_id?convert=false&v=3&alt=json",
+      url_generator_.GenerateInitiateUploadExistingFileUrl(
+          "file:resource_id").spec());
 }
 
 TEST_F(GDataWapiUrlGeneratorTest, GenerateResourceListRootUrl) {
@@ -173,10 +209,16 @@ TEST_F(GDataWapiUrlGeneratorTest, GenerateResourceListRootUrl) {
 }
 
 TEST_F(GDataWapiUrlGeneratorTest, GenerateAccountMetadataUrl) {
+  // Include installed apps.
   EXPECT_EQ(
       "https://docs.google.com/feeds/metadata/default"
       "?v=3&alt=json&include-installed-apps=true",
-      url_generator_.GenerateAccountMetadataUrl().spec());
+      url_generator_.GenerateAccountMetadataUrl(true).spec());
+
+  // Exclude installed apps.
+  EXPECT_EQ(
+      "https://docs.google.com/feeds/metadata/default?v=3&alt=json",
+      url_generator_.GenerateAccountMetadataUrl(false).spec());
 }
 
 }  // namespace google_apis

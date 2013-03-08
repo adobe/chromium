@@ -4,7 +4,7 @@
 
 #include "ipc/ipc_message_utils.h"
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/json/json_writer.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/nullable_string16.h"
@@ -178,28 +178,28 @@ bool ReadValue(const Message* m, PickleIterator* iter, Value** value,
       bool val;
       if (!ReadParam(m, iter, &val))
         return false;
-      *value = Value::CreateBooleanValue(val);
+      *value = new base::FundamentalValue(val);
       break;
     }
     case Value::TYPE_INTEGER: {
       int val;
       if (!ReadParam(m, iter, &val))
         return false;
-      *value = Value::CreateIntegerValue(val);
+      *value = new base::FundamentalValue(val);
       break;
     }
     case Value::TYPE_DOUBLE: {
       double val;
       if (!ReadParam(m, iter, &val))
         return false;
-      *value = Value::CreateDoubleValue(val);
+      *value = new base::FundamentalValue(val);
       break;
     }
     case Value::TYPE_STRING: {
       std::string val;
       if (!ReadParam(m, iter, &val))
         return false;
-      *value = Value::CreateStringValue(val);
+      *value = new base::StringValue(val);
       break;
     }
     case Value::TYPE_BINARY: {
@@ -488,25 +488,18 @@ void ParamTraits<base::FileDescriptor>::Log(const param_type& p,
 }
 #endif  // defined(OS_POSIX)
 
-void ParamTraits<FilePath>::Write(Message* m, const param_type& p) {
-  ParamTraits<FilePath::StringType>::Write(m, p.value());
+void ParamTraits<base::FilePath>::Write(Message* m, const param_type& p) {
+  p.WriteToPickle(m);
 }
 
-bool ParamTraits<FilePath>::Read(const Message* m,
-                                 PickleIterator* iter,
-                                 param_type* r) {
-  FilePath::StringType value;
-  if (!ParamTraits<FilePath::StringType>::Read(m, iter, &value))
-    return false;
-  // Reject embedded NULs as they can cause security checks to go awry.
-  if (value.find(FILE_PATH_LITERAL('\0')) != FilePath::StringType::npos)
-    return false;
-  *r = FilePath(value);
-  return true;
+bool ParamTraits<base::FilePath>::Read(const Message* m,
+                                       PickleIterator* iter,
+                                       param_type* r) {
+  return r->ReadFromPickle(iter);
 }
 
-void ParamTraits<FilePath>::Log(const param_type& p, std::string* l) {
-  ParamTraits<FilePath::StringType>::Log(p.value(), l);
+void ParamTraits<base::FilePath>::Log(const param_type& p, std::string* l) {
+  ParamTraits<base::FilePath::StringType>::Log(p.value(), l);
 }
 
 void ParamTraits<ListValue>::Write(Message* m, const param_type& p) {
@@ -760,17 +753,17 @@ void ParamTraits<Message>::Log(const Message& p, std::string* l) {
 
 #if defined(OS_WIN)
 // Note that HWNDs/HANDLE/HCURSOR/HACCEL etc are always 32 bits, even on 64
-// bit systems.
+// bit systems. That's why we use the Windows macros to convert to 32 bits.
 void ParamTraits<HANDLE>::Write(Message* m, const param_type& p) {
-  m->WriteUInt32(reinterpret_cast<uint32>(p));
+  m->WriteInt(HandleToLong(p));
 }
 
 bool ParamTraits<HANDLE>::Read(const Message* m, PickleIterator* iter,
                                param_type* r) {
-  uint32 temp;
-  if (!m->ReadUInt32(iter, &temp))
+  int32 temp;
+  if (!m->ReadInt(iter, &temp))
     return false;
-  *r = reinterpret_cast<HANDLE>(temp);
+  *r = LongToHandle(temp);
   return true;
 }
 

@@ -81,15 +81,11 @@ WebAppsTable* WebDatabase::GetWebAppsTable() {
   return web_apps_table_.get();
 }
 
-WebIntentsTable* WebDatabase::GetWebIntentsTable() {
-  return web_intents_table_.get();
-}
-
 sql::Connection* WebDatabase::GetSQLConnection() {
   return &db_;
 }
 
-sql::InitStatus WebDatabase::Init(const FilePath& db_name,
+sql::InitStatus WebDatabase::Init(const base::FilePath& db_name,
                                   const std::string& app_locale) {
   // When running in unit tests, there is already a NotificationService object.
   // Since only one can exist at a time per thread, check first.
@@ -141,7 +137,7 @@ sql::InitStatus WebDatabase::Init(const FilePath& db_name,
   // Initialize the tables.
   if (!keyword_table_->Init() || !autofill_table_->Init() ||
       !logins_table_->Init() || !web_apps_table_->Init() ||
-      !token_service_table_->Init() || !web_intents_table_->Init() ) {
+      !token_service_table_->Init() || !web_intents_table_->Init()) {
     LOG(WARNING) << "Unable to initialize the web database.";
     return sql::INIT_FAILURE;
   }

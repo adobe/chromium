@@ -11,7 +11,7 @@
 #endif
 #include <delayimp.h>
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/native_library.h"
 #include "base/path_service.h"
@@ -21,14 +21,14 @@
 namespace media {
 
 // FFmpeg library name.
-static const char* kFFmpegDLL = "ffmpegsumo.dll";
+static const char kFFmpegDLL[] = "ffmpegsumo.dll";
 
 // Use a global to indicate whether the library has been initialized or not.  We
 // rely on function level static initialization in InitializeMediaLibrary() to
 // guarantee this is only set once in a thread safe manner.
 static bool g_media_library_is_initialized = false;
 
-static bool InitializeMediaLibraryInternal(const FilePath& base_path) {
+static bool InitializeMediaLibraryInternal(const base::FilePath& base_path) {
   DCHECK(!g_media_library_is_initialized);
 
   // LoadLibraryEx(..., LOAD_WITH_ALTERED_SEARCH_PATH) cannot handle
@@ -47,7 +47,7 @@ static bool InitializeMediaLibraryInternal(const FilePath& base_path) {
   return g_media_library_is_initialized;
 }
 
-bool InitializeMediaLibrary(const FilePath& base_path) {
+bool InitializeMediaLibrary(const base::FilePath& base_path) {
   static const bool kMediaLibraryInitialized =
       InitializeMediaLibraryInternal(base_path);
   DCHECK_EQ(kMediaLibraryInitialized, g_media_library_is_initialized);
@@ -55,7 +55,7 @@ bool InitializeMediaLibrary(const FilePath& base_path) {
 }
 
 void InitializeMediaLibraryForTesting() {
-  FilePath file_path;
+  base::FilePath file_path;
   CHECK(PathService::Get(base::DIR_EXE, &file_path));
   CHECK(InitializeMediaLibrary(file_path));
 }

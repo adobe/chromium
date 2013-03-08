@@ -7,7 +7,8 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/message_loop.h"
-#include "base/string_number_conversions.h"
+#include "base/strings/string_number_conversions.h"
+#include "chrome/test/base/interactive_test_utils.h"
 #include "chrome/test/base/ui_controls.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/browser_thread.h"
@@ -16,6 +17,10 @@
 #include "ui/views/view.h"
 #include "ui/views/widget/desktop_aura/desktop_screen.h"
 #include "ui/views/widget/widget.h"
+
+#if defined(ENABLE_MESSAGE_CENTER)
+#include "ui/message_center/message_center.h"
+#endif
 
 #if defined(USE_ASH)
 #include "ash/shell.h"
@@ -41,13 +46,13 @@ class TestView : public views::View {
     PreferredSizeChanged();
   }
 
-  gfx::Size GetPreferredSize() {
+  virtual gfx::Size GetPreferredSize() OVERRIDE {
     if (!preferred_size_.IsEmpty())
       return preferred_size_;
     return View::GetPreferredSize();
   }
 
-  virtual void Layout() {
+  virtual void Layout() OVERRIDE {
     View* child_view = child_at(0);
     child_view->SetBounds(0, 0, width(), height());
   }
@@ -97,6 +102,11 @@ void ViewEventTestBase::SetUp() {
   gfx::Screen::SetScreenInstance(
       gfx::SCREEN_TYPE_NATIVE, views::CreateDesktopScreen());
 #else
+#if defined(ENABLE_MESSAGE_CENTER)
+  // Ash Shell can't just live on its own without a browser process, we need to
+  // also create the message center.
+  message_center::MessageCenter::Initialize();
+#endif
   ash::Shell::CreateInstance(new ash::test::TestShellDelegate());
   context = ash::Shell::GetPrimaryRootWindow();
 #endif
@@ -125,6 +135,11 @@ void ViewEventTestBase::TearDown() {
 #if defined(OS_WIN)
 #else
   ash::Shell::DeleteInstance();
+#if defined(ENABLE_MESSAGE_CENTER)
+  // Ash Shell can't just live on its own without a browser process, we need to
+  // also shut down the message center.
+  message_center::MessageCenter::Shutdown();
+#endif
   aura::Env::DeleteInstance();
 #endif
 #elif defined(USE_AURA)
@@ -162,18 +177,8 @@ ViewEventTestBase::~ViewEventTestBase() {
 }
 
 void ViewEventTestBase::StartMessageLoopAndRunTest() {
-  window_->Show();
-  // Make sure the window is the foreground window, otherwise none of the
-  // mouse events are going to be targeted correctly.
-#if defined(OS_WIN)
-#if defined(USE_AURA)
-  HWND window =
-      window_->GetNativeWindow()->GetRootWindow()->GetAcceleratedWidget();
-#else
-  HWND window = window_->GetNativeWindow();
-#endif
-  SetForegroundWindow(window);
-#endif
+  ASSERT_TRUE(
+      ui_test_utils::ShowAndFocusNativeWindow(window_->GetNativeWindow()));
 
   // Flush any pending events to make sure we start with a clean slate.
   content::RunAllPendingInMessageLoop();

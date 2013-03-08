@@ -16,7 +16,7 @@
 namespace {
 
 // Simple function to create a file with |filename|.
-void CreateFile(const FilePath& filename) {
+void CreateFile(const base::FilePath& filename) {
   FILE* fp = file_util::OpenFile(filename, "w");
   ASSERT_TRUE(fp != NULL);
   file_util::CloseFile(fp);
@@ -34,13 +34,13 @@ std::string GetScreenshotUrl(const std::string timestamp) {
 class FeedbackUITest : public testing::Test {
  public:
   FeedbackUITest() {}
-  ~FeedbackUITest() {}
+  virtual ~FeedbackUITest() {}
   virtual void SetUp() OVERRIDE {
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
   }
  protected:
   void CreateScreenshotFile(const std::string& timestamp) {
-    FilePath filepath = temp_dir_.path().Append(
+    base::FilePath filepath = temp_dir_.path().Append(
         FILE_PATH_LITERAL(GetScreenshotFilename(timestamp)));
     ASSERT_NO_FATAL_FAILURE(CreateFile(filepath));
   }
@@ -54,7 +54,8 @@ class FeedbackUITest : public testing::Test {
 
 TEST_F(FeedbackUITest, GetMostRecentScreenshotsNoScreenShot) {
   // Create a random file.
-  FilePath filepath = temp_dir_.path().Append(FILE_PATH_LITERAL("garbage.png"));
+  base::FilePath filepath =
+      temp_dir_.path().Append(FILE_PATH_LITERAL("garbage.png"));
   ASSERT_NO_FATAL_FAILURE(CreateFile(filepath));
   // Expect getting no screenshot.
   FeedbackUI::GetMostRecentScreenshots(

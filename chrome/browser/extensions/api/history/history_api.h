@@ -13,8 +13,8 @@
 #include "chrome/browser/extensions/api/profile_keyed_api_factory.h"
 #include "chrome/browser/extensions/event_router.h"
 #include "chrome/browser/extensions/extension_function.h"
-#include "chrome/browser/history/history.h"
 #include "chrome/browser/history/history_notifications.h"
+#include "chrome/browser/history/history_service.h"
 #include "chrome/common/cancelable_task_tracker.h"
 #include "chrome/common/extensions/api/history.h"
 #include "content/public/browser/notification_registrar.h"
@@ -91,6 +91,7 @@ class HistoryFunction : public AsyncExtensionFunction {
   virtual void Run() OVERRIDE;
 
   bool ValidateUrl(const std::string& url_string, GURL* url);
+  bool VerifyDeleteAllowed();
   base::Time GetTime(double ms_from_epoch);
 };
 

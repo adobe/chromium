@@ -219,6 +219,7 @@
         'base/layout_mac.mm',
         'base/models/button_menu_item_model.cc',
         'base/models/button_menu_item_model.h',
+        'base/models/combobox_model.cc',
         'base/models/combobox_model.h',
         'base/models/list_model.h',
         'base/models/list_model_observer.h',
@@ -263,6 +264,12 @@
         'base/text/utf16_indexing.h',
         'base/theme_provider.cc',
         'base/theme_provider.h',
+        'base/touch/touch_device.cc',
+        'base/touch/touch_device.h',
+        'base/touch/touch_device_android.cc',
+        'base/touch/touch_device_win.cc',
+        'base/touch/touch_editing_controller.cc',
+        'base/touch/touch_editing_controller.h',
         'base/touch/touch_factory.cc',
         'base/touch/touch_factory.h',
         'base/ui_base_exports.cc',
@@ -332,6 +339,7 @@
         'gfx/android/window_android.h',
         'gfx/blit.cc',
         'gfx/blit.h',
+        'gfx/break_list.h',
         'gfx/canvas.cc',
         'gfx/canvas.h',
         'gfx/canvas_android.cc',
@@ -405,9 +413,9 @@
         'gfx/insets_f.h',
         'gfx/interpolated_transform.cc',
         'gfx/interpolated_transform.h',
-        'gfx/mac/nsimage_cache.h',
-        'gfx/mac/nsimage_cache.mm',
         'gfx/mac/scoped_ns_disable_screen_updates.h',
+        'gfx/matrix3_f.cc',
+        'gfx/matrix3_f.h',
         'gfx/native_widget_types.h',
         'gfx/pango_util.cc',
         'gfx/pango_util.h',
@@ -509,8 +517,6 @@
         'gfx/vector3d_f.h',
         'gfx/video_decode_acceleration_support_mac.h',
         'gfx/video_decode_acceleration_support_mac.mm',
-        'notifications/notification_types.h',
-        'notifications/notification_types.cc',
         'webui/jstemplate_builder.cc',
         'webui/jstemplate_builder.h',
         'webui/web_ui_util.cc',
@@ -603,12 +609,6 @@
             ['exclude', '^base/gestures/*'],
           ]
         }],
-        ['use_aura==1 and use_ash==0 and OS=="linux"', {
-          'sources': [
-            'base/linux_ui.cc',
-            'base/linux_ui.h',
-          ]
-        }],
         ['use_glib == 1', {
           'dependencies': [
             # font_gtk.cc uses fontconfig.
@@ -665,8 +665,12 @@
           ],
         }],
         ['chromeos==1', {
+          'sources': [
+            'base/touch/touch_device_aurax11.cc',
+          ],
           'sources!': [
             'base/clipboard/clipboard_aurax11.cc',
+            'base/touch/touch_device.cc',
           ],
         }],
         ['OS=="win"', {
@@ -675,10 +679,9 @@
             'gfx/gdi_util.h',
             'gfx/icon_util.cc',
             'gfx/icon_util.h',
-            'base/touch/touch_device_win.cc',
-            'base/touch/touch_device_win.h',
           ],
           'sources!': [
+            'base/touch/touch_device.cc',
             'base/touch/touch_factory.cc',
             'base/touch/touch_factory.h',
             'gfx/pango_util.h',
@@ -792,6 +795,7 @@
           'sources!': [
             'base/dragdrop/drag_utils.cc',
             'base/dragdrop/drag_utils.h',
+            'base/touch/touch_device.cc',
             'base/touch/touch_factory.cc',
             'base/touch/touch_factory.h',
             'gfx/pango_util.cc',
@@ -861,7 +865,6 @@
            'target_name': 'ui_java',
            'type': 'none',
            'variables': {
-             'package_name': 'ui',
              'java_in_dir': '../ui/android/java',
              'has_java_resources': 1,
              'R_package': 'org.chromium.ui',

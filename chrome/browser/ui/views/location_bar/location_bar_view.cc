@@ -9,6 +9,7 @@
 
 #include "base/command_line.h"
 #include "base/i18n/rtl.h"
+#include "base/prefs/pref_service.h"
 #include "base/stl_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
@@ -19,7 +20,6 @@
 #include "chrome/browser/extensions/script_bubble_controller.h"
 #include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/favicon/favicon_tab_helper.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_service.h"
@@ -27,10 +27,10 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_instant_controller.h"
-#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/omnibox/alternate_nav_url_fetcher.h"
 #include "chrome/browser/ui/omnibox/location_bar_util.h"
 #include "chrome/browser/ui/omnibox/omnibox_popup_model.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/view_ids.h"
 #include "chrome/browser/ui/views/bookmarks/bookmark_prompt_view.h"
 #include "chrome/browser/ui/views/browser_dialogs.h"
@@ -48,7 +48,6 @@
 #include "chrome/browser/ui/views/location_bar/script_bubble_icon_view.h"
 #include "chrome/browser/ui/views/location_bar/selected_keyword_view.h"
 #include "chrome/browser/ui/views/location_bar/star_view.h"
-#include "chrome/browser/ui/views/location_bar/web_intents_button_view.h"
 #include "chrome/browser/ui/views/location_bar/zoom_bubble_view.h"
 #include "chrome/browser/ui/views/location_bar/zoom_view.h"
 #include "chrome/browser/ui/views/omnibox/omnibox_view_views.h"
@@ -77,6 +76,7 @@
 #include "ui/views/border.h"
 #include "ui/views/button_drag_utils.h"
 #include "ui/views/controls/label.h"
+#include "ui/views/controls/textfield/textfield.h"
 #include "ui/views/layout/layout_constants.h"
 #include "ui/views/widget/widget.h"
 
@@ -186,13 +186,13 @@ LocationBarView::LocationBarView(Browser* browser,
       open_pdf_in_reader_view_(NULL),
       script_bubble_icon_view_(NULL),
       star_view_(NULL),
-      web_intents_button_view_(NULL),
       action_box_button_view_(NULL),
       mode_(mode),
       show_focus_rect_(false),
       template_url_service_(NULL),
       animation_offset_(0) {
-  set_id(VIEW_ID_LOCATION_BAR);
+  if (!views::Textfield::IsViewsTextfieldEnabled())
+    set_id(VIEW_ID_OMNIBOX);
 
   if (mode_ == NORMAL) {
     background_painter_.reset(
@@ -245,14 +245,11 @@ void LocationBarView::Init() {
   ev_bubble_view_->set_drag_controller(this);
   AddChildView(ev_bubble_view_);
 
-  // URL edit field.
-  // View container for URL edit field.
+  // Initialize the Omnibox view.
   location_entry_.reset(CreateOmniboxView(this, model_, profile_,
       command_updater_, mode_ == POPUP, this));
   SetLocationEntryFocusable(true);
-
   location_entry_view_ = location_entry_->AddToView(this);
-  location_entry_view_->set_id(VIEW_ID_AUTOCOMPLETE);
 
   selected_keyword_view_ = new SelectedKeywordView(
       kSelectedKeywordBackgroundImages, IDR_KEYWORD_SEARCH_MAGNIFIER,
@@ -285,11 +282,6 @@ void LocationBarView::Init() {
   zoom_view_ = new ZoomView(model_, delegate_);
   zoom_view_->set_id(VIEW_ID_ZOOM_BUTTON);
   AddChildView(zoom_view_);
-
-  web_intents_button_view_ =
-      new WebIntentsButtonView(this, kWIBubbleBackgroundImages, font_,
-                               GetColor(ToolbarModel::NONE, TEXT));
-  AddChildView(web_intents_button_view_);
 
   open_pdf_in_reader_view_ = new OpenPDFInReaderView(this);
   AddChildView(open_pdf_in_reader_view_);
@@ -418,7 +410,6 @@ void LocationBarView::Update(const WebContents* tab_for_state_restoring) {
   RefreshZoomView();
   RefreshPageActionViews();
   RefreshScriptBubble();
-  web_intents_button_view_->Update(GetWebContents());
   open_pdf_in_reader_view_->Update(
       model_->GetInputInProgress() ? NULL : GetWebContents());
 
@@ -430,6 +421,9 @@ void LocationBarView::Update(const WebContents* tab_for_state_restoring) {
                                          star_enabled);
   if (star_view_ && !extensions::FeatureSwitch::action_box()->IsEnabled())
     star_view_->SetVisible(star_enabled);
+
+  if (action_box_button_view_)
+    action_box_button_view_->SetVisible(!model_->GetInputInProgress());
 
   string16 search_provider;
   if (!model_->GetInputInProgress() &&
@@ -490,13 +484,6 @@ void LocationBarView::InvalidatePageActions() {
         content::Source<LocationBar>(this),
         content::NotificationService::NoDetails());
   }
-}
-
-void LocationBarView::UpdateWebIntentsButton() {
-  web_intents_button_view_->Update(GetWebContents());
-
-  Layout();
-  SchedulePaint();
 }
 
 void LocationBarView::UpdateOpenPDFInReaderPrompt() {
@@ -642,16 +629,14 @@ string16 LocationBarView::GetInstantSuggestion() const {
 void LocationBarView::SetLocationEntryFocusable(bool focusable) {
   OmniboxViewViews* omnibox_views = GetOmniboxViewViews(location_entry_.get());
   if (omnibox_views)
-    omnibox_views->SetLocationEntryFocusable(focusable);
+    omnibox_views->set_focusable(focusable);
   else
     set_focusable(focusable);
 }
 
 bool LocationBarView::IsLocationEntryFocusableInRootView() const {
   OmniboxViewViews* omnibox_views = GetOmniboxViewViews(location_entry_.get());
-  if (omnibox_views)
-    return omnibox_views->IsLocationEntryFocusableInRootView();
-  return views::View::IsFocusable();
+  return omnibox_views ? omnibox_views->IsFocusable() : View::IsFocusable();
 }
 
 gfx::Size LocationBarView::GetPreferredSize() {
@@ -742,7 +727,7 @@ void LocationBarView::Layout() {
         location_icon_view_);
   }
 
-  if (action_box_button_view_) {
+  if (action_box_button_view_ && action_box_button_view_->visible()) {
     right_decorations.AddDecoration(
         kVerticalEdgeThickness - ActionBoxButtonView::kBorderOverlap, 0, false,
         0, 0, 0, 0, action_box_button_view_);
@@ -781,12 +766,6 @@ void LocationBarView::Layout() {
           kBubbleLocationY, 0, false, 0, GetEdgeItemPadding(), GetItemPadding(),
           (*i)->GetBuiltInHorizontalPadding(), (*i));
     }
-  }
-  if (web_intents_button_view_->visible()) {
-    right_decorations.AddDecoration(
-        kBubbleLocationY, 0, false, 0, GetEdgeItemPadding(), GetItemPadding(),
-        web_intents_button_view_->GetBuiltInHorizontalPadding(),
-        web_intents_button_view_);
   }
   if (show_keyword_hint) {
     right_decorations.AddDecoration(
@@ -833,13 +812,24 @@ void LocationBarView::Layout() {
   // text to force using minimum size if necessary, but currently the chance of
   // showing keyword hints and suggested text is minimal and we're not confident
   // this is the right approach for suggested text.
+
   if (suggested_text_view_) {
+    // We do not display the suggested text when it contains a mix of RTL and
+    // LTR characters since this could mean the suggestion should be displayed
+    // in the middle of the string.
+    base::i18n::TextDirection text_direction = base::i18n::GetStringDirection(
+        location_entry_->GetText());
+    text_direction = text_direction == base::i18n::GetStringDirection(
+        suggested_text_view_->text()) ? text_direction :
+            base::i18n::UNKNOWN_DIRECTION;
+
     // TODO(sky): need to layout when the user changes caret position.
     int suggested_text_width =
         suggested_text_view_->GetPreferredSize().width();
-    if (suggested_text_width > available_width) {
+    if (suggested_text_width > available_width ||
+        text_direction == base::i18n::UNKNOWN_DIRECTION) {
       // Hide the suggested text if the user has scrolled or we can't fit all
-      // the suggested text.
+      // the suggested text, or we have a mix of RTL and LTR characters.
       suggested_text_view_->SetBounds(0, 0, 0, 0);
     } else {
       int location_needed_width = location_entry_->TextWidth();
@@ -850,12 +840,26 @@ void LocationBarView::Layout() {
 #endif
       location_bounds.set_width(
           std::min(location_needed_width,
-          location_bounds.width() - suggested_text_width));
+                   location_bounds.width() - suggested_text_width));
       // TODO(sky): figure out why this needs the -1.
-      suggested_text_view_->SetBounds(location_bounds.right() - 1,
+      gfx::Rect suggested_text_bounds(location_bounds.right() - 1,
                                       location_bounds.y(),
                                       suggested_text_width,
                                       location_bounds.height());
+
+      // We reverse the order of the location entry and suggested text if:
+      // - Chrome is RTL but the text is fully LTR, or
+      // - Chrome is LTR but the text is fully RTL.
+      // This ensures the suggested text is correctly displayed to the right
+      // (or left) of the user text.
+      if (base::i18n::IsRTL() ? text_direction == base::i18n::LEFT_TO_RIGHT :
+          text_direction == base::i18n::RIGHT_TO_LEFT) {
+        // TODO(sky): Figure out why we need the +1.
+        suggested_text_bounds.set_x(location_bounds.x() + 1);
+        location_bounds.set_x(
+            location_bounds.x() + suggested_text_bounds.width());
+      }
+      suggested_text_view_->SetBoundsRect(suggested_text_bounds);
     }
   }
 
@@ -1116,7 +1120,7 @@ void LocationBarView::RefreshPageActionViews() {
 
   if (!page_action_views_.empty() && contents) {
     Browser* browser = chrome::FindBrowserWithWebContents(contents);
-    GURL url = chrome::GetActiveWebContents(browser)->GetURL();
+    GURL url = browser->tab_strip_model()->GetActiveWebContents()->GetURL();
 
     for (PageActionViews::const_iterator i(page_action_views_.begin());
          i != page_action_views_.end(); ++i) {
@@ -1273,14 +1277,7 @@ bool LocationBarView::HasFocus() const {
 
 void LocationBarView::OnBoundsChanged(const gfx::Rect& previous_bounds) {
   if (browser_ && browser_->instant_controller() && parent()) {
-    // Pass the side margins of the location bar to the Instant Controller.
-    const gfx::Rect bounds = GetBoundsInScreen();
-    const gfx::Rect parent_bounds = parent()->GetBoundsInScreen();
-    int start = bounds.x() - parent_bounds.x();
-    int end = parent_bounds.right() - bounds.right();
-    if (base::i18n::IsRTL())
-      std::swap(start, end);
-    browser_->instant_controller()->SetMarginSize(start, end);
+    browser_->instant_controller()->SetOmniboxBounds(bounds());
   }
 }
 

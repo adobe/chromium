@@ -27,7 +27,8 @@ class TestCryptoStream : public QuicCryptoStream {
       : QuicCryptoStream(session) {
   }
 
-  void OnHandshakeMessage(const CryptoHandshakeMessage& message) {
+  virtual void OnHandshakeMessage(
+      const CryptoHandshakeMessage& message) OVERRIDE {
     SetHandshakeComplete(QUIC_NO_ERROR);
   }
 };
@@ -52,17 +53,17 @@ class TestSession : public QuicSession {
         crypto_stream_(this) {
   }
 
-  virtual QuicCryptoStream* GetCryptoStream() {
+  virtual QuicCryptoStream* GetCryptoStream() OVERRIDE {
     return &crypto_stream_;
   }
 
-  virtual TestStream* CreateOutgoingReliableStream() {
+  virtual TestStream* CreateOutgoingReliableStream() OVERRIDE {
     TestStream* stream = new TestStream(GetNextStreamId(), this);
     ActivateStream(stream);
     return stream;
   }
 
-  virtual TestStream* CreateIncomingReliableStream(QuicStreamId id) {
+  virtual TestStream* CreateIncomingReliableStream(QuicStreamId id) OVERRIDE {
     return new TestStream(id, this);
   }
 
@@ -197,6 +198,17 @@ TEST_F(QuicSessionTest, OnCanWriteWithClosedStream) {
   EXPECT_TRUE(session_.OnCanWrite());
 }
 
+TEST_F(QuicSessionTest, SendGoAway) {
+  // After sending a GoAway, ensure new incoming streams cannot be created and
+  // result in a RST being sent.
+  EXPECT_CALL(*connection_,
+              SendGoAway(QUIC_PEER_GOING_AWAY, 0u, "Going Away."));
+  session_.SendGoAway(QUIC_PEER_GOING_AWAY, "Going Away.");
+  EXPECT_TRUE(session_.goaway_sent());
+
+  EXPECT_CALL(*connection_, SendRstStream(3u, QUIC_PEER_GOING_AWAY));
+  EXPECT_FALSE(session_.GetIncomingReliableStream(3u));
+}
 }  // namespace
 }  // namespace test
 }  // namespace net

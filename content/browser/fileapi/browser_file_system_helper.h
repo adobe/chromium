@@ -9,6 +9,10 @@
 #include "content/common/content_export.h"
 #include "webkit/fileapi/file_system_context.h"
 
+namespace fileapi {
+class ExternalMountPoints;
+}
+
 namespace quota {
 class SpecialStoragePolicy;
 }
@@ -19,8 +23,9 @@ namespace content {
 // the browser process.
 CONTENT_EXPORT scoped_refptr<fileapi::FileSystemContext>
 CreateFileSystemContext(
-    const FilePath& profile_path,
+    const base::FilePath& profile_path,
     bool is_incognito,
+    fileapi::ExternalMountPoints* external_mount_points,
     quota::SpecialStoragePolicy* special_storage_policy,
     quota::QuotaManagerProxy* quota_manager_proxy);
 

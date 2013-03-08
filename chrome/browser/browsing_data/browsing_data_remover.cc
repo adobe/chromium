@@ -13,7 +13,7 @@
 #include "base/file_util.h"
 #include "base/logging.h"
 #include "base/platform_file.h"
-#include "base/prefs/public/pref_member.h"
+#include "base/prefs/pref_service.h"
 #include "chrome/browser/autofill/personal_data_manager.h"
 #include "chrome/browser/autofill/personal_data_manager_factory.h"
 #include "chrome/browser/browser_process.h"
@@ -23,7 +23,7 @@
 #include "chrome/browser/download/download_service_factory.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_special_storage_policy.h"
-#include "chrome/browser/history/history.h"
+#include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/io_thread.h"
 #include "chrome/browser/nacl_host/nacl_browser.h"
@@ -199,6 +199,15 @@ void BrowsingDataRemover::RemoveImpl(int remove_mask,
   remove_origin_ = origin;
   origin_set_mask_ = origin_set_mask;
 
+  PrefService* prefs = profile_->GetPrefs();
+  bool may_delete_history = prefs->GetBoolean(
+      prefs::kAllowDeletingBrowserHistory);
+
+  // All the UI entry points into the BrowsingDataRemover should be disabled,
+  // but this will fire if something was missed or added.
+  DCHECK(may_delete_history ||
+      (!(remove_mask & REMOVE_HISTORY) && !(remove_mask & REMOVE_DOWNLOADS)));
+
   if (origin_set_mask_ & BrowsingDataHelper::UNPROTECTED_WEB) {
     content::RecordAction(
         UserMetricsAction("ClearBrowsingData_MaskContainsUnprotectedWeb"));
@@ -219,7 +228,7 @@ void BrowsingDataRemover::RemoveImpl(int remove_mask,
                                   BrowsingDataHelper::EXTENSION),
       forgotten_to_add_origin_mask_type);
 
-  if (remove_mask & REMOVE_HISTORY) {
+  if ((remove_mask & REMOVE_HISTORY) && may_delete_history) {
     HistoryService* history_service = HistoryServiceFactory::GetForProfile(
         profile_, Profile::EXPLICIT_ACCESS);
     if (history_service) {
@@ -312,7 +321,7 @@ void BrowsingDataRemover::RemoveImpl(int remove_mask,
     }
   }
 
-  if (remove_mask & REMOVE_DOWNLOADS) {
+  if ((remove_mask & REMOVE_DOWNLOADS) && may_delete_history) {
     content::RecordAction(UserMetricsAction("ClearBrowsingData_Downloads"));
     DownloadManager* download_manager =
         BrowserContext::GetDownloadManager(profile_);
@@ -418,7 +427,11 @@ void BrowsingDataRemover::RemoveImpl(int remove_mask,
       plugin_data_remover_.reset(content::PluginDataRemover::Create(profile_));
     base::WaitableEvent* event =
         plugin_data_remover_->StartRemoving(delete_begin_);
-    watcher_.StartWatching(event, this);
+
+    base::WaitableEventWatcher::EventCallback watcher_callback =
+        base::Bind(&BrowsingDataRemover::OnWaitableEventSignaled,
+                   base::Unretained(this));
+    watcher_.StartWatching(event, watcher_callback);
   }
 #endif
 
@@ -991,7 +1004,13 @@ void BrowsingDataRemover::ClearServerBoundCertsOnIOThread(
   net::ServerBoundCertService* server_bound_cert_service =
       rq_context->GetURLRequestContext()->server_bound_cert_service();
   server_bound_cert_service->GetCertStore()->DeleteAllCreatedBetween(
-      delete_begin_, delete_end_);
+      delete_begin_, delete_end_,
+      base::Bind(&BrowsingDataRemover::OnClearedServerBoundCertsOnIOThread,
+                 base::Unretained(this), base::Unretained(rq_context)));
+}
+
+void BrowsingDataRemover::OnClearedServerBoundCertsOnIOThread(
+    net::URLRequestContextGetter* rq_context) {
   // Need to close open SSL connections which may be using the channel ids we
   // are deleting.
   // TODO(mattm): http://crbug.com/166069 Make the server bound cert

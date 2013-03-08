@@ -26,7 +26,6 @@ namespace drive {
 class DriveEntryProto;
 class DriveFileSystemInterface;
 class DrivePrefetcher;
-class DriveSyncClientObserver;
 
 // The DriveSyncClient is used to synchronize pinned files on Drive and the
 // cache on the local drive. The sync client works as follows.
@@ -72,10 +71,6 @@ class DriveSyncClient
   virtual void OnCacheUnpinned(const std::string& resource_id,
                                const std::string& md5) OVERRIDE;
   virtual void OnCacheCommitted(const std::string& resource_id) OVERRIDE;
-
-  // Adds/Removes an observer.
-  void AddObserver(DriveSyncClientObserver* observer);
-  void RemoveObserver(DriveSyncClientObserver* observer);
 
   // Starts processing the backlog (i.e. pinned-but-not-filed files and
   // dirty-but-not-uploaded files). Kicks off retrieval of the resource
@@ -127,7 +122,7 @@ class DriveSyncClient
   void OnGetEntryInfoByResourceId(const std::string& resource_id,
                                   const DriveCacheEntry& cache_entry,
                                   DriveFileError error,
-                                  const FilePath& file_path,
+                                  const base::FilePath& file_path,
                                   scoped_ptr<DriveEntryProto> entry_proto);
 
   // Called when a cache entry is obtained.
@@ -146,7 +141,7 @@ class DriveSyncClient
   // Calls DoSyncLoop() to go back to the sync loop.
   void OnFetchFileComplete(const std::string& resource_id,
                            DriveFileError error,
-                           const FilePath& local_path,
+                           const base::FilePath& local_path,
                            const std::string& ununsed_mime_type,
                            DriveFileType file_type);
 
@@ -158,7 +153,6 @@ class DriveSyncClient
   Profile* profile_;
   DriveFileSystemInterface* file_system_;  // Owned by DriveSystemService.
   DriveCache* cache_;  // Owned by DriveSystemService.
-  ObserverList<DriveSyncClientObserver> observers_;
 
   // List of the resource ids of resources which have a fetch task created.
   std::set<std::string> fetch_list_;

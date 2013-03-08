@@ -6,7 +6,7 @@
 #define CONTENT_PUBLIC_TEST_RENDER_WIDGET_TEST_H_
 
 #include "base/basictypes.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "content/public/test/render_view_test.h"
 
 class SkBitmap;
@@ -52,7 +52,8 @@ class RenderWidgetTest : public RenderViewTest {
   // file_util::CreateTemporaryFile(&tmp_path);
   // OutputBitmapToFile(bitmap, tmp_path);
   // LOG(INFO) << "Bitmap image stored at: " << tmp_path.value();
-  void OutputBitmapToFile(const SkBitmap& bitmap, const FilePath& file_path);
+  void OutputBitmapToFile(const SkBitmap& bitmap,
+                          const base::FilePath& file_path);
 };
 
 }  // namespace content

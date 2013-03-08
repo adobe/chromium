@@ -18,11 +18,31 @@ namespace fileapi {
 
 namespace {
 
-bool CrackFileSystemURL(
+}  // namespace
+
+FileSystemURL::FileSystemURL()
+    : is_valid_(false),
+      type_(kFileSystemTypeUnknown),
+      mount_type_(kFileSystemTypeUnknown) {
+}
+
+// static
+FileSystemURL FileSystemURL::CreateForTest(const GURL& url) {
+  return FileSystemURL(url);
+}
+
+FileSystemURL FileSystemURL::CreateForTest(const GURL& origin,
+                                           FileSystemType type,
+                                           const base::FilePath& path) {
+  return FileSystemURL(origin, type, path);
+}
+
+// static
+bool FileSystemURL::ParseFileSystemSchemeURL(
     const GURL& url,
     GURL* origin_url,
     FileSystemType* type,
-    FilePath* file_path) {
+    base::FilePath* file_path) {
   GURL origin;
   FileSystemType file_system_type = kFileSystemTypeUnknown;
 
@@ -42,6 +62,7 @@ bool CrackFileSystemURL(
     { kFileSystemTypeExternal, kExternalDir },
     { kFileSystemTypeTest, kTestDir },
   };
+
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(kValidTypes); ++i) {
     if (StartsWithASCII(inner_path, kValidTypes[i].dir, true)) {
       file_system_type = kValidTypes[i].type;
@@ -60,7 +81,7 @@ bool CrackFileSystemURL(
   while (!path.empty() && path[0] == '/')
     path.erase(0, 1);
 
-  FilePath converted_path = FilePath::FromUTF8Unsafe(path);
+  base::FilePath converted_path = base::FilePath::FromUTF8Unsafe(path);
 
   // All parent references should have been resolved in the renderer.
   if (converted_path.ReferencesParent())
@@ -77,28 +98,38 @@ bool CrackFileSystemURL(
   return true;
 }
 
-}  // namespace
-
-FileSystemURL::FileSystemURL()
-    : type_(kFileSystemTypeUnknown),
-      mount_type_(kFileSystemTypeUnknown),
-      is_valid_(false) {}
-
 FileSystemURL::FileSystemURL(const GURL& url)
-    : type_(kFileSystemTypeUnknown) {
-  is_valid_ = CrackFileSystemURL(url, &origin_, &type_, &virtual_path_);
-  MayCrackIsolatedPath();
+    : type_(kFileSystemTypeUnknown),
+      mount_type_(kFileSystemTypeUnknown) {
+  is_valid_ = ParseFileSystemSchemeURL(url, &origin_, &type_, &path_);
+  virtual_path_ = path_;
+  mount_type_ = type_;
 }
 
-FileSystemURL::FileSystemURL(
-    const GURL& origin,
-    FileSystemType type,
-    const FilePath& path)
-    : origin_(origin),
+FileSystemURL::FileSystemURL(const GURL& origin,
+                             FileSystemType type,
+                             const base::FilePath& path)
+    : is_valid_(true),
+      origin_(origin),
       type_(type),
-      virtual_path_(path.NormalizePathSeparators()),
-      is_valid_(true) {
-  MayCrackIsolatedPath();
+      mount_type_(type),
+      path_(path.NormalizePathSeparators()),
+      virtual_path_(path.NormalizePathSeparators()) {
+}
+
+FileSystemURL::FileSystemURL(const GURL& origin,
+                             FileSystemType mount_type,
+                             const base::FilePath& virtual_path,
+                             const std::string& filesystem_id,
+                             FileSystemType cracked_type,
+                             const base::FilePath& cracked_path)
+    : is_valid_(true),
+      origin_(origin),
+      type_(cracked_type),
+      mount_type_(mount_type),
+      path_(cracked_path.NormalizePathSeparators()),
+      filesystem_id_(filesystem_id),
+      virtual_path_(virtual_path.NormalizePathSeparators()) {
 }
 
 FileSystemURL::~FileSystemURL() {}
@@ -108,22 +139,18 @@ std::string FileSystemURL::DebugString() const {
     return "invalid filesystem: URL";
   std::ostringstream ss;
   ss << GetFileSystemRootURI(origin_, mount_type_);
-  if (!virtual_path_.empty())
+
+  // filesystem_id_ will be non empty for (and only for) cracked URLs.
+  if (!filesystem_id_.empty()) {
     ss << virtual_path_.value();
-  if (type_ != mount_type_ || path_ != virtual_path_) {
     ss << " (";
     ss << GetFileSystemTypeString(type_) << "@" << filesystem_id_ << ":";
     ss << path_.value();
     ss << ")";
+  } else {
+    ss << path_.value();
   }
   return ss.str();
-}
-
-FileSystemURL FileSystemURL::WithPath(const FilePath& path) const {
-  FileSystemURL url = *this;
-  url.path_ = path;
-  url.virtual_path_.clear();
-  return url;
 }
 
 bool FileSystemURL::IsParent(const FileSystemURL& child) const {
@@ -151,21 +178,6 @@ bool FileSystemURL::Comparator::operator()(const FileSystemURL& lhs,
   if (lhs.filesystem_id_ != rhs.filesystem_id_)
     return lhs.filesystem_id_ < rhs.filesystem_id_;
   return lhs.path_ < rhs.path_;
-}
-
-void FileSystemURL::MayCrackIsolatedPath() {
-  path_ = virtual_path_;
-  mount_type_ = type_;
-  if (is_valid_ && IsolatedContext::IsIsolatedType(type_)) {
-    // If the type is isolated, crack the path further to get the 'real'
-    // filesystem type and path.
-    is_valid_ = ExternalMountPoints::GetSystemInstance()->CrackVirtualPath(
-        virtual_path_, &filesystem_id_, &type_, &path_);
-    if (is_valid_)
-      return;
-    is_valid_ = IsolatedContext::GetInstance()->CrackVirtualPath(
-        virtual_path_, &filesystem_id_, &type_, &path_);
-  }
 }
 
 }  // namespace fileapi

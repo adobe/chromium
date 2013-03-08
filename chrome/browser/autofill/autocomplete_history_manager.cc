@@ -6,15 +6,16 @@
 
 #include <vector>
 
-#include "base/prefs/public/pref_service_base.h"
+#include "base/prefs/pref_service.h"
 #include "base/string16.h"
-#include "base/string_number_conversions.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/autofill/autofill_external_delegate.h"
 #include "chrome/browser/autofill/validation.h"
 #include "chrome/common/autofill_messages.h"
 #include "chrome/common/form_data.h"
 #include "chrome/common/pref_names.h"
+#include "components/user_prefs/user_prefs.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
@@ -109,14 +110,15 @@ bool IsTextField(const FormFieldData& field) {
 AutocompleteHistoryManager::AutocompleteHistoryManager(
     WebContents* web_contents)
     : content::WebContentsObserver(web_contents),
+      browser_context_(web_contents->GetBrowserContext()),
+      autofill_data_(
+          AutofillWebDataService::FromBrowserContext(browser_context_)),
       pending_query_handle_(0),
       query_id_(0),
       external_delegate_(NULL) {
-  browser_context_ = web_contents->GetBrowserContext();
-  // May be NULL in unit tests.
-  autofill_data_ = AutofillWebDataService::FromBrowserContext(browser_context_);
-  autofill_enabled_.Init(prefs::kAutofillEnabled,
-                         PrefServiceBase::FromBrowserContext(browser_context_));
+  autofill_enabled_.Init(
+      prefs::kAutofillEnabled,
+      components::UserPrefs::Get(browser_context_));
 }
 
 AutocompleteHistoryManager::~AutocompleteHistoryManager() {
@@ -232,24 +234,9 @@ void AutocompleteHistoryManager::SetExternalDelegate(
   external_delegate_ = delegate;
 }
 
-AutocompleteHistoryManager::AutocompleteHistoryManager(
-    WebContents* web_contents,
-    BrowserContext* browser_context,
-    scoped_ptr<AutofillWebDataService> awd)
-    : content::WebContentsObserver(web_contents),
-      browser_context_(browser_context),
-      autofill_data_(awd.Pass()),
-      pending_query_handle_(0),
-      query_id_(0),
-      external_delegate_(NULL) {
-  autofill_enabled_.Init(prefs::kAutofillEnabled,
-                         PrefServiceBase::FromBrowserContext(browser_context_));
-}
-
 void AutocompleteHistoryManager::CancelPendingQuery() {
   if (pending_query_handle_) {
-    SendSuggestions(NULL);
-    if (autofill_data_.get())
+    if (autofill_data_)
       autofill_data_->CancelRequest(pending_query_handle_);
     pending_query_handle_ = 0;
   }

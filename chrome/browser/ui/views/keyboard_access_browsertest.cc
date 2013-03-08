@@ -60,11 +60,11 @@ class ViewFocusChangeWaiter : public views::FocusChangeListener {
  private:
   // Inherited from FocusChangeListener
   virtual void OnWillChangeFocus(views::View* focused_before,
-                                 views::View* focused_now) {
+                                 views::View* focused_now) OVERRIDE {
   }
 
   virtual void OnDidChangeFocus(views::View* focused_before,
-                                views::View* focused_now) {
+                                views::View* focused_now) OVERRIDE {
     if (focused_now && focused_now->id() != previous_view_id_) {
       MessageLoop::current()->PostTask(FROM_HERE, MessageLoop::QuitClosure());
     }
@@ -262,5 +262,34 @@ IN_PROC_BROWSER_TEST_F(KeyboardAccessTest, ReserveKeyboardAccelerators) {
       browser(), ui::VKEY_W, true, false, false, false));
   ASSERT_EQ(0, browser()->tab_strip_model()->active_index());
 }
+
+#if defined(OS_WIN)  // These keys are Windows-only.
+IN_PROC_BROWSER_TEST_F(KeyboardAccessTest, BackForwardKeys) {
+  // Navigate to create some history.
+  ui_test_utils::NavigateToURL(browser(), GURL("chrome://version/"));
+  ui_test_utils::NavigateToURL(browser(), GURL("chrome://about/"));
+
+  string16 before_back;
+  ASSERT_TRUE(ui_test_utils::GetCurrentTabTitle(browser(), &before_back));
+
+  // Navigate back.
+  ASSERT_TRUE(ui_test_utils::SendKeyPressSync(
+      browser(), ui::VKEY_BROWSER_BACK, false, false, false, false));
+
+  string16 after_back;
+  ASSERT_TRUE(ui_test_utils::GetCurrentTabTitle(browser(), &after_back));
+
+  EXPECT_NE(before_back, after_back);
+
+  // And then forward.
+  ASSERT_TRUE(ui_test_utils::SendKeyPressSync(
+      browser(), ui::VKEY_BROWSER_FORWARD, false, false, false, false));
+
+  string16 after_forward;
+  ASSERT_TRUE(ui_test_utils::GetCurrentTabTitle(browser(), &after_forward));
+
+  EXPECT_EQ(before_back, after_forward);
+}
+#endif
 
 }  // namespace

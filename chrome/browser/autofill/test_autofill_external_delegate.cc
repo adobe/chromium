@@ -15,7 +15,7 @@ void GenerateTestAutofillPopup(
   FormFieldData field;
   field.is_focusable = true;
   field.should_autocomplete = true;
-  gfx::Rect bounds(100, 100);
+  gfx::RectF bounds(100.f, 100.f);
   autofill_external_delegate->OnQuery(query_id, form, field, bounds, false);
 
   std::vector<string16> autofill_item;
@@ -25,29 +25,5 @@ void GenerateTestAutofillPopup(
   autofill_external_delegate->OnSuggestionsReturned(
       query_id, autofill_item, autofill_item, autofill_item, autofill_id);
 }
-
-TestAutofillExternalDelegate::TestAutofillExternalDelegate(
-    content::WebContents* web_contents,
-    AutofillManager* autofill_manager)
-    : AutofillExternalDelegate(web_contents, autofill_manager) {
-  // Initialize Controller.
-  const gfx::Rect element_bounds;
-  AutofillExternalDelegate::EnsurePopupForElement(element_bounds);
-}
-
-TestAutofillExternalDelegate::~TestAutofillExternalDelegate() {}
-
-void TestAutofillExternalDelegate::ApplyAutofillSuggestions(
-    const std::vector<string16>& autofill_values,
-    const std::vector<string16>& autofill_labels,
-    const std::vector<string16>& autofill_icons,
-    const std::vector<int>& autofill_unique_ids) {}
-
-void TestAutofillExternalDelegate::HideAutofillPopup() {}
-
-void TestAutofillExternalDelegate::EnsurePopupForElement(
-    const gfx::Rect& element_bounds) {}
-
-void TestAutofillExternalDelegate::ControllerDestroyed() {}
 
 }  // namespace autofill

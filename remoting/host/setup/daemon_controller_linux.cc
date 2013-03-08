@@ -11,8 +11,8 @@
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/environment.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/json/json_writer.h"
 #include "base/logging.h"
 #include "base/md5.h"
@@ -37,8 +37,8 @@ const char kDaemonScript[] =
 // Timeout for running daemon script.
 const int64 kDaemonTimeoutMs = 5000;
 
-// Timeout for commands that require password prompt- 1 minute;
-const int64 kSudoTimeoutMs = 60000;
+// Timeout for commands that require password prompt - 5 minutes.
+const int64 kSudoTimeoutSeconds = 5 * 60;
 
 std::string GetMd5(const std::string& value) {
   base::MD5Context ctx;
@@ -68,7 +68,7 @@ class DaemonControllerLinux : public remoting::DaemonController {
       const GetUsageStatsConsentCallback& done) OVERRIDE;
 
  private:
-  FilePath GetConfigPath();
+  base::FilePath GetConfigPath();
 
   void DoGetConfig(const GetConfigCallback& callback);
   void DoSetConfigAndStart(scoped_ptr<base::DictionaryValue> config,
@@ -88,8 +88,8 @@ DaemonControllerLinux::DaemonControllerLinux()
   file_io_thread_.Start();
 }
 
-static bool GetScriptPath(FilePath* result) {
-  FilePath candidate_exe(kDaemonScript);
+static bool GetScriptPath(base::FilePath* result) {
+  base::FilePath candidate_exe(kDaemonScript);
   if (access(candidate_exe.value().c_str(), X_OK) == 0) {
     *result = candidate_exe;
     return true;
@@ -101,12 +101,14 @@ static bool RunHostScriptWithTimeout(
     const std::vector<std::string>& args,
     base::TimeDelta timeout,
     int* exit_code) {
+  DCHECK(exit_code);
+
   // As long as we're relying on running an external binary from the
   // PATH, don't do it as root.
   if (getuid() == 0) {
     return false;
   }
-  FilePath script_path;
+  base::FilePath script_path;
   if (!GetScriptPath(&script_path)) {
     return false;
   }
@@ -115,17 +117,17 @@ static bool RunHostScriptWithTimeout(
     command_line.AppendArg(args[i]);
   }
   base::ProcessHandle process_handle;
-  bool result = base::LaunchProcess(command_line,
-                                    base::LaunchOptions(),
-                                    &process_handle);
-  if (result) {
-    if (exit_code) {
-      result = base::WaitForExitCodeWithTimeout(
-          process_handle, exit_code, timeout);
-    }
-    base::CloseProcessHandle(process_handle);
+  if (!base::LaunchProcess(command_line, base::LaunchOptions(),
+                           &process_handle)) {
+    return false;
   }
-  return result;
+
+  if (!base::WaitForExitCodeWithTimeout(process_handle, exit_code, timeout)) {
+    base::KillProcess(process_handle, 0, false);
+    return false;
+  }
+
+  return true;
 }
 
 static bool RunHostScript(const std::vector<std::string>& args,
@@ -200,7 +202,7 @@ void DaemonControllerLinux::GetVersion(
       done_callback));
 }
 
-FilePath DaemonControllerLinux::GetConfigPath() {
+base::FilePath DaemonControllerLinux::GetConfigPath() {
   std::string filename = "host#" + GetMd5(net::GetHostName()) + ".json";
   return file_util::GetHomeDir().
       Append(".config/chrome-remote-desktop").Append(filename);
@@ -236,7 +238,7 @@ void DaemonControllerLinux::DoSetConfigAndStart(
   args.push_back("--add-user");
   int exit_code;
   if (!RunHostScriptWithTimeout(
-          args, base::TimeDelta::FromMilliseconds(kSudoTimeoutMs),
+          args, base::TimeDelta::FromSeconds(kSudoTimeoutSeconds),
           &exit_code) ||
       exit_code != 0) {
     LOG(ERROR) << "Failed to add user to chrome-remote-desktop group.";
@@ -245,7 +247,7 @@ void DaemonControllerLinux::DoSetConfigAndStart(
   }
 
   // Ensure the configuration directory exists.
-  FilePath config_dir = GetConfigPath().DirName();
+  base::FilePath config_dir = GetConfigPath().DirName();
   if (!file_util::DirectoryExists(config_dir) &&
       !file_util::CreateDirectory(config_dir)) {
     LOG(ERROR) << "Failed to create config directory " << config_dir.value();
@@ -314,7 +316,7 @@ void DaemonControllerLinux::DoStop(const CompletionCallback& done_callback) {
 
 void DaemonControllerLinux::DoGetVersion(
     const GetVersionCallback& done_callback) {
-  FilePath script_path;
+  base::FilePath script_path;
   if (!GetScriptPath(&script_path)) {
     done_callback.Run("");
     return;

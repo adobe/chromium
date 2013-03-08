@@ -8,7 +8,7 @@
 #include <pk11sdr.h>
 
 #include "base/basictypes.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/stringprintf.h"
 #include "base/sys_string_conversions.h"
 #include "crypto/nss_util.h"
@@ -24,7 +24,8 @@ NSSDecryptor::~NSSDecryptor() {
   }
 }
 
-bool NSSDecryptor::Init(const FilePath& dll_path, const FilePath& db_path) {
+bool NSSDecryptor::Init(const base::FilePath& dll_path,
+                        const base::FilePath& db_path) {
   crypto::EnsureNSSInit();
   is_nss_initialized_ = true;
   const std::string modspec =

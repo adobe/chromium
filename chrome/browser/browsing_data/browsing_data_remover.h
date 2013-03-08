@@ -50,11 +50,11 @@ struct SessionStorageUsageInfo;
 // BrowsingDataRemover is responsible for removing data related to browsing:
 // visits in url database, downloads, cookies ...
 
-class BrowsingDataRemover : public content::NotificationObserver,
+class BrowsingDataRemover : public content::NotificationObserver
 #if defined(ENABLE_PLUGINS)
-                            public PepperFlashSettingsManager::Client,
+                            , public PepperFlashSettingsManager::Client
 #endif
-                            public base::WaitableEventWatcher::Delegate {
+                            {
  public:
   // Time period ranges available when doing browsing data removals.
   enum TimePeriod {
@@ -82,6 +82,10 @@ class BrowsingDataRemover : public content::NotificationObserver,
     REMOVE_WEBSQL = 1 << 11,
     REMOVE_SERVER_BOUND_CERTS = 1 << 12,
     REMOVE_CONTENT_LICENSES = 1 << 13,
+    // The following flag is used only in tests. In normal usage, hosted app
+    // data is controlled by the REMOVE_COOKIES flag, applied to the
+    // protected-web origin.
+    REMOVE_HOSTED_APP_DATA_TESTONLY = 1 << 31,
 
     // "Site data" includes cookies, appcache, file systems, indexedDBs, local
     // storage, webSQL, and plugin data.
@@ -140,6 +144,9 @@ class BrowsingDataRemover : public content::NotificationObserver,
   static BrowsingDataRemover* CreateForPeriod(Profile* profile,
                                               TimePeriod period);
 
+  // Calculate the begin time for the deletion range specified by |time_period|.
+  static base::Time CalculateBeginDeleteTime(TimePeriod time_period);
+
   // Quota managed data uses a different bitmask for types than
   // BrowsingDataRemover uses. This method generates that mask.
   static int GenerateQuotaClientMask(int remove_mask);
@@ -183,9 +190,6 @@ class BrowsingDataRemover : public content::NotificationObserver,
     STATE_DONE
   };
 
-  // Calculate the begin time for the deletion range specified by |time_period|.
-  static base::Time CalculateBeginDeleteTime(TimePeriod time_period);
-
   // Setter for |is_removing_|; DCHECKs that we can only start removing if we're
   // not already removing, and vice-versa.
   static void set_removing(bool is_removing);
@@ -210,10 +214,8 @@ class BrowsingDataRemover : public content::NotificationObserver,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE;
 
-  // WaitableEventWatcher implementation.
   // Called when plug-in data has been cleared. Invokes NotifyAndDeleteIfDone.
-  virtual void OnWaitableEventSignaled(
-      base::WaitableEvent* waitable_event) OVERRIDE;
+  void OnWaitableEventSignaled(base::WaitableEvent* waitable_event);
 
 #if defined(ENABLE_PLUGINS)
   // PepperFlashSettingsManager::Client implementation.
@@ -319,6 +321,11 @@ class BrowsingDataRemover : public content::NotificationObserver,
 
   // Invoked on the IO thread to delete server bound certs.
   void ClearServerBoundCertsOnIOThread(
+      net::URLRequestContextGetter* rq_context);
+
+  // Callback on IO Thread when server bound certs have been deleted. Clears SSL
+  // connection pool and posts to UI thread to run OnClearedServerBoundCerts.
+  void OnClearedServerBoundCertsOnIOThread(
       net::URLRequestContextGetter* rq_context);
 
   // Callback when server bound certs have been deleted. Invokes

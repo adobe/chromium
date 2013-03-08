@@ -8,7 +8,7 @@
 #include <string>
 #include <vector>
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "content/common/content_export.h"
 #include "webkit/plugins/ppapi/plugin_module.h"
 #include "webkit/plugins/webplugininfo.h"
@@ -34,7 +34,7 @@ struct CONTENT_EXPORT PepperPluginInfo {
   // Defaults to true.
   bool is_sandboxed;
 
-  FilePath path;  // Internal plugins have "internal-[name]" as path.
+  base::FilePath path;  // Internal plugins have "internal-[name]" as path.
   std::string name;
   std::string description;
   std::string version;

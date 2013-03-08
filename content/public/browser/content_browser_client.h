@@ -10,22 +10,27 @@
 #include <vector>
 
 #include "base/callback_forward.h"
+#include "base/memory/scoped_ptr.h"
 #include "content/public/browser/file_descriptor_info.h"
 #include "content/public/common/socket_permission_request.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/window_container_type.h"
 #include "net/base/mime_util.h"
 #include "net/cookies/canonical_cookie.h"
+#include "net/url_request/url_request_job_factory.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebNotificationPresenter.h"
+#include "webkit/glue/resource_type.h"
 
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
 #include "base/posix/global_descriptors.h"
 #endif
 
-
 class CommandLine;
-class FilePath;
 class GURL;
+
+namespace base {
+class FilePath;
+}
 
 namespace webkit_glue {
 struct WebPreferences;
@@ -47,7 +52,12 @@ class SSLCertRequestInfo;
 class SSLInfo;
 class URLRequest;
 class URLRequestContext;
+class URLRequestContextGetter;
 class X509Certificate;
+}
+
+namespace ui {
+class SelectFilePolicy;
 }
 
 namespace content {
@@ -65,13 +75,10 @@ class RenderViewHost;
 class RenderViewHostDelegateView;
 class ResourceContext;
 class SiteInstance;
-class SpeechInputManagerDelegate;
 class SpeechRecognitionManagerDelegate;
 class WebContents;
-class WebContentsView;
 class WebContentsViewDelegate;
-class WebRTCInternals;
-class WebUIControllerFactory;
+class WebContentsViewPort;
 struct MainFunctionParams;
 struct ShowDesktopNotificationHostMsgParams;
 
@@ -93,11 +100,11 @@ class CONTENT_EXPORT ContentBrowserClient {
   virtual BrowserMainParts* CreateBrowserMainParts(
       const MainFunctionParams& parameters);
 
-  // Allows an embedder to return their own WebContentsView implementation.
+  // Allows an embedder to return their own WebContentsViewPort implementation.
   // Return NULL to let the default one for the platform be created. Otherwise
   // |render_view_host_delegate_view| also needs to be provided, and it is
   // owned by the embedder.
-  virtual WebContentsView* OverrideCreateWebContentsView(
+  virtual WebContentsViewPort* OverrideCreateWebContentsView(
       WebContents* web_contents,
       RenderViewHostDelegateView** render_view_host_delegate_view);
 
@@ -122,10 +129,6 @@ class CONTENT_EXPORT ContentBrowserClient {
   // Notifies that a BrowserChildProcessHost has been created.
   virtual void BrowserChildProcessHostCreated(BrowserChildProcessHost* host) {}
 
-  // Gets the WebUIControllerFactory which will be responsible for generating
-  // WebUIs. Can return NULL if the embedder doesn't need WebUI support.
-  virtual WebUIControllerFactory* GetWebUIControllerFactory();
-
   // Get the effective URL for the given actual URL, to allow an embedder to
   // group different url schemes in the same SiteInstance.
   virtual GURL GetEffectiveURL(BrowserContext* browser_context,
@@ -135,6 +138,40 @@ class CONTENT_EXPORT ContentBrowserClient {
   // rendered by the same process, rather than using process-per-site-instance.
   virtual bool ShouldUseProcessPerSite(BrowserContext* browser_context,
                                        const GURL& effective_url);
+
+  // Creates the main net::URLRequestContextGetter. Should only be called once
+  // per ContentBrowserClient object.
+  // TODO(ajwong): Remove once http://crbug.com/159193 is resolved.
+  virtual net::URLRequestContextGetter* CreateRequestContext(
+      BrowserContext* browser_context,
+      scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+          blob_protocol_handler,
+      scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+          file_system_protocol_handler,
+      scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+          developer_protocol_handler,
+      scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+          chrome_protocol_handler,
+      scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+          chrome_devtools_protocol_handler);
+
+  // Creates the net::URLRequestContextGetter for a StoragePartition. Should
+  // only be called once per partition_path per ContentBrowserClient object.
+  // TODO(ajwong): Remove once http://crbug.com/159193 is resolved.
+  virtual net::URLRequestContextGetter* CreateRequestContextForStoragePartition(
+      BrowserContext* browser_context,
+      const base::FilePath& partition_path,
+      bool in_memory,
+      scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+          blob_protocol_handler,
+      scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+          file_system_protocol_handler,
+      scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+          developer_protocol_handler,
+      scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+          chrome_protocol_handler,
+      scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+          chrome_devtools_protocol_handler);
 
   // Returns whether a specified URL is handled by the embedder's internal
   // protocol handlers.
@@ -157,10 +194,11 @@ class CONTENT_EXPORT ContentBrowserClient {
   // Called from a site instance's destructor.
   virtual void SiteInstanceDeleting(SiteInstance* site_instance) {}
 
-  // Returns true if for the navigation from |current_url| to |new_url|,
-  // processes should be swapped (even if we are in a process model that
-  // doesn't usually swap).
-  virtual bool ShouldSwapProcessesForNavigation(const GURL& current_url,
+  // Returns true if for the navigation from |current_url| to |new_url|
+  // in |site_instance|, the process should be swapped (even if we are in a
+  // process model that doesn't usually swap).
+  virtual bool ShouldSwapProcessesForNavigation(SiteInstance* site_instance,
+                                                const GURL& current_url,
                                                 const GURL& new_url);
 
   // Returns true if the given navigation redirect should cause a renderer
@@ -303,6 +341,7 @@ class CONTENT_EXPORT ContentBrowserClient {
       int cert_error,
       const net::SSLInfo& ssl_info,
       const GURL& request_url,
+      ResourceType::Type resource_type,
       bool overridable,
       bool strict_enforcement,
       const base::Callback<void(bool)>& callback,
@@ -332,10 +371,6 @@ class CONTENT_EXPORT ContentBrowserClient {
   // Returns a class to get notifications about media event. The embedder can
   // return NULL if they're not interested.
   virtual MediaObserver* GetMediaObserver();
-
-  // Returns a class to get WebRTC updates. The embedder can return NULL if they
-  // are not interested.
-  virtual WebRTCInternals* GetWebRTCInternals();
 
   // Asks permission to show desktop notifications.
   virtual void RequestDesktopNotificationPermission(
@@ -429,7 +464,7 @@ class CONTENT_EXPORT ContentBrowserClient {
 
   // Returns the default download directory.
   // This can be called on any thread.
-  virtual FilePath GetDefaultDownloadDirectory();
+  virtual base::FilePath GetDefaultDownloadDirectory();
 
   // Returns the default filename used in downloads when we have no idea what
   // else we should do with the file.
@@ -451,7 +486,11 @@ class CONTENT_EXPORT ContentBrowserClient {
                                     const SocketPermissionRequest& params);
 
   // Returns the directory containing hyphenation dictionaries.
-  virtual FilePath GetHyphenDictionaryDirectory();
+  virtual base::FilePath GetHyphenDictionaryDirectory();
+
+  // Returns an implementation of a file selecition policy. Can return NULL.
+  virtual ui::SelectFilePolicy* CreateSelectFilePolicy(
+      WebContents* web_contents);
 
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
   // Populates |mappings| with all files that need to be mapped before launching

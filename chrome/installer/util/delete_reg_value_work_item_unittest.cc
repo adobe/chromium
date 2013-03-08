@@ -4,7 +4,7 @@
 
 #include <windows.h>
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/string_util.h"
 #include "base/win/registry.h"
@@ -46,7 +46,7 @@ class DeleteRegValueWorkItemTest : public testing::Test {
 TEST_F(DeleteRegValueWorkItemTest, DeleteExistingValue) {
   RegKey key;
   std::wstring parent_key(kTestRoot);
-  parent_key.push_back(FilePath::kSeparators[0]);
+  parent_key.push_back(base::FilePath::kSeparators[0]);
   parent_key.append(kWriteNew);
   ASSERT_EQ(ERROR_SUCCESS,
       key.Create(HKEY_CURRENT_USER, parent_key.c_str(), KEY_READ | KEY_WRITE));
@@ -103,7 +103,7 @@ TEST_F(DeleteRegValueWorkItemTest, DeleteExistingValue) {
 TEST_F(DeleteRegValueWorkItemTest, DeleteNonExistentValue) {
   RegKey key;
   std::wstring parent_key(kTestRoot);
-  parent_key.push_back(FilePath::kSeparators[0]);
+  parent_key.push_back(base::FilePath::kSeparators[0]);
   parent_key.append(kWriteNew);
   ASSERT_EQ(ERROR_SUCCESS,
       key.Create(HKEY_CURRENT_USER, parent_key.c_str(), KEY_READ | KEY_WRITE));

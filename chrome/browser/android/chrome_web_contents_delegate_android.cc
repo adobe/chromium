@@ -10,10 +10,11 @@
 #include "chrome/browser/file_select_helper.h"
 #include "chrome/browser/google/google_url_tracker.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/app_modal_dialogs/javascript_dialog_creator.h"
+#include "chrome/browser/ui/app_modal_dialogs/javascript_dialog_manager.h"
 #include "chrome/browser/ui/find_bar/find_match_rects_details.h"
 #include "chrome/browser/ui/find_bar/find_notification_details.h"
 #include "chrome/browser/ui/find_bar/find_tab_helper.h"
+#include "chrome/browser/ui/media_stream_infobar_delegate.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/android/download_controller_android.h"
 #include "content/public/browser/navigation_entry.h"
@@ -27,6 +28,10 @@
 #include "net/http/http_request_headers.h"
 #include "ui/gfx/rect.h"
 #include "ui/gfx/rect_f.h"
+
+#if defined(ENABLE_PLUGINS)
+#include "chrome/browser/pepper_broker_infobar_delegate.h"
+#endif
 
 using base::android::AttachCurrentThread;
 using base::android::GetClass;
@@ -257,9 +262,9 @@ void ChromeWebContentsDelegateAndroid::FindMatchRectsReply(
       details_object.obj());
 }
 
-content::JavaScriptDialogCreator*
-ChromeWebContentsDelegateAndroid::GetJavaScriptDialogCreator() {
-  return GetJavaScriptDialogCreatorInstance();
+content::JavaScriptDialogManager*
+ChromeWebContentsDelegateAndroid::GetJavaScriptDialogManager() {
+  return GetJavaScriptDialogManagerInstance();
 }
 
 bool ChromeWebContentsDelegateAndroid::CanDownload(
@@ -271,14 +276,10 @@ bool ChromeWebContentsDelegateAndroid::CanDownload(
         source, request_id);
     return false;
   }
+  // DownloadControllerAndroid::OnPostDownloadStarted() is called for the
+  // started download by the default DownloadUIController::Delegate
+  // implementation.
   return true;
-}
-
-void ChromeWebContentsDelegateAndroid::OnStartDownload(
-    WebContents* source,
-    content::DownloadItem* download) {
-  content::DownloadControllerAndroid::Get()->OnPostDownloadStarted(
-      source, download);
 }
 
 void ChromeWebContentsDelegateAndroid::DidNavigateToPendingEntry(
@@ -298,6 +299,28 @@ void ChromeWebContentsDelegateAndroid::DidNavigateMainFramePostCommit(
     UMA_HISTOGRAM_TIMES("Omnibox.GoogleSearch.SearchTime", time_delta);
   }
 }
+
+void ChromeWebContentsDelegateAndroid::RequestMediaAccessPermission(
+    content::WebContents* web_contents,
+    const content::MediaStreamRequest& request,
+    const content::MediaResponseCallback& callback) {
+  MediaStreamInfoBarDelegate::Create(web_contents, request, callback);
+}
+
+bool ChromeWebContentsDelegateAndroid::RequestPpapiBrokerPermission(
+    WebContents* web_contents,
+    const GURL& url,
+    const base::FilePath& plugin_path,
+    const base::Callback<void(bool)>& callback) {
+#if defined(ENABLE_PLUGINS)
+    PepperBrokerInfoBarDelegate::Create(
+        web_contents, url, plugin_path, callback);
+    return true;
+#else
+    return false;
+#endif
+}
+
 
 }  // namespace android
 }  // namespace chrome

@@ -25,22 +25,29 @@ base::TimeDelta VideoRendererBase::kMaxLastFrameDuration() {
 VideoRendererBase::VideoRendererBase(
     const scoped_refptr<base::MessageLoopProxy>& message_loop,
     const SetDecryptorReadyCB& set_decryptor_ready_cb,
-    const base::Closure& paint_cb,
+    const PaintCB& paint_cb,
     const SetOpaqueCB& set_opaque_cb,
     bool drop_frames)
     : message_loop_(message_loop),
+      weak_factory_(this),
       set_decryptor_ready_cb_(set_decryptor_ready_cb),
+      received_end_of_stream_(false),
       frame_available_(&lock_),
       state_(kUninitialized),
       thread_(base::kNullThreadHandle),
       pending_read_(false),
-      pending_paint_(false),
-      pending_paint_with_last_available_(false),
       drop_frames_(drop_frames),
       playback_rate_(0),
       paint_cb_(paint_cb),
-      set_opaque_cb_(set_opaque_cb) {
+      set_opaque_cb_(set_opaque_cb),
+      last_timestamp_(kNoTimestamp()) {
   DCHECK(!paint_cb_.is_null());
+}
+
+VideoRendererBase::~VideoRendererBase() {
+  base::AutoLock auto_lock(lock_);
+  CHECK(state_ == kStopped || state_ == kUninitialized) << state_;
+  CHECK_EQ(thread_, base::kNullThreadHandle);
 }
 
 void VideoRendererBase::Play(const base::Closure& callback) {
@@ -68,55 +75,64 @@ void VideoRendererBase::Flush(const base::Closure& callback) {
 
   if (decrypting_demuxer_stream_) {
     decrypting_demuxer_stream_->Reset(base::Bind(
-        &VideoRendererBase::ResetDecoder, this));
+        &VideoRendererBase::ResetDecoder, weak_this_));
     return;
   }
 
-  decoder_->Reset(base::Bind(&VideoRendererBase::OnDecoderResetDone, this));
+  decoder_->Reset(base::Bind(
+      &VideoRendererBase::OnDecoderResetDone, weak_this_));
 }
 
 void VideoRendererBase::ResetDecoder() {
   DCHECK(message_loop_->BelongsToCurrentThread());
   base::AutoLock auto_lock(lock_);
-  decoder_->Reset(base::Bind(&VideoRendererBase::OnDecoderResetDone, this));
+  decoder_->Reset(base::Bind(
+      &VideoRendererBase::OnDecoderResetDone, weak_this_));
 }
 
 void VideoRendererBase::Stop(const base::Closure& callback) {
   DCHECK(message_loop_->BelongsToCurrentThread());
+  base::AutoLock auto_lock(lock_);
   if (state_ == kUninitialized || state_ == kStopped) {
     callback.Run();
     return;
   }
 
+  // TODO(scherkus): Consider invalidating |weak_factory_| and replacing
+  // task-running guards that check |state_| with DCHECK().
+
+  state_ = kStopped;
+
+  statistics_cb_.Reset();
+  max_time_cb_.Reset();
+  DoStopOrError_Locked();
+
+  // Clean up our thread if present.
   base::PlatformThreadHandle thread_to_join = base::kNullThreadHandle;
-  {
-    base::AutoLock auto_lock(lock_);
-    state_ = kStopped;
-
-    statistics_cb_.Reset();
-    max_time_cb_.Reset();
-    if (!pending_paint_ && !pending_paint_with_last_available_)
-      DoStopOrError_Locked();
-
-    // Clean up our thread if present.
-    if (thread_ != base::kNullThreadHandle) {
-      // Signal the thread since it's possible to get stopped with the video
-      // thread waiting for a read to complete.
-      frame_available_.Signal();
-      thread_to_join = thread_;
-      thread_ = base::kNullThreadHandle;
-    }
+  if (thread_ != base::kNullThreadHandle) {
+    // Signal the thread since it's possible to get stopped with the video
+    // thread waiting for a read to complete.
+    frame_available_.Signal();
+    std::swap(thread_, thread_to_join);
   }
-  if (thread_to_join != base::kNullThreadHandle)
+
+  if (thread_to_join != base::kNullThreadHandle) {
+    base::AutoUnlock auto_unlock(lock_);
     base::PlatformThread::Join(thread_to_join);
+  }
 
   if (decrypting_demuxer_stream_) {
     decrypting_demuxer_stream_->Reset(base::Bind(
-        &VideoRendererBase::StopDecoder, this, callback));
+        &VideoRendererBase::StopDecoder, weak_this_, callback));
     return;
   }
 
-  decoder_->Stop(callback);
+  if (decoder_) {
+    decoder_->Stop(callback);
+    return;
+  }
+
+  callback.Run();
 }
 
 void VideoRendererBase::StopDecoder(const base::Closure& callback) {
@@ -142,7 +158,6 @@ void VideoRendererBase::Preroll(base::TimeDelta time,
   state_ = kPrerolling;
   preroll_cb_ = cb;
   preroll_timestamp_ = time;
-  prerolling_delayed_frame_ = NULL;
   AttemptRead_Locked();
 }
 
@@ -170,6 +185,7 @@ void VideoRendererBase::Initialize(const scoped_refptr<DemuxerStream>& stream,
   DCHECK(!get_duration_cb.is_null());
   DCHECK_EQ(kUninitialized, state_);
 
+  weak_this_ = weak_factory_.GetWeakPtr();
   init_cb_ = init_cb;
   statistics_cb_ = statistics_cb;
   max_time_cb_ = max_time_cb;
@@ -178,6 +194,7 @@ void VideoRendererBase::Initialize(const scoped_refptr<DemuxerStream>& stream,
   error_cb_ = error_cb;
   get_time_cb_ = get_time_cb;
   get_duration_cb_ = get_duration_cb;
+  state_ = kInitializing;
 
   scoped_ptr<VideoDecoderSelector> decoder_selector(
       new VideoDecoderSelector(base::MessageLoopProxy::current(),
@@ -191,7 +208,7 @@ void VideoRendererBase::Initialize(const scoped_refptr<DemuxerStream>& stream,
   decoder_selector_ptr->SelectVideoDecoder(
       stream,
       statistics_cb,
-      base::Bind(&VideoRendererBase::OnDecoderSelected, this,
+      base::Bind(&VideoRendererBase::OnDecoderSelected, weak_this_,
                  base::Passed(&decoder_selector)));
 }
 
@@ -204,6 +221,8 @@ void VideoRendererBase::OnDecoderSelected(
 
   if (state_ == kStopped)
     return;
+
+  DCHECK_EQ(state_, kInitializing);
 
   if (!selected_decoder) {
     state_ = kUninitialized;
@@ -252,22 +271,12 @@ void VideoRendererBase::ThreadMain() {
   const base::TimeDelta kIdleTimeDelta =
       base::TimeDelta::FromMilliseconds(10);
 
-  uint32 frames_dropped = 0;
-
   for (;;) {
     base::AutoLock auto_lock(lock_);
 
     // Thread exit condition.
     if (state_ == kStopped)
       return;
-
-    if (frames_dropped > 0) {
-      PipelineStatistics statistics;
-      statistics.video_frames_dropped = frames_dropped;
-      statistics_cb_.Run(statistics);
-
-      frames_dropped = 0;
-    }
 
     // Remain idle as long as we're not playing.
     if (state_ != kPlaying || playback_rate_ == 0) {
@@ -277,17 +286,9 @@ void VideoRendererBase::ThreadMain() {
 
     // Remain idle until we have the next frame ready for rendering.
     if (ready_frames_.empty()) {
-      frame_available_.TimedWait(kIdleTimeDelta);
-      continue;
-    }
-
-    // Remain idle until we've initialized |current_frame_| via prerolling.
-    if (!current_frame_) {
-      // This can happen if our preroll only contains end of stream frames.
-      if (ready_frames_.front()->IsEndOfStream()) {
+      if (received_end_of_stream_) {
         state_ = kEnded;
         ended_cb_.Run();
-        ready_frames_.clear();
 
         // No need to sleep here as we idle when |state_ != kPlaying|.
         continue;
@@ -297,9 +298,6 @@ void VideoRendererBase::ThreadMain() {
       continue;
     }
 
-    // Calculate how long until we should advance the frame, which is
-    // typically negative but for playback rates < 1.0f may be long enough
-    // that it makes more sense to idle and check again.
     base::TimeDelta remaining_time =
         CalculateSleepDuration(ready_frames_.front(), playback_rate_);
 
@@ -311,149 +309,68 @@ void VideoRendererBase::ThreadMain() {
       continue;
     }
 
-
-    // We're almost there!
+    // Deadline is defined as the midpoint between this frame and the next
+    // frame, using the delta between this frame and the previous frame as the
+    // assumption for frame duration.
     //
-    // At this point we've rendered |current_frame_| for the proper amount
-    // of time and also have the next frame that ready for rendering.
-
-
-    // If the next frame is end of stream then we are truly at the end of the
-    // video stream.
+    // TODO(scherkus): An improvement over midpoint might be selecting the
+    // minimum and/or maximum between the midpoint and some constants. As a
+    // thought experiment, consider what would be better than the midpoint
+    // for both the 1fps case and 120fps case.
     //
-    // TODO(scherkus): deduplicate this end of stream check after we get rid of
-    // |current_frame_|.
-    if (ready_frames_.front()->IsEndOfStream()) {
-      state_ = kEnded;
-      ended_cb_.Run();
-      ready_frames_.clear();
+    // TODO(scherkus): This can be vastly improved. Use a histogram to measure
+    // the accuracy of our frame timing code. http://crbug.com/149829
+    if (drop_frames_ && last_timestamp_ != kNoTimestamp()) {
+      base::TimeDelta now = get_time_cb_.Run();
+      base::TimeDelta deadline = ready_frames_.front()->GetTimestamp() +
+          (ready_frames_.front()->GetTimestamp() - last_timestamp_) / 2;
 
-      // No need to sleep here as we idle when |state_ != kPlaying|.
-      continue;
-    }
-
-    // We cannot update |current_frame_| until we've completed the pending
-    // paint. Furthermore, the pending paint might be really slow: check to
-    // see if we have any ready frames that we can drop if they've already
-    // expired.
-    if (pending_paint_) {
-      while (!ready_frames_.empty()) {
-        // Can't drop anything if we're at the end.
-        if (ready_frames_.front()->IsEndOfStream())
-          break;
-
-        base::TimeDelta remaining_time =
-            ready_frames_.front()->GetTimestamp() - get_time_cb_.Run();
-
-        // Still a chance we can render the frame!
-        if (remaining_time.InMicroseconds() > 0)
-          break;
-
-        if (!drop_frames_)
-          break;
-
-        // Frame dropped: read again.
-        ++frames_dropped;
-        ready_frames_.pop_front();
-        message_loop_->PostTask(FROM_HERE, base::Bind(
-            &VideoRendererBase::AttemptRead, this));
+      if (now > deadline) {
+        DropNextReadyFrame_Locked();
+        continue;
       }
-      // Continue waiting for the current paint to finish.
-      frame_available_.TimedWait(kIdleTimeDelta);
-      continue;
     }
-
 
     // Congratulations! You've made it past the video frame timing gauntlet.
     //
-    // We can now safely update the current frame, request another frame, and
-    // signal to the client that a new frame is available.
-    DCHECK(!pending_paint_);
-    DCHECK(!ready_frames_.empty());
-    SetCurrentFrameToNextReadyFrame();
-    message_loop_->PostTask(FROM_HERE, base::Bind(
-        &VideoRendererBase::AttemptRead, this));
-
-    base::AutoUnlock auto_unlock(lock_);
-    paint_cb_.Run();
+    // At this point enough time has passed that the next frame that ready for
+    // rendering.
+    PaintNextReadyFrame_Locked();
   }
 }
 
-void VideoRendererBase::SetCurrentFrameToNextReadyFrame() {
-  current_frame_ = ready_frames_.front();
+void VideoRendererBase::PaintNextReadyFrame_Locked() {
+  lock_.AssertAcquired();
+
+  scoped_refptr<VideoFrame> next_frame = ready_frames_.front();
   ready_frames_.pop_front();
 
-  // Notify the pipeline of natural_size() changes.
-  const gfx::Size& natural_size = current_frame_->natural_size();
+  last_timestamp_ = next_frame->GetTimestamp();
+
+  const gfx::Size& natural_size = next_frame->natural_size();
   if (natural_size != last_natural_size_) {
-    size_changed_cb_.Run(natural_size);
     last_natural_size_ = natural_size;
+    size_changed_cb_.Run(natural_size);
   }
+
+  paint_cb_.Run(next_frame);
+
+  message_loop_->PostTask(FROM_HERE, base::Bind(
+      &VideoRendererBase::AttemptRead, weak_this_));
 }
 
-void VideoRendererBase::GetCurrentFrame(scoped_refptr<VideoFrame>* frame_out) {
-  base::AutoLock auto_lock(lock_);
-  DCHECK(!pending_paint_ && !pending_paint_with_last_available_);
+void VideoRendererBase::DropNextReadyFrame_Locked() {
+  lock_.AssertAcquired();
 
-  if ((!current_frame_ || current_frame_->IsEndOfStream()) &&
-      (!last_available_frame_ || last_available_frame_->IsEndOfStream())) {
-    *frame_out = NULL;
-    return;
-  }
+  last_timestamp_ = ready_frames_.front()->GetTimestamp();
+  ready_frames_.pop_front();
 
-  // We should have initialized and have the current frame.
-  DCHECK_NE(state_, kUninitialized);
-  DCHECK_NE(state_, kStopped);
-  DCHECK_NE(state_, kError);
+  PipelineStatistics statistics;
+  statistics.video_frames_dropped = 1;
+  statistics_cb_.Run(statistics);
 
-  if (current_frame_) {
-    *frame_out = current_frame_;
-    last_available_frame_ = current_frame_;
-    pending_paint_ = true;
-  } else {
-    DCHECK(last_available_frame_);
-    *frame_out = last_available_frame_;
-    pending_paint_with_last_available_ = true;
-  }
-}
-
-void VideoRendererBase::PutCurrentFrame(scoped_refptr<VideoFrame> frame) {
-  base::AutoLock auto_lock(lock_);
-
-  // Note that we do not claim |pending_paint_| when we return NULL frame, in
-  // that case, |current_frame_| could be changed before PutCurrentFrame.
-  if (pending_paint_) {
-    DCHECK_EQ(current_frame_, frame);
-    DCHECK(!pending_paint_with_last_available_);
-    pending_paint_ = false;
-  } else if (pending_paint_with_last_available_) {
-    DCHECK_EQ(last_available_frame_, frame);
-    DCHECK(!pending_paint_);
-    pending_paint_with_last_available_ = false;
-  } else {
-    DCHECK(!frame);
-  }
-
-  // We had cleared the |pending_paint_| flag, there are chances that current
-  // frame is timed-out. We will wake up our main thread to advance the current
-  // frame when this is true.
-  frame_available_.Signal();
-  if (state_ == kFlushingDecoder)
-    return;
-
-  if (state_ == kFlushing) {
-    AttemptFlush_Locked();
-    return;
-  }
-
-  if (state_ == kError || state_ == kStopped) {
-    DoStopOrError_Locked();
-  }
-}
-
-VideoRendererBase::~VideoRendererBase() {
-  base::AutoLock auto_lock(lock_);
-  DCHECK(state_ == kUninitialized || state_ == kStopped) << state_;
+  message_loop_->PostTask(FROM_HERE, base::Bind(
+      &VideoRendererBase::AttemptRead, weak_this_));
 }
 
 void VideoRendererBase::FrameReady(VideoDecoder::Status status,
@@ -505,18 +422,16 @@ void VideoRendererBase::FrameReady(VideoDecoder::Status status,
   // Discard frames until we reach our desired preroll timestamp.
   if (state_ == kPrerolling && !frame->IsEndOfStream() &&
       frame->GetTimestamp() <= preroll_timestamp_) {
-    prerolling_delayed_frame_ = frame;
+    // Maintain the latest frame decoded so the correct frame is displayed
+    // after prerolling has completed.
+    ready_frames_.clear();
+    AddReadyFrame_Locked(frame);
+
     AttemptRead_Locked();
     return;
   }
 
-  if (prerolling_delayed_frame_) {
-    DCHECK_EQ(state_, kPrerolling);
-    AddReadyFrame(prerolling_delayed_frame_);
-    prerolling_delayed_frame_ = NULL;
-  }
-
-  AddReadyFrame(frame);
+  AddReadyFrame_Locked(frame);
   PipelineStatistics statistics;
   statistics.video_frames_decoded = 1;
   statistics_cb_.Run(statistics);
@@ -525,64 +440,61 @@ void VideoRendererBase::FrameReady(VideoDecoder::Status status,
   // purposes:
   //   1) Prerolling while paused
   //   2) Keeps decoding going if video rendering thread starts falling behind
-  if (NumFrames_Locked() < limits::kMaxVideoFrames && !frame->IsEndOfStream()) {
+  if (ready_frames_.size() < static_cast<size_t>(limits::kMaxVideoFrames) &&
+      !received_end_of_stream_) {
     AttemptRead_Locked();
     return;
   }
 
   // If we're at capacity or end of stream while prerolling we need to
   // transition to prerolled.
-  if (state_ == kPrerolling) {
-    DCHECK(!current_frame_);
-    state_ = kPrerolled;
+  if (state_ != kPrerolling)
+    return;
 
-    // Because we might remain in the prerolled state for an undetermined amount
-    // of time (i.e., we were not playing before we started prerolling), we'll
-    // manually update the current frame and notify the subclass below.
-    if (!ready_frames_.front()->IsEndOfStream())
-      SetCurrentFrameToNextReadyFrame();
+  state_ = kPrerolled;
 
-    // ...and we're done prerolling!
-    DCHECK(!preroll_cb_.is_null());
-    base::ResetAndReturn(&preroll_cb_).Run(PIPELINE_OK);
+  // Because we might remain in the prerolled state for an undetermined amount
+  // of time (e.g., we seeked while paused), we'll paint the first prerolled
+  // frame.
+  if (!ready_frames_.empty())
+    PaintNextReadyFrame_Locked();
 
-    base::AutoUnlock ul(lock_);
-    paint_cb_.Run();
-  }
+  base::ResetAndReturn(&preroll_cb_).Run(PIPELINE_OK);
 }
 
-void VideoRendererBase::AddReadyFrame(const scoped_refptr<VideoFrame>& frame) {
-  // Adjust the incoming frame if its rendering stop time is past the duration
-  // of the video itself. This is typically the last frame of the video and
-  // occurs if the container specifies a duration that isn't a multiple of the
-  // frame rate.  Another way for this to happen is for the container to state a
-  // smaller duration than the largest packet timestamp.
+void VideoRendererBase::AddReadyFrame_Locked(
+    const scoped_refptr<VideoFrame>& frame) {
+  lock_.AssertAcquired();
+
   base::TimeDelta duration = get_duration_cb_.Run();
+  base::TimeDelta max_clock_time = kNoTimestamp();
+
   if (frame->IsEndOfStream()) {
-    base::TimeDelta end_timestamp = kNoTimestamp();
-    if (!ready_frames_.empty()) {
-      end_timestamp = std::min(
-          duration,
-          ready_frames_.back()->GetTimestamp() + kMaxLastFrameDuration());
-    } else if (current_frame_) {
-      end_timestamp =
-          std::min(duration,
-                   current_frame_->GetTimestamp() + kMaxLastFrameDuration());
+    DCHECK(!received_end_of_stream_);
+    received_end_of_stream_ = true;
+    max_clock_time = duration;
+  } else {
+    // Adjust the incoming frame if its rendering stop time is past the duration
+    // of the video itself. This is typically the last frame of the video and
+    // occurs if the container specifies a duration that isn't a multiple of the
+    // frame rate.  Another way for this to happen is for the container to state
+    // a smaller duration than the largest packet timestamp.
+    if (frame->GetTimestamp() > duration) {
+      frame->SetTimestamp(duration);
     }
-    frame->SetTimestamp(end_timestamp);
-  } else if (frame->GetTimestamp() > duration) {
-    frame->SetTimestamp(duration);
+
+    max_clock_time = frame->GetTimestamp();
+    ready_frames_.push_back(frame);
+    DCHECK_LE(ready_frames_.size(),
+              static_cast<size_t>(limits::kMaxVideoFrames));
   }
 
-  ready_frames_.push_back(frame);
-  DCHECK_LE(NumFrames_Locked(), limits::kMaxVideoFrames);
-
-  base::TimeDelta max_clock_time =
-      frame->IsEndOfStream() ? duration : frame->GetTimestamp();
   DCHECK(max_clock_time != kNoTimestamp());
   max_time_cb_.Run(max_clock_time);
 
-  frame_available_.Signal();
+  // Avoid needlessly waking up |thread_| unless playing.
+  if (state_ == kPlaying)
+    frame_available_.Signal();
 }
 
 void VideoRendererBase::AttemptRead() {
@@ -594,9 +506,8 @@ void VideoRendererBase::AttemptRead_Locked() {
   DCHECK(message_loop_->BelongsToCurrentThread());
   lock_.AssertAcquired();
 
-  if (pending_read_ ||
-      NumFrames_Locked() == limits::kMaxVideoFrames ||
-      (!ready_frames_.empty() && ready_frames_.back()->IsEndOfStream())) {
+  if (pending_read_ || received_end_of_stream_ ||
+      ready_frames_.size() == static_cast<size_t>(limits::kMaxVideoFrames)) {
     return;
   }
 
@@ -606,10 +517,11 @@ void VideoRendererBase::AttemptRead_Locked() {
     case kPrerolling:
     case kPlaying:
       pending_read_ = true;
-      decoder_->Read(base::Bind(&VideoRendererBase::FrameReady, this));
+      decoder_->Read(base::Bind(&VideoRendererBase::FrameReady, weak_this_));
       return;
 
     case kUninitialized:
+    case kInitializing:
     case kPrerolled:
     case kFlushingDecoder:
     case kFlushed:
@@ -622,6 +534,9 @@ void VideoRendererBase::AttemptRead_Locked() {
 
 void VideoRendererBase::OnDecoderResetDone() {
   base::AutoLock auto_lock(lock_);
+  if (state_ == kStopped)
+    return;
+
   DCHECK_EQ(kFlushingDecoder, state_);
   DCHECK(!pending_read_);
 
@@ -633,14 +548,15 @@ void VideoRendererBase::AttemptFlush_Locked() {
   lock_.AssertAcquired();
   DCHECK_EQ(kFlushing, state_);
 
-  prerolling_delayed_frame_ = NULL;
   ready_frames_.clear();
+  received_end_of_stream_ = false;
 
-  if (!pending_paint_ && !pending_read_) {
-    state_ = kFlushed;
-    current_frame_ = NULL;
-    base::ResetAndReturn(&flush_cb_).Run();
-  }
+  if (pending_read_)
+    return;
+
+  state_ = kFlushed;
+  last_timestamp_ = kNoTimestamp();
+  base::ResetAndReturn(&flush_cb_).Run();
 }
 
 base::TimeDelta VideoRendererBase::CalculateSleepDuration(
@@ -657,20 +573,9 @@ base::TimeDelta VideoRendererBase::CalculateSleepDuration(
 }
 
 void VideoRendererBase::DoStopOrError_Locked() {
-  DCHECK(!pending_paint_);
-  DCHECK(!pending_paint_with_last_available_);
   lock_.AssertAcquired();
-  current_frame_ = NULL;
-  last_available_frame_ = NULL;
+  last_timestamp_ = kNoTimestamp();
   ready_frames_.clear();
-}
-
-int VideoRendererBase::NumFrames_Locked() const {
-  lock_.AssertAcquired();
-  int outstanding_frames =
-      (current_frame_ ? 1 : 0) + (last_available_frame_ ? 1 : 0) +
-      (current_frame_ && (current_frame_ == last_available_frame_) ? -1 : 0);
-  return ready_frames_.size() + outstanding_frames;
 }
 
 }  // namespace media

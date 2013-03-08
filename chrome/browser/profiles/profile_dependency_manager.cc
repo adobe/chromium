@@ -26,29 +26,39 @@
 #include "chrome/browser/extensions/api/file_handlers/file_handlers_api.h"
 #include "chrome/browser/extensions/api/font_settings/font_settings_api.h"
 #include "chrome/browser/extensions/api/history/history_api.h"
+#include "chrome/browser/extensions/api/i18n/i18n_api.h"
+#include "chrome/browser/extensions/api/icons/icons_api.h"
+#include "chrome/browser/extensions/api/identity/identity_api.h"
 #include "chrome/browser/extensions/api/idle/idle_manager_factory.h"
-#include "chrome/browser/extensions/api/managed_mode/managed_mode_api.h"
+#include "chrome/browser/extensions/api/input/input.h"
+#include "chrome/browser/extensions/api/managed_mode_private/managed_mode_private_api.h"
 #include "chrome/browser/extensions/api/management/management_api.h"
 #include "chrome/browser/extensions/api/media_galleries_private/media_galleries_private_api.h"
 #include "chrome/browser/extensions/api/omnibox/omnibox_api.h"
+#include "chrome/browser/extensions/api/page_launcher/page_launcher_api.h"
 #include "chrome/browser/extensions/api/preference/preference_api.h"
 #include "chrome/browser/extensions/api/processes/processes_api.h"
 #include "chrome/browser/extensions/api/push_messaging/push_messaging_api.h"
+#include "chrome/browser/extensions/api/session_restore/session_restore_api.h"
 #include "chrome/browser/extensions/api/tab_capture/tab_capture_registry_factory.h"
 #include "chrome/browser/extensions/api/tabs/tabs_windows_api.h"
+#include "chrome/browser/extensions/api/themes/theme_api.h"
 #include "chrome/browser/extensions/api/web_navigation/web_navigation_api.h"
+#include "chrome/browser/extensions/csp_parser.h"
 #include "chrome/browser/extensions/extension_system_factory.h"
+#include "chrome/browser/extensions/install_tracker_factory.h"
 #include "chrome/browser/extensions/manifest_url_parser.h"
 #include "chrome/browser/extensions/web_accessible_resources_parser.h"
-#include "chrome/browser/extensions/web_intents_parser.h"
 #include "chrome/browser/favicon/favicon_service_factory.h"
 #include "chrome/browser/geolocation/chrome_geolocation_permission_context_factory.h"
 #include "chrome/browser/google/google_url_tracker_factory.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/history/shortcuts_backend_factory.h"
-#include "chrome/browser/intents/web_intents_registry_factory.h"
-#include "chrome/browser/media_gallery/media_galleries_preferences_factory.h"
+#include "chrome/browser/media_galleries/media_galleries_preferences_factory.h"
 #include "chrome/browser/notifications/desktop_notification_service_factory.h"
+#if !defined(OS_ANDROID)
+#include "chrome/browser/notifications/sync_notifier/chrome_notifier_service_factory.h"
+#endif
 #include "chrome/browser/password_manager/password_store_factory.h"
 #include "chrome/browser/plugins/plugin_prefs_factory.h"
 #include "chrome/browser/predictors/autocomplete_action_predictor_factory.h"
@@ -78,7 +88,6 @@
 #include "chrome/browser/ui/find_bar/find_bar_state_factory.h"
 #include "chrome/browser/ui/global_error/global_error_service_factory.h"
 #include "chrome/browser/ui/tabs/pinned_tab_service_factory.h"
-#include "chrome/browser/ui/webui/chrome_url_data_manager_factory.h"
 #include "chrome/browser/ui/webui/ntp/ntp_resource_cache_factory.h"
 #include "chrome/browser/user_style_sheet_watcher_factory.h"
 #include "chrome/browser/webdata/web_data_service_factory.h"
@@ -92,8 +101,9 @@
 #endif
 
 #if defined(OS_CHROMEOS)
-#include "chrome/browser/chromeos/extensions/input_method_api_factory.h"
+#include "chrome/browser/chromeos/extensions/input_method_api.h"
 #include "chrome/browser/chromeos/extensions/media_player_api.h"
+#include "chrome/browser/chromeos/extensions/networking_private_event_router_factory.h"
 #include "chrome/browser/extensions/api/input_ime/input_ime_api.h"
 #if defined(FILE_MANAGER_EXTENSION)
 #include "chrome/browser/chromeos/extensions/file_browser_private_api_factory.h"
@@ -227,7 +237,7 @@ ProfileDependencyManager::~ProfileDependencyManager() {}
 // profile creation time.
 //
 // TODO(erg): This needs to be something else. I don't think putting every
-// FooServiceFactory here will scale or is desireable long term.
+// FooServiceFactory here will scale or is desirable long term.
 void ProfileDependencyManager::AssertFactoriesBuilt() {
   if (built_factories_)
     return;
@@ -242,7 +252,6 @@ void ProfileDependencyManager::AssertFactoriesBuilt() {
   captive_portal::CaptivePortalServiceFactory::GetInstance();
 #endif
   ChromeGeolocationPermissionContextFactory::GetInstance();
-  ChromeURLDataManagerFactory::GetInstance();
 #if defined(ENABLE_PRINTING)
   CloudPrintProxyServiceFactory::GetInstance();
 #endif
@@ -258,16 +267,24 @@ void ProfileDependencyManager::AssertFactoriesBuilt() {
   extensions::BluetoothAPIFactory::GetInstance();
   extensions::CommandService::GetFactoryInstance();
   extensions::CookiesAPI::GetFactoryInstance();
+  extensions::CSPParser::GetFactoryInstance();
   extensions::DialAPIFactory::GetInstance();
   extensions::ExtensionActionAPI::GetFactoryInstance();
   extensions::ExtensionSystemFactory::GetInstance();
   extensions::FileHandlersAPI::GetFactoryInstance();
   extensions::FontSettingsAPI::GetFactoryInstance();
   extensions::HistoryAPI::GetFactoryInstance();
+  extensions::I18nAPI::GetFactoryInstance();
+  extensions::IconsAPI::GetFactoryInstance();
+  extensions::IdentityAPI::GetFactoryInstance();
   extensions::IdleManagerFactory::GetInstance();
+  extensions::InstallTrackerFactory::GetInstance();
+#if defined(TOOLKIT_VIEWS)
+  extensions::InputAPI::GetFactoryInstance();
+#endif
 #if defined(OS_CHROMEOS)
   extensions::InputImeAPI::GetFactoryInstance();
-  extensions::InputMethodAPIFactory::GetInstance();
+  extensions::InputMethodAPI::GetFactoryInstance();
 #endif
   extensions::ManagedModeAPI::GetFactoryInstance();
   extensions::ManagementAPI::GetFactoryInstance();
@@ -277,18 +294,22 @@ void ProfileDependencyManager::AssertFactoriesBuilt() {
   extensions::MediaPlayerAPI::GetFactoryInstance();
 #endif
   extensions::OmniboxAPI::GetFactoryInstance();
+  extensions::PageLauncherAPI::GetFactoryInstance();
   extensions::PreferenceAPI::GetFactoryInstance();
   extensions::ProcessesAPI::GetFactoryInstance();
   extensions::PushMessagingAPI::GetFactoryInstance();
+  extensions::SessionRestoreAPI::GetFactoryInstance();
 #if defined(ENABLE_INPUT_SPEECH)
   extensions::SpeechInputAPI::GetFactoryInstance();
 #endif
   extensions::SuggestedLinksRegistryFactory::GetInstance();
   extensions::TabCaptureRegistryFactory::GetInstance();
   extensions::TabsWindowsAPI::GetFactoryInstance();
+#if defined(ENABLE_THEMES)
+  extensions::ThemeAPI::GetFactoryInstance();
+#endif
   extensions::TtsAPI::GetFactoryInstance();
   extensions::WebAccessibleResourcesParser::GetFactoryInstance();
-  extensions::WebIntentsParser::GetFactoryInstance();
   extensions::WebNavigationAPI::GetFactoryInstance();
 #endif
   FaviconServiceFactory::GetInstance();
@@ -303,7 +324,13 @@ void ProfileDependencyManager::AssertFactoriesBuilt() {
   GlobalErrorServiceFactory::GetInstance();
   GoogleURLTrackerFactory::GetInstance();
   HistoryServiceFactory::GetInstance();
+#if !defined(OS_ANDROID)
+  notifier::ChromeNotifierServiceFactory::GetInstance();
+#endif
   MediaGalleriesPreferencesFactory::GetInstance();
+#if defined(OS_CHROMEOS)
+  chromeos::NetworkingPrivateEventRouterFactory::GetInstance();
+#endif
   NTPResourceCacheFactory::GetInstance();
   PasswordStoreFactory::GetInstance();
   PersonalDataManagerFactory::GetInstance();
@@ -343,9 +370,6 @@ void ProfileDependencyManager::AssertFactoriesBuilt() {
   TokenServiceFactory::GetInstance();
   UserStyleSheetWatcherFactory::GetInstance();
   WebDataServiceFactory::GetInstance();
-#if defined(ENABLE_WEB_INTENTS)
-  WebIntentsRegistryFactory::GetInstance();
-#endif
 
   built_factories_ = true;
 }
@@ -356,7 +380,7 @@ void ProfileDependencyManager::BuildDestructionOrder(Profile* profile) {
   // dependency graph to "/path/to/profile/profile-dependencies.dot".
   if (CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kDumpProfileDependencyGraph)) {
-    FilePath dot_file =
+    base::FilePath dot_file =
         profile->GetPath().AppendASCII("profile-dependencies.dot");
     std::string contents = DumpGraphvizDependency();
     file_util::WriteFile(dot_file, contents.c_str(), contents.size());

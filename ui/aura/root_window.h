@@ -63,7 +63,7 @@ class AURA_EXPORT RootWindow : public ui::CompositorDelegate,
  public:
   struct AURA_EXPORT CreateParams {
     // CreateParams with initial_bounds and default host.
-    CreateParams(const gfx::Rect& initial_bounds);
+    explicit CreateParams(const gfx::Rect& initial_bounds);
     ~CreateParams() {}
 
     gfx::Rect initial_bounds;
@@ -131,6 +131,9 @@ class AURA_EXPORT RootWindow : public ui::CompositorDelegate,
 
   // Draw the whole screen.
   void ScheduleFullDraw();
+
+  // Returns a target window for the given gesture event.
+  Window* GetGestureTarget(ui::GestureEvent* event);
 
   // Handles a gesture event. Returns true if handled. Unlike the other
   // event-dispatching function (e.g. for touch/mouse/keyboard events), gesture
@@ -241,10 +244,14 @@ class AURA_EXPORT RootWindow : public ui::CompositorDelegate,
 
   // Overridden from ui::CompositorObserver:
   virtual void OnCompositingDidCommit(ui::Compositor*) OVERRIDE;
-  virtual void OnCompositingStarted(ui::Compositor*) OVERRIDE;
+  virtual void OnCompositingStarted(ui::Compositor*,
+                                    base::TimeTicks start_time) OVERRIDE;
   virtual void OnCompositingEnded(ui::Compositor*) OVERRIDE;
   virtual void OnCompositingAborted(ui::Compositor*) OVERRIDE;
   virtual void OnCompositingLockStateChanged(ui::Compositor*) OVERRIDE;
+  virtual void OnUpdateVSyncParameters(ui::Compositor* compositor,
+                                       base::TimeTicks timebase,
+                                       base::TimeDelta interval) OVERRIDE;
 
   // Overridden from ui::LayerDelegate:
   virtual void OnDeviceScaleFactorChanged(float device_scale_factor) OVERRIDE;
@@ -282,6 +289,11 @@ class AURA_EXPORT RootWindow : public ui::CompositorDelegate,
   // Called whenever the mouse moves, tracks the current |mouse_moved_handler_|,
   // sending exited and entered events as its value changes.
   void HandleMouseMoved(const ui::MouseEvent& event, Window* target);
+
+  // Dispatches the specified event type (intended for enter/exit) to the
+  // |mouse_moved_handler_|.
+  void DispatchMouseEnterOrExit(const ui::MouseEvent& event,
+                                ui::EventType type);
 
   void ProcessEvent(Window* target, ui::Event* event);
 
@@ -323,6 +335,7 @@ class AURA_EXPORT RootWindow : public ui::CompositorDelegate,
   virtual bool OnHostMouseEvent(ui::MouseEvent* event) OVERRIDE;
   virtual bool OnHostScrollEvent(ui::ScrollEvent* event) OVERRIDE;
   virtual bool OnHostTouchEvent(ui::TouchEvent* event) OVERRIDE;
+  virtual void OnHostCancelMode() OVERRIDE;
   virtual void OnHostActivated() OVERRIDE;
   virtual void OnHostLostWindowCapture() OVERRIDE;
   virtual void OnHostLostMouseGrab() OVERRIDE;

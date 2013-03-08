@@ -4,7 +4,7 @@
 
 #include "chrome/browser/parsers/metadata_parser_jpeg_factory.h"
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/parsers/metadata_parser_jpeg.h"
 
@@ -12,18 +12,19 @@ MetadataParserJpegFactory::MetadataParserJpegFactory()
     : MetadataParserFactory() {
 }
 
-bool MetadataParserJpegFactory::CanParse(const FilePath& path,
+bool MetadataParserJpegFactory::CanParse(const base::FilePath& path,
                                          char* bytes,
                                          int bytes_size) {
 #if defined(OS_WIN)
-  FilePath::StringType ext = UTF8ToWide(std::string(".jpg"));
+  base::FilePath::StringType ext = UTF8ToWide(std::string(".jpg"));
 #elif defined(OS_POSIX)
-  FilePath::StringType ext = ".jpg";
+  base::FilePath::StringType ext = ".jpg";
 #endif
   return path.MatchesExtension(ext);
 }
 
-MetadataParser* MetadataParserJpegFactory::CreateParser(const FilePath& path) {
+MetadataParser* MetadataParserJpegFactory::CreateParser(
+    const base::FilePath& path) {
   JpegMetadataParser* parser;
   parser = new JpegMetadataParser(path);
   return parser;

@@ -9,7 +9,7 @@
 namespace extensions {
 
 ExtensionBuilder::ExtensionBuilder()
-    : location_(Extension::LOAD),
+    : location_(Manifest::UNPACKED),
       flags_(Extension::NO_FLAGS) {
 }
 ExtensionBuilder::~ExtensionBuilder() {}
@@ -27,12 +27,12 @@ scoped_refptr<Extension> ExtensionBuilder::Build() {
   return extension;
 }
 
-ExtensionBuilder& ExtensionBuilder::SetPath(const FilePath& path) {
+ExtensionBuilder& ExtensionBuilder::SetPath(const base::FilePath& path) {
   path_ = path;
   return *this;
 }
 
-ExtensionBuilder& ExtensionBuilder::SetLocation(Extension::Location location) {
+ExtensionBuilder& ExtensionBuilder::SetLocation(Manifest::Location location) {
   location_ = location;
   return *this;
 }

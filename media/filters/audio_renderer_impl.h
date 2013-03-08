@@ -5,11 +5,10 @@
 // Audio rendering unit utilizing an AudioRendererSink to output data.
 //
 // This class lives inside three threads during it's lifetime, namely:
-// 1. Render thread.
-//    This object is created on the render thread.
-// 2. Pipeline thread
-//    Initialize() is called here with the audio format.
-//    Play/Pause/Preroll() also happens here.
+// 1. Render thread
+//    Where the object is created.
+// 2. Media thread (provided via constructor)
+//    All AudioDecoder methods are called on this thread.
 // 3. Audio thread created by the AudioRendererSink.
 //    Render() is called here where audio data is decoded into raw PCM data.
 //
@@ -23,13 +22,17 @@
 #include <deque>
 
 #include "base/gtest_prod_util.h"
+#include "base/memory/weak_ptr.h"
 #include "base/synchronization/lock.h"
-#include "base/threading/thread_checker.h"
 #include "media/base/audio_decoder.h"
 #include "media/base/audio_renderer.h"
 #include "media/base/audio_renderer_sink.h"
 #include "media/base/decryptor.h"
 #include "media/filters/audio_renderer_algorithm.h"
+
+namespace base {
+class MessageLoopProxy;
+}
 
 namespace media {
 
@@ -41,12 +44,12 @@ class MEDIA_EXPORT AudioRendererImpl
     : public AudioRenderer,
       NON_EXPORTED_BASE(public AudioRendererSink::RenderCallback) {
  public:
-  // Methods called on Render thread ------------------------------------------
   // An AudioRendererSink is used as the destination for the rendered audio.
-  AudioRendererImpl(AudioRendererSink* sink,
+  AudioRendererImpl(const scoped_refptr<base::MessageLoopProxy>& message_loop,
+                    AudioRendererSink* sink,
                     const SetDecryptorReadyCB& set_decryptor_ready_cb);
+  virtual ~AudioRendererImpl();
 
-  // Methods called on pipeline thread ----------------------------------------
   // AudioRenderer implementation.
   virtual void Initialize(const scoped_refptr<DemuxerStream>& stream,
                           const AudioDecoderList& decoders,
@@ -73,13 +76,14 @@ class MEDIA_EXPORT AudioRendererImpl
   // Initialize().
   void DisableUnderflowForTesting();
 
- protected:
-  virtual ~AudioRendererImpl();
+  // Allows injection of a custom time callback for non-realtime testing.
+  typedef base::Callback<base::Time()> NowCB;
+  void set_now_cb_for_testing(const NowCB& now_cb) {
+    now_cb_ = now_cb;
+  }
 
  private:
   friend class AudioRendererImplTest;
-  FRIEND_TEST_ALL_PREFIXES(AudioRendererImplTest, EndOfStream);
-  FRIEND_TEST_ALL_PREFIXES(AudioRendererImplTest, Underflow_EndOfStream);
 
   // Callback from the audio decoder delivering decoded audio samples.
   void DecodedAudioReady(AudioDecoder::Status status,
@@ -116,25 +120,26 @@ class MEDIA_EXPORT AudioRendererImpl
 
   // Estimate earliest time when current buffer can stop playing.
   void UpdateEarliestEndTime_Locked(int frames_filled,
-                                    float playback_rate,
                                     base::TimeDelta playback_delay,
                                     base::Time time_now);
 
-  // Methods called on pipeline thread ----------------------------------------
   void DoPlay();
   void DoPause();
 
-  // media::AudioRendererSink::RenderCallback implementation.  Called on the
-  // AudioDevice thread.
+  // AudioRendererSink::RenderCallback implementation.
+  //
+  // NOTE: These are called on the audio callback thread!
   virtual int Render(AudioBus* audio_bus,
                      int audio_delay_milliseconds) OVERRIDE;
   virtual void OnRenderError() OVERRIDE;
 
-  // Helper method that schedules an asynchronous read from the decoder and
-  // increments |pending_reads_|.
+  // Helper methods that schedule an asynchronous read from the decoder as long
+  // as there isn't a pending read.
   //
-  // Safe to call from any thread.
-  void ScheduleRead_Locked();
+  // Must be called on |message_loop_|.
+  void AttemptRead();
+  void AttemptRead_Locked();
+  bool CanRead_Locked();
 
   // Returns true if the data in the buffer is all before
   // |preroll_timestamp_|. This can only return true while
@@ -153,12 +158,15 @@ class MEDIA_EXPORT AudioRendererImpl
 
   void ResetDecoder(const base::Closure& callback);
 
+  scoped_refptr<base::MessageLoopProxy> message_loop_;
+  base::WeakPtrFactory<AudioRendererImpl> weak_factory_;
+  base::WeakPtr<AudioRendererImpl> weak_this_;
+
   scoped_ptr<AudioSplicer> splicer_;
 
-  // The sink (destination) for rendered audio.  |sink_| must only be accessed
-  // on the pipeline thread (verify with |pipeline_thread_checker_|).  |sink_|
-  // must never be called under |lock_| or the 3-way thread bridge between the
-  // audio, pipeline, and decoder threads may deadlock.
+  // The sink (destination) for rendered audio. |sink_| must only be accessed
+  // on |message_loop_|. |sink_| must never be called under |lock_| or else we
+  // may deadlock between |message_loop_| and the audio callback thread.
   scoped_refptr<media::AudioRendererSink> sink_;
 
   SetDecryptorReadyCB set_decryptor_ready_cb_;
@@ -166,9 +174,6 @@ class MEDIA_EXPORT AudioRendererImpl
   // These two will be set by AudioDecoderSelector::SelectAudioDecoder().
   scoped_refptr<AudioDecoder> decoder_;
   scoped_refptr<DecryptingDemuxerStream> decrypting_demuxer_stream_;
-
-  // Ensures certain methods are always called on the pipeline thread.
-  base::ThreadChecker pipeline_thread_checker_;
 
   // AudioParameters constructed during Initialize() based on |decoder_|.
   AudioParameters audio_parameters_;
@@ -187,6 +192,9 @@ class MEDIA_EXPORT AudioRendererImpl
 
   // Callback provided to Preroll().
   PipelineStatusCB preroll_cb_;
+
+  // Typically calls base::Time::Now() but can be overridden by a test.
+  NowCB now_cb_;
 
   // After Initialize() has completed, all variables below must be accessed
   // under |lock_|. ------------------------------------------------------------
@@ -236,6 +244,7 @@ class MEDIA_EXPORT AudioRendererImpl
   // know when that particular data would start playing, but it is much better
   // than nothing.
   base::Time earliest_end_time_;
+  size_t total_frames_filled_;
 
   bool underflow_disabled_;
 

@@ -82,6 +82,7 @@ enum InstantSizeUnits {
 };
 
 // What the Instant page contains when it requests to be shown.
+// TODO(jered): Delete this.
 enum InstantShownReason {
   // Contents are not specified; the page wants to be shown unconditionally.
   // This is a stopgap to display in unexpected situations, and should not
@@ -143,12 +144,25 @@ struct ThemeBackgroundInfo {
   // is valid.
   ThemeBackgroundImageAlignment image_vertical_alignment;
 
+  // The theme background image top offset is only valid if
+  // |image_vertical_alignment| is |THEME_BKGRND_IMAGE_ALIGN_TOP|.
+  int image_top_offset;
+
   // The theme background image tiling is only valid if |theme_id| is valid.
   ThemeBackgroundImageTiling image_tiling;
 
   // The theme background image height.
   // Value is only valid if |theme_id| is valid.
   uint16 image_height;
+};
+
+// A most visited item.
+struct MostVisitedItem {
+  // URL of the most visited page.
+  GURL url;
+
+  // Title of the most visited page.
+  string16 title;
 };
 
 #endif  // CHROME_COMMON_INSTANT_TYPES_H_

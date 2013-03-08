@@ -10,16 +10,15 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
+#include "base/file_util.h"
 #include "base/memory/weak_ptr.h"
 #include "base/path_service.h"
 #include "base/string16.h"
-#include "base/string_number_conversions.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/plugins/plugin_prefs.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/webui/chrome_url_data_manager.h"
-#include "chrome/browser/ui/webui/chrome_web_ui_data_source.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
@@ -27,6 +26,7 @@
 #include "content/public/browser/plugin_service.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_ui.h"
+#include "content/public/browser/web_ui_data_source.h"
 #include "content/public/browser/web_ui_message_handler.h"
 #include "grit/browser_resources.h"
 #include "grit/chromium_strings.h"
@@ -48,7 +48,7 @@ namespace {
 
 content::WebUIDataSource* CreateNaClUIHTMLSource() {
   content::WebUIDataSource* source =
-      ChromeWebUIDataSource::Create(chrome::kChromeUINaClHost);
+      content::WebUIDataSource::Create(chrome::kChromeUINaClHost);
 
   source->SetUseJsonJSFormatV2();
   source->AddLocalizedString("loadingMessage", IDS_NACL_LOADING_MESSAGE);
@@ -231,9 +231,12 @@ void NaClDOMHandler::PopulatePageInformation(DictionaryValue* naclInfo) {
   AddLineBreak(list.get());
 
   // Obtain the version of the PNaCl translator.
-  FilePath pnacl_path;
+  base::FilePath pnacl_path;
   bool got_path = PathService::Get(chrome::DIR_PNACL_COMPONENT, &pnacl_path);
-  if (!got_path || pnacl_path.empty()) {
+  // The PathService may return an empty string if PNaCl is not yet installed.
+  // However, do not trust that the path returned by the PathService exists.
+  // Check for existence here.
+  if (!got_path || pnacl_path.empty() || !file_util::PathExists(pnacl_path)) {
     AddPair(list.get(),
             ASCIIToUTF16("PNaCl translator"),
             ASCIIToUTF16("Not installed"));
@@ -277,5 +280,5 @@ NaClUI::NaClUI(content::WebUI* web_ui) : WebUIController(web_ui) {
 
   // Set up the about:nacl source.
   Profile* profile = Profile::FromWebUI(web_ui);
-  ChromeURLDataManager::AddWebUIDataSource(profile, CreateNaClUIHTMLSource());
+  content::WebUIDataSource::Add(profile, CreateNaClUIHTMLSource());
 }

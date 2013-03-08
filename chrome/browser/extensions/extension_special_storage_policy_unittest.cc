@@ -10,14 +10,15 @@
 #include "chrome/common/content_settings_types.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_manifest_constants.h"
+#include "chrome/common/extensions/manifest.h"
 #include "chrome/common/extensions/manifest_handler.h"
-#include "chrome/common/extensions/web_intents_handler.h"
 #include "chrome/test/base/testing_profile.h"
 #include "content/public/test/test_browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using content::BrowserThread;
 using extensions::Extension;
+using extensions::Manifest;
 
 namespace keys = extension_manifest_keys;
 
@@ -25,16 +26,14 @@ class ExtensionSpecialStoragePolicyTest : public testing::Test {
  public:
   virtual void SetUp() {
     policy_ = new ExtensionSpecialStoragePolicy(NULL);
-    extensions::ManifestHandler::Register(keys::kIntents,
-                                          new extensions::WebIntentsHandler);
   }
 
  protected:
   scoped_refptr<Extension> CreateProtectedApp() {
 #if defined(OS_WIN)
-    FilePath path(FILE_PATH_LITERAL("c:\\foo"));
+    base::FilePath path(FILE_PATH_LITERAL("c:\\foo"));
 #elif defined(OS_POSIX)
-    FilePath path(FILE_PATH_LITERAL("/foo"));
+    base::FilePath path(FILE_PATH_LITERAL("/foo"));
 #endif
     DictionaryValue manifest;
     manifest.SetString(keys::kName, "Protected");
@@ -46,16 +45,17 @@ class ExtensionSpecialStoragePolicyTest : public testing::Test {
     manifest.Set(keys::kWebURLs, list);
     std::string error;
     scoped_refptr<Extension> protected_app = Extension::Create(
-        path, Extension::INVALID, manifest, Extension::NO_FLAGS, &error);
+        path, Manifest::INVALID_LOCATION, manifest,
+        Extension::NO_FLAGS, &error);
     EXPECT_TRUE(protected_app.get()) << error;
     return protected_app;
   }
 
   scoped_refptr<Extension> CreateUnlimitedApp() {
 #if defined(OS_WIN)
-    FilePath path(FILE_PATH_LITERAL("c:\\bar"));
+    base::FilePath path(FILE_PATH_LITERAL("c:\\bar"));
 #elif defined(OS_POSIX)
-    FilePath path(FILE_PATH_LITERAL("/bar"));
+    base::FilePath path(FILE_PATH_LITERAL("/bar"));
 #endif
     DictionaryValue manifest;
     manifest.SetString(keys::kName, "Unlimited");
@@ -70,16 +70,17 @@ class ExtensionSpecialStoragePolicyTest : public testing::Test {
     manifest.Set(keys::kWebURLs, list);
     std::string error;
     scoped_refptr<Extension> unlimited_app = Extension::Create(
-        path, Extension::INVALID, manifest, Extension::NO_FLAGS, &error);
+        path, Manifest::INVALID_LOCATION, manifest,
+        Extension::NO_FLAGS, &error);
     EXPECT_TRUE(unlimited_app.get()) << error;
     return unlimited_app;
   }
 
   scoped_refptr<Extension> CreateComponentApp() {
 #if defined(OS_WIN)
-    FilePath path(FILE_PATH_LITERAL("c:\\component"));
+    base::FilePath path(FILE_PATH_LITERAL("c:\\component"));
 #elif defined(OS_POSIX)
-    FilePath path(FILE_PATH_LITERAL("/component"));
+    base::FilePath path(FILE_PATH_LITERAL("/component"));
 #endif
     DictionaryValue manifest;
     manifest.SetString(keys::kName, "Component");
@@ -96,16 +97,16 @@ class ExtensionSpecialStoragePolicyTest : public testing::Test {
     manifest.Set(keys::kPermissions, list);
     std::string error;
     scoped_refptr<Extension> component_app = Extension::Create(
-        path, Extension::COMPONENT, manifest, Extension::NO_FLAGS, &error);
+        path, Manifest::COMPONENT, manifest, Extension::NO_FLAGS, &error);
     EXPECT_TRUE(component_app.get()) << error;
     return component_app;
   }
 
   scoped_refptr<Extension> CreateHandlerApp() {
 #if defined(OS_WIN)
-    FilePath path(FILE_PATH_LITERAL("c:\\handler"));
+    base::FilePath path(FILE_PATH_LITERAL("c:\\handler"));
 #elif defined(OS_POSIX)
-    FilePath path(FILE_PATH_LITERAL("/handler"));
+    base::FilePath path(FILE_PATH_LITERAL("/handler"));
 #endif
     DictionaryValue manifest;
     manifest.SetString(keys::kName, "Handler");
@@ -121,42 +122,10 @@ class ExtensionSpecialStoragePolicyTest : public testing::Test {
     manifest.Set(keys::kPermissions, list);
     std::string error;
     scoped_refptr<Extension> handler_app = Extension::Create(
-        path, Extension::INVALID, manifest, Extension::NO_FLAGS, &error);
+        path, Manifest::INVALID_LOCATION, manifest,
+        Extension::NO_FLAGS, &error);
     EXPECT_TRUE(handler_app.get()) << error;
     return handler_app;
-  }
-
-  scoped_refptr<Extension> CreateWebIntentViewApp() {
-#if defined(OS_WIN)
-    FilePath path(FILE_PATH_LITERAL("c:\\bar"));
-#elif defined(OS_POSIX)
-    FilePath path(FILE_PATH_LITERAL("/bar"));
-#endif
-    DictionaryValue manifest;
-    manifest.SetString(keys::kName, "WebIntent");
-    manifest.SetString(keys::kVersion, "1");
-    manifest.SetString(keys::kLaunchWebURL, "http://explicit/unlimited/start");
-
-    ListValue* view_intent_types = new ListValue;
-    view_intent_types->Append(Value::CreateStringValue("text/plain"));
-
-    DictionaryValue* view_intent = new DictionaryValue;
-    view_intent->SetString(keys::kIntentTitle, "Test Intent");
-    view_intent->Set(keys::kIntentType, view_intent_types);
-
-    ListValue* view_intent_list = new ListValue;
-    view_intent_list->Append(view_intent);
-
-    DictionaryValue* intents = new DictionaryValue;
-    intents->SetWithoutPathExpansion("http://webintents.org/view",
-                                     view_intent_list);
-    manifest.Set(keys::kIntents, intents);
-
-    std::string error;
-    scoped_refptr<Extension> intent_app = Extension::Create(
-        path, Extension::INVALID, manifest, Extension::NO_FLAGS, &error);
-    EXPECT_TRUE(intent_app.get()) << error;
-    return intent_app;
   }
 
   // Verifies that the set of extensions protecting |url| is *exactly* equal to
@@ -278,16 +247,6 @@ TEST_F(ExtensionSpecialStoragePolicyTest, OverlappingApps) {
   ExpectProtectedBy(empty_set, GURL("http://explicit/"));
   ExpectProtectedBy(empty_set, GURL("http://foo.wildcards/"));
   ExpectProtectedBy(empty_set, GURL("https://bar.wildcards/"));
-}
-
-TEST_F(ExtensionSpecialStoragePolicyTest, WebIntentViewApp) {
-  scoped_refptr<Extension> intent_app(CreateWebIntentViewApp());
-
-  policy_->GrantRightsForExtension(intent_app);
-  EXPECT_TRUE(policy_->IsFileHandler(intent_app->id()));
-
-  policy_->RevokeRightsForExtension(intent_app);
-  EXPECT_FALSE(policy_->IsFileHandler(intent_app->id()));
 }
 
 TEST_F(ExtensionSpecialStoragePolicyTest, HasSessionOnlyOrigins) {

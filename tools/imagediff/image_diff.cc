@@ -9,17 +9,18 @@
 // what the run-webkit-tests script expects.
 
 #include <algorithm>
-#include <vector>
-#include <string>
 #include <iostream>
+#include <string>
+#include <vector>
 
 #include "base/basictypes.h"
 #include "base/command_line.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/process_util.h"
+#include "base/safe_numerics.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "ui/gfx/codec/png_codec.h"
@@ -91,7 +92,7 @@ class Image {
 
   // Creates the image from the given filename on disk, and returns true on
   // success.
-  bool CreateFromFilename(const FilePath& path) {
+  bool CreateFromFilename(const base::FilePath& path) {
     FILE* f = file_util::OpenFile(path, "rb");
     if (!f)
       return false;
@@ -193,7 +194,7 @@ void PrintHelp() {
   */
 }
 
-int CompareImages(const FilePath& file1, const FilePath& file2) {
+int CompareImages(const base::FilePath& file1, const base::FilePath& file2) {
   Image actual_image;
   Image baseline_image;
 
@@ -294,8 +295,8 @@ bool CreateImageDiff(const Image& image1, const Image& image2, Image* out) {
   return same;
 }
 
-int DiffImages(const FilePath& file1, const FilePath& file2,
-               const FilePath& out_file) {
+int DiffImages(const base::FilePath& file1, const base::FilePath& file2,
+               const base::FilePath& out_file) {
   Image actual_image;
   Image baseline_image;
 
@@ -321,7 +322,8 @@ int DiffImages(const FilePath& file1, const FilePath& file2,
                         diff_image.w() * 4, false,
                         std::vector<gfx::PNGCodec::Comment>(), &png_encoding);
   if (file_util::WriteFile(out_file,
-      reinterpret_cast<char*>(&png_encoding.front()), png_encoding.size()) < 0)
+          reinterpret_cast<char*>(&png_encoding.front()),
+          base::checked_numeric_cast<int>(png_encoding.size())) < 0)
     return kStatusError;
 
   return kStatusDifferent;
@@ -330,11 +332,11 @@ int DiffImages(const FilePath& file1, const FilePath& file2,
 // It isn't strictly correct to only support ASCII paths, but this
 // program reads paths on stdin and the program that spawns it outputs
 // paths as non-wide strings anyway.
-FilePath FilePathFromASCII(const std::string& str) {
+base::FilePath FilePathFromASCII(const std::string& str) {
 #if defined(OS_WIN)
-  return FilePath(ASCIIToWide(str));
+  return base::FilePath(ASCIIToWide(str));
 #else
-  return FilePath(str);
+  return base::FilePath(str);
 #endif
 }
 
@@ -345,18 +347,18 @@ int main(int argc, const char* argv[]) {
   if (parsed_command_line.HasSwitch(kOptionPollStdin)) {
     // Watch stdin for filenames.
     std::string stdin_buffer;
-    FilePath filename1;
+    base::FilePath filename1;
     while (std::getline(std::cin, stdin_buffer)) {
       if (stdin_buffer.empty())
         continue;
 
       if (!filename1.empty()) {
         // CompareImages writes results to stdout unless an error occurred.
-        FilePath filename2 = FilePathFromASCII(stdin_buffer);
+        base::FilePath filename2 = FilePathFromASCII(stdin_buffer);
         if (CompareImages(filename1, filename2) == kStatusError)
           printf("error\n");
         fflush(stdout);
-        filename1 = FilePath();
+        filename1 = base::FilePath();
       } else {
         // Save the first filename in another buffer and wait for the second
         // filename to arrive via stdin.
@@ -369,12 +371,12 @@ int main(int argc, const char* argv[]) {
   const CommandLine::StringVector& args = parsed_command_line.GetArgs();
   if (parsed_command_line.HasSwitch(kOptionGenerateDiff)) {
     if (args.size() == 3) {
-      return DiffImages(FilePath(args[0]),
-                        FilePath(args[1]),
-                        FilePath(args[2]));
+      return DiffImages(base::FilePath(args[0]),
+                        base::FilePath(args[1]),
+                        base::FilePath(args[2]));
     }
   } else if (args.size() == 2) {
-    return CompareImages(FilePath(args[0]), FilePath(args[1]));
+    return CompareImages(base::FilePath(args[0]), base::FilePath(args[1]));
   }
 
   PrintHelp();

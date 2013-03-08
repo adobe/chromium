@@ -4,7 +4,7 @@
 
 #include "chrome/browser/extensions/extension_test_message_listener.h"
 
-#include "base/string_number_conversions.h"
+#include "base/strings/string_number_conversions.h"
 #include "chrome/browser/extensions/api/test/test_api.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/test/base/ui_test_utils.h"
@@ -16,7 +16,9 @@ ExtensionTestMessageListener::ExtensionTestMessageListener(
     : expected_message_(expected_message),
       satisfied_(false),
       waiting_(false),
-      will_reply_(will_reply) {
+      will_reply_(will_reply),
+      failure_message_(""),
+      failed_(false) {
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_TEST_MESSAGE,
                  content::NotificationService::AllSources());
 }
@@ -25,10 +27,10 @@ ExtensionTestMessageListener::~ExtensionTestMessageListener() {}
 
 bool ExtensionTestMessageListener::WaitUntilSatisfied()  {
   if (satisfied_)
-    return true;
+    return !failed_;
   waiting_ = true;
   content::RunMessageLoop();
-  return satisfied_;
+  return !failed_;
 }
 
 void ExtensionTestMessageListener::Reply(const std::string& message) {
@@ -48,7 +50,10 @@ void ExtensionTestMessageListener::Observe(
     const content::NotificationSource& source,
     const content::NotificationDetails& details) {
   const std::string& content = *content::Details<std::string>(details).ptr();
-  if (!satisfied_ && content == expected_message_) {
+  if (!satisfied_ && (content == expected_message_ ||
+      (!failure_message_.empty() && (content == failure_message_)))) {
+    if (!failed_)
+      failed_ = (content == failure_message_);
     function_ = content::Source<extensions::TestSendMessageFunction>(
         source).ptr();
     satisfied_ = true;

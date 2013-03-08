@@ -23,10 +23,6 @@ const std::string& FakeInvalidator::GetUniqueId() const {
   return unique_id_;
 }
 
-const std::string& FakeInvalidator::GetStateDeprecated() const {
-  return state_;
-}
-
 const std::string& FakeInvalidator::GetCredentialsEmail() const {
   return email_;
 }
@@ -45,9 +41,8 @@ void FakeInvalidator::EmitOnInvalidatorStateChange(InvalidatorState state) {
 }
 
 void FakeInvalidator::EmitOnIncomingInvalidation(
-    const ObjectIdInvalidationMap& invalidation_map,
-    IncomingInvalidationSource source) {
-  registrar_.DispatchInvalidationsToHandlers(invalidation_map, source);
+    const ObjectIdInvalidationMap& invalidation_map) {
+  registrar_.DispatchInvalidationsToHandlers(invalidation_map);
 }
 
 void FakeInvalidator::RegisterHandler(InvalidationHandler* handler) {
@@ -55,12 +50,17 @@ void FakeInvalidator::RegisterHandler(InvalidationHandler* handler) {
 }
 
 void FakeInvalidator::UpdateRegisteredIds(InvalidationHandler* handler,
-                                           const ObjectIdSet& ids) {
+                                          const ObjectIdSet& ids) {
   registrar_.UpdateRegisteredIds(handler, ids);
 }
 
 void FakeInvalidator::UnregisterHandler(InvalidationHandler* handler) {
   registrar_.UnregisterHandler(handler);
+}
+
+void FakeInvalidator::Acknowledge(const invalidation::ObjectId& id,
+                                  const AckHandle& ack_handle) {
+  // Do nothing.
 }
 
 InvalidatorState FakeInvalidator::GetInvalidatorState() const {
@@ -69,10 +69,6 @@ InvalidatorState FakeInvalidator::GetInvalidatorState() const {
 
 void FakeInvalidator::SetUniqueId(const std::string& unique_id) {
   unique_id_ = unique_id;
-}
-
-void FakeInvalidator::SetStateDeprecated(const std::string& state) {
-  state_ = state;
 }
 
 void FakeInvalidator::UpdateCredentials(

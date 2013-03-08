@@ -10,12 +10,18 @@
 #include "base/compiler_specific.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/message_loop.h"
 #include "chrome/browser/chromeos/input_method/mock_candidate_window_controller.h"
 #include "chrome/browser/chromeos/input_method/mock_ibus_controller.h"
 #include "chrome/browser/chromeos/input_method/mock_input_method_delegate.h"
 #include "chrome/browser/chromeos/input_method/mock_xkeyboard.h"
+#include "chromeos/dbus/ibus/mock_ibus_client.h"
+#include "chromeos/dbus/ibus/mock_ibus_input_context_client.h"
+#include "chromeos/dbus/mock_dbus_thread_manager_without_gmock.h"
+#include "chromeos/ime/mock_ibus_daemon_controller.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/accelerators/accelerator.h"
+#include "ui/base/ime/text_input_test_support.h"
 #include "ui/base/keycodes/keyboard_codes.h"
 
 namespace chromeos {
@@ -36,6 +42,16 @@ class InputMethodManagerImplTest :  public testing::Test {
   virtual ~InputMethodManagerImplTest() {}
 
   virtual void SetUp() OVERRIDE {
+    mock_ibus_daemon_controller_ = new chromeos::MockIBusDaemonController();
+    chromeos::IBusDaemonController::InitializeForTesting(
+        mock_ibus_daemon_controller_);
+    mock_dbus_thread_manager_ =
+        new chromeos::MockDBusThreadManagerWithoutGMock();
+    chromeos::DBusThreadManager::InitializeForTesting(
+        mock_dbus_thread_manager_);
+    mock_ibus_client_ = mock_dbus_thread_manager_->mock_ibus_client();
+    mock_ibus_input_context_client_ =
+        mock_dbus_thread_manager_->mock_ibus_input_context_client();
     delegate_ = new MockInputMethodDelegate();
     manager_.reset(new InputMethodManagerImpl(
         scoped_ptr<InputMethodDelegate>(delegate_)));
@@ -54,6 +70,8 @@ class InputMethodManagerImplTest :  public testing::Test {
     candidate_window_controller_ = NULL;
     xkeyboard_ = NULL;
     manager_.reset();
+    chromeos::DBusThreadManager::Shutdown();
+    chromeos::IBusDaemonController::Shutdown();
   }
 
  protected:
@@ -61,7 +79,12 @@ class InputMethodManagerImplTest :  public testing::Test {
   MockInputMethodDelegate* delegate_;
   MockIBusController* controller_;
   MockCandidateWindowController* candidate_window_controller_;
+  MockIBusDaemonController* mock_ibus_daemon_controller_;
+  MockIBusInputContextClient* mock_ibus_input_context_client_;
+  MockIBusClient* mock_ibus_client_;
+  MockDBusThreadManagerWithoutGMock* mock_dbus_thread_manager_;
   MockXKeyboard* xkeyboard_;
+  MessageLoop message_loop_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(InputMethodManagerImplTest);
@@ -209,13 +232,13 @@ TEST_F(InputMethodManagerImplTest, TestEnableLayouts) {
               std::find(methods->begin(), methods->end(), *id_to_find));
   }
   // For http://crbug.com/19655#c11 - (2)
-  EXPECT_EQ(0, controller_->start_count_);
+  EXPECT_EQ(0, mock_ibus_daemon_controller_->start_count());
 
   // For http://crbug.com/19655#c11 - (5)
   // The hardware keyboard layout "xkb:us::eng" is always active, hence 2U.
   manager_->EnableLayouts("ja", "");  // Japanese
   EXPECT_EQ(2U, manager_->GetNumActiveInputMethods());
-  EXPECT_EQ(0, controller_->start_count_);
+  EXPECT_EQ(0, mock_ibus_daemon_controller_->start_count());
 }
 
 TEST_F(InputMethodManagerImplTest, TestEnableLayoutsNonUsHardwareKeyboard) {
@@ -282,7 +305,7 @@ TEST_F(InputMethodManagerImplTest, TestEnableTwoLayouts) {
   EXPECT_EQ(2U, manager_->GetNumActiveInputMethods());
   // Since all the IDs added avobe are keyboard layouts, Start() should not be
   // called.
-  EXPECT_EQ(0, controller_->start_count_);
+  EXPECT_EQ(0, mock_ibus_daemon_controller_->start_count());
   EXPECT_EQ(1, observer.input_method_changed_count_);
   EXPECT_EQ(ids[0], manager_->GetCurrentInputMethod().id());
   EXPECT_EQ("us(dvorak)", xkeyboard_->last_layout_);
@@ -336,7 +359,7 @@ TEST_F(InputMethodManagerImplTest, TestEnableLayoutAndIme) {
   ids.push_back("xkb:us:dvorak:eng");
   ids.push_back("mozc");
   EXPECT_TRUE(manager_->EnableInputMethods(ids));
-  EXPECT_EQ(1, controller_->start_count_);
+  EXPECT_EQ(1, mock_ibus_daemon_controller_->start_count());
   EXPECT_EQ(1, observer.input_method_changed_count_);
   EXPECT_EQ(ids[0], manager_->GetCurrentInputMethod().id());
   EXPECT_EQ("us(dvorak)", xkeyboard_->last_layout_);
@@ -353,11 +376,11 @@ TEST_F(InputMethodManagerImplTest, TestEnableLayoutAndIme) {
   EXPECT_EQ("us(dvorak)", xkeyboard_->last_layout_);
   // Currently, to work around  a crash issue at crosbug.com/27051,
   // controller_->Stop(); is NOT called when all IMEs are disabled.
-  EXPECT_EQ(0, controller_->stop_count_);
+  EXPECT_EQ(0, mock_ibus_daemon_controller_->stop_count());
 
   // However, IME should always be stopped on shutdown.
   manager_->SetState(InputMethodManager::STATE_TERMINATING);
-  EXPECT_EQ(1, controller_->stop_count_);
+  EXPECT_EQ(1, mock_ibus_daemon_controller_->stop_count());
   manager_->RemoveObserver(&observer);
 }
 
@@ -370,7 +393,7 @@ TEST_F(InputMethodManagerImplTest, TestEnableLayoutAndIme2) {
   ids.push_back("xkb:us:dvorak:eng");
   ids.push_back("mozc");
   EXPECT_TRUE(manager_->EnableInputMethods(ids));
-  EXPECT_EQ(1, controller_->start_count_);
+  EXPECT_EQ(1, mock_ibus_daemon_controller_->start_count());
   EXPECT_EQ(1, observer.input_method_changed_count_);
   EXPECT_EQ(ids[0], manager_->GetCurrentInputMethod().id());
   EXPECT_EQ("us(dvorak)", xkeyboard_->last_layout_);
@@ -393,7 +416,7 @@ TEST_F(InputMethodManagerImplTest, TestEnableImes) {
   ids.push_back("mozc-chewing");
   ids.push_back("mozc-dv");
   EXPECT_TRUE(manager_->EnableInputMethods(ids));
-  EXPECT_EQ(1, controller_->start_count_);
+  EXPECT_EQ(1, mock_ibus_daemon_controller_->start_count());
   EXPECT_EQ(1, observer.input_method_changed_count_);
   EXPECT_EQ(ids[0], manager_->GetCurrentInputMethod().id());
   EXPECT_EQ("us", xkeyboard_->last_layout_);
@@ -485,7 +508,7 @@ TEST_F(InputMethodManagerImplTest, TestEnableLayoutAndImeThenLock) {
   EXPECT_EQ("us(dvorak)", xkeyboard_->last_layout_);
   // controller_->Stop() should never be called when the screen is locked even
   // after crosbug.com/27051 is fixed.
-  EXPECT_EQ(0, controller_->stop_count_);
+  EXPECT_EQ(0, mock_ibus_daemon_controller_->stop_count());
   manager_->SwitchToNextInputMethod();
   EXPECT_EQ("xkb:us::eng",  // The hardware keyboard layout.
             manager_->GetCurrentInputMethod().id());
@@ -859,7 +882,7 @@ TEST_F(InputMethodManagerImplTest, TestAddRemoveExtensionInputMethods) {
   ids.push_back("xkb:us:dvorak:eng");
   EXPECT_TRUE(manager_->EnableInputMethods(ids));
   EXPECT_EQ(1U, manager_->GetNumActiveInputMethods());
-  EXPECT_EQ(0, controller_->start_count_);
+  EXPECT_EQ(0, mock_ibus_daemon_controller_->start_count());
   EXPECT_EQ(1, observer.input_method_changed_count_);
   EXPECT_EQ(ids[0],
             manager_->GetCurrentInputMethod().id());
@@ -875,7 +898,9 @@ TEST_F(InputMethodManagerImplTest, TestAddRemoveExtensionInputMethods) {
       "en-US",
       NULL);
   EXPECT_EQ(2U, manager_->GetNumActiveInputMethods());
-  EXPECT_EQ(1, controller_->start_count_);  // should be started.
+
+  // should be started.
+  EXPECT_EQ(1, mock_ibus_daemon_controller_->start_count());
   {
     scoped_ptr<InputMethodDescriptors> methods(
         manager_->GetActiveInputMethods());
@@ -909,7 +934,7 @@ TEST_F(InputMethodManagerImplTest, TestAddRemoveExtensionInputMethods) {
   EXPECT_EQ(1U, manager_->GetNumActiveInputMethods());
   // Currently, to work around  a crash issue at crosbug.com/27051,
   // controller_->Stop(); is NOT called when all (extension) IMEs are disabled.
-  EXPECT_EQ(0, controller_->stop_count_);
+  EXPECT_EQ(0, mock_ibus_daemon_controller_->stop_count());
 
   manager_->RemoveObserver(&observer);
 }
@@ -951,7 +976,7 @@ TEST_F(InputMethodManagerImplTest, TestAddExtensionInputThenLockScreen) {
   EXPECT_EQ("xkb:us::eng",
             manager_->GetCurrentInputMethod().id());
   EXPECT_EQ("us", xkeyboard_->last_layout_);
-  EXPECT_EQ(0, controller_->stop_count_);
+  EXPECT_EQ(0, mock_ibus_daemon_controller_->stop_count());
 
   // Unlock the screen.
   manager_->SetState(InputMethodManager::STATE_BROWSER_SCREEN);
@@ -978,15 +1003,15 @@ TEST_F(InputMethodManagerImplTest, TestReset) {
   ids.push_back("mozc");
   EXPECT_TRUE(manager_->EnableInputMethods(ids));
   EXPECT_EQ(2U, manager_->GetNumActiveInputMethods());
-  EXPECT_EQ(1, controller_->reset_count_);
+  EXPECT_EQ(1, mock_ibus_input_context_client_->reset_call_count());
   manager_->ChangeInputMethod("mozc");
   EXPECT_EQ(1, controller_->change_input_method_count_);
   EXPECT_EQ("mozc", controller_->change_input_method_id_);
-  EXPECT_EQ(1, controller_->reset_count_);
+  EXPECT_EQ(1, mock_ibus_input_context_client_->reset_call_count());
   manager_->ChangeInputMethod("xkb:us::eng");
   EXPECT_EQ(2, controller_->change_input_method_count_);
   EXPECT_EQ("mozc", controller_->change_input_method_id_);
-  EXPECT_EQ(1, controller_->reset_count_);
+  EXPECT_EQ(1, mock_ibus_input_context_client_->reset_call_count());
 }
 
 }  // namespace input_method

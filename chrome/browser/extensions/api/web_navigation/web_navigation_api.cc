@@ -15,6 +15,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/tab_contents/retargeting_details.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_iterator.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/view_type_utils.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -87,9 +88,8 @@ WebNavigationEventRouter::WebNavigationEventRouter(Profile* profile)
                  content::NotificationService::AllSources());
 
   BrowserList::AddObserver(this);
-  for (BrowserList::const_iterator iter = BrowserList::begin();
-       iter != BrowserList::end(); ++iter) {
-    OnBrowserAdded(*iter);
+  for (chrome::BrowserIterator it; !it.done(); it.Next()) {
+    OnBrowserAdded(*it);
   }
 }
 
@@ -321,9 +321,7 @@ void WebNavigationTabObserver::Observe(
       if (render_view_host == render_view_host_) {
         render_view_host_ = NULL;
         if (pending_render_view_host_) {
-          SendErrorEvents(web_contents(),
-                          pending_render_view_host_,
-                          FrameNavigationState::FrameID());
+          render_view_host_ = pending_render_view_host_;
           pending_render_view_host_ = NULL;
         }
       } else if (render_view_host == pending_render_view_host_) {

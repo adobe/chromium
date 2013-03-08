@@ -34,13 +34,13 @@
 #include "ash/system/status_area_widget.h"
 #include "ash/system/tray/system_tray_delegate.h"
 #include "ash/system/tray/system_tray_notifier.h"
-#include "ash/tooltips/tooltip_controller.h"
 #include "ash/touch/touch_observer_hud.h"
 #include "ash/wm/activation_controller.h"
 #include "ash/wm/always_on_top_controller.h"
 #include "ash/wm/app_list_controller.h"
 #include "ash/wm/ash_activation_controller.h"
 #include "ash/wm/ash_focus_rules.h"
+#include "ash/wm/ash_native_cursor_manager.h"
 #include "ash/wm/base_layout_manager.h"
 #include "ash/wm/capture_controller.h"
 #include "ash/wm/coordinate_conversion.h"
@@ -89,12 +89,13 @@
 #include "ui/views/corewm/focus_controller.h"
 #include "ui/views/corewm/input_method_event_filter.h"
 #include "ui/views/corewm/shadow_controller.h"
+#include "ui/views/corewm/tooltip_controller.h"
 #include "ui/views/corewm/visibility_controller.h"
 #include "ui/views/corewm/window_modality_controller.h"
 #include "ui/views/focus/focus_manager_factory.h"
 #include "ui/views/widget/native_widget_aura.h"
 #include "ui/views/widget/widget.h"
-#include "ui/views/window/dialog_frame_view.h"
+#include "ui/views/window/dialog_delegate.h"
 
 #if !defined(OS_MACOSX)
 #include "ash/accelerators/accelerator_controller.h"
@@ -103,12 +104,15 @@
 #endif
 
 #if defined(OS_CHROMEOS)
+#include "ash/ash_constants.h"
 #include "ash/display/display_change_observer_x11.h"
+#include "ash/display/display_error_dialog.h"
 #include "ash/display/output_configurator_animation.h"
 #include "base/chromeos/chromeos_version.h"
 #include "base/message_pump_aurax11.h"
 #include "chromeos/display/output_configurator.h"
 #include "content/public/browser/gpu_data_manager.h"
+#include "content/public/common/content_switches.h"
 #include "content/public/common/gpu_feature_type.h"
 #endif  // defined(OS_CHROMEOS)
 
@@ -195,9 +199,10 @@ Shell::Shell(ShellDelegate* delegate)
       activation_client_(NULL),
 #if defined(OS_CHROMEOS)
       output_configurator_(new chromeos::OutputConfigurator()),
-      output_configurator_animation_(
-          new internal::OutputConfiguratorAnimation()),
 #endif  // defined(OS_CHROMEOS)
+      native_cursor_manager_(new AshNativeCursorManager),
+      cursor_manager_(scoped_ptr<views::corewm::NativeCursorManager>(
+          native_cursor_manager_)),
       browser_context_(NULL),
       simulate_modal_window_open_for_testing_(false) {
   DCHECK(delegate_.get());
@@ -212,10 +217,12 @@ Shell::Shell(ShellDelegate* delegate)
   bool is_panel_fitting_disabled =
       (blacklisted_features & content::GPU_FEATURE_TYPE_PANEL_FITTING) ||
       CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kAshDisablePanelFitting);
-  output_configurator_->Init(!is_panel_fitting_disabled);
+          ::switches::kDisablePanelFitting);
 
-  output_configurator_->AddObserver(output_configurator_animation_.get());
+  output_configurator_->Init(
+      !is_panel_fitting_disabled,
+      delegate_->IsFirstRunAfterBoot() ? kChromeOsBootColor : 0);
+
   base::MessagePumpAuraX11::Current()->AddDispatcherForRootWindow(
       output_configurator());
 #endif  // defined(OS_CHROMEOS)
@@ -286,7 +293,10 @@ Shell::~Shell() {
   power_button_controller_.reset();
   session_state_controller_.reset();
 
-  // This also deletes all RootWindows.
+  // This also deletes all RootWindows. Note that we invoke Shutdown() on
+  // DisplayController before resetting |display_controller_|, since destruction
+  // of its owned RootWindowControllers relies on the value.
+  display_controller_->Shutdown();
   display_controller_.reset();
   screen_position_controller_.reset();
 
@@ -294,14 +304,19 @@ Shell::~Shell() {
   // because they might have registered ActivationChangeObserver.
   activation_controller_.reset();
 
-  DCHECK(instance_ == this);
-  instance_ = NULL;
-
 #if defined(OS_CHROMEOS)
-  output_configurator_->RemoveObserver(output_configurator_animation_.get());
+  if (display_change_observer_.get())
+    output_configurator_->RemoveObserver(display_change_observer_.get());
+  if (output_configurator_animation_.get())
+    output_configurator_->RemoveObserver(output_configurator_animation_.get());
+  if (display_error_observer_.get())
+    output_configurator_->RemoveObserver(display_error_observer_.get());
   base::MessagePumpAuraX11::Current()->RemoveDispatcherForRootWindow(
       output_configurator());
 #endif  // defined(OS_CHROMEOS)
+
+  DCHECK(instance_ == this);
+  instance_ = NULL;
 }
 
 // static
@@ -402,7 +417,15 @@ void Shell::Init() {
 #if defined(OS_CHROMEOS)
   if (base::chromeos::IsRunningOnChromeOS()) {
     display_change_observer_.reset(new internal::DisplayChangeObserverX11);
-    display_change_observer_->NotifyDisplayChange();
+    // Register |display_change_observer_| first so that the rest of
+    // observer gets invoked after the root windows are configured.
+    output_configurator_->AddObserver(display_change_observer_.get());
+    output_configurator_animation_.reset(
+        new internal::OutputConfiguratorAnimation());
+    display_error_observer_.reset(new internal::DisplayErrorObserver());
+    output_configurator_->AddObserver(output_configurator_animation_.get());
+    output_configurator_->AddObserver(display_error_observer_.get());
+    display_change_observer_->OnDisplayModeChanged();
   }
 #endif
 
@@ -413,6 +436,10 @@ void Shell::Init() {
   env_filter_.reset(new views::corewm::CompoundEventFilter);
   AddPreTargetHandler(env_filter_.get());
 
+  // Env creates the compositor. Historically it seems to have been implicitly
+  // initialized first by the ActivationController, but now that FocusController
+  // no longer does this we need to do it explicitly.
+  aura::Env::GetInstance();
   if (views::corewm::UseFocusController()) {
     views::corewm::FocusController* focus_controller =
         new views::corewm::FocusController(new wm::AshFocusRules);
@@ -518,8 +545,8 @@ void Shell::Init() {
   video_detector_.reset(new VideoDetector);
   window_cycle_controller_.reset(new WindowCycleController(activation_client_));
 
-  tooltip_controller_.reset(new internal::TooltipController(
-      drag_drop_controller_.get()));
+  tooltip_controller_.reset(new views::corewm::TooltipController(
+                                gfx::SCREEN_TYPE_ALTERNATE));
   AddPreTargetHandler(tooltip_controller_.get());
 
   event_client_.reset(new internal::EventClientImpl);
@@ -535,10 +562,10 @@ void Shell::Init() {
   // StatusAreaWidget uses Shell's CapsLockDelegate.
   caps_lock_delegate_.reset(delegate_->CreateCapsLockDelegate());
 
-  if (!command_line->HasSwitch(switches::kAuraNoShadows)) {
+  if (!command_line->HasSwitch(views::corewm::switches::kNoDropShadows)) {
     resize_shadow_controller_.reset(new internal::ResizeShadowController());
     shadow_controller_.reset(
-        new views::corewm::ShadowController(GetPrimaryRootWindow()));
+        new views::corewm::ShadowController(activation_client_));
   }
 
   // Create system_tray_notifier_ before the delegate.
@@ -567,12 +594,14 @@ void Shell::Init() {
   user_wallpaper_delegate_->InitializeWallpaper();
 
   if (initially_hide_cursor_)
-    cursor_manager_.DisableMouseEvents();
+    cursor_manager_.HideCursor();
   cursor_manager_.SetCursor(ui::kCursorPointer);
 
-  // Cursor might have been hidden by somethign other than chrome.
-  // Let the first mouse event show the cursor.
-  env_filter_->set_cursor_hidden_by_filter(true);
+  if (!cursor_manager_.IsCursorVisible()) {
+    // Cursor might have been hidden by something other than chrome.
+    // Let the first mouse event show the cursor.
+    env_filter_->set_cursor_hidden_by_filter(true);
+  }
 }
 
 void Shell::ShowContextMenu(const gfx::Point& location_in_screen) {
@@ -642,10 +671,8 @@ bool Shell::IsSystemModalWindowOpen() const {
 
 views::NonClientFrameView* Shell::CreateDefaultNonClientFrameView(
     views::Widget* widget) {
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-          ::switches::kEnableNewDialogStyle)) {
-    return new views::DialogFrameView(string16());
-  }
+  if (views::DialogDelegate::UseNewStyle())
+    return views::DialogDelegate::CreateNewStyleFrameView(widget);
   // Use translucent-style window frames for dialogs.
   CustomFrameViewAsh* frame_view = new CustomFrameViewAsh;
   frame_view->Init(widget);
@@ -829,12 +856,6 @@ void Shell::InitRootWindowForSecondaryDisplay(aura::RootWindow* root) {
 void Shell::DoInitialWorkspaceAnimation() {
   return GetPrimaryRootWindowController()->workspace_controller()->
       DoInitialAnimation();
-}
-
-message_center::MessageCenter* Shell::message_center() {
-  if (!message_center_.get())
-    message_center_.reset(new message_center::MessageCenter());
-  return message_center_.get();
 }
 
 void Shell::InitRootWindowController(

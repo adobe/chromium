@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2013 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,11 +16,14 @@
 #include "base/lazy_instance.h"
 #include "base/linux_util.h"
 #include "base/message_loop.h"
-#include "base/string_number_conversions.h"
-#include "base/string_split.h"
+#include "base/prefs/pref_service.h"
+#include "base/strings/string_number_conversions.h"
+#include "base/strings/string_split.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/accessibility/accessibility_util.h"
 #include "chrome/browser/chromeos/accessibility/magnification_manager.h"
+#include "chrome/browser/chromeos/app_mode/kiosk_app_launcher.h"
+#include "chrome/browser/chromeos/app_mode/kiosk_app_manager.h"
 #include "chrome/browser/chromeos/audio/audio_handler.h"
 #include "chrome/browser/chromeos/boot_times_loader.h"
 #include "chrome/browser/chromeos/contacts/contact_manager.h"
@@ -48,6 +51,7 @@
 #include "chrome/browser/chromeos/memory/oom_priority_manager.h"
 #include "chrome/browser/chromeos/net/connectivity_state_helper.h"
 #include "chrome/browser/chromeos/net/cros_network_change_notifier_factory.h"
+#include "chrome/browser/chromeos/net/managed_network_configuration_handler.h"
 #include "chrome/browser/chromeos/net/network_change_notifier_network_library.h"
 #include "chrome/browser/chromeos/net/network_portal_detector.h"
 #include "chrome/browser/chromeos/power/brightness_observer.h"
@@ -56,8 +60,10 @@
 #include "chrome/browser/chromeos/power/resume_observer.h"
 #include "chrome/browser/chromeos/power/screen_dimming_observer.h"
 #include "chrome/browser/chromeos/power/screen_lock_observer.h"
+#include "chrome/browser/chromeos/power/suspend_observer.h"
 #include "chrome/browser/chromeos/power/user_activity_notifier.h"
 #include "chrome/browser/chromeos/power/video_activity_notifier.h"
+#include "chrome/browser/chromeos/screensaver/screensaver_controller.h"
 #include "chrome/browser/chromeos/settings/device_settings_service.h"
 #include "chrome/browser/chromeos/settings/owner_key_util.h"
 #include "chrome/browser/chromeos/system/statistics_provider.h"
@@ -69,11 +75,10 @@
 #include "chrome/browser/metrics/metrics_service.h"
 #include "chrome/browser/net/chrome_network_delegate.h"
 #include "chrome/browser/policy/browser_policy_connector.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/rlz/rlz.h"
-#include "chrome/browser/system_monitor/removable_device_notifications_chromeos.h"
+#include "chrome/browser/storage_monitor/storage_monitor_chromeos.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
@@ -90,10 +95,10 @@
 #include "chromeos/network/network_change_notifier_chromeos.h"
 #include "chromeos/network/network_change_notifier_factory_chromeos.h"
 #include "chromeos/network/network_configuration_handler.h"
-#include "chromeos/network/network_device_handler.h"
 #include "chromeos/network/network_event_log.h"
 #include "chromeos/network/network_state_handler.h"
 #include "chromeos/power/power_state_override.h"
+#include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/common/main_function_params.h"
 #include "grit/platform_locale_settings.h"
@@ -144,19 +149,19 @@ class StubLogin : public LoginStatusConsumer,
         std::string());
   }
 
-  ~StubLogin() {
+  virtual ~StubLogin() {
     LoginUtils::Get()->DelegateDeleted(this);
   }
 
-  void OnLoginFailure(const LoginFailure& error) {
+  virtual void OnLoginFailure(const LoginFailure& error) OVERRIDE {
     LOG(ERROR) << "Login Failure: " << error.GetErrorString();
     delete this;
   }
 
-  void OnLoginSuccess(const std::string& username,
-                      const std::string& password,
-                      bool pending_requests,
-                      bool using_oauth) {
+  virtual void OnLoginSuccess(const std::string& username,
+                              const std::string& password,
+                              bool pending_requests,
+                              bool using_oauth) OVERRIDE {
     pending_requests_ = pending_requests;
     if (!profile_prepared_) {
       // Will call OnProfilePrepared in the end.
@@ -172,7 +177,7 @@ class StubLogin : public LoginStatusConsumer,
   }
 
   // LoginUtils::Delegate implementation:
-  virtual void OnProfilePrepared(Profile* profile) {
+  virtual void OnProfilePrepared(Profile* profile) OVERRIDE {
     profile_prepared_ = true;
     LoginUtils::Get()->DoBrowserLaunch(profile, NULL);
     if (!pending_requests_)
@@ -183,6 +188,15 @@ class StubLogin : public LoginStatusConsumer,
   bool pending_requests_;
   bool profile_prepared_;
 };
+
+bool ShouldAutoLaunchKioskApp(const CommandLine& command_line) {
+  KioskAppManager* app_manager = KioskAppManager::Get();
+  return command_line.HasSwitch(::switches::kEnableAppMode) &&
+      command_line.HasSwitch(::switches::kLoginManager) &&
+      !command_line.HasSwitch(::switches::kForceLoginManagerInTests) &&
+      !app_manager->GetAutoLaunchApp().empty() &&
+      !app_manager->GetSuppressAutoLaunch();
+}
 
 void OptionallyRunChromeOSLoginManager(const CommandLine& parsed_command_line,
                                        Profile* profile) {
@@ -210,6 +224,11 @@ void OptionallyRunChromeOSLoginManager(const CommandLine& parsed_command_line,
 
     if (KioskModeSettings::Get()->IsKioskModeEnabled())
       InitializeKioskModeScreensaver();
+
+    // If app mode is enabled, reset auto launch suppression flag when
+    // login screen is shown.
+    if (parsed_command_line.HasSwitch(::switches::kEnableAppMode))
+      KioskAppManager::Get()->SetSuppressAutoLaunch(false);
   } else if (parsed_command_line.HasSwitch(::switches::kLoginUser) &&
              parsed_command_line.HasSwitch(::switches::kLoginPassword)) {
     BootTimesLoader::Get()->RecordLoginAttempted();
@@ -234,11 +253,8 @@ namespace internal {
 // destructor will get called if and only if this has been instantiated.
 class DBusServices {
  public:
-  DBusServices(const content::MainFunctionParams& parameters,
-               bool use_new_network_change_notifier)
-      : use_new_network_change_notifier_(use_new_network_change_notifier),
-        cros_initialized_(false),
-        network_handlers_initialized_(false) {
+  explicit DBusServices(const content::MainFunctionParams& parameters)
+      : cros_initialized_(false) {
     // Initialize CrosLibrary only for the browser, unless running tests
     // (which do their own CrosLibrary setup).
     if (!parameters.ui_task) {
@@ -253,15 +269,35 @@ class DBusServices {
     CrosDBusService::Initialize();
 
     // This function and SystemKeyEventListener use InputMethodManager.
-    chromeos::input_method::Initialize();
+    chromeos::input_method::Initialize(
+        content::BrowserThread::GetMessageLoopProxyForThread(
+            content::BrowserThread::UI),
+        content::BrowserThread::GetMessageLoopProxyForThread(
+            content::BrowserThread::FILE));
     disks::DiskMountManager::Initialize();
     cryptohome::AsyncMethodCaller::Initialize();
+
+    // Always initialize these handlers which should not conflict with
+    // NetworkLibrary.
+    chromeos::network_event_log::Initialize();
+    chromeos::GeolocationHandler::Initialize();
+    chromeos::NetworkStateHandler::Initialize();
+
+    if (CommandLine::ForCurrentProcess()->HasSwitch(
+            chromeos::switches::kEnableNewNetworkConfigurationHandlers)) {
+      chromeos::NetworkConfigurationHandler::Initialize();
+      chromeos::ManagedNetworkConfigurationHandler::Initialize();
+    }
 
     // Initialize the network change notifier for Chrome OS. The network
     // change notifier starts to monitor changes from the power manager and
     // the network manager.
-    if (!use_new_network_change_notifier_)
+    if (CommandLine::ForCurrentProcess()->HasSwitch(
+            chromeos::switches::kEnableNewNetworkChangeNotifier)) {
+      NetworkChangeNotifierFactoryChromeos::GetInstance()->Initialize();
+    } else {
       CrosNetworkChangeNotifierFactory::GetInstance()->Init();
+    }
 
     // Likewise, initialize the upgrade detector for Chrome OS. The upgrade
     // detector starts to monitor changes from the update engine.
@@ -278,32 +314,6 @@ class DBusServices {
     DeviceSettingsService::Get()->Initialize(
         DBusThreadManager::Get()->GetSessionManagerClient(),
         OwnerKeyUtil::Create());
-
-    // Add observers for WallpaperManager. This depends on PowerManagerClient().
-    WallpaperManager::Get()->AddObservers();
-  }
-
-  // TODO(stevenjb): Move this into DBusServices() once the switch is no
-  // longer required. (Switch is set in about_flags.cc and not applied until
-  // after DBusServices() is called).
-  void InitializeNetworkHandlers() {
-    network_handlers_initialized_ = true;
-
-    // Always initialize these handlers which should not conflict with
-    // NetworkLibrary.
-    chromeos::network_event_log::Initialize();
-    chromeos::GeolocationHandler::Initialize();
-
-    if (CommandLine::ForCurrentProcess()->HasSwitch(
-            chromeos::switches::kEnableNewNetworkHandlers)) {
-      chromeos::NetworkDeviceHandler::Initialize();
-      chromeos::NetworkStateHandler::Initialize();
-      chromeos::NetworkConfigurationHandler::Initialize();
-      // TODO(gauravsh): This needs re-factoring. NetworkChangeNotifier choice
-      // needs to be made before about:flags are processed.
-      if (use_new_network_change_notifier_)
-        NetworkChangeNotifierFactoryChromeos::GetInstance()->Initialize();
-    }
   }
 
   ~DBusServices() {
@@ -315,18 +325,16 @@ class DBusServices {
     if (cros_initialized_ && CrosLibrary::Get())
       CrosLibrary::Shutdown();
 
-    chromeos::ConnectivityStateHelper::Shutdown();
-    if (network_handlers_initialized_) {
-      if (CommandLine::ForCurrentProcess()->HasSwitch(
-              chromeos::switches::kEnableNewNetworkHandlers)) {
-        chromeos::NetworkDeviceHandler::Shutdown();
-        chromeos::NetworkStateHandler::Shutdown();
-        chromeos::NetworkConfigurationHandler::Shutdown();
-      }
-
-      chromeos::GeolocationHandler::Shutdown();
-      chromeos::network_event_log::Shutdown();
+    if (CommandLine::ForCurrentProcess()->HasSwitch(
+            chromeos::switches::kEnableNewNetworkConfigurationHandlers)) {
+      chromeos::ManagedNetworkConfigurationHandler::Shutdown();
+      chromeos::NetworkConfigurationHandler::Shutdown();
     }
+
+    chromeos::ConnectivityStateHelper::Shutdown();
+    chromeos::NetworkStateHandler::Shutdown();
+    chromeos::GeolocationHandler::Shutdown();
+    chromeos::network_event_log::Shutdown();
 
     cryptohome::AsyncMethodCaller::Shutdown();
     disks::DiskMountManager::Shutdown();
@@ -337,9 +345,7 @@ class DBusServices {
   }
 
  private:
-  bool use_new_network_change_notifier_;
   bool cros_initialized_;
-  bool network_handlers_initialized_;
 
   DISALLOW_COPY_AND_ASSIGN(DBusServices);
 };
@@ -350,8 +356,7 @@ class DBusServices {
 
 ChromeBrowserMainPartsChromeos::ChromeBrowserMainPartsChromeos(
     const content::MainFunctionParams& parameters)
-    : ChromeBrowserMainPartsLinux(parameters),
-      use_new_network_change_notifier_(false) {
+    : ChromeBrowserMainPartsLinux(parameters) {
 }
 
 ChromeBrowserMainPartsChromeos::~ChromeBrowserMainPartsChromeos() {
@@ -412,13 +417,12 @@ void ChromeBrowserMainPartsChromeos::PreMainMessageLoopStart() {
   // Note: At the time this is called, we have not processed about:flags
   // so this requires that the network handler flag was passed in at the command
   // line.
-  if (!CommandLine::ForCurrentProcess()->HasSwitch(
-          chromeos::switches::kEnableNewNetworkHandlers)) {
-    network_change_factory = new CrosNetworkChangeNotifierFactory();
-  } else {
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+          chromeos::switches::kEnableNewNetworkChangeNotifier)) {
     LOG(WARNING) << "Using new connection change notifier.";
     network_change_factory = new NetworkChangeNotifierFactoryChromeos();
-    use_new_network_change_notifier_ = true;
+  } else {
+    network_change_factory = new CrosNetworkChangeNotifierFactory();
   }
   net::NetworkChangeNotifier::SetFactory(network_change_factory);
   ChromeBrowserMainPartsLinux::PreMainMessageLoopStart();
@@ -428,8 +432,7 @@ void ChromeBrowserMainPartsChromeos::PostMainMessageLoopStart() {
   MessageLoopForUI* message_loop = MessageLoopForUI::current();
   message_loop->AddObserver(g_message_loop_observer.Pointer());
 
-  dbus_services_.reset(new internal::DBusServices(
-      parameters(), use_new_network_change_notifier_));
+  dbus_services_.reset(new internal::DBusServices(parameters()));
 
   ChromeBrowserMainPartsLinux::PostMainMessageLoopStart();
 }
@@ -438,7 +441,6 @@ void ChromeBrowserMainPartsChromeos::PostMainMessageLoopStart() {
 // about_flags settings are applied in ChromeBrowserMainParts::PreCreateThreads.
 void ChromeBrowserMainPartsChromeos::PreMainMessageLoopRun() {
   // Must be called after about_flags settings are applied (see note above).
-  dbus_services_->InitializeNetworkHandlers();
   chromeos::ConnectivityStateHelper::Initialize();
 
   AudioHandler::Initialize();
@@ -538,6 +540,10 @@ void ChromeBrowserMainPartsChromeos::PreProfileInit() {
   // be placed after UserManager::SessionStarted();
   chromeos::MagnificationManager::Initialize();
 
+  // Add observers for WallpaperManager. This depends on PowerManagerClient,
+  // TimezoneSettings and CrosSettings.
+  WallpaperManager::Get()->AddObservers();
+
 #if defined(USE_LINUX_BREAKPAD)
   cros_version_loader_.GetVersion(VersionLoader::VERSION_FULL,
                                   base::Bind(&ChromeOSVersionCallback),
@@ -586,8 +592,18 @@ void ChromeBrowserMainPartsChromeos::PostProfileInit() {
 
   // Tests should be able to tune login manager before showing it.
   // Thus only show login manager in normal (non-testing) mode.
-  if (!parameters().ui_task)
-    OptionallyRunChromeOSLoginManager(parsed_command_line(), profile());
+  if (!parameters().ui_task ||
+      parsed_command_line().HasSwitch(::switches::kForceLoginManagerInTests)) {
+    if (ShouldAutoLaunchKioskApp(parsed_command_line())) {
+      kiosk_app_launcher_.reset(new KioskAppLauncher(
+          KioskAppManager::Get()->GetAutoLaunchApp(),
+          base::Bind(&ChromeBrowserMainPartsChromeos::KioskAppLaunchCallback,
+                     base::Unretained(this))));
+      kiosk_app_launcher_->Start();
+    } else {
+      OptionallyRunChromeOSLoginManager(parsed_command_line(), profile());
+    }
+  }
 
   // These observers must be initialized after the profile because
   // they use the profile to dispatch extension events.
@@ -598,14 +614,18 @@ void ChromeBrowserMainPartsChromeos::PostProfileInit() {
   output_observer_.reset(new OutputObserver());
   resume_observer_.reset(new ResumeObserver());
   screen_lock_observer_.reset(new ScreenLockObserver());
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kEnableScreensaverExtensions)) {
+    screensaver_controller_.reset(new ScreensaverController());
+  }
+  suspend_observer_.reset(new SuspendObserver());
   if (KioskModeSettings::Get()->IsKioskModeEnabled()) {
     power_state_override_ = new PowerStateOverride(
         PowerStateOverride::BLOCK_DISPLAY_SLEEP);
   }
   chromeos::accessibility::Initialize();
 
-  removable_device_notifications_ =
-      new RemovableDeviceNotificationsCros();
+  storage_monitor_ = new StorageMonitorCros();
 
   // Initialize the network portal detector for Chrome OS. The network
   // portal detector starts to listen for notifications from
@@ -693,6 +713,7 @@ void ChromeBrowserMainPartsChromeos::PostMainMessageLoopRun() {
   // We should remove observers attached to D-Bus clients before
   // DBusThreadManager is shut down.
   screen_lock_observer_.reset();
+  suspend_observer_.reset();
   resume_observer_.reset();
   brightness_observer_.reset();
   output_observer_.reset();
@@ -719,15 +740,17 @@ void ChromeBrowserMainPartsChromeos::PostMainMessageLoopRun() {
   // Detach D-Bus clients before DBusThreadManager is shut down.
   power_button_observer_.reset();
   screen_dimming_observer_.reset();
+  screensaver_controller_.reset();
 
   // Delete ContactManager while |g_browser_process| is still alive.
   contact_manager_.reset();
 
   chromeos::MagnificationManager::Shutdown();
 
-  // Let the UserManager unregister itself as an observer of the CrosSettings
-  // singleton before it is destroyed.
+  // Let the UserManager and WallpaperManager unregister itself as an observer
+  // of the CrosSettings singleton before it is destroyed.
   UserManager::Get()->Shutdown();
+  WallpaperManager::Get()->Shutdown();
 
   ChromeBrowserMainPartsLinux::PostMainMessageLoopRun();
 }
@@ -787,7 +810,7 @@ void ChromeBrowserMainPartsChromeos::SetupLowMemoryHeadroomFieldTrial() {
 void ChromeBrowserMainPartsChromeos::SetupZramFieldTrial() {
   // The dice for this experiment have been thrown at boot.  The selected group
   // number is stored in a file.
-  const FilePath kZramGroupPath("/home/chronos/.swap_exp_enrolled");
+  const base::FilePath kZramGroupPath("/home/chronos/.swap_exp_enrolled");
   std::string zram_file_content;
   // If the file does not exist, the experiment has not started.
   if (!file_util::ReadFileToString(kZramGroupPath, &zram_file_content))
@@ -824,6 +847,20 @@ void ChromeBrowserMainPartsChromeos::SetupZramFieldTrial() {
   trial->AppendGroup("snow_no_swap", zram_group == '6' ? 1 : 0);
   trial->AppendGroup("snow_1GB_swap", zram_group == '7' ? 1 : 0);
   trial->AppendGroup("snow_2GB_swap", zram_group == '8' ? 1 : 0);
+  // This is necessary to start the experiment as a side effect.
+  trial->group();
+}
+
+void ChromeBrowserMainPartsChromeos::KioskAppLaunchCallback(bool success) {
+  // If the launch succeeds, do nothing and wait for chrome restart.
+  if (success)
+    return;
+
+  // If failed to launch, go back to login screen.
+  LOG(ERROR) << "Failed to launch kiosk app. Fall back to login screen";
+  OptionallyRunChromeOSLoginManager(parsed_command_line(), profile());
+
+  // TODO(xiyuan): Show error message.
 }
 
 }  //  namespace chromeos

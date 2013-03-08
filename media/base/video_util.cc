@@ -8,6 +8,7 @@
 
 #include "base/logging.h"
 #include "media/base/video_frame.h"
+#include "media/base/yuv_convert.h"
 
 namespace media {
 
@@ -30,8 +31,8 @@ gfx::Size GetNaturalSize(const gfx::Size& visible_size,
   return gfx::Size(width & ~1, height);
 }
 
-static void CopyPlane(size_t plane, const uint8* source, int stride, int rows,
-                      VideoFrame* frame) {
+void CopyPlane(size_t plane, const uint8* source, int stride, int rows,
+               VideoFrame* frame) {
   uint8* dest = frame->data(plane);
   int dest_stride = frame->stride(plane);
 
@@ -83,6 +84,154 @@ void FillYUV(VideoFrame* frame, uint8 y, uint8 u, uint8 v) {
     u_plane += frame->stride(VideoFrame::kUPlane);
     v_plane += frame->stride(VideoFrame::kVPlane);
   }
+}
+
+void RotatePlaneByPixels(
+    const uint8* src,
+    uint8* dest,
+    int width,
+    int height,
+    int rotation,  // Clockwise.
+    bool flip_vert,
+    bool flip_horiz) {
+  DCHECK((width > 0) && (height > 0) &&
+         ((width & 1) == 0) && ((height & 1) == 0) &&
+         (rotation >= 0) && (rotation < 360) && (rotation % 90 == 0));
+
+  // Consolidate cases. Only 0 and 90 are left.
+  if (rotation == 180 || rotation == 270) {
+    rotation -= 180;
+    flip_vert = !flip_vert;
+    flip_horiz = !flip_horiz;
+  }
+
+  int num_rows = height;
+  int num_cols = width;
+  int src_stride = width;
+  // During pixel copying, the corresponding incremental of dest pointer
+  // when src pointer moves to next row.
+  int dest_row_step = width;
+  // During pixel copying, the corresponding incremental of dest pointer
+  // when src pointer moves to next column.
+  int dest_col_step = 1;
+
+  if (rotation == 0) {
+    if (flip_horiz) {
+      // Use pixel copying.
+      dest_col_step = -1;
+      if (flip_vert) {
+        // Rotation 180.
+        dest_row_step = -width;
+        dest += height * width - 1;
+      } else {
+        dest += width - 1;
+      }
+    } else {
+      if (flip_vert) {
+        // Fast copy by rows.
+        dest += width * (height - 1);
+        for (int row = 0; row < height; ++row) {
+          memcpy(dest, src, width);
+          src += width;
+          dest -= width;
+        }
+      } else {
+        memcpy(dest, src, width * height);
+      }
+      return;
+    }
+  } else if (rotation == 90) {
+    int offset;
+    if (width > height) {
+      offset = (width - height) / 2;
+      src += offset;
+      num_rows = num_cols = height;
+    } else {
+      offset = (height - width) / 2;
+      src += width * offset;
+      num_rows = num_cols = width;
+    }
+
+    dest_col_step = (flip_vert ? -width : width);
+    dest_row_step = (flip_horiz ? 1 : -1);
+    if (flip_horiz) {
+      if (flip_vert) {
+        dest += (width > height ? width * (height - 1) + offset :
+                                  width * (height - offset - 1));
+      } else {
+        dest += (width > height ? offset : width * offset);
+      }
+    } else {
+      if (flip_vert) {
+        dest += (width > height ?  width * height - offset - 1 :
+                                   width * (height - offset) - 1);
+      } else {
+        dest += (width > height ? width - offset - 1 :
+                                  width * (offset + 1) - 1);
+      }
+    }
+  } else {
+    NOTREACHED();
+  }
+
+  // Copy pixels.
+  for (int row = 0; row < num_rows; ++row) {
+    const uint8* src_ptr = src;
+    uint8* dest_ptr = dest;
+    for (int col = 0; col < num_cols; ++col) {
+      *dest_ptr = *src_ptr++;
+      dest_ptr += dest_col_step;
+    }
+    src += src_stride;
+    dest += dest_row_step;
+  }
+}
+
+gfx::Rect ComputeLetterboxRegion(const gfx::Rect& bounds,
+                                 const gfx::Size& content) {
+  int64 x = static_cast<int64>(content.width()) * bounds.height();
+  int64 y = static_cast<int64>(content.height()) * bounds.width();
+
+  gfx::Size letterbox(bounds.width(), bounds.height());
+  if (y < x)
+    letterbox.set_height(static_cast<int>(y / content.width()));
+  else
+    letterbox.set_width(static_cast<int>(x / content.height()));
+  gfx::Rect result = bounds;
+  result.ClampToCenteredSize(letterbox);
+  return result;
+}
+
+void CopyRGBToVideoFrame(const uint8* source,
+                         int stride,
+                         const gfx::Rect& region_in_frame,
+                         VideoFrame* frame) {
+  const int kY = VideoFrame::kYPlane;
+  const int kU = VideoFrame::kUPlane;
+  const int kV = VideoFrame::kVPlane;
+  CHECK_EQ(frame->stride(kU), frame->stride(kV));
+  const int uv_stride = frame->stride(kU);
+
+  if (region_in_frame != gfx::Rect(frame->coded_size())) {
+    // TODO(justinlin): Optimize this by clearing just the margins.
+    // http://crbug.com/178789
+    FillYUV(frame, 0x00, 0x80, 0x80);
+  }
+
+  const int y_offset = region_in_frame.x()
+                     + (region_in_frame.y() * frame->stride(kY));
+  const int uv_offset = region_in_frame.x() / 2
+                      + (region_in_frame.y() / 2 * uv_stride);
+
+  ConvertRGB32ToYUV(source,
+                    frame->data(kY) + y_offset,
+                    frame->data(kU) + uv_offset,
+                    frame->data(kV) + uv_offset,
+                    region_in_frame.width(),
+                    region_in_frame.height(),
+                    stride,
+                    frame->stride(kY),
+                    uv_stride);
 }
 
 }  // namespace media

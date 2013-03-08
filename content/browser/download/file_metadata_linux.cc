@@ -7,8 +7,8 @@
 #include <sys/types.h>
 #include <sys/xattr.h>
 
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "googleurl/src/gurl.h"
 
@@ -27,7 +27,7 @@ static void SetExtendedFileAttribute(const char* path, const char* name,
   }
 }
 
-void AddOriginMetadataToFile(const FilePath& file, const GURL& source,
+void AddOriginMetadataToFile(const base::FilePath& file, const GURL& source,
                              const GURL& referrer) {
   DCHECK(file_util::PathIsWritable(file));
   if (source.is_valid()) {

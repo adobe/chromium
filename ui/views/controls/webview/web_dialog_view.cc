@@ -12,6 +12,7 @@
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
+#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/views/controls/webview/webview.h"
@@ -46,7 +47,11 @@ WebDialogView::WebDialogView(
       WebDialogWebContentsDelegate(context, handler),
       initialized_(false),
       delegate_(delegate),
-      web_view_(new views::WebView(context)) {
+      web_view_(new views::WebView(context)),
+      is_attempting_close_dialog_(false),
+      before_unload_fired_(false),
+      closed_via_webui_(false),
+      close_contents_called_(false) {
   web_view_->set_allow_accelerators(true);
   AddChildView(web_view_);
   set_contents_view(web_view_);
@@ -75,7 +80,8 @@ gfx::Size WebDialogView::GetPreferredSize() {
 bool WebDialogView::AcceleratorPressed(const ui::Accelerator& accelerator) {
   // Pressing ESC closes the dialog.
   DCHECK_EQ(ui::VKEY_ESCAPE, accelerator.key_code());
-  OnDialogClosed(std::string());
+  if (GetWidget())
+    GetWidget()->Close();
   return true;
 }
 
@@ -87,12 +93,23 @@ void WebDialogView::ViewHierarchyChanged(bool is_add,
 }
 
 bool WebDialogView::CanClose() {
-  bool close_dialog = true;
-  if (delegate_)
-    delegate_->OnCloseContents(web_view_->web_contents(),
-                               &close_dialog);
+  // If CloseContents() is called before CanClose(), which is called by
+  // RenderViewHostImpl::ClosePageIgnoringUnloadEvents, it indicates
+  // beforeunload event should not be fired during closing.
+  if ((is_attempting_close_dialog_ && before_unload_fired_) ||
+      close_contents_called_) {
+    is_attempting_close_dialog_ = false;
+    before_unload_fired_ = false;
+    return true;
+  }
 
-  return close_dialog;
+  if (!is_attempting_close_dialog_) {
+    // Fire beforeunload event when user attempts to close the dialog.
+    is_attempting_close_dialog_ = true;
+    web_view_->
+        web_contents()->GetRenderViewHost()->FirePageBeforeUnload(false);
+  }
+  return false;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -213,6 +230,13 @@ void WebDialogView::OnDialogClosed(const std::string& json_retval) {
   }
 }
 
+void WebDialogView::OnDialogCloseFromWebUI(const std::string& json_retval) {
+  closed_via_webui_ = true;
+  dialog_close_retval_ = json_retval;
+  if (GetWidget())
+    GetWidget()->Close();
+}
+
 void WebDialogView::OnCloseContents(WebContents* source,
                                     bool* out_close_dialog) {
   if (delegate_)
@@ -247,6 +271,8 @@ void WebDialogView::MoveContents(WebContents* source, const gfx::Rect& pos) {
 void WebDialogView::HandleKeyboardEvent(content::WebContents* source,
                                         const NativeWebKeyboardEvent& event) {
 #if defined(USE_AURA)
+  if (!event.os_event)
+    return;
   ui::KeyEvent aura_event(event.os_event->native_event(), false);
   views::NativeWidgetAura* aura_widget =
       static_cast<views::NativeWidgetAura*>(GetWidget()->native_widget());
@@ -260,10 +286,11 @@ void WebDialogView::HandleKeyboardEvent(content::WebContents* source,
 }
 
 void WebDialogView::CloseContents(WebContents* source) {
+  close_contents_called_ = true;
   bool close_dialog = false;
   OnCloseContents(source, &close_dialog);
   if (close_dialog)
-    OnDialogClosed(std::string());
+    OnDialogClosed(closed_via_webui_ ? dialog_close_retval_ : std::string());
 }
 
 content::WebContents* WebDialogView::OpenURLFromTab(
@@ -295,6 +322,13 @@ void WebDialogView::AddNewContents(content::WebContents* source,
 void WebDialogView::LoadingStateChanged(content::WebContents* source) {
   if (delegate_)
     delegate_->OnLoadingStateChanged(source);
+}
+
+void WebDialogView::BeforeUnloadFired(content::WebContents* tab,
+                                      bool proceed,
+                                      bool* proceed_to_fire_unload) {
+  before_unload_fired_ = true;
+  *proceed_to_fire_unload = proceed;
 }
 
 ////////////////////////////////////////////////////////////////////////////////

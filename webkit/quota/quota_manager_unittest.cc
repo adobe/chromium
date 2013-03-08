@@ -35,8 +35,8 @@ const StorageType kSync = kStorageTypeSyncable;
 const int kAllClients = QuotaClient::kAllClientsMask;
 
 // Returns a deterministic value for the amount of available disk space.
-int64 GetAvailableDiskSpaceForTest(const FilePath&) {
-  return 13377331;
+int64 GetAvailableDiskSpaceForTest(const base::FilePath&) {
+  return 13377331 + QuotaManager::kMinimumPreserveForSystem;
 }
 
 class QuotaManagerTest : public testing::Test {
@@ -51,7 +51,7 @@ class QuotaManagerTest : public testing::Test {
         mock_time_counter_(0) {
   }
 
-  void SetUp() {
+  virtual void SetUp() {
     ASSERT_TRUE(data_dir_.CreateUniqueTempDir());
     mock_special_storage_policy_ = new MockSpecialStoragePolicy;
     quota_manager_ = new QuotaManager(
@@ -67,7 +67,7 @@ class QuotaManagerTest : public testing::Test {
     additional_callback_count_ = 0;
   }
 
-  void TearDown() {
+  virtual void TearDown() {
     // Make sure the quota manager cleans up correctly.
     quota_manager_ = NULL;
     MessageLoop::current()->RunUntilIdle();
@@ -393,7 +393,7 @@ class QuotaManagerTest : public testing::Test {
   const OriginInfoTableEntries& origin_info_entries() const {
     return origin_info_entries_;
   }
-  FilePath profile_path() const { return data_dir_.path(); }
+  base::FilePath profile_path() const { return data_dir_.path(); }
   int status_callback_count() const { return status_callback_count_; }
   void reset_status_callback_count() { status_callback_count_ = 0; }
 
@@ -649,13 +649,15 @@ TEST_F(QuotaManagerTest, GetUsage_MultipleClients) {
   MessageLoop::current()->RunUntilIdle();
   EXPECT_EQ(kQuotaStatusOk, status());
   EXPECT_EQ(1, usage());
-  EXPECT_EQ(available_space(), quota());
+  EXPECT_EQ(available_space() - QuotaManager::kMinimumPreserveForSystem,
+            quota() - usage());
 
   GetUsageAndQuota(GURL("http://installed/"), kPerm);
   MessageLoop::current()->RunUntilIdle();
   EXPECT_EQ(kQuotaStatusOk, status());
   EXPECT_EQ(1, usage());
-  EXPECT_EQ(available_space(), quota());
+  EXPECT_EQ(available_space() - QuotaManager::kMinimumPreserveForSystem,
+            quota() - usage());
 
   GetGlobalUsage(kTemp);
   MessageLoop::current()->RunUntilIdle();

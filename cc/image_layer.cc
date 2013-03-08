@@ -48,7 +48,7 @@ void ImageLayer::setTexturePriorities(const PriorityCalculator& priorityCalc)
     TiledLayer::setTexturePriorities(priorityCalc);
 }
 
-void ImageLayer::update(ResourceUpdateQueue& queue, const OcclusionTracker* occlusion, RenderingStats& stats)
+void ImageLayer::update(ResourceUpdateQueue& queue, const OcclusionTracker* occlusion, RenderingStats* stats)
 {
     createUpdaterIfNeeded();
     if (m_needsDisplay) {
@@ -77,6 +77,7 @@ LayerUpdater* ImageLayer::updater() const
 
 void ImageLayer::calculateContentsScale(
     float ideal_contents_scale,
+    bool animating_transform_to_screen,
     float* contentsScaleX,
     float* contentsScaleY,
     gfx::Size* contentBounds)

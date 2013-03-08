@@ -37,6 +37,11 @@ def AddInstallAPKOption(option_parser):
   option_parser.add_option('--apk_package',
                            help=('The package name used by the apk containing '
                                  'the application.'))
+  option_parser.add_option('--keep_data',
+                           action='store_true',
+                           default=False,
+                           help=('Keep the package data when installing '
+                                 'the application.'))
 
 
 def ValidateInstallAPKOption(option_parser, options):
@@ -99,10 +104,6 @@ def AddGTestOptions(option_parser):
   #TODO(craigdh): Replace _ with - in arguments for consistency.
   option_parser.add_option('-a', '--test_arguments', dest='test_arguments',
                            help='Additional arguments to pass to the test.')
-  option_parser.add_option('-L', dest='log_dump',
-                           help='File name of log dump, which will be put in '
-                           'subfolder debug_info_dumps under the same '
-                           'directory in where the test_suite exists.')
   option_parser.add_option('-e', '--emulator', dest='use_emulator',
                            action='store_true',
                            help='Run tests in a new instance of emulator.')

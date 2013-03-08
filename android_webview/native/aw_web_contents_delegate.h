@@ -19,7 +19,7 @@ class AwWebContentsDelegate
  public:
   AwWebContentsDelegate(JNIEnv* env, jobject obj);
   virtual ~AwWebContentsDelegate();
-  virtual content::JavaScriptDialogCreator* GetJavaScriptDialogCreator()
+  virtual content::JavaScriptDialogManager* GetJavaScriptDialogManager()
       OVERRIDE;
   virtual void FindReply(content::WebContents* web_contents,
                          int request_id,
@@ -30,8 +30,6 @@ class AwWebContentsDelegate
   virtual bool CanDownload(content::RenderViewHost* source,
                            int request_id,
                            const std::string& request_method) OVERRIDE;
-  virtual void OnStartDownload(content::WebContents* source,
-                               content::DownloadItem* download) OVERRIDE;
   virtual void AddNewContents(content::WebContents* source,
                               content::WebContents* new_contents,
                               WindowOpenDisposition disposition,

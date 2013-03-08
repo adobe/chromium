@@ -26,7 +26,7 @@ import time
 from pylib import android_commands
 from pylib.base.test_result import SingleTestResult, TestResults
 from pylib.instrumentation import apk_info
-from pylib.instrumentation.run_java_tests import TestRunner
+from pylib.instrumentation import test_runner
 
 
 # aka the parent of com.google.android
@@ -77,11 +77,14 @@ class PythonTestBase(object):
     test = self._ComposeFullTestName(fname, suite, test)
     apks = [apk_info.ApkInfo(self.options.test_apk_path,
             self.options.test_apk_jar_path)]
-    java_test_runner = TestRunner(self.options, self.device_id, [test], False,
-                                  self.shard_index,
-                                  apks,
-                                  self.ports_to_forward)
-    return java_test_runner.Run()
+    java_test_runner = test_runner.TestRunner(self.options, self.device_id,
+                                              self.shard_index, False, apks,
+                                              self.ports_to_forward)
+    try:
+      java_test_runner.SetUp()
+      return java_test_runner.RunTest(test)[0]
+    finally:
+      java_test_runner.TearDown()
 
   def _RunJavaTests(self, fname, tests):
     """Calls a list of tests and stops at the first test failure.

@@ -6,6 +6,7 @@
 
 #include "base/file_util.h"
 #include "base/logging.h"
+#include "base/metrics/histogram.h"
 #include "base/stringprintf.h"
 #include "base/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
@@ -15,6 +16,20 @@
 #include "third_party/leveldatabase/src/include/leveldb/status.h"
 #include "third_party/leveldatabase/src/include/leveldb/options.h"
 #include "third_party/leveldatabase/src/include/leveldb/write_batch.h"
+
+
+namespace {
+
+const char session_storage_uma_name[] = "SessionStorageDatabase.Open";
+
+enum SessionStorageUMA {
+  SESSION_STORAGE_UMA_SUCCESS,
+  SESSION_STORAGE_UMA_RECREATED,
+  SESSION_STORAGE_UMA_FAIL,
+  SESSION_STORAGE_UMA_MAX
+};
+
+}  // namespace
 
 // Layout of the database:
 // | key                            | value                              |
@@ -36,7 +51,7 @@
 
 namespace dom_storage {
 
-SessionStorageDatabase::SessionStorageDatabase(const FilePath& file_path)
+SessionStorageDatabase::SessionStorageDatabase(const base::FilePath& file_path)
     : file_path_(file_path),
       db_error_(false),
       is_inconsistent_(false) {
@@ -240,6 +255,10 @@ bool SessionStorageDatabase::ReadNamespacesAndOrigins(
       current_namespace_id =
           key.substr(namespace_prefix.length(),
                      key.length() - namespace_prefix.length() - 1);
+      // Ensure that we keep track of the namespace even if it doesn't contain
+      // any origins.
+      namespaces_and_origins->insert(
+          std::make_pair(current_namespace_id, std::vector<GURL>()));
     } else {
       // The key is of the form "namespace-<namespaceid>-<origin>".
       std::string origin = key.substr(current_namespace_start_key.length());
@@ -282,10 +301,20 @@ bool SessionStorageDatabase::LazyOpen(bool create_if_needed) {
     if (!s.ok()) {
       LOG(WARNING) << "Failed to open leveldb in " << file_path_.value()
                    << ", error: " << s.ToString();
+      UMA_HISTOGRAM_ENUMERATION(session_storage_uma_name,
+                                SESSION_STORAGE_UMA_FAIL,
+                                SESSION_STORAGE_UMA_MAX);
       DCHECK(db == NULL);
       db_error_ = true;
       return false;
     }
+    UMA_HISTOGRAM_ENUMERATION(session_storage_uma_name,
+                              SESSION_STORAGE_UMA_RECREATED,
+                              SESSION_STORAGE_UMA_MAX);
+  } else {
+    UMA_HISTOGRAM_ENUMERATION(session_storage_uma_name,
+                              SESSION_STORAGE_UMA_SUCCESS,
+                              SESSION_STORAGE_UMA_MAX);
   }
   db_.reset(db);
   return true;
@@ -411,6 +440,25 @@ bool SessionStorageDatabase::DeleteAreaHelper(
     return false;
   std::string namespace_key = NamespaceKey(namespace_id, origin);
   batch->Delete(namespace_key);
+
+  // If this was the only area in the namespace, delete the namespace start key,
+  // too.
+  std::string namespace_start_key = NamespaceStartKey(namespace_id);
+  scoped_ptr<leveldb::Iterator> it(db_->NewIterator(leveldb::ReadOptions()));
+  it->Seek(namespace_start_key);
+  if (!ConsistencyCheck(it->Valid()))
+    return false;
+  // Advance the iterator 2 times (we still haven't really deleted
+  // namespace_key).
+  it->Next();
+  if (!ConsistencyCheck(it->Valid()))
+    return false;
+  it->Next();
+  if (!it->Valid())
+    return true;
+  std::string key = it->key().ToString();
+  if (key.find(namespace_start_key) != 0)
+    batch->Delete(namespace_start_key);
   return true;
 }
 

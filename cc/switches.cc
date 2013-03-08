@@ -4,6 +4,8 @@
 
 #include "cc/switches.h"
 
+#include "base/command_line.h"
+
 namespace cc {
 namespace switches {
 
@@ -16,6 +18,10 @@ const char kDisableThreadedAnimation[]      = "disable-threaded-animation";
 
 // Send a message for every frame from the impl thread to the parent compositor.
 const char kEnableCompositorFrameMessage[] = "enable-compositor-frame-message";
+
+// Paint content on the main thread instead of the compositor thread.
+// Overrides the kEnableImplSidePainting flag.
+const char kDisableImplSidePainting[] = "disable-impl-side-painting";
 
 // Paint content on the compositor thread instead of the main thread.
 const char kEnableImplSidePainting[] = "enable-impl-side-painting";
@@ -30,8 +36,14 @@ const char kEnableRightAlignedScheduling[] = "enable-right-aligned-scheduling";
 const char kEnableTopControlsPositionCalculation[] =
     "enable-top-controls-position-calculation";
 
-// The height of the movable top controls in screen pixels.
+// The height of the movable top controls.
 const char kTopControlsHeight[] = "top-controls-height";
+
+// Percentage of the top controls need to be hidden before they will auto hide.
+const char kTopControlsHideThreshold[] = "top-controls-hide-threshold";
+
+// Percentage of the top controls need to be shown before they will auto show.
+const char kTopControlsShowThreshold[] = "top-controls-show-threshold";
 
 // Number of worker threads used to rasterize content.
 const char kNumRasterThreads[] = "num-raster-threads";
@@ -62,6 +74,41 @@ const char kShowNonOccludingRects[] = "show-nonoccluding-rects";
 // Show metrics about overdraw in about:tracing recordings, such as the number
 // of pixels culled, and the number of pixels drawn, for each frame.
 const char kTraceOverdraw[] = "trace-overdraw";
+
+// Logs all rendered frames.
+const char kTraceAllRenderedFrames[]      = "trace-all-rendered-frames";
+
+// Re-rasters everything multiple times to simulate a much slower machine.
+// Give a scale factor to cause raster to take that many times longer to
+// complete, such as --slow-down-raster-scale-factor=25.
+const char kSlowDownRasterScaleFactor[] = "slow-down-raster-scale-factor";
+
+// Schedule rasterization jobs according to their estimated processing cost.
+const char kUseCheapnessEstimator[] = "use-cheapness-estimator";
+
+// The scale factor for low resolution tile contents.
+const char kLowResolutionContentsScaleFactor[] =
+    "low-resolution-contents-scale-factor";
+
+// Causes the compositor to render to textures which are then sent to the parent
+// through the texture mailbox mechanism.
+// Requires --enable-compositor-frame-message.
+const char kCompositeToMailbox[] = "composite-to-mailbox";
+
+bool IsImplSidePaintingEnabled() {
+  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
+
+  if (command_line.HasSwitch(cc::switches::kDisableImplSidePainting))
+    return false;
+  else if (command_line.HasSwitch(cc::switches::kEnableImplSidePainting))
+    return true;
+
+#if defined(OS_ANDROID)
+  return true;
+#else
+  return false;
+#endif
+}
 
 }  // namespace switches
 }  // namespace cc

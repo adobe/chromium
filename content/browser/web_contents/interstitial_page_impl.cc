@@ -24,6 +24,7 @@
 #include "content/common/view_messages.h"
 #include "content/port/browser/render_view_host_delegate_view.h"
 #include "content/port/browser/render_widget_host_view_port.h"
+#include "content/port/browser/web_contents_view_port.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/content_browser_client.h"
@@ -33,7 +34,6 @@
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/storage_partition.h"
-#include "content/public/browser/web_contents_view.h"
 #include "content/public/common/bindings_policy.h"
 #include "content/public/common/page_transition_types.h"
 #include "net/base/escape.h"
@@ -164,6 +164,9 @@ InterstitialPageImpl::~InterstitialPageImpl() {
 }
 
 void InterstitialPageImpl::Show() {
+  if (!enabled())
+    return;
+
   // If an interstitial is already showing or about to be shown, close it before
   // showing the new one.
   // Be careful not to take an action on the old interstitial more than once.
@@ -210,7 +213,7 @@ void InterstitialPageImpl::Show() {
     // Give delegates a chance to set some states on the navigation entry.
     delegate_->OverrideEntry(entry);
 
-    web_contents_->GetController().AddTransientEntry(entry);
+    web_contents_->GetController().SetTransientEntry(entry);
   }
 
   DCHECK(!render_view_host_);
@@ -235,6 +238,8 @@ void InterstitialPageImpl::Show() {
 
 void InterstitialPageImpl::Hide() {
   // We may have already been hidden, and are just waiting to be deleted.
+  // We can't check for enabled() here, because some callers have already
+  // called Disable.
   if (!render_view_host_)
     return;
 
@@ -268,8 +273,7 @@ void InterstitialPageImpl::Hide() {
                  weak_ptr_factory_.GetWeakPtr(),
                  render_view_host_));
   render_view_host_ = NULL;
-  if (web_contents_->GetInterstitialPage())
-    web_contents_->remove_interstitial_page();
+  web_contents_->DetachInterstitialPage();
   // Let's revert to the original title if necessary.
   NavigationEntry* entry = web_contents_->GetController().GetActiveEntry();
   if (!new_navigation_ && should_revert_web_contents_title_) {
@@ -277,16 +281,15 @@ void InterstitialPageImpl::Hide() {
     web_contents_->NotifyNavigationStateChanged(INVALIDATE_TYPE_TITLE);
   }
 
-  NotificationService::current()->Notify(
-      NOTIFICATION_INTERSTITIAL_DETACHED,
-      Source<WebContents>(web_contents_),
-      NotificationService::NoDetails());
-
   InterstitialPageMap::iterator iter =
       g_web_contents_to_interstitial_page->find(web_contents_);
   DCHECK(iter != g_web_contents_to_interstitial_page->end());
   if (iter != g_web_contents_to_interstitial_page->end())
     g_web_contents_to_interstitial_page->erase(iter);
+
+  // Clear the WebContents pointer, because it may now be deleted.
+  // This signifies that we are in the process of shutting down.
+  web_contents_ = NULL;
 }
 
 void InterstitialPageImpl::Observe(
@@ -358,8 +361,11 @@ void InterstitialPageImpl::RenderViewGone(RenderViewHost* render_view_host,
                                           base::TerminationStatus status,
                                           int error_code) {
   // Our renderer died. This should not happen in normal cases.
-  // Just dismiss the interstitial.
-  DontProceed();
+  // If we haven't already started shutdown, just dismiss the interstitial.
+  // We cannot check for enabled() here, because we may have called Disable
+  // without calling Hide.
+  if (render_view_host_)
+    DontProceed();
 }
 
 void InterstitialPageImpl::DidNavigate(
@@ -368,7 +374,7 @@ void InterstitialPageImpl::DidNavigate(
   // A fast user could have navigated away from the page that triggered the
   // interstitial while the interstitial was loading, that would have disabled
   // us. In that case we can dismiss ourselves.
-  if (!enabled_) {
+  if (!enabled()) {
     DontProceed();
     return;
   }
@@ -379,16 +385,7 @@ void InterstitialPageImpl::DidNavigate(
 
   // The RenderViewHost has loaded its contents, we can show it now.
   render_view_host_->GetView()->Show();
-  web_contents_->set_interstitial_page(this);
-
-  // This notification hides the bookmark bar. Note that this has to happen
-  // after the interstitial page was registered with |web_contents_|, since
-  // there will be a callback to |web_contents_| testing if an interstitial page
-  // is showing before hiding the bookmark bar.
-  NotificationService::current()->Notify(
-      NOTIFICATION_INTERSTITIAL_ATTACHED,
-      Source<WebContents>(web_contents_),
-      NotificationService::NoDetails());
+  web_contents_->AttachInterstitialPage(this);
 
   RenderWidgetHostView* rwh_view =
       web_contents_->GetRenderViewHost()->GetView();
@@ -468,12 +465,15 @@ void InterstitialPageImpl::RenderWidgetDeleted(
 bool InterstitialPageImpl::PreHandleKeyboardEvent(
     const NativeWebKeyboardEvent& event,
     bool* is_keyboard_shortcut) {
+  if (!enabled())
+    return false;
   return web_contents_->PreHandleKeyboardEvent(event, is_keyboard_shortcut);
 }
 
 void InterstitialPageImpl::HandleKeyboardEvent(
       const NativeWebKeyboardEvent& event) {
-  return web_contents_->HandleKeyboardEvent(event);
+  if (enabled())
+    web_contents_->HandleKeyboardEvent(event);
 }
 
 WebContents* InterstitialPageImpl::web_contents() const {
@@ -481,6 +481,9 @@ WebContents* InterstitialPageImpl::web_contents() const {
 }
 
 RenderViewHost* InterstitialPageImpl::CreateRenderViewHost() {
+  if (!enabled())
+    return NULL;
+
   // Interstitial pages don't want to share the session storage so we mint a
   // new one.
   BrowserContext* browser_context = web_contents()->GetBrowserContext();
@@ -504,8 +507,10 @@ WebContentsView* InterstitialPageImpl::CreateWebContentsView() {
   if (!enabled() || !create_view_)
     return NULL;
   WebContentsView* web_contents_view = web_contents()->GetView();
+  WebContentsViewPort* web_contents_view_port =
+      static_cast<WebContentsViewPort*>(web_contents_view);
   RenderWidgetHostView* view =
-      web_contents_view->CreateViewForWidget(render_view_host_);
+      web_contents_view_port->CreateViewForWidget(render_view_host_);
   render_view_host_->SetView(view);
   render_view_host_->AllowBindings(BINDINGS_POLICY_DOM_AUTOMATION);
 
@@ -521,6 +526,11 @@ WebContentsView* InterstitialPageImpl::CreateWebContentsView() {
 }
 
 void InterstitialPageImpl::Proceed() {
+  // Don't repeat this if we are already shutting down.  We cannot check for
+  // enabled() here, because we may have called Disable without calling Hide.
+  if (!render_view_host_)
+    return;
+
   if (action_taken_ != NO_ACTION) {
     NOTREACHED();
     return;
@@ -553,6 +563,10 @@ void InterstitialPageImpl::Proceed() {
 }
 
 void InterstitialPageImpl::DontProceed() {
+  // Don't repeat this if we are already shutting down.  We cannot check for
+  // enabled() here, because we may have called Disable without calling Hide.
+  if (!render_view_host_)
+    return;
   DCHECK(action_taken_ != DONT_PROCEED_ACTION);
 
   Disable();

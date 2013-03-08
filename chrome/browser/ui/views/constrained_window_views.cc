@@ -11,9 +11,10 @@
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/themes/theme_service.h"
+#include "chrome/browser/themes/theme_properties.h"
 #include "chrome/browser/ui/toolbar/toolbar_model.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
+#include "chrome/browser/ui/views/theme_image_mapper.h"
 #include "chrome/browser/ui/web_contents_modal_dialog_manager.h"
 #include "chrome/common/chrome_constants.h"
 #include "content/public/browser/navigation_controller.h"
@@ -109,7 +110,8 @@ class XPWindowResources : public views::WindowResources {
   }
   virtual ~XPWindowResources() {}
 
-  virtual gfx::ImageSkia* GetPartImage(views::FramePartImage part_id) const {
+  virtual gfx::ImageSkia* GetPartImage(
+      views::FramePartImage part_id) const OVERRIDE {
     return images_[part_id];
   }
 
@@ -139,7 +141,8 @@ class VistaWindowResources : public views::WindowResources {
   }
   virtual ~VistaWindowResources() {}
 
-  virtual gfx::ImageSkia* GetPartImage(views::FramePartImage part_id) const {
+  virtual gfx::ImageSkia* GetPartImage(
+      views::FramePartImage part_id) const OVERRIDE {
     return images_[part_id];
   }
 
@@ -168,10 +171,11 @@ gfx::ImageSkia* VistaWindowResources::images_[];
 class ConstrainedWindowFrameView : public views::NonClientFrameView,
                                    public views::ButtonListener {
  public:
-  explicit ConstrainedWindowFrameView(ConstrainedWindowViews* container);
+  ConstrainedWindowFrameView(views::Widget* container,
+                             bool browser_is_off_the_record);
   virtual ~ConstrainedWindowFrameView();
 
-  void UpdateWindowTitle();
+  virtual void UpdateWindowTitle() OVERRIDE;
 
   // Overridden from views::NonClientFrameView:
   virtual gfx::Rect GetBoundsForClientView() const OVERRIDE;
@@ -224,7 +228,7 @@ class ConstrainedWindowFrameView : public views::NonClientFrameView,
   gfx::Rect CalculateClientAreaBounds(int width, int height) const;
 
   SkColor GetTitleColor() const {
-    return container_->owner()->GetBrowserContext()->IsOffTheRecord()
+    return browser_is_off_the_record_
 #if defined(OS_WIN) && !defined(USE_AURA)
             || !ui::win::IsAeroGlassEnabled()
 #endif
@@ -234,7 +238,9 @@ class ConstrainedWindowFrameView : public views::NonClientFrameView,
   // Loads the appropriate set of WindowResources for the frame view.
   void InitWindowResources();
 
-  ConstrainedWindowViews* container_;
+  views::Widget* container_;
+
+  bool browser_is_off_the_record_;
 
   scoped_ptr<views::WindowResources> resources_;
 
@@ -285,9 +291,10 @@ const SkColor kContentsBorderShadow = SkColorSetARGB(51, 0, 0, 0);
 }  // namespace
 
 ConstrainedWindowFrameView::ConstrainedWindowFrameView(
-    ConstrainedWindowViews* container)
+    views::Widget* container, bool browser_is_off_the_record)
     : NonClientFrameView(),
       container_(container),
+      browser_is_off_the_record_(browser_is_off_the_record),
       close_button_(new views::ImageButton(this)),
       frame_background_(new views::FrameBackground()) {
   InitClass();
@@ -383,7 +390,7 @@ void ConstrainedWindowFrameView::OnThemeChanged() {
 void ConstrainedWindowFrameView::ButtonPressed(
     views::Button* sender, const ui::Event& event) {
   if (sender == close_button_)
-    container_->CloseWebContentsModalDialog();
+    container_->Close();
 }
 
 int ConstrainedWindowFrameView::NonClientBorderThickness() const {
@@ -431,9 +438,12 @@ gfx::Rect ConstrainedWindowFrameView::IconBounds() const {
 
 void ConstrainedWindowFrameView::PaintFrameBorder(gfx::Canvas* canvas) {
   ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
-  frame_background_->set_frame_color(ThemeService::GetDefaultColor(
-      ThemeService::COLOR_FRAME));
-  gfx::ImageSkia* theme_frame = rb.GetImageSkiaNamed(IDR_THEME_FRAME);
+  frame_background_->set_frame_color(ThemeProperties::GetDefaultColor(
+      ThemeProperties::COLOR_FRAME));
+  chrome::HostDesktopType desktop_type =
+      chrome::GetHostDesktopTypeForNativeView(GetWidget()->GetNativeView());
+  gfx::ImageSkia* theme_frame = rb.GetImageSkiaNamed(
+      chrome::MapThemeImage(desktop_type, IDR_THEME_FRAME));
   frame_background_->set_theme_image(theme_frame);
   frame_background_->set_theme_overlay_image(NULL);
   frame_background_->set_top_area_height(theme_frame->height());
@@ -538,7 +548,7 @@ class ConstrainedWindowFrameViewAsh : public ash::CustomFrameViewAsh {
         container_(NULL) {
   }
 
-  void Init(ConstrainedWindowViews* container) {
+  void Init(views::Widget* container) {
     container_ = container;
     ash::CustomFrameViewAsh::Init(container);
     // Always use "active" look.
@@ -549,117 +559,40 @@ class ConstrainedWindowFrameViewAsh : public ash::CustomFrameViewAsh {
   virtual void ButtonPressed(views::Button* sender,
                              const ui::Event& event) OVERRIDE {
     if (sender == close_button())
-      container_->CloseWebContentsModalDialog();
+      container_->Close();
   }
 
  private:
-  ConstrainedWindowViews* container_;  // not owned
+  views::Widget* container_;  // not owned
   DISALLOW_COPY_AND_ASSIGN(ConstrainedWindowFrameViewAsh);
 };
 #endif  // defined(USE_ASH)
 
-ConstrainedWindowViews::ConstrainedWindowViews(
-    content::WebContents* web_contents,
-    views::WidgetDelegate* widget_delegate)
-    : web_contents_(web_contents),
-      ALLOW_THIS_IN_INITIALIZER_LIST(native_constrained_window_(
-          NativeConstrainedWindow::CreateNativeConstrainedWindow(this))) {
-  views::Widget::InitParams params(views::Widget::InitParams::TYPE_WINDOW);
+views::Widget* CreateWebContentsModalDialogViews(
+    views::WidgetDelegate* widget_delegate,
+    gfx::NativeView parent) {
+  views::Widget* dialog = new views::Widget;
+
+  views::Widget::InitParams params;
   params.delegate = widget_delegate;
-  params.native_widget = native_constrained_window_->AsNativeWidget();
   params.child = true;
+  params.parent = parent;
 
-  params.parent = web_contents_->GetNativeView();
+  dialog->Init(params);
 
+  return dialog;
+}
+
+views::NonClientFrameView* CreateConstrainedStyleNonClientFrameView(
+    views::Widget* widget,
+    content::BrowserContext* browser_context) {
+  if (views::DialogDelegate::UseNewStyle())
+    return views::DialogDelegate::CreateNewStyleFrameView(widget);
 #if defined(USE_ASH)
-  // Ash window headers can be transparent.
-  params.transparent = true;
-  views::corewm::SetChildWindowVisibilityChangesAnimated(params.parent);
-  // No animations should get performed on the window since that will re-order
-  // the window stack which will then cause many problems.
-  if (params.parent && params.parent->parent()) {
-    params.parent->parent()->SetProperty(aura::client::kAnimationsDisabledKey,
-                                         true);
-  }
-#endif
-  Init(params);
-
-  WebContentsModalDialogManager* web_contents_modal_dialog_manager =
-      WebContentsModalDialogManager::FromWebContents(web_contents_);
-  web_contents_modal_dialog_manager->AddDialog(this);
-#if defined(USE_ASH)
-  GetNativeWindow()->SetProperty(ash::kConstrainedWindowKey, true);
-  views::corewm::SetModalParent(GetNativeWindow(),
-                                web_contents_->GetView()->GetNativeView());
-#endif
-}
-
-ConstrainedWindowViews::~ConstrainedWindowViews() {
-}
-
-void ConstrainedWindowViews::ShowWebContentsModalDialog() {
-  Show();
-  FocusWebContentsModalDialog();
-}
-
-void ConstrainedWindowViews::CloseWebContentsModalDialog() {
-#if defined(USE_ASH)
-  gfx::NativeView view = web_contents_->GetNativeView();
-  // Allow the parent to animate again.
-  if (view && view->parent())
-    view->parent()->ClearProperty(aura::client::kAnimationsDisabledKey);
-#endif
-  WebContentsModalDialogManager* web_contents_modal_dialog_manager =
-      WebContentsModalDialogManager::FromWebContents(web_contents_);
-  web_contents_modal_dialog_manager->WillClose(this);
-  Close();
-}
-
-void ConstrainedWindowViews::FocusWebContentsModalDialog() {
-  if (widget_delegate() && widget_delegate()->GetInitiallyFocusedView())
-    widget_delegate()->GetInitiallyFocusedView()->RequestFocus();
-#if defined(USE_ASH)
-  // We don't necessarily have a RootWindow yet.
-  if (GetNativeView()->GetRootWindow())
-    GetNativeView()->Focus();
-#endif
-}
-
-void ConstrainedWindowViews::PulseWebContentsModalDialog() {
-}
-
-gfx::NativeWindow ConstrainedWindowViews::GetNativeWindow() {
-  return Widget::GetNativeWindow();
-}
-
-views::NonClientFrameView* ConstrainedWindowViews::CreateNonClientFrameView() {
-#if defined(USE_ASH)
-  CommandLine* command_line = CommandLine::ForCurrentProcess();
-  if (command_line->HasSwitch(switches::kEnableNewDialogStyle))
-    return ash::Shell::GetInstance()->CreateDefaultNonClientFrameView(this);
   ConstrainedWindowFrameViewAsh* frame = new ConstrainedWindowFrameViewAsh;
-  frame->Init(this);
+  frame->Init(widget);
   return frame;
 #endif
-  return new ConstrainedWindowFrameView(this);
-}
-
-void ConstrainedWindowViews::OnNativeConstrainedWindowDestroyed() {
-  WebContentsModalDialogManager* web_contents_modal_dialog_manager =
-      WebContentsModalDialogManager::FromWebContents(web_contents_);
-  web_contents_modal_dialog_manager->WillClose(this);
-}
-
-void ConstrainedWindowViews::OnNativeConstrainedWindowMouseActivate() {
-  Activate();
-}
-
-views::internal::NativeWidgetDelegate*
-    ConstrainedWindowViews::AsNativeWidgetDelegate() {
-  return this;
-}
-
-int ConstrainedWindowViews::GetNonClientComponent(const gfx::Point& point) {
-  // Prevent a constrained window to be moved by the user.
-  return HTNOWHERE;
+  return new ConstrainedWindowFrameView(widget,
+                                        browser_context->IsOffTheRecord());
 }

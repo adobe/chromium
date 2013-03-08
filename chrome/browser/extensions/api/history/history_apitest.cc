@@ -4,14 +4,16 @@
 
 #include "base/base_switches.h"
 #include "base/command_line.h"
+#include "base/prefs/pref_service.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/extensions/extension_apitest.h"
-#include "chrome/browser/history/history.h"
+#include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/history/history_types.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/pref_names.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/mock_host_resolver.h"
 
@@ -19,7 +21,7 @@ namespace extensions {
 
 class HistoryApiTest : public ExtensionApiTest {
  public:
-  virtual void SetUpInProcessBrowserTestFixture() {
+  virtual void SetUpInProcessBrowserTestFixture() OVERRIDE {
     ExtensionApiTest::SetUpInProcessBrowserTestFixture();
 
     host_resolver()->AddRule("www.a.com", "127.0.0.1");
@@ -28,7 +30,7 @@ class HistoryApiTest : public ExtensionApiTest {
     ASSERT_TRUE(StartTestServer());
   }
 
-  virtual void SetUpCommandLine(CommandLine* command_line) {
+  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
     ExtensionApiTest::SetUpCommandLine(command_line);
     command_line->AppendSwitch(switches::kEnableExperimentalExtensionApis);
   }
@@ -52,6 +54,13 @@ IN_PROC_BROWSER_TEST_F(HistoryApiTest, DISABLED_TimedSearch) {
 #endif
 IN_PROC_BROWSER_TEST_F(HistoryApiTest, MAYBE_Delete) {
   ASSERT_TRUE(RunExtensionSubtest("history", "delete.html")) << message_;
+}
+
+IN_PROC_BROWSER_TEST_F(HistoryApiTest, DeleteProhibited) {
+  browser()->profile()->GetPrefs()->
+      SetBoolean(prefs::kAllowDeletingBrowserHistory, false);
+  ASSERT_TRUE(RunExtensionSubtest("history", "delete_prohibited.html")) <<
+      message_;
 }
 
 // See crbug.com/79074

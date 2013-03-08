@@ -19,16 +19,19 @@ class ScriptBadgeHandler : public ManifestHandler {
   ScriptBadgeHandler();
   virtual ~ScriptBadgeHandler();
 
-  virtual bool Parse(const base::Value* value,
-                     Extension* extension,
-                     string16* error) OVERRIDE;
+  virtual bool Parse(Extension* extension, string16* error) OVERRIDE;
+  virtual const std::vector<std::string> PrerequisiteKeys() const OVERRIDE;
+  virtual bool AlwaysParseForType(Manifest::Type type) const OVERRIDE;
 
-  virtual bool HasNoKey(Extension* extension, string16* error) OVERRIDE;
  private:
   // Sets the fields of ActionInfo to the default values, matching the parent
   // extension's title and icons. Performed whether or not the script_badge key
   // is present in the manifest.
   void SetActionInfoDefaults(const Extension* extension, ActionInfo* info);
+
+  virtual const std::vector<std::string> Keys() const OVERRIDE;
+
+  DISALLOW_COPY_AND_ASSIGN(ScriptBadgeHandler);
 };
 
 }  // namespace extensions

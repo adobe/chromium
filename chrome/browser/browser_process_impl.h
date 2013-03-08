@@ -25,7 +25,7 @@ class ChromeNetLog;
 class ChromeResourceDispatcherHostDelegate;
 class CommandLine;
 class RemoteDebuggingServer;
-class PrefServiceSimple;
+class PrefRegistrySimple;
 class PromoResourceService;
 
 #if defined(ENABLE_PLUGIN_INSTALLATION)
@@ -76,7 +76,7 @@ class BrowserProcessImpl : public BrowserProcess,
   virtual IOThread* io_thread() OVERRIDE;
   virtual WatchDogThread* watchdog_thread() OVERRIDE;
   virtual ProfileManager* profile_manager() OVERRIDE;
-  virtual PrefServiceSimple* local_state() OVERRIDE;
+  virtual PrefService* local_state() OVERRIDE;
   virtual net::URLRequestContextGetter* system_request_context() OVERRIDE;
   virtual chrome_variations::VariationsService* variations_service() OVERRIDE;
 #if defined(OS_CHROMEOS)
@@ -96,6 +96,7 @@ class BrowserProcessImpl : public BrowserProcess,
   virtual AutomationProviderList* GetAutomationProviderList() OVERRIDE;
   virtual void CreateDevToolsHttpProtocolHandler(
       Profile* profile,
+      chrome::HostDesktopType host_desktop_type,
       const std::string& ip,
       int port,
       const std::string& frontend_url) OVERRIDE;
@@ -132,6 +133,8 @@ class BrowserProcessImpl : public BrowserProcess,
   virtual void PlatformSpecificCommandLineProcessing(
       const CommandLine& command_line) OVERRIDE;
 
+  static void RegisterPrefs(PrefRegistrySimple* registry);
+
  private:
   void CreateMetricsService();
   void CreateWatchdogThread();
@@ -144,9 +147,6 @@ class BrowserProcessImpl : public BrowserProcess,
   void CreateIconManager();
   void CreateIntranetRedirectDetector();
   void CreateNotificationUIManager();
-#if defined(ENABLE_MESSAGE_CENTER) && !defined(USE_ASH)
-  void CreateMessageCenter();
-#endif
   void CreateStatusTrayManager();
   void CreatePrintPreviewDialogController();
   void CreateBackgroundPrintingManager();
@@ -182,7 +182,7 @@ class BrowserProcessImpl : public BrowserProcess,
   scoped_ptr<ProfileManager> profile_manager_;
 
   bool created_local_state_;
-  scoped_ptr<PrefServiceSimple> local_state_;
+  scoped_ptr<PrefService> local_state_;
 
   bool created_icon_manager_;
   scoped_ptr<IconManager> icon_manager_;
@@ -211,12 +211,6 @@ class BrowserProcessImpl : public BrowserProcess,
   // Manager for desktop notification UI.
   bool created_notification_ui_manager_;
   scoped_ptr<NotificationUIManager> notification_ui_manager_;
-
-#if defined(ENABLE_MESSAGE_CENTER) && !defined(USE_ASH)
-  // MessageCenter keeps currently displayed UI notifications.
-  scoped_ptr<message_center::MessageCenter> message_center_;
-  bool created_message_center_;
-#endif
 
 #if defined(ENABLE_AUTOMATION)
   scoped_ptr<AutomationProviderList> automation_provider_list_;

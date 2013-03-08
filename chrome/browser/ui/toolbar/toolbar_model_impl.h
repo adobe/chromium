@@ -18,6 +18,7 @@ class ToolbarModelDelegate;
 
 namespace content {
 class NavigationController;
+class WebContents;
 }
 
 namespace net {
@@ -31,6 +32,9 @@ class ToolbarModelImpl : public ToolbarModel {
  public:
   explicit ToolbarModelImpl(ToolbarModelDelegate* delegate);
   virtual ~ToolbarModelImpl();
+
+  static SecurityLevel GetSecurityLevelForWebContents(
+      content::WebContents* web_contents);
 
   // Overriden from ToolbarModel.
   virtual string16 GetText(
@@ -53,13 +57,12 @@ class ToolbarModelImpl : public ToolbarModel {
   // If this returns NULL, default values are used.
   content::NavigationController* GetNavigationController() const;
 
-  // Attempt to extract search terms from the current url. Called by GetText if
-  // |display_search_urls_as_search_terms| is true and by
-  // WouldReplaceSearchURLWithSearchTerms.
-  string16 TryToExtractSearchTermsFromURL() const;
-
   // Helper method to extract the profile from the navigation controller.
   Profile* GetProfile() const;
+
+  // Returns search terms as in chrome::search::GetSearchTerms unless those
+  // terms would be treated by the omnibox as a navigation.
+  string16 GetSearchTerms() const;
 
   ToolbarModelDelegate* delegate_;
 

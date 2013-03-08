@@ -10,8 +10,8 @@
 #include "chrome/browser/extensions/extension_test_message_listener.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/login/login_prompt.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/features/feature.h"
@@ -41,7 +41,7 @@ class CancelLoginDialog : public content::NotificationObserver {
 
   virtual void Observe(int type,
                        const content::NotificationSource& source,
-                       const content::NotificationDetails& details) {
+                       const content::NotificationDetails& details) OVERRIDE {
     LoginHandler* handler =
         content::Details<LoginNotificationDetails>(details).ptr()->handler();
     handler->CancelAuth();
@@ -57,7 +57,7 @@ class CancelLoginDialog : public content::NotificationObserver {
 
 class ExtensionWebRequestApiTest : public ExtensionApiTest {
  public:
-  virtual void SetUpInProcessBrowserTestFixture() {
+  virtual void SetUpInProcessBrowserTestFixture() OVERRIDE {
     // TODO(battre): remove this when declarative webRequest API becomes stable.
     CommandLine::ForCurrentProcess()->AppendSwitch(
         switches::kEnableExperimentalExtensionApis);
@@ -114,7 +114,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionWebRequestApiTest, WebRequestNewTab) {
   ASSERT_TRUE(RunExtensionSubtest("webrequest", "test_newTab.html"))
       << message_;
 
-  WebContents* tab = chrome::GetActiveWebContents(browser());
+  WebContents* tab = browser()->tab_strip_model()->GetActiveWebContents();
   content::WaitForLoadStop(tab);
 
   ResultCatcher catcher;
@@ -142,9 +142,21 @@ IN_PROC_BROWSER_TEST_F(ExtensionWebRequestApiTest, WebRequestNewTab) {
   ASSERT_TRUE(catcher.GetNextResult()) << catcher.message();
 }
 
-IN_PROC_BROWSER_TEST_F(ExtensionWebRequestApiTest, WebRequestDeclarative) {
-  ASSERT_TRUE(RunExtensionSubtest("webrequest", "test_declarative.html")) <<
-      message_;
+IN_PROC_BROWSER_TEST_F(ExtensionWebRequestApiTest, WebRequestDeclarative1) {
+  ASSERT_TRUE(RunExtensionSubtest("webrequest", "test_declarative1.html"))
+      << message_;
+}
+
+// This test times out on XP. See http://crbug.com/178296
+#if defined(OS_WIN)
+#define MAYBE_WebRequestDeclarative2 DISABLED_WebRequestDeclarative2
+#else
+#define MAYBE_WebRequestDeclarative2 WebRequestDeclarative2
+#endif
+IN_PROC_BROWSER_TEST_F(ExtensionWebRequestApiTest,
+                       MAYBE_WebRequestDeclarative2) {
+  ASSERT_TRUE(RunExtensionSubtest("webrequest", "test_declarative2.html"))
+      << message_;
 }
 
 IN_PROC_BROWSER_TEST_F(ExtensionWebRequestApiTest,
@@ -190,7 +202,7 @@ void ExtensionWebRequestApiTest::RunPermissionTest(
       test_server()->GetURL("files/extensions/test_file.html"));
 
   std::string body;
-  WebContents* tab = chrome::GetActiveWebContents(browser());
+  WebContents* tab = browser()->tab_strip_model()->GetActiveWebContents();
   ASSERT_TRUE(content::ExecuteScriptAndExtractString(
         tab,
         "window.domAutomationController.send(document.body.textContent)",
@@ -211,7 +223,7 @@ void ExtensionWebRequestApiTest::RunPermissionTest(
       test_server()->GetURL("files/extensions/test_file.html"));
 
   body.clear();
-  WebContents* otr_tab = chrome::GetActiveWebContents(otr_browser);
+  WebContents* otr_tab = otr_browser->tab_strip_model()->GetActiveWebContents();
   ASSERT_TRUE(content::ExecuteScriptAndExtractString(
       otr_tab,
       "window.domAutomationController.send(document.body.textContent)",
@@ -245,16 +257,12 @@ IN_PROC_BROWSER_TEST_F(ExtensionWebRequestApiTest,
 }
 
 IN_PROC_BROWSER_TEST_F(ExtensionWebRequestApiTest, PostData1) {
-  // Request body access is only enabled on dev (and canary).
-  Feature::ScopedCurrentChannel sc(chrome::VersionInfo::CHANNEL_DEV);
   // Test HTML form POST data access with the default and "url" encoding.
   ASSERT_TRUE(RunExtensionSubtest("webrequest", "test_post1.html")) <<
       message_;
 }
 
 IN_PROC_BROWSER_TEST_F(ExtensionWebRequestApiTest, PostData2) {
-  // Request body access is only enabled on dev (and canary).
-  Feature::ScopedCurrentChannel sc(chrome::VersionInfo::CHANNEL_DEV);
   // Test HTML form POST data access with the multipart and plaintext encoding.
   ASSERT_TRUE(RunExtensionSubtest("webrequest", "test_post2.html")) <<
       message_;

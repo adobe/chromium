@@ -33,20 +33,38 @@ using WebKit::WebScriptSource;
 using WebKit::WebString;
 using WebKit::WebView;
 
+namespace {
+
 // The delay in milliseconds that we'll wait before checking to see if the
 // translate library injected in the page is ready.
-static const int kTranslateInitCheckDelayMs = 150;
+const int kTranslateInitCheckDelayMs = 150;
 
 // The maximum number of times we'll check to see if the translate library
 // injected in the page is ready.
-static const int kMaxTranslateInitCheckAttempts = 5;
+const int kMaxTranslateInitCheckAttempts = 5;
 
 // The delay we wait in milliseconds before checking whether the translation has
 // finished.
-static const int kTranslateStatusCheckDelayMs = 400;
+const int kTranslateStatusCheckDelayMs = 400;
 
 // Language name passed to the Translate element for it to detect the language.
-static const char* const kAutoDetectionLanguage = "auto";
+const char* const kAutoDetectionLanguage = "auto";
+
+// Language code synonyms. Some languages have changed codes over the years
+// and sometimes the older codes are used, so we must see them as synonyms.
+struct LanguageCodeSynonym {
+  const char* const to;  // code used in supporting list
+  const char* const from;  // synonym code
+};
+
+const LanguageCodeSynonym kLanguageCodeSynonyms[] = {
+  {"no", "nb"},
+  {"iw", "he"},
+  {"jw", "jv"},
+  {"tl", "fil"},
+};
+
+}  // namespace
 
 ////////////////////////////////////////////////////////////////////////////////
 // TranslateHelper, public:
@@ -74,41 +92,10 @@ void TranslateHelper::PageCaptured(const string16& contents) {
   // language of the intended audience (a distinction really only
   // relevant for things like langauge textbooks).  This distinction
   // shouldn't affect translation.
-  std::string language = document.contentLanguage().utf8();
-  size_t coma_index = language.find(',');
-  if (coma_index != std::string::npos) {
-    // There are more than 1 language specified, just keep the first one.
-    language = language.substr(0, coma_index);
-  }
-  TrimWhitespaceASCII(language, TRIM_ALL, &language);
-
-  // An underscore instead of a dash is a frequent mistake.
-  size_t underscore_index = language.find('_');
-  if (underscore_index != std::string::npos)
-    language[underscore_index] = '-';
-
-  // Change everything up to a dash to lower-case and everything after to upper.
-  size_t dash_index = language.find('-');
-  if (dash_index != std::string::npos) {
-    language = StringToLowerASCII(language.substr(0, dash_index)) +
-        StringToUpperASCII(language.substr(dash_index));
-  } else {
-    language = StringToLowerASCII(language);
-  }
-
-#if defined(ENABLE_LANGUAGE_DETECTION)
-  if (language.empty()) {
-    base::TimeTicks begin_time = base::TimeTicks::Now();
-    language = DetermineTextLanguage(contents);
-    UMA_HISTOGRAM_MEDIUM_TIMES("Renderer4.LanguageDetection",
-                               base::TimeTicks::Now() - begin_time);
-  } else {
-    VLOG(9) << "PageLanguageFromMetaTag: " << language;
-  }
-#else
+  std::string content_language = document.contentLanguage().utf8();
+  std::string language = DeterminePageLanguage(content_language, contents);
   if (language.empty())
     return;
-#endif  // defined(ENABLE_LANGUAGE_DETECTION)
 
   Send(new ChromeViewHostMsg_TranslateLanguageDetermined(
       routing_id(), language, IsPageTranslatable(&document)));
@@ -120,26 +107,6 @@ void TranslateHelper::CancelPendingTranslation() {
   page_id_ = -1;
   source_lang_.clear();
   target_lang_.clear();
-}
-
-// static
-bool TranslateHelper::IsPageTranslatable(WebDocument* document) {
-  std::vector<WebElement> meta_elements;
-  webkit_glue::GetMetaElementsWithAttribute(document,
-                                            ASCIIToUTF16("name"),
-                                            ASCIIToUTF16("google"),
-                                            &meta_elements);
-  std::vector<WebElement>::const_iterator iter;
-  for (iter = meta_elements.begin(); iter != meta_elements.end(); ++iter) {
-    WebString attribute = iter->getAttribute("value");
-    if (attribute.isNull())  // We support both 'value' and 'content'.
-      attribute = iter->getAttribute("content");
-    if (attribute.isNull())
-      continue;
-    if (LowerCaseEqualsASCII(attribute, "notranslate"))
-      return false;
-  }
-  return true;
 }
 
 #if defined(ENABLE_LANGUAGE_DETECTION)
@@ -155,6 +122,9 @@ std::string TranslateHelper::DetermineTextLanguage(const string16& text) {
   // We don't trust the result if the CLD reports that the detection is not
   // reliable, or if the actual text used to detect the language was less than
   // 100 bytes (short texts can often lead to wrong results).
+  // TODO(toyoshim): CLD provides |is_reliable| flag. But, it just says that
+  // the determined language code is correct with 50% confidence. Chrome should
+  // handle the real confidence value to judge.
   if (is_reliable && text_bytes >= 100 && cld_language != NUM_LANGUAGES &&
       cld_language != UNKNOWN_LANGUAGE && cld_language != TG_UNKNOWN_LANGUAGE) {
     // We should not use LanguageCode_ISO_639_1 because it does not cover all
@@ -241,6 +211,118 @@ bool TranslateHelper::DontDelayTasks() {
 ////////////////////////////////////////////////////////////////////////////////
 // TranslateHelper, private:
 //
+// static
+void TranslateHelper::CorrectLanguageCodeTypo(std::string* code) {
+  DCHECK(code);
+
+  size_t coma_index = code->find(',');
+  if (coma_index != std::string::npos) {
+    // There are more than 1 language specified, just keep the first one.
+    *code = code->substr(0, coma_index);
+  }
+  TrimWhitespaceASCII(*code, TRIM_ALL, code);
+
+  // An underscore instead of a dash is a frequent mistake.
+  size_t underscore_index = code->find('_');
+  if (underscore_index != std::string::npos)
+    (*code)[underscore_index] = '-';
+
+  // Change everything up to a dash to lower-case and everything after to upper.
+  size_t dash_index = code->find('-');
+  if (dash_index != std::string::npos) {
+    *code = StringToLowerASCII(code->substr(0, dash_index)) +
+        StringToUpperASCII(code->substr(dash_index));
+  } else {
+    *code = StringToLowerASCII(*code);
+  }
+}
+
+// static
+void TranslateHelper::ConvertLanguageCodeSynonym(std::string* code) {
+  DCHECK(code);
+
+  // Apply liner search here because number of items in the list is just four.
+  for (size_t i = 0; i < arraysize(kLanguageCodeSynonyms); ++i) {
+    if (code->compare(kLanguageCodeSynonyms[i].from) == 0) {
+      *code = std::string(kLanguageCodeSynonyms[i].to);
+      break;
+    }
+  }
+}
+
+// static
+void TranslateHelper::ResetInvalidLanguageCode(std::string* code) {
+  // Roughly check if the language code follows [a-z][a-z](-[A-Z][A-Z]).
+  size_t dash_index = code->find('-');
+  if (!(dash_index == 2 && code->size() == 5) &&
+      !(dash_index == std::string::npos && code->size() == 2)) {
+    // Reset |language| to ignore the invalid code.
+    *code = std::string();
+  }
+}
+
+// static
+std::string TranslateHelper::DeterminePageLanguage(const std::string& code,
+                                                   const string16& contents) {
+#if defined(ENABLE_LANGUAGE_DETECTION)
+  base::TimeTicks begin_time = base::TimeTicks::Now();
+  std::string cld_language = DetermineTextLanguage(contents);
+  UMA_HISTOGRAM_MEDIUM_TIMES("Renderer4.LanguageDetection",
+                             base::TimeTicks::Now() - begin_time);
+  ConvertLanguageCodeSynonym(&cld_language);
+  VLOG(9) << "CLD determined language code: " << cld_language;
+
+  // If |code| is empty, just use CLD result even though it might be
+  // chrome::kUnknownLanguageCode.
+  if (code.empty())
+    return cld_language;
+#endif  // defined(ENABLE_LANGUAGE_DETECTION)
+
+  // Correct well-known format errors.
+  std::string language = code;
+  CorrectLanguageCodeTypo(&language);
+
+  // Convert language code synonym firstly because sometime synonym code is in
+  // invalid format, e.g. 'fil'. After validation, such a 3 characters language
+  // gets converted to an empty string.
+  ConvertLanguageCodeSynonym(&language);
+  ResetInvalidLanguageCode(&language);
+  VLOG(9) << "Content-Language based language code: " << language;
+
+#if defined(ENABLE_LANGUAGE_DETECTION)
+  if (cld_language != chrome::kUnknownLanguageCode &&
+      cld_language != language) {
+    // Content-Language value might be wrong because CLD says that this page
+    // is written in another language with confidence.
+    // In this case, Chrome doesn't rely on any of the language codes, and
+    // gives up suggesting a translation.
+    VLOG(9) << "CLD disagreed with the Content-Language value with confidence.";
+    return std::string(chrome::kUnknownLanguageCode);
+  }
+#endif  // defined(ENABLE_LANGUAGE_DETECTION)
+
+  return language;
+}
+
+// static
+bool TranslateHelper::IsPageTranslatable(WebDocument* document) {
+  std::vector<WebElement> meta_elements;
+  webkit_glue::GetMetaElementsWithAttribute(document,
+                                            ASCIIToUTF16("name"),
+                                            ASCIIToUTF16("google"),
+                                            &meta_elements);
+  std::vector<WebElement>::const_iterator iter;
+  for (iter = meta_elements.begin(); iter != meta_elements.end(); ++iter) {
+    WebString attribute = iter->getAttribute("value");
+    if (attribute.isNull())  // We support both 'value' and 'content'.
+      attribute = iter->getAttribute("content");
+    if (attribute.isNull())
+      continue;
+    if (LowerCaseEqualsASCII(attribute, "notranslate"))
+      return false;
+  }
+  return true;
+}
 
 bool TranslateHelper::OnMessageReceived(const IPC::Message& message) {
   bool handled = true;
@@ -373,6 +455,7 @@ bool TranslateHelper::ExecuteScriptAndGetBoolResult(const std::string& script,
   if (!main_frame)
     return false;
 
+  v8::HandleScope handle_scope;
   v8::Handle<v8::Value> v = main_frame->executeScriptAndReturnValue(
       WebScriptSource(ASCIIToUTF16(script)));
   if (v.IsEmpty() || !v->IsBoolean())
@@ -389,6 +472,7 @@ bool TranslateHelper::ExecuteScriptAndGetStringResult(const std::string& script,
   if (!main_frame)
     return false;
 
+  v8::HandleScope handle_scope;
   v8::Handle<v8::Value> v = main_frame->executeScriptAndReturnValue(
       WebScriptSource(ASCIIToUTF16(script)));
   if (v.IsEmpty() || !v->IsString())

@@ -87,7 +87,7 @@
           },
           {
             "title": "Desktop Notifications",
-            "fileName": "notifications.html"
+            "fileName": "desktop_notifications.html"
           }
         ]
       },
@@ -102,10 +102,6 @@
           {
             "title": "Access Hardware Devices",
             "fileName": "app_hardware.html"
-          },
-          {
-            "title": "Connect Apps with Web Intents",
-            "fileName": "app_intents.html"
           }
         ]
       },
@@ -148,6 +144,10 @@
       {
         "title": "Chrome JavaScript APIs",
         "fileName": "api_index.html"
+      },
+      {
+        "title": "Webview Tag API",
+        "fileName": "webview_tag.html"
       },
       {
         "title": "Supported Libraries",

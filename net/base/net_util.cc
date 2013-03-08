@@ -12,22 +12,22 @@
 
 #if defined(OS_WIN)
 #include <windows.h>
-#include <winsock2.h>
 #include <iphlpapi.h>
+#include <winsock2.h>
 #pragma comment(lib, "iphlpapi.lib")
 #elif defined(OS_POSIX)
 #include <fcntl.h>
 #if !defined(OS_ANDROID)
 #include <ifaddrs.h>
 #endif
-#include <netdb.h>
 #include <net/if.h>
+#include <netdb.h>
 #include <netinet/in.h>
 #endif
 
 #include "base/basictypes.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/i18n/file_util_icu.h"
 #include "base/i18n/icu_string_conversions.h"
 #include "base/i18n/time_formatting.h"
@@ -42,14 +42,14 @@
 #include "base/string_number_conversions.h"
 #include "base/string_piece.h"
 #include "base/string_split.h"
-#include "base/string_tokenizer.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
+#include "base/strings/string_tokenizer.h"
+#include "base/strings/utf_offset_string_conversions.h"
 #include "base/synchronization/lock.h"
-#include "base/sys_string_conversions.h"
 #include "base/sys_byteorder.h"
+#include "base/sys_string_conversions.h"
 #include "base/time.h"
-#include "base/utf_offset_string_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "googleurl/src/gurl.h"
@@ -83,7 +83,7 @@ namespace net {
 namespace {
 
 // what we prepend to get a file URL
-static const FilePath::CharType kFileURLPrefix[] =
+static const base::FilePath::CharType kFileURLPrefix[] =
     FILE_PATH_LITERAL("file:///");
 
 // The general list of blocked ports. Will be blocked unless a specific
@@ -397,7 +397,7 @@ bool IsIDNComponentSafe(const char16* str,
   // the remainder.
   component_characters.removeAll(common_characters);
 
-  StringTokenizer t(languages, ",");
+  base::StringTokenizer t(languages, ",");
   while (t.GetNext()) {
     if (IsComponentCoveredByLang(component_characters, t.token()))
       return true;
@@ -459,7 +459,7 @@ void LimitOffsets(const string16& str,
   if (offsets_for_adjustment) {
     std::for_each(offsets_for_adjustment->begin(),
                   offsets_for_adjustment->end(),
-                  LimitOffset<string16>(str.length()));
+                  base::LimitOffset<string16>(str.length()));
   }
 }
 
@@ -482,7 +482,7 @@ string16 IDNToUnicodeWithOffsets(const std::string& host,
   // on a per-component basis.
   string16 out16;
   {
-    OffsetAdjuster offset_adjuster(offsets_for_adjustment);
+    base::OffsetAdjuster offset_adjuster(offsets_for_adjustment);
     for (size_t component_start = 0, component_end;
          component_start < input16.length();
          component_start = component_end + 1) {
@@ -502,7 +502,7 @@ string16 IDNToUnicodeWithOffsets(const std::string& host,
       size_t new_component_length = out16.length() - new_component_start;
 
       if (converted_idn && offsets_for_adjustment) {
-        offset_adjuster.Add(OffsetAdjuster::Adjustment(component_start,
+        offset_adjuster.Add(base::OffsetAdjuster::Adjustment(component_start,
             component_length, new_component_length));
       }
 
@@ -665,7 +665,8 @@ class NonHostComponentTransform : public AppendComponentTransform {
       const std::string& component_text,
       std::vector<size_t>* offsets_into_component) const OVERRIDE {
     return (unescape_rules_ == UnescapeRule::NONE) ?
-        UTF8ToUTF16AndAdjustOffsets(component_text, offsets_into_component) :
+        base::UTF8ToUTF16AndAdjustOffsets(component_text,
+                                          offsets_into_component) :
         UnescapeAndDecodeUTF8URLComponentWithOffsets(component_text,
             unescape_rules_, offsets_into_component);
   }
@@ -851,15 +852,15 @@ bool IsReservedName(const string16& filename) {
 //    integrating with the user's shell.
 void EnsureSafeExtension(const std::string& mime_type,
                          bool ignore_extension,
-                         FilePath* file_name) {
+                         base::FilePath* file_name) {
   // See if our file name already contains an extension.
-  FilePath::StringType extension = file_name->Extension();
+  base::FilePath::StringType extension = file_name->Extension();
   if (!extension.empty())
     extension.erase(extension.begin());  // Erase preceding '.'.
 
   if ((ignore_extension || extension.empty()) && !mime_type.empty()) {
-    FilePath::StringType preferred_mime_extension;
-    std::vector<FilePath::StringType> all_mime_extensions;
+    base::FilePath::StringType preferred_mime_extension;
+    std::vector<base::FilePath::StringType> all_mime_extensions;
     // The GetPreferredExtensionForMimeType call will end up going to disk.  Do
     // this on another thread to avoid slowing the IO thread.
     // http://crbug.com/61827
@@ -881,7 +882,7 @@ void EnsureSafeExtension(const std::string& mime_type,
   }
 
 #if defined(OS_WIN)
-  static const FilePath::CharType default_extension[] =
+  static const base::FilePath::CharType default_extension[] =
       FILE_PATH_LITERAL("download");
 
   // Rename shell-integrated extensions.
@@ -910,11 +911,11 @@ size_t GetCountOfExplicitlyAllowedPorts() {
   return g_explicitly_allowed_ports.Get().size();
 }
 
-GURL FilePathToFileURL(const FilePath& path) {
+GURL FilePathToFileURL(const base::FilePath& path) {
   // Produce a URL like "file:///C:/foo" for a regular file, or
   // "file://///server/path" for UNC. The URL canonicalizer will fix up the
   // latter case to be the canonical UNC form: "file://server/path"
-  FilePath::StringType url_string(kFileURLPrefix);
+  base::FilePath::StringType url_string(kFileURLPrefix);
   url_string.append(path.value());
 
   // Now do replacement of some characters. Since we assume the input is a
@@ -1119,19 +1120,19 @@ string16 StripWWWFromHost(const GURL& url) {
 
 void GenerateSafeFileName(const std::string& mime_type,
                           bool ignore_extension,
-                          FilePath* file_path) {
+                          base::FilePath* file_path) {
   // Make sure we get the right file extension
   EnsureSafeExtension(mime_type, ignore_extension, file_path);
 
 #if defined(OS_WIN)
   // Prepend "_" to the file name if it's a reserved name
-  FilePath::StringType leaf_name = file_path->BaseName().value();
+  base::FilePath::StringType leaf_name = file_path->BaseName().value();
   DCHECK(!leaf_name.empty());
   if (IsReservedName(leaf_name)) {
-    leaf_name = FilePath::StringType(FILE_PATH_LITERAL("_")) + leaf_name;
+    leaf_name = base::FilePath::StringType(FILE_PATH_LITERAL("_")) + leaf_name;
     *file_path = file_path->DirName();
-    if (file_path->value() == FilePath::kCurrentDirectory) {
-      *file_path = FilePath(leaf_name);
+    if (file_path->value() == base::FilePath::kCurrentDirectory) {
+      *file_path = base::FilePath(leaf_name);
     } else {
       *file_path = file_path->Append(leaf_name);
     }
@@ -1206,24 +1207,24 @@ string16 GetSuggestedFilename(const GURL& url,
   trimmed_trailing_character_count += path_length_before_trim - path.length();
   file_util::ReplaceIllegalCharactersInPath(&path, '-');
   path.append(trimmed_trailing_character_count, '-');
-  FilePath result(path);
+  base::FilePath result(path);
   GenerateSafeFileName(mime_type, overwrite_extension, &result);
   return result.value();
 #else
   std::string path = filename.empty() ? default_name : filename;
   file_util::ReplaceIllegalCharactersInPath(&path, '-');
-  FilePath result(path);
+  base::FilePath result(path);
   GenerateSafeFileName(mime_type, overwrite_extension, &result);
   return UTF8ToUTF16(result.value());
 #endif
 }
 
-FilePath GenerateFileName(const GURL& url,
-                          const std::string& content_disposition,
-                          const std::string& referrer_charset,
-                          const std::string& suggested_name,
-                          const std::string& mime_type,
-                          const std::string& default_file_name) {
+base::FilePath GenerateFileName(const GURL& url,
+                                const std::string& content_disposition,
+                                const std::string& referrer_charset,
+                                const std::string& suggested_name,
+                                const std::string& mime_type,
+                                const std::string& default_file_name) {
   string16 file_name = GetSuggestedFilename(url,
                                             content_disposition,
                                             referrer_charset,
@@ -1232,9 +1233,10 @@ FilePath GenerateFileName(const GURL& url,
                                             default_file_name);
 
 #if defined(OS_WIN)
-  FilePath generated_name(file_name);
+  base::FilePath generated_name(file_name);
 #else
-  FilePath generated_name(base::SysWideToNativeMB(UTF16ToWide(file_name)));
+  base::FilePath generated_name(
+      base::SysWideToNativeMB(UTF16ToWide(file_name)));
 #endif
 
 #if defined(OS_CHROMEOS)
@@ -1552,11 +1554,11 @@ string16 FormatUrlWithOffsets(const GURL& url,
     // Update the offsets based on removed username and/or password.
     if (offsets_for_adjustment && !offsets_for_adjustment->empty() &&
         (parsed.username.is_nonempty() || parsed.password.is_nonempty())) {
-      OffsetAdjuster offset_adjuster(offsets_for_adjustment);
+      base::OffsetAdjuster offset_adjuster(offsets_for_adjustment);
       if (parsed.username.is_nonempty() && parsed.password.is_nonempty()) {
         // The seeming off-by-one and off-by-two in these first two lines are to
         // account for the ':' after the username and '@' after the password.
-        offset_adjuster.Add(OffsetAdjuster::Adjustment(
+        offset_adjuster.Add(base::OffsetAdjuster::Adjustment(
             static_cast<size_t>(parsed.username.begin),
             static_cast<size_t>(parsed.username.len + parsed.password.len + 2),
             0));
@@ -1565,7 +1567,7 @@ string16 FormatUrlWithOffsets(const GURL& url,
             parsed.username.is_nonempty() ? &parsed.username : &parsed.password;
         // The seeming off-by-one in below is to account for the '@' after the
         // username/password.
-        offset_adjuster.Add(OffsetAdjuster::Adjustment(
+        offset_adjuster.Add(base::OffsetAdjuster::Adjustment(
             static_cast<size_t>(nonempty_component->begin),
             static_cast<size_t>(nonempty_component->len + 1), 0));
       }
@@ -1644,7 +1646,7 @@ string16 FormatUrlWithOffsets(const GURL& url,
     std::vector<size_t> offsets_into_ref(
         OffsetsIntoComponent(original_offsets, original_ref_begin));
     if (parsed.ref.len > 0) {
-      url_string.append(UTF8ToUTF16AndAdjustOffsets(
+      url_string.append(base::UTF8ToUTF16AndAdjustOffsets(
           spec.substr(original_ref_begin, static_cast<size_t>(parsed.ref.len)),
           &offsets_into_ref));
     }
@@ -1662,8 +1664,8 @@ string16 FormatUrlWithOffsets(const GURL& url,
     const size_t kHTTPSize = arraysize(kHTTP) - 1;
     url_string = url_string.substr(kHTTPSize);
     if (offsets_for_adjustment && !offsets_for_adjustment->empty()) {
-      OffsetAdjuster offset_adjuster(offsets_for_adjustment);
-      offset_adjuster.Add(OffsetAdjuster::Adjustment(0, kHTTPSize, 0));
+      base::OffsetAdjuster offset_adjuster(offsets_for_adjustment);
+      offset_adjuster.Add(base::OffsetAdjuster::Adjustment(0, kHTTPSize, 0));
     }
     if (prefix_end)
       *prefix_end -= kHTTPSize;
@@ -1875,6 +1877,9 @@ IPv6SupportResult TestIPv6SupportInternal() {
           unicast_address->Address.lpSockaddr);
       struct in6_addr* sin6_addr = &addr_in6->sin6_addr;
       if (IN6_IS_ADDR_LOOPBACK(sin6_addr) || IN6_IS_ADDR_LINKLOCAL(sin6_addr))
+        continue;
+      const uint8 kTeredoPrefix[] = { 0x20, 0x01, 0, 0 };
+      if (!memcmp(sin6_addr->s6_addr, kTeredoPrefix, arraysize(kTeredoPrefix)))
         continue;
       return IPv6SupportResult(true, IPV6_GLOBAL_ADDRESS_PRESENT, 0);
     }

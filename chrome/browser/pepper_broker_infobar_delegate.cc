@@ -4,11 +4,12 @@
 
 #include "chrome/browser/pepper_broker_infobar_delegate.h"
 
+#include "base/prefs/pref_service.h"
 #include "chrome/browser/api/infobars/infobar_service.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
+#include "chrome/browser/content_settings/tab_specific_content_settings.h"
 #include "chrome/browser/plugins/plugin_finder.h"
 #include "chrome/browser/plugins/plugin_metadata.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/page_navigator.h"
@@ -27,6 +28,11 @@
 const char kPpapiBrokerLearnMoreUrl[] =
     "https://support.google.com/chrome/?p=ib_pepper_broker";
 
+#if defined(OS_CHROMEOS)
+const char kNetflixPluginFileName[] = "libnetflixplugin2.so";
+const char kWidevinePluginFileName[] = "libwidevinecdmadapter.so";
+#endif
+
 using content::OpenURLParams;
 using content::Referrer;
 using content::WebContents;
@@ -35,7 +41,7 @@ using content::WebContents;
 void PepperBrokerInfoBarDelegate::Create(
     WebContents* web_contents,
     const GURL& url,
-    const FilePath& plugin_path,
+    const base::FilePath& plugin_path,
     const base::Callback<void(bool)>& callback) {
   Profile* profile =
       Profile::FromBrowserContext(web_contents->GetBrowserContext());
@@ -44,6 +50,21 @@ void PepperBrokerInfoBarDelegate::Create(
     callback.Run(false);
     return;
   }
+
+  TabSpecificContentSettings* tab_content_settings =
+      TabSpecificContentSettings::FromWebContents(web_contents);
+
+#if defined(OS_CHROMEOS)
+  // On ChromeOS, we're ok with granting broker access to Netflix and Widevine
+  // plugin, since it can only come installed with the OS.
+  base::FilePath plugin_file_name = plugin_path.BaseName();
+  if (plugin_file_name.value() == FILE_PATH_LITERAL(kNetflixPluginFileName) ||
+      plugin_file_name.value() == FILE_PATH_LITERAL(kWidevinePluginFileName)) {
+    tab_content_settings->SetPepperBrokerAllowed(true);
+    callback.Run(true);
+    return;
+  }
+#endif
 
   HostContentSettingsMap* content_settings =
       profile->GetHostContentSettingsMap();
@@ -55,12 +76,14 @@ void PepperBrokerInfoBarDelegate::Create(
     case CONTENT_SETTING_ALLOW: {
       content::RecordAction(
           content::UserMetricsAction("PPAPI.BrokerSettingAllow"));
+      tab_content_settings->SetPepperBrokerAllowed(true);
       callback.Run(true);
       break;
     }
     case CONTENT_SETTING_BLOCK: {
       content::RecordAction(
           content::UserMetricsAction("PPAPI.BrokerSettingDeny"));
+      tab_content_settings->SetPepperBrokerAllowed(false);
       callback.Run(false);
       break;
     }
@@ -75,7 +98,7 @@ void PepperBrokerInfoBarDelegate::Create(
       infobar_service->AddInfoBar(scoped_ptr<InfoBarDelegate>(
           new PepperBrokerInfoBarDelegate(
               infobar_service, url, plugin_path, languages, content_settings,
-              callback)));
+              tab_content_settings, callback)));
       break;
     }
     default:
@@ -147,15 +170,17 @@ gfx::Image* PepperBrokerInfoBarDelegate::GetIcon() const {
 PepperBrokerInfoBarDelegate::PepperBrokerInfoBarDelegate(
     InfoBarService* infobar_service,
     const GURL& url,
-    const FilePath& plugin_path,
+    const base::FilePath& plugin_path,
     const std::string& languages,
     HostContentSettingsMap* content_settings,
+    TabSpecificContentSettings* tab_content_settings,
     const base::Callback<void(bool)>& callback)
     : ConfirmInfoBarDelegate(infobar_service),
       url_(url),
       plugin_path_(plugin_path),
       languages_(languages),
       content_settings_(content_settings),
+      tab_content_settings_(tab_content_settings),
       callback_(callback) {
 }
 
@@ -175,4 +200,5 @@ void PepperBrokerInfoBarDelegate::DispatchCallback(bool result) {
       ContentSettingsPattern::Wildcard(),
       CONTENT_SETTINGS_TYPE_PPAPI_BROKER,
       std::string(), result ? CONTENT_SETTING_ALLOW : CONTENT_SETTING_BLOCK);
+  tab_content_settings_->SetPepperBrokerAllowed(result);
 }

@@ -5,7 +5,7 @@
 #ifndef CHROME_BROWSER_TASK_PROFILER_AUTO_TRACKING_H_
 #define CHROME_BROWSER_TASK_PROFILER_AUTO_TRACKING_H_
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/tracked_objects.h"
 
 //------------------------------------------------------------------------------
@@ -25,10 +25,10 @@ class AutoTracking {
 
   ~AutoTracking();
 
-  void set_output_file_path(const FilePath &path);
+  void set_output_file_path(const base::FilePath &path);
 
  private:
-  FilePath output_file_path_;
+  base::FilePath output_file_path_;
 
   DISALLOW_COPY_AND_ASSIGN(AutoTracking);
 };

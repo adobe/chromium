@@ -7,6 +7,7 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/message_loop.h"
+#include "base/prefs/pref_service.h"
 #include "base/stl_util.h"
 #include "base/string_util.h"
 #include "base/sys_string_conversions.h"
@@ -20,7 +21,6 @@
 #include "chrome/browser/extensions/extension_action.h"
 #include "chrome/browser/extensions/location_bar_controller.h"
 #include "chrome/browser/extensions/tab_helper.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_service.h"
@@ -40,14 +40,14 @@
 #import "chrome/browser/ui/cocoa/location_bar/location_icon_decoration.h"
 #import "chrome/browser/ui/cocoa/location_bar/page_action_decoration.h"
 #import "chrome/browser/ui/cocoa/location_bar/plus_decoration.h"
+#import "chrome/browser/ui/cocoa/location_bar/search_token_decoration.h"
 #import "chrome/browser/ui/cocoa/location_bar/selected_keyword_decoration.h"
+#import "chrome/browser/ui/cocoa/location_bar/separator_decoration.h"
 #import "chrome/browser/ui/cocoa/location_bar/star_decoration.h"
-#import "chrome/browser/ui/cocoa/location_bar/web_intents_button_decoration.h"
 #import "chrome/browser/ui/cocoa/location_bar/zoom_decoration.h"
 #import "chrome/browser/ui/cocoa/omnibox/omnibox_view_mac.h"
 #include "chrome/browser/ui/content_settings/content_setting_bubble_model.h"
 #include "chrome/browser/ui/content_settings/content_setting_image_model.h"
-#include "chrome/browser/ui/intents/web_intent_picker_controller.h"
 #include "chrome/browser/ui/omnibox/alternate_nav_url_fetcher.h"
 #include "chrome/browser/ui/omnibox/location_bar_util.h"
 #import "chrome/browser/ui/omnibox/omnibox_popup_model.h"
@@ -94,18 +94,18 @@ LocationBarViewMac::LocationBarViewMac(
       field_(field),
       disposition_(CURRENT_TAB),
       location_icon_decoration_(new LocationIconDecoration(this)),
+      search_token_decoration_(new SearchTokenDecoration()),
       selected_keyword_decoration_(
           new SelectedKeywordDecoration(OmniboxViewMac::GetFieldFont())),
+      separator_decoration_(new SeparatorDecoration()),
       ev_bubble_decoration_(
           new EVBubbleDecoration(location_icon_decoration_.get(),
                                  OmniboxViewMac::GetFieldFont())),
       plus_decoration_(NULL),
       star_decoration_(new StarDecoration(command_updater)),
-      zoom_decoration_(new ZoomDecoration(toolbar_model)),
+      zoom_decoration_(new ZoomDecoration(this)),
       keyword_hint_decoration_(
           new KeywordHintDecoration(OmniboxViewMac::GetFieldFont())),
-      web_intents_button_decoration_(
-          new WebIntentsButtonDecoration(this, OmniboxViewMac::GetFieldFont())),
       profile_(profile),
       browser_(browser),
       toolbar_model_(toolbar_model),
@@ -123,12 +123,6 @@ LocationBarViewMac::LocationBarViewMac(
     content_setting_decorations_.push_back(
         new ContentSettingDecoration(type, this, profile_));
   }
-
-  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
-  web_intents_button_decoration_->SetButtonImages(
-      rb.GetNativeImageNamed(IDR_OMNIBOX_WI_BUBBLE_BACKGROUND_L).ToNSImage(),
-      rb.GetNativeImageNamed(IDR_OMNIBOX_WI_BUBBLE_BACKGROUND_C).ToNSImage(),
-      rb.GetNativeImageNamed(IDR_OMNIBOX_WI_BUBBLE_BACKGROUND_R).ToNSImage());
 
   registrar_.Add(this,
       chrome::NOTIFICATION_EXTENSION_PAGE_ACTION_VISIBILITY_CHANGED,
@@ -238,10 +232,6 @@ void LocationBarViewMac::InvalidatePageActions() {
   }
 }
 
-void LocationBarViewMac::UpdateWebIntentsButton() {
-  RefreshWebIntentsButtonDecoration();
-}
-
 void LocationBarViewMac::UpdateOpenPDFInReaderPrompt() {
   // Not implemented on Mac.
 }
@@ -254,12 +244,13 @@ void LocationBarViewMac::SaveStateToContents(WebContents* contents) {
 void LocationBarViewMac::Update(const WebContents* contents,
                                 bool should_restore_state) {
   command_updater_->UpdateCommandEnabled(IDC_BOOKMARK_PAGE, IsStarEnabled());
+  command_updater_->UpdateCommandEnabled(IDC_BOOKMARK_PAGE_FROM_STAR,
+                                         IsStarEnabled());
   UpdateStarDecorationVisibility();
   UpdatePlusDecorationVisibility();
   UpdateZoomDecoration();
   RefreshPageActionDecorations();
   RefreshContentSettingsDecorations();
-  RefreshWebIntentsButtonDecoration();
   // OmniboxView restores state if the tab is non-NULL.
   omnibox_view_->Update(should_restore_state ? contents : NULL);
   OnChanged();
@@ -308,6 +299,11 @@ void LocationBarViewMac::OnChanged() {
   location_icon_decoration_->SetImage(image);
   ev_bubble_decoration_->SetImage(image);
   Layout();
+
+  if (browser_->instant_controller()) {
+    browser_->instant_controller()->SetOmniboxBounds(
+        gfx::Rect(NSRectToCGRect([field_ frame])));
+  }
 }
 
 void LocationBarViewMac::OnSelectionBoundsChanged() {
@@ -526,8 +522,8 @@ void LocationBarViewMac::ZoomChangedForActiveTab(bool can_show_bubble) {
   UpdateZoomDecoration();
   OnDecorationsChanged();
 
-  // TODO(dbeam): show a zoom bubble when |can_show_bubble| is true, the zoom
-  // decoration is showing, and the wrench menu isn't showing.
+  if (can_show_bubble && zoom_decoration_->IsVisible())
+    zoom_decoration_->ToggleBubble(YES);
 }
 
 NSPoint LocationBarViewMac::GetActionBoxAnchorPoint() const {
@@ -662,16 +658,6 @@ void LocationBarViewMac::RefreshPageActionDecorations() {
   }
 }
 
-void LocationBarViewMac::RefreshWebIntentsButtonDecoration() {
-  WebContents* web_contents = GetWebContents();
-  if (!web_contents) {
-    web_intents_button_decoration_->SetVisible(false);
-    return;
-  }
-
-  web_intents_button_decoration_->Update(web_contents);
-}
-
 // TODO(shess): This function should over time grow to closely match
 // the views Layout() function.
 void LocationBarViewMac::Layout() {
@@ -688,8 +674,7 @@ void LocationBarViewMac::Layout() {
   if (plus_decoration_.get())
     [cell addRightDecoration:plus_decoration_.get()];
   [cell addRightDecoration:star_decoration_.get()];
-  // TODO(dbeam): uncomment when zoom bubble exists.
-  // [cell addRightDecoration:zoom_decoration_.get()];
+  [cell addRightDecoration:zoom_decoration_.get()];
 
   // Note that display order is right to left.
   for (size_t i = 0; i < page_action_decorations_.size(); ++i) {
@@ -701,16 +686,20 @@ void LocationBarViewMac::Layout() {
 
   [cell addRightDecoration:keyword_hint_decoration_.get()];
 
-  [cell addRightDecoration:web_intents_button_decoration_.get()];
+  [cell addRightDecoration:separator_decoration_.get()];
+  [cell addRightDecoration:search_token_decoration_.get()];
 
   // By default only the location icon is visible.
   location_icon_decoration_->SetVisible(true);
   selected_keyword_decoration_->SetVisible(false);
   ev_bubble_decoration_->SetVisible(false);
   keyword_hint_decoration_->SetVisible(false);
+  separator_decoration_->SetVisible(false);
+  search_token_decoration_->SetVisible(false);
 
   // Get the keyword to use for keyword-search and hinting.
   const string16 keyword = omnibox_view_->model()->keyword();
+
   string16 short_name;
   bool is_extension_keyword = false;
   if (!keyword.empty()) {
@@ -718,9 +707,16 @@ void LocationBarViewMac::Layout() {
         GetKeywordShortName(keyword, &is_extension_keyword);
   }
 
+  const string16 search_provider_name = GetSearchProviderName();
   const bool is_keyword_hint = omnibox_view_->model()->is_keyword_hint();
 
-  if (!keyword.empty() && !is_keyword_hint) {
+  const bool show_search_token = !search_provider_name.empty();
+  const bool show_selected_keyword = !keyword.empty() && !is_keyword_hint &&
+    !show_search_token;
+  const bool show_keyword_hint = !keyword.empty() && is_keyword_hint &&
+    !show_search_token;
+
+  if (show_selected_keyword) {
     // Switch from location icon to keyword mode.
     location_icon_decoration_->SetVisible(false);
     selected_keyword_decoration_->SetVisible(true);
@@ -733,10 +729,14 @@ void LocationBarViewMac::Layout() {
 
     string16 label(toolbar_model_->GetEVCertName());
     ev_bubble_decoration_->SetFullLabel(base::SysUTF16ToNSString(label));
-  } else if (!keyword.empty() && is_keyword_hint) {
+  } else if (show_keyword_hint) {
     keyword_hint_decoration_->SetKeyword(short_name,
                                          is_extension_keyword);
     keyword_hint_decoration_->SetVisible(true);
+  } else if (show_search_token) {
+    separator_decoration_->SetVisible(true);
+    search_token_decoration_->SetSearchProviderName(search_provider_name);
+    search_token_decoration_->SetVisible(true);
   }
 
   // These need to change anytime the layout changes.
@@ -783,4 +783,16 @@ void LocationBarViewMac::UpdatePlusDecorationVisibility() {
     // If the action box is enabled, hide it when input is in progress.
     plus_decoration_->SetVisible(!toolbar_model_->GetInputInProgress());
   }
+}
+
+string16 LocationBarViewMac::GetSearchProviderName() const {
+  if (!toolbar_model_->GetInputInProgress() &&
+      toolbar_model_->WouldReplaceSearchURLWithSearchTerms()) {
+    const TemplateURL* template_url =
+        TemplateURLServiceFactory::GetForProfile(profile_)->
+            GetDefaultSearchProvider();
+    if (template_url)
+      return template_url->short_name();
+  }
+  return string16();
 }

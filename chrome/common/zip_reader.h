@@ -8,9 +8,10 @@
 #include <string>
 
 #include "base/basictypes.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/platform_file.h"
 #include "base/time.h"
 
 #if defined(USE_SYSTEM_MINIZIP)
@@ -50,7 +51,7 @@ class ZipReader {
 
     // Returns the file path. The path is usually relative like
     // "foo/bar.txt", but if it's absolute, is_unsafe() returns true.
-    const FilePath& file_path() const { return file_path_; }
+    const base::FilePath& file_path() const { return file_path_; }
 
     // Returns the size of the original file (i.e. after uncompressed).
     // Returns 0 if the entry is a directory.
@@ -67,7 +68,7 @@ class ZipReader {
     bool is_unsafe() const { return is_unsafe_; }
 
    private:
-    const FilePath file_path_;
+    const base::FilePath file_path_;
     int64 original_size_;
     base::Time last_modified_;
     bool is_directory_;
@@ -80,13 +81,11 @@ class ZipReader {
 
   // Opens the zip file specified by |zip_file_path|. Returns true on
   // success.
-  bool Open(const FilePath& zip_file_path);
+  bool Open(const base::FilePath& zip_file_path);
 
-#if defined(OS_POSIX)
-  // Opens the zip file referred to by the file descriptor |zip_fd|.
+  // Opens the zip file referred to by the platform file |zip_fd|.
   // Returns true on success.
-  bool OpenFromFd(int zip_fd);
-#endif
+  bool OpenFromPlatformFile(base::PlatformFile zip_fd);
 
   // Opens the zip data stored in |data|. This class uses a weak reference to
   // the given sring while extracting files, i.e. the caller should keep the
@@ -121,7 +120,7 @@ class ZipReader {
   // Locates an entry in the zip file and opens it. Returns true on
   // success. This function internally calls OpenCurrentEntryInZip() on
   // success. On failure, current_entry_info() becomes NULL.
-  bool LocateAndOpenEntry(const FilePath& path_in_zip);
+  bool LocateAndOpenEntry(const base::FilePath& path_in_zip);
 
   // Extracts the current entry to the given output file path. If the
   // current file is a directory, just creates a directory
@@ -129,7 +128,7 @@ class ZipReader {
   // called beforehand.
   //
   // This function does not preserve the timestamp of the original entry.
-  bool ExtractCurrentEntryToFilePath(const FilePath& output_file_path);
+  bool ExtractCurrentEntryToFilePath(const base::FilePath& output_file_path);
 
   // Extracts the current entry to the given output directory path using
   // ExtractCurrentEntryToFilePath(). Sub directories are created as needed
@@ -139,7 +138,8 @@ class ZipReader {
   //
   // Returns true on success. OpenCurrentEntryInZip() must be called
   // beforehand.
-  bool ExtractCurrentEntryIntoDirectory(const FilePath& output_directory_path);
+  bool ExtractCurrentEntryIntoDirectory(
+      const base::FilePath& output_directory_path);
 
 #if defined(OS_POSIX)
   // Extracts the current entry by writing directly to a file descriptor.

@@ -8,8 +8,8 @@
 #include <string>
 #include <vector>
 
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/message_loop.h"
 #include "content/public/test/test_browser_thread.h"
@@ -26,7 +26,7 @@ class TransportSecurityPersisterTest : public testing::Test {
         test_io_thread_(content::BrowserThread::IO, &message_loop_) {
   }
 
-  ~TransportSecurityPersisterTest() {
+  virtual ~TransportSecurityPersisterTest() {
     message_loop_.RunUntilIdle();
   }
 
@@ -68,11 +68,9 @@ TEST_F(TransportSecurityPersisterTest, SerializeData2) {
   static const char kYahooDomain[] = "yahoo.com";
 
   EXPECT_FALSE(state_.GetDomainState(kYahooDomain, true, &domain_state));
-  domain_state.upgrade_mode =
-      TransportSecurityState::DomainState::MODE_FORCE_HTTPS;
-  domain_state.upgrade_expiry = expiry;
-  domain_state.include_subdomains = true;
-  state_.EnableHost(kYahooDomain, domain_state);
+
+  bool include_subdomains = true;
+  state_.AddHSTS(kYahooDomain, expiry, include_subdomains);
 
   std::string output;
   bool dirty;
@@ -101,27 +99,26 @@ TEST_F(TransportSecurityPersisterTest, SerializeData3) {
   memset(fp1.data(), 0, fp1.size());
   net::HashValue fp2(net::HASH_VALUE_SHA1);
   memset(fp2.data(), 1, fp2.size());
-  TransportSecurityState::DomainState example_state;
-  example_state.upgrade_expiry =
+  base::Time expiry =
       base::Time::Now() + base::TimeDelta::FromSeconds(1000);
-  example_state.upgrade_mode =
-      TransportSecurityState::DomainState::MODE_FORCE_HTTPS;
-  example_state.dynamic_spki_hashes_expiry = example_state.upgrade_expiry;
-  example_state.dynamic_spki_hashes.push_back(fp1);
-  example_state.dynamic_spki_hashes.push_back(fp2);
-  state_.EnableHost("www.example.com", example_state);
+  net::HashValueVector dynamic_spki_hashes;
+  dynamic_spki_hashes.push_back(fp1);
+  dynamic_spki_hashes.push_back(fp2);
+  bool include_subdomains = false;
+  state_.AddHSTS("www.example.com", expiry, include_subdomains);
+  state_.AddHPKP("www.example.com", expiry, include_subdomains,
+                 dynamic_spki_hashes);
 
   // Add another entry.
   memset(fp1.data(), 2, fp1.size());
   memset(fp2.data(), 3, fp2.size());
-  example_state.upgrade_expiry =
+  expiry =
       base::Time::Now() + base::TimeDelta::FromSeconds(3000);
-  example_state.upgrade_mode =
-      TransportSecurityState::DomainState::MODE_DEFAULT;
-  example_state.dynamic_spki_hashes_expiry = example_state.upgrade_expiry;
-  example_state.dynamic_spki_hashes.push_back(fp1);
-  example_state.dynamic_spki_hashes.push_back(fp2);
-  state_.EnableHost("www.example.net", example_state);
+  dynamic_spki_hashes.push_back(fp1);
+  dynamic_spki_hashes.push_back(fp2);
+  state_.AddHSTS("www.example.net", expiry, include_subdomains);
+  state_.AddHPKP("www.example.net", expiry, include_subdomains,
+                 dynamic_spki_hashes);
 
   // Save a copy of everything.
   std::map<std::string, TransportSecurityState::DomainState> saved;
@@ -138,7 +135,7 @@ TEST_F(TransportSecurityPersisterTest, SerializeData3) {
   // just do it directly rather than call persister_->StateIsDirty. (That uses
   // ImportantFileWriter, which has an asynchronous commit interval rather
   // than block.) Use a different basename just for cleanliness.
-  FilePath path =
+  base::FilePath path =
       temp_dir_.path().AppendASCII("TransportSecurityPersisterTest");
   EXPECT_TRUE(file_util::WriteFile(path, serialized.c_str(),
                                    serialized.size()));
@@ -187,7 +184,7 @@ TEST_F(TransportSecurityPersisterTest, PublicKeyHashes) {
 
   net::HashValue sha1(net::HASH_VALUE_SHA1);
   memset(sha1.data(), '1', sha1.size());
-  domain_state.static_spki_hashes.push_back(sha1);
+  domain_state.dynamic_spki_hashes.push_back(sha1);
 
   EXPECT_FALSE(domain_state.CheckPublicKeyPins(hashes));
 
@@ -199,16 +196,18 @@ TEST_F(TransportSecurityPersisterTest, PublicKeyHashes) {
 
   const base::Time current_time(base::Time::Now());
   const base::Time expiry = current_time + base::TimeDelta::FromSeconds(1000);
-  domain_state.upgrade_expiry = expiry;
-  state_.EnableHost(kTestDomain, domain_state);
+  bool include_subdomains = false;
+  state_.AddHSTS(kTestDomain, expiry, include_subdomains);
+  state_.AddHPKP(kTestDomain, expiry, include_subdomains,
+                 domain_state.dynamic_spki_hashes);
   std::string ser;
   EXPECT_TRUE(persister_->SerializeData(&ser));
   bool dirty;
   EXPECT_TRUE(persister_->LoadEntries(ser, &dirty));
   EXPECT_TRUE(state_.GetDomainState(kTestDomain, false, &domain_state));
-  EXPECT_EQ(1u, domain_state.static_spki_hashes.size());
-  EXPECT_EQ(sha1.tag, domain_state.static_spki_hashes[0].tag);
-  EXPECT_EQ(0, memcmp(domain_state.static_spki_hashes[0].data(), sha1.data(),
+  EXPECT_EQ(1u, domain_state.dynamic_spki_hashes.size());
+  EXPECT_EQ(sha1.tag, domain_state.dynamic_spki_hashes[0].tag);
+  EXPECT_EQ(0, memcmp(domain_state.dynamic_spki_hashes[0].data(), sha1.data(),
                       sha1.size()));
 }
 

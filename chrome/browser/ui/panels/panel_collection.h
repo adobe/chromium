@@ -39,13 +39,21 @@ class PanelCollection {
     // its layout immediately.
     DELAY_LAYOUT_REFRESH = 0x8,
     // Do not refresh layout. Used by stacking.
-    NO_LAYOUT_REFRESH = 0x10
+    NO_LAYOUT_REFRESH = 0x10,
+    // Collapse other inactive stacked panels such the tha new panel can fit
+    // within the working area. Used by stacking.
+    COLLAPSE_TO_FIT = 0x20
+  };
+
+  enum RemovalReason {
+    PANEL_CLOSED,
+    PANEL_CHANGED_COLLECTION
   };
 
   Type type() const { return type_; }
 
   // Called when the display area is changed.
-  virtual void OnDisplayAreaChanged(const gfx::Rect& old_display_area) = 0;
+  virtual void OnDisplayChanged() = 0;
 
   // Updates the positioning of all panels in the collection, usually as
   // a result of removing or resizing a panel in collection.
@@ -57,7 +65,8 @@ class PanelCollection {
 
   // Removes |panel| from the collection of panels. Invoked asynchronously
   // after a panel has been closed.
-  virtual void RemovePanel(Panel* panel) = 0;
+  // |reason| denotes why the panel is removed from the collection.
+  virtual void RemovePanel(Panel* panel, RemovalReason reason) = 0;
 
   // Closes all panels in the collection. Panels will be removed after closing.
   virtual void CloseAll() = 0;

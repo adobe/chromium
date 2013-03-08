@@ -8,7 +8,7 @@
 #include "ash/ash_export.h"
 #include "ash/launcher/background_animator.h"
 #include "ash/shelf_types.h"
-#include "ash/system/tray/tray_views.h"
+#include "ash/system/tray/actionable_view.h"
 #include "ui/views/bubble/tray_bubble_view.h"
 
 namespace ash {
@@ -16,13 +16,14 @@ namespace internal {
 
 class ShelfLayoutManager;
 class StatusAreaWidget;
+class TrayEventFilter;
 class TrayBackground;
+
 // Base class for children of StatusAreaWidget: SystemTray, WebNotificationTray.
 // This class handles setting and animating the background when the Launcher
 // his shown/hidden. It also inherits from ActionableView so that the tray
 // items can override PerformAction when clicked on.
-
-class ASH_EXPORT TrayBackgroundView : public internal::ActionableView,
+class ASH_EXPORT TrayBackgroundView : public ActionableView,
                                       public BackgroundAnimatorDelegate {
  public:
   // Base class for tray containers. Sets the border and layout. The container
@@ -128,6 +129,7 @@ class ASH_EXPORT TrayBackgroundView : public internal::ActionableView,
   }
   TrayContainer* tray_container() const { return tray_container_; }
   ShelfAlignment shelf_alignment() const { return shelf_alignment_; }
+  TrayEventFilter* tray_event_filter() { return tray_event_filter_.get(); }
 
   ShelfLayoutManager* GetShelfLayoutManager();
 
@@ -156,6 +158,7 @@ class ASH_EXPORT TrayBackgroundView : public internal::ActionableView,
   internal::BackgroundAnimator hide_background_animator_;
   internal::BackgroundAnimator hover_background_animator_;
   scoped_ptr<TrayWidgetObserver> widget_observer_;
+  scoped_ptr<TrayEventFilter> tray_event_filter_;
 
   DISALLOW_COPY_AND_ASSIGN(TrayBackgroundView);
 };

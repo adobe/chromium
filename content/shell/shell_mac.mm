@@ -137,7 +137,7 @@ void MakeShellButton(NSRect* rect,
 
 namespace content {
 
-void Shell::PlatformInitialize() {
+void Shell::PlatformInitialize(const gfx::Size& default_window_size) {
 }
 
 void Shell::PlatformCleanUp() {
@@ -180,9 +180,9 @@ void Shell::PlatformCreateWindow(int width, int height) {
                           NSResizableWindowMask;
   CrShellWindow* window =
       [[CrShellWindow alloc] initWithContentRect:content_rect
-                styleMask:style_mask
-                  backing:NSBackingStoreBuffered
-                    defer:NO];
+                                       styleMask:style_mask
+                                         backing:NSBackingStoreBuffered
+                                           defer:NO];
   window_ = window;
   [window setShell:this];
   [window_ setTitle:kWindowTitle];

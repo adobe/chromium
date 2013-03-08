@@ -35,7 +35,7 @@
 
 #include <string>
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/files/important_file_writer.h"
 #include "base/memory/weak_ptr.h"
 #include "net/base/transport_security_state.h"
@@ -47,7 +47,7 @@ class TransportSecurityPersister
       public base::ImportantFileWriter::DataSerializer {
  public:
   TransportSecurityPersister(net::TransportSecurityState* state,
-                             const FilePath& profile_path,
+                             const base::FilePath& profile_path,
                              bool readonly);
   virtual ~TransportSecurityPersister();
 

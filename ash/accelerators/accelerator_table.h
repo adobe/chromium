@@ -46,7 +46,7 @@ enum AcceleratorAction {
   POWER_RELEASED,
   RESTORE_TAB,
   ROTATE_SCREEN,
-  ROTATE_WINDOWS,
+  ROTATE_WINDOW,
   SELECT_LAST_WIN,
   SELECT_WIN_0,
   SELECT_WIN_1,
@@ -57,6 +57,7 @@ enum AcceleratorAction {
   SELECT_WIN_6,
   SELECT_WIN_7,
   SHOW_KEYBOARD_OVERLAY,
+  SHOW_MESSAGE_CENTER_BUBBLE,
   SHOW_OAK,
   SHOW_SYSTEM_TRAY_BUBBLE,
   SHOW_TASK_MANAGER,
@@ -72,6 +73,7 @@ enum AcceleratorAction {
   TOGGLE_ROOT_WINDOW_FULL_SCREEN,
   TOGGLE_SPOKEN_FEEDBACK,
   TOGGLE_WIFI,
+  TOUCH_HUD_CLEAR,
   TOUCH_HUD_MODE_CHANGE,
   VOLUME_DOWN,
   VOLUME_MUTE,
@@ -84,7 +86,8 @@ enum AcceleratorAction {
   CYCLE_DISPLAY_MODE,
   LOCK_SCREEN,
   OPEN_CROSH,
-  OPEN_FILE_MANAGER_DIALOG,
+  OPEN_FILE_DIALOG,  // Open 'Open file' dialog.
+  OPEN_FILE_MANAGER,
   DISABLE_GPU_WATCHDOG,
 #endif
 #if !defined(NDEBUG)
@@ -145,6 +148,12 @@ ASH_EXPORT extern const AcceleratorAction kNonrepeatableActions[];
 
 // The number of elements in kNonrepeatableActions.
 ASH_EXPORT extern const size_t kNonrepeatableActionsLength;
+
+// Actions allowed in app mode.
+ASH_EXPORT extern const AcceleratorAction kActionsAllowedInAppMode[];
+
+// The number of elements in kActionsAllowedInAppMode.
+ASH_EXPORT extern const size_t kActionsAllowedInAppModeLength;
 
 }  // namespace ash
 

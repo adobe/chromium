@@ -5,7 +5,7 @@
 #ifndef CHROME_BROWSER_LIFETIME_APPLICATION_LIFETIME_H_
 #define CHROME_BROWSER_LIFETIME_APPLICATION_LIFETIME_H_
 
-namespace browser {
+namespace chrome {
 
 // Starts a user initiated exit process. Called from Browser::Exit.
 // On platforms other than ChromeOS, this is equivalent to
@@ -83,6 +83,6 @@ void OnAppExiting();
 // processing required.
 void HandleAppExitingForPlatform();
 
-}  // namespace browser
+}  // namespace chrome
 
 #endif  // CHROME_BROWSER_LIFETIME_APPLICATION_LIFETIME_H_

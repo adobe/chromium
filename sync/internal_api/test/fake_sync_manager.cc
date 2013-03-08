@@ -55,12 +55,11 @@ ModelTypeSet FakeSyncManager::GetAndResetEnabledTypes() {
 }
 
 void FakeSyncManager::Invalidate(
-    const ObjectIdInvalidationMap& invalidation_map,
-    IncomingInvalidationSource source) {
+    const ObjectIdInvalidationMap& invalidation_map) {
   if (!sync_task_runner_->PostTask(
       FROM_HERE,
       base::Bind(&FakeSyncManager::InvalidateOnSyncThread,
-                 base::Unretained(this), invalidation_map, source))) {
+                 base::Unretained(this), invalidation_map))) {
     NOTREACHED();
   }
 }
@@ -87,7 +86,7 @@ void FakeSyncManager::WaitForSyncThread() {
 }
 
 void FakeSyncManager::Init(
-    const FilePath& database_location,
+    const base::FilePath& database_location,
     const WeakHandle<JsEventHandler>& event_handler,
     const std::string& sync_server_and_path,
     int sync_server_port,
@@ -173,6 +172,11 @@ void FakeSyncManager::UnregisterInvalidationHandler(
   registrar_.UnregisterHandler(handler);
 }
 
+void FakeSyncManager::AcknowledgeInvalidation(const invalidation::ObjectId& id,
+                                              const AckHandle& ack_handle) {
+  // Do nothing.
+}
+
 void FakeSyncManager::StartSyncingNormally(
       const ModelSafeRoutingInfo& routing_info) {
   // Do nothing.
@@ -181,6 +185,7 @@ void FakeSyncManager::StartSyncingNormally(
 void FakeSyncManager::ConfigureSyncer(
     ConfigureReason reason,
     ModelTypeSet types_to_config,
+    ModelTypeSet failed_types,
     const ModelSafeRoutingInfo& new_routing_info,
     const base::Closure& ready_task,
     const base::Closure& retry_task) {
@@ -196,7 +201,7 @@ void FakeSyncManager::ConfigureSyncer(
 
   // Update our fake directory by clearing and fake-downloading as necessary.
   UserShare* share = GetUserShare();
-  share->directory->PurgeEntriesWithTypeIn(disabled_types);
+  share->directory->PurgeEntriesWithTypeIn(disabled_types, ModelTypeSet());
   for (ModelTypeSet::Iterator it = success_types.First(); it.Good(); it.Inc()) {
     // We must be careful to not create the same root node twice.
     if (!initial_sync_ended_types_.Has(it.Get())) {
@@ -270,17 +275,24 @@ SyncEncryptionHandler* FakeSyncManager::GetEncryptionHandler() {
   return fake_encryption_handler_.get();
 }
 
+void FakeSyncManager::RefreshTypes(ModelTypeSet types) {
+  last_refresh_request_types_ = types;
+}
+
 void FakeSyncManager::InvalidateOnSyncThread(
-    const ObjectIdInvalidationMap& invalidation_map,
-    IncomingInvalidationSource source) {
+    const ObjectIdInvalidationMap& invalidation_map) {
   DCHECK(sync_task_runner_->RunsTasksOnCurrentThread());
-  registrar_.DispatchInvalidationsToHandlers(invalidation_map, source);
+  registrar_.DispatchInvalidationsToHandlers(invalidation_map);
 }
 
 void FakeSyncManager::UpdateInvalidatorStateOnSyncThread(
     InvalidatorState state) {
   DCHECK(sync_task_runner_->RunsTasksOnCurrentThread());
   registrar_.UpdateInvalidatorState(state);
+}
+
+ModelTypeSet FakeSyncManager::GetLastRefreshRequestTypes() {
+  return last_refresh_request_types_;
 }
 
 }  // namespace syncer

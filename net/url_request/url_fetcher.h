@@ -10,16 +10,15 @@
 
 #include "base/callback_forward.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/platform_file.h"
 #include "base/supports_user_data.h"
 #include "base/task_runner.h"
 #include "net/base/net_export.h"
 
-class FilePath;
 class GURL;
 
 namespace base {
+class FilePath;
 class MessageLoopProxy;
 class TimeDelta;
 }
@@ -28,7 +27,6 @@ namespace net {
 class HostPortPair;
 class HttpRequestHeaders;
 class HttpResponseHeaders;
-class UploadDataStream;
 class URLFetcherDelegate;
 class URLRequestContextGetter;
 class URLRequestStatus;
@@ -81,6 +79,7 @@ class NET_EXPORT URLFetcher {
     DELETE_REQUEST,   // DELETE is already taken on Windows.
                       // <winnt.h> defines a DELETE macro.
     PUT,
+    PATCH,
   };
 
   // Used by SetURLRequestUserData.  The callback should make a fresh
@@ -117,18 +116,31 @@ class NET_EXPORT URLFetcher {
   // of testing code that uses an URLFetcher.
   static void SetEnableInterceptionForTests(bool enabled);
 
-  // Sets data only needed by POSTs.  All callers making POST requests should
-  // call one of the SetUploadData* methods before the request is started.
-  // |upload_content_type| is the MIME type of the content, while
-  // |upload_content| is the data to be sent.
-  virtual void SetUploadDataStream(
-      const std::string& upload_content_type,
-      scoped_ptr<UploadDataStream> upload_content) = 0;
+  // Normally, URLFetcher will abort loads that request SSL client certificate
+  // authentication, but this method may be used to cause URLFetchers to ignore
+  // requests for client certificates and continue anonymously. Because such
+  // behaviour affects the URLRequestContext's shared network state and socket
+  // pools, it should only be used for testing.
+  static void SetIgnoreCertificateRequests(bool ignored);
 
-  // Convenience method for setting upload data from a string.
-  // (the Content-Length header value will be set to the length of this data).
+  // Sets data only needed by POSTs.  All callers making POST requests should
+  // call one of the SetUpload* methods before the request is started.
+  // |upload_content_type| is the MIME type of the content, while
+  // |upload_content| is the data to be sent (the Content-Length header value
+  // will be set to the length of this data).
   virtual void SetUploadData(const std::string& upload_content_type,
                              const std::string& upload_content) = 0;
+
+  // Sets data only needed by POSTs.  All callers making POST requests should
+  // call one of the SetUpload* methods before the request is started.
+  // |upload_content_type| is the MIME type of the content, while
+  // |file_path| is the path to the file containing the data to be sent (the
+  // Content-Length header value will be set to the length of this file).
+  // |file_task_runner| will be used for all file operations.
+  virtual void SetUploadFilePath(
+      const std::string& upload_content_type,
+      const base::FilePath& file_path,
+      scoped_refptr<base::TaskRunner> file_task_runner) = 0;
 
   // Indicates that the POST data is sent via chunked transfer encoding.
   // This may only be called before calling Start().
@@ -213,7 +225,7 @@ class NET_EXPORT URLFetcher {
   // The created file is removed when the URLFetcher is deleted unless you
   // take ownership by calling GetResponseAsFilePath().
   virtual void SaveResponseToFileAtPath(
-      const FilePath& file_path,
+      const base::FilePath& file_path,
       scoped_refptr<base::TaskRunner> file_task_runner) = 0;
 
   // By default, the response is saved in a string. Call this method to save the
@@ -276,8 +288,9 @@ class NET_EXPORT URLFetcher {
   // true, caller takes responsibility for the file, and it will not
   // be removed once the URLFetcher is destroyed.  User should not take
   // ownership more than once, or call this method after taking ownership.
-  virtual bool GetResponseAsFilePath(bool take_ownership,
-                                     FilePath* out_response_path) const = 0;
+  virtual bool GetResponseAsFilePath(
+      bool take_ownership,
+      base::FilePath* out_response_path) const = 0;
 };
 
 }  // namespace net

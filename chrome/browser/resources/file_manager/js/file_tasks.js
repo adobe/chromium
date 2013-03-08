@@ -4,8 +4,10 @@
 
 /**
  * This object encapsulates everything related to tasks execution.
+ *
  * @param {FileManager} fileManager FileManager instance.
- * @param {object} opt_params File manager load parameters.
+ * @param {Object=} opt_params File manager load parameters.
+ * @constructor
  */
 function FileTasks(fileManager, opt_params) {
   this.fileManager_ = fileManager;
@@ -15,17 +17,26 @@ function FileTasks(fileManager, opt_params) {
 
   /**
    * List of invocations to be called once tasks are available.
+   *
+   * @private
+   * @type {Array,<Object>}
    */
   this.pendingInvocations_ = [];
 }
 
 /**
 * Location of the Chrome Web Store.
+*
+* @const
+* @type {string}
 */
 FileTasks.CHROME_WEB_STORE_URL = 'https://chrome.google.com/webstore';
 
 /**
 * Location of the FAQ about the file actions.
+*
+* @const
+* @type {string}
 */
 FileTasks.NO_ACTION_FOR_FILE_URL = 'http://support.google.com/chromeos/bin/' +
     'answer.py?answer=1700055&topic=29026&ctx=topic';
@@ -46,7 +57,8 @@ FileTasks.prototype.init = function(urls, opt_mimeTypes) {
 
 /**
  * Returns amount of tasks.
- * @return {number=} amount of tasks.
+ *
+ * @return {number} amount of tasks.
  */
 FileTasks.prototype.size = function() {
   return (this.tasks_ && this.tasks_.length) || 0;
@@ -54,6 +66,7 @@ FileTasks.prototype.size = function() {
 
 /**
  * Callback when tasks found.
+ *
  * @param {Array.<Object>} tasks The tasks.
  * @private
  */
@@ -69,6 +82,7 @@ FileTasks.prototype.onTasks_ = function(tasks) {
 
 /**
  * Processes internal tasks.
+ *
  * @param {Array.<Object>} tasks The tasks.
  * @private
  */
@@ -77,7 +91,7 @@ FileTasks.prototype.processTasks_ = function(tasks) {
   var id = util.platform.getAppId();
   var is_on_drive = false;
   for (var index = 0; index < this.urls_.length; ++index) {
-    if (FileType.isOnGDrive(this.urls_[index])) {
+    if (FileType.isOnDrive(this.urls_[index])) {
       is_on_drive = true;
       break;
     }
@@ -156,6 +170,7 @@ FileTasks.prototype.processTasks_ = function(tasks) {
 
 /**
  * Executes default task.
+ *
  * @private
  */
 FileTasks.prototype.executeDefault_ = function() {
@@ -190,6 +205,7 @@ FileTasks.prototype.executeDefault_ = function() {
 
 /**
  * Executes a single task.
+ *
  * @param {string} taskId Task identifier.
  * @param {Array.<string>=} opt_urls Urls to execute on instead of |this.urls_|.
  * @private
@@ -211,23 +227,24 @@ FileTasks.prototype.execute_ = function(taskId, opt_urls) {
 
 /**
  * Checks whether the remote files are available right now.
+ *
  * @param {function} callback The callback.
  * @private
  */
 FileTasks.prototype.checkAvailability_ = function(callback) {
-  function areAll(props, name) {
-    function isOne(e) {
+  var areAll = function(props, name) {
+    var isOne = function(e) {
       // If got no properties, we safely assume that item is unavailable.
       return e && e[name];
-    }
+    };
     return props.filter(isOne).length == props.length;
-  }
+  };
 
   var fm = this.fileManager_;
   var urls = this.urls_;
 
-  if (fm.isOnGData() && fm.isOffline()) {
-    fm.metadataCache_.get(urls, 'gdata', function(props) {
+  if (fm.isOnDrive() && fm.isDriveOffline()) {
+    fm.metadataCache_.get(urls, 'drive', function(props) {
       if (areAll(props, 'availableOffline')) {
         callback();
         return;
@@ -249,9 +266,9 @@ FileTasks.prototype.checkAvailability_ = function(callback) {
     return;
   }
 
-  if (fm.isOnGData() && fm.isOnMeteredConnection()) {
-    fm.metadataCache_.get(urls, 'gdata', function(gdataProps) {
-      if (areAll(gdataProps, 'availableWhenMetered')) {
+  if (fm.isOnDrive() && fm.isDriveOnMeteredConnection()) {
+    fm.metadataCache_.get(urls, 'drive', function(driveProps) {
+      if (areAll(driveProps, 'availableWhenMetered')) {
         callback();
         return;
       }
@@ -259,7 +276,7 @@ FileTasks.prototype.checkAvailability_ = function(callback) {
       fm.metadataCache_.get(urls, 'filesystem', function(fileProps) {
         var sizeToDownload = 0;
         for (var i = 0; i != urls.length; i++) {
-          if (!gdataProps[i].availableWhenMetered)
+          if (!driveProps[i].availableWhenMetered)
             sizeToDownload += fileProps[i].size;
         }
         fm.confirm.show(
@@ -279,6 +296,7 @@ FileTasks.prototype.checkAvailability_ = function(callback) {
 
 /**
  * Executes an internal task.
+ *
  * @param {string} id The short task id.
  * @param {Array.<string>} urls The urls to execute on.
  * @private
@@ -344,6 +362,7 @@ FileTasks.prototype.executeInternalTask_ = function(id, urls) {
 
 /**
  * Mounts archives.
+ *
  * @param {Array.<string>} urls Mount file urls list.
  * @private
  */
@@ -373,6 +392,7 @@ FileTasks.prototype.mountArchives_ = function(urls) {
 
 /**
  * Open the Gallery.
+ *
  * @param {Array.<string>} urls List of selected urls.
  */
 FileTasks.prototype.openGallery = function(urls) {
@@ -399,7 +419,7 @@ FileTasks.prototype.openGallery = function(urls) {
   // changes in the Gallery and popped when the Gallery is closed.
   util.updateAppState(false /*push*/);
 
-  function onClose(selectedUrls) {
+  var onClose = function(selectedUrls) {
     fm.directoryModel_.selectUrls(selectedUrls);
     if (util.platform.v2()) {
       fm.closeFilePopup_();  // Will call Gallery.unload.
@@ -409,19 +429,22 @@ FileTasks.prototype.openGallery = function(urls) {
     } else {
       window.history.back(1);  // This will restore document.title.
     }
-  }
+  };
 
   galleryFrame.onload = function() {
     fm.show_();
     galleryFrame.contentWindow.ImageUtil.metrics = metrics;
     window.galleryTestAPI = galleryFrame.contentWindow.galleryTestAPI;
 
+    // TODO(haruki): isOnReadonlyDirectory() only checks the permission for the
+    // root. We should check more granular permission to know whether the file
+    // is writable or not.
     var readonly = fm.isOnReadonlyDirectory();
     var currentDir = fm.directoryModel_.getCurrentDirEntry();
     var downloadsDir = fm.directoryModel_.getRootsList().item(0);
     var readonlyDirName = null;
     if (readonly) {
-      readonlyDirName = fm.isOnGData() ?
+      readonlyDirName = fm.isOnDrive() ?
           PathUtil.getRootLabel(PathUtil.getRootPath(currentDir.fullPath)) :
           fm.directoryModel_.getCurrentRootName();
     }
@@ -435,7 +458,6 @@ FileTasks.prototype.openGallery = function(urls) {
       metadataCache: fm.metadataCache_,
       pageState: this.params_,
       onClose: onClose,
-      allowMosaic: fm.isOnGData(),
       onThumbnailError: function(imageURL) {
         fm.metadataCache_.refreshFileMetadata(imageURL);
       },
@@ -450,6 +472,7 @@ FileTasks.prototype.openGallery = function(urls) {
 
 /**
  * Displays the list of tasks in a task picker combobutton.
+ *
  * @param {cr.ui.ComboButton} combobutton The task picker element.
  * @private
  */
@@ -483,6 +506,7 @@ FileTasks.prototype.display_ = function(combobutton) {
 
 /**
  * Creates sorted array of available task descriptions such as title and icon.
+ *
  * @return {Array} created array can be used to feed combobox, menus and so on.
  * @private
  */
@@ -509,6 +533,7 @@ FileTasks.prototype.createItems_ = function() {
  * Updates context menu with default item.
  * @private
  */
+
 FileTasks.prototype.updateMenuItem_ = function() {
   this.fileManager_.updateContextMenuActionItems(this.defaultTask_,
       this.tasks_.length > 1);
@@ -516,9 +541,10 @@ FileTasks.prototype.updateMenuItem_ = function() {
 
 /**
  * Creates combobutton item based on task.
+ *
  * @param {Object} task Task to convert.
  * @param {string=} opt_title Title.
- * @param {boolean} opt_bold Make a menu item bold.
+ * @param {boolean=} opt_bold Make a menu item bold.
  * @return {Object} Item appendable to combobutton drop-down list.
  * @private
  */
@@ -538,6 +564,7 @@ FileTasks.prototype.createCombobuttonItem_ = function(task, opt_title,
  * Decorates a FileTasks method, so it will be actually executed after the tasks
  * are available.
  * This decorator expects an implementation called |method + '_'|.
+ *
  * @param {string} method The method name.
  */
 FileTasks.decorate = function(method) {
@@ -581,4 +608,3 @@ FileTasks.decorate('display');
 FileTasks.decorate('updateMenuItem');
 FileTasks.decorate('execute');
 FileTasks.decorate('executeDefault');
-

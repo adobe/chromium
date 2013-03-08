@@ -3,7 +3,7 @@
 // found in the LICENSE file.
 
 #include "base/command_line.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "content/browser/device_orientation/device_data.h"
@@ -26,11 +26,11 @@ class MockProvider : public Provider {
         removed_observer_(false) {
   }
 
-  virtual void AddObserver(Observer* observer) {
+  virtual void AddObserver(Observer* observer) OVERRIDE {
     added_observer_ = true;
     observer->OnDeviceDataUpdate(device_data_.get(), device_data_type_);
   }
-  virtual void RemoveObserver(Observer* observer) {
+  virtual void RemoveObserver(Observer* observer) OVERRIDE {
     removed_observer_ = true;
   }
 
@@ -46,7 +46,7 @@ class MockProvider : public Provider {
 class DeviceOrientationBrowserTest : public ContentBrowserTest {
  public:
   // From ContentBrowserTest.
-  virtual void SetUpCommandLine(CommandLine* command_line) {
+  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
     EXPECT_TRUE(!command_line->HasSwitch(switches::kDisableDeviceOrientation));
   }
 };

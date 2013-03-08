@@ -62,10 +62,12 @@ class APIPermission {
     kDial,
     kDebugger,
     kDeclarative,
+    kDeclarativeContent,
     kDeclarativeWebRequest,
     kDeveloperPrivate,
     kDevtools,
     kDownloads,
+    kDownloadsInternal,
     kEchoPrivate,
     kExperimental,
     kFileBrowserHandler,
@@ -74,6 +76,7 @@ class APIPermission {
     kFileSystem,
     kFileSystemWrite,
     kFontSettings,
+    kFullscreen,
     kGeolocation,
     kHistory,
     kIdle,
@@ -85,6 +88,8 @@ class APIPermission {
     kMediaGalleriesPrivate,
     kMediaPlayerPrivate,
     kMetricsPrivate,
+    kNativeMessaging,
+    kNetworkingPrivate,
     kNotification,
     kPageCapture,
     kPointerLock,
@@ -93,12 +98,15 @@ class APIPermission {
     kProxy,
     kPushMessaging,
     kRtcPrivate,
+    kScreensaver,
     kSerial,
+    kSessionRestore,
     kSocket,
     kStorage,
     kSyncFileSystem,
     kSystemPrivate,
     kSystemIndicator,
+    kSystemInfoDisplay,
     kTab,
     kTabCapture,
     kTerminalPrivate,
@@ -211,7 +219,7 @@ class APIPermissionInfo {
     // Indicates that extensions cannot specify the permission as optional.
     kFlagCannotBeOptional = 1 << 3,
 
-    // Indicates that extensions cannot specify the permission as optional.
+    // Indicates that extensions must specify the permission as optional.
     kFlagMustBeOptional = 1 << 4
   };
 

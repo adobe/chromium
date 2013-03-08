@@ -10,15 +10,15 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
-#include "content/renderer/media/media_stream_extra_data.h"
 #include "content/renderer/media/media_stream_dependency_factory.h"
+#include "content/renderer/media/media_stream_extra_data.h"
 #include "content/renderer/media/media_stream_impl.h"
 #include "content/renderer/render_view_impl.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebMediaStream.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebMediaStreamCenterClient.h"
-#include "third_party/WebKit/Source/Platform/chromium/public/WebMediaStreamComponent.h"
-#include "third_party/WebKit/Source/Platform/chromium/public/WebMediaStreamDescriptor.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebMediaStreamSource.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebMediaStreamSourcesRequest.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebMediaStreamTrack.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebVector.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
 #include "third_party/libjingle/source/talk/app/webrtc/jsep.h"
@@ -26,50 +26,27 @@
 namespace content {
 
 static webrtc::MediaStreamInterface* GetNativeMediaStream(
-    const WebKit::WebMediaStreamDescriptor& stream) {
+    const WebKit::WebMediaStream& stream) {
   MediaStreamExtraData* extra_data =
       static_cast<MediaStreamExtraData*>(stream.extraData());
-  if (extra_data && extra_data->remote_stream())
-    return extra_data->remote_stream();
-
-  if (extra_data && extra_data->local_stream())
-    return extra_data->local_stream();
-
-  // TODO(perkj): This can occur if a JS create a new MediaStream based on an
-  // existing MediaStream.
-  NOTIMPLEMENTED();
-  return NULL;
+  return extra_data->stream();
 }
 
-template <class TrackList>
-static webrtc::MediaStreamTrackInterface* GetTrack(
-    const std::string& source_id,
-    TrackList* tracks) {
-  for (size_t i = 0; i < tracks->count(); ++i) {
-    if (tracks->at(i)->id() == source_id)
-      return tracks->at(i);
-  }
-  return NULL;
-}
 
 static webrtc::MediaStreamTrackInterface* GetNativeMediaStreamTrack(
-      const WebKit::WebMediaStreamDescriptor& stream,
-      const WebKit::WebMediaStreamComponent& component) {
-  std::string source_id = UTF16ToUTF8(component.source().id());
+      const WebKit::WebMediaStream& stream,
+      const WebKit::WebMediaStreamTrack& component) {
+  std::string track_id = UTF16ToUTF8(component.id());
   webrtc::MediaStreamInterface* native_stream = GetNativeMediaStream(stream);
   if (native_stream) {
     if (component.source().type() == WebKit::WebMediaStreamSource::TypeAudio) {
-      return GetTrack<webrtc::AudioTracks>(
-          source_id, native_stream->audio_tracks());
+      return native_stream->FindAudioTrack(track_id);
     }
     if (component.source().type() == WebKit::WebMediaStreamSource::TypeVideo) {
-      return GetTrack<webrtc::VideoTracks>(
-          source_id, native_stream->video_tracks());
+      return native_stream->FindVideoTrack(track_id);
     }
   }
-  // TODO(perkj): This can occur if a JS create a new MediaStream based on an
-  // existing MediaStream.
-  NOTIMPLEMENTED();
+  NOTREACHED();
   return NULL;
 }
 
@@ -85,8 +62,8 @@ void MediaStreamCenter::queryMediaStreamSources(
 }
 
 void MediaStreamCenter::didEnableMediaStreamTrack(
-    const WebKit::WebMediaStreamDescriptor& stream,
-    const WebKit::WebMediaStreamComponent& component) {
+    const WebKit::WebMediaStream& stream,
+    const WebKit::WebMediaStreamTrack& component) {
   webrtc::MediaStreamTrackInterface* track =
       GetNativeMediaStreamTrack(stream, component);
   if (track)
@@ -94,8 +71,8 @@ void MediaStreamCenter::didEnableMediaStreamTrack(
 }
 
 void MediaStreamCenter::didDisableMediaStreamTrack(
-    const WebKit::WebMediaStreamDescriptor& stream,
-    const WebKit::WebMediaStreamComponent& component) {
+    const WebKit::WebMediaStream& stream,
+    const WebKit::WebMediaStreamTrack& component) {
   webrtc::MediaStreamTrackInterface* track =
       GetNativeMediaStreamTrack(stream, component);
   if (track)
@@ -103,7 +80,7 @@ void MediaStreamCenter::didDisableMediaStreamTrack(
 }
 
 void MediaStreamCenter::didStopLocalMediaStream(
-    const WebKit::WebMediaStreamDescriptor& stream) {
+    const WebKit::WebMediaStream& stream) {
   DVLOG(1) << "MediaStreamCenter::didStopLocalMediaStream";
   MediaStreamExtraData* extra_data =
        static_cast<MediaStreamExtraData*>(stream.extraData());
@@ -116,7 +93,7 @@ void MediaStreamCenter::didStopLocalMediaStream(
 }
 
 void MediaStreamCenter::didCreateMediaStream(
-    WebKit::WebMediaStreamDescriptor& stream) {
+    WebKit::WebMediaStream& stream) {
   if (!rtc_factory_)
     return;
   rtc_factory_->CreateNativeLocalMediaStream(&stream);

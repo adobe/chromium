@@ -7,7 +7,9 @@
 #include <vector>
 
 #include "ash/ash_constants.h"
+#include "ash/root_window_controller.h"
 #include "ash/shell.h"
+#include "ash/shell_window_ids.h"
 #include "ash/wm/activation_controller.h"
 #include "ash/wm/window_properties.h"
 #include "ui/aura/client/activation_client.h"
@@ -66,11 +68,26 @@ bool CanMaximizeWindow(const aura::Window* window) {
   return window->GetProperty(aura::client::kCanMaximizeKey);
 }
 
+bool CanMinimizeWindow(const aura::Window* window) {
+  internal::RootWindowController* controller =
+      internal::RootWindowController::ForWindow(window);
+  if (!controller)
+    return false;
+  aura::Window* lockscreen = controller->GetContainer(
+      internal::kShellWindowId_LockScreenContainersContainer);
+  if (lockscreen->Contains(window))
+    return false;
+
+  return true;
+}
+
 bool CanResizeWindow(const aura::Window* window) {
   return window->GetProperty(aura::client::kCanResizeKey);
 }
 
 bool CanSnapWindow(aura::Window* window) {
+  if (!CanResizeWindow(window))
+    return false;
   // If a window has a maximum size defined, snapping may make it too big.
   return window->delegate() ? window->delegate()->GetMaximumSize().IsEmpty() :
                               true;
@@ -154,23 +171,31 @@ void SetPreAutoManageWindowBounds(aura::Window* window,
                       new gfx::Rect(bounds));
 }
 
-void AdjustBoundsToEnsureWindowVisibility(gfx::Rect* bounds,
-                                          const gfx::Rect& work_area) {
+void AdjustBoundsToEnsureMinimumWindowVisibility(const gfx::Rect& work_area,
+                                                 gfx::Rect* bounds) {
+  AdjustBoundsToEnsureWindowVisibility(
+      work_area, kMinimumOnScreenArea, kMinimumOnScreenArea, bounds);
+}
+
+void AdjustBoundsToEnsureWindowVisibility(const gfx::Rect& work_area,
+                                          int min_width,
+                                          int min_height,
+                                          gfx::Rect* bounds) {
   bounds->set_width(std::min(bounds->width(), work_area.width()));
   bounds->set_height(std::min(bounds->height(), work_area.height()));
   if (!work_area.Intersects(*bounds)) {
     int y_offset = 0;
     if (work_area.bottom() < bounds->y()) {
-      y_offset = work_area.bottom() - bounds->y() - kMinimumOnScreenArea;
+      y_offset = work_area.bottom() - bounds->y() - min_height;
     } else if (bounds->bottom() < work_area.y()) {
-      y_offset = work_area.y() - bounds->bottom() + kMinimumOnScreenArea;
+      y_offset = work_area.y() - bounds->bottom() + min_height;
     }
 
     int x_offset = 0;
     if (work_area.right() < bounds->x()) {
-      x_offset = work_area.right() - bounds->x() - kMinimumOnScreenArea;
+      x_offset = work_area.right() - bounds->x() - min_width;
     } else if (bounds->right() < work_area.x()) {
-      x_offset = work_area.x() - bounds->right() + kMinimumOnScreenArea;
+      x_offset = work_area.x() - bounds->right() + min_width;
     }
     bounds->Offset(x_offset, y_offset);
   }

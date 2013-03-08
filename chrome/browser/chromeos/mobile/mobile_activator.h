@@ -8,7 +8,7 @@
 #include <map>
 #include <string>
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/memory/singleton.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
@@ -37,7 +37,7 @@ class CellularConfigDocument
   virtual ~CellularConfigDocument();
 
   void SetErrorMap(const ErrorMap& map);
-  bool LoadFromFile(const FilePath& config_path);
+  bool LoadFromFile(const base::FilePath& config_path);
 
   std::string version_;
   ErrorMap error_map_;

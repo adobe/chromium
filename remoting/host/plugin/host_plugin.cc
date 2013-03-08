@@ -10,8 +10,9 @@
 
 #include "base/at_exit.h"
 #include "base/basictypes.h"
+#include "base/command_line.h"
 #include "base/logging.h"
-#include "base/stringize_macros.h"
+#include "base/strings/stringize_macros.h"
 #include "net/socket/ssl_server_socket.h"
 #include "remoting/base/plugin_thread_task_runner.h"
 #include "remoting/host/plugin/constants.h"
@@ -75,7 +76,7 @@ class HostNPPlugin : public remoting::PluginThreadTaskRunner::Delegate {
                        plugin_task_runner_));
   }
 
-  ~HostNPPlugin() {
+  virtual ~HostNPPlugin() {
     if (scriptable_object_) {
       DCHECK_EQ(scriptable_object_->referenceCount, 1UL);
       g_npnetscape_funcs->releaseobject(scriptable_object_);
@@ -450,12 +451,9 @@ NPError SetWindow(NPP instance, NPWindow* pNPWindow) {
 }  // namespace
 
 #if defined(OS_WIN)
-HMODULE g_hModule = NULL;
-
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD dwReason, LPVOID lpReserved) {
   switch (dwReason) {
     case DLL_PROCESS_ATTACH:
-      g_hModule = hModule;
       DisableThreadLibraryCalls(hModule);
       break;
     case DLL_PROCESS_DETACH:
@@ -503,6 +501,8 @@ EXPORT NPError API_CALL NP_Initialize(NPNetscapeFuncs* npnetscape_funcs
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
   NP_GetEntryPoints(nppfuncs);
 #endif
+  // Init an empty command line for common objects that use it.
+  CommandLine::Init(0, NULL);
   return NPERR_NO_ERROR;
 }
 

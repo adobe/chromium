@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2013 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,10 +13,13 @@
 #include "base/chromeos/chromeos_version.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
+#include "base/prefs/pref_registry_simple.h"
+#include "base/prefs/pref_service.h"
 #include "base/rand_util.h"
+#include "base/string_util.h"
 #include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
@@ -30,7 +33,6 @@
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/chromeos/power/session_length_limiter.h"
 #include "chrome/browser/policy/browser_policy_connector.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/sync/profile_sync_service.h"
@@ -65,6 +67,14 @@ const char kLocallyManagedUsersFirstRun[] = "LocallyManagedUsersFirstRun";
 // A pref of the next id for locally managed users generation.
 const char kLocallyManagedUsersNextId[] =
     "LocallyManagedUsersNextId";
+
+// A pref of the next id for locally managed users generation.
+const char kLocallyManagedUserCreationTransactionDisplayName[] =
+    "LocallyManagedUserCreationTransactionDisplayName";
+
+// A pref of the next id for locally managed users generation.
+const char kLocallyManagedUserCreationTransactionUserId[] =
+    "LocallyManagedUserCreationTransactionUserId";
 
 // A string pref that gets set when a public account is removed but a user is
 // currently logged into that account, requiring the account's data to be
@@ -158,16 +168,20 @@ bool ParseUserList(const ListValue& users_list,
 }  // namespace
 
 // static
-void UserManager::RegisterPrefs(PrefServiceSimple* local_state) {
-  local_state->RegisterListPref(kRegularUsers);
-  local_state->RegisterListPref(kPublicAccounts);
-  local_state->RegisterListPref(kLocallyManagedUsersFirstRun);
-  local_state->RegisterIntegerPref(kLocallyManagedUsersNextId, 0);
-  local_state->RegisterStringPref(kPublicAccountPendingDataRemoval, "");
-  local_state->RegisterDictionaryPref(kUserOAuthTokenStatus);
-  local_state->RegisterDictionaryPref(kUserDisplayName);
-  local_state->RegisterDictionaryPref(kUserDisplayEmail);
-  SessionLengthLimiter::RegisterPrefs(local_state);
+void UserManager::RegisterPrefs(PrefRegistrySimple* registry) {
+  registry->RegisterListPref(kRegularUsers);
+  registry->RegisterListPref(kPublicAccounts);
+  registry->RegisterListPref(kLocallyManagedUsersFirstRun);
+  registry->RegisterIntegerPref(kLocallyManagedUsersNextId, 0);
+  registry->RegisterStringPref(kPublicAccountPendingDataRemoval, "");
+  registry->RegisterStringPref(
+      kLocallyManagedUserCreationTransactionDisplayName, "");
+  registry->RegisterStringPref(
+      kLocallyManagedUserCreationTransactionUserId, "");
+  registry->RegisterDictionaryPref(kUserOAuthTokenStatus);
+  registry->RegisterDictionaryPref(kUserDisplayName);
+  registry->RegisterDictionaryPref(kUserDisplayEmail);
+  SessionLengthLimiter::RegisterPrefs(registry);
 }
 
 UserManagerImpl::UserManagerImpl()
@@ -180,6 +194,7 @@ UserManagerImpl::UserManagerImpl()
       is_current_user_new_(false),
       is_current_user_ephemeral_regular_user_(false),
       ephemeral_users_enabled_(false),
+      merge_session_state_(MERGE_STATUS_NOT_STARTED),
       observed_sync_service_(NULL),
       user_image_manager_(new UserImageManagerImpl) {
   // UserManager instance should be used only on UI thread.
@@ -383,15 +398,10 @@ void UserManagerImpl::SessionStarted() {
   }
 }
 
-const User* UserManagerImpl::CreateLocallyManagedUserRecord(
-      const string16& display_name) {
-  const User* user = FindLocallyManagedUser(display_name);
-  DCHECK(!user);
-  if (user)
-    return user;
-  std::string id;
+std::string UserManagerImpl::GenerateUniqueLocallyManagedUserId() {
   int counter = g_browser_process->local_state()->
       GetInteger(kLocallyManagedUsersNextId);
+  std::string id;
   bool user_exists;
   do {
     id = base::StringPrintf("%d@%s", counter, kLocallyManagedUserDomain);
@@ -406,15 +416,27 @@ const User* UserManagerImpl::CreateLocallyManagedUserRecord(
   g_browser_process->local_state()->
       SetInteger(kLocallyManagedUsersNextId, counter);
 
-  User* new_user = User::CreateLocallyManagedUser(id);
+  g_browser_process->local_state()->CommitPendingWrite();
+  return id;
+}
+
+const User* UserManagerImpl::CreateLocallyManagedUserRecord(
+      const std::string& e_mail,
+      const string16& display_name) {
+  const User* user = FindLocallyManagedUser(display_name);
+  DCHECK(!user);
+  if (user)
+    return user;
+
+  User* new_user = User::CreateLocallyManagedUser(e_mail);
   ListPrefUpdate prefs_users_update(g_browser_process->local_state(),
                                     kRegularUsers);
-  prefs_users_update->Insert(0, new base::StringValue(id));
+  prefs_users_update->Insert(0, new base::StringValue(e_mail));
   ListPrefUpdate prefs_new_users_update(g_browser_process->local_state(),
                                         kLocallyManagedUsersFirstRun);
-  prefs_new_users_update->Insert(0, new base::StringValue(id));
+  prefs_new_users_update->Insert(0, new base::StringValue(e_mail));
   users_.insert(users_.begin(), new_user);
-  SaveUserDisplayName(id, display_name);
+  SaveUserDisplayName(e_mail, display_name);
 
   g_browser_process->local_state()->CommitPendingWrite();
   return new_user;
@@ -637,14 +659,13 @@ void UserManagerImpl::OnStateChanged() {
     DVLOG(1) << "Invalidate OAuth token because of a sync error.";
     SaveUserOAuthStatus(
         logged_in_user_->email(),
-        CommandLine::ForCurrentProcess()->HasSwitch(::switches::kForceOAuth1) ?
-            User::OAUTH1_TOKEN_STATUS_INVALID :
-            User::OAUTH2_TOKEN_STATUS_INVALID);
+        User::OAUTH2_TOKEN_STATUS_INVALID);
   }
 }
 
 void UserManagerImpl::OnPolicyUpdated(const std::string& account_id) {
   UpdatePublicAccountDisplayName(account_id);
+  NotifyUserListChanged();
 }
 
 void UserManagerImpl::OnDeviceLocalAccountsChanged() {
@@ -723,6 +744,19 @@ bool UserManagerImpl::IsLoggedInAsStub() const {
 bool UserManagerImpl::IsSessionStarted() const {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   return session_started_;
+}
+
+UserManager::MergeSessionState UserManagerImpl::GetMergeSessionState() const {
+  return merge_session_state_;
+}
+
+void UserManagerImpl::SetMergeSessionState(
+    UserManager::MergeSessionState state) {
+  if (merge_session_state_ == state)
+    return;
+
+  merge_session_state_ = state;
+  NotifyMergeSessionStateChanged();
 }
 
 bool UserManagerImpl::HasBrowserRestarted() const {
@@ -881,18 +915,15 @@ void UserManagerImpl::RetrieveTrustedDevicePolicies() {
         it = users_.erase(it);
         changed = true;
       } else {
-        prefs_users_update->Append(new base::StringValue(user_email));
+        if ((*it)->GetType() != User::USER_TYPE_PUBLIC_ACCOUNT)
+          prefs_users_update->Append(new base::StringValue(user_email));
         ++it;
       }
     }
   }
 
-  if (changed) {
-    content::NotificationService::current()->Notify(
-        chrome::NOTIFICATION_POLICY_USER_LIST_CHANGED,
-        content::Source<UserManager>(this),
-        content::NotificationService::NoDetails());
-  }
+  if (changed)
+    NotifyUserListChanged();
 
   cros_settings_->AddSettingsObserver(kAccountsPrefDeviceLocalAccounts,
                                       this);
@@ -1082,6 +1113,77 @@ void UserManagerImpl::UpdatePublicAccountDisplayName(
 
   // Set or clear the display name.
   SaveUserDisplayName(username, UTF8ToUTF16(display_name));
+}
+
+void UserManagerImpl::StartLocallyManagedUserCreationTransaction(
+      const string16& display_name) {
+  g_browser_process->local_state()->
+      SetString(kLocallyManagedUserCreationTransactionDisplayName,
+           UTF16ToASCII(display_name));
+}
+
+void UserManagerImpl::SetLocallyManagedUserCreationTransactionUserId(
+      const std::string& email) {
+  g_browser_process->local_state()->
+      SetString(kLocallyManagedUserCreationTransactionUserId,
+                email);
+}
+
+void UserManagerImpl::CommitLocallyManagedUserCreationTransaction() {
+  g_browser_process->local_state()->
+      ClearPref(kLocallyManagedUserCreationTransactionDisplayName);
+  g_browser_process->local_state()->
+      ClearPref(kLocallyManagedUserCreationTransactionUserId);
+}
+
+UserFlow* UserManagerImpl::GetCurrentUserFlow() const {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  if (!IsUserLoggedIn())
+    return GetDefaultUserFlow();
+  return GetUserFlow(GetLoggedInUser()->email());
+}
+
+UserFlow* UserManagerImpl::GetUserFlow(const std::string& email) const {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  FlowMap::const_iterator it = specific_flows_.find(email);
+  if (it != specific_flows_.end())
+    return it->second;
+  return GetDefaultUserFlow();
+}
+
+void UserManagerImpl::SetUserFlow(const std::string& email, UserFlow* flow) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  ResetUserFlow(email);
+  specific_flows_[email] = flow;
+}
+
+void UserManagerImpl::ResetUserFlow(const std::string& email) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  FlowMap::iterator it = specific_flows_.find(email);
+  if (it != specific_flows_.end()) {
+    delete it->second;
+    specific_flows_.erase(it);
+  }
+}
+
+UserFlow* UserManagerImpl::GetDefaultUserFlow() const {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  if (!default_flow_.get())
+    default_flow_.reset(new DefaultUserFlow());
+  return default_flow_.get();
+}
+
+void UserManagerImpl::NotifyUserListChanged() {
+  content::NotificationService::current()->Notify(
+      chrome::NOTIFICATION_USER_LIST_CHANGED,
+      content::Source<UserManager>(this),
+      content::NotificationService::NoDetails());
+}
+
+void UserManagerImpl::NotifyMergeSessionStateChanged() {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  FOR_EACH_OBSERVER(UserManager::Observer, observer_list_,
+                    MergeSessionStateChanged(merge_session_state_));
 }
 
 }  // namespace chromeos

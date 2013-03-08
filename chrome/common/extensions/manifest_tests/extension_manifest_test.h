@@ -5,25 +5,21 @@
 #ifndef CHROME_COMMON_EXTENSIONS_MANIFEST_TESTS_EXTENSION_MANIFEST_TEST_H_
 #define CHROME_COMMON_EXTENSIONS_MANIFEST_TESTS_EXTENSION_MANIFEST_TEST_H_
 
-#include "base/values.h"
+#include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/values.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_manifest_constants.h"
 #include "chrome/common/extensions/features/feature.h"
+#include "chrome/common/extensions/manifest.h"
 #include "testing/gtest/include/gtest/gtest.h"
-
-namespace errors = extension_manifest_errors;
-namespace keys = extension_manifest_keys;
 
 class ExtensionManifestTest : public testing::Test {
  public:
   ExtensionManifestTest();
 
  protected:
-  // If filename is a relative path, LoadManifestFile will treat it relative to
-  // the appropriate test directory.
-  static DictionaryValue* LoadManifestFile(const std::string& filename,
-                                           std::string* error);
+  virtual void TearDown() OVERRIDE;
 
   // Helper class that simplifies creating methods that take either a filename
   // to a manifest or the manifest itself.
@@ -46,7 +42,8 @@ class ExtensionManifestTest : public testing::Test {
 
     const std::string& name() const { return name_; };
 
-    DictionaryValue* GetManifest(std::string* error) const;
+    DictionaryValue* GetManifest(char const* test_data_dir,
+                                 std::string* error) const;
 
    private:
     const std::string name_;
@@ -54,37 +51,44 @@ class ExtensionManifestTest : public testing::Test {
     mutable scoped_ptr<DictionaryValue> manifest_holder_;
   };
 
+  // The subdirectory in which to find test data files.
+  virtual char const* test_data_dir();
+
+  scoped_ptr<DictionaryValue> LoadManifest(
+      char const* manifest_name,
+      std::string* error);
+
   scoped_refptr<extensions::Extension> LoadExtension(
       const Manifest& manifest,
       std::string* error,
-      extensions::Extension::Location location =
-          extensions::Extension::INTERNAL,
+      extensions::Manifest::Location location =
+          extensions::Manifest::INTERNAL,
       int flags = extensions::Extension::NO_FLAGS);
 
   scoped_refptr<extensions::Extension> LoadAndExpectSuccess(
       const Manifest& manifest,
-      extensions::Extension::Location location =
-          extensions::Extension::INTERNAL,
+      extensions::Manifest::Location location =
+          extensions::Manifest::INTERNAL,
       int flags = extensions::Extension::NO_FLAGS);
 
   scoped_refptr<extensions::Extension> LoadAndExpectSuccess(
       char const* manifest_name,
-      extensions::Extension::Location location =
-          extensions::Extension::INTERNAL,
+      extensions::Manifest::Location location =
+          extensions::Manifest::INTERNAL,
       int flags = extensions::Extension::NO_FLAGS);
 
   scoped_refptr<extensions::Extension> LoadAndExpectWarning(
       const Manifest& manifest,
       const std::string& expected_error,
-      extensions::Extension::Location location =
-          extensions::Extension::INTERNAL,
+      extensions::Manifest::Location location =
+          extensions::Manifest::INTERNAL,
       int flags = extensions::Extension::NO_FLAGS);
 
   scoped_refptr<extensions::Extension> LoadAndExpectWarning(
       char const* manifest_name,
       const std::string& expected_error,
-      extensions::Extension::Location location =
-          extensions::Extension::INTERNAL,
+      extensions::Manifest::Location location =
+          extensions::Manifest::INTERNAL,
       int flags = extensions::Extension::NO_FLAGS);
 
   void VerifyExpectedError(extensions::Extension* extension,
@@ -94,14 +98,14 @@ class ExtensionManifestTest : public testing::Test {
 
   void LoadAndExpectError(char const* manifest_name,
                           const std::string& expected_error,
-                          extensions::Extension::Location location =
-                              extensions::Extension::INTERNAL,
+                          extensions::Manifest::Location location =
+                              extensions::Manifest::INTERNAL,
                           int flags = extensions::Extension::NO_FLAGS);
 
   void LoadAndExpectError(const Manifest& manifest,
                           const std::string& expected_error,
-                          extensions::Extension::Location location =
-                              extensions::Extension::INTERNAL,
+                          extensions::Manifest::Location location =
+                              extensions::Manifest::INTERNAL,
                           int flags = extensions::Extension::NO_FLAGS);
 
   void AddPattern(extensions::URLPatternSet* extent,
@@ -118,18 +122,18 @@ class ExtensionManifestTest : public testing::Test {
   struct Testcase {
     std::string manifest_filename_;
     std::string expected_error_; // only used for ExpectedError tests
-    extensions::Extension::Location location_;
+    extensions::Manifest::Location location_;
     int flags_;
 
     Testcase(std::string manifest_filename, std::string expected_error,
-        extensions::Extension::Location location, int flags);
+        extensions::Manifest::Location location, int flags);
 
     Testcase(std::string manifest_filename, std::string expected_error);
 
     explicit Testcase(std::string manifest_filename);
 
     Testcase(std::string manifest_filename,
-             extensions::Extension::Location location,
+             extensions::Manifest::Location location,
              int flags);
   };
 

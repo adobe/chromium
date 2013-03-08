@@ -13,7 +13,6 @@
 #include "chrome/installer/util/master_preferences.h"
 #include "chrome/installer/util/master_preferences_constants.h"
 #include "chrome/installer/util/util_constants.h"
-#include "googleurl/src/gurl.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace {
@@ -27,10 +26,10 @@ class MasterPreferencesTest : public testing::Test {
     EXPECT_TRUE(file_util::Delete(prefs_file_, false));
   }
 
-  const FilePath& prefs_file() const { return prefs_file_; }
+  const base::FilePath& prefs_file() const { return prefs_file_; }
 
  private:
-  FilePath prefs_file_;
+  base::FilePath prefs_file_;
 };
 
 // Used to specify an expected value for a set boolean preference variable.
@@ -192,12 +191,12 @@ TEST_F(MasterPreferencesTest, FirstRunTabs) {
 
   EXPECT_TRUE(file_util::WriteFile(prefs_file(), text, strlen(text)));
   installer::MasterPreferences prefs(prefs_file());
-  typedef std::vector<GURL> TabsVector;
+  typedef std::vector<std::string> TabsVector;
   TabsVector tabs = prefs.GetFirstRunTabs();
   ASSERT_EQ(3, tabs.size());
-  EXPECT_EQ(GURL("http://google.com/f1"), tabs[0]);
-  EXPECT_EQ(GURL("https://google.com/f2"), tabs[1]);
-  EXPECT_EQ(GURL("new_tab_page"), tabs[2]);
+  EXPECT_EQ("http://google.com/f1", tabs[0]);
+  EXPECT_EQ("https://google.com/f2", tabs[1]);
+  EXPECT_EQ("new_tab_page", tabs[2]);
 }
 
 // In this test instead of using our synthetic json file, we use an
@@ -205,7 +204,7 @@ TEST_F(MasterPreferencesTest, FirstRunTabs) {
 // they change something in the manifest this test will break, but in
 // general it is expected the extension format to be backwards compatible.
 TEST(MasterPrefsExtension, ValidateExtensionJSON) {
-  FilePath prefs_path;
+  base::FilePath prefs_path;
   ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &prefs_path));
   prefs_path = prefs_path.AppendASCII("extensions")
       .AppendASCII("good").AppendASCII("Preferences");
@@ -236,7 +235,7 @@ TEST(MasterPrefsExtension, ValidateExtensionJSON) {
 // Test that we are parsing master preferences correctly.
 TEST_F(MasterPreferencesTest, GetInstallPreferencesTest) {
   // Create a temporary prefs file.
-  FilePath prefs_file;
+  base::FilePath prefs_file;
   ASSERT_TRUE(file_util::CreateTemporaryFile(&prefs_file));
   const char text[] =
     "{ \n"

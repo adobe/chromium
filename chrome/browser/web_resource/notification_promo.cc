@@ -8,23 +8,23 @@
 #include <vector>
 
 #include "base/bind.h"
+#include "base/prefs/pref_registry_simple.h"
+#include "base/prefs/pref_service.h"
 #include "base/rand_util.h"
-#include "base/string_number_conversions.h"
 #include "base/string_util.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/sys_info.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/time.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/prefs/pref_service.h"
-#include "chrome/browser/prefs/pref_service_simple.h"
-#include "chrome/browser/prefs/pref_service_syncable.h"
 #include "chrome/browser/web_resource/promo_resource_service.h"
 #include "chrome/common/chrome_version_info.h"
-#include "chrome/common/net/url_util.h"
 #include "chrome/common/pref_names.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/user_metrics.h"
 #include "googleurl/src/gurl.h"
+#include "net/base/url_util.h"
 
 #if defined(OS_ANDROID)
 #include "base/command_line.h"
@@ -143,7 +143,8 @@ base::Value* DeepCopyAndResolveStrings(
       const base::ListValue* list = static_cast<const base::ListValue*>(node);
       base::ListValue* copy = new base::ListValue;
       for (base::ListValue::const_iterator it = list->begin();
-           it != list->end(); ++it) {
+           it != list->end();
+           ++it) {
         base::Value* child_copy = DeepCopyAndResolveStrings(*it, strings);
         copy->Append(child_copy);
       }
@@ -154,22 +155,19 @@ base::Value* DeepCopyAndResolveStrings(
       const base::DictionaryValue* dict =
           static_cast<const base::DictionaryValue*>(node);
       base::DictionaryValue* copy = new base::DictionaryValue;
-      for (base::DictionaryValue::key_iterator it = dict->begin_keys();
-           it != dict->end_keys(); ++it) {
-        const base::Value* child = NULL;
-        bool rv = dict->GetWithoutPathExpansion(*it, &child);
-        DCHECK(rv);
-        base::Value* child_copy = DeepCopyAndResolveStrings(child, strings);
-        copy->SetWithoutPathExpansion(*it, child_copy);
+      for (base::DictionaryValue::Iterator it(*dict);
+           !it.IsAtEnd();
+           it.Advance()) {
+        base::Value* child_copy = DeepCopyAndResolveStrings(&it.value(),
+                                                            strings);
+        copy->SetWithoutPathExpansion(it.key(), child_copy);
       }
       return copy;
     }
 
     case Value::TYPE_STRING: {
-      const base::StringValue* str =
-          static_cast<const base::StringValue*>(node);
       std::string value;
-      bool rv = str->GetAsString(&value);
+      bool rv = node->GetAsString(&value);
       DCHECK(rv);
       std::string actual_value;
       if (!strings || !strings->GetString(value, &actual_value))
@@ -186,7 +184,7 @@ base::Value* DeepCopyAndResolveStrings(
 void AppendQueryParameter(GURL* url,
                           const std::string& param,
                           const std::string& value) {
-  *url = chrome_common_net::AppendQueryParameter(*url, param, value);
+  *url = net::AppendQueryParameter(*url, param, value);
 }
 
 }  // namespace
@@ -312,17 +310,22 @@ void NotificationPromo::OnNewNotification() {
 }
 
 // static
-void NotificationPromo::RegisterPrefs(PrefServiceSimple* local_state) {
-  local_state->RegisterDictionaryPref(kPrefPromoObject);
+void NotificationPromo::RegisterPrefs(PrefRegistrySimple* registry) {
+  registry->RegisterDictionaryPref(kPrefPromoObject);
 }
 
 // static
-void NotificationPromo::RegisterUserPrefs(PrefServiceSyncable* prefs) {
-  // TODO(dbeam): Remove in M28 when we're reasonably sure all prefs are gone.
+void NotificationPromo::RegisterUserPrefs(PrefRegistrySyncable* registry) {
+  // TODO(dbeam): Registered only for migration. Remove in M28 when
+  // we're reasonably sure all prefs are gone.
   // http://crbug.com/168887
-  prefs->RegisterDictionaryPref(kPrefPromoObject,
-                                PrefServiceSyncable::UNSYNCABLE_PREF);
-  prefs->ClearPref(kPrefPromoObject);
+  registry->RegisterDictionaryPref(kPrefPromoObject,
+                                   PrefRegistrySyncable::UNSYNCABLE_PREF);
+}
+
+// static
+void NotificationPromo::MigrateUserPrefs(PrefService* user_prefs) {
+  user_prefs->ClearPref(kPrefPromoObject);
 }
 
 void NotificationPromo::WritePrefs() {

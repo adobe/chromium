@@ -285,7 +285,7 @@
       {
         "name": "onSuspendCanceled",
         "type": "function",
-        "description": "Sent after onSuspend() to indicate that the app won't be unloaded after all."
+        "description": "Sent after onSuspend to indicate that the app won't be unloaded after all."
       },
       {
         "name": "onUpdateAvailable",
@@ -305,6 +305,12 @@
             "description": "The manifest details of the available update."
           }
         ]
+      },
+      {
+        "name": "onBrowserUpdateAvailable",
+        "type": "function",
+        "description": "Fired when a Chrome update is available, but isn't installed immediately because a browser restart is required.",
+        "parameters": []
       },
       {
         "name": "onConnect",

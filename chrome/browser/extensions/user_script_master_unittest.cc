@@ -6,8 +6,8 @@
 
 #include <string>
 
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
@@ -66,7 +66,7 @@ class UserScriptMasterTest : public testing::Test,
 
   virtual void Observe(int type,
                        const content::NotificationSource& source,
-                       const content::NotificationDetails& details) {
+                       const content::NotificationDetails& details) OVERRIDE {
     DCHECK(type == chrome::NOTIFICATION_USER_SCRIPTS_UPDATED);
 
     shared_memory_ = content::Details<base::SharedMemory>(details).ptr();
@@ -232,7 +232,7 @@ TEST_F(UserScriptMasterTest, Parse8) {
 }
 
 TEST_F(UserScriptMasterTest, SkipBOMAtTheBeginning) {
-  FilePath path = temp_dir_.path().AppendASCII("script.user.js");
+  base::FilePath path = temp_dir_.path().AppendASCII("script.user.js");
   const std::string content("\xEF\xBB\xBF alert('hello');");
   size_t written = file_util::WriteFile(path, content.c_str(), content.size());
   ASSERT_EQ(written, content.size());
@@ -255,7 +255,7 @@ TEST_F(UserScriptMasterTest, SkipBOMAtTheBeginning) {
 }
 
 TEST_F(UserScriptMasterTest, LeaveBOMNotAtTheBeginning) {
-  FilePath path = temp_dir_.path().AppendASCII("script.user.js");
+  base::FilePath path = temp_dir_.path().AppendASCII("script.user.js");
   const std::string content("alert('here's a BOOM: \xEF\xBB\xBF');");
   size_t written = file_util::WriteFile(path, content.c_str(), content.size());
   ASSERT_EQ(written, content.size());

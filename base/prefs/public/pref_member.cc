@@ -7,7 +7,7 @@
 #include "base/bind_helpers.h"
 #include "base/callback.h"
 #include "base/location.h"
-#include "base/prefs/public/pref_service_base.h"
+#include "base/prefs/pref_service.h"
 #include "base/value_conversions.h"
 
 using base::MessageLoopProxy;
@@ -24,14 +24,14 @@ PrefMemberBase::~PrefMemberBase() {
 }
 
 void PrefMemberBase::Init(const char* pref_name,
-                          PrefServiceBase* prefs,
+                          PrefService* prefs,
                           const NamedChangeCallback& observer) {
   observer_ = observer;
   Init(pref_name, prefs);
 }
 
 void PrefMemberBase::Init(const char* pref_name,
-                          PrefServiceBase* prefs) {
+                          PrefService* prefs) {
   DCHECK(pref_name);
   DCHECK(prefs);
   DCHECK(pref_name_.empty());  // Check that Init is only called once.
@@ -61,7 +61,7 @@ void PrefMemberBase::MoveToThread(
   internal()->MoveToThread(message_loop);
 }
 
-void PrefMemberBase::OnPreferenceChanged(PrefServiceBase* service,
+void PrefMemberBase::OnPreferenceChanged(PrefService* service,
                                          const std::string& pref_name) {
   VerifyValuePrefName();
   UpdateValueFromPref((!setting_value_ && !observer_.is_null()) ?
@@ -70,7 +70,7 @@ void PrefMemberBase::OnPreferenceChanged(PrefServiceBase* service,
 
 void PrefMemberBase::UpdateValueFromPref(const base::Closure& callback) const {
   VerifyValuePrefName();
-  const PrefServiceBase::Preference* pref =
+  const PrefService::Preference* pref =
       prefs_->FindPreference(pref_name_.c_str());
   DCHECK(pref);
   if (!internal())
@@ -104,11 +104,11 @@ bool PrefMemberBase::Internal::IsOnCorrectThread() const {
 }
 
 void PrefMemberBase::Internal::UpdateValue(
-    Value* v,
+    base::Value* v,
     bool is_managed,
     bool is_user_modifiable,
     const base::Closure& callback) const {
-  scoped_ptr<Value> value(v);
+  scoped_ptr<base::Value> value(v);
   base::ScopedClosureRunner closure_runner(callback);
   if (IsOnCorrectThread()) {
     bool rv = UpdateValueInternal(*value);
@@ -131,9 +131,9 @@ void PrefMemberBase::Internal::MoveToThread(
   thread_loop_ = message_loop;
 }
 
-bool PrefMemberVectorStringUpdate(const Value& value,
+bool PrefMemberVectorStringUpdate(const base::Value& value,
                                   std::vector<std::string>* string_vector) {
-  if (!value.IsType(Value::TYPE_LIST))
+  if (!value.IsType(base::Value::TYPE_LIST))
     return false;
   const ListValue* list = static_cast<const ListValue*>(&value);
 
@@ -158,7 +158,8 @@ void PrefMember<bool>::UpdatePref(const bool& value) {
 }
 
 template <>
-bool PrefMember<bool>::Internal::UpdateValueInternal(const Value& value) const {
+bool PrefMember<bool>::Internal::UpdateValueInternal(
+    const base::Value& value) const {
   return value.GetAsBoolean(&value_);
 }
 
@@ -168,7 +169,8 @@ void PrefMember<int>::UpdatePref(const int& value) {
 }
 
 template <>
-bool PrefMember<int>::Internal::UpdateValueInternal(const Value& value) const {
+bool PrefMember<int>::Internal::UpdateValueInternal(
+    const base::Value& value) const {
   return value.GetAsInteger(&value_);
 }
 
@@ -178,7 +180,7 @@ void PrefMember<double>::UpdatePref(const double& value) {
 }
 
 template <>
-bool PrefMember<double>::Internal::UpdateValueInternal(const Value& value)
+bool PrefMember<double>::Internal::UpdateValueInternal(const base::Value& value)
     const {
   return value.GetAsDouble(&value_);
 }
@@ -189,18 +191,20 @@ void PrefMember<std::string>::UpdatePref(const std::string& value) {
 }
 
 template <>
-bool PrefMember<std::string>::Internal::UpdateValueInternal(const Value& value)
+bool PrefMember<std::string>::Internal::UpdateValueInternal(
+    const base::Value& value)
     const {
   return value.GetAsString(&value_);
 }
 
 template <>
-void PrefMember<FilePath>::UpdatePref(const FilePath& value) {
+void PrefMember<base::FilePath>::UpdatePref(const base::FilePath& value) {
   prefs()->SetFilePath(pref_name().c_str(), value);
 }
 
 template <>
-bool PrefMember<FilePath>::Internal::UpdateValueInternal(const Value& value)
+bool PrefMember<base::FilePath>::Internal::UpdateValueInternal(
+    const base::Value& value)
     const {
   return base::GetValueAsFilePath(value, &value_);
 }
@@ -215,6 +219,6 @@ void PrefMember<std::vector<std::string> >::UpdatePref(
 
 template <>
 bool PrefMember<std::vector<std::string> >::Internal::UpdateValueInternal(
-    const Value& value) const {
+    const base::Value& value) const {
   return subtle::PrefMemberVectorStringUpdate(value, &value_);
 }

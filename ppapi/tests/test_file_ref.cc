@@ -681,10 +681,6 @@ std::string TestFileRef::TestRenameFileAndDirectory() {
 
 #ifndef PPAPI_OS_NACL
 std::string TestFileRef::TestFileNameEscaping() {
-  // The directory methods we need only work in-process and not in NaCl for now.
-  if (testing_interface_->IsOutOfProcess())
-    PASS();
-
   TestCompletionCallback callback(instance_->pp_instance(), force_async_);
   pp::FileSystem file_system(instance_, PP_FILESYSTEMTYPE_LOCALTEMPORARY);
   int32_t rv = file_system.Open(1024, callback);
@@ -718,26 +714,26 @@ std::string TestFileRef::TestFileNameEscaping() {
   if (rv != PP_OK)
     return ReportError("FileIO::Open", rv);
 
-  pp::DirectoryReader_Dev directory_reader(test_dir_ref);
-  pp::DirectoryEntry_Dev entry;
+  // DirectoryReader only works out-of-process.
+  if (testing_interface_->IsOutOfProcess()) {
+    TestCompletionCallbackWithOutput< std::vector<pp::DirectoryEntry_Dev> >
+        output_callback(instance_->pp_instance(), force_async_);
+    pp::DirectoryReader_Dev directory_reader(test_dir_ref);
 
-  rv = directory_reader.GetNextEntry(&entry, callback);
-  if (rv == PP_OK_COMPLETIONPENDING)
-    rv = callback.WaitForResult();
-  if (rv != PP_OK && rv != PP_ERROR_FILENOTFOUND)
-    return ReportError("DirectoryEntry_Dev::GetNextEntry", rv);
-  if (entry.is_null())
-    return "Entry was not found.";
-  if (entry.file_ref().GetName().AsString() != kTerribleName)
-    return "Entry name did not match.";
+    rv = directory_reader.ReadEntries(output_callback);
+    if (rv == PP_OK_COMPLETIONPENDING)
+      rv = output_callback.WaitForResult();
+    if (rv != PP_OK && rv != PP_ERROR_FILENOTFOUND)
+      return ReportError("DirectoryEntry_Dev::ReadEntries", rv);
 
-  rv = directory_reader.GetNextEntry(&entry, callback);
-  if (rv == PP_OK_COMPLETIONPENDING)
-    rv = callback.WaitForResult();
-  if (rv != PP_OK && rv != PP_ERROR_FILENOTFOUND)
-    return ReportError("DirectoryEntry_Dev::GetNextEntry", rv);
-  if (!entry.is_null())
-    return "Directory had too many entries.";
+    std::vector<pp::DirectoryEntry_Dev> entries = output_callback.output();
+    if (entries.empty())
+      return "Entry was not found.";
+    if (entries.size() != 1)
+      return "Directory had too many entries.";
+    if (entries.front().file_ref().GetName().AsString() != kTerribleName)
+      return "Entry name did not match.";
+  }
 
   PASS();
 }

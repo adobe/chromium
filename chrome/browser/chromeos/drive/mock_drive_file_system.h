@@ -40,61 +40,62 @@ class MockDriveFileSystem : public DriveFileSystemInterface {
                             const GURL& next_feed,
                             const SearchCallback& callback));
   MOCK_METHOD3(TransferFileFromRemoteToLocal,
-               void(const FilePath& local_src_file_path,
-                    const FilePath& remote_dest_file_path,
+               void(const base::FilePath& local_src_file_path,
+                    const base::FilePath& remote_dest_file_path,
                     const FileOperationCallback& callback));
   MOCK_METHOD3(TransferFileFromLocalToRemote,
-               void(const FilePath& local_src_file_path,
-                    const FilePath& remote_dest_file_path,
+               void(const base::FilePath& local_src_file_path,
+                    const base::FilePath& remote_dest_file_path,
                     const FileOperationCallback& callback));
-  MOCK_METHOD2(OpenFile, void(const FilePath& file_path,
+  MOCK_METHOD2(OpenFile, void(const base::FilePath& file_path,
                               const OpenFileCallback& callback));
-  MOCK_METHOD2(CloseFile, void(const FilePath& file_path,
+  MOCK_METHOD2(CloseFile, void(const base::FilePath& file_path,
                               const FileOperationCallback& callback));
-  MOCK_METHOD3(Copy, void(const FilePath& src_file_path,
-                          const FilePath& dest_file_path,
+  MOCK_METHOD3(Copy, void(const base::FilePath& src_file_path,
+                          const base::FilePath& dest_file_path,
                           const FileOperationCallback& callback));
-  MOCK_METHOD3(Move, void(const FilePath& src_file_path,
-                          const FilePath& dest_file_path,
+  MOCK_METHOD3(Move, void(const base::FilePath& src_file_path,
+                          const base::FilePath& dest_file_path,
                           const FileOperationCallback& callback));
-  MOCK_METHOD3(Remove, void(const FilePath& file_path,
+  MOCK_METHOD3(Remove, void(const base::FilePath& file_path,
                             bool is_recursive,
                             const FileOperationCallback& callback));
   MOCK_METHOD4(CreateDirectory,
-               void(const FilePath& directory_path,
+               void(const base::FilePath& directory_path,
                     bool is_exclusive,
                     bool is_recursive,
                     const FileOperationCallback& callback));
   MOCK_METHOD3(CreateFile,
-               void(const FilePath& file_path,
+               void(const base::FilePath& file_path,
                     bool is_exclusive,
                     const FileOperationCallback& callback));
-  MOCK_METHOD3(
-      GetFileByPath,
-      void(const FilePath& file_path,
-           const GetFileCallback& get_file_callback,
-           const google_apis::GetContentCallback& get_content_callback));
-  MOCK_METHOD3(
+  MOCK_METHOD2(GetFileByPath,
+               void(const base::FilePath& file_path,
+                    const GetFileCallback& callback));
+  MOCK_METHOD4(
       GetFileByResourceId,
       void(const std::string& resource_id,
+           const DriveClientContext& context,
            const GetFileCallback& get_file_callback,
            const google_apis::GetContentCallback& get_content_callback));
-  MOCK_METHOD2(UpdateFileByResourceId,
+  MOCK_METHOD3(UpdateFileByResourceId,
                void(const std::string& resource_id,
+                    const DriveClientContext& context,
                     const FileOperationCallback& callback));
-  MOCK_METHOD2(GetEntryInfoByPath, void(const FilePath& file_path,
+  MOCK_METHOD2(GetEntryInfoByPath, void(const base::FilePath& file_path,
                                         const GetEntryInfoCallback& callback));
   MOCK_METHOD2(ReadDirectoryByPath,
-               void(const FilePath& file_path,
+               void(const base::FilePath& file_path,
                     const ReadDirectoryWithSettingCallback& callback));
-  MOCK_METHOD1(RequestDirectoryRefresh,
-               void(const FilePath& file_path));
+  MOCK_METHOD2(RefreshDirectory,
+               void(const base::FilePath& file_path,
+                    const FileOperationCallback& callback));
   MOCK_METHOD1(GetAvailableSpace,
                void(const GetAvailableSpaceCallback& callback));
   // This function is not mockable by gmock because scoped_ptr is not supported.
-  virtual void AddUploadedFile(const FilePath& file,
+  virtual void AddUploadedFile(const base::FilePath& file,
                                scoped_ptr<google_apis::ResourceEntry> entry,
-                               const FilePath& file_content_path,
+                               const base::FilePath& file_content_path,
                                const FileOperationCallback& callback) OVERRIDE {
   }
   MOCK_METHOD1(GetMetadata,

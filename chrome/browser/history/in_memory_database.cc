@@ -4,7 +4,7 @@
 
 #include "chrome/browser/history/in_memory_database.h"
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
 #include "base/time.h"
@@ -62,7 +62,7 @@ bool InMemoryDatabase::InitFromScratch() {
   return true;
 }
 
-bool InMemoryDatabase::InitFromDisk(const FilePath& history_name) {
+bool InMemoryDatabase::InitFromDisk(const base::FilePath& history_name) {
   if (!InitDB())
     return false;
 

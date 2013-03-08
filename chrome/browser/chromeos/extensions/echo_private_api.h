@@ -8,16 +8,46 @@
 #include "base/compiler_specific.h"
 #include "chrome/browser/extensions/extension_function.h"
 
-class GetRegistrationCodeFunction : public SyncExtensionFunction {
+class EchoPrivateGetRegistrationCodeFunction : public SyncExtensionFunction {
  public:
-  GetRegistrationCodeFunction();
+  EchoPrivateGetRegistrationCodeFunction();
 
  protected:
-  virtual ~GetRegistrationCodeFunction();
+  virtual ~EchoPrivateGetRegistrationCodeFunction();
   virtual bool RunImpl() OVERRIDE;
 
  private:
+  void GetRegistrationCode(const std::string& type);
   DECLARE_EXTENSION_FUNCTION("echoPrivate.getRegistrationCode",
                              ECHOPRIVATE_GETREGISTRATIONCODE)
+};
+
+class EchoPrivateGetOobeTimestampFunction : public AsyncExtensionFunction {
+ public:
+  EchoPrivateGetOobeTimestampFunction();
+
+ protected:
+  virtual ~EchoPrivateGetOobeTimestampFunction();
+  virtual bool RunImpl() OVERRIDE;
+
+ private:
+  bool GetOobeTimestampOnFileThread();
+  DECLARE_EXTENSION_FUNCTION("echoPrivate.getOobeTimestamp",
+                             ECHOPRIVATE_GETOOBETIMESTAMP)
+};
+
+class EchoPrivateCheckAllowRedeemOffersFunction
+    : public AsyncExtensionFunction {
+ public:
+  EchoPrivateCheckAllowRedeemOffersFunction();
+
+ protected:
+  virtual ~EchoPrivateCheckAllowRedeemOffersFunction();
+  virtual bool RunImpl() OVERRIDE;
+
+ private:
+  void CheckAllowRedeemOffers();
+  DECLARE_EXTENSION_FUNCTION("echoPrivate.checkAllowRedeemOffers",
+                             ECHOPRIVATE_CHECKALLOWREDEEMOFFERS)
 };
 #endif  // CHROME_BROWSER_CHROMEOS_EXTENSIONS_ECHO_PRIVATE_API_H_

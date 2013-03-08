@@ -4,7 +4,7 @@
 
 #include "chrome/browser/google_apis/operation_registry.h"
 
-#include "base/string_number_conversions.h"
+#include "base/strings/string_number_conversions.h"
 #include "content/public/browser/browser_thread.h"
 
 using content::BrowserThread;
@@ -42,7 +42,7 @@ std::string OperationTransferStateToString(OperationTransferState state) {
 }
 
 OperationProgressStatus::OperationProgressStatus(OperationType type,
-                                                 const FilePath& path)
+                                                 const base::FilePath& path)
     : operation_id(-1),
       operation_type(type),
       file_path(path),
@@ -70,12 +70,12 @@ std::string OperationProgressStatus::DebugString() const {
 
 OperationRegistry::Operation::Operation(OperationRegistry* registry)
     : registry_(registry),
-      progress_status_(OPERATION_OTHER, FilePath()) {
+      progress_status_(OPERATION_OTHER, base::FilePath()) {
 }
 
 OperationRegistry::Operation::Operation(OperationRegistry* registry,
                                         OperationType type,
-                                        const FilePath& path)
+                                        const base::FilePath& path)
     : registry_(registry),
       progress_status_(type, path) {
 }
@@ -135,11 +135,6 @@ void OperationRegistry::Operation::NotifyResume() {
   }
 }
 
-void OperationRegistry::Operation::NotifyAuthFailed(GDataErrorCode error) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  registry_->OnOperationAuthFailed(error);
-}
-
 OperationRegistry::OperationRegistry()
     : do_notification_frequency_control_(true) {
   in_flight_operations_.set_check_on_null_data(true);
@@ -168,14 +163,14 @@ void OperationRegistry::CancelAll() {
        !iter.IsAtEnd();
        iter.Advance()) {
     Operation* operation = iter.GetCurrentValue();
-    operation->Cancel();
-    // Cancel() may immediately trigger OnOperationFinish and remove the
+    CancelOperation(operation);
+    // CancelOperation may immediately trigger OnOperationFinish and remove the
     // operation from the map, but IDMap is designed to be safe on such remove
     // while iteration.
   }
 }
 
-bool OperationRegistry::CancelForFilePath(const FilePath& file_path) {
+bool OperationRegistry::CancelForFilePath(const base::FilePath& file_path) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   for (OperationIDMap::iterator iter(&in_flight_operations_);
@@ -183,11 +178,24 @@ bool OperationRegistry::CancelForFilePath(const FilePath& file_path) {
        iter.Advance()) {
     Operation* operation = iter.GetCurrentValue();
     if (operation->progress_status().file_path == file_path) {
-      operation->Cancel();
+      CancelOperation(operation);
       return true;
     }
   }
   return false;
+}
+
+void OperationRegistry::CancelOperation(Operation* operation) {
+  if (operation->progress_status().transfer_state == OPERATION_SUSPENDED) {
+    // SUSPENDED operation already completed its job (like calling back to
+    // its client code). Invoking operation->Cancel() again on it is a kind of
+    // 'double deletion'. So here we directly call OnOperationFinish and just
+    // unregister the operation from the registry.
+    // TODO(kinaba): http://crbug.com/164098 Get rid of the hack.
+    OnOperationFinish(operation->progress_status().operation_id);
+  } else {
+    operation->Cancel();
+  }
 }
 
 void OperationRegistry::OnOperationStart(
@@ -244,7 +252,18 @@ void OperationRegistry::OnOperationResume(
       break;
     }
   }
-  DCHECK(suspended);
+
+  if (!suspended) {
+    // Preceding suspended operations was not found. Assume it was canceled.
+    //
+    // operation->Cancel() needs to be called to properly shut down the
+    // current operation, but operation->Cancel() tries to unregister itself
+    // from the registry. So, as a hack, temporarily assign it an ID.
+    // TODO(kinaba): http://crbug.com/164098 Get rid of it.
+    new_status->operation_id = in_flight_operations_.Add(operation);
+    CancelOperation(operation);
+    return;
+  }
 
   // Copy the progress status.
   const OperationProgressStatus& old_status = suspended->progress_status();
@@ -272,15 +291,6 @@ void OperationRegistry::OnOperationSuspend(OperationID id) {
   DVLOG(1) << "GDataOperation[" << id << "] suspended.";
   if (IsFileTransferOperation(operation))
     NotifyStatusToObservers();
-}
-
-void OperationRegistry::OnOperationAuthFailed(GDataErrorCode error) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-
-  DVLOG(1) << "GDataOperation authentication failed.";
-  FOR_EACH_OBSERVER(OperationRegistryObserver,
-                    observer_list_,
-                    OnAuthenticationFailed(error));
 }
 
 bool OperationRegistry::IsFileTransferOperation(

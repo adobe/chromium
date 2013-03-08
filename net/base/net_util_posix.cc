@@ -6,11 +6,11 @@
 
 #include <sys/types.h>
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/posix/eintr_wrapper.h"
-#include "base/string_tokenizer.h"
 #include "base/string_util.h"
+#include "base/strings/string_tokenizer.h"
 #include "base/threading/thread_restrictions.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/escape.h"
@@ -29,8 +29,8 @@
 
 namespace net {
 
-bool FileURLToFilePath(const GURL& url, FilePath* path) {
-  *path = FilePath();
+bool FileURLToFilePath(const GURL& url, base::FilePath* path) {
+  *path = base::FilePath();
   std::string& file_path_str = const_cast<std::string&>(path->value());
   file_path_str.clear();
 
@@ -66,10 +66,10 @@ bool FileURLToFilePath(const GURL& url, FilePath* path) {
 bool GetNetworkList(NetworkInterfaceList* networks) {
 #if defined(OS_ANDROID)
   std::string network_list = android::GetNetworkList();
-  StringTokenizer network_interfaces(network_list, ";");
+  base::StringTokenizer network_interfaces(network_list, ";");
   while (network_interfaces.GetNext()) {
     std::string network_item = network_interfaces.token();
-    StringTokenizer network_tokenizer(network_item, ",");
+    base::StringTokenizer network_tokenizer(network_item, ",");
     std::string name;
     if (!network_tokenizer.GetNext())
       continue;
@@ -139,6 +139,10 @@ bool GetNetworkList(NetworkInterfaceList* networks) {
 
   return true;
 #endif
+}
+
+WifiPHYLayerProtocol GetWifiPHYLayerProtocol() {
+  return WIFI_PHY_LAYER_PROTOCOL_UNKNOWN;
 }
 
 }  // namespace net

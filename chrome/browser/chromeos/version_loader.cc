@@ -7,13 +7,13 @@
 #include <vector>
 
 #include "base/bind.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/location.h"
 #include "base/message_loop.h"
-#include "base/string_split.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
+#include "base/strings/string_split.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "base/threading/thread.h"
 #include "base/time.h"
@@ -134,7 +134,7 @@ void VersionLoader::Backend::GetVersion(VersionFormat format,
   DCHECK(BrowserThread::GetBlockingPool()->RunsTasksOnCurrentThread());
 
   std::string contents;
-  const FilePath file_path(kPathVersion);
+  const base::FilePath file_path(kPathVersion);
   if (file_util::ReadFileToString(file_path, &contents)) {
     *version = ParseVersion(
         contents,
@@ -158,7 +158,7 @@ void VersionLoader::Backend::GetFirmware(std::string* firmware) {
   DCHECK(BrowserThread::GetBlockingPool()->RunsTasksOnCurrentThread());
 
   std::string contents;
-  const FilePath file_path(kPathFirmware);
+  const base::FilePath file_path(kPathFirmware);
   if (file_util::ReadFileToString(file_path, &contents)) {
     *firmware = ParseFirmware(contents);
   }

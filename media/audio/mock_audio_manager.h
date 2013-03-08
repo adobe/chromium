@@ -29,8 +29,6 @@ class MockAudioManager : public media::AudioManager {
 
   virtual string16 GetAudioInputDeviceModel() OVERRIDE;
 
-  virtual bool CanShowAudioInputSettings() OVERRIDE;
-
   virtual void ShowAudioInputSettings() OVERRIDE;
 
   virtual void GetAudioInputDeviceNames(
@@ -54,6 +52,10 @@ class MockAudioManager : public media::AudioManager {
       AudioDeviceListener* listener) OVERRIDE;
   virtual void RemoveOutputDeviceChangeListener(
       AudioDeviceListener* listener) OVERRIDE;
+
+  virtual AudioParameters GetDefaultOutputStreamParameters() OVERRIDE;
+  virtual AudioParameters GetInputStreamParameters(
+      const std::string& device_id) OVERRIDE;
 
  private:
   virtual ~MockAudioManager();

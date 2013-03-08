@@ -9,37 +9,24 @@
 
 #include "base/basictypes.h"
 #include "cc/cc_export.h"
+#include "gpu/command_buffer/common/mailbox.h"
 #include "ui/gfx/size.h"
 
 namespace cc {
-
-struct CC_EXPORT Mailbox {
-  Mailbox();
-  bool isZero() const;
-  void setName(const int8* name);
-  int8 name[64];
-};
 
 struct CC_EXPORT TransferableResource {
   TransferableResource();
   ~TransferableResource();
 
   unsigned id;
+  unsigned sync_point;
   uint32 format;
   uint32 filter;
   gfx::Size size;
-  Mailbox mailbox;
+  gpu::Mailbox mailbox;
 };
 
 typedef std::vector<TransferableResource> TransferableResourceArray;
-
-struct CC_EXPORT TransferableResourceList {
-  TransferableResourceList();
-  ~TransferableResourceList();
-
-  TransferableResourceArray resources;
-  unsigned sync_point;
-};
 
 }  // namespace cc
 

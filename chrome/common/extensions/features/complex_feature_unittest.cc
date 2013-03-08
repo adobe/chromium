@@ -11,9 +11,9 @@
 using chrome::VersionInfo;
 using extensions::ComplexFeature;
 using extensions::DictionaryBuilder;
-using extensions::Extension;
 using extensions::Feature;
 using extensions::ListBuilder;
+using extensions::Manifest;
 using extensions::SimpleFeature;
 
 namespace {
@@ -29,6 +29,8 @@ class ExtensionComplexFeatureTest : public testing::Test {
 };
 
 TEST_F(ExtensionComplexFeatureTest, MultipleRulesWhitelist) {
+  const std::string kIdFoo("fooabbbbccccddddeeeeffffgggghhhh");
+  const std::string kIdBar("barabbbbccccddddeeeeffffgggghhhh");
   scoped_ptr<ComplexFeature::FeatureList> features(
       new ComplexFeature::FeatureList());
 
@@ -36,7 +38,7 @@ TEST_F(ExtensionComplexFeatureTest, MultipleRulesWhitelist) {
   scoped_ptr<SimpleFeature> simple_feature(new SimpleFeature());
   scoped_ptr<DictionaryValue> rule(
       DictionaryBuilder()
-      .Set("whitelist", ListBuilder().Append("foo"))
+      .Set("whitelist", ListBuilder().Append(kIdFoo))
       .Set("extension_types", ListBuilder().Append("extension")).Build());
   simple_feature->Parse(rule.get());
   features->push_back(simple_feature.release());
@@ -44,7 +46,7 @@ TEST_F(ExtensionComplexFeatureTest, MultipleRulesWhitelist) {
   // Rule: "packaged_app", whitelist "bar".
   simple_feature.reset(new SimpleFeature());
   rule = DictionaryBuilder()
-      .Set("whitelist", ListBuilder().Append("bar"))
+      .Set("whitelist", ListBuilder().Append(kIdBar))
       .Set("extension_types", ListBuilder().Append("packaged_app")).Build();
   simple_feature->Parse(rule.get());
   features->push_back(simple_feature.release());
@@ -53,30 +55,29 @@ TEST_F(ExtensionComplexFeatureTest, MultipleRulesWhitelist) {
 
   // Test match 1st rule.
   EXPECT_EQ(Feature::IS_AVAILABLE, feature->IsAvailableToManifest(
-      "foo",
-      Extension::TYPE_EXTENSION,
+      kIdFoo,
+      Manifest::TYPE_EXTENSION,
       Feature::UNSPECIFIED_LOCATION,
       Feature::UNSPECIFIED_PLATFORM,
       Feature::GetCurrentPlatform()).result());
 
   // Test match 2nd rule.
   EXPECT_EQ(Feature::IS_AVAILABLE, feature->IsAvailableToManifest(
-      "bar",
-      Extension::TYPE_LEGACY_PACKAGED_APP,
+      kIdBar,
+      Manifest::TYPE_LEGACY_PACKAGED_APP,
       Feature::UNSPECIFIED_LOCATION,
       Feature::UNSPECIFIED_PLATFORM,
       Feature::GetCurrentPlatform()).result());
 
   // Test whitelist with wrong extension type.
   EXPECT_NE(Feature::IS_AVAILABLE, feature->IsAvailableToManifest(
-      "bar",
-      Extension::TYPE_EXTENSION,
+      kIdBar,
+      Manifest::TYPE_EXTENSION,
       Feature::UNSPECIFIED_LOCATION,
       Feature::UNSPECIFIED_PLATFORM,
       Feature::GetCurrentPlatform()).result());
-  EXPECT_NE(Feature::IS_AVAILABLE, feature->IsAvailableToManifest(
-      "foo",
-      Extension::TYPE_LEGACY_PACKAGED_APP,
+  EXPECT_NE(Feature::IS_AVAILABLE, feature->IsAvailableToManifest(kIdFoo,
+      Manifest::TYPE_LEGACY_PACKAGED_APP,
       Feature::UNSPECIFIED_LOCATION,
       Feature::UNSPECIFIED_PLATFORM,
       Feature::GetCurrentPlatform()).result());
@@ -110,7 +111,7 @@ TEST_F(ExtensionComplexFeatureTest, MultipleRulesChannels) {
     Feature::ScopedCurrentChannel current_channel(VersionInfo::CHANNEL_UNKNOWN);
     EXPECT_EQ(Feature::IS_AVAILABLE, feature->IsAvailableToManifest(
         "1",
-        Extension::TYPE_EXTENSION,
+        Manifest::TYPE_EXTENSION,
         Feature::UNSPECIFIED_LOCATION,
         Feature::UNSPECIFIED_PLATFORM,
         Feature::GetCurrentPlatform()).result());
@@ -121,7 +122,7 @@ TEST_F(ExtensionComplexFeatureTest, MultipleRulesChannels) {
     Feature::ScopedCurrentChannel current_channel(VersionInfo::CHANNEL_BETA);
     EXPECT_EQ(Feature::IS_AVAILABLE, feature->IsAvailableToManifest(
         "2",
-        Extension::TYPE_LEGACY_PACKAGED_APP,
+        Manifest::TYPE_LEGACY_PACKAGED_APP,
         Feature::UNSPECIFIED_LOCATION,
         Feature::UNSPECIFIED_PLATFORM,
         Feature::GetCurrentPlatform()).result());
@@ -132,7 +133,7 @@ TEST_F(ExtensionComplexFeatureTest, MultipleRulesChannels) {
     Feature::ScopedCurrentChannel current_channel(VersionInfo::CHANNEL_BETA);
     EXPECT_NE(Feature::IS_AVAILABLE, feature->IsAvailableToManifest(
         "1",
-        Extension::TYPE_EXTENSION,
+        Manifest::TYPE_EXTENSION,
         Feature::UNSPECIFIED_LOCATION,
         Feature::UNSPECIFIED_PLATFORM,
         Feature::GetCurrentPlatform()).result());

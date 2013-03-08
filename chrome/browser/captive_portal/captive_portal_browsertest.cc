@@ -9,16 +9,16 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
+#include "base/prefs/pref_service.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/captive_portal/captive_portal_service.h"
 #include "chrome/browser/captive_portal/captive_portal_service_factory.h"
 #include "chrome/browser/captive_portal/captive_portal_tab_helper.h"
 #include "chrome/browser/captive_portal/captive_portal_tab_reloader.h"
 #include "chrome/browser/net/url_request_mock_util.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
@@ -416,7 +416,7 @@ net::URLRequestJob* URLRequestMockCaptivePortalJobFactory::Factory(
   EXPECT_TRUE(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
   // The PathService is threadsafe.
-  FilePath root_http;
+  base::FilePath root_http;
   PathService::Get(chrome::DIR_TEST_DATA, &root_http);
 
   if (request->url() == GURL(kMockHttpsUrl) ||
@@ -477,10 +477,8 @@ std::string CreateServerRedirect(const std::string& dest_url) {
 // Profiles.
 int NumLoadingTabs() {
   int num_loading_tabs = 0;
-  for (TabContentsIterator tab_contents_it;
-       !tab_contents_it.done();
-       ++tab_contents_it) {
-    if (tab_contents_it->IsLoading())
+  for (TabContentsIterator it; !it.done(); it.Next()) {
+    if (it->IsLoading())
       ++num_loading_tabs;
   }
   return num_loading_tabs;
@@ -628,11 +626,9 @@ FailLoadsAfterLoginObserver::FailLoadsAfterLoginObserver()
     : waiting_for_navigation_(false) {
   registrar_.Add(this, content::NOTIFICATION_LOAD_STOP,
                  content::NotificationService::AllSources());
-  for (TabContentsIterator tab_contents_it;
-       !tab_contents_it.done();
-       ++tab_contents_it) {
-    if (tab_contents_it->IsLoading())
-      tabs_needing_navigation_.insert(*tab_contents_it);
+  for (TabContentsIterator it; !it.done(); it.Next()) {
+    if (it->IsLoading())
+      tabs_needing_navigation_.insert(*it);
   }
 }
 
@@ -695,9 +691,9 @@ class CaptivePortalObserver : public content::NotificationObserver {
 
  private:
   // Records results and exits the message loop, if needed.
-  void Observe(int type,
-               const content::NotificationSource& source,
-               const content::NotificationDetails& details);
+  virtual void Observe(int type,
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
   // Number of times OnPortalResult has been called since construction.
   int num_results_received_;
@@ -782,11 +778,9 @@ void AddHstsHost(net::URLRequestContextGetter* context_getter,
     return;
   }
 
-  net::TransportSecurityState::DomainState state;
-  state.upgrade_expiry = state.created + base::TimeDelta::FromDays(1000);
-  state.include_subdomains = false;
-
-  transport_security_state->EnableHost(host, state);
+  base::Time expiry = base::Time::Now() + base::TimeDelta::FromDays(1000);
+  bool include_subdomains = false;
+  transport_security_state->AddHSTS(host, expiry, include_subdomains);
 }
 
 }  // namespace
@@ -1020,10 +1014,8 @@ CaptivePortalBrowserTest::GetStateOfTabReloaderAt(Browser* browser,
 int CaptivePortalBrowserTest::NumTabsWithState(
     CaptivePortalTabReloader::State state) const {
   int num_tabs = 0;
-  for (TabContentsIterator tab_contents_it;
-       !tab_contents_it.done();
-       ++tab_contents_it) {
-    if (GetStateOfTabReloader(*tab_contents_it) == state)
+  for (TabContentsIterator it; !it.done(); it.Next()) {
+    if (GetStateOfTabReloader(*it) == state)
       ++num_tabs;
   }
   return num_tabs;
@@ -1565,9 +1557,9 @@ IN_PROC_BROWSER_TEST_F(CaptivePortalBrowserTest, HttpsNonTimeoutError) {
 // Make sure no captive portal test triggers on HTTPS timeouts of iframes.
 IN_PROC_BROWSER_TEST_F(CaptivePortalBrowserTest, HttpsIframeTimeout) {
   // Use an HTTPS server for the top level page.
-  net::TestServer https_server(net::TestServer::TYPE_HTTPS,
-                               net::TestServer::kLocalhost,
-                               FilePath(FILE_PATH_LITERAL("chrome/test/data")));
+  net::TestServer https_server(
+      net::TestServer::TYPE_HTTPS, net::TestServer::kLocalhost,
+      base::FilePath(FILE_PATH_LITERAL("chrome/test/data")));
   ASSERT_TRUE(https_server.Start());
 
   GURL url = https_server.GetURL(kTestServerIframeTimeoutPath);
@@ -1620,9 +1612,9 @@ IN_PROC_BROWSER_TEST_F(CaptivePortalBrowserTest, RedirectSSLCertError) {
   net::TestServer::SSLOptions ssl_options;
   ssl_options.server_certificate =
       net::TestServer::SSLOptions::CERT_MISMATCHED_NAME;
-  net::TestServer https_server(net::TestServer::TYPE_HTTPS,
-                               ssl_options,
-                               FilePath(FILE_PATH_LITERAL("chrome/test/data")));
+  net::TestServer https_server(
+      net::TestServer::TYPE_HTTPS, ssl_options,
+      base::FilePath(FILE_PATH_LITERAL("chrome/test/data")));
   ASSERT_TRUE(https_server.Start());
 
   GURL ssl_login_url = https_server.GetURL(kTestServerLoginPath);
@@ -1708,9 +1700,9 @@ IN_PROC_BROWSER_TEST_F(CaptivePortalBrowserTest, SSLCertErrorLogin) {
   net::TestServer::SSLOptions https_options;
   https_options.server_certificate =
       net::TestServer::SSLOptions::CERT_MISMATCHED_NAME;
-  net::TestServer https_server(net::TestServer::TYPE_HTTPS,
-                               https_options,
-                               FilePath(FILE_PATH_LITERAL("chrome/test/data")));
+  net::TestServer https_server(
+      net::TestServer::TYPE_HTTPS, https_options,
+      base::FilePath(FILE_PATH_LITERAL("chrome/test/data")));
   ASSERT_TRUE(https_server.Start());
 
   // The path does not matter.
@@ -1808,7 +1800,7 @@ IN_PROC_BROWSER_TEST_F(CaptivePortalBrowserTest, TwoBrokenTabs) {
   ui_test_utils::NavigateToURLWithDisposition(
       browser(),
       URLRequestMockHTTPJob::GetMockUrl(
-          FilePath(FILE_PATH_LITERAL("title2.html"))),
+          base::FilePath(FILE_PATH_LITERAL("title2.html"))),
       NEW_FOREGROUND_TAB,
       ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
 
@@ -1872,9 +1864,9 @@ IN_PROC_BROWSER_TEST_F(CaptivePortalBrowserTest, NavigateBrokenTab) {
   // Navigate the error tab to a non-error page.
   TabStripModel* tab_strip_model = browser()->tab_strip_model();
   tab_strip_model->ActivateTabAt(0, true);
-  ui_test_utils::NavigateToURL(browser(),
-                               URLRequestMockHTTPJob::GetMockUrl(
-                                   FilePath(FILE_PATH_LITERAL("title2.html"))));
+  ui_test_utils::NavigateToURL(
+      browser(), URLRequestMockHTTPJob::GetMockUrl(
+                     base::FilePath(FILE_PATH_LITERAL("title2.html"))));
   EXPECT_EQ(CaptivePortalTabReloader::STATE_NONE,
             GetStateOfTabReloaderAt(browser(), 0));
 
@@ -1921,7 +1913,7 @@ IN_PROC_BROWSER_TEST_F(CaptivePortalBrowserTest,
   RunNavigateLoadingTabToTimeoutTest(
       browser(),
       URLRequestMockHTTPJob::GetMockUrl(
-          FilePath(FILE_PATH_LITERAL("title.html"))),
+          base::FilePath(FILE_PATH_LITERAL("title.html"))),
       GURL(kMockHttpsUrl),
       GURL(kMockHttpsUrl2));
 }
@@ -1932,7 +1924,7 @@ IN_PROC_BROWSER_TEST_F(CaptivePortalBrowserTest, GoBack) {
   ui_test_utils::NavigateToURL(
       browser(),
       URLRequestMockHTTPJob::GetMockUrl(
-          FilePath(FILE_PATH_LITERAL("title2.html"))));
+          base::FilePath(FILE_PATH_LITERAL("title2.html"))));
 
   // Go to the error page.
   SlowLoadBehindCaptivePortal(browser(), true);
@@ -1963,9 +1955,9 @@ IN_PROC_BROWSER_TEST_F(CaptivePortalBrowserTest, GoBackToTimeout) {
   SlowLoadNoCaptivePortal(browser(), RESULT_INTERNET_CONNECTED);
 
   // Navigate to a working page.
-  ui_test_utils::NavigateToURL(browser(),
-                               URLRequestMockHTTPJob::GetMockUrl(
-                                   FilePath(FILE_PATH_LITERAL("title2.html"))));
+  ui_test_utils::NavigateToURL(
+      browser(), URLRequestMockHTTPJob::GetMockUrl(
+                     base::FilePath(FILE_PATH_LITERAL("title2.html"))));
   ASSERT_EQ(CaptivePortalTabReloader::STATE_NONE,
             GetStateOfTabReloaderAt(browser(), 0));
 
@@ -2068,7 +2060,9 @@ IN_PROC_BROWSER_TEST_F(CaptivePortalBrowserTest, ReloadTimeout) {
 // the background one.
 // Disabled:  http://crbug.com/134357
 IN_PROC_BROWSER_TEST_F(CaptivePortalBrowserTest, DISABLED_TwoWindows) {
-  Browser* browser2 = new Browser(Browser::CreateParams(browser()->profile()));
+  Browser* browser2 =
+      new Browser(Browser::CreateParams(browser()->profile(),
+                                        browser()->host_desktop_type()));
   // Navigate the new browser window so it'll be shown and we can pick the
   // active window.
   ui_test_utils::NavigateToURL(browser2, GURL(chrome::kAboutBlankURL));
@@ -2164,9 +2158,9 @@ IN_PROC_BROWSER_TEST_F(CaptivePortalBrowserTest, HttpToHttpsRedirectLogin) {
 // An HTTPS page redirects to an HTTP page.
 IN_PROC_BROWSER_TEST_F(CaptivePortalBrowserTest, HttpsToHttpRedirect) {
   // Use an HTTPS server for the top level page.
-  net::TestServer https_server(net::TestServer::TYPE_HTTPS,
-                               net::TestServer::kLocalhost,
-                               FilePath(FILE_PATH_LITERAL("chrome/test/data")));
+  net::TestServer https_server(
+      net::TestServer::TYPE_HTTPS, net::TestServer::kLocalhost,
+      base::FilePath(FILE_PATH_LITERAL("chrome/test/data")));
   ASSERT_TRUE(https_server.Start());
 
   GURL http_timeout_url =

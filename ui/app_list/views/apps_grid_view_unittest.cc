@@ -10,12 +10,12 @@
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
-#include "base/stringprintf.h"
 #include "base/timer.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/app_list/app_list_item_model.h"
 #include "ui/app_list/app_list_model.h"
 #include "ui/app_list/pagination_model.h"
+#include "ui/app_list/test/app_list_test_model.h"
 #include "ui/app_list/views/app_list_item_view.h"
 #include "ui/app_list/views/test/apps_grid_view_test_api.h"
 
@@ -95,7 +95,7 @@ class AppsGridViewTest : public testing::Test {
 
   // testing::Test overrides:
   virtual void SetUp() OVERRIDE {
-    model_.reset(new AppListModel);
+    model_.reset(new AppListTestModel);
     pagination_model_.reset(new PaginationModel);
 
     apps_grid_view_.reset(new AppsGridView(NULL, pagination_model_.get()));
@@ -110,35 +110,6 @@ class AppsGridViewTest : public testing::Test {
   }
 
  protected:
-  void PopulateApps(int n) {
-    for (int i = 0; i < n; ++i) {
-      std::string title = base::StringPrintf("Item %d", i);
-      model_->apps()->Add(CreateItem(title));
-    }
-  }
-
-  // Get a string of all apps in |model| joined with ','.
-  std::string GetModelContent() {
-    std::string content;
-    for (size_t i = 0; i < model_->apps()->item_count(); ++i) {
-      if (i > 0)
-        content += ',';
-      content += model_->apps()->GetItemAt(i)->title();
-    }
-    return content;
-  }
-
-  AppListItemModel* CreateItem(const std::string& title) {
-    AppListItemModel* item = new AppListItemModel;
-    item->SetTitle(title);
-    return item;
-  }
-
-  void HighlightItemAt(int index) {
-    AppListItemModel* item = model_->apps()->GetItemAt(index);
-    item->SetHighlighted(true);
-  }
-
   AppListItemView* GetItemViewAt(int index) {
     return static_cast<AppListItemView*>(
         test_api_->GetViewAtModelIndex(index));
@@ -189,7 +160,7 @@ class AppsGridViewTest : public testing::Test {
     apps_grid_view_->OnKeyPressed(key_event);
   }
 
-  scoped_ptr<AppListModel> model_;
+  scoped_ptr<AppListTestModel> model_;
   scoped_ptr<PaginationModel> pagination_model_;
   scoped_ptr<AppsGridView> apps_grid_view_;
   scoped_ptr<AppsGridViewTestApi> test_api_;
@@ -203,33 +174,33 @@ class AppsGridViewTest : public testing::Test {
 TEST_F(AppsGridViewTest, CreatePage) {
   // Fully populates a page.
   const int kPages = 1;
-  PopulateApps(kPages * kTilesPerPage);
+  model_->PopulateApps(kPages * kTilesPerPage);
   EXPECT_EQ(kPages, pagination_model_->total_pages());
 
   // Adds one more and gets a new page created.
-  model_->apps()->Add(CreateItem(std::string("Extra")));
+  model_->AddItem(std::string("Extra"));
   EXPECT_EQ(kPages + 1, pagination_model_->total_pages());
 }
 
 TEST_F(AppsGridViewTest, EnsureHighlightedVisible) {
   const int kPages = 3;
-  PopulateApps(kPages * kTilesPerPage);
+  model_->PopulateApps(kPages * kTilesPerPage);
   EXPECT_EQ(kPages, pagination_model_->total_pages());
   EXPECT_EQ(0, pagination_model_->selected_page());
 
   // Highlight first one and last one one first page and first page should be
   // selected.
-  HighlightItemAt(0);
+  model_->HighlightItemAt(0);
   EXPECT_EQ(0, pagination_model_->selected_page());
-  HighlightItemAt(kTilesPerPage - 1);
+  model_->HighlightItemAt(kTilesPerPage - 1);
   EXPECT_EQ(0, pagination_model_->selected_page());
 
   // Highlight first one on 2nd page and 2nd page should be selected.
-  HighlightItemAt(kTilesPerPage + 1);
+  model_->HighlightItemAt(kTilesPerPage + 1);
   EXPECT_EQ(1, pagination_model_->selected_page());
 
   // Highlight last one in the model and last page should be selected.
-  HighlightItemAt(model_->apps()->item_count() - 1);
+  model_->HighlightItemAt(model_->apps()->item_count() - 1);
   EXPECT_EQ(kPages - 1, pagination_model_->selected_page());
 }
 
@@ -237,7 +208,7 @@ TEST_F(AppsGridViewTest, RemoveSelectedLastApp) {
   const int kTotalItems = 2;
   const int kLastItemIndex = kTotalItems - 1;
 
-  PopulateApps(kTotalItems);
+  model_->PopulateApps(kTotalItems);
 
   AppListItemView* last_view = GetItemViewAt(kLastItemIndex);
   apps_grid_view_->SetSelectedView(last_view);
@@ -253,9 +224,9 @@ TEST_F(AppsGridViewTest, RemoveSelectedLastApp) {
 
 TEST_F(AppsGridViewTest, MouseDrag) {
   const int kTotalItems = 4;
-  PopulateApps(kTotalItems);
+  model_->PopulateApps(kTotalItems);
   EXPECT_EQ(std::string("Item 0,Item 1,Item 2,Item 3"),
-            GetModelContent());
+            model_->GetModelContent());
 
   gfx::Point from = GetItemTileRectAt(0, 0).CenterPoint();
   gfx::Point to = GetItemTileRectAt(0, 1).CenterPoint();
@@ -264,14 +235,14 @@ TEST_F(AppsGridViewTest, MouseDrag) {
   SimulateDrag(AppsGridView::MOUSE, from, to);
   apps_grid_view_->EndDrag(false);
   EXPECT_EQ(std::string("Item 1,Item 0,Item 2,Item 3"),
-            GetModelContent());
+            model_->GetModelContent());
   test_api_->LayoutToIdealBounds();
 
   // Canceling drag should keep existing order.
   SimulateDrag(AppsGridView::MOUSE, from, to);
   apps_grid_view_->EndDrag(true);
   EXPECT_EQ(std::string("Item 1,Item 0,Item 2,Item 3"),
-            GetModelContent());
+            model_->GetModelContent());
   test_api_->LayoutToIdealBounds();
 
   // Deleting an item keeps remaining intact.
@@ -279,15 +250,15 @@ TEST_F(AppsGridViewTest, MouseDrag) {
   model_->apps()->DeleteAt(1);
   apps_grid_view_->EndDrag(false);
   EXPECT_EQ(std::string("Item 1,Item 2,Item 3"),
-            GetModelContent());
+            model_->GetModelContent());
   test_api_->LayoutToIdealBounds();
 
   // Adding a launcher item cancels the drag and respects the order.
   SimulateDrag(AppsGridView::MOUSE, from, to);
-  model_->apps()->Add(CreateItem(std::string("Extra")));
+  model_->AddItem(std::string("Extra"));
   apps_grid_view_->EndDrag(false);
   EXPECT_EQ(std::string("Item 1,Item 2,Item 3,Extra"),
-            GetModelContent());
+            model_->GetModelContent());
   test_api_->LayoutToIdealBounds();
 }
 
@@ -299,7 +270,7 @@ TEST_F(AppsGridViewTest, MouseDragFlipPage) {
                                   pagination_model_.get());
 
   const int kPages = 3;
-  PopulateApps(kPages * kTilesPerPage);
+  model_->PopulateApps(kPages * kTilesPerPage);
   EXPECT_EQ(kPages, pagination_model_->total_pages());
   EXPECT_EQ(0, pagination_model_->selected_page());
 
@@ -342,9 +313,9 @@ TEST_F(AppsGridViewTest, MouseDragFlipPage) {
 
 TEST_F(AppsGridViewTest, SimultaneousDrag) {
   const int kTotalItems = 4;
-  PopulateApps(kTotalItems);
+  model_->PopulateApps(kTotalItems);
   EXPECT_EQ(std::string("Item 0,Item 1,Item 2,Item 3"),
-            GetModelContent());
+            model_->GetModelContent());
 
   gfx::Point mouse_from = GetItemTileRectAt(0, 0).CenterPoint();
   gfx::Point mouse_to = GetItemTileRectAt(0, 1).CenterPoint();
@@ -358,7 +329,7 @@ TEST_F(AppsGridViewTest, SimultaneousDrag) {
   // Finishes the drag and mouse drag wins.
   apps_grid_view_->EndDrag(false);
   EXPECT_EQ(std::string("Item 1,Item 0,Item 2,Item 3"),
-            GetModelContent());
+            model_->GetModelContent());
   test_api_->LayoutToIdealBounds();
 
   // Starts a touch drag first then a mouse drag.
@@ -367,28 +338,58 @@ TEST_F(AppsGridViewTest, SimultaneousDrag) {
   // Finishes the drag and touch drag wins.
   apps_grid_view_->EndDrag(false);
   EXPECT_EQ(std::string("Item 1,Item 0,Item 3,Item 2"),
-            GetModelContent());
+            model_->GetModelContent());
   test_api_->LayoutToIdealBounds();
 }
 
 TEST_F(AppsGridViewTest, HighlightWithKeyboard) {
-  const int kTotalitems = 2;
-  PopulateApps(kTotalitems);
-  apps_grid_view_->SetSelectedView(GetItemViewAt(0));
+  const int kPages = 2;
+  model_->PopulateApps(kPages * kTilesPerPage);
 
-  // Try moving off the item to an invalid location.
+  const int first_index = 0;
+  const int last_index = kPages * kTilesPerPage - 1;
+  const int last_index_on_page1 = kTilesPerPage - 1;
+  const int first_index_on_page2 = kTilesPerPage;
+
+  // Try moving off the item beyond the first one.
+  apps_grid_view_->SetSelectedView(GetItemViewAt(first_index));
   SimulateKeyPress(ui::VKEY_UP);
-  EXPECT_TRUE(apps_grid_view_->IsSelectedView(GetItemViewAt(0)));
-  SimulateKeyPress(ui::VKEY_DOWN);
-  EXPECT_TRUE(apps_grid_view_->IsSelectedView(GetItemViewAt(0)));
+  EXPECT_TRUE(apps_grid_view_->IsSelectedView(GetItemViewAt(first_index)));
   SimulateKeyPress(ui::VKEY_LEFT);
-  EXPECT_TRUE(apps_grid_view_->IsSelectedView(GetItemViewAt(0)));
+  EXPECT_TRUE(apps_grid_view_->IsSelectedView(GetItemViewAt(first_index)));
 
-  // Move to the second item and try to go past it.
+  // Move to the last item and try to go past it.
+  apps_grid_view_->SetSelectedView(GetItemViewAt(last_index));
+  SimulateKeyPress(ui::VKEY_DOWN);
+  EXPECT_TRUE(apps_grid_view_->IsSelectedView(GetItemViewAt(last_index)));
   SimulateKeyPress(ui::VKEY_RIGHT);
-  EXPECT_TRUE(apps_grid_view_->IsSelectedView(GetItemViewAt(1)));
+  EXPECT_TRUE(apps_grid_view_->IsSelectedView(GetItemViewAt(last_index)));
+
+  // Move right on last item on page 1 should get to first item on page 2
+  // and vice vesa.
+  apps_grid_view_->SetSelectedView(GetItemViewAt(last_index_on_page1));
   SimulateKeyPress(ui::VKEY_RIGHT);
-  EXPECT_TRUE(apps_grid_view_->IsSelectedView(GetItemViewAt(1)));
+  EXPECT_TRUE(apps_grid_view_->IsSelectedView(GetItemViewAt(
+      first_index_on_page2)));
+  SimulateKeyPress(ui::VKEY_LEFT);
+  EXPECT_TRUE(apps_grid_view_->IsSelectedView(GetItemViewAt(
+      last_index_on_page1)));
+
+  // Up/down changes page similarly to the above left/right cases.
+  apps_grid_view_->SetSelectedView(GetItemViewAt(last_index_on_page1));
+  SimulateKeyPress(ui::VKEY_DOWN);
+  EXPECT_TRUE(apps_grid_view_->IsSelectedView(GetItemViewAt(
+      last_index_on_page1 + kCols)));
+  SimulateKeyPress(ui::VKEY_UP);
+  EXPECT_TRUE(apps_grid_view_->IsSelectedView(GetItemViewAt(
+      last_index_on_page1)));
+
+  // After page switch, arrow keys select first item on current page.
+  apps_grid_view_->SetSelectedView(GetItemViewAt(first_index));
+  pagination_model_->SelectPage(1, false);
+  SimulateKeyPress(ui::VKEY_UP);
+  EXPECT_TRUE(apps_grid_view_->IsSelectedView(GetItemViewAt(
+      first_index_on_page2)));
 }
 
 }  // namespace test

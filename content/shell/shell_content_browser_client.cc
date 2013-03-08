@@ -9,6 +9,7 @@
 #include "base/path_service.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/resource_dispatcher_host.h"
+#include "content/public/browser/storage_partition.h"
 #include "content/shell/geolocation/shell_access_token_store.h"
 #include "content/shell/shell.h"
 #include "content/shell/shell_browser_context.h"
@@ -34,8 +35,8 @@ namespace content {
 
 namespace {
 
-FilePath GetWebKitRootDirFilePath() {
-  FilePath base_path;
+base::FilePath GetWebKitRootDirFilePath() {
+  base::FilePath base_path;
   PathService::Get(base::DIR_SOURCE_ROOT, &base_path);
   if (file_util::PathExists(
           base_path.Append(FILE_PATH_LITERAL("third_party/WebKit")))) {
@@ -55,13 +56,34 @@ FilePath GetWebKitRootDirFilePath() {
   return base_path;
 }
 
+base::FilePath GetChromiumRootDirFilePath() {
+  base::FilePath webkit_path = GetWebKitRootDirFilePath();
+  if (file_util::PathExists(webkit_path.Append(
+          FILE_PATH_LITERAL("Source/WebKit/chromium/webkit/support")))) {
+    // We're in a WebKit-only checkout.
+    return webkit_path.Append(FILE_PATH_LITERAL("Source/WebKit/chromium"));
+  } else {
+    // We're in a Chromium checkout, and WebKit is in third_party/WebKit.
+    return webkit_path.Append(FILE_PATH_LITERAL("../.."));
+  }
+}
+
 }  // namespace
 
 ShellContentBrowserClient::ShellContentBrowserClient()
-    : shell_browser_main_parts_(NULL) {
+    : hyphen_dictionary_file_(base::kInvalidPlatformFileValue),
+      shell_browser_main_parts_(NULL) {
   if (!CommandLine::ForCurrentProcess()->HasSwitch(switches::kDumpRenderTree))
     return;
   webkit_source_dir_ = GetWebKitRootDirFilePath();
+  base::FilePath dictionary_file_path = GetChromiumRootDirFilePath().Append(
+      FILE_PATH_LITERAL("third_party/hyphen/hyph_en_US.dic"));
+  file_util::AbsolutePath(&dictionary_file_path);
+  hyphen_dictionary_file_ = base::CreatePlatformFile(dictionary_file_path,
+                                                     base::PLATFORM_FILE_READ |
+                                                     base::PLATFORM_FILE_OPEN,
+                                                     NULL,
+                                                     NULL);
 }
 
 ShellContentBrowserClient::~ShellContentBrowserClient() {
@@ -77,8 +99,63 @@ void ShellContentBrowserClient::RenderProcessHostCreated(
     RenderProcessHost* host) {
   if (!CommandLine::ForCurrentProcess()->HasSwitch(switches::kDumpRenderTree))
     return;
-  host->GetChannel()->AddFilter(new ShellMessageFilter(host->GetID()));
+  host->GetChannel()->AddFilter(new ShellMessageFilter(
+      host->GetID(),
+      BrowserContext::GetDefaultStoragePartition(browser_context())
+          ->GetDatabaseTracker(),
+      BrowserContext::GetDefaultStoragePartition(browser_context())
+          ->GetQuotaManager()));
   host->Send(new ShellViewMsg_SetWebKitSourceDir(webkit_source_dir_));
+
+  if (hyphen_dictionary_file_ != base::kInvalidPlatformFileValue) {
+    IPC::PlatformFileForTransit file = IPC::GetFileHandleForProcess(
+        hyphen_dictionary_file_, host->GetHandle(), false);
+    host->Send(new ShellViewMsg_LoadHyphenDictionary(file));
+  }
+}
+
+net::URLRequestContextGetter* ShellContentBrowserClient::CreateRequestContext(
+    BrowserContext* content_browser_context,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        blob_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        file_system_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        developer_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        chrome_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        chrome_devtools_protocol_handler) {
+  ShellBrowserContext* shell_browser_context =
+      ShellBrowserContextForBrowserContext(content_browser_context);
+  return shell_browser_context->CreateRequestContext(
+      blob_protocol_handler.Pass(), file_system_protocol_handler.Pass(),
+      developer_protocol_handler.Pass(), chrome_protocol_handler.Pass(),
+      chrome_devtools_protocol_handler.Pass());
+}
+
+net::URLRequestContextGetter*
+ShellContentBrowserClient::CreateRequestContextForStoragePartition(
+    BrowserContext* content_browser_context,
+    const base::FilePath& partition_path,
+    bool in_memory,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        blob_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        file_system_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        developer_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        chrome_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        chrome_devtools_protocol_handler) {
+  ShellBrowserContext* shell_browser_context =
+      ShellBrowserContextForBrowserContext(content_browser_context);
+  return shell_browser_context->CreateRequestContextForStoragePartition(
+      partition_path, in_memory, blob_protocol_handler.Pass(),
+      file_system_protocol_handler.Pass(),
+      developer_protocol_handler.Pass(), chrome_protocol_handler.Pass(),
+      chrome_devtools_protocol_handler.Pass());
 }
 
 void ShellContentBrowserClient::AppendExtraCommandLineSwitches(
@@ -109,24 +186,11 @@ std::string ShellContentBrowserClient::GetDefaultDownloadName() {
 
 WebContentsViewDelegate* ShellContentBrowserClient::GetWebContentsViewDelegate(
     WebContents* web_contents) {
-#if defined(TOOLKIT_GTK) || defined(OS_WIN) || defined(OS_MACOSX)
+#if !defined(USE_AURA)
   return CreateShellWebContentsViewDelegate(web_contents);
-#endif
-  NOTIMPLEMENTED();
+#else
   return NULL;
-}
-
-bool ShellContentBrowserClient::CanCreateWindow(
-    const GURL& opener_url,
-    const GURL& origin,
-    WindowContainerType container_type,
-    ResourceContext* context,
-    int render_process_id,
-    bool* no_javascript_access) {
-  *no_javascript_access = false;
-  if (!CommandLine::ForCurrentProcess()->HasSwitch(switches::kDumpRenderTree))
-    return true;
-  return WebKitTestController::Get()->CanOpenWindows();
+#endif
 }
 
 #if defined(OS_ANDROID)
@@ -135,7 +199,7 @@ void ShellContentBrowserClient::GetAdditionalMappedFilesForChildProcess(
     int child_process_id,
     std::vector<content::FileDescriptorInfo>* mappings) {
   int flags = base::PLATFORM_FILE_OPEN | base::PLATFORM_FILE_READ;
-  FilePath pak_file;
+  base::FilePath pak_file;
   bool r = PathService::Get(base::DIR_ANDROID_APP_DATA, &pak_file);
   CHECK(r);
   pak_file = pak_file.Append(FILE_PATH_LITERAL("paks"));
@@ -164,6 +228,15 @@ ShellBrowserContext*
 
 AccessTokenStore* ShellContentBrowserClient::CreateAccessTokenStore() {
   return new ShellAccessTokenStore(browser_context()->GetRequestContext());
+}
+
+ShellBrowserContext*
+ShellContentBrowserClient::ShellBrowserContextForBrowserContext(
+    BrowserContext* content_browser_context) {
+  if (content_browser_context == browser_context())
+    return browser_context();
+  DCHECK_EQ(content_browser_context, off_the_record_browser_context());
+  return off_the_record_browser_context();
 }
 
 }  // namespace content

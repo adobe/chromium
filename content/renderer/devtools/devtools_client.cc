@@ -21,6 +21,12 @@ using WebKit::WebString;
 
 namespace content {
 
+namespace {
+
+bool g_devtools_frontend_testing_enabled = false;
+
+}  // namespace
+
 DevToolsClient::DevToolsClient(RenderViewImpl* render_view)
     : RenderViewObserver(render_view) {
   const CommandLine& command_line = *CommandLine::ForCurrentProcess();
@@ -54,6 +60,10 @@ void DevToolsClient::sendMessageToBackend(const WebString& message)  {
 
 void DevToolsClient::activateWindow() {
   Send(new DevToolsHostMsg_ActivateWindow(routing_id()));
+}
+
+void DevToolsClient::changeAttachedWindowHeight(unsigned height) {
+  Send(new DevToolsHostMsg_ChangeAttachedWindowHeight(routing_id(), height));
 }
 
 void DevToolsClient::closeWindow() {
@@ -102,10 +112,18 @@ void DevToolsClient::removeFileSystem(const WebString& fileSystemPath) {
                                             fileSystemPath.utf8()));
 }
 
+bool DevToolsClient::isUnderTest() {
+  return g_devtools_frontend_testing_enabled;
+}
 
 void DevToolsClient::OnDispatchOnInspectorFrontend(const std::string& message) {
   web_tools_frontend_->dispatchOnInspectorFrontend(
       WebString::fromUTF8(message));
+}
+
+// static
+void DevToolsClient::EnableDevToolsFrontendTesting() {
+  g_devtools_frontend_testing_enabled = true;
 }
 
 }  // namespace content

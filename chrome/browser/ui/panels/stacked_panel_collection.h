@@ -26,11 +26,11 @@ class StackedPanelCollection : public PanelCollection {
   virtual ~StackedPanelCollection();
 
   // PanelCollection OVERRIDES:
-  virtual void OnDisplayAreaChanged(const gfx::Rect& old_display_area) OVERRIDE;
+  virtual void OnDisplayChanged() OVERRIDE;
   virtual void RefreshLayout() OVERRIDE;
   virtual void AddPanel(Panel* panel,
                         PositioningMask positioning_mask) OVERRIDE;
-  virtual void RemovePanel(Panel* panel) OVERRIDE;
+  virtual void RemovePanel(Panel* panel, RemovalReason reason) OVERRIDE;
   virtual void CloseAll() OVERRIDE;
   virtual void ResizePanelWindow(
       Panel* panel,
@@ -60,9 +60,16 @@ class StackedPanelCollection : public PanelCollection {
   virtual void OnPanelActiveStateChanged(Panel* panel) OVERRIDE;
 
   Panel* GetPanelAbove(Panel* panel) const;
+  Panel* GetPanelBelow(Panel* panel) const;
   bool HasPanel(Panel* panel) const;
 
   void MoveAllDraggingPanelsInstantly(const gfx::Vector2d& delta_origin);
+
+  // Returns the maximum available space from the bottom of the stack. The
+  // maximum available space is defined as the distance between the bottom
+  // of the stack and the bottom of the working area, assuming that all inactive
+  // panels are collapsed.
+  int GetMaximiumAvailableBottomSpace() const;
 
   NativePanelStack* native_stack() const { return native_stack_; }
   int num_panels() const { return panels_.size(); }
@@ -70,6 +77,10 @@ class StackedPanelCollection : public PanelCollection {
   Panel* top_panel() const { return panels_.empty() ? NULL : panels_.front(); }
   Panel* bottom_panel() const {
     return panels_.empty() ? NULL : panels_.back();
+  }
+  Panel* most_recently_active_panel() const {
+    return most_recently_active_panels_.empty() ?
+        NULL : most_recently_active_panels_.front();
   }
 
  private:
@@ -86,15 +97,46 @@ class StackedPanelCollection : public PanelCollection {
     PanelPlacement() : panel(NULL), top_panel(NULL) { }
   };
 
+  // Returns the enclosing bounds that include all panels in the stack.
+  gfx::Rect GetEnclosingBounds() const;
+
+  // Returns the work area where the stack resides. If the stack spans across
+  // multiple displays, return the work area of the display that most closely
+  // intersects the stack.
+  gfx::Rect GetWorkArea() const;
+
+  // Tries to collapse panels in the least recently active order in order to get
+  // enough bottom space for |needed_space|. Returns the current available space
+  // so far if all panels that could be collapsed have been collapsed.
+  int MinimizePanelsForSpace(int needed_space);
+
+  // Returns the current available space above the top of the stack. The current
+  // available space is defined as the distance between the top of the working
+  // area and the top of the stack.
+  int GetCurrentAvailableTopSpace() const;
+
+  // Returns the current available space below the bottom of the stack. The
+  // current available space is defined as the distance between the bottom
+  // of the stack and the bottom of the working area.
+  int GetCurrentAvailableBottomSpace() const;
+
   // Minimizes or restores all panels in the collection.
   void MinimizeAll();
-  void RestoreAll();
+  void RestoreAll(Panel* panel_clicked);
+
+  void UpdatePanelCornerStyle(Panel* panel);
+
+  void UpdateNativeStackBounds();
 
   PanelManager* panel_manager_;
 
   NativePanelStack* native_stack_;  // Weak, owns us.
 
   Panels panels_;  // The top panel is in the front of the list.
+
+  // Keeps track of the panels in their active order. The most recently active
+  // panel is in the front of the list.
+  Panels most_recently_active_panels_;
 
   // Used to save the placement information for a panel.
   PanelPlacement saved_panel_placement_;

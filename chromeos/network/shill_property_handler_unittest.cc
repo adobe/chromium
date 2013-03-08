@@ -39,16 +39,6 @@ class TestListener : public internal::ShillPropertyHandler::Listener {
     UpdateEntries(GetTypeString(type), entries);
   }
 
-  virtual void UpdateAvailableTechnologies(
-      const base::ListValue& technologies) OVERRIDE {
-    UpdateEntries(flimflam::kAvailableTechnologiesProperty, technologies);
-  }
-
-  virtual void UpdateEnabledTechnologies(
-      const base::ListValue& technologies) OVERRIDE {
-    UpdateEntries(flimflam::kEnabledTechnologiesProperty, technologies);
-  }
-
   virtual void UpdateManagedStateProperties(
       ManagedState::ManagedType type,
       const std::string& path,
@@ -61,6 +51,13 @@ class TestListener : public internal::ShillPropertyHandler::Listener {
       const std::string& key,
       const base::Value& value) OVERRIDE {
     AddPropertyUpdate(flimflam::kServicesProperty, service_path);
+  }
+
+  virtual void UpdateDeviceProperty(
+      const std::string& device_path,
+      const std::string& key,
+      const base::Value& value) OVERRIDE {
+    AddPropertyUpdate(flimflam::kDevicesProperty, device_path);
   }
 
   virtual void ManagerPropertyChanged() OVERRIDE {
@@ -170,12 +167,10 @@ class ShillPropertyHandlerTest : public testing::Test {
 
   void AddDevice(const std::string& type, const std::string& id) {
     ASSERT_TRUE(IsValidType(type));
-    manager_test_->AddDevice(id);
     device_test_->AddDevice(id, type, std::string("/device/" + id));
   }
 
   void RemoveDevice(const std::string& id) {
-    manager_test_->RemoveDevice(id);
     device_test_->RemoveDevice(id);
   }
 
@@ -184,17 +179,16 @@ class ShillPropertyHandlerTest : public testing::Test {
                   const std::string& state,
                   bool add_to_watch_list) {
     ASSERT_TRUE(IsValidType(type));
-    manager_test_->AddService(id, add_to_watch_list);
-    service_test_->AddService(id, id, type, state);
+    service_test_->AddService(id, id, type, state, add_to_watch_list);
   }
 
   void RemoveService(const std::string& id) {
-    manager_test_->RemoveService(id);
     service_test_->RemoveService(id);
   }
 
   // Call this after any initial Shill client setup
   void SetupShillPropertyHandler() {
+    SetupDefaultShillState();
     listener_.reset(new TestListener);
     shill_property_handler_.reset(
         new internal::ShillPropertyHandler(listener_.get()));
@@ -211,6 +205,23 @@ class ShillPropertyHandlerTest : public testing::Test {
   }
 
  protected:
+  void SetupDefaultShillState() {
+    message_loop_.RunUntilIdle();  // Process any pending updates
+    device_test_->ClearDevices();
+    AddDevice(flimflam::kTypeWifi, "stub_wifi_device1");
+    AddDevice(flimflam::kTypeCellular, "stub_cellular_device1");
+    service_test_->ClearServices();
+    const bool add_to_watchlist = true;
+    AddService(flimflam::kTypeEthernet, "stub_ethernet",
+               flimflam::kStateOnline, add_to_watchlist);
+    AddService(flimflam::kTypeWifi, "stub_wifi1",
+               flimflam::kStateOnline, add_to_watchlist);
+    AddService(flimflam::kTypeWifi, "stub_wifi2",
+               flimflam::kStateIdle, add_to_watchlist);
+    AddService(flimflam::kTypeCellular, "stub_cellular1",
+               flimflam::kStateIdle, add_to_watchlist);
+  }
+
   MessageLoopForUI message_loop_;
   scoped_ptr<TestListener> listener_;
   scoped_ptr<internal::ShillPropertyHandler> shill_property_handler_;
@@ -226,15 +237,10 @@ TEST_F(ShillPropertyHandlerTest, ShillPropertyHandlerStub) {
   SetupShillPropertyHandler();
   message_loop_.RunUntilIdle();
   EXPECT_EQ(1, listener_->manager_updates());
-  // ShillManagerClient default stub entries are in shill_manager_client.cc.
-  // TODO(stevenjb): Eliminate default stub entries and add them explicitly.
-  const size_t kNumShillManagerClientStubImplTechnologies = 3;
-  EXPECT_EQ(kNumShillManagerClientStubImplTechnologies,
-            listener_->entries(
-                flimflam::kAvailableTechnologiesProperty).size());
-  EXPECT_EQ(kNumShillManagerClientStubImplTechnologies,
-            listener_->entries(
-                flimflam::kEnabledTechnologiesProperty).size());
+  EXPECT_TRUE(shill_property_handler_->TechnologyAvailable(
+      flimflam::kTypeWifi));
+  EXPECT_TRUE(shill_property_handler_->TechnologyEnabled(
+      flimflam::kTypeWifi));
   const size_t kNumShillManagerClientStubImplDevices = 2;
   EXPECT_EQ(kNumShillManagerClientStubImplDevices,
             listener_->entries(flimflam::kDevicesProperty).size());
@@ -246,7 +252,6 @@ TEST_F(ShillPropertyHandlerTest, ShillPropertyHandlerStub) {
 }
 
 TEST_F(ShillPropertyHandlerTest, ShillPropertyHandlerTechnologyChanged) {
-  // This relies on the stub dbus implementations for ShillManagerClient,
   SetupShillPropertyHandler();
   message_loop_.RunUntilIdle();
   EXPECT_EQ(1, listener_->manager_updates());
@@ -254,28 +259,24 @@ TEST_F(ShillPropertyHandlerTest, ShillPropertyHandlerTechnologyChanged) {
   manager_test_->AddTechnology(flimflam::kTypeWimax, false);
   message_loop_.RunUntilIdle();
   EXPECT_EQ(2, listener_->manager_updates());
-  const size_t kNumShillManagerClientStubImplTechnologies = 3;
-  EXPECT_EQ(kNumShillManagerClientStubImplTechnologies + 1,
-            listener_->entries(
-                flimflam::kAvailableTechnologiesProperty).size());
-  EXPECT_EQ(kNumShillManagerClientStubImplTechnologies,
-            listener_->entries(
-                flimflam::kEnabledTechnologiesProperty).size());
+  EXPECT_TRUE(shill_property_handler_->TechnologyAvailable(
+      flimflam::kTypeWimax));
+  EXPECT_FALSE(shill_property_handler_->TechnologyEnabled(
+      flimflam::kTypeWimax));
+
   // Enable the technology.
   DBusThreadManager::Get()->GetShillManagerClient()->EnableTechnology(
       flimflam::kTypeWimax,
       base::Bind(&base::DoNothing), base::Bind(&ErrorCallbackFunction));
   message_loop_.RunUntilIdle();
   EXPECT_EQ(3, listener_->manager_updates());
-  EXPECT_EQ(kNumShillManagerClientStubImplTechnologies + 1,
-            listener_->entries(
-                flimflam::kEnabledTechnologiesProperty).size());
+  EXPECT_TRUE(shill_property_handler_->TechnologyEnabled(
+      flimflam::kTypeWimax));
 
   EXPECT_EQ(0, listener_->errors());
 }
 
 TEST_F(ShillPropertyHandlerTest, ShillPropertyHandlerDevicePropertyChanged) {
-  // This relies on the stub dbus implementations for ShillManagerClient,
   SetupShillPropertyHandler();
   message_loop_.RunUntilIdle();
   EXPECT_EQ(1, listener_->manager_updates());
@@ -303,7 +304,6 @@ TEST_F(ShillPropertyHandlerTest, ShillPropertyHandlerDevicePropertyChanged) {
 }
 
 TEST_F(ShillPropertyHandlerTest, ShillPropertyHandlerServicePropertyChanged) {
-  // This relies on the stub dbus implementations for ShillManagerClient,
   SetupShillPropertyHandler();
   message_loop_.RunUntilIdle();
   EXPECT_EQ(1, listener_->manager_updates());
@@ -318,7 +318,8 @@ TEST_F(ShillPropertyHandlerTest, ShillPropertyHandlerServicePropertyChanged) {
              flimflam::kStateIdle, false);
   message_loop_.RunUntilIdle();
   EXPECT_EQ(1, listener_->manager_updates());  // No new manager updates.
-  EXPECT_EQ(2, listener_->list_updates(flimflam::kServicesProperty));
+  // Only watched services trigger a service list update.
+  EXPECT_EQ(1, listener_->list_updates(flimflam::kServicesProperty));
   EXPECT_EQ(kNumShillManagerClientStubImplServices + 1,
             listener_->entries(flimflam::kServicesProperty).size());
   // Change a property.
@@ -338,7 +339,7 @@ TEST_F(ShillPropertyHandlerTest, ShillPropertyHandlerServicePropertyChanged) {
              flimflam::kStateIdle, true);
   message_loop_.RunUntilIdle();
   // Service list update should be received when watch list changes.
-  EXPECT_EQ(3, listener_->list_updates(flimflam::kServicesProperty));
+  EXPECT_EQ(2, listener_->list_updates(flimflam::kServicesProperty));
   // Number of services shouldn't change.
   EXPECT_EQ(kNumShillManagerClientStubImplServices + 1,
             listener_->entries(flimflam::kServicesProperty).size());
@@ -360,7 +361,7 @@ TEST_F(ShillPropertyHandlerTest, ShillPropertyHandlerServicePropertyChanged) {
   // Remove a service
   RemoveService(kTestServicePath);
   message_loop_.RunUntilIdle();
-  EXPECT_EQ(4, listener_->list_updates(flimflam::kServicesProperty));
+  EXPECT_EQ(3, listener_->list_updates(flimflam::kServicesProperty));
   EXPECT_EQ(kNumShillManagerClientStubImplServices,
             listener_->entries(flimflam::kServicesProperty).size());
 

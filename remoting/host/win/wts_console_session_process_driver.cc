@@ -5,35 +5,43 @@
 #include "remoting/host/win/wts_console_session_process_driver.h"
 
 #include "base/base_switches.h"
-#include "base/file_path.h"
+#include "base/command_line.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/single_thread_task_runner.h"
 #include "ipc/ipc_message.h"
 #include "ipc/ipc_message_macros.h"
 #include "remoting/host/chromoting_messages.h"
+#include "remoting/host/host_main.h"
 #include "remoting/host/ipc_constants.h"
 #include "remoting/host/sas_injector.h"
 #include "remoting/host/win/worker_process_launcher.h"
-#include "remoting/host/win/wts_console_monitor.h"
 #include "remoting/host/win/wts_session_process_delegate.h"
+#include "remoting/host/win/wts_terminal_monitor.h"
 
 // The security descriptor of the named pipe the process running in the console
 // session connects to. It gives full access to LocalSystem and denies access by
 // anyone else.
 const char kDaemonIpcSecurityDescriptor[] = "O:SYG:SYD:(A;;GA;;;SY)";
 
+// The command line parameters that should be copied from the service's command
+// line to the host process.
+const char* kCopiedSwitchNames[] = {
+    "host-config", switches::kV, switches::kVModule
+};
+
 namespace remoting {
 
 WtsConsoleSessionProcessDriver::WtsConsoleSessionProcessDriver(
     const base::Closure& stopped_callback,
-    WtsConsoleMonitor* monitor,
+    WtsTerminalMonitor* monitor,
     scoped_refptr<base::SingleThreadTaskRunner> caller_task_runner,
     scoped_refptr<base::SingleThreadTaskRunner> io_task_runner)
     : Stoppable(caller_task_runner, stopped_callback),
       caller_task_runner_(caller_task_runner),
       io_task_runner_(io_task_runner),
       monitor_(monitor) {
-  monitor_->AddWtsConsoleObserver(this);
+  monitor_->AddWtsTerminalObserver(net::IPEndPoint(), this);
 }
 
 WtsConsoleSessionProcessDriver::~WtsConsoleSessionProcessDriver() {
@@ -44,7 +52,7 @@ WtsConsoleSessionProcessDriver::~WtsConsoleSessionProcessDriver() {
   // predictably.
   CHECK_EQ(stoppable_state(), Stoppable::kStopped);
 
-  monitor_->RemoveWtsConsoleObserver(this);
+  monitor_->RemoveWtsTerminalObserver(this);
 
   CHECK(launcher_.get() == NULL);
 }
@@ -81,18 +89,24 @@ void WtsConsoleSessionProcessDriver::OnSessionAttached(uint32 session_id) {
 
   DCHECK(launcher_.get() == NULL);
 
-  // Construct the host binary name.
-  FilePath host_binary;
-  if (!GetInstalledBinaryPath(kHostBinaryName, &host_binary)) {
+  // Get the host binary name.
+  base::FilePath desktop_binary;
+  if (!GetInstalledBinaryPath(kDesktopBinaryName, &desktop_binary)) {
     Stop();
     return;
   }
+
+  scoped_ptr<CommandLine> target(new CommandLine(desktop_binary));
+  target->AppendSwitchASCII(kProcessTypeSwitchName, kProcessTypeHost);
+  target->CopySwitchesFrom(*CommandLine::ForCurrentProcess(),
+                           kCopiedSwitchNames,
+                           arraysize(kCopiedSwitchNames));
 
   // Create a Delegate capable of launching an elevated process in the session.
   scoped_ptr<WtsSessionProcessDelegate> delegate(
       new WtsSessionProcessDelegate(caller_task_runner_,
                                     io_task_runner_,
-                                    host_binary,
+                                    target.Pass(),
                                     session_id,
                                     true,
                                     kDaemonIpcSecurityDescriptor));

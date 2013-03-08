@@ -35,7 +35,8 @@ TestInternalComponentsFactory::BuildContext(
     ThrottledDataTypeTracker* throttled_data_type_tracker,
     const std::vector<SyncEngineEventListener*>& listeners,
     sessions::DebugInfoGetter* debug_info_getter,
-    TrafficRecorder* traffic_recorder) {
+    TrafficRecorder* traffic_recorder,
+    const std::string& invalidator_client_id) {
 
   // Tests don't wire up listeners.
   std::vector<SyncEngineEventListener*> empty_listeners;
@@ -44,13 +45,14 @@ TestInternalComponentsFactory::BuildContext(
           connection_manager, directory, workers, monitor,
           throttled_data_type_tracker, empty_listeners, debug_info_getter,
           traffic_recorder,
-          switches_.encryption_method == ENCRYPTION_KEYSTORE));
+          switches_.encryption_method == ENCRYPTION_KEYSTORE,
+          invalidator_client_id));
 
 }
 
 scoped_ptr<syncable::DirectoryBackingStore>
 TestInternalComponentsFactory::BuildDirectoryBackingStore(
-      const std::string& dir_name, const FilePath& backing_filepath) {
+      const std::string& dir_name, const base::FilePath& backing_filepath) {
   switch (storage_option_) {
     case STORAGE_IN_MEMORY:
       return scoped_ptr<syncable::DirectoryBackingStore>(

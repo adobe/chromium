@@ -5,6 +5,7 @@
 #include "chrome/renderer/extensions/module_system.h"
 
 #include "base/bind.h"
+#include "base/stl_util.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebScopedMicrotaskSuppression.h"
 
 namespace {
@@ -20,7 +21,9 @@ namespace extensions {
 
 ModuleSystem::ModuleSystem(v8::Handle<v8::Context> context,
                            SourceMap* source_map)
-    : context_(v8::Persistent<v8::Context>::New(context)),
+    : NativeHandler(context->GetIsolate()),
+      context_(v8::Persistent<v8::Context>::New(context->GetIsolate(),
+                                                context)),
       source_map_(source_map),
       natives_enabled_(0) {
   RouteFunction("require",
@@ -39,7 +42,7 @@ ModuleSystem::~ModuleSystem() {
   // Deleting this value here prevents future lazy field accesses from
   // referencing ModuleSystem after it has been freed.
   context_->Global()->DeleteHiddenValue(v8::String::New(kModuleSystem));
-  context_.Dispose();
+  context_.Dispose(context_->GetIsolate());
 }
 
 ModuleSystem::NativesEnabledScope::NativesEnabledScope(
@@ -159,29 +162,39 @@ v8::Handle<v8::Value> ModuleSystem::RequireForJsInner(
 
 void ModuleSystem::CallModuleMethod(const std::string& module_name,
                                     const std::string& method_name) {
+  std::vector<v8::Handle<v8::Value> > args;
+  CallModuleMethod(module_name, method_name, &args);
+}
+
+v8::Local<v8::Value> ModuleSystem::CallModuleMethod(
+    const std::string& module_name,
+    const std::string& method_name,
+    std::vector<v8::Handle<v8::Value> >* args) {
   v8::HandleScope handle_scope;
   v8::Local<v8::Value> module =
       v8::Local<v8::Value>::New(
           RequireForJsInner(v8::String::New(module_name.c_str())));
   if (module.IsEmpty() || !module->IsObject())
-    return;
+    return v8::Local<v8::Value>();
   v8::Local<v8::Value> value =
       v8::Handle<v8::Object>::Cast(module)->Get(
           v8::String::New(method_name.c_str()));
   if (value.IsEmpty() || !value->IsFunction())
-    return;
+    return v8::Local<v8::Value>();
   v8::Handle<v8::Function> func =
       v8::Handle<v8::Function>::Cast(value);
   // TODO(jeremya/koz): refer to context_ here, not the current context.
   v8::Handle<v8::Object> global(v8::Context::GetCurrent()->Global());
+  v8::Local<v8::Value> result;
   {
     WebKit::WebScopedMicrotaskSuppression suppression;
     v8::TryCatch try_catch;
     try_catch.SetCaptureMessage(true);
-    func->Call(global, 0, NULL);
+    result = func->Call(global, args->size(), vector_as_array(args));
     if (try_catch.HasCaught())
       HandleException(try_catch);
   }
+  return handle_scope.Close(result);
 }
 
 void ModuleSystem::RegisterNativeHandler(const std::string& name,
@@ -209,7 +222,7 @@ v8::Handle<v8::Value> ModuleSystem::LazyFieldGetter(
   v8::Handle<v8::Object> global(v8::Context::GetCurrent()->Global());
   v8::Handle<v8::Value> module_system_value =
       global->GetHiddenValue(v8::String::New(kModuleSystem));
-  if (module_system_value->IsUndefined()) {
+  if (module_system_value.IsEmpty() || module_system_value->IsUndefined()) {
     // ModuleSystem has been deleted.
     return v8::Undefined();
   }
@@ -292,8 +305,8 @@ v8::Handle<v8::Value> ModuleSystem::GetNative(const v8::Arguments& args) {
 
 v8::Handle<v8::String> ModuleSystem::WrapSource(v8::Handle<v8::String> source) {
   v8::HandleScope handle_scope;
-  v8::Handle<v8::String> left =
-      v8::String::New("(function(require, requireNative, exports) {");
+  v8::Handle<v8::String> left = v8::String::New(
+      "(function(require, requireNative, exports) {'use strict';");
   v8::Handle<v8::String> right = v8::String::New("\n})");
   return handle_scope.Close(
       v8::String::Concat(left, v8::String::Concat(source, right)));

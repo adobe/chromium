@@ -8,7 +8,7 @@
 #include <string>
 
 #include "base/base64.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/format_macros.h"
 #include "base/logging.h"
 #include "base/string_util.h"
@@ -445,7 +445,7 @@ base::NativeLibrary GSSAPISharedLibrary::LoadSharedLibrary() {
 
   for (size_t i = 0; i < num_lib_names; ++i) {
     const char* library_name = library_names[i];
-    FilePath file_path(library_name);
+    base::FilePath file_path(library_name);
 
     // TODO(asanka): Move library loading to a separate thread.
     //               http://crbug.com/66702

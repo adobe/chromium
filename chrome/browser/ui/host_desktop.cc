@@ -11,32 +11,12 @@
 #include "ash/shell.h"
 #include "chrome/browser/ui/ash/ash_util.h"
 #include "chrome/browser/ui/aura/active_desktop_monitor.h"
-#include "chrome/browser/ui/browser_list_impl.h"
+#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_list.h"
 
 namespace chrome {
 
-namespace {
-
-bool g_force_ = false;
-HostDesktopType g_force_type_ = HOST_DESKTOP_TYPE_COUNT;
-
-}  // namespace
-
-ScopedForceDesktopType::ScopedForceDesktopType(HostDesktopType type)
-    : previous_type_(g_force_type_),
-      previous_force_(g_force_) {
-  g_force_type_ = type;
-  g_force_ = true;
-}
-
-ScopedForceDesktopType::~ScopedForceDesktopType() {
-  g_force_type_ = previous_type_;
-  g_force_ = previous_force_;
-}
-
 HostDesktopType GetHostDesktopTypeForNativeView(gfx::NativeView native_view) {
-  if (g_force_)
-    return g_force_type_;
 #if defined(USE_ASH)
   // TODO(ananta)
   // Once we've threaded creation context to wherever needed, we should remove
@@ -55,8 +35,6 @@ HostDesktopType GetHostDesktopTypeForNativeView(gfx::NativeView native_view) {
 
 HostDesktopType GetHostDesktopTypeForNativeWindow(
     gfx::NativeWindow native_window) {
-  if (g_force_)
-    return g_force_type_;
 #if defined(USE_ASH)
   // TODO(ananta)
   // Once we've threaded creation context to wherever needed, we should remove
@@ -71,22 +49,6 @@ HostDesktopType GetHostDesktopTypeForNativeWindow(
 #else
   return HOST_DESKTOP_TYPE_NATIVE;
 #endif
-}
-
-HostDesktopType GetHostDesktopTypeForBrowser(const Browser* browser) {
-  if (g_force_)
-    return g_force_type_;
-  for (HostDesktopType type = HOST_DESKTOP_TYPE_FIRST;
-      type < HOST_DESKTOP_TYPE_COUNT;
-      type = static_cast<HostDesktopType>(type + 1)) {
-    BrowserListImpl::const_iterator begin =
-        BrowserListImpl::GetInstance(type)->begin();
-    BrowserListImpl::const_iterator end =
-        BrowserListImpl::GetInstance(type)->end();
-    if (std::find(begin, end, browser) != end)
-      return type;
-  }
-  return HOST_DESKTOP_TYPE_NATIVE;
 }
 
 HostDesktopType GetActiveDesktop() {

@@ -26,7 +26,7 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/net/chrome_cookie_notification_details.h"
-#include "chrome/browser/prefs/pref_service.h"
+#include "chrome/browser/prefs/pref_service_syncable.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/signin_manager.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
@@ -56,6 +56,7 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/time_format.h"
 #include "chrome/common/url_constants.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
@@ -249,8 +250,6 @@ void ProfileSyncService::TrySyncDatatypePrefRecovery() {
   PrefService* const pref_service = profile_->GetPrefs();
   if (!pref_service)
     return;
-  if (sync_prefs_.HasKeepEverythingSynced())
-    return;
   const syncer::ModelTypeSet registered_types = GetRegisteredDataTypes();
   if (sync_prefs_.GetPreferredDataTypes(registered_types).Size() > 1)
     return;
@@ -318,6 +317,9 @@ void ProfileSyncService::RegisterAuthNotifications() {
                  content::Source<TokenService>(token_service));
   registrar_.Add(this,
                  chrome::NOTIFICATION_GOOGLE_SIGNIN_SUCCESSFUL,
+                 content::Source<Profile>(profile_));
+  registrar_.Add(this,
+                 chrome::NOTIFICATION_GOOGLE_SIGNED_OUT,
                  content::Source<Profile>(profile_));
 }
 
@@ -495,6 +497,11 @@ void ProfileSyncService::StartUp() {
   if (backend_.get()) {
     backend_->UpdateRegisteredInvalidationIds(
         invalidator_registrar_->GetAllRegisteredIds());
+    for (AckHandleReplayQueue::const_iterator it = ack_replay_queue_.begin();
+         it != ack_replay_queue_.end(); ++it) {
+      backend_->AcknowledgeInvalidation(it->first, it->second);
+    }
+    ack_replay_queue_.clear();
   }
 
   if (!sync_global_error_.get()) {
@@ -530,6 +537,18 @@ void ProfileSyncService::UnregisterInvalidationHandler(
   invalidator_registrar_->UnregisterHandler(handler);
 }
 
+void ProfileSyncService::AcknowledgeInvalidation(
+    const invalidation::ObjectId& id,
+    const syncer::AckHandle& ack_handle) {
+  if (backend_.get()) {
+    backend_->AcknowledgeInvalidation(id, ack_handle);
+  } else {
+    // If |backend_| is NULL, save the acknowledgements to replay when
+    // it's created and initialized.
+    ack_replay_queue_.push_back(std::make_pair(id, ack_handle));
+  }
+}
+
 syncer::InvalidatorState ProfileSyncService::GetInvalidatorState() const {
   return invalidator_registrar_->GetInvalidatorState();
 }
@@ -542,7 +561,7 @@ void ProfileSyncService::EmitInvalidationForTest(
 
   const syncer::ObjectIdInvalidationMap& invalidation_map =
       ObjectIdSetToInvalidationMap(notify_ids, payload);
-  OnIncomingInvalidation(invalidation_map, syncer::REMOTE_INVALIDATION);
+  OnIncomingInvalidation(invalidation_map);
 }
 
 void ProfileSyncService::Shutdown() {
@@ -631,13 +650,6 @@ void ProfileSyncService::DisableForUser() {
   invalidator_storage_.Clear();
   ClearUnrecoverableError();
   ShutdownImpl(true);
-
-  // TODO(atwilson): Don't call SignOut() on *any* platform - move this into
-  // the UI layer if needed (sync activity should never result in the user
-  // being logged out of all chrome services).
-  if (!auto_start_enabled_ && !signin_->GetAuthenticatedUsername().empty())
-    signin_->SignOut();
-
   NotifyObservers();
 }
 
@@ -752,10 +764,8 @@ void ProfileSyncService::OnInvalidatorStateChange(
 }
 
 void ProfileSyncService::OnIncomingInvalidation(
-    const syncer::ObjectIdInvalidationMap& invalidation_map,
-    syncer::IncomingInvalidationSource source) {
-  invalidator_registrar_->DispatchInvalidationsToHandlers(invalidation_map,
-                                                          source);
+    const syncer::ObjectIdInvalidationMap& invalidation_map) {
+  invalidator_registrar_->DispatchInvalidationsToHandlers(invalidation_map);
 }
 
 void ProfileSyncService::OnBackendInitialized(
@@ -931,6 +941,12 @@ void ProfileSyncService::OnExperimentsChanged(
                                       true);
   }
 
+  if (experiments.full_history_sync) {
+    about_flags::SetExperimentEnabled(g_browser_process->local_state(),
+                                      syncer::kFullHistorySyncFlag,
+                                      true);
+  }
+
   current_experiments_ = experiments;
 }
 
@@ -938,10 +954,12 @@ void ProfileSyncService::UpdateAuthErrorState(const AuthError& error) {
   is_auth_in_progress_ = false;
   last_auth_error_ = error;
 
-  // Fan the notification out to interested UI-thread components.
-  NotifyObservers();
+  // Fan the notification out to interested UI-thread components. Notify the
+  // SigninGlobalError first so it reflects the latest auth state before we
+  // notify observers.
   if (signin())
     signin()->signin_global_error()->AuthStatusChanged();
+  NotifyObservers();
 }
 
 namespace {
@@ -978,6 +996,9 @@ void ProfileSyncService::OnStopSyncingPermanently() {
   UpdateAuthErrorState(AuthError(AuthError::SERVICE_UNAVAILABLE));
   sync_prefs_.SetStartSuppressed(true);
   DisableForUser();
+  // If signout is allowed, signout the user on a dashboard clear.
+  if (!auto_start_enabled_)  // Skip signout on ChromeOS/Android.
+    signin_->SignOut();
 }
 
 void ProfileSyncService::OnPassphraseRequired(
@@ -1320,44 +1341,34 @@ void ProfileSyncService::UpdateSelectedTypesHistogram(
   }
 
   // Only log the data types that are shown in the sync settings ui.
-  const syncer::ModelType model_types[] = {
-    syncer::APPS,
-    syncer::AUTOFILL,
-    syncer::BOOKMARKS,
-    syncer::EXTENSIONS,
-    syncer::PASSWORDS,
-    syncer::PREFERENCES,
-    syncer::SESSIONS,
-    syncer::SYNCED_NOTIFICATIONS,
-    syncer::THEMES,
-    syncer::TYPED_URLS
-  };
-
-  const browser_sync::user_selectable_type::UserSelectableSyncType
+  // Note: the order of these types must match the ordering of
+  // the respective types in ModelType
+const browser_sync::user_selectable_type::UserSelectableSyncType
       user_selectable_types[] = {
-    browser_sync::user_selectable_type::APPS,
-    browser_sync::user_selectable_type::AUTOFILL,
     browser_sync::user_selectable_type::BOOKMARKS,
-    browser_sync::user_selectable_type::EXTENSIONS,
-    browser_sync::user_selectable_type::PASSWORDS,
     browser_sync::user_selectable_type::PREFERENCES,
-    browser_sync::user_selectable_type::SESSIONS,
-    browser_sync::user_selectable_type::SYNCED_NOTIFICATIONS,
+    browser_sync::user_selectable_type::PASSWORDS,
+    browser_sync::user_selectable_type::AUTOFILL,
     browser_sync::user_selectable_type::THEMES,
-    browser_sync::user_selectable_type::TYPED_URLS
+    browser_sync::user_selectable_type::TYPED_URLS,
+    browser_sync::user_selectable_type::EXTENSIONS,
+    browser_sync::user_selectable_type::APPS,
+    browser_sync::user_selectable_type::PROXY_TABS
   };
 
-  COMPILE_ASSERT(23 == syncer::MODEL_TYPE_COUNT, UpdateCustomConfigHistogram);
-  COMPILE_ASSERT(arraysize(model_types) ==
-                 browser_sync::user_selectable_type::SELECTABLE_DATATYPE_COUNT,
-                 UpdateCustomConfigHistogram);
-  COMPILE_ASSERT(arraysize(model_types) == arraysize(user_selectable_types),
-                 UpdateCustomConfigHistogram);
+  COMPILE_ASSERT(26 == syncer::MODEL_TYPE_COUNT, UpdateCustomConfigHistogram);
 
   if (!sync_everything) {
     const syncer::ModelTypeSet current_types = GetPreferredDataTypes();
-    for (size_t i = 0; i < arraysize(model_types); ++i) {
-      const syncer::ModelType type = model_types[i];
+
+    syncer::ModelTypeSet type_set = syncer::UserSelectableTypes();
+    syncer::ModelTypeSet::Iterator it = type_set.First();
+
+    DCHECK_EQ(arraysize(user_selectable_types), type_set.Size());
+
+    for (size_t i = 0; i < arraysize(user_selectable_types) && it.Good();
+         ++i, it.Inc()) {
+      const syncer::ModelType type = it.Get();
       if (chosen_types.Has(type) &&
           (!HasSyncSetupCompleted() || !current_types.Has(type))) {
         // Selected type has changed - log it.
@@ -1387,7 +1398,8 @@ void ProfileSyncService::RefreshSpareBootstrapToken(
 }
 #endif
 
-void ProfileSyncService::OnUserChoseDatatypes(bool sync_everything,
+void ProfileSyncService::OnUserChoseDatatypes(
+    bool sync_everything,
     syncer::ModelTypeSet chosen_types) {
   if (!backend_.get() && !HasUnrecoverableError()) {
     NOTREACHED();
@@ -1479,7 +1491,8 @@ void ProfileSyncService::ConfigureDataTypeManager() {
         factory_->CreateDataTypeManager(debug_info_listener_,
                                         backend_.get(),
                                         &data_type_controllers_,
-                                        this));
+                                        this,
+                                        &failed_datatypes_handler_));
 
     // We create the migrator at the same time.
     migrator_.reset(
@@ -1699,9 +1712,6 @@ void ProfileSyncService::SetEncryptionPassphrase(const std::string& passphrase,
            passphrase_required_reason_ == syncer::REASON_DECRYPTION)) <<
          "Can not set explicit passphrase when decryption is needed.";
 
-  if (type == EXPLICIT)
-    UMA_HISTOGRAM_BOOLEAN("Sync.CustomPassphrase", true);
-
   DVLOG(1) << "Setting " << (type == EXPLICIT ? "explicit" : "implicit")
            << " passphrase for encryption.";
   if (passphrase_required_reason_ == syncer::REASON_ENCRYPTION) {
@@ -1737,7 +1747,6 @@ void ProfileSyncService::EnableEncryptEverything() {
   // problems around cancelling encryption in the background (crbug.com/119649).
   if (!encrypt_everything_)
     encryption_pending_ = true;
-  UMA_HISTOGRAM_BOOLEAN("Sync.EncryptAllData", true);
 }
 
 bool ProfileSyncService::encryption_pending() const {
@@ -1777,8 +1786,8 @@ void ProfileSyncService::Observe(int type,
       const GoogleServiceSigninSuccessDetails* successful =
           content::Details<const GoogleServiceSigninSuccessDetails>(
               details).ptr();
-      DCHECK(!successful->password.empty());
-      if (!sync_prefs_.IsStartSuppressed()) {
+      if (!sync_prefs_.IsStartSuppressed() &&
+          !successful->password.empty()) {
         cached_passphrase_ = successful->password;
         // Try to consume the passphrase we just cached. If the sync backend
         // is not running yet, the passphrase will remain cached until the
@@ -1831,6 +1840,10 @@ void ProfileSyncService::Observe(int type,
         TryStart();
       break;
     }
+    case chrome::NOTIFICATION_GOOGLE_SIGNED_OUT:
+      // Disable sync if the user is signed out.
+      DisableForUser();
+      break;
     default: {
       NOTREACHED();
     }
@@ -1884,6 +1897,10 @@ bool ProfileSyncService::ShouldPushChanges() {
 void ProfileSyncService::StopAndSuppress() {
   sync_prefs_.SetStartSuppressed(true);
   ShutdownImpl(false);
+}
+
+bool ProfileSyncService::IsStartSuppressed() const {
+  return sync_prefs_.IsStartSuppressed();
 }
 
 void ProfileSyncService::UnsuppressAndStart() {

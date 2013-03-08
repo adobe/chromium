@@ -17,6 +17,7 @@
 #include "chrome/browser/extensions/requirements_checker.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_file_util.h"
+#include "chrome/common/extensions/manifest.h"
 #include "content/public/browser/browser_thread.h"
 #include "sync/api/string_ordinal.h"
 
@@ -34,7 +35,7 @@ class SimpleExtensionLoadPrompt : public ExtensionInstallPrompt::Delegate {
   SimpleExtensionLoadPrompt(Profile* profile,
                             base::WeakPtr<ExtensionService> extension_service,
                             const Extension* extension);
-  ~SimpleExtensionLoadPrompt();
+  virtual ~SimpleExtensionLoadPrompt();
 
   void ShowPrompt();
 
@@ -98,7 +99,8 @@ UnpackedInstaller::UnpackedInstaller(ExtensionService* extension_service)
     : service_weak_(extension_service->AsWeakPtr()),
       prompt_for_plugins_(true),
       requirements_checker_(new RequirementsChecker()),
-      require_modern_manifest_version_(true) {
+      require_modern_manifest_version_(true),
+      launch_on_load_(false) {
   CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 }
 
@@ -107,14 +109,15 @@ UnpackedInstaller::~UnpackedInstaller() {
         BrowserThread::CurrentlyOn(BrowserThread::FILE));
 }
 
-void UnpackedInstaller::Load(const FilePath& path_in) {
+void UnpackedInstaller::Load(const base::FilePath& path_in) {
   DCHECK(extension_path_.empty());
   extension_path_ = path_in;
   BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
       base::Bind(&UnpackedInstaller::GetAbsolutePath, this));
 }
 
-void UnpackedInstaller::LoadFromCommandLine(const FilePath& path_in) {
+void UnpackedInstaller::LoadFromCommandLine(const base::FilePath& path_in,
+                                            bool launch_on_load) {
   CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(extension_path_.empty());
 
@@ -135,7 +138,7 @@ void UnpackedInstaller::LoadFromCommandLine(const FilePath& path_in) {
   std::string error;
   extension_ = extension_file_util::LoadExtension(
       extension_path_,
-      Extension::LOAD,
+      Manifest::COMMAND_LINE,
       GetFlags(),
       &error);
 
@@ -143,6 +146,8 @@ void UnpackedInstaller::LoadFromCommandLine(const FilePath& path_in) {
     ReportExtensionLoadError(error);
     return;
   }
+
+  launch_on_load_ = launch_on_load;
 
   CheckRequirements();
 }
@@ -169,7 +174,7 @@ void UnpackedInstaller::OnRequirementsChecked(
 int UnpackedInstaller::GetFlags() {
   std::string id = Extension::GenerateIdForPath(extension_path_);
   bool allow_file_access =
-      Extension::ShouldAlwaysAllowFileAccess(Extension::LOAD);
+      Manifest::ShouldAlwaysAllowFileAccess(Manifest::UNPACKED);
   if (service_weak_->extension_prefs()->HasAllowFileAccessSetting(id))
     allow_file_access = service_weak_->extension_prefs()->AllowFileAccess(id);
 
@@ -220,7 +225,7 @@ void UnpackedInstaller::LoadWithFileAccess(int flags) {
   std::string error;
   extension_ = extension_file_util::LoadExtension(
       extension_path_,
-      Extension::LOAD,
+      Manifest::UNPACKED,
       flags,
       &error);
 
@@ -263,6 +268,10 @@ void UnpackedInstaller::OnLoaded() {
 
   PermissionsUpdater perms_updater(service_weak_->profile());
   perms_updater.GrantActivePermissions(extension_, false);
+
+  if (launch_on_load_)
+    service_weak_->ScheduleLaunchOnLoad(extension_->id());
+
   service_weak_->OnExtensionInstalled(extension_,
                                       syncer::StringOrdinal(),
                                       false /* no requirement errors */,

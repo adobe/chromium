@@ -7,12 +7,13 @@
 #include "base/bind.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/metrics/histogram.h"
+#include "base/prefs/pref_service.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/content_settings/content_settings_utils.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
+#include "chrome/browser/plugins/chrome_plugin_service_filter.h"
 #include "chrome/browser/plugins/plugin_finder.h"
 #include "chrome/browser/plugins/plugin_metadata.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_content_client.h"
 #include "chrome/common/content_settings.h"
@@ -132,6 +133,8 @@ void PluginInfoMessageFilter::PluginsLoaded(
     output.group_name = plugin_metadata->name();
   }
 
+  context_.MaybeGrantAccess(output.status, output.plugin.path);
+
   ChromeViewHostMsg_GetPluginInfo::WriteReplyParams(reply_msg, output);
   Send(reply_msg);
 }
@@ -225,12 +228,12 @@ bool PluginInfoMessageFilter::Context::FindEnabledPlugin(
       PluginService::GetInstance()->GetFilter();
   size_t i = 0;
   for (; i < matching_plugins.size(); ++i) {
-    if (!filter || filter->ShouldUsePlugin(render_process_id_,
-                                           render_view_id,
-                                           resource_context_,
-                                           url,
-                                           top_origin_url,
-                                           &matching_plugins[i])) {
+    if (!filter || filter->IsPluginAvailable(render_process_id_,
+                                             render_view_id,
+                                             resource_context_,
+                                             url,
+                                             top_origin_url,
+                                             &matching_plugins[i])) {
       break;
     }
   }
@@ -289,3 +292,14 @@ void PluginInfoMessageFilter::Context::GetPluginContentSetting(
       info.primary_pattern == ContentSettingsPattern::Wildcard() &&
       info.secondary_pattern == ContentSettingsPattern::Wildcard();
 }
+
+void PluginInfoMessageFilter::Context::MaybeGrantAccess(
+    const ChromeViewHostMsg_GetPluginInfo_Status& status,
+    const base::FilePath& path) const {
+  if (status.value == ChromeViewHostMsg_GetPluginInfo_Status::kAllowed ||
+      status.value == ChromeViewHostMsg_GetPluginInfo_Status::kClickToPlay) {
+    ChromePluginServiceFilter::GetInstance()->AuthorizePlugin(
+        render_process_id_, path);
+  }
+}
+

@@ -6,6 +6,7 @@
 
 #include <algorithm>
 
+#include "ash/shell.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/chromeos/login/base_login_display_host.h"
@@ -21,16 +22,18 @@
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "grit/theme_resources.h"
+#include "ui/aura/root_window.h"
 #include "ui/base/accessibility/accessible_view_state.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/rect.h"
-#include "ui/views/controls/button/text_button.h"
+#include "ui/views/controls/button/label_button.h"
 #include "ui/views/controls/image_view.h"
-#include "ui/views/layout/grid_layout.h"
 #include "ui/views/layout/layout_constants.h"
 #include "ui/views/widget/widget.h"
+
+using views::Widget;
 
 namespace {
 
@@ -70,9 +73,9 @@ namespace chromeos {
 const int ChildNetworkConfigView::kInputFieldMinWidth = 270;
 
 NetworkConfigView::NetworkConfigView(Network* network)
-    : delegate_(NULL),
-      advanced_button_(NULL),
-      advanced_button_container_(NULL) {
+    : child_config_view_(NULL),
+      delegate_(NULL),
+      advanced_button_(NULL) {
   DCHECK(GetActiveDialog() == NULL);
   SetActiveDialog(this);
   if (network->type() == TYPE_WIFI) {
@@ -86,24 +89,24 @@ NetworkConfigView::NetworkConfigView(Network* network)
         new VPNConfigView(this, static_cast<VirtualNetwork*>(network));
   } else {
     NOTREACHED();
-    child_config_view_ = NULL;
   }
 }
 
 NetworkConfigView::NetworkConfigView(ConnectionType type)
-    : delegate_(NULL),
-      advanced_button_(NULL),
-      advanced_button_container_(NULL) {
+    : child_config_view_(NULL),
+      delegate_(NULL),
+      advanced_button_(NULL) {
   DCHECK(GetActiveDialog() == NULL);
   SetActiveDialog(this);
   if (type == TYPE_WIFI) {
     child_config_view_ = new WifiConfigView(this, false /* show_8021x */);
-    CreateAdvancedButton();
+    advanced_button_ = new views::LabelButton(this, l10n_util::GetStringUTF16(
+        IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_ADVANCED_BUTTON));
+    advanced_button_->SetStyle(views::Button::STYLE_NATIVE_TEXTBUTTON);
   } else if (type == TYPE_VPN) {
     child_config_view_ = new VPNConfigView(this);
   } else {
     NOTREACHED();
-    child_config_view_ = NULL;
   }
 }
 
@@ -117,11 +120,7 @@ bool NetworkConfigView::Show(Network* network, gfx::NativeWindow parent) {
   if (GetActiveDialog() != NULL)
     return false;
   NetworkConfigView* view = new NetworkConfigView(network);
-  if (parent == NULL)
-    parent = GetDialogParent();
-  views::Widget* window = views::Widget::CreateWindowWithParent(view, parent);
-  window->SetAlwaysOnTop(true);
-  window->Show();
+  view->ShowDialog(parent);
   return true;
 }
 
@@ -131,11 +130,7 @@ bool NetworkConfigView::ShowForType(ConnectionType type,
   if (GetActiveDialog() != NULL)
     return false;
   NetworkConfigView* view = new NetworkConfigView(type);
-  if (parent == NULL)
-    parent = GetDialogParent();
-  views::Widget* window = views::Widget::CreateWindowWithParent(view, parent);
-  window->SetAlwaysOnTop(true);
-  window->Show();
+  view->ShowDialog(parent);
   return true;
 }
 
@@ -147,7 +142,7 @@ string16 NetworkConfigView::GetDialogButtonLabel(
     ui::DialogButton button) const {
   if (button == ui::DIALOG_BUTTON_OK)
     return l10n_util::GetStringUTF16(IDS_OPTIONS_SETTINGS_CONNECT);
-  return string16();
+  return views::DialogDelegateView::GetDialogButtonLabel(button);
 }
 
 bool NetworkConfigView::IsDialogButtonEnabled(ui::DialogButton button) const {
@@ -174,8 +169,8 @@ bool NetworkConfigView::Accept() {
   return result;
 }
 
-views::View* NetworkConfigView::GetExtraView() {
-  return advanced_button_container_;
+views::View* NetworkConfigView::CreateExtraView() {
+  return advanced_button_;
 }
 
 views::View* NetworkConfigView::GetInitiallyFocusedView() {
@@ -246,22 +241,16 @@ void NetworkConfigView::ViewHierarchyChanged(
   }
 }
 
-void NetworkConfigView::CreateAdvancedButton() {
-  advanced_button_ = new views::NativeTextButton(this,
-      l10n_util::GetStringUTF16(
-          IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_ADVANCED_BUTTON));
-
-  // Wrap the advanced button in a grid layout in order to left-align it.
-  advanced_button_container_ = new views::View();
-  views::GridLayout* layout = new views::GridLayout(advanced_button_container_);
-  advanced_button_container_->SetLayoutManager(layout);
-
-  int column_set_id = 0;
-  views::ColumnSet* column_set = layout->AddColumnSet(column_set_id);
-  column_set->AddColumn(views::GridLayout::LEADING, views::GridLayout::LEADING,
-                        0, views::GridLayout::USE_PREF, 0, 0);
-  layout->StartRow(0, column_set_id);
-  layout->AddView(advanced_button_);
+void NetworkConfigView::ShowDialog(gfx::NativeWindow parent) {
+  if (parent == NULL)
+    parent = GetDialogParent();
+  // Failed connections may result in a pop-up with no natural parent window,
+  // so provide a fallback context on the active display.
+  Widget* window = parent ?
+      Widget::CreateWindowWithParent(this, parent) :
+      Widget::CreateWindowWithContext(this, ash::Shell::GetActiveRootWindow());
+  window->SetAlwaysOnTop(true);
+  window->Show();
 }
 
 ControlledSettingIndicatorView::ControlledSettingIndicatorView()

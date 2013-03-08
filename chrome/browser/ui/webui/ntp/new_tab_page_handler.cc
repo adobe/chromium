@@ -4,16 +4,18 @@
 
 #include "chrome/browser/ui/webui/ntp/new_tab_page_handler.h"
 
+#include "apps/app_launcher.h"
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/metrics/histogram.h"
-#include "chrome/browser/prefs/pref_service.h"
+#include "base/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
 #include "chrome/browser/web_resource/notification_promo.h"
 #include "chrome/common/pref_names.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/web_ui.h"
 #include "grit/chromium_strings.h"
@@ -72,6 +74,9 @@ void NewTabPageHandler::RegisterMessages() {
                  base::Unretained(this)));
   web_ui()->RegisterMessageCallback("logTimeToClick",
       base::Bind(&NewTabPageHandler::HandleLogTimeToClick,
+                 base::Unretained(this)));
+  web_ui()->RegisterMessageCallback("getShouldShowApps",
+      base::Bind(&NewTabPageHandler::HandleGetShouldShowApps,
                  base::Unretained(this)));
 }
 
@@ -167,11 +172,22 @@ void NewTabPageHandler::HandleLogTimeToClick(const ListValue* args) {
   }
 }
 
+void NewTabPageHandler::HandleGetShouldShowApps(const ListValue* args) {
+  apps::GetIsAppLauncherEnabled(
+      base::Bind(&NewTabPageHandler::GotIsAppLauncherEnabled,
+                 AsWeakPtr()));
+}
+
+void NewTabPageHandler::GotIsAppLauncherEnabled(bool is_enabled) {
+  base::FundamentalValue should_show_apps(!is_enabled);
+  web_ui()->CallJavascriptFunction("ntp.gotShouldShowApps", should_show_apps);
+}
+
 // static
-void NewTabPageHandler::RegisterUserPrefs(PrefServiceSyncable* prefs) {
+void NewTabPageHandler::RegisterUserPrefs(PrefRegistrySyncable* registry) {
   // TODO(estade): should be syncable.
-  prefs->RegisterIntegerPref(prefs::kNtpShownPage, APPS_PAGE_ID,
-                             PrefServiceSyncable::UNSYNCABLE_PREF);
+  registry->RegisterIntegerPref(prefs::kNtpShownPage, APPS_PAGE_ID,
+                                PrefRegistrySyncable::UNSYNCABLE_PREF);
 }
 
 // static
@@ -180,10 +196,6 @@ void NewTabPageHandler::GetLocalizedValues(Profile* profile,
   values->SetInteger("most_visited_page_id", MOST_VISITED_PAGE_ID);
   values->SetInteger("apps_page_id", APPS_PAGE_ID);
   values->SetInteger("suggestions_page_id", SUGGESTIONS_PAGE_ID);
-  // TODO(jeremycho): Add this to histograms.xml (see issue 144067).
-  values->SetInteger("recently_closed_page_id", RECENTLY_CLOSED_PAGE_ID);
-  // TODO(vadimt): Add this to histograms.xml (see issue 148871).
-  values->SetInteger("other_devices_page_id", OTHER_DEVICES_PAGE_ID);
 
   PrefService* prefs = profile->GetPrefs();
   int shown_page = prefs->GetInteger(prefs::kNtpShownPage);

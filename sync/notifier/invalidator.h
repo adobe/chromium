@@ -69,6 +69,10 @@ class SYNC_EXPORT Invalidator {
   // associated with |handler|.
   virtual void UnregisterHandler(InvalidationHandler* handler) = 0;
 
+  // Acknowledge that an invalidation for |id| was handled.
+  virtual void Acknowledge(const invalidation::ObjectId& id,
+                           const AckHandle& ack_handle) = 0;
+
   // Returns the current invalidator state.  When called from within
   // InvalidationHandler::OnInvalidatorStateChange(), this must return
   // the updated state.
@@ -78,11 +82,6 @@ class SYNC_EXPORT Invalidator {
   // UpdateCredentials.  |unique_id| should be a non-empty globally
   // unique string.
   virtual void SetUniqueId(const std::string& unique_id) = 0;
-
-  // SetState must be called once, before any call to
-  // UpdateCredentials.  |state| may be empty.
-  // Deprecated in favour of InvalidationStateTracker persistence.
-  virtual void SetStateDeprecated(const std::string& state) = 0;
 
   // The observers won't be notified of any notifications until
   // UpdateCredentials is called at least once. It can be called more than

@@ -10,6 +10,7 @@
 #include "chrome/browser/extensions/extension_function.h"
 #include "chrome/browser/extensions/extension_install_prompt.h"
 #include "chrome/browser/extensions/extension_uninstall_dialog.h"
+#include "chrome/browser/extensions/pack_extension_job.h"
 #include "chrome/browser/extensions/requirements_checker.h"
 #include "chrome/browser/profiles/profile_keyed_service.h"
 #include "content/public/browser/notification_observer.h"
@@ -58,9 +59,11 @@ class DeveloperPrivateAPI : public ProfileKeyedService,
   explicit DeveloperPrivateAPI(Profile* profile);
   virtual ~DeveloperPrivateAPI();
 
-  void SetLastUnpackedDirectory(const FilePath& path);
+  void SetLastUnpackedDirectory(const base::FilePath& path);
 
-  FilePath& getLastUnpackedDirectory() { return last_unpacked_directory_; }
+  base::FilePath& GetLastUnpackedDirectory() {
+    return last_unpacked_directory_;
+  }
 
   // ProfileKeyedService implementation
   virtual void Shutdown() OVERRIDE;
@@ -75,7 +78,7 @@ class DeveloperPrivateAPI : public ProfileKeyedService,
 
   // Used to start the load |load_extension_dialog_| in the last directory that
   // was loaded.
-  FilePath last_unpacked_directory_;
+  base::FilePath last_unpacked_directory_;
 
   content::NotificationRegistrar registrar_;
 
@@ -95,7 +98,7 @@ class DeveloperPrivateAutoUpdateFunction : public SyncExtensionFunction {
   virtual bool RunImpl() OVERRIDE;
 };
 
-class DeveloperPrivateGetItemsInfoFunction : public SyncExtensionFunction {
+class DeveloperPrivateGetItemsInfoFunction : public AsyncExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("developerPrivate.getItemsInfo",
                              DEVELOPERPRIVATE_GETITEMSINFO)
@@ -108,14 +111,13 @@ class DeveloperPrivateGetItemsInfoFunction : public SyncExtensionFunction {
 
  private:
 
-  void AddItemsInfo(const ExtensionSet& items,
-                    ExtensionSystem* system,
-                    ItemInfoList* item_list);
-
   scoped_ptr<developer::ItemInfo> CreateItemInfo(
       const extensions::Extension& item,
-      ExtensionSystem* system,
       bool item_is_enabled);
+
+  void GetIconsOnFileThread(
+      ItemInfoList item_list,
+      std::map<std::string, ExtensionResource> itemIdToIconResourceMap);
 
   // Helper that lists the current inspectable html pages for the extension.
   void GetInspectablePagesForExtensionProcess(
@@ -161,6 +163,18 @@ class DeveloperPrivateAllowFileAccessFunction : public SyncExtensionFunction {
   virtual bool RunImpl() OVERRIDE;
 };
 
+class DeveloperPrivateAllowIncognitoFunction : public SyncExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("developerPrivate.allowIncognito",
+                             DEVELOPERPRIVATE_ALLOWINCOGNITO);
+
+ protected:
+  virtual ~DeveloperPrivateAllowIncognitoFunction();
+
+  // ExtensionFunction:
+  virtual bool RunImpl() OVERRIDE;
+};
+
 class DeveloperPrivateReloadFunction : public SyncExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("developerPrivate.reload",
@@ -168,6 +182,18 @@ class DeveloperPrivateReloadFunction : public SyncExtensionFunction {
 
  protected:
   virtual ~DeveloperPrivateReloadFunction();
+
+  // ExtensionFunction:
+  virtual bool RunImpl() OVERRIDE;
+};
+
+class DeveloperPrivateRestartFunction : public SyncExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("developerPrivate.restart",
+                             DEVELOPERPRIVATE_RESTART);
+
+ protected:
+  virtual ~DeveloperPrivateRestartFunction();
 
   // ExtensionFunction:
   virtual bool RunImpl() OVERRIDE;
@@ -195,17 +221,19 @@ class DeveloperPrivateEnableFunction
   scoped_ptr<extensions::RequirementsChecker> requirements_checker_;
 };
 
-class DeveloperPrivateChooseEntryFunction : public SyncExtensionFunction,
+class DeveloperPrivateChooseEntryFunction : public AsyncExtensionFunction,
                                             public EntryPickerClient {
  protected:
   virtual ~DeveloperPrivateChooseEntryFunction();
   virtual bool RunImpl() OVERRIDE;
   bool ShowPicker(ui::SelectFileDialog::Type picker_type,
-                  const FilePath& last_directory,
-                  const string16& select_title);
+                  const base::FilePath& last_directory,
+                  const string16& select_title,
+                  const ui::SelectFileDialog::FileTypeInfo& info,
+                  int file_type_index);
 
-  // EntryPickerCLient functions.
-  virtual void FileSelected(const FilePath& path) = 0;
+  // EntryPickerClient functions.
+  virtual void FileSelected(const base::FilePath& path) = 0;
   virtual void FileSelectionCanceled() = 0;
 };
 
@@ -221,9 +249,50 @@ class DeveloperPrivateLoadUnpackedFunction
   virtual bool RunImpl() OVERRIDE;
 
   // EntryPickerCLient implementation.
-  virtual void FileSelected(const FilePath& path) OVERRIDE;
+  virtual void FileSelected(const base::FilePath& path) OVERRIDE;
   virtual void FileSelectionCanceled() OVERRIDE;
+};
 
+class DeveloperPrivateChoosePathFunction
+    : public DeveloperPrivateChooseEntryFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("developerPrivate.choosePath",
+                             DEVELOPERPRIVATE_CHOOSEPATH);
+
+ protected:
+  virtual ~DeveloperPrivateChoosePathFunction();
+  virtual bool RunImpl() OVERRIDE;
+
+  // EntryPickerClient functions.
+  virtual void FileSelected(const base::FilePath& path) OVERRIDE;
+  virtual void FileSelectionCanceled() OVERRIDE;
+};
+
+class DeveloperPrivatePackDirectoryFunction
+    : public AsyncExtensionFunction,
+      public extensions::PackExtensionJob::Client {
+
+ public:
+  DECLARE_EXTENSION_FUNCTION("developerPrivate.packDirectory",
+                             DEVELOPERPRIVATE_PACKDIRECTORY);
+
+  DeveloperPrivatePackDirectoryFunction();
+
+  // ExtensionPackJob::Client implementation.
+  virtual void OnPackSuccess(const base::FilePath& crx_file,
+                             const base::FilePath& key_file) OVERRIDE;
+  virtual void OnPackFailure(
+      const std::string& error,
+      extensions::ExtensionCreator::ErrorType error_type) OVERRIDE;
+
+ protected:
+  virtual ~DeveloperPrivatePackDirectoryFunction();
+  virtual bool RunImpl() OVERRIDE;
+
+ private:
+  scoped_refptr<extensions::PackExtensionJob> pack_job_;
+  std::string item_path_str_;
+  std::string key_path_str_;
 };
 
 class DeveloperPrivateGetStringsFunction : public SyncExtensionFunction {

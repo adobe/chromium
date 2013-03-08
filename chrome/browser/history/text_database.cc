@@ -11,8 +11,8 @@
 #include "base/file_util.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
-#include "base/string_number_conversions.h"
 #include "base/stringprintf.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/diagnostics/sqlite_diagnostics.h"
 #include "sql/statement.h"
@@ -54,7 +54,8 @@ const char kTitleColumnIndex[] = "1";
 const char kBodyColumnIndex[] = "2";
 
 // The string prepended to the database identifier to generate the filename.
-const FilePath::CharType kFilePrefix[] = FILE_PATH_LITERAL("History Index ");
+const base::FilePath::CharType kFilePrefix[] =
+    FILE_PATH_LITERAL("History Index ");
 
 }  // namespace
 
@@ -62,7 +63,7 @@ TextDatabase::Match::Match() {}
 
 TextDatabase::Match::~Match() {}
 
-TextDatabase::TextDatabase(const FilePath& path,
+TextDatabase::TextDatabase(const base::FilePath& path,
                            DBIdent id,
                            bool allow_create)
     : path_(path),
@@ -76,26 +77,27 @@ TextDatabase::~TextDatabase() {
 }
 
 // static
-const FilePath::CharType* TextDatabase::file_base() {
+const base::FilePath::CharType* TextDatabase::file_base() {
   return kFilePrefix;
 }
 
 // static
-FilePath TextDatabase::IDToFileName(DBIdent id) {
+base::FilePath TextDatabase::IDToFileName(DBIdent id) {
   // Identifiers are intended to be a combination of the year and month, for
   // example, 200801 for January 2008. We convert this to
   // "History Index 2008-01". However, we don't make assumptions about this
   // scheme: the caller should assign IDs as it feels fit with the knowledge
   // that they will apppear on disk in this form.
-  FilePath::StringType filename(file_base());
+  base::FilePath::StringType filename(file_base());
   base::StringAppendF(&filename, FILE_PATH_LITERAL("%d-%02d"),
                       id / 100, id % 100);
-  return FilePath(filename);
+  return base::FilePath(filename);
 }
 
 // static
-TextDatabase::DBIdent TextDatabase::FileNameToID(const FilePath& file_path) {
-  FilePath::StringType file_name = file_path.BaseName().value();
+TextDatabase::DBIdent TextDatabase::FileNameToID(
+    const base::FilePath& file_path) {
+  base::FilePath::StringType file_name = file_path.BaseName().value();
 
   // We don't actually check the prefix here. Since the file system could
   // be case insensitive in ways we can't predict (NTFS), checking could
@@ -103,7 +105,7 @@ TextDatabase::DBIdent TextDatabase::FileNameToID(const FilePath& file_path) {
   static const size_t kIDStringLength = 7;  // Room for "xxxx-xx".
   if (file_name.length() < kIDStringLength)
     return 0;
-  const FilePath::StringType suffix(
+  const base::FilePath::StringType suffix(
       &file_name[file_name.length() - kIDStringLength]);
 
   if (suffix.length() != kIDStringLength ||
@@ -114,7 +116,7 @@ TextDatabase::DBIdent TextDatabase::FileNameToID(const FilePath& file_path) {
   // TODO: Once StringPiece supports a templated interface over the
   // underlying string type, use it here instead of substr, since that
   // will avoid needless string copies.  StringPiece cannot be used
-  // right now because FilePath::StringType could use either 8 or 16 bit
+  // right now because base::FilePath::StringType could use either 8 or 16 bit
   // characters, depending on the OS.
   int year, month;
   base::StringToInt(suffix.substr(0, 4), &year);
@@ -285,43 +287,24 @@ bool TextDatabase::GetTextMatches(const std::string& query,
                                   const QueryOptions& options,
                                   std::vector<Match>* results,
                                   URLSet* found_urls) {
-  std::string sql =
-      "SELECT info.rowid, url, title, time, offsets(pages), body FROM pages "
-      "LEFT OUTER JOIN info ON pages.rowid = info.rowid WHERE ";
+  std::string sql = "SELECT url, title, time, offsets(pages), body FROM pages "
+                    "LEFT OUTER JOIN info ON pages.rowid = info.rowid WHERE ";
   sql += options.body_only ? "body " : "pages ";
-  sql += "MATCH ? AND time >= ? AND (time < ?";
-  if (!options.cursor.empty())
-    sql += " OR (time = ? AND info.rowid < ?)";
+  sql += "MATCH ? AND time >= ? AND time < ? ";
   // Times may not be unique, so also sort by rowid to ensure a stable order.
-  sql += ") ORDER BY time DESC, info.rowid DESC";
+  sql += "ORDER BY time DESC, info.rowid DESC";
 
-  // Generate unique IDs for the different variations of the statement,
+  // Generate unique IDs for the two possible variations of the statement,
   // so they don't share the same cached prepared statement.
   sql::StatementID body_only_id = SQL_FROM_HERE;
   sql::StatementID pages_id = SQL_FROM_HERE;
-  sql::StatementID pages_with_cursor_id = SQL_FROM_HERE;
 
-  // Ensure that cursor and body_only aren't both specified, because that
-  // combination is not covered here.
-  DCHECK(!options.body_only || options.cursor.empty());
+  sql::Statement statement(db_.GetCachedStatement(
+      (options.body_only ? body_only_id : pages_id), sql.c_str()));
 
-  // Choose the correct statement ID based on the options.
-  sql::StatementID statement_id = pages_id;
-  if (options.body_only)
-    statement_id = body_only_id;
-  else if (!options.cursor.empty())
-    statement_id = pages_with_cursor_id;
-
-  sql::Statement statement(db_.GetCachedStatement(statement_id, sql.c_str()));
-
-  int i = 0;
-  statement.BindString(i++, query);
-  statement.BindInt64(i++, options.EffectiveBeginTime());
-  statement.BindInt64(i++, options.EffectiveEndTime());
-  if (!options.cursor.empty()) {
-    statement.BindInt64(i++, options.EffectiveEndTime());
-    statement.BindInt64(i++, options.cursor.rowid_);
-  }
+  statement.BindString(0, query);
+  statement.BindInt64(1, options.EffectiveBeginTime());
+  statement.BindInt64(2, options.EffectiveEndTime());
 
   // |results| may not be initially empty, so keep track of how many were added
   // by this call.
@@ -332,28 +315,27 @@ bool TextDatabase::GetTextMatches(const std::string& query,
     // if (canceled_or_something)
     //   break;
 
-    GURL url(statement.ColumnString(1));
+    GURL url(statement.ColumnString(0));
     URLSet::const_iterator found_url = found_urls->find(url);
     if (found_url != found_urls->end())
       continue;  // Don't add this duplicate.
 
-    if (options.max_count > 0 && ++result_count > options.max_count)
+    if (++result_count > options.EffectiveMaxCount())
       break;
 
     // Fill the results into the vector (avoid copying the URL with Swap()).
     results->resize(results->size() + 1);
     Match& match = results->at(results->size() - 1);
-    match.rowid = statement.ColumnInt64(0);
     match.url.Swap(&url);
 
-    match.title = statement.ColumnString16(2);
-    match.time = base::Time::FromInternalValue(statement.ColumnInt64(3));
+    match.title = statement.ColumnString16(1);
+    match.time = base::Time::FromInternalValue(statement.ColumnInt64(2));
 
     // Extract any matches in the title.
-    std::string offsets_str = statement.ColumnString(4);
+    std::string offsets_str = statement.ColumnString(3);
     Snippet::ExtractMatchPositions(offsets_str, kTitleColumnIndex,
                                    &match.title_match_positions);
-    Snippet::ConvertMatchPositionsToWide(statement.ColumnString(2),
+    Snippet::ConvertMatchPositionsToWide(statement.ColumnString(1),
                                          &match.title_match_positions);
 
     // Extract the matches in the body.
@@ -362,11 +344,11 @@ bool TextDatabase::GetTextMatches(const std::string& query,
                                    &match_positions);
 
     // Compute the snippet based on those matches.
-    std::string body = statement.ColumnString(5);
+    std::string body = statement.ColumnString(4);
     match.snippet.ComputeSnippet(match_positions, body);
   }
   statement.Reset(true);
-  return result_count > options.max_count;
+  return result_count > options.EffectiveMaxCount();
 }
 
 }  // namespace history

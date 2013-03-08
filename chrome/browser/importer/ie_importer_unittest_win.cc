@@ -11,6 +11,7 @@
 #include <shlguid.h>
 #include <urlhist.h>
 #include <shlobj.h>
+#include <propvarutil.h>
 
 #include <algorithm>
 #include <vector>
@@ -26,14 +27,15 @@
 #include "base/win/registry.h"
 #include "base/win/scoped_com_initializer.h"
 #include "base/win/scoped_comptr.h"
+#include "base/win/scoped_propvariant.h"
 #include "base/win/windows_version.h"
 #include "chrome/browser/history/history_types.h"
+#include "chrome/browser/importer/ie_importer.h"
 #include "chrome/browser/importer/importer_bridge.h"
 #include "chrome/browser/importer/importer_data_types.h"
 #include "chrome/browser/importer/importer_host.h"
 #include "chrome/browser/importer/importer_progress_observer.h"
 #include "chrome/browser/importer/importer_unittest_utils.h"
-#include "chrome/browser/importer/ie_importer.h"
 #include "chrome/browser/importer/pstore_declarations.h"
 #include "chrome/browser/password_manager/ie7_password.h"
 #include "chrome/browser/search_engines/template_url.h"
@@ -116,7 +118,7 @@ const FaviconGroup kIEFaviconGroup[2] = {
     L"http://chinese-title-favorite/"}},
 };
 
-bool CreateOrderBlob(const FilePath& favorites_folder,
+bool CreateOrderBlob(const base::FilePath& favorites_folder,
                      const string16& path,
                      const std::vector<string16>& entries) {
   if (entries.size() > 255)
@@ -129,9 +131,9 @@ bool CreateOrderBlob(const FilePath& favorites_folder,
   blob[16] = static_cast<uint8>(entries.size());
 
   for (size_t i = 0; i < entries.size(); ++i) {
-    ITEMIDLIST* id_list_full = ILCreateFromPath(
+    PIDLIST_ABSOLUTE id_list_full = ILCreateFromPath(
         favorites_folder.Append(path).Append(entries[i]).value().c_str());
-    ITEMIDLIST* id_list = ILFindLastID(id_list_full);
+    PUITEMID_CHILD id_list = ILFindLastID(id_list_full);
     // Include the trailing zero-length item id.  Don't include the single
     // element array.
     size_t id_list_size = id_list->mkid.cb + sizeof(id_list->mkid.cb);
@@ -161,7 +163,7 @@ bool CreateOrderBlob(const FilePath& favorites_folder,
   return true;
 }
 
-bool CreateUrlFileWithFavicon(const FilePath& file,
+bool CreateUrlFileWithFavicon(const base::FilePath& file,
                               const std::wstring& url,
                               const std::wstring& favicon_url) {
   base::win::ScopedComPtr<IUniformResourceLocator> locator;
@@ -189,10 +191,14 @@ bool CreateUrlFileWithFavicon(const FilePath& file,
       return false;
     }
     PROPSPEC properties[] = {{PRSPEC_PROPID, PID_IS_ICONFILE}};
-    PROPVARIANT values[] = {{VT_LPWSTR}};
-    values[0].pwszVal = const_cast<wchar_t*>(favicon_url.c_str());
-    if (FAILED(property_storage->WriteMultiple(1, properties, values, 0)))
+    // WriteMultiple takes an array of PROPVARIANTs, but since this code only
+    // needs an array of size 1: a pointer to |pv_icon| is equivalent.
+    base::win::ScopedPropVariant pv_icon;
+    if (FAILED(InitPropVariantFromString(favicon_url.c_str(),
+                                         pv_icon.Receive())) ||
+        FAILED(property_storage->WriteMultiple(1, properties, &pv_icon, 0))) {
       return false;
+    }
   }
 
   // Save the .url file.
@@ -206,7 +212,7 @@ bool CreateUrlFileWithFavicon(const FilePath& file,
       sizeof kDummyFaviconImageData) != -1);
 }
 
-bool CreateUrlFile(const FilePath& file, const std::wstring& url) {
+bool CreateUrlFile(const base::FilePath& file, const std::wstring& url) {
   return CreateUrlFileWithFavicon(file, url, std::wstring());
 }
 
@@ -437,10 +443,10 @@ class IEImporterTest : public ImporterTest {
 TEST_F(IEImporterTest, IEImporter) {
   // Sets up a favorites folder.
   base::win::ScopedCOMInitializer com_init;
-  FilePath path = temp_dir_.path().AppendASCII("Favorites");
+  base::FilePath path = temp_dir_.path().AppendASCII("Favorites");
   CreateDirectory(path.value().c_str(), NULL);
   CreateDirectory(path.AppendASCII("SubFolder").value().c_str(), NULL);
-  FilePath links_path = path.AppendASCII("Links");
+  base::FilePath links_path = path.AppendASCII("Links");
   CreateDirectory(links_path.value().c_str(), NULL);
   CreateDirectory(links_path.AppendASCII("SubFolderOfLinks").value().c_str(),
                   NULL);
@@ -482,7 +488,7 @@ TEST_F(IEImporterTest, IEImporter) {
     L"SubFolder.url",
   };
   ASSERT_TRUE(CreateOrderBlob(
-      FilePath(path), L"",
+      base::FilePath(path), L"",
       std::vector<string16>(root_links, root_links + arraysize(root_links))));
 
   HRESULT res;
@@ -526,7 +532,7 @@ TEST_F(IEImporterTest, IEImporter) {
 TEST_F(IEImporterTest, IEImporterMalformedFavoritesRegistry) {
   // Sets up a favorites folder.
   base::win::ScopedCOMInitializer com_init;
-  FilePath path = temp_dir_.path().AppendASCII("Favorites");
+  base::FilePath path = temp_dir_.path().AppendASCII("Favorites");
   CreateDirectory(path.value().c_str(), NULL);
   CreateDirectory(path.AppendASCII("b").value().c_str(), NULL);
   ASSERT_TRUE(CreateUrlFile(path.AppendASCII("a.url"),

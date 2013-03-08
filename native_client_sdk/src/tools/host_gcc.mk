@@ -20,6 +20,12 @@ HOST_CXX?=g++
 HOST_LINK?=g++
 HOST_LIB?=ar r
 
+ifeq (,$(findstring gcc,$(shell $(WHICH) gcc)))
+$(warning To skip the host build use:)
+$(warning "make all_versions NO_HOST_BUILDS=1")
+$(error Unable to find gcc in PATH while building Host build)
+endif
+
 
 LINUX_WARNINGS?=-Wno-long-long
 LINUX_CCFLAGS=-fPIC -pthread $(LINUX_WARNINGS) -I$(NACL_SDK_ROOT)/include -I$(NACL_SDK_ROOT)/include/linux
@@ -32,13 +38,15 @@ LINUX_CCFLAGS=-fPIC -pthread $(LINUX_WARNINGS) -I$(NACL_SDK_ROOT)/include -I$(NA
 # $2 = Compile Flags
 #
 define C_COMPILER_RULE
-$(OUTDIR)/$(basename $(1)).o : $(1) $(TOP_MAKE) | $(OUTDIR)
-	$(HOST_CC) -o $$@ -c $$< -fPIC $(POSIX_FLAGS) $(2) $(LINUX_FLAGS)
+-include $(OUTDIR)/$(basename $(1)).d
+$(OUTDIR)/$(basename $(1)).o : $(1) $(TOP_MAKE) | $(dir $(OUTDIR)/$(basename $(1)))dir.stamp
+	$(call LOG,CC,$$@,$(HOST_CC) -o $$@ -c $$< -fPIC $(POSIX_FLAGS) $(2) $(LINUX_FLAGS))
 endef
 
 define CXX_COMPILER_RULE
-$(OUTDIR)/$(basename $(1)).o : $(1) $(TOP_MAKE) | $(OUTDIR)
-	$(HOST_CXX) -o $$@ -c $$< -fPIC $(POSIX_FLAGS) $(2) $(LINUX_FLAGS)
+-include $(OUTDIR)/$(basename $(1)).d
+$(OUTDIR)/$(basename $(1)).o : $(1) $(TOP_MAKE) |$(dir $(OUTDIR)/$(basename $(1)))dir.stamp
+	$(call LOG,CXX,$$@,$(HOST_CXX) -o $$@ -c $$< -fPIC $(POSIX_FLAGS) $(2) $(LINUX_FLAGS))
 endef
 
 
@@ -75,10 +83,13 @@ endef
 #
 #
 define LIB_RULE
+$(STAMPDIR)/$(1).stamp : $(NACL_SDK_ROOT)/lib/$(OSNAME)_host/$(CONFIG)/lib$(1).a
+	@echo "TOUCHED $$@" > $(STAMPDIR)/$(1).stamp
+
 all:$(NACL_SDK_ROOT)/lib/$(OSNAME)_host/$(CONFIG)/lib$(1).a
 $(NACL_SDK_ROOT)/lib/$(OSNAME)_host/$(CONFIG)/lib$(1).a : $(foreach src,$(2),$(OUTDIR)/$(basename $(src)).o)
 	$(MKDIR) -p $$(dir $$@)
-	$(HOST_LIB) $$@ $$^
+	$(call LOG,LIB,$$@,$(HOST_LIB) $$@ $$^)
 endef
 
 
@@ -94,8 +105,8 @@ endef
 #
 define LINKER_RULE
 all: $(1)
-$(1) : $(2) $(4)
-	$(HOST_LINK) -shared -o $(1) $(2) $(foreach path,$(5),-L$(path)/$(OSNAME)_host)/$(CONFIG) $(foreach lib,$(3),-l$(lib)) $(6)
+$(1) : $(2) $(foreach dep,$(4),$(STAMPDIR)/$(dep).stamp)
+	$(call LOG,LINK,$$@,$(HOST_LINK) -shared -o $(1) $(2) $(NACL_LDFLAGS) $(foreach path,$(5),-L$(path)/$(OSNAME)_host)/$(CONFIG) $(foreach lib,$(3),-l$(lib)) $(6))
 endef
 
 
@@ -114,24 +125,4 @@ $(call LINKER_RULE,$(OUTDIR)/$(1)$(HOST_EXT),$(foreach src,$(2),$(OUTDIR)/$(base
 endef
 
 
-#
-# NMF Manifiest generation
-#
-# Use the python script create_nmf to scan the binaries for dependencies using
-# objdump.  Pass in the (-L) paths to the default library toolchains so that we
-# can find those libraries and have it automatically copy the files (-s) to
-# the target directory for us.
-#
-# $1 = Target Name (the basename of the nmf
-# $2 = Additional create_nmf.py arguments
-#
-NMF:=python $(NACL_SDK_ROOT)/tools/create_nmf.py
-
-define NMF_RULE
-NMF_LIST+=$(OUTDIR)/$(1).nmf
-$(OUTDIR)/$(1).nmf : $(OUTDIR)/$(1)$(HOST_EXT)
-	@echo "Host Toolchain" > $$@
-endef
-
-all : $(LIB_LIST) $(DEPS_LIST) $(NMF_LIST)
-
+all : $(LIB_LIST) $(DEPS_LIST)

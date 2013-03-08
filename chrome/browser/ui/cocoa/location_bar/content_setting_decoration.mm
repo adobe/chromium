@@ -6,10 +6,10 @@
 
 #include <algorithm>
 
+#include "base/prefs/pref_service.h"
 #include "base/sys_string_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_content_setting_bubble_model_delegate.h"
 #include "chrome/browser/ui/browser_list.h"
@@ -296,8 +296,10 @@ void ContentSettingDecoration::SetToolTip(NSString* tooltip) {
 
 // Override to handle the case where there is text to display during the
 // animation. The width is based on the animator's progress.
-CGFloat ContentSettingDecoration::GetWidthForSpace(CGFloat width) {
-  CGFloat preferred_width = ImageDecoration::GetWidthForSpace(width);
+CGFloat ContentSettingDecoration::GetWidthForSpace(CGFloat width,
+                                                   CGFloat text_width) {
+  CGFloat preferred_width =
+      ImageDecoration::GetWidthForSpace(width, text_width);
   if (animation_.get()) {
     AnimationState state = [animation_ animationState];
     if (state != kNoAnimation) {
@@ -364,7 +366,7 @@ void ContentSettingDecoration::DrawInFrame(NSRect frame, NSView* control_view) {
     // rect.
     NSRect remainder = frame;
     remainder.origin.x = NSMaxX(icon_rect);
-    NSInsetRect(remainder, kTextMarginPadding, kTextMarginPadding);
+    NSInsetRect(remainder, kTextMarginPadding, kTextYInset);
     // .get() needed to fix compiler warning (confusion with NSImageRep).
     [animated_text_.get() drawAtPoint:remainder.origin];
   } else {

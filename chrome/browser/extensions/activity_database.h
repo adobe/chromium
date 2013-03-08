@@ -5,16 +5,22 @@
 #ifndef CHROME_BROWSER_EXTENSIONS_ACTIVITY_DATABASE_H_
 #define CHROME_BROWSER_EXTENSIONS_ACTIVITY_DATABASE_H_
 
+#include <string>
+#include <vector>
 #include "base/basictypes.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/memory/ref_counted_memory.h"
 #include "chrome/browser/extensions/api_actions.h"
 #include "chrome/browser/extensions/blocked_actions.h"
-#include "chrome/browser/extensions/url_actions.h"
+#include "chrome/browser/extensions/dom_actions.h"
+#include "chrome/common/extensions/extension.h"
 #include "sql/connection.h"
 #include "sql/init_status.h"
 
+namespace base {
+class Clock;
 class FilePath;
+}
 
 namespace extensions {
 
@@ -30,11 +36,11 @@ class ActivityDatabase : public base::RefCountedThreadSafe<ActivityDatabase> {
   void SetErrorDelegate(sql::ErrorDelegate* error_delegate);
 
   // Opens the DB and creates tables as necessary.
-  void Init(const FilePath& db_name);
+  void Init(const base::FilePath& db_name);
   void LogInitFailure();
 
-  // Record a UrlAction in the database.
-  void RecordUrlAction(scoped_refptr<UrlAction> action);
+  // Record a DOMction in the database.
+  void RecordDOMAction(scoped_refptr<DOMAction> action);
 
   // Record a APIAction in the database.
   void RecordAPIAction(scoped_refptr<APIAction> action);
@@ -45,6 +51,15 @@ class ActivityDatabase : public base::RefCountedThreadSafe<ActivityDatabase> {
   // Record an Action in the database.
   void RecordAction(scoped_refptr<Action> action);
 
+  // Gets all actions for a given extension for the specified day. 0 = today,
+  // 1 = yesterday, etc. Only returns 1 day at a time. Actions are sorted from
+  // newest to oldest.
+  scoped_ptr<std::vector<scoped_refptr<Action> > > GetActions(
+      const std::string& extension_id, const int days_ago);
+
+  // Break any outstanding transactions, raze the database, and close
+  // it.  Future calls on the current database handle will fail, when
+  // next opened the database will be empty.
   void KillDatabase();
 
   bool initialized() const { return initialized_; }
@@ -56,6 +71,8 @@ class ActivityDatabase : public base::RefCountedThreadSafe<ActivityDatabase> {
   bool Raze();
   void Close();
 
+  void SetClockForTesting(base::Clock* clock);
+
  private:
   friend class base::RefCountedThreadSafe<ActivityDatabase>;
 
@@ -64,6 +81,7 @@ class ActivityDatabase : public base::RefCountedThreadSafe<ActivityDatabase> {
   sql::InitStatus InitializeTable(const char* table_name,
                                   const char* table_structure);
 
+  base::Clock* testing_clock_;
   sql::Connection db_;
   bool initialized_;
 
@@ -72,4 +90,3 @@ class ActivityDatabase : public base::RefCountedThreadSafe<ActivityDatabase> {
 
 }  // namespace extensions
 #endif  // CHROME_BROWSER_EXTENSIONS_ACTIVITY_DATABASE_H_
-

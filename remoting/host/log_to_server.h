@@ -9,8 +9,8 @@
 #include <map>
 #include <string>
 
-#include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "base/threading/non_thread_safe.h"
 #include "remoting/host/host_status_observer.h"
 #include "remoting/host/server_log_entry.h"
@@ -27,7 +27,7 @@ class XmlElement;
 
 namespace remoting {
 
-class ChromotingHost;
+class HostStatusMonitor;
 class IqSender;
 
 // LogToServer sends log entries to a server.
@@ -37,9 +37,10 @@ class LogToServer : public base::NonThreadSafe,
                     public HostStatusObserver,
                     public SignalStrategy::Listener {
  public:
-  explicit LogToServer(ChromotingHost* host,
+  explicit LogToServer(base::WeakPtr<HostStatusMonitor> monitor,
                        ServerLogEntry::Mode mode,
-                       SignalStrategy* signal_strategy);
+                       SignalStrategy* signal_strategy,
+                       const std::string& directory_bot_jid);
   virtual ~LogToServer();
 
   // Logs a session state change. Currently, this is either
@@ -64,10 +65,12 @@ class LogToServer : public base::NonThreadSafe,
   void Log(const ServerLogEntry& entry);
   void SendPendingEntries();
 
-  scoped_refptr<ChromotingHost> host_;
+  base::WeakPtr<HostStatusMonitor> monitor_;
   ServerLogEntry::Mode mode_;
   SignalStrategy* signal_strategy_;
   scoped_ptr<IqSender> iq_sender_;
+  std::string directory_bot_jid_;
+
   // A map from client JID to the route type of that client's connection to
   // this host.
   std::map<std::string, protocol::TransportRoute::RouteType>

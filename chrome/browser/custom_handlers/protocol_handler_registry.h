@@ -15,6 +15,7 @@
 #include "base/sequenced_task_runner_helpers.h"
 #include "base/values.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/profiles/profile_keyed_service.h"
 #include "chrome/browser/shell_integration.h"
 #include "chrome/common/custom_handlers/protocol_handler.h"
 #include "content/public/browser/browser_thread.h"
@@ -23,7 +24,7 @@
 #include "net/url_request/url_request_job.h"
 #include "net/url_request/url_request_job_factory.h"
 
-class PrefServiceSyncable;
+class PrefRegistrySyncable;
 
 // This is where handlers for protocols registered with
 // navigator.registerProtocolHandler() are registered. Each Profile owns an
@@ -105,21 +106,8 @@ class ProtocolHandlerRegistry : public ProfileKeyedService {
     void Chain(scoped_ptr<net::URLRequestJobFactory> job_factory);
 
     // URLRequestJobFactory implementation.
-    virtual bool SetProtocolHandler(const std::string& scheme,
-                                    ProtocolHandler* protocol_handler) OVERRIDE;
-    virtual void AddInterceptor(Interceptor* interceptor) OVERRIDE;
-    virtual net::URLRequestJob* MaybeCreateJobWithInterceptor(
-        net::URLRequest* request,
-        net::NetworkDelegate* network_delegate) const OVERRIDE;
     virtual net::URLRequestJob* MaybeCreateJobWithProtocolHandler(
         const std::string& scheme,
-        net::URLRequest* request,
-        net::NetworkDelegate* network_delegate) const OVERRIDE;
-    virtual net::URLRequestJob* MaybeInterceptRedirect(
-        const GURL& location,
-        net::URLRequest* request,
-        net::NetworkDelegate* network_delegate) const OVERRIDE;
-    virtual net::URLRequestJob* MaybeInterceptResponse(
         net::URLRequest* request,
         net::NetworkDelegate* network_delegate) const OVERRIDE;
     virtual bool IsHandledProtocol(const std::string& scheme) const OVERRIDE;
@@ -244,7 +232,7 @@ class ProtocolHandlerRegistry : public ProfileKeyedService {
   virtual void Shutdown() OVERRIDE;
 
   // Registers the preferences that we store registered protocol handlers in.
-  static void RegisterUserPrefs(PrefServiceSyncable* prefService);
+  static void RegisterUserPrefs(PrefRegistrySyncable* registry);
 
   bool enabled() const { return enabled_; }
 

@@ -7,11 +7,11 @@
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/metrics/stats_table.h"
+#include "base/prefs/pref_service.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/memory_purger.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
@@ -31,13 +31,11 @@
 #include "ui/gfx/canvas.h"
 #include "ui/views/background.h"
 #include "ui/views/context_menu_controller.h"
-#include "ui/views/controls/button/chrome_style.h"
-#include "ui/views/controls/button/text_button.h"
+#include "ui/views/controls/button/label_button.h"
 #include "ui/views/controls/link.h"
 #include "ui/views/controls/link_listener.h"
 #include "ui/views/controls/menu/menu_model_adapter.h"
 #include "ui/views/controls/menu/menu_runner.h"
-#include "ui/views/controls/table/group_table_model.h"
 #include "ui/views/controls/table/table_grouper.h"
 #include "ui/views/controls/table/table_view.h"
 #include "ui/views/controls/table/table_view_observer.h"
@@ -267,8 +265,8 @@ class TaskManagerView : public views::ButtonListener,
   // Restores saved always on top state from a previous session.
   bool GetSavedAlwaysOnTopState(bool* always_on_top) const;
 
-  views::TextButton* purge_memory_button_;
-  views::TextButton* kill_button_;
+  views::LabelButton* purge_memory_button_;
+  views::LabelButton* kill_button_;
   views::Link* about_memory_link_;
   views::TableView* tab_table_;
   views::View* tab_table_parent_;
@@ -416,15 +414,13 @@ void TaskManagerView::Init() {
   // If we're running with --purge-memory-button, add a "Purge memory" button.
   if (CommandLine::ForCurrentProcess()->HasSwitch(
       switches::kPurgeMemoryButton)) {
-    purge_memory_button_ = new views::NativeTextButton(this,
+    purge_memory_button_ = new views::LabelButton(this,
         l10n_util::GetStringUTF16(IDS_TASK_MANAGER_PURGE_MEMORY));
-    if (DialogDelegate::UseNewStyle())
-      views::ApplyChromeStyle(purge_memory_button_);
+    purge_memory_button_->SetStyle(views::Button::STYLE_NATIVE_TEXTBUTTON);
   }
-  kill_button_ = new views::NativeTextButton(this,
+  kill_button_ = new views::LabelButton(this,
       l10n_util::GetStringUTF16(IDS_TASK_MANAGER_KILL));
-  if (DialogDelegate::UseNewStyle())
-    views::ApplyChromeStyle(kill_button_);
+  kill_button_->SetStyle(views::Button::STYLE_NATIVE_TEXTBUTTON);
   about_memory_link_ = new views::Link(
       l10n_util::GetStringUTF16(IDS_TASK_MANAGER_ABOUT_MEMORY_LINK));
   about_memory_link_->set_listener(this);

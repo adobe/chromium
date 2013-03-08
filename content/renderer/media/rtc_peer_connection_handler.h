@@ -20,6 +20,8 @@ class WebRTCDataChannelHandler;
 
 namespace content {
 
+class PeerConnectionTracker;
+
 // Mockable wrapper for WebKit::WebRTCStatsResponse
 class CONTENT_EXPORT LocalRTCStatsResponse
     : public talk_base::RefCountInterface {
@@ -52,8 +54,8 @@ class CONTENT_EXPORT LocalRTCStatsRequest
   LocalRTCStatsRequest();
 
   virtual bool hasSelector() const;
-  virtual WebKit::WebMediaStreamDescriptor stream() const;
-  virtual WebKit::WebMediaStreamComponent component() const;
+  virtual WebKit::WebMediaStream stream() const;
+  virtual WebKit::WebMediaStreamTrack component() const;
   virtual void requestSucceeded(const LocalRTCStatsResponse* response);
   virtual scoped_refptr<LocalRTCStatsResponse> createResponse();
 
@@ -85,7 +87,8 @@ class CONTENT_EXPORT RTCPeerConnectionHandler
   // Initialize method only used for unit test.
   bool InitializeForTest(
       const WebKit::WebRTCConfiguration& server_configuration,
-      const WebKit::WebMediaConstraints& options);
+      const WebKit::WebMediaConstraints& options,
+      PeerConnectionTracker* peer_connection_tracker);
 
   // WebKit::WebRTCPeerConnectionHandler implementation
   virtual bool initialize(
@@ -117,24 +120,32 @@ class CONTENT_EXPORT RTCPeerConnectionHandler
       const WebKit::WebRTCICECandidate& candidate) OVERRIDE;
 
   virtual bool addStream(
-      const WebKit::WebMediaStreamDescriptor& stream,
+      const WebKit::WebMediaStream& stream,
       const WebKit::WebMediaConstraints& options) OVERRIDE;
   virtual void removeStream(
-      const WebKit::WebMediaStreamDescriptor& stream) OVERRIDE;
+      const WebKit::WebMediaStream& stream) OVERRIDE;
   virtual void getStats(
       const WebKit::WebRTCStatsRequest& request) OVERRIDE;
   virtual WebKit::WebRTCDataChannelHandler* createDataChannel(
       const WebKit::WebString& label, bool reliable) OVERRIDE;
+  virtual WebKit::WebRTCDTMFSenderHandler* createDTMFSender(
+      const WebKit::WebMediaStreamTrack& track) OVERRIDE;
   virtual void stop() OVERRIDE;
 
   // webrtc::PeerConnectionObserver implementation
   virtual void OnError() OVERRIDE;
-  virtual void OnStateChange(StateType state_changed) OVERRIDE;
+  // Triggered when the SignalingState changed.
+  virtual void OnSignalingChange(
+      webrtc::PeerConnectionInterface::SignalingState new_state) OVERRIDE;
   virtual void OnAddStream(webrtc::MediaStreamInterface* stream) OVERRIDE;
   virtual void OnRemoveStream(webrtc::MediaStreamInterface* stream) OVERRIDE;
   virtual void OnIceCandidate(
       const webrtc::IceCandidateInterface* candidate) OVERRIDE;
-  virtual void OnIceComplete() OVERRIDE;
+  virtual void OnIceConnectionChange(
+      webrtc::PeerConnectionInterface::IceConnectionState new_state) OVERRIDE;
+  virtual void OnIceGatheringChange(
+      webrtc::PeerConnectionInterface::IceGatheringState new_state) OVERRIDE;
+
   virtual void OnDataChannel(
       webrtc::DataChannelInterface* data_channel) OVERRIDE;
   virtual void OnRenegotiationNeeded() OVERRIDE;
@@ -143,14 +154,23 @@ class CONTENT_EXPORT RTCPeerConnectionHandler
   // getStats takes ownership of request parameter.
   virtual void getStats(LocalRTCStatsRequest* request);
 
+  // Calls GetStats on |native_peer_connection_|.
+  void GetStats(webrtc::StatsObserver* observer,
+                webrtc::MediaStreamTrackInterface* track);
+
+  PeerConnectionTracker* peer_connection_tracker();
+
  private:
   webrtc::SessionDescriptionInterface* CreateNativeSessionDescription(
-      const WebKit::WebRTCSessionDescription& description);
+      const WebKit::WebRTCSessionDescription& description,
+      webrtc::SdpParseError* error);
 
   // |client_| is a weak pointer, and is valid until stop() has returned.
   WebKit::WebRTCPeerConnectionHandlerClient* client_;
 
   WebKit::WebFrame* frame_;
+
+  PeerConnectionTracker* peer_connection_tracker_;
 
   DISALLOW_COPY_AND_ASSIGN(RTCPeerConnectionHandler);
 };

@@ -9,20 +9,20 @@
 #include <windows.h>
 #endif
 
-#include <iostream>
 #include <fstream>
+#include <iostream>
 
 #include "base/at_exit.h"
 #include "base/base_paths.h"
 #include "base/command_line.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
-#include "base/stringprintf.h"
-#include "base/string_number_conversions.h"
-#include "base/string_split.h"
 #include "base/string_util.h"
+#include "base/stringprintf.h"
+#include "base/strings/string_number_conversions.h"
+#include "base/strings/string_split.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/test/test_timeouts.h"
 #include "base/threading/platform_thread.h"
@@ -45,8 +45,8 @@
 #include "chrome/test/webdriver/commands/html5_storage_commands.h"
 #include "chrome/test/webdriver/commands/keys_command.h"
 #include "chrome/test/webdriver/commands/log_command.h"
-#include "chrome/test/webdriver/commands/navigate_commands.h"
 #include "chrome/test/webdriver/commands/mouse_commands.h"
+#include "chrome/test/webdriver/commands/navigate_commands.h"
 #include "chrome/test/webdriver/commands/screenshot_command.h"
 #include "chrome/test/webdriver/commands/session_with_id.h"
 #include "chrome/test/webdriver/commands/set_timeout_commands.h"
@@ -237,7 +237,7 @@ int RunChromeDriver() {
 
   // Parse command line flags.
   std::string port = "9515";
-  FilePath log_path;
+  base::FilePath log_path;
   std::string root;
   std::string url_base;
   int http_threads = 4;
@@ -266,7 +266,7 @@ int RunChromeDriver() {
   bool logging_success = InitWebDriverLogging(log_path, kAllLogLevel);
   std::string chromedriver_info = base::StringPrintf(
       "ChromeDriver %s", chrome::kChromeVersion);
-  FilePath chromedriver_exe;
+  base::FilePath chromedriver_exe;
   if (PathService::Get(base::FILE_EXE, &chromedriver_exe)) {
     chromedriver_info += base::StringPrintf(
         " %" PRFilePath, chromedriver_exe.value().c_str());

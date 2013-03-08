@@ -7,6 +7,7 @@
 #include "base/message_loop.h"
 #include "base/utf_string_conversions.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "ui/base/events/event_utils.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/point.h"
 #include "ui/views/bubble/bubble_delegate.h"
@@ -17,6 +18,8 @@
 #include "ui/views/widget/native_widget_delegate.h"
 
 #if defined(USE_AURA)
+#include "ui/aura/client/aura_constants.h"
+#include "ui/aura/test/test_window_delegate.h"
 #include "ui/aura/window.h"
 #include "ui/views/widget/native_widget_aura.h"
 #if !defined(OS_CHROMEOS)
@@ -826,6 +829,29 @@ TEST_F(WidgetOwnershipTest,
   EXPECT_TRUE(state.native_widget_deleted);
 }
 
+// Widget owns its NativeWidget and has a WidgetDelegateView as its contents.
+TEST_F(WidgetOwnershipTest,
+       Ownership_WidgetOwnsNativeWidgetWithWithWidgetDelegateView) {
+  OwnershipTestState state;
+
+  WidgetDelegateView* delegate_view = new WidgetDelegateView;
+
+  scoped_ptr<Widget> widget(new OwnershipTestWidget(&state));
+  Widget::InitParams params = CreateParams(Widget::InitParams::TYPE_POPUP);
+  params.native_widget =
+      new OwnershipTestNativeWidgetPlatform(widget.get(), &state);
+  params.ownership = Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
+  params.delegate = delegate_view;
+  widget->Init(params);
+  widget->SetContentsView(delegate_view);
+
+  // Now delete the Widget. There should be no crash or use-after-free.
+  widget.reset();
+
+  EXPECT_TRUE(state.widget_deleted);
+  EXPECT_TRUE(state.native_widget_deleted);
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // Widget observer tests.
 //
@@ -844,7 +870,7 @@ class WidgetObserverTest : public WidgetTest, public WidgetObserver {
   virtual ~WidgetObserverTest() {}
 
   // Overridden from WidgetObserver:
-  virtual void OnWidgetClosing(Widget* widget) OVERRIDE {
+  virtual void OnWidgetDestroying(Widget* widget) OVERRIDE {
     if (active_ == widget)
       active_ = NULL;
     widget_closed_ = widget;
@@ -902,7 +928,6 @@ class WidgetObserverTest : public WidgetTest, public WidgetObserver {
   const Widget* widget_bounds_changed() const { return widget_bounds_changed_; }
 
  private:
-
   Widget* active_;
 
   Widget* widget_closed_;
@@ -1161,7 +1186,7 @@ TEST_F(WidgetTest, FocusChangesOnBubble) {
   contents_view->RequestFocus();
   EXPECT_TRUE(contents_view->HasFocus());
 
-  // Show a buble.
+  // Show a bubble.
   BubbleDelegateView* bubble_delegate_view =
       new BubbleDelegateView(contents_view, BubbleBorder::TOP_LEFT);
   bubble_delegate_view->set_focusable(true);
@@ -1267,6 +1292,120 @@ TEST_F(WidgetTest, DesktopNativeWidgetAuraNoPaintAfterHideTest) {
   widget.Close();
 }
 
+// This class provides functionality to test whether the destruction of full
+// screen child windows occurs correctly in desktop AURA without crashing.
+// It provides facilities to test the following cases:-
+// 1. Child window destroyed which should lead to the destruction of the
+//    parent.
+// 2. Parent window destroyed which should lead to the child being destroyed.
+class DesktopAuraFullscreenChildWindowDestructionTest
+    : public views::TestViewsDelegate,
+      public aura::WindowObserver {
+ public:
+  DesktopAuraFullscreenChildWindowDestructionTest()
+      : full_screen_widget_(NULL),
+        child_window_(NULL),
+        parent_destroyed_(false),
+        child_destroyed_(false) {}
+
+  ~DesktopAuraFullscreenChildWindowDestructionTest() {
+    EXPECT_TRUE(parent_destroyed_);
+    EXPECT_TRUE(child_destroyed_);
+    full_screen_widget_ = NULL;
+    child_window_ = NULL;
+  }
+
+  // views::TestViewsDelegate overrides.
+  virtual void OnBeforeWidgetInit(
+      Widget::InitParams* params,
+      internal::NativeWidgetDelegate* delegate) OVERRIDE {
+    if (!params->native_widget)
+      params->native_widget = new views::DesktopNativeWidgetAura(delegate);
+  }
+
+  void CreateFullscreenChildWindow(const gfx::Rect& bounds) {
+    Widget::InitParams init_params;
+    init_params.type = Widget::InitParams::TYPE_WINDOW;
+    init_params.bounds = bounds;
+    init_params.ownership = Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
+    init_params.layer_type = ui::LAYER_NOT_DRAWN;
+
+    widget_.Init(init_params);
+
+    child_window_ = new aura::Window(&child_window_delegate_);
+    child_window_->SetType(aura::client::WINDOW_TYPE_NORMAL);
+    child_window_->Init(ui::LAYER_TEXTURED);
+    child_window_->SetName("TestFullscreenChildWindow");
+    child_window_->SetProperty(aura::client::kShowStateKey,
+                              ui::SHOW_STATE_FULLSCREEN);
+    child_window_->SetDefaultParentByRootWindow(
+        widget_.GetNativeView()->GetRootWindow(), gfx::Rect(0, 0, 1900, 1600));
+    child_window_->Show();
+    child_window_->AddObserver(this);
+
+    ASSERT_TRUE(child_window_->parent() != NULL);
+    child_window_->parent()->AddObserver(this);
+
+    full_screen_widget_ =
+        views::Widget::GetWidgetForNativeView(child_window_->parent());
+    ASSERT_TRUE(full_screen_widget_ != NULL);
+  }
+
+  void DestroyChildWindow() {
+    ASSERT_TRUE(child_window_ != NULL);
+    delete child_window_;
+  }
+
+  void DestroyParentWindow() {
+    ASSERT_TRUE(full_screen_widget_ != NULL);
+    full_screen_widget_->CloseNow();
+  }
+
+  virtual void OnWindowDestroying(aura::Window* window) OVERRIDE {
+    window->RemoveObserver(this);
+    if (window == child_window_) {
+      child_destroyed_ = true;
+    } else if (window == full_screen_widget_->GetNativeView()) {
+      parent_destroyed_ = true;
+    } else {
+      ADD_FAILURE() << "Unexpected window destroyed callback: " << window;
+    }
+  }
+
+ private:
+  views::Widget widget_;
+  views::Widget* full_screen_widget_;
+  aura::Window* child_window_;
+  bool parent_destroyed_;
+  bool child_destroyed_;
+  aura::test::TestWindowDelegate child_window_delegate_;
+
+  DISALLOW_COPY_AND_ASSIGN(DesktopAuraFullscreenChildWindowDestructionTest);
+};
+
+TEST_F(WidgetTest, DesktopAuraFullscreenChildDestroyedBeforeParentTest) {
+  ViewsDelegate::views_delegate = NULL;
+  DesktopAuraFullscreenChildWindowDestructionTest full_screen_child_test;
+  ASSERT_NO_FATAL_FAILURE(full_screen_child_test.CreateFullscreenChildWindow(
+      gfx::Rect(0, 0, 200, 200)));
+
+  RunPendingMessages();
+  ASSERT_NO_FATAL_FAILURE(full_screen_child_test.DestroyChildWindow());
+  RunPendingMessages();
+}
+
+TEST_F(WidgetTest, DesktopAuraFullscreenChildParentDestroyed) {
+  ViewsDelegate::views_delegate = NULL;
+
+  DesktopAuraFullscreenChildWindowDestructionTest full_screen_child_test;
+  ASSERT_NO_FATAL_FAILURE(full_screen_child_test.CreateFullscreenChildWindow(
+      gfx::Rect(0, 0, 200, 200)));
+
+  RunPendingMessages();
+  ASSERT_NO_FATAL_FAILURE(full_screen_child_test.DestroyParentWindow());
+  RunPendingMessages();
+}
+
 #endif  // !defined(OS_CHROMEOS)
 
 // Tests that wheel events generted from scroll events are targetted to the
@@ -1290,7 +1429,13 @@ TEST_F(WidgetTest, WheelEventsFromScrollEventTarget) {
   // Generate a scroll event on the cursor view. The focused view will receive a
   // wheel event, but since it doesn't process the event, the view under the
   // cursor will receive the wheel event.
-  ui::ScrollEvent scroll(ui::ET_SCROLL, gfx::Point(65, 5), 0, 0, 20);
+  ui::ScrollEvent scroll(ui::ET_SCROLL,
+                         gfx::Point(65, 5),
+                         ui::EventTimeForNow(),
+                         0,
+                         0, 20,
+                         0, 20,
+                         2);
   widget->OnScrollEvent(&scroll);
 
   EXPECT_EQ(0, focused_view->GetEventCount(ui::ET_SCROLL));
@@ -1302,7 +1447,13 @@ TEST_F(WidgetTest, WheelEventsFromScrollEventTarget) {
   focused_view->ResetCounts();
   cursor_view->ResetCounts();
 
-  ui::ScrollEvent scroll2(ui::ET_SCROLL, gfx::Point(5, 5), 0, 0, 20);
+  ui::ScrollEvent scroll2(ui::ET_SCROLL,
+                          gfx::Point(5, 5),
+                          ui::EventTimeForNow(),
+                          0,
+                          0, 20,
+                          0, 20,
+                          2);
   widget->OnScrollEvent(&scroll2);
   EXPECT_EQ(1, focused_view->GetEventCount(ui::ET_SCROLL));
   EXPECT_EQ(1, focused_view->GetEventCount(ui::ET_MOUSEWHEEL));
@@ -1373,6 +1524,88 @@ TEST_F(WidgetTest, GestureScrollEventDispatching) {
   }
 
   widget->CloseNow();
+}
+
+// Used by SingleWindowClosing to count number of times WindowClosing() has
+// been invoked.
+class ClosingDelegate : public WidgetDelegate {
+ public:
+  ClosingDelegate() : count_(0), widget_(NULL) {}
+
+  int count() const { return count_; }
+
+  void set_widget(views::Widget* widget) { widget_ = widget; }
+
+  // WidgetDelegate overrides:
+  virtual Widget* GetWidget() OVERRIDE { return widget_; }
+  virtual const Widget* GetWidget() const OVERRIDE { return widget_; }
+  virtual void WindowClosing() OVERRIDE {
+    count_++;
+  }
+
+ private:
+  int count_;
+  views::Widget* widget_;
+
+  DISALLOW_COPY_AND_ASSIGN(ClosingDelegate);
+};
+
+// Verifies WindowClosing() is invoked correctly on the delegate when a Widget
+// is closed.
+TEST_F(WidgetTest, SingleWindowClosing) {
+  scoped_ptr<ClosingDelegate> delegate(new ClosingDelegate());
+  Widget* widget = new Widget();  // Destroyed by CloseNow() below.
+  Widget::InitParams init_params =
+      CreateParams(Widget::InitParams::TYPE_WINDOW);
+  init_params.bounds = gfx::Rect(0, 0, 200, 200);
+  init_params.delegate = delegate.get();
+#if defined(USE_AURA) && !defined(OS_CHROMEOS)
+  init_params.native_widget = new DesktopNativeWidgetAura(widget);
+#endif
+  widget->Init(init_params);
+  EXPECT_EQ(0, delegate->count());
+  widget->CloseNow();
+  EXPECT_EQ(1, delegate->count());
+}
+
+// Used by SetTopLevelCorrectly to track calls to OnBeforeWidgetInit().
+class VerifyTopLevelDelegate : public TestViewsDelegate {
+ public:
+  VerifyTopLevelDelegate()
+      : on_before_init_called_(false),
+        is_top_level_(false) {
+  }
+
+  bool on_before_init_called() const { return on_before_init_called_; }
+  bool is_top_level() const { return is_top_level_; }
+
+  virtual void OnBeforeWidgetInit(
+      Widget::InitParams* params,
+      internal::NativeWidgetDelegate* delegate) OVERRIDE {
+    on_before_init_called_ = true;
+    is_top_level_ = params->top_level;
+  }
+
+ private:
+  bool on_before_init_called_;
+  bool is_top_level_;
+
+  DISALLOW_COPY_AND_ASSIGN(VerifyTopLevelDelegate);
+};
+
+// Verifies |top_level| is correctly passed to
+// ViewsDelegate::OnBeforeWidgetInit().
+TEST_F(WidgetTest, SetTopLevelCorrectly) {
+  set_views_delegate(NULL);
+  VerifyTopLevelDelegate* delegate = new VerifyTopLevelDelegate;
+  set_views_delegate(delegate);  // ViewsTestBase takes ownership.
+  scoped_ptr<Widget> widget(new Widget);
+  Widget::InitParams params =
+      CreateParams(views::Widget::InitParams::TYPE_POPUP);
+  params.ownership = Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
+  widget->Init(params);
+  EXPECT_TRUE(delegate->on_before_init_called());
+  EXPECT_TRUE(delegate->is_top_level());
 }
 
 }  // namespace

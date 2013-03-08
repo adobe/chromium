@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include "base/message_loop.h"
+#include "base/prefs/pref_service.h"
 #include "chrome/browser/chromeos/extensions/file_browser_handler.h"
 #include "chrome/browser/chromeos/extensions/file_browser_resource_throttle.h"
 #include "chrome/browser/download/download_prefs.h"
@@ -13,9 +14,9 @@
 #include "chrome/browser/google_apis/test_server/http_request.h"
 #include "chrome/browser/google_apis/test_server/http_response.h"
 #include "chrome/browser/google_apis/test_server/http_server.h"
-#include "chrome/browser/prefs/pref_service.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_tabstrip.cc"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/pref_names.cc"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/download_item.h"
@@ -135,7 +136,7 @@ class FileBrowserResourceThrottleExtensionApiTest : public ExtensionApiTest {
     FileBrowserHandler::set_extension_whitelisted_for_test(NULL);
   }
 
-  virtual void SetUpOnMainThread() {
+  virtual void SetUpOnMainThread() OVERRIDE {
     // Init test server.
     test_server_.reset(new HttpServer());
     test_server_->InitializeAndWaitUntilReady();
@@ -144,7 +145,7 @@ class FileBrowserResourceThrottleExtensionApiTest : public ExtensionApiTest {
     ExtensionApiTest::SetUpOnMainThread();
   }
 
-  virtual void CleanUpOnMainThread() {
+  virtual void CleanUpOnMainThread() OVERRIDE {
     // Tear down the test server.
     test_server_->ShutdownAndWaitUntilComplete();
     test_server_.reset();
@@ -244,9 +245,16 @@ class FileBrowserResourceThrottleExtensionApiTest : public ExtensionApiTest {
   base::ScopedTempDir downloads_dir_;
 };
 
+// http://crbug.com/176082: This test flaky on Chrome OS ASAN bots.
+#if defined(OS_CHROMEOS)
+#define MAYBE_Basic DISABLED_Basic
+#else
+#define MAYBE_Basic Basic
+#endif
 // Tests that invoking FileBrowserResourceThrottle with handleable MIME type
 // actually invokes the fileBrowserHandler.onExecuteContnentHandler event.
-IN_PROC_BROWSER_TEST_F(FileBrowserResourceThrottleExtensionApiTest, Basic) {
+IN_PROC_BROWSER_TEST_F(FileBrowserResourceThrottleExtensionApiTest,
+                       MAYBE_Basic) {
   ASSERT_TRUE(LoadTestExtension()) << message_;
 
   ResultCatcher catcher;
@@ -260,7 +268,8 @@ IN_PROC_BROWSER_TEST_F(FileBrowserResourceThrottleExtensionApiTest, Basic) {
   // Get child and routing id from the current web contents (the real values
   // should be used so the FileBrowserHandlerEventRouter can correctly extract
   // profile from them).
-  WebContents* web_contents = chrome::GetActiveWebContents(browser());
+  WebContents* web_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
   ASSERT_TRUE(web_contents);
   int child_id = web_contents->GetRenderProcessHost()->GetID();
   int routing_id = web_contents->GetRoutingID();
@@ -361,11 +370,12 @@ IN_PROC_BROWSER_TEST_F(FileBrowserResourceThrottleExtensionApiTest,
   GURL url = test_server_->GetURL("/text_path.txt");
 
   // The download's target file path.
-  FilePath target_path =
+  base::FilePath target_path =
       downloads_dir_.path().Append(FILE_PATH_LITERAL("download_target.txt"));
 
   // Set the downloads parameters.
-  content::WebContents* web_contents = chrome::GetActiveWebContents(browser());
+  content::WebContents* web_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
   ASSERT_TRUE(web_contents);
   scoped_ptr<DownloadUrlParameters> params(
       DownloadUrlParameters::FromWebContents(web_contents, url));

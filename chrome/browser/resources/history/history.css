@@ -7,12 +7,30 @@ body:not(.uber-frame) {
   margin: 0 8px 0 8px;
 }
 
+html[dir=rtl] body.uber-frame > .page {
+  -webkit-margin-end: 0;
+}
+
 #editing-controls,
 #loading-spinner {
   margin-top: 16px;
 <if expr="not pp_ifdef('android')">
   white-space: nowrap;
 </if>
+}
+
+#lock-unlock-button:not(.profile-is-managed),
+.managed-user-locked #allow-selected,
+.managed-user-locked #block-selected {
+  display: none;
+}
+
+#lock-unlock-button {
+  float: right;
+}
+
+html[dir=rtl] #lock-unlock-button {
+  float: left;
 }
 
 #search-button {
@@ -34,16 +52,47 @@ body:not(.uber-frame) {
   max-width: 718px;
 }
 
+#filter-controls {
+  overflow: auto;
+}
+
 #editing-controls button:first-of-type {
   -webkit-margin-start: 0;
 }
 
-#filter-controls div {
-  display: inline-block;
+#filter-controls select {
+  -webkit-margin-end: 0;
+}
+
+html[dir=rtl] #range-today,
+html[dir=rtl] #range-previous,
+html[dir=rtl] #range-next {
+  float: left;
+}
+
+#range-next img,
+#range-previous img {
+  position: relative;
+  top: 1px;
+}
+
+#range-next:disabled img,
+#range-previous:disabled img {
+  opacity: 0.4;
 }
 
 #display-filter-controls {
   float: right;
+}
+
+#display-filter-controls label {
+  -webkit-margin-start: 6px;
+}
+
+#display-filter-controls label:not(:last-child) {
+  -webkit-border-end: 1px solid rgb(151, 156, 160);
+  -webkit-margin-start: 0;
+  padding: 0 6px 0 6px;
 }
 
 #results-display {
@@ -79,15 +128,14 @@ body:not(.uber-frame) {
 }
 
 .entry {
-  overflow: auto; /* Make sure it's at least as large as its children. */
+  overflow: auto;
 }
 
 .entry-box,
 .site-domain-wrapper {
-  -webkit-box-orient: horizontal;
+  -webkit-align-items: center;
   cursor: default;
-  display: -webkit-box;
-  float: left;  /* Box will shrink to fit its content. */
+  display: -webkit-flex;
   /* An odd line-height ensures a consistent baseline on all platforms. */
   line-height: 1.75em;
   margin-bottom: 6px;
@@ -99,10 +147,7 @@ body:not(.uber-frame) {
 
 .site-domain-wrapper {
   cursor: pointer;
-}
-
-html[dir=rtl] .entry-box {
-  float: right; /* To make the box shrink to fit its content. */
+  width: 100%;
 }
 
 .day {
@@ -121,6 +166,14 @@ html[dir=rtl] .entry-box {
   margin: 0;
   overflow: hidden;
   padding: 0;
+}
+
+.month-results {
+  -webkit-padding-start: 0;
+}
+
+html[dir='rtl'] .site-results {
+  clear: both;
 }
 
 h2.timeframe {
@@ -150,35 +203,29 @@ h2.timeframe {
   display: none;
 }
 
+
+html[dir='rtl'] .number-visits {
+  /* This element contains parentheses, which without the unicode-bidi: embed
+   * directive would show up incorrectly (e.g. '(www.google.com (5'). Using
+   * 'embed' makes the engine set the text in the parentheses as LTR even
+   * when the layout is set to RTL, which makes using -webkit-*-start
+   * impossible. So use margins and dir='rtl'.
+   */
+  direction: rtl;
+  unicode-bidi: embed;
+}
+
 .number-visits {
   color: rgb(151, 156, 160);
 }
 
 .drop-down {
   -webkit-margin-end: 5px;
-  background: white -webkit-canvas(drop-down-arrow) no-repeat center 4px;
-  border: 1px solid rgb(192, 195, 198);
-  border-radius: 2px;
-  height: 12px;
-  padding: 0;
-  position: relative;
-  top: 2px;
-  width: 12px;
+  margin-top: 1px;
 }
 
-.drop-down:hover {
-  background-image: -webkit-canvas(drop-down-arrow-hover);
-  border-color: rgb(48, 57, 66);
-}
-
-.drop-down[menu-shown],
-.drop-down:focus {
-  background-color: rgb(48, 57, 66);
-  background-image: -webkit-canvas(drop-down-arrow-active);
-  border-color: rgb(48, 57, 66);
-}
-
-html[dir='rtl'] .entry .title {
+html[dir='rtl'] .entry .title,
+html[dir='rtl'] .site-domain {
   /* Put the favicon on the right. */
   background-position-x: right;
 }
@@ -191,7 +238,8 @@ html[dir='rtl'] .entry .title {
   width: 90px;
 }
 
-.search-results .time {
+.search-results .time,
+.month-results .time {
   width: 110px;
 }
 
@@ -204,19 +252,71 @@ html[dir='rtl'] .entry .title {
 <if expr="not pp_ifdef('android')">
 /* Checkboxes are shown when checked or focused, or when the entry is hovered.
  * Fade in on focus, but not on hover, because it makes the UI feel laggy. */
+.site-domain-wrapper input[type=checkbox]:not(:checked),
 .entry input[type=checkbox]:not(:checked) {
   opacity: 0;
 }
 
+.site-domain-wrapper:hover input[type=checkbox],
+.site-domain-wrapper input[type=checkbox]:focus,
 .entry-box:hover input[type=checkbox],
 .entry-box input[type=checkbox]:focus {
   opacity: 1;
 }
 
+.site-domain-wrapper input[type=checkbox]:focus,
 .entry-box input[type=checkbox]:focus {
   -webkit-transition: opacity 150ms;
 }
+
+.filter-status {
+  display: -webkit-flex;
+  -webkit-flex-grow: 1;
+  -webkit-justify-content: flex-end;
+}
+
+.filter-status > div {
+  -webkit-transition: background-color 500ms ease-in-out;
+  border-radius: 3px;
+  font-size: 11px;
+  height: 14px;
+  line-height: 12px;
+  visibility: hidden;
+  white-space: nowrap;
+}
+
+.filter-status > div.filter-allowed,
+.filter-status > div.filter-blocked,
+.filter-status > div.in-content-pack-active,
+.filter-status > div.in-content-pack-passive {
+  margin: 3px 3px 3px 0;
+  padding: 0 4px;
+  visibility: visible;
+}
+
+.filter-allowed,
+.in-content-pack-active {
+  background-color: rgb(141, 240, 127);
+  border: 1px solid rgb(33, 190, 33);
+  color: rgb(54, 54, 54);
+}
+
+.filter-blocked {
+  border: 1px solid rgb(211, 0, 0);
+  background-color: rgb(255, 147, 105);
+  color: rgb(54, 54, 54);
+}
+
+.in-content-pack-passive {
+  border: 1px solid rgb(155, 224, 163);
+  background-color: rgb(225, 255, 205);
+  color: rgb(148, 148, 148);
+}
 </if>
+
+#range-previous img {
+  -webkit-transform: scaleX(-1);
+}
 
 .entry-box {
   background-color: none;
@@ -229,7 +329,7 @@ html[dir='rtl'] .entry .title {
 }
 
 .entry .title {
-  -webkit-box-flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -247,11 +347,22 @@ html[dir='rtl'] .entry .title {
   background-size: 16px;
 }
 
+.site-domain button {
+  color: rgb(48, 57, 66);
+}
+
+.site-domain button:hover {
+  text-decoration: none;
+}
+
 .site-domain-arrow {
   -webkit-transition: -webkit-transform 300ms linear;
-  color: #8F8F8F;
+  background: url('../disclosure_triangle_small.png') no-repeat;
+  background-position: 5px 5px;
+  color: rgb(143, 143, 143);
   height: 21px;
   margin-right: 2px;
+  opacity: 0.58;
   text-align: center;
   width: 21px;
 }
@@ -262,6 +373,14 @@ html[dir='rtl'] .entry .title {
 
 .site-domain-arrow.expand {
   -webkit-transform: rotate(90deg);
+}
+
+html[dir='rtl'] .site-domain-arrow.collapse {
+  -webkit-transform: rotate(90deg);
+}
+
+html[dir='rtl'] .site-domain-arrow.expand {
+  -webkit-transform: rotate(180deg);
 }
 
 .entry .starred {
@@ -290,11 +409,11 @@ html[dir='rtl'] .entry .title {
   opacity: 0;
 }
 
-.menu-button.drop-down {
-  position: relative;
-  top: 2px;
+button.menu-button.drop-down {
+  top: 0;
 }
 
 #action-menu > :not(hr) {
   line-height: 29px;
+  outline: none;
 }

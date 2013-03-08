@@ -33,6 +33,11 @@
 #endif
 #endif
 
+// Assembly functions are declared without namespace.
+extern "C" {
+void EmptyRegisterState_MMX();
+}  // extern "C"
+
 namespace media {
 
 static FilterYUVRowsProc ChooseFilterYUVRowsProc() {
@@ -40,9 +45,12 @@ static FilterYUVRowsProc ChooseFilterYUVRowsProc() {
   base::CPU cpu;
   if (cpu.has_sse2())
     return &FilterYUVRows_SSE2;
+
+#if defined(MEDIA_MMX_INTRINSICS_AVAILABLE)
   if (cpu.has_mmx())
     return &FilterYUVRows_MMX;
-#endif
+#endif  // defined(MEDIA_MMX_INTRINSICS_AVAILABLE)
+#endif  // defined(ARCH_CPU_X86_FAMILY)
   return &FilterYUVRows_C;
 }
 
@@ -97,9 +105,16 @@ void EmptyRegisterState() {
     has_mmx = cpu.has_mmx();
     checked = true;
   }
-  if (has_mmx)
+
+  if (has_mmx) {
+#if defined(MEDIA_MMX_INTRINSICS_AVAILABLE)
     _mm_empty();
-#endif
+#else
+    EmptyRegisterState_MMX();
+#endif  // defined(MEDIA_MMX_INTRINSICS_AVAILABLE)
+  }
+
+#endif  // defined(ARCH_CPU_X86_FAMILY)
 }
 
 // 16.16 fixed point arithmetic

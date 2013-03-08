@@ -9,12 +9,12 @@
 #include "base/logging.h"
 #include "base/mac/mac_util.h"
 #include "base/message_loop.h"
+#include "base/prefs/pref_service.h"
 #include "base/sys_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/download/download_shelf.h"
 #include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/password_manager/password_manager.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/shell_integration.h"
 #include "chrome/browser/ui/bookmarks/bookmark_utils.h"
@@ -22,7 +22,6 @@
 #include "chrome/browser/ui/browser_command_controller.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_list.h"
-#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window_state.h"
 #import "chrome/browser/ui/cocoa/browser/avatar_button_controller.h"
 #import "chrome/browser/ui/cocoa/browser/avatar_menu_bubble_controller.h"
@@ -43,6 +42,7 @@
 #import "chrome/browser/ui/cocoa/web_dialog_window_controller.h"
 #import "chrome/browser/ui/cocoa/website_settings_bubble_controller.h"
 #include "chrome/browser/ui/search/search_model.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/web_applications/web_app_ui.h"
 #include "chrome/browser/web_applications/web_app.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -51,6 +51,7 @@
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_view.h"
 #include "content/public/common/password_form.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
@@ -59,6 +60,7 @@
 
 #if defined(ENABLE_ONE_CLICK_SIGNIN)
 #import "chrome/browser/ui/cocoa/one_click_signin_bubble_controller.h"
+#import "chrome/browser/ui/cocoa/one_click_signin_dialog_controller.h"
 #endif
 
 using content::NativeWebKeyboardEvent;
@@ -90,7 +92,7 @@ namespace {
 NSPoint GetPointForBubble(content::WebContents* web_contents,
                           int x_offset,
                           int y_offset) {
-  NSView* view = web_contents->GetNativeView();
+  NSView* view = web_contents->GetView()->GetNativeView();
   NSRect bounds = [view bounds];
   NSPoint point;
   point.x = NSMinX(bounds) + x_offset;
@@ -99,6 +101,12 @@ NSPoint GetPointForBubble(content::WebContents* web_contents,
   point = [view convertPoint:point toView:nil];
   point = [[view window] convertBaseToScreen:point];
   return point;
+}
+
+void CreateShortcuts(const ShellIntegration::ShortcutInfo& shortcut_info) {
+  // creation_locations will be ignored by CreatePlatformShortcuts on Mac.
+  ShellIntegration::ShortcutLocations creation_locations;
+  web_app::CreateShortcuts(shortcut_info, creation_locations);
 }
 
 }  // namespace
@@ -284,7 +292,7 @@ void BrowserWindowCocoa::BookmarkBarStateChanged(
 
 void BrowserWindowCocoa::UpdateDevTools() {
   [controller_ updateDevToolsForContents:
-      chrome::GetActiveWebContents(browser_)];
+      browser_->tab_strip_model()->GetActiveWebContents()];
 }
 
 void BrowserWindowCocoa::UpdateLoadingAnimations(bool should_animate) {
@@ -339,8 +347,8 @@ void BrowserWindowCocoa::Restore() {
 
 void BrowserWindowCocoa::EnterFullscreen(
       const GURL& url, FullscreenExitBubbleType bubble_type) {
-  [controller_ enterFullscreenForURL:url
-                          bubbleType:bubble_type];
+  [controller_ enterPresentationModeForURL:url
+                                bubbleType:bubble_type];
 }
 
 void BrowserWindowCocoa::ExitFullscreen() {
@@ -353,7 +361,14 @@ void BrowserWindowCocoa::UpdateFullscreenExitBubbleContent(
   [controller_ updateFullscreenExitBubbleURL:url bubbleType:bubble_type];
 }
 
+bool BrowserWindowCocoa::ShouldHideUIForFullscreen() const {
+  // On Mac, fullscreen mode has most normal things (in a slide-down panel).
+  return false;
+}
+
 bool BrowserWindowCocoa::IsFullscreen() const {
+  if ([controller_ inPresentationMode])
+    CHECK([controller_ isFullscreen]);  // Presentation mode must be fullscreen.
   return [controller_ isFullscreen];
 }
 
@@ -409,7 +424,6 @@ void BrowserWindowCocoa::RotatePaneFocus(bool forwards) {
 void BrowserWindowCocoa::FocusBookmarksToolbar() {
   // Not needed on the Mac.
 }
-
 
 bool BrowserWindowCocoa::IsBookmarkBarVisible() const {
   return browser_->profile()->GetPrefs()->GetBoolean(prefs::kShowBookmarkBar);
@@ -476,12 +490,20 @@ void BrowserWindowCocoa::ShowChromeToMobileBubble() {
 
 #if defined(ENABLE_ONE_CLICK_SIGNIN)
 void BrowserWindowCocoa::ShowOneClickSigninBubble(
-      const StartSyncCallback& start_sync_callback) {
-  OneClickSigninBubbleController* bubble_controller =
-      [[OneClickSigninBubbleController alloc]
-        initWithBrowserWindowController:cocoa_controller()
-                    start_sync_callback:start_sync_callback];
-  [bubble_controller showWindow:nil];
+    OneClickSigninBubbleType type,
+    const StartSyncCallback& start_sync_callback) {
+  if (type == ONE_CLICK_SIGNIN_BUBBLE_TYPE_BUBBLE) {
+    scoped_nsobject<OneClickSigninBubbleController> bubble_controller(
+        [[OneClickSigninBubbleController alloc]
+            initWithBrowserWindowController:cocoa_controller()
+                                   callback:start_sync_callback]);
+    [bubble_controller showWindow:nil];
+  } else {
+    WebContents* web_contents =
+        browser_->tab_strip_model()->GetActiveWebContents();
+    // Deletes itself when the dialog closes.
+    new OneClickSigninDialogController(web_contents, start_sync_callback);
+  }
 }
 #endif
 
@@ -564,9 +586,8 @@ void BrowserWindowCocoa::ShowCreateChromeAppShortcutsDialog(
     Profile* profile, const extensions::Extension* app) {
   // Normally we would show a dialog, but since we always create the app
   // shortcut in /Applications there are no options for the user to choose.
-  ShellIntegration::ShortcutInfo shortcut_info;
-  web_app::UpdateShortcutInfoForApp(*app, profile, &shortcut_info);
-  web_app::CreateShortcuts(shortcut_info);
+  web_app::UpdateShortcutInfoAndIconForApp(*app, profile,
+                                           base::Bind(&CreateShortcuts));
 }
 
 void BrowserWindowCocoa::Cut() {
@@ -585,19 +606,20 @@ void BrowserWindowCocoa::OpenTabpose() {
   [controller_ openTabpose];
 }
 
-void BrowserWindowCocoa::EnterPresentationMode(
-      const GURL& url,
-      FullscreenExitBubbleType bubble_type) {
-  [controller_ enterPresentationModeForURL:url
-                                bubbleType:bubble_type];
+void BrowserWindowCocoa::EnterFullscreenWithChrome() {
+  CHECK(base::mac::IsOSLionOrLater());
+  if ([controller_ inPresentationMode])
+    [controller_ exitPresentationMode];
+  else
+    [controller_ enterFullscreen];
 }
 
-void BrowserWindowCocoa::ExitPresentationMode() {
-  [controller_ exitPresentationMode];
+bool BrowserWindowCocoa::IsFullscreenWithChrome() {
+  return IsFullscreen() && ![controller_ inPresentationMode];
 }
 
-bool BrowserWindowCocoa::InPresentationMode() {
-  return [controller_ inPresentationMode];
+bool BrowserWindowCocoa::IsFullscreenWithoutChrome() {
+  return IsFullscreen() && [controller_ inPresentationMode];
 }
 
 gfx::Rect BrowserWindowCocoa::GetInstantBounds() {
@@ -646,7 +668,7 @@ extensions::ActiveTabPermissionGranter*
 void BrowserWindowCocoa::ModeChanged(
     const chrome::search::Mode& old_mode,
     const chrome::search::Mode& new_mode) {
-  [controller_ updateBookmarkBarStateForInstantPreview];
+  [controller_ updateBookmarkBarStateForInstantOverlay];
 }
 
 void BrowserWindowCocoa::DestroyBrowser() {
@@ -680,7 +702,8 @@ void BrowserWindowCocoa::ShowPasswordGenerationBubble(
     const gfx::Rect& rect,
     const content::PasswordForm& form,
     autofill::PasswordGenerator* password_generator) {
-  WebContents* web_contents = chrome::GetActiveWebContents(browser_);
+  WebContents* web_contents =
+      browser_->tab_strip_model()->GetActiveWebContents();
   // We want to point to the middle of the rect instead of the right side.
   NSPoint point = GetPointForBubble(web_contents,
                                     rect.x() + rect.width()/2,

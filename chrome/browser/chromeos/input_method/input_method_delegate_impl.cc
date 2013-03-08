@@ -5,8 +5,8 @@
 #include "chrome/browser/chromeos/input_method/input_method_delegate_impl.h"
 
 #include "base/logging.h"
+#include "base/prefs/pref_service.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/common/pref_names.h"
 
 namespace chromeos {
@@ -16,7 +16,7 @@ InputMethodDelegateImpl::InputMethodDelegateImpl() {}
 
 std::string InputMethodDelegateImpl::GetHardwareKeyboardLayout() const {
   if (g_browser_process) {
-    PrefServiceBase* local_state = g_browser_process->local_state();
+    PrefService* local_state = g_browser_process->local_state();
     if (local_state)
       return local_state->GetString(prefs::kHardwareKeyboardLayout);
   }

@@ -115,7 +115,6 @@ input.common[type='checkbox']::after {
 .buttonbar {
   display: -webkit-box;
   height: 29px;
-  line-height: 29px;
 }
 
 .buttonbar.right {
@@ -272,10 +271,10 @@ span.disclosureindicator {
    menus in FileBrowser look like native ChromeOS menus. */
 
 menu.chrome-menu {
-  -webkit-box-shadow: 0 2px 2px 0 rgba(0, 0, 0, .2);
+  -webkit-box-shadow: 0 2px 1px 0 rgba(0, 0, 0, .2);
   -webkit-transition: opacity 200ms ease-in;
-  border: 1px solid rgba(0, 0, 0, .28);
-  border-radius: 2px;
+  border: 1px solid rgba(0, 0, 0, .32);
+  border-radius: 3px;
   outline: none;
   padding: 2px 0;
   z-index: 15;
@@ -286,6 +285,11 @@ menu.chrome-menu[hidden] {
   opacity: 0;
   pointer-events: none;
   visibility: hidden;
+}
+
+menu.chrome-menu.hide-delayed[hidden] {
+  -webkit-transition-delay: 120ms;
+  -webkit-transition-property: opacity, visibility;
 }
 
 menu.chrome-menu > :not(hr) {
@@ -379,7 +383,6 @@ input[type='submit'][disabled]:hover {
   border-radius: 2px;
   box-sizing: border-box;
   margin: 2px 0;
-  padding: 1px;
 }
 
 .progress-track {
@@ -390,4 +393,8 @@ input[type='submit'][disabled]:hover {
   border-radius: 2px;
   height: 10px;
   margin: -1px;
+}
+
+.progress-track.smoothed {
+  -webkit-transition: width 1s linear;
 }

@@ -8,7 +8,7 @@
 #include <string>
 
 #include "base/basictypes.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/synchronization/lock.h"
 
 namespace google_breakpad {
@@ -112,7 +112,7 @@ class CrashService {
   google_breakpad::CrashReportSender* sender_;
 
   // the path to dumps and logs directory.
-  FilePath report_path_;
+  base::FilePath report_path_;
   // the extra tag sent to the server with each dump.
   std::wstring reporter_tag_;
 

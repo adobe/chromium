@@ -4,7 +4,7 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/memory/ref_counted.h"
 #include "base/test/thread_test_helper.h"
 #include "content/browser/web_contents/web_contents_impl.h"
@@ -52,7 +52,7 @@ class FileSystemBrowserTest : public ContentBrowserTest {
 
 class FileSystemBrowserTestWithLowQuota : public FileSystemBrowserTest {
  public:
-  virtual void SetUpOnMainThread() {
+  virtual void SetUpOnMainThread() OVERRIDE {
     const int kInitialQuotaKilobytes = 5000;
     const int kTemporaryStorageQuotaMaxSize =
         kInitialQuotaKilobytes * 1024 * QuotaManager::kPerHostTemporaryPortion;
@@ -85,9 +85,9 @@ class FileSystemLayoutTest : public InProcessBrowserLayoutTest {
  public:
   FileSystemLayoutTest() :
       InProcessBrowserLayoutTest(
-          FilePath(),
-          FilePath(
-              FILE_PATH_LITERAL("fast/filesystem_temp")
+          base::FilePath(),
+          base::FilePath(
+              FILE_PATH_LITERAL("fast/filesystem")
                   ).NormalizePathSeparators()) {
   }
 };
@@ -108,7 +108,9 @@ IN_PROC_BROWSER_TEST_F(FileSystemLayoutTest, AsyncOperations) {
   RunLayoutTest("async-operations.html");
 }
 
-IN_PROC_BROWSER_TEST_F(FileSystemLayoutTest, CrossFilesystemOp) {
+// crbug.com/172787 for disabling on Windows (flaky), crbug.com/173079 for
+// temporary disabling everywhere.
+IN_PROC_BROWSER_TEST_F(FileSystemLayoutTest, DISABLED_CrossFilesystemOp) {
   RunLayoutTest("cross-filesystem-op.html");
 }
 
@@ -228,7 +230,10 @@ IN_PROC_BROWSER_TEST_F(FileSystemLayoutTest, OpRemove) {
   RunLayoutTest("op-remove.html");
 }
 
-IN_PROC_BROWSER_TEST_F(FileSystemLayoutTest, OpRestrictedChars) {
+// TODO(kinuko): This has been broken before but the bug has surfaced
+// due to a partial fix for drive-letter handling.
+// http://crbug.com/176253
+IN_PROC_BROWSER_TEST_F(FileSystemLayoutTest, DISABLED_OpRestrictedChars) {
   RunLayoutTest("op-restricted-chars.html");
 }
 

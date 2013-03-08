@@ -6,11 +6,12 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
+#include "base/prefs/pref_registry_simple.h"
+#include "base/prefs/pref_service.h"
 #include "base/rand_util.h"
 #include "base/stl_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "net/base/load_flags.h"
@@ -55,9 +56,9 @@ GURL IntranetRedirectDetector::RedirectOrigin() {
 }
 
 // static
-void IntranetRedirectDetector::RegisterPrefs(PrefServiceSimple* prefs) {
-  prefs->RegisterStringPref(prefs::kLastKnownIntranetRedirectOrigin,
-                            std::string());
+void IntranetRedirectDetector::RegisterPrefs(PrefRegistrySimple* registry) {
+  registry->RegisterStringPref(prefs::kLastKnownIntranetRedirectOrigin,
+                               std::string());
 }
 
 void IntranetRedirectDetector::FinishSleep() {

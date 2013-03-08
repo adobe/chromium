@@ -46,6 +46,7 @@ class LocalTranslator {
       : onc_signature_(&onc_signature),
         onc_object_(&onc_object),
         shill_dictionary_(shill_dictionary) {
+    field_translation_table_ = GetFieldTranslationTable(onc_signature);
   }
 
   void TranslateFields();
@@ -75,6 +76,7 @@ class LocalTranslator {
                                 const std::string& shill_property_name);
 
   const OncValueSignature* onc_signature_;
+  const FieldTranslationEntry* field_translation_table_;
   const base::DictionaryValue* onc_object_;
   base::DictionaryValue* shill_dictionary_;
 
@@ -99,7 +101,7 @@ void LocalTranslator::TranslateFields() {
 void LocalTranslator::TranslateOpenVPN() {
   // Shill supports only one RemoteCertKU but ONC a list.
   // Copy only the first entry if existing.
-  const base::ListValue* certKUs;
+  const base::ListValue* certKUs = NULL;
   std::string certKU;
   if (onc_object_->GetListWithoutPathExpansion(vpn::kRemoteCertKU, &certKUs) &&
       certKUs->GetString(0, &certKU)) {
@@ -135,6 +137,9 @@ void LocalTranslator::TranslateWiFi() {
   TranslateWithTableAndSet(security, kWiFiSecurityTable,
                            flimflam::kSecurityProperty);
 
+  // We currently only support managed and no adhoc networks.
+  shill_dictionary_->SetStringWithoutPathExpansion(flimflam::kModeProperty,
+                                                   flimflam::kModeManaged);
   CopyFieldsAccordingToSignature();
 }
 
@@ -187,16 +192,17 @@ void LocalTranslator::CopyFieldsAccordingToSignature() {
 void LocalTranslator::AddValueAccordingToSignature(
     const std::string& onc_name,
     scoped_ptr<base::Value> value) {
-  if (value.get() == NULL)
-    return;
-  const OncFieldSignature* field_signature =
-      GetFieldSignature(*onc_signature_, onc_name);
-  DCHECK(field_signature != NULL);
-  if (field_signature == NULL || field_signature->shill_property_name == NULL)
+  if (!value || !field_translation_table_)
     return;
 
-  shill_dictionary_->SetWithoutPathExpansion(
-      field_signature->shill_property_name, value.release());
+  std::string shill_property_name;
+  if (!GetShillPropertyName(onc_name,
+                            field_translation_table_,
+                            &shill_property_name))
+    return;
+
+  shill_dictionary_->SetWithoutPathExpansion(shill_property_name,
+                                             value.release());
 }
 
 void LocalTranslator::TranslateWithTableAndSet(
@@ -230,7 +236,7 @@ void TranslateONCHierarchy(const OncValueSignature& signature,
   // Recurse into nested objects.
   for (base::DictionaryValue::Iterator it(onc_object); it.HasNext();
        it.Advance()) {
-    const base::DictionaryValue* inner_object;
+    const base::DictionaryValue* inner_object = NULL;
     if (!it.value().GetAsDictionary(&inner_object))
       continue;
 

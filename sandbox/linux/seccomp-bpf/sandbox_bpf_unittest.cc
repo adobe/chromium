@@ -2,21 +2,36 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <errno.h>
+#include <pthread.h>
+#include <sched.h>
+#include <sys/prctl.h>
 #include <sys/syscall.h>
+#include <sys/time.h>
 #include <sys/utsname.h>
+
+#if defined(ANDROID)
+// Work-around for buggy headers in Android's NDK
+#define __user
+#endif
+#include <linux/futex.h>
 
 #include <ostream>
 
 #include "base/memory/scoped_ptr.h"
 #include "sandbox/linux/seccomp-bpf/bpf_tests.h"
 #include "sandbox/linux/seccomp-bpf/syscall.h"
+#include "sandbox/linux/seccomp-bpf/trap.h"
 #include "sandbox/linux/seccomp-bpf/verifier.h"
 #include "sandbox/linux/services/broker_process.h"
 #include "sandbox/linux/services/linux_syscalls.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 // Workaround for Android's prctl.h file.
-#if !defined(PR_CAPBSET_READ)
+#ifndef PR_GET_ENDIAN
+#define PR_GET_ENDIAN   19
+#endif
+#ifndef PR_CAPBSET_READ
 #define PR_CAPBSET_READ 23
 #define PR_CAPBSET_DROP 24
 #endif
@@ -26,7 +41,8 @@ using sandbox::BrokerProcess;
 
 namespace {
 
-const int kExpectedReturnValue = 42;
+const int  kExpectedReturnValue   = 42;
+const char kSandboxDebuggingEnv[] = "CHROME_SANDBOX_DEBUGGING";
 
 // This test should execute no matter whether we have kernel support. So,
 // we make it a TEST() instead of a BPF_TEST().
@@ -64,11 +80,11 @@ intptr_t FakeGetPid(const struct arch_seccomp_data& args, void *aux) {
   return (*pid_ptr)++;
 }
 
-ErrorCode VerboseAPITestingPolicy(int sysno, void *aux) {
+ErrorCode VerboseAPITestingPolicy(Sandbox *sandbox, int sysno, void *aux) {
   if (!Sandbox::IsValidSyscallNumber(sysno)) {
     return ErrorCode(ENOSYS);
   } else if (sysno == __NR_getpid) {
-    return Sandbox::Trap(FakeGetPid, aux);
+    return sandbox->Trap(FakeGetPid, aux);
   } else {
     return ErrorCode(ErrorCode::ERR_ALLOWED);
   }
@@ -78,8 +94,9 @@ SANDBOX_TEST(SandboxBpf, VerboseAPITesting) {
   if (Sandbox::SupportsSeccompSandbox(-1) ==
       playground2::Sandbox::STATUS_AVAILABLE) {
     pid_t test_var = 0;
-    playground2::Sandbox::SetSandboxPolicy(VerboseAPITestingPolicy, &test_var);
-    playground2::Sandbox::StartSandbox();
+    Sandbox sandbox;
+    sandbox.SetSandboxPolicy(VerboseAPITestingPolicy, &test_var);
+    sandbox.StartSandbox();
 
     BPF_ASSERT(test_var == 0);
     BPF_ASSERT(syscall(__NR_getpid) == 0);
@@ -95,7 +112,7 @@ SANDBOX_TEST(SandboxBpf, VerboseAPITesting) {
 
 // A simple blacklist test
 
-ErrorCode BlacklistNanosleepPolicy(int sysno, void *) {
+ErrorCode BlacklistNanosleepPolicy(Sandbox *, int sysno, void *) {
   if (!Sandbox::IsValidSyscallNumber(sysno)) {
     // FIXME: we should really not have to do that in a trivial policy
     return ErrorCode(ENOSYS);
@@ -119,7 +136,7 @@ BPF_TEST(SandboxBpf, ApplyBasicBlacklistPolicy, BlacklistNanosleepPolicy) {
 
 // Now do a simple whitelist test
 
-ErrorCode WhitelistGetpidPolicy(int sysno, void *) {
+ErrorCode WhitelistGetpidPolicy(Sandbox *, int sysno, void *) {
   switch (sysno) {
     case __NR_getpid:
     case __NR_exit_group:
@@ -149,7 +166,8 @@ intptr_t EnomemHandler(const struct arch_seccomp_data& args, void *aux) {
   return -ENOMEM;
 }
 
-ErrorCode BlacklistNanosleepPolicySigsys(int sysno, void *aux) {
+ErrorCode BlacklistNanosleepPolicySigsys(Sandbox *sandbox, int sysno,
+                                         void *aux) {
   if (!Sandbox::IsValidSyscallNumber(sysno)) {
     // FIXME: we should really not have to do that in a trivial policy
     return ErrorCode(ENOSYS);
@@ -157,7 +175,7 @@ ErrorCode BlacklistNanosleepPolicySigsys(int sysno, void *aux) {
 
   switch (sysno) {
     case __NR_nanosleep:
-      return Sandbox::Trap(EnomemHandler, aux);
+      return sandbox->Trap(EnomemHandler, aux);
     default:
       return ErrorCode(ErrorCode::ERR_ALLOWED);
   }
@@ -180,6 +198,111 @@ BPF_TEST(SandboxBpf, BasicBlacklistWithSigsys,
   BPF_ASSERT(BPF_AUX == kExpectedReturnValue);
 }
 
+// A simple test that verifies we can return arbitrary errno values.
+
+ErrorCode ErrnoTestPolicy(Sandbox *, int sysno, void *) {
+  if (!Sandbox::IsValidSyscallNumber(sysno)) {
+    // FIXME: we should really not have to do that in a trivial policy
+    return ErrorCode(ENOSYS);
+  }
+
+  switch (sysno) {
+  case __NR_dup2:
+    // Pretend that dup2() worked, but don't actually do anything.
+    return ErrorCode(0);
+  case __NR_setuid:
+#if defined(__NR_setuid32)
+  case __NR_setuid32:
+#endif
+    // Return errno = 1
+    return ErrorCode(1);
+  case __NR_setgid:
+#if defined(__NR_setgid32)
+  case __NR_setgid32:
+#endif
+    // Return maximum errno value (typically 4095).
+    return ErrorCode(ErrorCode::ERR_MAX_ERRNO);
+  default:
+    return ErrorCode(ErrorCode::ERR_ALLOWED);
+  }
+}
+
+BPF_TEST(SandboxBpf, ErrnoTest, ErrnoTestPolicy) {
+  // Verify that dup2() returns success, but doesn't actually run.
+  int fds[4];
+  BPF_ASSERT(pipe(fds) == 0);
+  BPF_ASSERT(pipe(fds+2) == 0);
+  BPF_ASSERT(dup2(fds[2], fds[0]) == 0);
+  char buf[1] = { };
+  BPF_ASSERT(write(fds[1], "\x55", 1) == 1);
+  BPF_ASSERT(write(fds[3], "\xAA", 1) == 1);
+  BPF_ASSERT(read(fds[0], buf, 1) == 1);
+
+  // If dup2() executed, we will read \xAA, but it dup2() has been turned
+  // into a no-op by our policy, then we will read \x55.
+  BPF_ASSERT(buf[0] == '\x55');
+
+  // Verify that we can return the minimum and maximum errno values.
+  BPF_ASSERT(setuid(0) == -1);
+  BPF_ASSERT(errno == 1);
+  BPF_ASSERT(setgid(0) == -1);
+  BPF_ASSERT(errno == ErrorCode::ERR_MAX_ERRNO);
+}
+
+// Testing the stacking of two sandboxes
+
+ErrorCode StackingPolicyPartOne(Sandbox *sandbox, int sysno, void *) {
+  if (!Sandbox::IsValidSyscallNumber(sysno)) {
+    return ErrorCode(ENOSYS);
+  }
+
+  switch (sysno) {
+    case __NR_getppid:
+      return sandbox->Cond(0, ErrorCode::TP_32BIT, ErrorCode::OP_EQUAL, 0,
+                           ErrorCode(ErrorCode::ERR_ALLOWED),
+                           ErrorCode(EPERM));
+    default:
+      return ErrorCode(ErrorCode::ERR_ALLOWED);
+  }
+}
+
+ErrorCode StackingPolicyPartTwo(Sandbox *sandbox, int sysno, void *) {
+  if (!Sandbox::IsValidSyscallNumber(sysno)) {
+    return ErrorCode(ENOSYS);
+  }
+
+  switch (sysno) {
+    case __NR_getppid:
+      return sandbox->Cond(0, ErrorCode::TP_32BIT, ErrorCode::OP_EQUAL, 0,
+                           ErrorCode(EINVAL),
+                           ErrorCode(ErrorCode::ERR_ALLOWED));
+    default:
+      return ErrorCode(ErrorCode::ERR_ALLOWED);
+  }
+}
+
+BPF_TEST(SandboxBpf, StackingPolicy, StackingPolicyPartOne) {
+  errno = 0;
+  BPF_ASSERT(syscall(__NR_getppid, 0) > 0);
+  BPF_ASSERT(errno == 0);
+
+  BPF_ASSERT(syscall(__NR_getppid, 1) == -1);
+  BPF_ASSERT(errno == EPERM);
+
+  // Stack a second sandbox with its own policy. Verify that we can further
+  // restrict filters, but we cannot relax existing filters.
+  Sandbox sandbox;
+  sandbox.SetSandboxPolicy(StackingPolicyPartTwo, NULL);
+  sandbox.StartSandbox();
+
+  errno = 0;
+  BPF_ASSERT(syscall(__NR_getppid, 0) == -1);
+  BPF_ASSERT(errno == EINVAL);
+
+  BPF_ASSERT(syscall(__NR_getppid, 1) == -1);
+  BPF_ASSERT(errno == EPERM);
+}
+
 // A more complex, but synthetic policy. This tests the correctness of the BPF
 // program by iterating through all syscalls and checking for an errno that
 // depends on the syscall number. Unlike the Verifier, this exercises the BPF
@@ -195,7 +318,7 @@ int SysnoToRandomErrno(int sysno) {
   return ((sysno & ~3) >> 2) % 29 + 1;
 }
 
-ErrorCode SyntheticPolicy(int sysno, void *) {
+ErrorCode SyntheticPolicy(Sandbox *, int sysno, void *) {
   if (!Sandbox::IsValidSyscallNumber(sysno)) {
     // FIXME: we should really not have to do that in a trivial policy
     return ErrorCode(ENOSYS);
@@ -253,7 +376,7 @@ int ArmPrivateSysnoToErrno(int sysno) {
   }
 }
 
-ErrorCode ArmPrivatePolicy(int sysno, void *) {
+ErrorCode ArmPrivatePolicy(Sandbox *, int sysno, void *) {
   if (!Sandbox::IsValidSyscallNumber(sysno)) {
     // FIXME: we should really not have to do that in a trivial policy.
     return ErrorCode(ENOSYS);
@@ -293,12 +416,13 @@ intptr_t CountSyscalls(const struct arch_seccomp_data& args, void *aux) {
   return Sandbox::ForwardSyscall(args);
 }
 
-ErrorCode GreyListedPolicy(int sysno, void *aux) {
+ErrorCode GreyListedPolicy(Sandbox *sandbox, int sysno, void *aux) {
   // The use of UnsafeTrap() causes us to print a warning message. This is
   // generally desirable, but it results in the unittest failing, as it doesn't
   // expect any messages on "stderr". So, temporarily disable messages. The
   // BPF_TEST() is guaranteed to turn messages back on, after the policy
   // function has completed.
+  setenv(kSandboxDebuggingEnv, "t", 0);
   Die::SuppressInfoMessages(true);
 
   // Some system calls must always be allowed, if our policy wants to make
@@ -318,7 +442,7 @@ ErrorCode GreyListedPolicy(int sysno, void *aux) {
     return ErrorCode(EPERM);
   } else if (Sandbox::IsValidSyscallNumber(sysno)) {
     // Allow (and count) all other system calls.
-      return Sandbox::UnsafeTrap(CountSyscalls, aux);
+      return sandbox->UnsafeTrap(CountSyscalls, aux);
   } else {
     return ErrorCode(ENOSYS);
   }
@@ -338,6 +462,19 @@ BPF_TEST(SandboxBpf, GreyListedPolicy,
   BPF_ASSERT(*name);
 }
 
+SANDBOX_TEST(SandboxBpf, EnableUnsafeTrapsInSigSysHandler) {
+  // Disabling warning messages that could confuse our test framework.
+  setenv(kSandboxDebuggingEnv, "t", 0);
+  Die::SuppressInfoMessages(true);
+
+  unsetenv(kSandboxDebuggingEnv);
+  SANDBOX_ASSERT(Trap::EnableUnsafeTrapsInSigSysHandler() == false);
+  setenv(kSandboxDebuggingEnv, "", 1);
+  SANDBOX_ASSERT(Trap::EnableUnsafeTrapsInSigSysHandler() == false);
+  setenv(kSandboxDebuggingEnv, "t", 1);
+  SANDBOX_ASSERT(Trap::EnableUnsafeTrapsInSigSysHandler() == true);
+}
+
 intptr_t PrctlHandler(const struct arch_seccomp_data& args, void *) {
   if (args.args[0] == PR_CAPBSET_DROP &&
       static_cast<int>(args.args[1]) == -1) {
@@ -349,12 +486,13 @@ intptr_t PrctlHandler(const struct arch_seccomp_data& args, void *) {
   }
 }
 
-ErrorCode PrctlPolicy(int sysno, void *aux) {
+ErrorCode PrctlPolicy(Sandbox *sandbox, int sysno, void *aux) {
+  setenv(kSandboxDebuggingEnv, "t", 0);
   Die::SuppressInfoMessages(true);
 
   if (sysno == __NR_prctl) {
     // Handle prctl() inside an UnsafeTrap()
-    return Sandbox::UnsafeTrap(PrctlHandler, NULL);
+    return sandbox->UnsafeTrap(PrctlHandler, NULL);
   } else if (Sandbox::IsValidSyscallNumber(sysno)) {
     // Allow all other system calls.
     return ErrorCode(ErrorCode::ERR_ALLOWED);
@@ -390,7 +528,8 @@ intptr_t AllowRedirectedSyscall(const struct arch_seccomp_data& args, void *) {
   return Sandbox::ForwardSyscall(args);
 }
 
-ErrorCode RedirectAllSyscallsPolicy(int sysno, void *aux) {
+ErrorCode RedirectAllSyscallsPolicy(Sandbox *sandbox, int sysno, void *aux) {
+  setenv(kSandboxDebuggingEnv, "t", 0);
   Die::SuppressInfoMessages(true);
 
   // Some system calls must always be allowed, if our policy wants to make
@@ -406,7 +545,7 @@ ErrorCode RedirectAllSyscallsPolicy(int sysno, void *aux) {
       ) {
     return ErrorCode(ErrorCode::ERR_ALLOWED);
   } else if (Sandbox::IsValidSyscallNumber(sysno)) {
-    return Sandbox::UnsafeTrap(AllowRedirectedSyscall, aux);
+    return sandbox->UnsafeTrap(AllowRedirectedSyscall, aux);
   } else {
     return ErrorCode(ENOSYS);
   }
@@ -537,7 +676,7 @@ intptr_t BrokerOpenTrapHandler(const struct arch_seccomp_data& args,
   }
 }
 
-ErrorCode DenyOpenPolicy(int sysno, void *aux) {
+ErrorCode DenyOpenPolicy(Sandbox *sandbox, int sysno, void *aux) {
   InitializedOpenBroker* iob = static_cast<InitializedOpenBroker*>(aux);
   if (!Sandbox::IsValidSyscallNumber(sysno)) {
     return ErrorCode(ENOSYS);
@@ -548,7 +687,7 @@ ErrorCode DenyOpenPolicy(int sysno, void *aux) {
     case __NR_openat:
       // We get a InitializedOpenBroker class, but our trap handler wants
       // the BrokerProcess object.
-      return ErrorCode(Sandbox::Trap(BrokerOpenTrapHandler,
+      return ErrorCode(sandbox->Trap(BrokerOpenTrapHandler,
                                      iob->broker_process()));
     default:
       return ErrorCode(ErrorCode::ERR_ALLOWED);
@@ -590,6 +729,54 @@ BPF_TEST(SandboxBpf, UseOpenBroker, DenyOpenPolicy,
   BPF_ASSERT(read(cpu_info_fd, buf, sizeof(buf)) > 0);
 }
 
+// Simple test demonstrating how to use Sandbox::Cond()
+
+ErrorCode SimpleCondTestPolicy(Sandbox *sandbox, int sysno, void *) {
+  if (!Sandbox::IsValidSyscallNumber(sysno)) {
+    // FIXME: we should really not have to do that in a trivial policy
+    return ErrorCode(ENOSYS);
+  }
+
+  // We deliberately return unusual errno values upon failure, so that we
+  // can uniquely test for these values. In a "real" policy, you would want
+  // to return more traditional values.
+  switch (sysno) {
+    case __NR_open:
+      // Allow opening files for reading, but don't allow writing.
+      COMPILE_ASSERT(O_RDONLY == 0, O_RDONLY_must_be_all_zero_bits);
+      return sandbox->Cond(1, ErrorCode::TP_32BIT, ErrorCode::OP_HAS_ANY_BITS,
+                           O_ACCMODE /* 0x3 */,
+                           ErrorCode(EROFS),
+                           ErrorCode(ErrorCode::ERR_ALLOWED));
+    case __NR_prctl:
+      // Allow prctl(PR_SET_DUMPABLE) and prctl(PR_GET_DUMPABLE), but
+      // disallow everything else.
+      return sandbox->Cond(0, ErrorCode::TP_32BIT, ErrorCode::OP_EQUAL,
+                           PR_SET_DUMPABLE,
+                           ErrorCode(ErrorCode::ERR_ALLOWED),
+             sandbox->Cond(0, ErrorCode::TP_32BIT, ErrorCode::OP_EQUAL,
+                           PR_GET_DUMPABLE,
+                           ErrorCode(ErrorCode::ERR_ALLOWED),
+                           ErrorCode(ENOMEM)));
+    default:
+      return ErrorCode(ErrorCode::ERR_ALLOWED);
+  }
+}
+
+BPF_TEST(SandboxBpf, SimpleCondTest, SimpleCondTestPolicy) {
+  int fd;
+  BPF_ASSERT((fd = open("/proc/self/comm", O_RDWR)) == -1);
+  BPF_ASSERT(errno == EROFS);
+  BPF_ASSERT((fd = open("/proc/self/comm", O_RDONLY)) >= 0);
+  close(fd);
+
+  int ret;
+  BPF_ASSERT((ret = prctl(PR_GET_DUMPABLE)) >= 0);
+  BPF_ASSERT(prctl(PR_SET_DUMPABLE, 1-ret) == 0);
+  BPF_ASSERT(prctl(PR_GET_ENDIAN, &ret) == -1);
+  BPF_ASSERT(errno == ENOMEM);
+}
+
 // This test exercises the Sandbox::Cond() method by building a complex
 // tree of conditional equality operations. It then makes system calls and
 // verifies that they return the values that we expected from our BPF
@@ -629,7 +816,7 @@ class EqualityStressTest {
     }
   }
 
-  ErrorCode Policy(int sysno) {
+  ErrorCode Policy(Sandbox *sandbox, int sysno) {
     if (!Sandbox::IsValidSyscallNumber(sysno)) {
       // FIXME: we should really not have to do that in a trivial policy
       return ErrorCode(ENOSYS);
@@ -642,7 +829,7 @@ class EqualityStressTest {
     } else {
       // ToErrorCode() turns an ArgValue object into an ErrorCode that is
       // suitable for use by a sandbox policy.
-      return ToErrorCode(arg_values_[sysno]);
+      return ToErrorCode(sandbox, arg_values_[sysno]);
     }
   }
 
@@ -792,7 +979,7 @@ class EqualityStressTest {
     }
   }
 
-  ErrorCode ToErrorCode(ArgValue *arg_value) {
+  ErrorCode ToErrorCode(Sandbox *sandbox, ArgValue *arg_value) {
     // Compute the ErrorCode that should be returned, if none of our
     // tests succeed (i.e. the system call parameter doesn't match any
     // of the values in arg_value->tests[].k_value).
@@ -805,7 +992,7 @@ class EqualityStressTest {
       // If this wasn't a leaf node yet, recursively descend into the rest
       // of the tree. This will end up adding a few more Sandbox::Cond()
       // tests to our ErrorCode.
-      err = ToErrorCode(arg_value->arg_value);
+      err = ToErrorCode(sandbox, arg_value->arg_value);
     }
 
     // Now, iterate over all the test cases that we want to compare against.
@@ -817,12 +1004,12 @@ class EqualityStressTest {
       if (arg_value->tests[n].err) {
         matched = ErrorCode(arg_value->tests[n].err);
       } else {
-        matched = ToErrorCode(arg_value->tests[n].arg_value);
+        matched = ToErrorCode(sandbox, arg_value->tests[n].arg_value);
       }
       // For now, all of our tests are limited to 32bit.
       // We have separate tests that check the behavior of 32bit vs. 64bit
       // conditional expressions.
-      err = Sandbox::Cond(arg_value->argno, ErrorCode::TP_32BIT,
+      err = sandbox->Cond(arg_value->argno, ErrorCode::TP_32BIT,
                           ErrorCode::OP_EQUAL, arg_value->tests[n].k_value,
                           matched, err);
     }
@@ -890,8 +1077,8 @@ class EqualityStressTest {
   static const int kMaxArgs = 6;
 };
 
-ErrorCode EqualityStressTestPolicy(int sysno, void *aux) {
-  return reinterpret_cast<EqualityStressTest *>(aux)->Policy(sysno);
+ErrorCode EqualityStressTestPolicy(Sandbox *sandbox, int sysno, void *aux) {
+  return reinterpret_cast<EqualityStressTest *>(aux)->Policy(sandbox, sysno);
 }
 
 BPF_TEST(SandboxBpf, EqualityTests, EqualityStressTestPolicy,
@@ -899,16 +1086,24 @@ BPF_TEST(SandboxBpf, EqualityTests, EqualityStressTestPolicy,
   BPF_AUX.VerifyFilter();
 }
 
-ErrorCode EqualityArgumentWidthPolicy(int sysno, void *) {
+ErrorCode EqualityArgumentWidthPolicy(Sandbox *sandbox, int sysno, void *) {
   if (!Sandbox::IsValidSyscallNumber(sysno)) {
     // FIXME: we should really not have to do that in a trivial policy
     return ErrorCode(ENOSYS);
   } else if (sysno == __NR_uname) {
-    return Sandbox::Cond(0, ErrorCode::TP_32BIT, ErrorCode::OP_EQUAL, 0,
-           Sandbox::Cond(1, ErrorCode::TP_32BIT, ErrorCode::OP_EQUAL,
+    return sandbox->Cond(0, ErrorCode::TP_32BIT, ErrorCode::OP_EQUAL, 0,
+           sandbox->Cond(1, ErrorCode::TP_32BIT, ErrorCode::OP_EQUAL,
                          0x55555555, ErrorCode(1), ErrorCode(2)),
-           Sandbox::Cond(1, ErrorCode::TP_64BIT, ErrorCode::OP_EQUAL,
-                         0x55555555AAAAAAAAull, ErrorCode(1), ErrorCode(2)));
+           // The BPF compiler and the BPF interpreter in the kernel are
+           // (mostly) agnostic of the host platform's word size. The compiler
+           // will happily generate code that tests a 64bit value, and the
+           // interpreter will happily perform this test.
+           // But unless there is a kernel bug, there is no way for us to pass
+           // in a 64bit quantity on a 32bit platform. The upper 32bits should
+           // always be zero. So, this test should always evaluate as false on
+           // 32bit systems.
+           sandbox->Cond(1, ErrorCode::TP_64BIT, ErrorCode::OP_EQUAL,
+                         0x55555555AAAAAAAAULL, ErrorCode(1), ErrorCode(2)));
   } else {
     return ErrorCode(ErrorCode::ERR_ALLOWED);
   }
@@ -921,10 +1116,12 @@ BPF_TEST(SandboxBpf, EqualityArgumentWidth, EqualityArgumentWidthPolicy) {
   // On 32bit machines, there is no way to pass a 64bit argument through the
   // syscall interface. So, we have to skip the part of the test that requires
   // 64bit arguments.
-  BPF_ASSERT(SandboxSyscall(__NR_uname, 1, 0x55555555AAAAAAAAull) == -1);
-  BPF_ASSERT(SandboxSyscall(__NR_uname, 1, 0x5555555500000000ull) == -2);
-  BPF_ASSERT(SandboxSyscall(__NR_uname, 1, 0x5555555511111111ull) == -2);
-  BPF_ASSERT(SandboxSyscall(__NR_uname, 1, 0x11111111AAAAAAAAull) == -2);
+  BPF_ASSERT(SandboxSyscall(__NR_uname, 1, 0x55555555AAAAAAAAULL) == -1);
+  BPF_ASSERT(SandboxSyscall(__NR_uname, 1, 0x5555555500000000ULL) == -2);
+  BPF_ASSERT(SandboxSyscall(__NR_uname, 1, 0x5555555511111111ULL) == -2);
+  BPF_ASSERT(SandboxSyscall(__NR_uname, 1, 0x11111111AAAAAAAAULL) == -2);
+#else
+  BPF_ASSERT(SandboxSyscall(__NR_uname, 1, 0x55555555) == -2);
 #endif
 }
 
@@ -935,16 +1132,17 @@ BPF_TEST(SandboxBpf, EqualityArgumentWidth, EqualityArgumentWidthPolicy) {
 BPF_DEATH_TEST(SandboxBpf, EqualityArgumentUnallowed64bit,
                DEATH_MESSAGE("Unexpected 64bit argument detected"),
                EqualityArgumentWidthPolicy) {
-  SandboxSyscall(__NR_uname, 0, 0x5555555555555555ull);
+  SandboxSyscall(__NR_uname, 0, 0x5555555555555555ULL);
 }
 #endif
 
-ErrorCode EqualityWithNegativeArgumentsPolicy(int sysno, void *) {
+ErrorCode EqualityWithNegativeArgumentsPolicy(Sandbox *sandbox, int sysno,
+                                              void *) {
   if (!Sandbox::IsValidSyscallNumber(sysno)) {
     // FIXME: we should really not have to do that in a trivial policy
     return ErrorCode(ENOSYS);
   } else if (sysno == __NR_uname) {
-    return Sandbox::Cond(0, ErrorCode::TP_32BIT, ErrorCode::OP_EQUAL,
+    return sandbox->Cond(0, ErrorCode::TP_32BIT, ErrorCode::OP_EQUAL,
                          0xFFFFFFFF, ErrorCode(1), ErrorCode(2));
   } else {
     return ErrorCode(ErrorCode::ERR_ALLOWED);
@@ -955,7 +1153,7 @@ BPF_TEST(SandboxBpf, EqualityWithNegativeArguments,
          EqualityWithNegativeArgumentsPolicy) {
   BPF_ASSERT(SandboxSyscall(__NR_uname, 0xFFFFFFFF) == -1);
   BPF_ASSERT(SandboxSyscall(__NR_uname, -1) == -1);
-  BPF_ASSERT(SandboxSyscall(__NR_uname, -1ll) == -1);
+  BPF_ASSERT(SandboxSyscall(__NR_uname, -1LL) == -1);
 }
 
 #if __SIZEOF_POINTER__ > 4
@@ -965,8 +1163,528 @@ BPF_DEATH_TEST(SandboxBpf, EqualityWithNegative64bitArguments,
   // When expecting a 32bit system call argument, we look at the MSB of the
   // 64bit value and allow both "0" and "-1". But the latter is allowed only
   // iff the LSB was negative. So, this death test should error out.
-  BPF_ASSERT(SandboxSyscall(__NR_uname, 0xFFFFFFFF00000000ll) == -1);
+  BPF_ASSERT(SandboxSyscall(__NR_uname, 0xFFFFFFFF00000000LL) == -1);
 }
 #endif
+
+ErrorCode AllBitTestPolicy(Sandbox *sandbox, int sysno, void *) {
+  // Test the OP_HAS_ALL_BITS conditional test operator with a couple of
+  // different bitmasks. We try to find bitmasks that could conceivably
+  // touch corner cases.
+  // For all of these tests, we override the uname(). We can make use with
+  // a single system call number, as we use the first system call argument to
+  // select the different bit masks that we want to test against.
+  if (!Sandbox::IsValidSyscallNumber(sysno)) {
+    // FIXME: we should really not have to do that in a trivial policy
+    return ErrorCode(ENOSYS);
+  } else if (sysno == __NR_uname) {
+    return sandbox->Cond(0, ErrorCode::TP_32BIT, ErrorCode::OP_EQUAL, 0,
+           sandbox->Cond(1, ErrorCode::TP_32BIT, ErrorCode::OP_HAS_ALL_BITS,
+                         0x0,
+                         ErrorCode(1), ErrorCode(0)),
+
+           sandbox->Cond(0, ErrorCode::TP_32BIT, ErrorCode::OP_EQUAL, 1,
+           sandbox->Cond(1, ErrorCode::TP_32BIT, ErrorCode::OP_HAS_ALL_BITS,
+                         0x1,
+                         ErrorCode(1), ErrorCode(0)),
+
+           sandbox->Cond(0, ErrorCode::TP_32BIT, ErrorCode::OP_EQUAL, 2,
+           sandbox->Cond(1, ErrorCode::TP_32BIT, ErrorCode::OP_HAS_ALL_BITS,
+                         0x3,
+                         ErrorCode(1), ErrorCode(0)),
+
+           sandbox->Cond(0, ErrorCode::TP_32BIT, ErrorCode::OP_EQUAL, 3,
+           sandbox->Cond(1, ErrorCode::TP_32BIT, ErrorCode::OP_HAS_ALL_BITS,
+                         0x80000000,
+                         ErrorCode(1), ErrorCode(0)),
+           sandbox->Cond(0, ErrorCode::TP_32BIT, ErrorCode::OP_EQUAL, 4,
+           sandbox->Cond(1, ErrorCode::TP_64BIT, ErrorCode::OP_HAS_ALL_BITS,
+                         0x0,
+                         ErrorCode(1), ErrorCode(0)),
+
+           sandbox->Cond(0, ErrorCode::TP_32BIT, ErrorCode::OP_EQUAL, 5,
+           sandbox->Cond(1, ErrorCode::TP_64BIT, ErrorCode::OP_HAS_ALL_BITS,
+                         0x1,
+                         ErrorCode(1), ErrorCode(0)),
+
+           sandbox->Cond(0, ErrorCode::TP_32BIT, ErrorCode::OP_EQUAL, 6,
+           sandbox->Cond(1, ErrorCode::TP_64BIT, ErrorCode::OP_HAS_ALL_BITS,
+                         0x3,
+                         ErrorCode(1), ErrorCode(0)),
+
+           sandbox->Cond(0, ErrorCode::TP_32BIT, ErrorCode::OP_EQUAL, 7,
+           sandbox->Cond(1, ErrorCode::TP_64BIT, ErrorCode::OP_HAS_ALL_BITS,
+                         0x80000000,
+                         ErrorCode(1), ErrorCode(0)),
+
+           sandbox->Cond(0, ErrorCode::TP_32BIT, ErrorCode::OP_EQUAL, 8,
+           sandbox->Cond(1, ErrorCode::TP_64BIT, ErrorCode::OP_HAS_ALL_BITS,
+                         0x100000000ULL,
+                         ErrorCode(1), ErrorCode(0)),
+
+           sandbox->Cond(0, ErrorCode::TP_32BIT, ErrorCode::OP_EQUAL, 9,
+           sandbox->Cond(1, ErrorCode::TP_64BIT, ErrorCode::OP_HAS_ALL_BITS,
+                         0x300000000ULL,
+                         ErrorCode(1), ErrorCode(0)),
+
+           sandbox->Cond(0, ErrorCode::TP_32BIT, ErrorCode::OP_EQUAL, 10,
+           sandbox->Cond(1, ErrorCode::TP_64BIT, ErrorCode::OP_HAS_ALL_BITS,
+                         0x100000001ULL,
+                         ErrorCode(1), ErrorCode(0)),
+
+                         sandbox->Kill("Invalid test case number"))))))))))));
+  } else {
+    return ErrorCode(ErrorCode::ERR_ALLOWED);
+  }
+}
+
+// Define a macro that performs tests using our test policy.
+// NOTE: Not all of the arguments in this macro are actually used!
+//       They are here just to serve as documentation of the conditions
+//       implemented in the test policy.
+//       Most notably, "op" and "mask" are unused by the macro. If you want
+//       to make changes to these values, you will have to edit the
+//       test policy instead.
+#define BITMASK_TEST(testcase, arg, op, mask, expected_value)                 \
+  BPF_ASSERT(SandboxSyscall(__NR_uname, (testcase), (arg)) == (expected_value))
+
+// Our uname() system call returns ErrorCode(1) for success and
+// ErrorCode(0) for failure. SandboxSyscall() turns this into an
+// exit code of -1 or 0.
+#define EXPECT_FAILURE  0
+#define EXPECT_SUCCESS -1
+
+// A couple of our tests behave differently on 32bit and 64bit systems, as
+// there is no way for a 32bit system call to pass in a 64bit system call
+// argument "arg".
+// We expect these tests to succeed on 64bit systems, but to tail on 32bit
+// systems.
+#define EXPT64_SUCCESS                                                        \
+  (sizeof(void *) > 4 ? EXPECT_SUCCESS : EXPECT_FAILURE)
+
+BPF_TEST(SandboxBpf, AllBitTests, AllBitTestPolicy) {
+  // 32bit test: all of 0x0 (should always be true)
+  BITMASK_TEST( 0,                   0, ALLBITS32,          0, EXPECT_SUCCESS);
+  BITMASK_TEST( 0,                   1, ALLBITS32,          0, EXPECT_SUCCESS);
+  BITMASK_TEST( 0,                   3, ALLBITS32,          0, EXPECT_SUCCESS);
+  BITMASK_TEST( 0,         0xFFFFFFFFU, ALLBITS32,          0, EXPECT_SUCCESS);
+  BITMASK_TEST( 0,                -1LL, ALLBITS32,          0, EXPECT_SUCCESS);
+
+  // 32bit test: all of 0x1
+  BITMASK_TEST( 1,                   0, ALLBITS32,        0x1, EXPECT_FAILURE);
+  BITMASK_TEST( 1,                   1, ALLBITS32,        0x1, EXPECT_SUCCESS);
+  BITMASK_TEST( 1,                   2, ALLBITS32,        0x1, EXPECT_FAILURE);
+  BITMASK_TEST( 1,                   3, ALLBITS32,        0x1, EXPECT_SUCCESS);
+
+  // 32bit test: all of 0x3
+  BITMASK_TEST( 2,                   0, ALLBITS32,        0x3, EXPECT_FAILURE);
+  BITMASK_TEST( 2,                   1, ALLBITS32,        0x3, EXPECT_FAILURE);
+  BITMASK_TEST( 2,                   2, ALLBITS32,        0x3, EXPECT_FAILURE);
+  BITMASK_TEST( 2,                   3, ALLBITS32,        0x3, EXPECT_SUCCESS);
+  BITMASK_TEST( 2,                   7, ALLBITS32,        0x3, EXPECT_SUCCESS);
+
+  // 32bit test: all of 0x80000000
+  BITMASK_TEST( 3,                   0, ALLBITS32, 0x80000000, EXPECT_FAILURE);
+  BITMASK_TEST( 3,         0x40000000U, ALLBITS32, 0x80000000, EXPECT_FAILURE);
+  BITMASK_TEST( 3,         0x80000000U, ALLBITS32, 0x80000000, EXPECT_SUCCESS);
+  BITMASK_TEST( 3,         0xC0000000U, ALLBITS32, 0x80000000, EXPECT_SUCCESS);
+  BITMASK_TEST( 3,       -0x80000000LL, ALLBITS32, 0x80000000, EXPECT_SUCCESS);
+
+  // 64bit test: all of 0x0 (should always be true)
+  BITMASK_TEST( 4,                   0, ALLBITS64,          0, EXPECT_SUCCESS);
+  BITMASK_TEST( 4,                   1, ALLBITS64,          0, EXPECT_SUCCESS);
+  BITMASK_TEST( 4,                   3, ALLBITS64,          0, EXPECT_SUCCESS);
+  BITMASK_TEST( 4,         0xFFFFFFFFU, ALLBITS64,          0, EXPECT_SUCCESS);
+  BITMASK_TEST( 4,       0x100000000LL, ALLBITS64,          0, EXPECT_SUCCESS);
+  BITMASK_TEST( 4,       0x300000000LL, ALLBITS64,          0, EXPECT_SUCCESS);
+  BITMASK_TEST( 4,0x8000000000000000LL, ALLBITS64,          0, EXPECT_SUCCESS);
+  BITMASK_TEST( 4,                -1LL, ALLBITS64,          0, EXPECT_SUCCESS);
+
+  // 64bit test: all of 0x1
+  BITMASK_TEST( 5,                   0, ALLBITS64,          1, EXPECT_FAILURE);
+  BITMASK_TEST( 5,                   1, ALLBITS64,          1, EXPECT_SUCCESS);
+  BITMASK_TEST( 5,                   2, ALLBITS64,          1, EXPECT_FAILURE);
+  BITMASK_TEST( 5,                   3, ALLBITS64,          1, EXPECT_SUCCESS);
+  BITMASK_TEST( 5,       0x100000000LL, ALLBITS64,          1, EXPECT_FAILURE);
+  BITMASK_TEST( 5,       0x100000001LL, ALLBITS64,          1, EXPECT_SUCCESS);
+  BITMASK_TEST( 5,       0x100000002LL, ALLBITS64,          1, EXPECT_FAILURE);
+  BITMASK_TEST( 5,       0x100000003LL, ALLBITS64,          1, EXPECT_SUCCESS);
+
+  // 64bit test: all of 0x3
+  BITMASK_TEST( 6,                   0, ALLBITS64,          3, EXPECT_FAILURE);
+  BITMASK_TEST( 6,                   1, ALLBITS64,          3, EXPECT_FAILURE);
+  BITMASK_TEST( 6,                   2, ALLBITS64,          3, EXPECT_FAILURE);
+  BITMASK_TEST( 6,                   3, ALLBITS64,          3, EXPECT_SUCCESS);
+  BITMASK_TEST( 6,                   7, ALLBITS64,          3, EXPECT_SUCCESS);
+  BITMASK_TEST( 6,       0x100000000LL, ALLBITS64,          3, EXPECT_FAILURE);
+  BITMASK_TEST( 6,       0x100000001LL, ALLBITS64,          3, EXPECT_FAILURE);
+  BITMASK_TEST( 6,       0x100000002LL, ALLBITS64,          3, EXPECT_FAILURE);
+  BITMASK_TEST( 6,       0x100000003LL, ALLBITS64,          3, EXPECT_SUCCESS);
+  BITMASK_TEST( 6,       0x100000007LL, ALLBITS64,          3, EXPECT_SUCCESS);
+
+  // 64bit test: all of 0x80000000
+  BITMASK_TEST( 7,                   0, ALLBITS64, 0x80000000, EXPECT_FAILURE);
+  BITMASK_TEST( 7,         0x40000000U, ALLBITS64, 0x80000000, EXPECT_FAILURE);
+  BITMASK_TEST( 7,         0x80000000U, ALLBITS64, 0x80000000, EXPECT_SUCCESS);
+  BITMASK_TEST( 7,         0xC0000000U, ALLBITS64, 0x80000000, EXPECT_SUCCESS);
+  BITMASK_TEST( 7,       -0x80000000LL, ALLBITS64, 0x80000000, EXPECT_SUCCESS);
+  BITMASK_TEST( 7,       0x100000000LL, ALLBITS64, 0x80000000, EXPECT_FAILURE);
+  BITMASK_TEST( 7,       0x140000000LL, ALLBITS64, 0x80000000, EXPECT_FAILURE);
+  BITMASK_TEST( 7,       0x180000000LL, ALLBITS64, 0x80000000, EXPECT_SUCCESS);
+  BITMASK_TEST( 7,       0x1C0000000LL, ALLBITS64, 0x80000000, EXPECT_SUCCESS);
+  BITMASK_TEST( 7,      -0x180000000LL, ALLBITS64, 0x80000000, EXPECT_SUCCESS);
+
+  // 64bit test: all of 0x100000000
+  BITMASK_TEST( 8,       0x000000000LL, ALLBITS64,0x100000000, EXPECT_FAILURE);
+  BITMASK_TEST( 8,       0x100000000LL, ALLBITS64,0x100000000, EXPT64_SUCCESS);
+  BITMASK_TEST( 8,       0x200000000LL, ALLBITS64,0x100000000, EXPECT_FAILURE);
+  BITMASK_TEST( 8,       0x300000000LL, ALLBITS64,0x100000000, EXPT64_SUCCESS);
+  BITMASK_TEST( 8,       0x000000001LL, ALLBITS64,0x100000000, EXPECT_FAILURE);
+  BITMASK_TEST( 8,       0x100000001LL, ALLBITS64,0x100000000, EXPT64_SUCCESS);
+  BITMASK_TEST( 8,       0x200000001LL, ALLBITS64,0x100000000, EXPECT_FAILURE);
+  BITMASK_TEST( 8,       0x300000001LL, ALLBITS64,0x100000000, EXPT64_SUCCESS);
+
+  // 64bit test: all of 0x300000000
+  BITMASK_TEST( 9,       0x000000000LL, ALLBITS64,0x300000000, EXPECT_FAILURE);
+  BITMASK_TEST( 9,       0x100000000LL, ALLBITS64,0x300000000, EXPECT_FAILURE);
+  BITMASK_TEST( 9,       0x200000000LL, ALLBITS64,0x300000000, EXPECT_FAILURE);
+  BITMASK_TEST( 9,       0x300000000LL, ALLBITS64,0x300000000, EXPT64_SUCCESS);
+  BITMASK_TEST( 9,       0x700000000LL, ALLBITS64,0x300000000, EXPT64_SUCCESS);
+  BITMASK_TEST( 9,       0x000000001LL, ALLBITS64,0x300000000, EXPECT_FAILURE);
+  BITMASK_TEST( 9,       0x100000001LL, ALLBITS64,0x300000000, EXPECT_FAILURE);
+  BITMASK_TEST( 9,       0x200000001LL, ALLBITS64,0x300000000, EXPECT_FAILURE);
+  BITMASK_TEST( 9,       0x300000001LL, ALLBITS64,0x300000000, EXPT64_SUCCESS);
+  BITMASK_TEST( 9,       0x700000001LL, ALLBITS64,0x300000000, EXPT64_SUCCESS);
+
+  // 64bit test: all of 0x100000001
+  BITMASK_TEST(10,       0x000000000LL, ALLBITS64,0x100000001, EXPECT_FAILURE);
+  BITMASK_TEST(10,       0x000000001LL, ALLBITS64,0x100000001, EXPECT_FAILURE);
+  BITMASK_TEST(10,       0x100000000LL, ALLBITS64,0x100000001, EXPECT_FAILURE);
+  BITMASK_TEST(10,       0x100000001LL, ALLBITS64,0x100000001, EXPT64_SUCCESS);
+  BITMASK_TEST(10,         0xFFFFFFFFU, ALLBITS64,0x100000001, EXPECT_FAILURE);
+  BITMASK_TEST(10,                 -1L, ALLBITS64,0x100000001, EXPT64_SUCCESS);
+}
+
+ErrorCode AnyBitTestPolicy(Sandbox *sandbox, int sysno, void *) {
+  // Test the OP_HAS_ANY_BITS conditional test operator with a couple of
+  // different bitmasks. We try to find bitmasks that could conceivably
+  // touch corner cases.
+  // For all of these tests, we override the uname(). We can make use with
+  // a single system call number, as we use the first system call argument to
+  // select the different bit masks that we want to test against.
+  if (!Sandbox::IsValidSyscallNumber(sysno)) {
+    // FIXME: we should really not have to do that in a trivial policy
+    return ErrorCode(ENOSYS);
+  } else if (sysno == __NR_uname) {
+    return sandbox->Cond(0, ErrorCode::TP_32BIT, ErrorCode::OP_EQUAL, 0,
+           sandbox->Cond(1, ErrorCode::TP_32BIT, ErrorCode::OP_HAS_ANY_BITS,
+                         0x0,
+                         ErrorCode(1), ErrorCode(0)),
+
+           sandbox->Cond(0, ErrorCode::TP_32BIT, ErrorCode::OP_EQUAL, 1,
+           sandbox->Cond(1, ErrorCode::TP_32BIT, ErrorCode::OP_HAS_ANY_BITS,
+                         0x1,
+                         ErrorCode(1), ErrorCode(0)),
+
+           sandbox->Cond(0, ErrorCode::TP_32BIT, ErrorCode::OP_EQUAL, 2,
+           sandbox->Cond(1, ErrorCode::TP_32BIT, ErrorCode::OP_HAS_ANY_BITS,
+                         0x3,
+                         ErrorCode(1), ErrorCode(0)),
+
+           sandbox->Cond(0, ErrorCode::TP_32BIT, ErrorCode::OP_EQUAL, 3,
+           sandbox->Cond(1, ErrorCode::TP_32BIT, ErrorCode::OP_HAS_ANY_BITS,
+                         0x80000000,
+                         ErrorCode(1), ErrorCode(0)),
+
+           // All the following tests don't really make much sense on 32bit
+           // systems. They will always evaluate as false.
+           sandbox->Cond(0, ErrorCode::TP_32BIT, ErrorCode::OP_EQUAL, 4,
+           sandbox->Cond(1, ErrorCode::TP_64BIT, ErrorCode::OP_HAS_ANY_BITS,
+                         0x0,
+                         ErrorCode(1), ErrorCode(0)),
+
+           sandbox->Cond(0, ErrorCode::TP_32BIT, ErrorCode::OP_EQUAL, 5,
+           sandbox->Cond(1, ErrorCode::TP_64BIT, ErrorCode::OP_HAS_ANY_BITS,
+                         0x1,
+                         ErrorCode(1), ErrorCode(0)),
+
+           sandbox->Cond(0, ErrorCode::TP_32BIT, ErrorCode::OP_EQUAL, 6,
+           sandbox->Cond(1, ErrorCode::TP_64BIT, ErrorCode::OP_HAS_ANY_BITS,
+                         0x3,
+                         ErrorCode(1), ErrorCode(0)),
+
+           sandbox->Cond(0, ErrorCode::TP_32BIT, ErrorCode::OP_EQUAL, 7,
+           sandbox->Cond(1, ErrorCode::TP_64BIT, ErrorCode::OP_HAS_ANY_BITS,
+                         0x80000000,
+                         ErrorCode(1), ErrorCode(0)),
+
+           sandbox->Cond(0, ErrorCode::TP_32BIT, ErrorCode::OP_EQUAL, 8,
+           sandbox->Cond(1, ErrorCode::TP_64BIT, ErrorCode::OP_HAS_ANY_BITS,
+                         0x100000000ULL,
+                         ErrorCode(1), ErrorCode(0)),
+
+           sandbox->Cond(0, ErrorCode::TP_32BIT, ErrorCode::OP_EQUAL, 9,
+           sandbox->Cond(1, ErrorCode::TP_64BIT, ErrorCode::OP_HAS_ANY_BITS,
+                         0x300000000ULL,
+                         ErrorCode(1), ErrorCode(0)),
+
+           sandbox->Cond(0, ErrorCode::TP_32BIT, ErrorCode::OP_EQUAL, 10,
+           sandbox->Cond(1, ErrorCode::TP_64BIT, ErrorCode::OP_HAS_ANY_BITS,
+                         0x100000001ULL,
+                         ErrorCode(1), ErrorCode(0)),
+
+                         sandbox->Kill("Invalid test case number"))))))))))));
+  } else {
+    return ErrorCode(ErrorCode::ERR_ALLOWED);
+  }
+}
+
+BPF_TEST(SandboxBpf, AnyBitTests, AnyBitTestPolicy) {
+  // 32bit test: any of 0x0 (should always be false)
+  BITMASK_TEST( 0,                   0, ANYBITS32,        0x0, EXPECT_FAILURE);
+  BITMASK_TEST( 0,                   1, ANYBITS32,        0x0, EXPECT_FAILURE);
+  BITMASK_TEST( 0,                   3, ANYBITS32,        0x0, EXPECT_FAILURE);
+  BITMASK_TEST( 0,         0xFFFFFFFFU, ANYBITS32,        0x0, EXPECT_FAILURE);
+  BITMASK_TEST( 0,                -1LL, ANYBITS32,        0x0, EXPECT_FAILURE);
+
+  // 32bit test: any of 0x1
+  BITMASK_TEST( 1,                   0, ANYBITS32,        0x1, EXPECT_FAILURE);
+  BITMASK_TEST( 1,                   1, ANYBITS32,        0x1, EXPECT_SUCCESS);
+  BITMASK_TEST( 1,                   2, ANYBITS32,        0x1, EXPECT_FAILURE);
+  BITMASK_TEST( 1,                   3, ANYBITS32,        0x1, EXPECT_SUCCESS);
+
+  // 32bit test: any of 0x3
+  BITMASK_TEST( 2,                   0, ANYBITS32,        0x3, EXPECT_FAILURE);
+  BITMASK_TEST( 2,                   1, ANYBITS32,        0x3, EXPECT_SUCCESS);
+  BITMASK_TEST( 2,                   2, ANYBITS32,        0x3, EXPECT_SUCCESS);
+  BITMASK_TEST( 2,                   3, ANYBITS32,        0x3, EXPECT_SUCCESS);
+  BITMASK_TEST( 2,                   7, ANYBITS32,        0x3, EXPECT_SUCCESS);
+
+  // 32bit test: any of 0x80000000
+  BITMASK_TEST( 3,                   0, ANYBITS32, 0x80000000, EXPECT_FAILURE);
+  BITMASK_TEST( 3,         0x40000000U, ANYBITS32, 0x80000000, EXPECT_FAILURE);
+  BITMASK_TEST( 3,         0x80000000U, ANYBITS32, 0x80000000, EXPECT_SUCCESS);
+  BITMASK_TEST( 3,         0xC0000000U, ANYBITS32, 0x80000000, EXPECT_SUCCESS);
+  BITMASK_TEST( 3,       -0x80000000LL, ANYBITS32, 0x80000000, EXPECT_SUCCESS);
+
+  // 64bit test: any of 0x0 (should always be false)
+  BITMASK_TEST( 4,                   0, ANYBITS64,        0x0, EXPECT_FAILURE);
+  BITMASK_TEST( 4,                   1, ANYBITS64,        0x0, EXPECT_FAILURE);
+  BITMASK_TEST( 4,                   3, ANYBITS64,        0x0, EXPECT_FAILURE);
+  BITMASK_TEST( 4,         0xFFFFFFFFU, ANYBITS64,        0x0, EXPECT_FAILURE);
+  BITMASK_TEST( 4,       0x100000000LL, ANYBITS64,        0x0, EXPECT_FAILURE);
+  BITMASK_TEST( 4,       0x300000000LL, ANYBITS64,        0x0, EXPECT_FAILURE);
+  BITMASK_TEST( 4,0x8000000000000000LL, ANYBITS64,        0x0, EXPECT_FAILURE);
+  BITMASK_TEST( 4,                -1LL, ANYBITS64,        0x0, EXPECT_FAILURE);
+
+  // 64bit test: any of 0x1
+  BITMASK_TEST( 5,                   0, ANYBITS64,        0x1, EXPECT_FAILURE);
+  BITMASK_TEST( 5,                   1, ANYBITS64,        0x1, EXPECT_SUCCESS);
+  BITMASK_TEST( 5,                   2, ANYBITS64,        0x1, EXPECT_FAILURE);
+  BITMASK_TEST( 5,                   3, ANYBITS64,        0x1, EXPECT_SUCCESS);
+  BITMASK_TEST( 5,       0x100000001LL, ANYBITS64,        0x1, EXPECT_SUCCESS);
+  BITMASK_TEST( 5,       0x100000000LL, ANYBITS64,        0x1, EXPECT_FAILURE);
+  BITMASK_TEST( 5,       0x100000002LL, ANYBITS64,        0x1, EXPECT_FAILURE);
+  BITMASK_TEST( 5,       0x100000003LL, ANYBITS64,        0x1, EXPECT_SUCCESS);
+
+  // 64bit test: any of 0x3
+  BITMASK_TEST( 6,                   0, ANYBITS64,        0x3, EXPECT_FAILURE);
+  BITMASK_TEST( 6,                   1, ANYBITS64,        0x3, EXPECT_SUCCESS);
+  BITMASK_TEST( 6,                   2, ANYBITS64,        0x3, EXPECT_SUCCESS);
+  BITMASK_TEST( 6,                   3, ANYBITS64,        0x3, EXPECT_SUCCESS);
+  BITMASK_TEST( 6,                   7, ANYBITS64,        0x3, EXPECT_SUCCESS);
+  BITMASK_TEST( 6,       0x100000000LL, ANYBITS64,        0x3, EXPECT_FAILURE);
+  BITMASK_TEST( 6,       0x100000001LL, ANYBITS64,        0x3, EXPECT_SUCCESS);
+  BITMASK_TEST( 6,       0x100000002LL, ANYBITS64,        0x3, EXPECT_SUCCESS);
+  BITMASK_TEST( 6,       0x100000003LL, ANYBITS64,        0x3, EXPECT_SUCCESS);
+  BITMASK_TEST( 6,       0x100000007LL, ANYBITS64,        0x3, EXPECT_SUCCESS);
+
+  // 64bit test: any of 0x80000000
+  BITMASK_TEST( 7,                   0, ANYBITS64, 0x80000000, EXPECT_FAILURE);
+  BITMASK_TEST( 7,         0x40000000U, ANYBITS64, 0x80000000, EXPECT_FAILURE);
+  BITMASK_TEST( 7,         0x80000000U, ANYBITS64, 0x80000000, EXPECT_SUCCESS);
+  BITMASK_TEST( 7,         0xC0000000U, ANYBITS64, 0x80000000, EXPECT_SUCCESS);
+  BITMASK_TEST( 7,       -0x80000000LL, ANYBITS64, 0x80000000, EXPECT_SUCCESS);
+  BITMASK_TEST( 7,       0x100000000LL, ANYBITS64, 0x80000000, EXPECT_FAILURE);
+  BITMASK_TEST( 7,       0x140000000LL, ANYBITS64, 0x80000000, EXPECT_FAILURE);
+  BITMASK_TEST( 7,       0x180000000LL, ANYBITS64, 0x80000000, EXPECT_SUCCESS);
+  BITMASK_TEST( 7,       0x1C0000000LL, ANYBITS64, 0x80000000, EXPECT_SUCCESS);
+  BITMASK_TEST( 7,      -0x180000000LL, ANYBITS64, 0x80000000, EXPECT_SUCCESS);
+
+  // 64bit test: any of 0x100000000
+  BITMASK_TEST( 8,       0x000000000LL, ANYBITS64,0x100000000, EXPECT_FAILURE);
+  BITMASK_TEST( 8,       0x100000000LL, ANYBITS64,0x100000000, EXPT64_SUCCESS);
+  BITMASK_TEST( 8,       0x200000000LL, ANYBITS64,0x100000000, EXPECT_FAILURE);
+  BITMASK_TEST( 8,       0x300000000LL, ANYBITS64,0x100000000, EXPT64_SUCCESS);
+  BITMASK_TEST( 8,       0x000000001LL, ANYBITS64,0x100000000, EXPECT_FAILURE);
+  BITMASK_TEST( 8,       0x100000001LL, ANYBITS64,0x100000000, EXPT64_SUCCESS);
+  BITMASK_TEST( 8,       0x200000001LL, ANYBITS64,0x100000000, EXPECT_FAILURE);
+  BITMASK_TEST( 8,       0x300000001LL, ANYBITS64,0x100000000, EXPT64_SUCCESS);
+
+  // 64bit test: any of 0x300000000
+  BITMASK_TEST( 9,       0x000000000LL, ANYBITS64,0x300000000, EXPECT_FAILURE);
+  BITMASK_TEST( 9,       0x100000000LL, ANYBITS64,0x300000000, EXPT64_SUCCESS);
+  BITMASK_TEST( 9,       0x200000000LL, ANYBITS64,0x300000000, EXPT64_SUCCESS);
+  BITMASK_TEST( 9,       0x300000000LL, ANYBITS64,0x300000000, EXPT64_SUCCESS);
+  BITMASK_TEST( 9,       0x700000000LL, ANYBITS64,0x300000000, EXPT64_SUCCESS);
+  BITMASK_TEST( 9,       0x000000001LL, ANYBITS64,0x300000000, EXPECT_FAILURE);
+  BITMASK_TEST( 9,       0x100000001LL, ANYBITS64,0x300000000, EXPT64_SUCCESS);
+  BITMASK_TEST( 9,       0x200000001LL, ANYBITS64,0x300000000, EXPT64_SUCCESS);
+  BITMASK_TEST( 9,       0x300000001LL, ANYBITS64,0x300000000, EXPT64_SUCCESS);
+  BITMASK_TEST( 9,       0x700000001LL, ANYBITS64,0x300000000, EXPT64_SUCCESS);
+
+  // 64bit test: any of 0x100000001
+  BITMASK_TEST( 10,      0x000000000LL, ANYBITS64,0x100000001, EXPECT_FAILURE);
+  BITMASK_TEST( 10,      0x000000001LL, ANYBITS64,0x100000001, EXPECT_SUCCESS);
+  BITMASK_TEST( 10,      0x100000000LL, ANYBITS64,0x100000001, EXPT64_SUCCESS);
+  BITMASK_TEST( 10,      0x100000001LL, ANYBITS64,0x100000001, EXPECT_SUCCESS);
+  BITMASK_TEST( 10,        0xFFFFFFFFU, ANYBITS64,0x100000001, EXPECT_SUCCESS);
+  BITMASK_TEST( 10,                -1L, ANYBITS64,0x100000001, EXPECT_SUCCESS);
+}
+
+intptr_t PthreadTrapHandler(const struct arch_seccomp_data& args, void *aux) {
+  if (args.args[0] != (CLONE_CHILD_CLEARTID|CLONE_CHILD_SETTID|SIGCHLD)) {
+    // We expect to get called for an attempt to fork(). No need to log that
+    // call. But if we ever get called for anything else, we want to verbosely
+    // print as much information as possible.
+    const char *msg = (const char *)aux;
+    printf("Clone() was called with unexpected arguments\n"
+           "  nr: %d\n"
+           "  1: 0x%llX\n"
+           "  2: 0x%llX\n"
+           "  3: 0x%llX\n"
+           "  4: 0x%llX\n"
+           "  5: 0x%llX\n"
+           "  6: 0x%llX\n"
+           "%s\n",
+           args.nr,
+           (long long)args.args[0],  (long long)args.args[1],
+           (long long)args.args[2],  (long long)args.args[3],
+           (long long)args.args[4],  (long long)args.args[5],
+           msg);
+  }
+  return -EPERM;
+}
+
+ErrorCode PthreadPolicyEquality(Sandbox *sandbox, int sysno, void *aux) {
+  // This policy allows creating threads with pthread_create(). But it
+  // doesn't allow any other uses of clone(). Most notably, it does not
+  // allow callers to implement fork() or vfork() by passing suitable flags
+  // to the clone() system call.
+  if (!Sandbox::IsValidSyscallNumber(sysno)) {
+    // FIXME: we should really not have to do that in a trivial policy
+    return ErrorCode(ENOSYS);
+  } else if (sysno == __NR_clone) {
+    // We have seen two different valid combinations of flags. Glibc
+    // uses the more modern flags, sets the TLS from the call to clone(), and
+    // uses futexes to monitor threads. Android's C run-time library, doesn't
+    // do any of this, but it sets the obsolete (and no-op) CLONE_DETACHED.
+    // The following policy is very strict. It only allows the exact masks
+    // that we have seen in known implementations. It is probably somewhat
+    // stricter than what we would want to do.
+    return sandbox->Cond(0, ErrorCode::TP_32BIT, ErrorCode::OP_EQUAL,
+                         CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_SIGHAND|
+                         CLONE_THREAD|CLONE_SYSVSEM|CLONE_SETTLS|
+                         CLONE_PARENT_SETTID|CLONE_CHILD_CLEARTID,
+                         ErrorCode(ErrorCode::ERR_ALLOWED),
+           sandbox->Cond(0, ErrorCode::TP_32BIT, ErrorCode::OP_EQUAL,
+                         CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_SIGHAND|
+                         CLONE_THREAD|CLONE_SYSVSEM|CLONE_DETACHED,
+                         ErrorCode(ErrorCode::ERR_ALLOWED),
+                         sandbox->Trap(PthreadTrapHandler, aux)));
+  } else {
+    return ErrorCode(ErrorCode::ERR_ALLOWED);
+  }
+}
+
+ErrorCode PthreadPolicyBitMask(Sandbox *sandbox, int sysno, void *aux) {
+  // This policy allows creating threads with pthread_create(). But it
+  // doesn't allow any other uses of clone(). Most notably, it does not
+  // allow callers to implement fork() or vfork() by passing suitable flags
+  // to the clone() system call.
+  if (!Sandbox::IsValidSyscallNumber(sysno)) {
+    // FIXME: we should really not have to do that in a trivial policy
+    return ErrorCode(ENOSYS);
+  } else if (sysno == __NR_clone) {
+    // We have seen two different valid combinations of flags. Glibc
+    // uses the more modern flags, sets the TLS from the call to clone(), and
+    // uses futexes to monitor threads. Android's C run-time library, doesn't
+    // do any of this, but it sets the obsolete (and no-op) CLONE_DETACHED.
+    // The following policy allows for either combination of flags, but it
+    // is generally a little more conservative than strictly necessary. We
+    // err on the side of rather safe than sorry.
+    // Very noticeably though, we disallow fork() (which is often just a
+    // wrapper around clone()).
+    return sandbox->Cond(0, ErrorCode::TP_32BIT, ErrorCode::OP_HAS_ANY_BITS,
+                         ~uint32(CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_SIGHAND|
+                                 CLONE_THREAD|CLONE_SYSVSEM|CLONE_SETTLS|
+                                 CLONE_PARENT_SETTID|CLONE_CHILD_CLEARTID|
+                                 CLONE_DETACHED),
+                         sandbox->Trap(PthreadTrapHandler,
+                                       "Unexpected CLONE_XXX flag found"),
+           sandbox->Cond(0, ErrorCode::TP_32BIT, ErrorCode::OP_HAS_ALL_BITS,
+                         CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_SIGHAND|
+                         CLONE_THREAD|CLONE_SYSVSEM,
+           sandbox->Cond(0, ErrorCode::TP_32BIT, ErrorCode::OP_HAS_ALL_BITS,
+                         CLONE_SETTLS|CLONE_PARENT_SETTID|CLONE_CHILD_CLEARTID,
+                         ErrorCode(ErrorCode::ERR_ALLOWED),
+           sandbox->Cond(0, ErrorCode::TP_32BIT, ErrorCode::OP_HAS_ANY_BITS,
+                         CLONE_SETTLS|CLONE_PARENT_SETTID|CLONE_CHILD_CLEARTID,
+                         sandbox->Trap(PthreadTrapHandler,
+                                       "Must set either all or none of the TLS"
+                                       " and futex bits in call to clone()"),
+                         ErrorCode(ErrorCode::ERR_ALLOWED))),
+                         sandbox->Trap(PthreadTrapHandler,
+                                       "Missing mandatory CLONE_XXX flags "
+                                       "when creating new thread")));
+  } else {
+    return ErrorCode(ErrorCode::ERR_ALLOWED);
+  }
+}
+
+static void *ThreadFnc(void *arg) {
+  ++*reinterpret_cast<int *>(arg);
+  SandboxSyscall(__NR_futex, arg, FUTEX_WAKE, 1, 0, 0, 0);
+  return NULL;
+}
+
+static void PthreadTest() {
+  // Attempt to start a joinable thread. This should succeed.
+  pthread_t thread;
+  int thread_ran = 0;
+  BPF_ASSERT(!pthread_create(&thread, NULL, ThreadFnc, &thread_ran));
+  BPF_ASSERT(!pthread_join(thread, NULL));
+  BPF_ASSERT(thread_ran);
+
+  // Attempt to start a detached thread. This should succeed.
+  thread_ran = 0;
+  pthread_attr_t attr;
+  BPF_ASSERT(!pthread_attr_init(&attr));
+  BPF_ASSERT(!pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED));
+  BPF_ASSERT(!pthread_create(&thread, &attr, ThreadFnc, &thread_ran));
+  BPF_ASSERT(!pthread_attr_destroy(&attr));
+  while (SandboxSyscall(__NR_futex, &thread_ran, FUTEX_WAIT,
+                        0, 0, 0, 0) == -EINTR) {
+  }
+  BPF_ASSERT(thread_ran);
+
+  // Attempt to fork() a process using clone(). This should fail. We use the
+  // same flags that glibc uses when calling fork(). But we don't actually
+  // try calling the fork() implementation in the C run-time library, as
+  // run-time libraries other than glibc might call __NR_fork instead of
+  // __NR_clone, and that would introduce a bogus test failure.
+  int pid;
+  BPF_ASSERT(SandboxSyscall(__NR_clone,
+                            CLONE_CHILD_CLEARTID|CLONE_CHILD_SETTID|SIGCHLD,
+                            0, 0, &pid) == -EPERM);
+}
+
+BPF_TEST(SandboxBpf, PthreadEquality, PthreadPolicyEquality) {
+  PthreadTest();
+}
+
+BPF_TEST(SandboxBpf, PthreadBitMask, PthreadPolicyBitMask) {
+  PthreadTest();
+}
 
 } // namespace

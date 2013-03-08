@@ -43,7 +43,8 @@ bool PrintWebViewHelper::RenderPreviewPage(
   base::TimeTicks begin_time = base::TimeTicks::Now();
   PrintPageInternal(page_params,
                     print_preview_context_.GetPrintCanvasSize(),
-                    print_preview_context_.frame(), initial_render_metafile);
+                    print_preview_context_.prepared_frame(),
+                    initial_render_metafile);
   print_preview_context_.RenderedPreviewPage(
       base::TimeTicks::Now() - begin_time);
   if (draft_metafile.get()) {
@@ -90,6 +91,9 @@ bool PrintWebViewHelper::PrintPagesNative(WebKit::WebFrame* frame,
     page_params.page_number = printed_pages[i];
     PrintPageInternal(page_params, canvas_size, frame, &metafile);
   }
+
+  // WebKit::printEnd() for PDF should be called before metafile is closed.
+  FinishFramePrinting();
 
   metafile.FinishDocument();
 

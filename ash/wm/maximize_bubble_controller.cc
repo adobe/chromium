@@ -83,7 +83,8 @@ class MaximizeBubbleBorder : public views::BubbleBorder {
 MaximizeBubbleBorder::MaximizeBubbleBorder(views::View* content_view,
                                            views::View* anchor)
     : views::BubbleBorder(views::BubbleBorder::TOP_RIGHT,
-                          views::BubbleBorder::NO_SHADOW),
+                          views::BubbleBorder::NO_SHADOW,
+                          kBubbleBackgroundColor),
       anchor_size_(anchor->size()),
       anchor_screen_origin_(0, 0),
       content_view_(content_view) {
@@ -194,7 +195,7 @@ class BubbleMouseWatcherHost: public views::MouseWatcherHost {
 
   // Implementation of MouseWatcherHost.
   virtual bool Contains(const gfx::Point& screen_point,
-                        views::MouseWatcherHost::MouseEventType type);
+                        views::MouseWatcherHost::MouseEventType type) OVERRIDE;
  private:
   MaximizeBubbleController::Bubble* bubble_;
 
@@ -225,7 +226,7 @@ class MaximizeBubbleController::Bubble : public views::BubbleDelegateView,
   virtual void GetWidgetHitTestMask(gfx::Path* mask) const OVERRIDE;
 
   // Implementation of MouseWatcherListener.
-  virtual void MouseMovedOutOfHost();
+  virtual void MouseMovedOutOfHost() OVERRIDE;
 
   // Implementation of MouseWatcherHost.
   virtual bool Contains(const gfx::Point& screen_point,
@@ -235,7 +236,7 @@ class MaximizeBubbleController::Bubble : public views::BubbleDelegateView,
   virtual gfx::Size GetPreferredSize() OVERRIDE;
 
   // Overridden from views::Widget::Observer.
-  virtual void OnWidgetClosing(views::Widget* widget) OVERRIDE;
+  virtual void OnWidgetDestroying(views::Widget* widget) OVERRIDE;
 
   // Called from the controller class to indicate that the menu should get
   // destroyed.
@@ -521,7 +522,8 @@ gfx::Size MaximizeBubbleController::Bubble::GetPreferredSize() {
   return contents_view_->GetPreferredSize();
 }
 
-void MaximizeBubbleController::Bubble::OnWidgetClosing(views::Widget* widget) {
+void MaximizeBubbleController::Bubble::OnWidgetDestroying(
+    views::Widget* widget) {
   if (bubble_widget_ == widget) {
     mouse_watcher_->Stop();
 
@@ -534,7 +536,7 @@ void MaximizeBubbleController::Bubble::OnWidgetClosing(views::Widget* widget) {
       owner_ = NULL;
     }
   }
-  BubbleDelegateView::OnWidgetClosing(widget);
+  BubbleDelegateView::OnWidgetDestroying(widget);
 }
 
 void MaximizeBubbleController::Bubble::ControllerRequestsCloseAndDelete() {

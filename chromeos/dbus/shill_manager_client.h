@@ -31,6 +31,8 @@ class CHROMEOS_EXPORT ShillManagerClient {
   typedef ShillClientHelper::PropertyChangedHandler PropertyChangedHandler;
   typedef ShillClientHelper::DictionaryValueCallback DictionaryValueCallback;
   typedef ShillClientHelper::ErrorCallback ErrorCallback;
+  typedef ShillClientHelper::StringCallback StringCallback;
+  typedef ShillClientHelper::BooleanCallback BooleanCallback;
 
   // Interface for setting up devices, services, and technologies for testing.
   // Accessed through GetTestInterface(), only implemented in the Stub Impl.
@@ -38,13 +40,14 @@ class CHROMEOS_EXPORT ShillManagerClient {
    public:
     virtual void AddDevice(const std::string& device_path) = 0;
     virtual void RemoveDevice(const std::string& device_path) = 0;
-    virtual void ResetDevices() = 0;
+    virtual void ClearDevices() = 0;
     virtual void AddService(const std::string& service_path,
                             bool add_to_watch_list) = 0;
     virtual void AddServiceAtIndex(const std::string& service_path,
                                    size_t index,
                                    bool add_to_watch_list) = 0;
     virtual void RemoveService(const std::string& service_path) = 0;
+    virtual void ClearServices() = 0;
     virtual void AddTechnology(const std::string& type, bool enabled) = 0;
     virtual void RemoveTechnology(const std::string& type) = 0;
     virtual void AddGeoNetwork(const std::string& technology,
@@ -117,7 +120,7 @@ class CHROMEOS_EXPORT ShillManagerClient {
   // Calls ConfigureService method.
   // |callback| is called after the method call succeeds.
   virtual void ConfigureService(const base::DictionaryValue& properties,
-                                const base::Closure& callback,
+                                const ObjectPathCallback& callback,
                                 const ErrorCallback& error_callback) = 0;
 
   // Calls GetService method.
@@ -125,6 +128,42 @@ class CHROMEOS_EXPORT ShillManagerClient {
   virtual void GetService(const base::DictionaryValue& properties,
                           const ObjectPathCallback& callback,
                           const ErrorCallback& error_callback) = 0;
+
+  // Verify that the given data corresponds to a trusted device, and return true
+  // to the callback if it is.
+  virtual void VerifyDestination(const std::string& certificate,
+                                 const std::string& public_key,
+                                 const std::string& nonce,
+                                 const std::string& signed_data,
+                                 const std::string& device_serial,
+                                 const BooleanCallback& callback,
+                                 const ErrorCallback& error_callback) = 0;
+
+  // Verify that the given data corresponds to a trusted device, and if it is,
+  // return the encrypted credentials for connecting to the network represented
+  // by the given |service_path|, encrypted using the |public_key| for the
+  // trusted device. If the device is not trusted, return the empty string.
+  virtual void VerifyAndEncryptCredentials(
+      const std::string& certificate,
+      const std::string& public_key,
+      const std::string& nonce,
+      const std::string& signed_data,
+      const std::string& device_serial,
+      const std::string& service_path,
+      const StringCallback& callback,
+      const ErrorCallback& error_callback) = 0;
+
+  // Verify that the given data corresponds to a trusted device, and return the
+  // |data| encrypted using the |public_key| for the trusted device. If the
+  // device is not trusted, return the empty string.
+  virtual void VerifyAndEncryptData(const std::string& certificate,
+                                 const std::string& public_key,
+                                 const std::string& nonce,
+                                 const std::string& signed_data,
+                                 const std::string& device_serial,
+                                 const std::string& data,
+                                 const StringCallback& callback,
+                                 const ErrorCallback& error_callback) = 0;
 
   // Returns an interface for testing (stub only), or returns NULL.
   virtual TestInterface* GetTestInterface() = 0;

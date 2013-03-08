@@ -15,11 +15,14 @@ class EnterpriseEnrollmentScreenActor;
 class EulaScreenActor;
 class NetworkScreenActor;
 class ResetScreenActor;
+class TermsOfServiceScreenActor;
 class UpdateScreenActor;
 class UserImageScreenActor;
 // TODO(altimofeev): use real actors instead
 class ViewScreenDelegate;
 class WizardScreen;
+class WrongHWIDScreenActor;
+class LocallyManagedUserCreationScreenHandler;
 
 // Interface which is used by WizardController to do actual OOBE screens
 // showing. Also it provides actors for the OOBE screens.
@@ -41,10 +44,13 @@ class OobeDisplay {
   virtual EnterpriseEnrollmentScreenActor*
       GetEnterpriseEnrollmentScreenActor() = 0;
   virtual ResetScreenActor* GetResetScreenActor() = 0;
+  virtual TermsOfServiceScreenActor* GetTermsOfServiceScreenActor() = 0;
   virtual UserImageScreenActor* GetUserImageScreenActor() = 0;
   // TODO(altimofeev): use real actors instead.
   virtual ViewScreenDelegate* GetRegistrationScreenActor() = 0;
-  virtual ViewScreenDelegate* GetHTMLPageScreenActor() = 0;
+  virtual WrongHWIDScreenActor* GetWrongHWIDScreenActor() = 0;
+  virtual LocallyManagedUserCreationScreenHandler*
+      GetLocallyManagedUserCreationScreenActor() = 0;
 };
 
 }  // namespace chromeos
