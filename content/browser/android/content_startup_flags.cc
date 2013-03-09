@@ -75,6 +75,11 @@ void SetContentCommandLineFlags(int max_render_process_count,
     parsed_command_line->AppendSwitchNative(
       switches::kRegisterPepperPlugins, plugin_descriptor);
   }
+
+  // Special build for Cordova
+  parsed_command_line->AppendSwitch(switches::kEnableExperimentalWebGL);
+  parsed_command_line->AppendSwitch(switches::kEnableCssShaders);
+  parsed_command_line->AppendSwitch(switches::kEnableExperimentalWebKitFeatures);
 }
 
 }  // namespace content
