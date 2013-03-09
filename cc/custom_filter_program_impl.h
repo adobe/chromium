@@ -18,6 +18,8 @@ namespace cc {
             return make_scoped_refptr(new CustomFilterProgramImpl(program));
         }
 
+        virtual unsigned id() const;
+
         virtual WebKit::WebString vertexShader() const;
         virtual void setVertexShader(const WebKit::WebString&);
 
@@ -32,6 +34,7 @@ namespace cc {
         virtual void refFromWebCustomFilterProgram();
         virtual void derefFromCustomFilterProgram();
 
+        unsigned m_id;
         WebKit::WebString m_vertexShader;
         WebKit::WebString m_fragmentShader;
     };

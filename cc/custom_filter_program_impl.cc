@@ -6,6 +6,11 @@
 
 namespace cc {
 
+unsigned CustomFilterProgramImpl::id() const
+{
+    return m_id;
+}
+
 WebKit::WebString CustomFilterProgramImpl::vertexShader() const
 {
     return m_vertexShader;
@@ -26,21 +31,24 @@ void CustomFilterProgramImpl::setFragmentShader(const WebKit::WebString& fragmen
     m_fragmentShader.assign(fragmentShader);
 }
 
-void CustomFilterProgramImpl::refFromWebCustomFilterProgram() {
+void CustomFilterProgramImpl::refFromWebCustomFilterProgram()
+{
     AddRef();
 }
-void CustomFilterProgramImpl::derefFromCustomFilterProgram() {
+void CustomFilterProgramImpl::derefFromCustomFilterProgram()
+{
     Release();
 }
 
-CustomFilterProgramImpl::~CustomFilterProgramImpl() {
+CustomFilterProgramImpl::~CustomFilterProgramImpl()
+{
 }
 
 CustomFilterProgramImpl::CustomFilterProgramImpl(const WebKit::WebCustomFilterProgram* program)
-    : m_vertexShader(program->vertexShader())
+    : m_id(program->id())
+    , m_vertexShader(program->vertexShader())
     , m_fragmentShader(program->fragmentShader())
 {
-
 }
 
 }
