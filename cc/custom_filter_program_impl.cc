@@ -4,6 +4,8 @@
 
 #include "cc/custom_filter_program_impl.h"
 
+#include "cc/custom_filter_compiled_program.h"
+
 namespace cc {
 
 unsigned CustomFilterProgramImpl::id() const
@@ -29,6 +31,11 @@ WebKit::WebString CustomFilterProgramImpl::fragmentShader() const
 void CustomFilterProgramImpl::setFragmentShader(const WebKit::WebString& fragmentShader)
 {
     m_fragmentShader.assign(fragmentShader);
+}
+
+void CustomFilterProgramImpl::setCompiledProgram(CustomFilterCompiledProgram* compiledProgram)
+{ 
+    m_compiledProgram.reset(compiledProgram);
 }
 
 void CustomFilterProgramImpl::refFromWebCustomFilterProgram()

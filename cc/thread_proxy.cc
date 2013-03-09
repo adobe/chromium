@@ -329,6 +329,7 @@ void ThreadProxy::checkOutputSurfaceStatusOnImplThread()
         offscreenContexts->VerifyContexts();
     if (cc::ContextProvider* customFilterContexts = m_layerTreeHostImpl->resourceProvider()->customFilterContextProvider())
         customFilterContexts->VerifyContexts();
+    m_layerTreeHostImpl->resourceProvider()->cleanupCustomFilters();
     m_schedulerOnImplThread->didLoseOutputSurface();
 }
 

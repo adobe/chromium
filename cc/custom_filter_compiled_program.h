@@ -5,7 +5,6 @@
 #ifndef CC_CUSTOM_FILTER_COMPILED_PROGRAM_H_
 #define CC_CUSTOM_FILTER_COMPILED_PROGRAM_H_
 
-#include "base/memory/scoped_ptr.h"
 #include "cc/cc_export.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebGraphicsContext3D.h"
 
@@ -31,12 +30,7 @@ enum CustomFilterProgramType {
 
 class CC_EXPORT CustomFilterCompiledProgram {
 public:
-    static scoped_ptr<CustomFilterCompiledProgram> create(WebKit::WebGraphicsContext3D* context, const WebKit::WebString& vertexShaderString, const WebKit::WebString& fragmentShaderString, CustomFilterProgramType programType)
-    {
-        scoped_ptr<CustomFilterCompiledProgram> renderer(make_scoped_ptr(new CustomFilterCompiledProgram(context, vertexShaderString, fragmentShaderString, programType)));
-        return renderer.Pass();
-    }
-    
+    CustomFilterCompiledProgram(WebKit::WebGraphicsContext3D* context, const WebKit::WebString& vertexShaderString, const WebKit::WebString& fragmentShaderString, CustomFilterProgramType programType);
     ~CustomFilterCompiledProgram();
     
     WebKit::WGC3Dint positionAttribLocation() const { return m_positionAttribLocation; }
@@ -57,8 +51,6 @@ public:
     
     WebKit::WebGLId program() const { return m_program; }
 private:
-    CustomFilterCompiledProgram(WebKit::WebGraphicsContext3D* context, const WebKit::WebString& vertexShaderString, const WebKit::WebString& fragmentShaderString, CustomFilterProgramType programType);
-    
     WebKit::WebGLId compileShader(WebKit::WGC3Denum shaderType, const WebKit::WebString& shaderString);
     WebKit::WebGLId linkProgram(WebKit::WebGLId vertexShader, WebKit::WebGLId fragmentShader);
     void initializeParameterLocations(CustomFilterProgramType);

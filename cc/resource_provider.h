@@ -275,6 +275,7 @@ public:
     void setCustomFilterContextProvider(scoped_refptr<cc::ContextProvider> customFilterContextProvider);
 
     scoped_refptr<CustomFilterProgramImpl> lookupCustomFilter(const WebKit::WebCustomFilterProgram*);
+    void cleanupCustomFilters();
 
 private:
     struct Resource {
@@ -353,6 +354,9 @@ private:
     base::ThreadChecker m_threadChecker;
 
     scoped_refptr<Fence> m_currentReadLockFence;
+
+    typedef base::hash_map<unsigned, scoped_refptr<CustomFilterProgramImpl> > CustomFilterProgramMap;
+    CustomFilterProgramMap m_customFilterPrograms;
 
     DISALLOW_COPY_AND_ASSIGN(ResourceProvider);
 };

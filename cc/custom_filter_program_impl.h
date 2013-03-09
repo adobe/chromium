@@ -5,10 +5,13 @@
 #ifndef CC_CUSTOM_FILTER_PROGRAM_IMPL_H_
 #define CC_CUSTOM_FILTER_PROGRAM_IMPL_H_
 
+#include "base/memory/scoped_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebCustomFilterProgram.h"
 
 namespace cc {
+
+    class CustomFilterCompiledProgram;
 
     class CustomFilterProgramImpl : 
         public base::RefCounted<CustomFilterProgramImpl>,
@@ -26,6 +29,9 @@ namespace cc {
         virtual WebKit::WebString fragmentShader() const;
         virtual void setFragmentShader(const WebKit::WebString&);
 
+        CustomFilterCompiledProgram* compiledProgram() const { return m_compiledProgram.get(); }
+        void setCompiledProgram(CustomFilterCompiledProgram* compiledProgram);
+
     private:
         friend class base::RefCounted<CustomFilterProgramImpl>;
         CustomFilterProgramImpl(const WebKit::WebCustomFilterProgram*);
@@ -37,6 +43,8 @@ namespace cc {
         unsigned m_id;
         WebKit::WebString m_vertexShader;
         WebKit::WebString m_fragmentShader;
+
+        scoped_ptr<CustomFilterCompiledProgram> m_compiledProgram;
     };
 
 }

@@ -267,7 +267,6 @@ public:
         m_source.setConfig(SkBitmap::kARGB_8888_Config, size.width(), size.height());
         skia::RefPtr<SkGrPixelRef> pixelRef = skia::AdoptRef(new SkGrPixelRef(texture.get()));
         m_source.setPixelRef(pixelRef.get());
-        std::cerr << "FilterBufferState Constructor: Source has texture with id " << texture->getTextureHandle() << "." <<  std::endl;
     }
 
     ~FilterBufferState() { }
@@ -309,14 +308,12 @@ public:
     {
         if (m_canvas.get()) {
             m_canvas->flush();
-            std::cerr << "Flush and destroy canvas." << std::endl;
             m_canvas.clear();
             m_device.clear();
         }
 
         skia::RefPtr<SkGrPixelRef> pixelRef = skia::AdoptRef(new SkGrPixelRef(m_scratchTextures[m_currentTexture].get()));
         m_source.setPixelRef(pixelRef.get());
-        std::cerr << "Swap: Set source pixel ref to texture with id " << m_scratchTextures[m_currentTexture]->getTextureHandle() << "." << std::endl;
         m_currentTexture = 1 - m_currentTexture;
     }
 
@@ -327,7 +324,6 @@ private:
         m_device = skia::AdoptRef(new SkGpuDevice(m_grContext, m_scratchTextures[m_currentTexture].get()));
         m_canvas = skia::AdoptRef(new SkCanvas(m_device.get()));
         m_canvas->clear(0x0);
-        std::cerr << "Create canvas backed by texture id " << m_scratchTextures[m_currentTexture]->getTextureHandle() << "." << std::endl;
     }
 
     GrContext* m_grContext;
@@ -425,7 +421,6 @@ SkBitmap RenderSurfaceFilters::apply(const WebKit::WebFilterOperations& filters,
             SkPaint paint;
             paint.setImageFilter(filter.get());
             canvas->drawSprite(state.source(), 0, 0, &paint);
-            std::cerr << "Apply blur." << std::endl;
             break;
         }
         case WebKit::WebFilterOperation::FilterTypeDropShadow: {

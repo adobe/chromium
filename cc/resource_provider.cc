@@ -1162,7 +1162,21 @@ void ResourceProvider::setCustomFilterContextProvider(scoped_refptr<cc::ContextP
 
 scoped_refptr<CustomFilterProgramImpl> ResourceProvider::lookupCustomFilter(const WebKit::WebCustomFilterProgram* program)
 {
-    return CustomFilterProgramImpl::create(program);
+    unsigned id = program->id();
+    CustomFilterProgramMap::const_iterator iter = m_customFilterPrograms.find(id);
+    scoped_refptr<CustomFilterProgramImpl> customFilterProgramImpl;
+    if (iter == m_customFilterPrograms.end()) {
+        customFilterProgramImpl = CustomFilterProgramImpl::create(program);
+        m_customFilterPrograms.insert(std::pair<unsigned, scoped_refptr<CustomFilterProgramImpl> >(id, customFilterProgramImpl));
+    } else {
+        customFilterProgramImpl = iter->second;
+    }
+    return customFilterProgramImpl;
+}
+
+void ResourceProvider::cleanupCustomFilters()
+{
+    m_customFilterPrograms.clear();
 }
 
 }  // namespace cc

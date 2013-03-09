@@ -462,6 +462,9 @@ bool SingleThreadProxy::doComposite(scoped_refptr<cc::ContextProvider> offscreen
     if (m_outputSurfaceLost) {
         if (cc::ContextProvider* offscreenContexts = m_layerTreeHostImpl->resourceProvider()->offscreenContextProvider())
             offscreenContexts->VerifyContexts();
+        if (cc::ContextProvider* customFilterContexts = m_layerTreeHostImpl->resourceProvider()->customFilterContextProvider())
+            customFilterContexts->VerifyContexts();
+        m_layerTreeHostImpl->resourceProvider()->cleanupCustomFilters();
         m_layerTreeHost->didLoseOutputSurface();
         return false;
     }

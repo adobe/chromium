@@ -181,13 +181,25 @@ void CustomFilterRenderer::unbindVertexAttribute(WebKit::WGC3Duint attributeLoca
 
 void CustomFilterRenderer::render(const WebKit::WebFilterOperation& op, WebKit::WebGLId sourceTextureId, WebKit::WGC3Dsizei width, WebKit::WGC3Dsizei height, WebKit::WebGLId destinationTextureId)
 {
-    std::cerr << "Applying custom filter with destination texture id " << destinationTextureId << " and source texture id " << sourceTextureId << "." << std::endl;
-
     // Set up m_context.
-    if (!m_context->makeContextCurrent()) {
-        std::cerr << "Failed to make custom filters m_context current." << std::endl;
+    if (!m_context->makeContextCurrent())
+        return;
+
+    CustomFilterProgramImpl* programImpl = static_cast<CustomFilterProgramImpl*>(op.customFilterProgram());
+    CustomFilterCompiledProgram* compiledProgram = programImpl->compiledProgram();
+    if (!compiledProgram) {
+        compiledProgram = new CustomFilterCompiledProgram(
+            m_context, op.customFilterProgram()->vertexShader(), op.customFilterProgram()->fragmentShader(), 
+            PROGRAM_TYPE_BLENDS_ELEMENT_TEXTURE); // TODO(mvujovic): Use the program type from WebCustomFilterProgram, when it's available there.
+        // CustomFilterProgramImpl is going to take ownership of the compiled program.
+        programImpl->setCompiledProgram(compiledProgram);
+    }
+
+    if (!compiledProgram->isInitialized()) {
+        // FIXME: make sure we are just reusing the texture in this case.
         return;
     }
+
     GLC(m_context, m_context->enable(GL_DEPTH_TEST));
 
     // Create frame buffer.
@@ -212,9 +224,6 @@ void CustomFilterRenderer::render(const WebKit::WebFilterOperation& op, WebKit::
     GLC(m_context, m_context->clearColor(0.0, 0.0, 0.0, 0.0));
     GLC(m_context, m_context->clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT));
 
-    scoped_ptr<CustomFilterCompiledProgram> compiledProgram = CustomFilterCompiledProgram::create(
-        m_context, op.customFilterProgram()->vertexShader(), op.customFilterProgram()->fragmentShader(), 
-        PROGRAM_TYPE_BLENDS_ELEMENT_TEXTURE); // TODO(mvujovic): Use the program type from WebCustomFilterProgram, when it's available there.
     WebKit::WebGLId program = compiledProgram->program();
     GLC(m_context, m_context->useProgram(program));
 
@@ -256,11 +265,10 @@ void CustomFilterRenderer::render(const WebKit::WebFilterOperation& op, WebKit::
     // Bind author defined parameters.
     WebKit::WebVector<WebKit::WebCustomFilterParameter> parameters;
     op.customFilterParameters(parameters);
-    bindProgramParameters(parameters, compiledProgram.get(), width, height);
+    bindProgramParameters(parameters, compiledProgram, width, height);
 
     // Draw!
     GLC(m_context, m_context->drawElements(GL_TRIANGLES, mesh.indicesCount(), GL_UNSIGNED_SHORT, 0));
-    std::cerr << "Draw elements!" << std::endl;
 
     // Unbind vertex attributes.
     unbindVertexAttribute(compiledProgram->positionAttribLocation());
@@ -279,7 +287,6 @@ void CustomFilterRenderer::render(const WebKit::WebFilterOperation& op, WebKit::
 
     // Flush.
     GLC(m_context, m_context->flush());
-    std::cerr << "Flush custom filter m_context." << std::endl;
 }
 
 }  // namespace cc
