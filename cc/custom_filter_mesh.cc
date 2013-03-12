@@ -11,7 +11,7 @@ namespace cc {
 static bool s_dumpCustomFilterMeshBuffers = false;
 #endif
 
-CustomFilterMesh::CustomFilterMesh(unsigned columns, unsigned rows, const gfx::RectF& meshBox, CustomFilterMeshType meshType)
+CustomFilterMesh::CustomFilterMesh(unsigned columns, unsigned rows, const gfx::RectF& meshBox, WebKit::WebCustomFilterMeshType meshType)
     : m_meshType(meshType)
     , m_points(columns + 1, rows + 1)
     , m_tiles(columns, rows)
@@ -32,7 +32,7 @@ CustomFilterMesh::CustomFilterMesh(unsigned columns, unsigned rows, const gfx::R
     // when there's no need to explode the tiles.
     // * detached: each triangle has its own vertices. This means each triangle can be moved independently and a vec3
     // attribute is passed, so that each vertex can be uniquely identified.
-    if (m_meshType == MeshTypeAttached)
+    if (m_meshType == WebKit::WebMeshTypeAttached)
         generateAttachedMesh();
     else
         generateDetachedMesh();
@@ -129,7 +129,7 @@ void CustomFilterMesh::dumpBuffers() const
 {
     printf("Mesh buffers: Points.width(): %d, Points.height(): %d meshBox: %f, %f, %f, %f, type: %s\n",
         m_points.width(), m_points.height(), m_meshBox.x(), m_meshBox.y(), m_meshBox.width(), m_meshBox.height(),
-        (m_meshType == MeshTypeAttached) ? "Attached" : "Detached");
+        (m_meshType == WebKit::WebMeshTypeAttached) ? "Attached" : "Detached");
     printf("---Vertex:\n\t");
     for (unsigned i = 0; i < m_vertices.size(); ++i) {
         printf("%f ", m_vertices.at(i));

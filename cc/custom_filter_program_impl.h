@@ -23,11 +23,9 @@ namespace cc {
 
         virtual unsigned id() const;
 
+        virtual WebKit::WebCustomFilterProgramType programType() const;
         virtual WebKit::WebString vertexShader() const;
-        virtual void setVertexShader(const WebKit::WebString&);
-
         virtual WebKit::WebString fragmentShader() const;
-        virtual void setFragmentShader(const WebKit::WebString&);
 
         CustomFilterCompiledProgram* compiledProgram() const { return m_compiledProgram.get(); }
         void setCompiledProgram(CustomFilterCompiledProgram* compiledProgram);
@@ -41,6 +39,7 @@ namespace cc {
         virtual void derefFromCustomFilterProgram();
 
         unsigned m_id;
+        WebKit::WebCustomFilterProgramType m_programType;
         WebKit::WebString m_vertexShader;
         WebKit::WebString m_fragmentShader;
 

@@ -11,6 +11,8 @@
 #include "ui/gfx/rect_f.h"
 #include "ui/gfx/size.h"
 #include "ui/gfx/size_f.h"
+// Needed for WebKit::WebCustomFilterMeshType 
+#include "third_party/WebKit/Source/Platform/chromium/public/WebFilterOperation.h"
 
 namespace cc {
 
@@ -42,18 +44,13 @@ enum CustomFilterMeshConstants {
     TriangleAttribOffset = MeshAttribOffset + MeshAttribSize * sizeof(float)
 };
 
-enum CustomFilterMeshType {
-    MeshTypeAttached,
-    MeshTypeDetached
-};
-
 class CC_EXPORT CustomFilterMesh {
 public:
     // Lines and columns are the values passed in CSS. The result is vertex mesh that has 'rows' numbers of rows
     // and 'columns' number of columns with a total of 'rows + 1' * 'columns + 1' vertices.
     // MeshBox is the filtered area calculated defined using the border-box, padding-box, content-box or filter-box
     // attributes. A value of (0, 0, 1, 1) will cover the entire output surface.
-    CustomFilterMesh(unsigned columns, unsigned rows, const gfx::RectF& meshBox, CustomFilterMeshType);
+    CustomFilterMesh(unsigned columns, unsigned rows, const gfx::RectF& meshBox, WebKit::WebCustomFilterMeshType);
     ~CustomFilterMesh();
 
     const std::vector<float>& vertices() const { return m_vertices; }
@@ -76,7 +73,7 @@ public:
     {
         static const unsigned AttachedMeshVertexSize = PositionAttribSize + TexAttribSize + MeshAttribSize;
         static const unsigned DetachedMeshVertexSize = AttachedMeshVertexSize + TriangleAttribSize;
-        return m_meshType == MeshTypeAttached ? AttachedMeshVertexSize : DetachedMeshVertexSize;
+        return m_meshType == WebKit::WebMeshTypeAttached ? AttachedMeshVertexSize : DetachedMeshVertexSize;
     }
 
     // CC-added code.
@@ -84,7 +81,7 @@ public:
 
     unsigned verticesCount() const
     {
-        return m_meshType == MeshTypeAttached ? pointsCount() : indicesCount();
+        return m_meshType == WebKit::WebMeshTypeAttached ? pointsCount() : indicesCount();
     }
 
 private:
@@ -123,7 +120,7 @@ private:
     std::vector<float> m_vertices;
     std::vector<uint16_t> m_indices;
 
-    CustomFilterMeshType m_meshType;
+    WebKit::WebCustomFilterMeshType m_meshType;
     gfx::Size m_points;
     gfx::Size m_tiles;
     gfx::SizeF m_tileSizeInPixels;

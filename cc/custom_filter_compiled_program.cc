@@ -12,7 +12,7 @@
 
 namespace cc {
 
-CustomFilterCompiledProgram::CustomFilterCompiledProgram(WebKit::WebGraphicsContext3D* context, const WebKit::WebString& validatedVertexShader, const WebKit::WebString& validatedFragmentShader, CustomFilterProgramType programType)
+CustomFilterCompiledProgram::CustomFilterCompiledProgram(WebKit::WebGraphicsContext3D* context, const WebKit::WebString& validatedVertexShader, const WebKit::WebString& validatedFragmentShader, WebKit::WebCustomFilterProgramType programType)
     : m_context(context)
     , m_program(0)
     , m_positionAttribLocation(-1)
@@ -95,7 +95,7 @@ WebKit::WebGLId CustomFilterCompiledProgram::linkProgram(WebKit::WebGLId vertexS
     return program;
 }
 
-void CustomFilterCompiledProgram::initializeParameterLocations(CustomFilterProgramType programType)
+void CustomFilterCompiledProgram::initializeParameterLocations(WebKit::WebCustomFilterProgramType programType)
 {
     m_positionAttribLocation = m_context->getAttribLocation(m_program, "a_position");
     m_texAttribLocation = m_context->getAttribLocation(m_program, "a_texCoord");
@@ -107,7 +107,7 @@ void CustomFilterCompiledProgram::initializeParameterLocations(CustomFilterProgr
     m_projectionMatrixLocation = m_context->getUniformLocation(m_program, "u_projectionMatrix");
     m_samplerSizeLocation = m_context->getUniformLocation(m_program, "u_textureSize");
     m_contentSamplerLocation = m_context->getUniformLocation(m_program, "u_contentTexture");
-    if (programType == PROGRAM_TYPE_BLENDS_ELEMENT_TEXTURE) {
+    if (programType == WebKit::WebProgramTypeBlendsElementTexture) {
         // When the author uses the CSS mix function in a custom filter, WebKit adds the internal
         // symbol css_u_texture to the shader code, which references the texture of the element.
         m_samplerLocation = m_context->getUniformLocation(m_program, "css_u_texture");

@@ -189,8 +189,7 @@ void CustomFilterRenderer::render(const WebKit::WebFilterOperation& op, WebKit::
     CustomFilterCompiledProgram* compiledProgram = programImpl->compiledProgram();
     if (!compiledProgram) {
         compiledProgram = new CustomFilterCompiledProgram(
-            m_context, op.customFilterProgram()->vertexShader(), op.customFilterProgram()->fragmentShader(), 
-            PROGRAM_TYPE_BLENDS_ELEMENT_TEXTURE); // TODO(mvujovic): Use the program type from WebCustomFilterProgram, when it's available there.
+            m_context, op.customFilterProgram()->vertexShader(), op.customFilterProgram()->fragmentShader(), op.customFilterProgram()->programType());
         // CustomFilterProgramImpl is going to take ownership of the compiled program.
         programImpl->setCompiledProgram(compiledProgram);
     }
@@ -229,7 +228,7 @@ void CustomFilterRenderer::render(const WebKit::WebFilterOperation& op, WebKit::
 
     // Generate a mesh.
     gfx::RectF meshBox(0.0, 0.0, 1.0, 1.0);
-    CustomFilterMesh mesh(op.meshRows(), op.meshColumns(), meshBox, (CustomFilterMeshType)op.meshType());
+    CustomFilterMesh mesh(op.meshColumns(), op.meshRows(), meshBox, op.meshType());
 
     // Set up vertex buffer.
     WebKit::WebGLId vertexBuffer = GLC(m_context, m_context->createBuffer());
@@ -245,7 +244,7 @@ void CustomFilterRenderer::render(const WebKit::WebFilterOperation& op, WebKit::
     bindVertexAttribute(compiledProgram->positionAttribLocation(), PositionAttribSize, mesh.bytesPerVertex(), PositionAttribOffset);
     bindVertexAttribute(compiledProgram->texAttribLocation(), TexAttribSize, mesh.bytesPerVertex(), TexAttribOffset);
     bindVertexAttribute(compiledProgram->meshAttribLocation(), MeshAttribSize, mesh.bytesPerVertex(), MeshAttribOffset);
-    if ((CustomFilterMeshType)op.meshType() == MeshTypeDetached)
+    if (op.meshType() == WebKit::WebMeshTypeDetached)
         bindVertexAttribute(compiledProgram->triangleAttribLocation(), TriangleAttribSize, mesh.bytesPerVertex(), TriangleAttribOffset);
 
     // Bind source texture.
@@ -253,14 +252,32 @@ void CustomFilterRenderer::render(const WebKit::WebFilterOperation& op, WebKit::
     glBindTexture(GL_TEXTURE_2D, sourceTextureId);
 
     // Bind uniform pointing to source texture.
-    WebKit::WGC3Dint sourceTextureUniformLocation = GLC(m_context, m_context->getUniformLocation(program, "css_u_texture"));
-    glUniform1i(sourceTextureUniformLocation, 0);
+    if (compiledProgram->samplerLocation() != -1) {
+        DCHECK(op.customFilterProgram()->programType() == WebKit::WebProgramTypeBlendsElementTexture);
+        glUniform1i(compiledProgram->samplerLocation(), 0);
+    }
 
-    // Bind projection matrix uniform.
-    WebKit::WGC3Dint projectionMatrixLocation = GLC(m_context, m_context->getUniformLocation(program, "u_projectionMatrix"));
-    float projectionMatrix[16];
-    orthogonalProjectionMatrix(projectionMatrix, -0.5, 0.5, -0.5, 0.5);
-    GLC(m_context, m_context->uniformMatrix4fv(projectionMatrixLocation, 1, false, projectionMatrix));
+    if (compiledProgram->projectionMatrixLocation() != -1) {
+        // Bind projection matrix uniform.
+        float projectionMatrix[16];
+        orthogonalProjectionMatrix(projectionMatrix, -0.5, 0.5, -0.5, 0.5);
+        GLC(m_context, m_context->uniformMatrix4fv(compiledProgram->projectionMatrixLocation(), 1, false, projectionMatrix));
+    }
+
+    if (compiledProgram->meshSizeLocation() != -1)
+        GLC(m_context, m_context->uniform2f(compiledProgram->meshSizeLocation(), op.meshColumns(), op.meshRows()));
+
+    if (compiledProgram->tileSizeLocation() != -1)
+        GLC(m_context, m_context->uniform2f(compiledProgram->tileSizeLocation(), 1.0 / op.meshColumns(), 1.0 / op.meshRows()));
+
+    if (compiledProgram->meshBoxLocation() != -1) {
+        // FIXME: This will change when filter margins will be implemented,
+        // see https://bugs.webkit.org/show_bug.cgi?id=71400
+        GLC(m_context, m_context->uniform4f(compiledProgram->meshBoxLocation(), -0.5, -0.5, 1.0, 1.0));
+    }
+
+    if (compiledProgram->samplerSizeLocation() != -1)
+        GLC(m_context, m_context->uniform2f(compiledProgram->samplerSizeLocation(), width, height));
 
     // Bind author defined parameters.
     WebKit::WebVector<WebKit::WebCustomFilterParameter> parameters;
@@ -274,7 +291,7 @@ void CustomFilterRenderer::render(const WebKit::WebFilterOperation& op, WebKit::
     unbindVertexAttribute(compiledProgram->positionAttribLocation());
     unbindVertexAttribute(compiledProgram->texAttribLocation());
     unbindVertexAttribute(compiledProgram->meshAttribLocation());
-    if ((CustomFilterMeshType)op.meshType() == MeshTypeDetached)
+    if (op.meshType() == WebKit::WebMeshTypeDetached)
         unbindVertexAttribute(compiledProgram->triangleAttribLocation());
 
     // TODO(mvujovic): Unbind built-in and custom uniforms.

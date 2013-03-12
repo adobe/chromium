@@ -7,6 +7,7 @@
 
 #include "cc/cc_export.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebGraphicsContext3D.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebCustomFilterProgram.h"
 
 namespace cc {
 
@@ -21,16 +22,9 @@ namespace cc {
 // Additionally, some conversions from WebString -> WebCString -> char* had to be done for the WebGraphicsContext3D functions.
 //
 
-// Constants from WebKit's CustomFilterConstants.h:
-
-enum CustomFilterProgramType {
-    PROGRAM_TYPE_NO_ELEMENT_TEXTURE,
-    PROGRAM_TYPE_BLENDS_ELEMENT_TEXTURE
-};
-
 class CC_EXPORT CustomFilterCompiledProgram {
 public:
-    CustomFilterCompiledProgram(WebKit::WebGraphicsContext3D* context, const WebKit::WebString& vertexShaderString, const WebKit::WebString& fragmentShaderString, CustomFilterProgramType programType);
+    CustomFilterCompiledProgram(WebKit::WebGraphicsContext3D* context, const WebKit::WebString& vertexShaderString, const WebKit::WebString& fragmentShaderString, WebKit::WebCustomFilterProgramType programType);
     ~CustomFilterCompiledProgram();
     
     WebKit::WGC3Dint positionAttribLocation() const { return m_positionAttribLocation; }
@@ -53,7 +47,7 @@ public:
 private:
     WebKit::WebGLId compileShader(WebKit::WGC3Denum shaderType, const WebKit::WebString& shaderString);
     WebKit::WebGLId linkProgram(WebKit::WebGLId vertexShader, WebKit::WebGLId fragmentShader);
-    void initializeParameterLocations(CustomFilterProgramType);
+    void initializeParameterLocations(WebKit::WebCustomFilterProgramType);
     
     WebKit::WebGraphicsContext3D* m_context;
     WebKit::WebGLId m_program;
