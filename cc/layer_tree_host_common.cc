@@ -755,9 +755,6 @@ static void calculateDrawPropertiesInternal(LayerType* layer, const gfx::Transfo
 
     gfx::RectF contentRect(gfx::PointF(), layer->contentBounds());
 
-    if (layer->filters().hasFilterThatMovesPixels())
-        expandRectWithFilters(contentRect, layer->filters());
-
     // fullHierarchyMatrix is the matrix that transforms objects between screen space (except projection matrix) and the most recent RenderSurfaceImpl's space.
     // nextHierarchyMatrix will only change if this layer uses a new RenderSurfaceImpl, otherwise remains the same.
     gfx::Transform nextHierarchyMatrix = fullHierarchyMatrix;
@@ -947,6 +944,8 @@ static void calculateDrawPropertiesInternal(LayerType* layer, const gfx::Transfo
     gfx::Rect localDrawableContentRectOfSubtree = accumulatedDrawableContentRectOfChildren;
     if (layer->drawsContent())
         localDrawableContentRectOfSubtree.Union(rectInTargetSpace);
+    if (layer->filters().hasFilterThatMovesPixels())
+        expandRectWithFilters(localDrawableContentRectOfSubtree, layer->filters());
     if (subtreeShouldBeClipped)
         localDrawableContentRectOfSubtree.Intersect(clipRectForSubtree);
 
