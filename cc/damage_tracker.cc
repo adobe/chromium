@@ -32,7 +32,7 @@ static inline void expandRectWithFilters(gfx::RectF& rect, const WebKit::WebFilt
 {
     int top, right, bottom, left;
     filters.getOutsets(top, right, bottom, left);
-    rect.Inset(-left, -top, -right, -bottom);
+    rect.Inset(std::min(0, -left), std::min(0, -top), std::min(0, -right), std::min(0, -bottom));
 }
 
 static inline void expandDamageRectInsideRectWithFilters(gfx::RectF& damageRect, const gfx::RectF& preFilterRect, const WebKit::WebFilterOperations& filters)

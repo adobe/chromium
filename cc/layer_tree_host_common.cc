@@ -149,7 +149,11 @@ static gfx::Rect calculateVisibleContentRect(LayerType* layer, const gfx::Rect& 
     // Compute visible bounds in target surface space.
     gfx::Rect visibleRectInTargetSurfaceSpace = layer->drawableContentRect();
 
-    if (!layer->renderTarget()->renderSurface()->clipRect().IsEmpty()) {
+    if (layer->filters().hasFilterThatMovesPixels())
+        return visibleRectInTargetSurfaceSpace;
+
+    if (!layer->renderTarget()->renderSurface()->clipRect().IsEmpty() 
+        && !layer->renderTarget()->renderSurface()->hasCustomFilters()) {
         // In this case the target surface does clip layers that contribute to
         // it. So, we have to convert the current surface's clipRect from its
         // ancestor surface space to the current (descendant) surface
@@ -546,6 +550,22 @@ static void roundTranslationComponents(gfx::Transform* transform)
     transform->matrix().setDouble(1, 3, MathUtil::Round(transform->matrix().getDouble(1, 3)));
 }
 
+template<typename RectType>
+static inline void expandRectWithFilters(RectType& rect, const WebKit::WebFilterOperations& filters)
+{
+    int top, right, bottom, left;
+    filters.getOutsets(top, right, bottom, left);
+    rect.Inset(std::min(0, -left), std::min(0, -top), std::min(0, -right), std::min(0, -bottom));
+}
+
+template<typename RectType>
+static inline void expandRectWithFiltersDamage(RectType& rect, const WebKit::WebFilterOperations& filters)
+{
+    int top, right, bottom, left;
+    filters.getOutsets(top, right, bottom, left);
+    rect.Inset(std::min(0, -right), std::min(0, -bottom), std::min(0, -top), std::min(0, -left));
+}
+
 // Recursively walks the layer tree starting at the given node and computes all the
 // necessary transformations, clipRects, render surfaces, etc.
 template<typename LayerType, typename LayerList, typename RenderSurfaceType>
@@ -735,6 +755,9 @@ static void calculateDrawPropertiesInternal(LayerType* layer, const gfx::Transfo
 
     gfx::RectF contentRect(gfx::PointF(), layer->contentBounds());
 
+    if (layer->filters().hasFilterThatMovesPixels())
+        expandRectWithFilters(contentRect, layer->filters());
+
     // fullHierarchyMatrix is the matrix that transforms objects between screen space (except projection matrix) and the most recent RenderSurfaceImpl's space.
     // nextHierarchyMatrix will only change if this layer uses a new RenderSurfaceImpl, otherwise remains the same.
     gfx::Transform nextHierarchyMatrix = fullHierarchyMatrix;
@@ -811,7 +834,7 @@ static void calculateDrawPropertiesInternal(LayerType* layer, const gfx::Transfo
         //         pixel-moving filters)
         if (layer->filters().hasFilterThatMovesPixels() || layer->filter())
             nearestAncestorThatMovesPixels = renderSurface;
-
+       
         // The render surface clipRect is expressed in the space where this surface draws, i.e. the same space as clipRectFromAncestor.
         renderSurface->setIsClipped(ancestorClipsSubtree);
         if (ancestorClipsSubtree) {
@@ -827,6 +850,10 @@ static void calculateDrawPropertiesInternal(LayerType* layer, const gfx::Transfo
             renderSurface->setClipRect(gfx::Rect());
             clipRectForSubtreeInDescendantSpace = clipRectFromAncestorInDescendantSpace;
         }
+
+        // Make sure we have enough outside information in order to compute the right blur/drop-shadow.
+        if (layer->filters().hasFilterThatMovesPixels())
+            expandRectWithFiltersDamage(clipRectForSubtreeInDescendantSpace, layer->filters());
 
         renderSurface->setNearestAncestorThatMovesPixels(nearestAncestorThatMovesPixels);
 
@@ -957,11 +984,16 @@ static void calculateDrawPropertiesInternal(LayerType* layer, const gfx::Transfo
         // clipped. If the layer is animating, then the surface's transform to
         // its target is not known on the main thread, and we should not use it
         // to clip.
-        if (!layer->replicaLayer() && transformToParentIsKnown(layer)) {
+        if (!layer->replicaLayer() && transformToParentIsKnown(layer) && !layer->filters().hasCustomFilters()) {
             // Note, it is correct to use ancestorClipsSubtree here, because we are looking at this layer's renderSurface, not the layer itself.
             if (ancestorClipsSubtree && !clippedContentRect.IsEmpty()) {
                 gfx::Rect surfaceClipRect = LayerTreeHostCommon::calculateVisibleRect(renderSurface->clipRect(), clippedContentRect, renderSurface->drawTransform());
                 clippedContentRect.Intersect(surfaceClipRect);
+                // Make sure we have enough outside information in order to compute the right blur/drop-shadow.
+                if (layer->filters().hasFilterThatMovesPixels()) {
+                    expandRectWithFiltersDamage(clippedContentRect, layer->filters());
+                    clippedContentRect.Intersect(localDrawableContentRectOfSubtree);
+                }
             }
         }
 

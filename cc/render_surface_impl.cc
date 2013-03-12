@@ -94,6 +94,15 @@ int RenderSurfaceImpl::owningLayerId() const
     return m_owningLayer ? m_owningLayer->id() : 0;
 }
 
+bool RenderSurfaceImpl::hasCustomFilters() const
+{
+    return m_owningLayer && m_owningLayer->filters().hasCustomFilters();
+}
+
+bool RenderSurfaceImpl::hasFilterThatMovesPixels() const
+{
+    return m_owningLayer && m_owningLayer->filters().hasFilterThatMovesPixels();
+}
 
 void RenderSurfaceImpl::setClipRect(const gfx::Rect& clipRect)
 {

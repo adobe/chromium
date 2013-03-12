@@ -56,7 +56,8 @@ template<typename RenderSurfaceType>
 static gfx::Rect screenSpaceClipRectInTargetSurface(const RenderSurfaceType* targetSurface, gfx::Rect screenSpaceClipRect)
 {
     gfx::Transform inverseScreenSpaceTransform(gfx::Transform::kSkipInitialization);
-    if (!targetSurface->screenSpaceTransform().GetInverse(&inverseScreenSpaceTransform))
+    if (targetSurface->hasFilterThatMovesPixels() ||
+        !targetSurface->screenSpaceTransform().GetInverse(&inverseScreenSpaceTransform))
         return targetSurface->contentRect();
 
     return gfx::ToEnclosingRect(MathUtil::projectClippedRect(inverseScreenSpaceTransform, screenSpaceClipRect));

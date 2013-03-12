@@ -91,6 +91,9 @@ public:
     void appendRenderPasses(RenderPassSink&);
     void appendQuads(QuadSink&, AppendQuadsData&, bool forReplica, RenderPass::Id renderPassId);
 
+    bool hasCustomFilters() const;
+    bool hasFilterThatMovesPixels() const;
+
 private:
     LayerImpl* m_owningLayer;
 

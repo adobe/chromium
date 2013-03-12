@@ -25,6 +25,15 @@ RenderSurface::~RenderSurface()
 {
 }
 
+bool RenderSurface::hasCustomFilters() const {
+    return m_owningLayer && m_owningLayer->filters().hasCustomFilters();
+}
+
+bool RenderSurface::hasFilterThatMovesPixels() const
+{
+    return m_owningLayer && m_owningLayer->filters().hasFilterThatMovesPixels();
+}
+
 gfx::RectF RenderSurface::drawableContentRect() const
 {
     gfx::RectF drawableContentRect = MathUtil::mapClippedRect(m_drawTransform, m_contentRect);

@@ -71,6 +71,9 @@ public:
     void setNearestAncestorThatMovesPixels(RenderSurface* surface) { m_nearestAncestorThatMovesPixels = surface; }
     const RenderSurface* nearestAncestorThatMovesPixels() const { return m_nearestAncestorThatMovesPixels; }
 
+    bool hasCustomFilters() const;
+    bool hasFilterThatMovesPixels() const;
+
 private:
     friend struct LayerIteratorActions;
 
