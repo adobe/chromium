@@ -515,9 +515,9 @@ void BrowserViewRendererImpl::EnableOnNewPicture(OnNewPictureMode mode) {
   // picture rasterization, send update the renderer side with the correct
   // listener state. (For now, we always leave render picture listener enabled).
   // render_view_host_ext_->EnableCapturePictureCallback(enabled);
-  //DCHECK(view_renderer_host_);
-  //view_renderer_host_->EnableCapturePictureCallback(
-  //    on_new_picture_mode_ == kOnNewPictureEnabled);
+  DCHECK(view_renderer_host_);
+  view_renderer_host_->EnableCapturePictureCallback(
+      on_new_picture_mode_ == kOnNewPictureEnabled);
 }
 
 void BrowserViewRendererImpl::OnVisibilityChanged(bool view_visible,
