@@ -23,7 +23,7 @@ def main(argv):
   argument_parser.add_argument('--output-dir', dest='output_dir')
   options = argument_parser.parse_args()
 
-  ant_res_dir = os.path.join("$(CHROME_LIB)", "res")
+  ant_res_dir = os.path.join("${chrome.dir}", "res")
 
   if os.path.isdir(options.output_dir):
     shutil.rmtree(options.output_dir)
