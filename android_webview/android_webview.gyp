@@ -265,7 +265,6 @@
         }
       ],
     },
-    
     {
       'target_name': 'android_webview_package',
       'type': 'none',
@@ -275,6 +274,7 @@
         'android_webview_package_resources',
       ],
       'variables': {
+        'native_libs_paths': ['<(SHARED_LIB_DIR)/libwebviewchromium.so'],
       },
       'copies': [
         {
@@ -289,13 +289,30 @@
             '<(PRODUCT_DIR)/android_webview_apk/assets/webviewchromium.pak',
           ]
         },
+      ],
+      'sources': [
+        '<@(native_libs_paths)'
+      ],
+      'rules': [
         {
-          'destination': '<(PRODUCT_DIR)/android_webview_jar/libs/armeabi-v7a',
-          'files': [
-            '<(SHARED_LIB_DIR)/libwebviewchromium.so',
-          ]
+          'rule_name': 'copy_and_strip_native_libraries',
+          'extension': 'so',
+          'variables': {
+            'stripped_library_path': '<(PRODUCT_DIR)/android_webview_jar/libs/<(android_app_abi)/<(RULE_INPUT_ROOT).so',
+          },
+          'outputs': [
+            '<(stripped_library_path)',
+          ],
+          # There is no way to do 2 actions for each source library in gyp. So to
+          # both strip the library and create the link in <(link_dir) a separate
+          # script is required.
+          'action': [
+            '<(DEPTH)/build/android/prepare_library_for_apk',
+            '<(android_strip)',
+            '<(RULE_INPUT_PATH)',
+            '<(stripped_library_path)',
+          ],
         },
-        
       ],
     },
   ],
