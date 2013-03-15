@@ -215,5 +215,105 @@
       },
       'includes': [ '../build/java_apk.gypi' ],
     },
+    
+    {
+      'target_name': 'android_webview_package_resources',
+      'type': 'none',
+      'dependencies': [
+        '../base/base.gyp:base_java',
+        '../components/components.gyp:navigation_interception_java',
+        '../components/components.gyp:web_contents_delegate_android_java',
+        '../content/content.gyp:content_java',
+        '../media/media.gyp:media_java',
+        '../net/net.gyp:net_java',
+        '../ui/ui.gyp:ui_java',
+      ],
+
+      'sources': [
+        '>@(additional_R_files)',
+        '>@(additional_R_text_files)',
+        '>@(additional_res_dirs)',
+      ],
+      
+      'actions': [
+        {
+          'action_name': 'copy_webview_package_resoruces',
+          'inputs': [
+            'build/copy_resources.py',
+          ],
+          'outputs': [
+            '<(PRODUCT_DIR)/android_webview_jar/res/ant-custom-rules.xml',
+          ],
+          'action': [
+            'python',
+            'build/copy_resources.py',
+            '--additional-r-files',
+            '>@(additional_R_files)',
+            '--additional-r-text-files',
+            '>@(additional_R_text_files)',
+            '--generated-r-dirs',
+            '>@(generated_R_dirs)',
+            '--additional-res-packages',
+            '>@(additional_res_packages)',
+            '--additional-res-dirs',
+            '>@(additional_res_dirs)',
+            '--output-dir',
+            '<(PRODUCT_DIR)/android_webview_jar/res/',
+            '--output-ant-file',
+            '<@(_outputs)',
+          ]
+        }
+      ],
+    },
+    {
+      'target_name': 'android_webview_package',
+      'type': 'none',
+      'dependencies': [
+        'libwebviewchromium',
+        'android_webview_java',
+        'android_webview_package_resources',
+      ],
+      'variables': {
+        'native_libs_paths': ['<(SHARED_LIB_DIR)/libwebviewchromium.so'],
+      },
+      'copies': [
+        {
+          'destination': '<(PRODUCT_DIR)/android_webview_jar/libs',
+          'files': [
+            '>@(input_jars_paths)',
+          ]
+        },
+        {
+          'destination': '<(PRODUCT_DIR)/android_webview_jar/assets',
+          'files': [
+            '<(PRODUCT_DIR)/android_webview_apk/assets/webviewchromium.pak',
+          ]
+        },
+      ],
+      'sources': [
+        '<@(native_libs_paths)'
+      ],
+      'rules': [
+        {
+          'rule_name': 'copy_and_strip_native_libraries',
+          'extension': 'so',
+          'variables': {
+            'stripped_library_path': '<(PRODUCT_DIR)/android_webview_jar/libs/<(android_app_abi)/<(RULE_INPUT_ROOT).so',
+          },
+          'outputs': [
+            '<(stripped_library_path)',
+          ],
+          # There is no way to do 2 actions for each source library in gyp. So to
+          # both strip the library and create the link in <(link_dir) a separate
+          # script is required.
+          'action': [
+            '<(DEPTH)/build/android/prepare_library_for_apk',
+            '<(android_strip)',
+            '<(RULE_INPUT_PATH)',
+            '<(stripped_library_path)',
+          ],
+        },
+      ],
+    },
   ],
 }
