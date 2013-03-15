@@ -149,10 +149,8 @@ static gfx::Rect calculateVisibleContentRect(LayerType* layer, const gfx::Rect& 
     // Compute visible bounds in target surface space.
     gfx::Rect visibleRectInTargetSurfaceSpace = layer->drawableContentRect();
 
-    if (layer->filters().hasFilterThatMovesPixels())
-        return visibleRectInTargetSurfaceSpace;
-
     if (!layer->renderTarget()->renderSurface()->clipRect().IsEmpty() 
+        && !layer->filters().hasFilterThatMovesPixels()
         && !layer->renderTarget()->renderSurface()->hasCustomFilters()) {
         // In this case the target surface does clip layers that contribute to
         // it. So, we have to convert the current surface's clipRect from its
