@@ -393,8 +393,8 @@ WebKit::WebFilterOperations RenderSurfaceFilters::optimize(const WebKit::WebFilt
     return newList;
 }
 
-SkBitmap RenderSurfaceFilters::apply(const WebKit::WebFilterOperations& filters, unsigned textureId, const gfx::SizeF& size, WebKit::WebGraphicsContext3D* context3D, GrContext* grContext, 
-    WebKit::WebGraphicsContext3D* customFilterContext3D)
+SkBitmap RenderSurfaceFilters::apply(const WebKit::WebFilterOperations& filters, unsigned textureId, const gfx::SizeF& surfaceSize, const gfx::SizeF& size, 
+    WebKit::WebGraphicsContext3D* context3D, GrContext* grContext, WebKit::WebGraphicsContext3D* customFilterContext3D)
 {
     DCHECK(grContext);
 
@@ -470,7 +470,7 @@ SkBitmap RenderSurfaceFilters::apply(const WebKit::WebFilterOperations& filters,
             WebKit::WebGLId destinationTextureId = state.currentTexture()->getTextureHandle();
             WebKit::WebGLId sourceTextureId = reinterpret_cast<GrTexture*>(state.source().getTexture())->getTextureHandle();
             scoped_ptr<CustomFilterRenderer> customFilterRenderer = CustomFilterRenderer::create(customFilterContext3D);
-            customFilterRenderer->render(op, sourceTextureId, size.width(), size.height(), destinationTextureId);
+            customFilterRenderer->render(op, sourceTextureId, surfaceSize, size, destinationTextureId);
             break;
         }
         }

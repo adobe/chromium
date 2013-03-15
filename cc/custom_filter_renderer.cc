@@ -6,6 +6,7 @@
 
 #include <iostream>
 
+#include "ui/gfx/transform.h"
 #include "cc/custom_filter_compiled_program.h"
 #include "cc/custom_filter_mesh.h"
 #include "cc/gl_renderer.h"
@@ -31,37 +32,26 @@ CustomFilterRenderer::~CustomFilterRenderer()
 {
 }
 
-static int inx(int row, int column)
+static gfx::Transform orthoProjectionMatrix(float left, float right, float bottom, float top)
 {
-    return 4 * (column - 1) + (row - 1);
-}
-
-static void identityMatrix(float matrix[16])
-{
-    for (int i = 0; i < 16; i++)
-        matrix[i] = (i % 5 == 0) ? 1.0 : 0.0;
-}
-
-static void orthogonalProjectionMatrix(float matrix[16], float left, float right, float bottom, float top)
-{
-    // Start with an identity matrix.
-    identityMatrix(matrix);
-
+    // Use the standard formula to map the clipping frustum to the cube from
+    // [-1, -1, -1] to [1, 1, 1].
     float deltaX = right - left;
     float deltaY = top - bottom;
+    gfx::Transform proj;
     if (!deltaX || !deltaY)
-        return;
-    matrix[inx(1, 1)] = 2.0 / deltaX;
-    matrix[inx(4, 1)] = -(right + left) / deltaX;
-    matrix[inx(2, 2)] = 2.0 / deltaY;
-    matrix[inx(4, 2)] = -(top + bottom) / deltaY;
+        return proj;
+    proj.matrix().setDouble(0, 0, 2.0f / deltaX);
+    proj.matrix().setDouble(0, 3, -(right + left) / deltaX);
+    proj.matrix().setDouble(1, 1, 2.0f / deltaY);
+    proj.matrix().setDouble(1, 3, -(top + bottom) / deltaY);
 
-    // Use big enough near/far values, so that simple rotations of rather large objects will not
-    // get clipped. 10000 should cover most of the screen resolutions.
     const float farValue = 10000;
     const float nearValue = -10000;
-    matrix[inx(3, 3)] = -2.0 / (farValue - nearValue);
-    matrix[inx(4, 3)] = -(farValue + nearValue) / (farValue - nearValue);
+    proj.matrix().setDouble(2, 2, -2.0 / (farValue - nearValue));
+    proj.matrix().setDouble(2, 3, -(farValue + nearValue) / (farValue - nearValue));
+
+    return proj;
 }
 
 void CustomFilterRenderer::bindProgramArrayParameters(int uniformLocation, const WebKit::WebCustomFilterParameter& arrayParameter)
@@ -179,7 +169,7 @@ void CustomFilterRenderer::unbindVertexAttribute(WebKit::WGC3Duint attributeLoca
         GLC(m_context, m_context->disableVertexAttribArray(attributeLocation));
 }
 
-void CustomFilterRenderer::render(const WebKit::WebFilterOperation& op, WebKit::WebGLId sourceTextureId, WebKit::WGC3Dsizei width, WebKit::WGC3Dsizei height, WebKit::WebGLId destinationTextureId)
+void CustomFilterRenderer::render(const WebKit::WebFilterOperation& op, WebKit::WebGLId sourceTextureId, const gfx::SizeF& surfaceSize, const gfx::SizeF& textureSize, WebKit::WebGLId destinationTextureId)
 {
     // Set up m_context.
     if (!m_context->makeContextCurrent())
@@ -199,6 +189,16 @@ void CustomFilterRenderer::render(const WebKit::WebFilterOperation& op, WebKit::
         return;
     }
 
+    // Surface size is the actual size of the area that we need to apply the filter,
+    // but the texture can be bigger than that.
+    WebKit::WGC3Dsizei width = surfaceSize.width();
+    WebKit::WGC3Dsizei height = surfaceSize.height();
+    WebKit::WGC3Dsizei textureWidth = textureSize.width();
+    WebKit::WGC3Dsizei textureHeight = textureSize.height();
+
+    float widthScale = (float)textureWidth / width;
+    float heightScale = (float)textureHeight / height;
+
     GLC(m_context, m_context->enable(GL_DEPTH_TEST));
 
     // Create frame buffer.
@@ -211,13 +211,15 @@ void CustomFilterRenderer::render(const WebKit::WebFilterOperation& op, WebKit::
     // Set up depth buffer.
     WebKit::WebGLId depthBuffer = GLC(m_context, m_context->createRenderbuffer());
     GLC(m_context, m_context->bindRenderbuffer(GL_RENDERBUFFER, depthBuffer));
-    GLC(m_context, m_context->renderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT16, width, height));
+    GLC(m_context, m_context->renderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT16, textureWidth, textureHeight));
 
     // Attach depth buffer to frame buffer.
     GLC(m_context, m_context->framebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, depthBuffer));
 
     // Set up viewport.
-    GLC(m_context, m_context->viewport(0, 0, width, height));
+    GLC(m_context, m_context->enable(GL_SCISSOR_TEST));
+    GLC(m_context, m_context->scissor(0, 0, width, height));
+    GLC(m_context, m_context->viewport(0, 0, textureWidth, textureHeight));
 
     // Clear render buffers.
     GLC(m_context, m_context->clearColor(0.0, 0.0, 0.0, 0.0));
@@ -257,11 +259,19 @@ void CustomFilterRenderer::render(const WebKit::WebFilterOperation& op, WebKit::
         glUniform1i(compiledProgram->samplerLocation(), 0);
     }
 
+    if (compiledProgram->samplerScaleLocation() != -1) {
+        DCHECK(op.customFilterProgram()->programType() == WebKit::WebProgramTypeBlendsElementTexture);
+        GLC(m_context, m_context->uniform2f(compiledProgram->samplerScaleLocation(), 1.0 / widthScale, 1.0 / heightScale));
+    }
+
     if (compiledProgram->projectionMatrixLocation() != -1) {
         // Bind projection matrix uniform.
-        float projectionMatrix[16];
-        orthogonalProjectionMatrix(projectionMatrix, -0.5, 0.5, -0.5, 0.5);
-        GLC(m_context, m_context->uniformMatrix4fv(compiledProgram->projectionMatrixLocation(), 1, false, projectionMatrix));
+        gfx::Transform projectionTransform = orthoProjectionMatrix(-widthScale / 2, widthScale / 2, -heightScale / 2, heightScale / 2);
+        projectionTransform.matrix().preTranslate(-(widthScale - 1) / 2, -(heightScale - 1) / 2, 0.0);
+
+        static float glMatrix[16];
+        projectionTransform.matrix().asColMajorf(&glMatrix[0]);
+        GLC(m_context, m_context->uniformMatrix4fv(compiledProgram->projectionMatrixLocation(), 1, false, &glMatrix[0]));
     }
 
     if (compiledProgram->meshSizeLocation() != -1)

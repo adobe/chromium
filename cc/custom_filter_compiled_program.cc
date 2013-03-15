@@ -24,6 +24,7 @@ CustomFilterCompiledProgram::CustomFilterCompiledProgram(WebKit::WebGraphicsCont
     , m_tileSizeLocation(-1)
     , m_meshSizeLocation(-1)
     , m_samplerLocation(-1)
+    , m_samplerScaleLocation(-1)
     , m_samplerSizeLocation(-1)
     , m_contentSamplerLocation(-1)
     , m_isInitialized(false)
@@ -111,6 +112,7 @@ void CustomFilterCompiledProgram::initializeParameterLocations(WebKit::WebCustom
         // When the author uses the CSS mix function in a custom filter, WebKit adds the internal
         // symbol css_u_texture to the shader code, which references the texture of the element.
         m_samplerLocation = m_context->getUniformLocation(m_program, "css_u_texture");
+        m_samplerScaleLocation = m_context->getUniformLocation(m_program, "css_u_textureScale");
     }
 }
 

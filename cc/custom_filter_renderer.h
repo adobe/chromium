@@ -20,7 +20,7 @@ public:
 
     virtual ~CustomFilterRenderer();
 
-    void render(const WebKit::WebFilterOperation& op, WebKit::WebGLId sourceTextureId, WebKit::WGC3Dsizei width, WebKit::WGC3Dsizei height, WebKit::WebGLId destinationTextureId);
+    void render(const WebKit::WebFilterOperation& op, WebKit::WebGLId sourceTextureId, const gfx::SizeF& surfaceSize, const gfx::SizeF& textureSize, WebKit::WebGLId destinationTextureId);
 
 protected:
     CustomFilterRenderer(WebKit::WebGraphicsContext3D* context);

@@ -377,7 +377,7 @@ void GLRenderer::drawDebugBorderQuad(const DrawingFrame& frame, const DebugBorde
     GLC(context(), context()->drawElements(GL_LINE_LOOP, 4, GL_UNSIGNED_SHORT, 0));
 }
 
-static inline SkBitmap applyFilters(GLRenderer* renderer, const WebKit::WebFilterOperations& filters, ScopedResource* sourceTextureResource)
+static inline SkBitmap applyFilters(GLRenderer* renderer, const WebKit::WebFilterOperations& filters, const gfx::SizeF& surfaceSize, ScopedResource* sourceTextureResource)
 {
     if (filters.isEmpty())
         return SkBitmap();
@@ -399,7 +399,7 @@ static inline SkBitmap applyFilters(GLRenderer* renderer, const WebKit::WebFilte
     cc::ContextProvider* customFilterContextProvider = renderer->resourceProvider()->customFilterContextProvider();
     WebKit::WebGraphicsContext3D* customFilterContext = customFilterContextProvider ? customFilterContextProvider->Context3d() : 0;
 
-    SkBitmap source = RenderSurfaceFilters::apply(filters, lock.textureId(), sourceTextureResource->size(), offscreenContexts->Context3d(), offscreenContexts->GrContext(), customFilterContext);
+    SkBitmap source = RenderSurfaceFilters::apply(filters, lock.textureId(), surfaceSize, sourceTextureResource->size(), offscreenContexts->Context3d(), offscreenContexts->GrContext(), customFilterContext);
 
     // Use the compositor's GL context again.
     renderer->resourceProvider()->graphicsContext3D()->makeContextCurrent();
@@ -519,7 +519,7 @@ scoped_ptr<ScopedResource> GLRenderer::drawBackgroundFilters(
     if (!getFramebufferTexture(deviceBackgroundTexture.get(), deviceRect))
         return scoped_ptr<ScopedResource>();
 
-    SkBitmap filteredDeviceBackground = applyFilters(this, filters, deviceBackgroundTexture.get());
+    SkBitmap filteredDeviceBackground = applyFilters(this, filters, deviceRect.size(), deviceBackgroundTexture.get());
     if (!filteredDeviceBackground.getTexture())
         return scoped_ptr<ScopedResource>();
 
@@ -576,7 +576,7 @@ void GLRenderer::drawRenderPassQuad(DrawingFrame& frame, const RenderPassDrawQua
     if (quad->filter) {
         filterBitmap = applyImageFilter(this, quad->filter.get(), contentsTexture);
     } else {
-        filterBitmap = applyFilters(this, quad->filters, contentsTexture);
+        filterBitmap = applyFilters(this, quad->filters, quad->rect.size(), contentsTexture);
     }
 
     // Draw the background texture if there is one.

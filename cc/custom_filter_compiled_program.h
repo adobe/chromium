@@ -36,6 +36,7 @@ public:
     WebKit::WGC3Dint tileSizeLocation() const { return m_tileSizeLocation; }
     WebKit::WGC3Dint meshSizeLocation() const { return m_meshSizeLocation; }
     WebKit::WGC3Dint samplerLocation() const { return m_samplerLocation; }
+    WebKit::WGC3Dint samplerScaleLocation() const { return m_samplerScaleLocation; }
     WebKit::WGC3Dint contentSamplerLocation() const { return m_contentSamplerLocation; }
     WebKit::WGC3Dint samplerSizeLocation() const { return m_samplerSizeLocation; }
 
@@ -61,6 +62,7 @@ private:
     WebKit::WGC3Dint m_tileSizeLocation;
     WebKit::WGC3Dint m_meshSizeLocation;
     WebKit::WGC3Dint m_samplerLocation;
+    WebKit::WGC3Dint m_samplerScaleLocation;
     WebKit::WGC3Dint m_samplerSizeLocation;
     WebKit::WGC3Dint m_contentSamplerLocation;
     
