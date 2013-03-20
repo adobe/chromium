@@ -469,8 +469,8 @@ SkBitmap RenderSurfaceFilters::apply(const WebKit::WebFilterOperations& filters,
             context3D->flush();
             WebKit::WebGLId destinationTextureId = state.currentTexture()->getTextureHandle();
             WebKit::WebGLId sourceTextureId = reinterpret_cast<GrTexture*>(state.source().getTexture())->getTextureHandle();
-            scoped_ptr<CustomFilterRenderer> customFilterRenderer = CustomFilterRenderer::create(customFilterContext3D);
-            customFilterRenderer->render(op, sourceTextureId, surfaceSize, size, destinationTextureId);
+            CustomFilterRenderer customFilterRenderer(customFilterContext3D);
+            customFilterRenderer.render(op, sourceTextureId, surfaceSize, size, destinationTextureId);
             break;
         }
         }

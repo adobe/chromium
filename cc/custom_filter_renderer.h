@@ -5,8 +5,6 @@
 #ifndef CC_CUSTOM_FILTER_RENDERER_H_
 #define CC_CUSTOM_FILTER_RENDERER_H_
 
-#include "base/memory/scoped_ptr.h"
-#include "cc/cc_export.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebGraphicsContext3D.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebFilterOperation.h"
 
@@ -14,16 +12,12 @@ namespace cc {
 
 class CustomFilterCompiledProgram;
 
-class CC_EXPORT CustomFilterRenderer {
+class CustomFilterRenderer {
 public:
-    static scoped_ptr<CustomFilterRenderer> create(WebKit::WebGraphicsContext3D* context);
-
+    CustomFilterRenderer(WebKit::WebGraphicsContext3D* context);
     virtual ~CustomFilterRenderer();
 
     void render(const WebKit::WebFilterOperation& op, WebKit::WebGLId sourceTextureId, const gfx::SizeF& surfaceSize, const gfx::SizeF& textureSize, WebKit::WebGLId destinationTextureId);
-
-protected:
-    CustomFilterRenderer(WebKit::WebGraphicsContext3D* context);
 
 private:
     DISALLOW_COPY_AND_ASSIGN(CustomFilterRenderer);

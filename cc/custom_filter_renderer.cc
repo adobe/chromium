@@ -17,12 +17,6 @@
 
 namespace cc {
 
-scoped_ptr<CustomFilterRenderer> CustomFilterRenderer::create(WebKit::WebGraphicsContext3D* context)
-{
-    scoped_ptr<CustomFilterRenderer> renderer(make_scoped_ptr(new CustomFilterRenderer(context)));
-    return renderer.Pass();
-}
-
 CustomFilterRenderer::CustomFilterRenderer(WebKit::WebGraphicsContext3D* context)
     : m_context(context)
 {
