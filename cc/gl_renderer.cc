@@ -1438,6 +1438,7 @@ void GLRenderer::enforceMemoryPolicy()
             discardBackbuffer();
         m_resourceProvider->releaseCachedData();
         GLC(m_context, m_context->flush());
+        m_customFilterCache.reset(0);
     }
 }
 

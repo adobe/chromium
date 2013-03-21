@@ -7,7 +7,6 @@
 #include "third_party/WebKit/Source/Platform/chromium/public/WebGraphicsContext3D.h"
 #include "cc/custom_filter_mesh.h"
 #include "cc/gl_renderer.h"
-//#include "third_party/khronos/GLES2/gl2.h"
 
 namespace cc {
 
