@@ -394,7 +394,7 @@ WebKit::WebFilterOperations RenderSurfaceFilters::optimize(const WebKit::WebFilt
 }
 
 SkBitmap RenderSurfaceFilters::apply(const WebKit::WebFilterOperations& filters, unsigned textureId, const gfx::SizeF& surfaceSize, const gfx::SizeF& size, 
-    WebKit::WebGraphicsContext3D* context3D, GrContext* grContext, WebKit::WebGraphicsContext3D* customFilterContext3D)
+    WebKit::WebGraphicsContext3D* context3D, GrContext* grContext, WebKit::WebGraphicsContext3D* customFilterContext3D, CustomFilterCache* customFilterCache)
 {
     DCHECK(grContext);
 
@@ -469,7 +469,7 @@ SkBitmap RenderSurfaceFilters::apply(const WebKit::WebFilterOperations& filters,
             context3D->flush();
             WebKit::WebGLId destinationTextureId = state.currentTexture()->getTextureHandle();
             WebKit::WebGLId sourceTextureId = reinterpret_cast<GrTexture*>(state.source().getTexture())->getTextureHandle();
-            CustomFilterRenderer customFilterRenderer(customFilterContext3D);
+            CustomFilterRenderer customFilterRenderer(customFilterContext3D, customFilterCache);
             customFilterRenderer.render(op, sourceTextureId, surfaceSize, size, destinationTextureId);
             break;
         }

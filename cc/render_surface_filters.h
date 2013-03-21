@@ -22,9 +22,11 @@ class WebGraphicsContext3D;
 
 namespace cc {
 
+class CustomFilterCache;
+
 class CC_EXPORT RenderSurfaceFilters {
 public:
-    static SkBitmap apply(const WebKit::WebFilterOperations& filters, unsigned textureId, const gfx::SizeF& surfaceSize, const gfx::SizeF& textureSize, WebKit::WebGraphicsContext3D*, GrContext*, WebKit::WebGraphicsContext3D*);
+    static SkBitmap apply(const WebKit::WebFilterOperations& filters, unsigned textureId, const gfx::SizeF& surfaceSize, const gfx::SizeF& textureSize, WebKit::WebGraphicsContext3D*, GrContext*, WebKit::WebGraphicsContext3D*, CustomFilterCache*);
     static WebKit::WebFilterOperations optimize(const WebKit::WebFilterOperations& filters);
 
 private:

@@ -16,6 +16,7 @@
 #include "cc/compositor_frame.h"
 #include "cc/compositor_frame_metadata.h"
 #include "cc/context_provider.h"
+#include "cc/custom_filter_cache.h"
 #include "cc/damage_tracker.h"
 #include "cc/geometry_binding.h"
 #include "cc/gl_frame_data.h"
@@ -399,7 +400,10 @@ static inline SkBitmap applyFilters(GLRenderer* renderer, const WebKit::WebFilte
     cc::ContextProvider* customFilterContextProvider = renderer->resourceProvider()->customFilterContextProvider();
     WebKit::WebGraphicsContext3D* customFilterContext = customFilterContextProvider ? customFilterContextProvider->Context3d() : 0;
 
-    SkBitmap source = RenderSurfaceFilters::apply(filters, lock.textureId(), surfaceSize, sourceTextureResource->size(), offscreenContexts->Context3d(), offscreenContexts->GrContext(), customFilterContext);
+    if (!renderer->customFilterCache())
+        renderer->setCustomFilterCache(CustomFilterCache::create(customFilterContext));
+
+    SkBitmap source = RenderSurfaceFilters::apply(filters, lock.textureId(), surfaceSize, sourceTextureResource->size(), offscreenContexts->Context3d(), offscreenContexts->GrContext(), customFilterContext, renderer->customFilterCache());
 
     // Use the compositor's GL context again.
     renderer->resourceProvider()->graphicsContext3D()->makeContextCurrent();
@@ -1856,11 +1860,18 @@ void GLRenderer::cleanupSharedObjects()
         GLC(m_context, m_context->deleteFramebuffer(m_offscreenFramebufferId));
 
     releaseRenderPassTextures();
+
+    m_customFilterCache.reset(0);
 }
 
 bool GLRenderer::isContextLost()
 {
     return (m_context->getGraphicsResetStatusARB() != GL_NO_ERROR);
+}
+
+void GLRenderer::setCustomFilterCache(scoped_ptr<CustomFilterCache> customFilterCache)
+{
+    m_customFilterCache.reset(customFilterCache.release());
 }
 
 }  // namespace cc

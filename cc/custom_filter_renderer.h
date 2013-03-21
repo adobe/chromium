@@ -5,17 +5,22 @@
 #ifndef CC_CUSTOM_FILTER_RENDERER_H_
 #define CC_CUSTOM_FILTER_RENDERER_H_
 
-#include "third_party/WebKit/Source/Platform/chromium/public/WebGraphicsContext3D.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebFilterOperation.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebGraphicsContext3D.h"
+
+namespace WebKit {
+    class WebGraphicsContext3D;
+}
 
 namespace cc {
 
+class CustomFilterCache;
 class CustomFilterCompiledProgram;
 
 class CustomFilterRenderer {
 public:
-    CustomFilterRenderer(WebKit::WebGraphicsContext3D* context);
-    virtual ~CustomFilterRenderer();
+    CustomFilterRenderer(WebKit::WebGraphicsContext3D* context, CustomFilterCache*);
+    ~CustomFilterRenderer();
 
     void render(const WebKit::WebFilterOperation& op, WebKit::WebGLId sourceTextureId, const gfx::SizeF& surfaceSize, const gfx::SizeF& textureSize, WebKit::WebGLId destinationTextureId);
 
@@ -31,6 +36,7 @@ private:
     void unbindVertexAttribute(WebKit::WGC3Duint attributeLocation);
 
     WebKit::WebGraphicsContext3D* m_context;
+    CustomFilterCache* m_customFilterCache;
 };
 
 }

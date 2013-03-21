@@ -22,6 +22,7 @@
 
 namespace cc {
 
+class CustomFilterCache;
 class OutputSurface;
 class ScopedResource;
 class StreamVideoDrawQuad;
@@ -63,6 +64,9 @@ public:
     virtual void sendManagedMemoryStats(size_t bytesVisible, size_t bytesVisibleAndNearby, size_t bytesAllocated) OVERRIDE;
 
     static void debugGLCall(WebKit::WebGraphicsContext3D*, const char* command, const char* file, int line);
+
+    void setCustomFilterCache(scoped_ptr<CustomFilterCache> customFilterCache);
+    CustomFilterCache* customFilterCache() const { return m_customFilterCache.get(); }
 
 protected:
     GLRenderer(RendererClient*, OutputSurface*, ResourceProvider*);
@@ -234,6 +238,8 @@ private:
     scoped_ptr<ResourceProvider::ScopedWriteLockGL> m_currentFramebufferLock;
 
     scoped_refptr<ResourceProvider::Fence> m_lastSwapFence;
+
+    scoped_ptr<CustomFilterCache> m_customFilterCache;
 
     DISALLOW_COPY_AND_ASSIGN(GLRenderer);
 };

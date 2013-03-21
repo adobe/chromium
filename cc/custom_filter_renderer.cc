@@ -8,6 +8,7 @@
 
 #include "ui/gfx/transform.h"
 #include "cc/custom_filter_compiled_program.h"
+#include "cc/custom_filter_cache.h"
 #include "cc/custom_filter_mesh.h"
 #include "cc/gl_renderer.h"
 #include "third_party/khronos/GLES2/gl2.h"
@@ -17,8 +18,9 @@
 
 namespace cc {
 
-CustomFilterRenderer::CustomFilterRenderer(WebKit::WebGraphicsContext3D* context)
+CustomFilterRenderer::CustomFilterRenderer(WebKit::WebGraphicsContext3D* context, CustomFilterCache* cache)
     : m_context(context)
+    , m_customFilterCache(cache)
 {
 }
 
@@ -196,17 +198,12 @@ void CustomFilterRenderer::render(const WebKit::WebFilterOperation& op, WebKit::
     GLC(m_context, m_context->enable(GL_DEPTH_TEST));
 
     // Create frame buffer.
-    WebKit::WebGLId frameBuffer = GLC(m_context, m_context->createFramebuffer());
-    GLC(m_context, m_context->bindFramebuffer(GL_FRAMEBUFFER, frameBuffer));
+    GLC(m_context, m_context->bindFramebuffer(GL_FRAMEBUFFER, m_customFilterCache->sharedFrameBuffer()));
 
     // Attach texture to frame buffer.
     GLC(m_context, m_context->framebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, destinationTextureId, 0));
-
     // Set up depth buffer.
-    WebKit::WebGLId depthBuffer = GLC(m_context, m_context->createRenderbuffer());
-    GLC(m_context, m_context->bindRenderbuffer(GL_RENDERBUFFER, depthBuffer));
-    GLC(m_context, m_context->renderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT16, textureWidth, textureHeight));
-
+    WebKit::WebGLId depthBuffer = m_customFilterCache->allocateRenderBuffer(textureWidth, textureHeight);
     // Attach depth buffer to frame buffer.
     GLC(m_context, m_context->framebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, depthBuffer));
 
@@ -223,18 +220,10 @@ void CustomFilterRenderer::render(const WebKit::WebFilterOperation& op, WebKit::
     GLC(m_context, m_context->useProgram(program));
 
     // Generate a mesh.
-    gfx::RectF meshBox(0.0, 0.0, 1.0, 1.0);
-    CustomFilterMesh mesh(op.meshColumns(), op.meshRows(), meshBox, op.meshType());
+    CustomFilterCacheMesh mesh = m_customFilterCache->allocateMesh(op.meshColumns(), op.meshRows(), op.meshType());
 
-    // Set up vertex buffer.
-    WebKit::WebGLId vertexBuffer = GLC(m_context, m_context->createBuffer());
-    GLC(m_context, m_context->bindBuffer(GL_ARRAY_BUFFER, vertexBuffer));
-    m_context->bufferData(GL_ARRAY_BUFFER, mesh.vertices().size() * sizeof(float), &mesh.vertices().at(0), GL_STATIC_DRAW);
-
-    // Set up index buffer.
-    WebKit::WebGLId indexBuffer = GLC(m_context, m_context->createBuffer());
-    m_context->bindBuffer(GL_ELEMENT_ARRAY_BUFFER, indexBuffer);
-    m_context->bufferData(GL_ELEMENT_ARRAY_BUFFER, mesh.indices().size() * sizeof(uint16_t), &mesh.indices().at(0), GL_STATIC_DRAW);
+    GLC(m_context, m_context->bindBuffer(GL_ARRAY_BUFFER, mesh.vertexBuffer()));
+    GLC(m_context, m_context->bindBuffer(GL_ELEMENT_ARRAY_BUFFER, mesh.indexBuffer()));
 
     // Bind all vertex attributes.
     bindVertexAttribute(compiledProgram->positionAttribLocation(), PositionAttribSize, mesh.bytesPerVertex(), PositionAttribOffset);
@@ -301,10 +290,9 @@ void CustomFilterRenderer::render(const WebKit::WebFilterOperation& op, WebKit::
     // TODO(mvujovic): Unbind built-in and custom uniforms.
 
     // Free resources.
-    m_context->deleteFramebuffer(frameBuffer);
-    m_context->deleteRenderbuffer(depthBuffer);
-    m_context->deleteBuffer(vertexBuffer);
-    m_context->deleteBuffer(indexBuffer);
+    
+    m_customFilterCache->releaseRenderBuffer(depthBuffer);
+    m_customFilterCache->releaseMesh(mesh);
 
     // Flush.
     GLC(m_context, m_context->flush());
