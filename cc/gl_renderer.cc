@@ -247,6 +247,9 @@ void GLRenderer::clearFramebuffer(DrawingFrame& frame)
 
 void GLRenderer::beginDrawingFrame(DrawingFrame& frame)
 {
+    if (m_customFilterCache.get())
+        m_customFilterCache->resetUseCount();
+
     // FIXME: Remove this once backbuffer is automatically recreated on first use
     ensureBackbuffer();
 
@@ -1226,6 +1229,9 @@ void GLRenderer::drawIOSurfaceQuad(const DrawingFrame& frame, const IOSurfaceDra
 
 void GLRenderer::finishDrawingFrame(DrawingFrame& frame)
 {
+    if (m_customFilterCache.get())
+        m_customFilterCache->purgeUnusedResources();
+    
     m_currentFramebufferLock.reset();
     m_swapBufferRect.Union(gfx::ToEnclosingRect(frame.rootDamageRect));
 

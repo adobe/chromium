@@ -203,9 +203,9 @@ void CustomFilterRenderer::render(const WebKit::WebFilterOperation& op, WebKit::
     // Attach texture to frame buffer.
     GLC(m_context, m_context->framebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, destinationTextureId, 0));
     // Set up depth buffer.
-    WebKit::WebGLId depthBuffer = m_customFilterCache->allocateRenderBuffer(textureWidth, textureHeight);
+    const CustomFilterCacheBuffer& depthBuffer = m_customFilterCache->allocateRenderBuffer(textureWidth, textureHeight);
     // Attach depth buffer to frame buffer.
-    GLC(m_context, m_context->framebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, depthBuffer));
+    GLC(m_context, m_context->framebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, depthBuffer.id()));
 
     // Set up viewport.
     GLC(m_context, m_context->enable(GL_SCISSOR_TEST));
