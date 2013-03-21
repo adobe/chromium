@@ -99,10 +99,7 @@ public:
     ~CustomFilterCache();
 
     const CustomFilterCacheBuffer& allocateRenderBuffer(int width, int height);
-    void releaseRenderBuffer(const CustomFilterCacheBuffer& renderBuffer);
-
     const CustomFilterCacheMesh& allocateMesh(unsigned columns, unsigned rows, WebKit::WebCustomFilterMeshType);
-    void releaseMesh(const CustomFilterCacheMesh& mesh);
 
     int sharedFrameBuffer();
 

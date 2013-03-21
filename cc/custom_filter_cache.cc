@@ -4,6 +4,7 @@
 
 #include "cc/custom_filter_cache.h"
 
+#include "base/debug/trace_event.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebGraphicsContext3D.h"
 #include "cc/custom_filter_mesh.h"
 #include "cc/gl_renderer.h"
@@ -62,12 +63,14 @@ static bool sortMeshBuffersFunctor(const CustomFilterCacheMesh& a, const CustomF
 }
 
 void CustomFilterCache::purgeUnusedResources() {
+    TRACE_EVENT0("cc", "CustomFilterCache::purgeUnusedResources");
+
     m_context->makeContextCurrent();
 
     std::sort(m_depthBuffers.begin(), m_depthBuffers.end(), sortDepthBuffersFunctor);
     std::sort(m_meshBuffers.begin(), m_meshBuffers.end(), sortMeshBuffersFunctor);
 
-    unsigned firstUnusedDepthBuffer = 0;
+    unsigned firstUnusedDepthBuffer = m_depthBuffers.size();
     for (unsigned i = 0; i < m_depthBuffers.size(); ++i) {
         if (!m_depthBuffers[i].useCount()) {
             firstUnusedDepthBuffer = i;
@@ -80,7 +83,7 @@ void CustomFilterCache::purgeUnusedResources() {
     }
     m_depthBuffers.resize(firstUnusedDepthBuffer);
 
-    unsigned firstUnusedMeshBuffer = 0;
+    unsigned firstUnusedMeshBuffer = m_meshBuffers.size();
     for (unsigned i = 0; i < m_meshBuffers.size(); ++i) {
         if (!m_meshBuffers[i].useCount()) {
             firstUnusedMeshBuffer = i;
@@ -108,16 +111,13 @@ const CustomFilterCacheBuffer& CustomFilterCache::allocateRenderBuffer(int width
             return buffer;
         }
     }
+    TRACE_EVENT0("cc", "CustomFilterCache::allocateRenderBuffer");
     WebKit::WebGLId depthBuffer = GLC(m_context, m_context->createRenderbuffer());
     GLC(m_context, m_context->bindRenderbuffer(GL_RENDERBUFFER, depthBuffer));
     GLC(m_context, m_context->renderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT16, width, height));
     m_depthBuffers.push_back(CustomFilterCacheBuffer(width, height, depthBuffer));
     m_depthBuffers.back().incrementUseCount();
     return m_depthBuffers.back();
-}
-
-void CustomFilterCache::releaseRenderBuffer(const CustomFilterCacheBuffer& buffer) {
-    
 }
 
 const CustomFilterCacheMesh& CustomFilterCache::allocateMesh(unsigned columns, unsigned rows, WebKit::WebCustomFilterMeshType meshType) {
@@ -130,7 +130,7 @@ const CustomFilterCacheMesh& CustomFilterCache::allocateMesh(unsigned columns, u
             return cacheMesh;
         }
     }
-
+    TRACE_EVENT0("cc", "CustomFilterCache::allocateMesh");
     gfx::RectF meshBox(0.0, 0.0, 1.0, 1.0);
     CustomFilterMesh mesh(columns, rows, meshBox, meshType);
 
@@ -147,10 +147,6 @@ const CustomFilterCacheMesh& CustomFilterCache::allocateMesh(unsigned columns, u
     m_meshBuffers.push_back(CustomFilterCacheMesh(vertexBuffer, indexBuffer, mesh.bytesPerVertex(), mesh.indicesCount(), columns, rows, meshType));
     m_meshBuffers.back().incrementUseCount();
     return m_meshBuffers.back();
-}
-
-void CustomFilterCache::releaseMesh(const CustomFilterCacheMesh& mesh) {
-    
 }
 
 }  // namespace cc

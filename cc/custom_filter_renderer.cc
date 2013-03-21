@@ -6,6 +6,7 @@
 
 #include <iostream>
 
+#include "base/debug/trace_event.h"
 #include "ui/gfx/transform.h"
 #include "cc/custom_filter_compiled_program.h"
 #include "cc/custom_filter_cache.h"
@@ -167,6 +168,8 @@ void CustomFilterRenderer::unbindVertexAttribute(WebKit::WGC3Duint attributeLoca
 
 void CustomFilterRenderer::render(const WebKit::WebFilterOperation& op, WebKit::WebGLId sourceTextureId, const gfx::SizeF& surfaceSize, const gfx::SizeF& textureSize, WebKit::WebGLId destinationTextureId)
 {
+    TRACE_EVENT0("cc", "CustomFilterRenderer::render");
+
     // Set up m_context.
     if (!m_context->makeContextCurrent())
         return;
@@ -288,11 +291,6 @@ void CustomFilterRenderer::render(const WebKit::WebFilterOperation& op, WebKit::
         unbindVertexAttribute(compiledProgram->triangleAttribLocation());
 
     // TODO(mvujovic): Unbind built-in and custom uniforms.
-
-    // Free resources.
-    
-    m_customFilterCache->releaseRenderBuffer(depthBuffer);
-    m_customFilterCache->releaseMesh(mesh);
 
     // Flush.
     GLC(m_context, m_context->flush());
