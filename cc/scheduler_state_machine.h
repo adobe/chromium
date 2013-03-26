@@ -130,6 +130,9 @@ public:
     // when such behavior would be undesirable.
     void setCanDraw(bool can);
 
+    // Prevents committing a new frame, when the GPU is not done with the previous one.
+    void swapBuffersComplete();
+
     // Indicates whether or not there is a pending tree.  This influences
     // whether or not we can succesfully commit at this time.  If the
     // last commit is still being processed (but not blocking), it may not
@@ -182,6 +185,7 @@ protected:
     bool m_canDraw;
     bool m_hasPendingTree;
     bool m_drawIfPossibleFailed;
+    bool m_swapBuffersComplete;
     TextureState m_textureState;
     OutputSurfaceState m_outputSurfaceState;
 

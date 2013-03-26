@@ -250,6 +250,8 @@ void GLRenderer::beginDrawingFrame(DrawingFrame& frame)
     if (m_customFilterCache.get())
         m_customFilterCache->resetUseCount();
 
+    TRACE_EVENT_ASYNC_BEGIN0("cc", "GLRenderer::drawingFrame", this);
+
     // FIXME: Remove this once backbuffer is automatically recreated on first use
     ensureBackbuffer();
 
@@ -1390,6 +1392,7 @@ void GLRenderer::receiveCompositorFrameAck(const CompositorFrameAck& ack) {
 
 void GLRenderer::onSwapBuffersComplete()
 {
+    TRACE_EVENT_ASYNC_END0("cc", "GLRenderer::drawingFrame", this);
     m_client->onSwapBuffersComplete();
 }
 

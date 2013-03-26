@@ -55,6 +55,7 @@ void DelayBasedTimeSource::setActive(bool active)
     if (!active) {
         m_state = STATE_INACTIVE;
         m_weakFactory.InvalidateWeakPtrs();
+        TRACE_EVENT_ASYNC_END0("cc", "DelayBasedTimeSource::postNextTickTask", this);
         return;
     }
 
@@ -92,6 +93,8 @@ base::TimeTicks DelayBasedTimeSource::nextTickTime()
 
 void DelayBasedTimeSource::onTimerFired()
 {
+    TRACE_EVENT_ASYNC_END0("cc", "DelayBasedTimeSource::postNextTickTask", this);
+
     DCHECK(m_state != STATE_INACTIVE);
 
     base::TimeTicks now = this->now();
@@ -105,8 +108,10 @@ void DelayBasedTimeSource::onTimerFired()
     postNextTickTask(now);
 
     // Fire the tick
-    if (m_client)
+    if (m_client) {
+        TRACE_EVENT0("cc", "DelayBasedTimeSource::onTimerFired");
         m_client->onTimerTick();
+    }
 }
 
 void DelayBasedTimeSource::setClient(TimeSourceClient* client)
@@ -217,6 +222,8 @@ base::TimeTicks DelayBasedTimeSource::nextTickTarget(base::TimeTicks now)
 
 void DelayBasedTimeSource::postNextTickTask(base::TimeTicks now)
 {
+    TRACE_EVENT_ASYNC_BEGIN0("cc", "DelayBasedTimeSource::postNextTickTask", this);
+
     base::TimeTicks newTickTarget = nextTickTarget(now);
 
     // Post another task *before* the tick and update state

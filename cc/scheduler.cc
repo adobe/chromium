@@ -123,6 +123,8 @@ void Scheduler::didSwapBuffersComplete()
 {
     TRACE_EVENT0("cc", "Scheduler::didSwapBuffersComplete");
     m_frameRateController->didFinishFrame();
+    m_stateMachine.swapBuffersComplete();
+    processScheduledActions();
 }
 
 void Scheduler::didLoseOutputSurface()
@@ -168,6 +170,8 @@ void Scheduler::processScheduledActions()
         return;
 
     base::AutoReset<bool> markInside(&m_insideProcessScheduledActions, true);
+
+    TRACE_EVENT1("cc", "Scheduler::processScheduledActions::state", "state", m_stateMachine.toString());
 
     SchedulerStateMachine::Action action = m_stateMachine.nextAction();
     while (action != SchedulerStateMachine::ACTION_NONE) {
