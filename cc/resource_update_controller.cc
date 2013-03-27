@@ -117,6 +117,8 @@ void ResourceUpdateController::discardUploadsToEvictedResources()
 void ResourceUpdateController::updateTexture(ResourceUpdate update)
 {
     if (update.picture) {
+        TRACE_EVENT0("cc", "ResourceUpdateController::updateTexture::GPU");
+
         PrioritizedResource* texture = update.texture;
         gfx::Rect pictureRect = update.content_rect;
         gfx::Rect sourceRect = update.source_rect;
@@ -175,6 +177,8 @@ void ResourceUpdateController::updateTexture(ResourceUpdate update)
     }
 
     if (update.bitmap) {
+        TRACE_EVENT0("cc", "ResourceUpdateController::updateTexture::Bitmap");
+
         update.bitmap->lockPixels();
         update.texture->setPixels(
             m_resourceProvider,
