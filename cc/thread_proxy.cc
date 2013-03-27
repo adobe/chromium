@@ -798,6 +798,7 @@ void ThreadProxy::scheduledActionCommit()
     }
     else
     {
+        TRACE_EVENT_INSTANT0("cc", "ThreadProxy::scheduledActionCommit::signal");
         m_commitCompletionEventOnImplThread->signal();
         m_commitCompletionEventOnImplThread = 0;
     }
