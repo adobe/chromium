@@ -132,7 +132,7 @@ void GpuChildThread::OnInitialize() {
 
 #if defined(OS_ANDROID)
   // TODO(epenner): Move thread priorities to base. (crbug.com/170549)
-  int nice_value = -6; // High priority
+  int nice_value = -10; // High priority
   setpriority(PRIO_PROCESS, base::PlatformThread::CurrentId(), nice_value);
 #endif
 

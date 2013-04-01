@@ -399,13 +399,17 @@ class BASE_EXPORT TraceLog {
   void AddThreadNameMetadataEvents();
 
 #if defined(OS_ANDROID)
+public:
   void SendToATrace(char phase,
                     const char* category,
                     const char* name,
+                    unsigned long long id,
                     int num_args,
                     const char** arg_names,
                     const unsigned char* arg_types,
-                    const unsigned long long* arg_values);
+                    const unsigned long long* arg_values,
+                    unsigned char flags);
+private:
   static void ApplyATraceEnabledFlag(unsigned char* category_enabled);
 #endif
 

@@ -24,12 +24,14 @@ namespace content {
 
 CommandBufferProxyImpl::CommandBufferProxyImpl(
     GpuChannelHost* channel,
-    int route_id)
+    int route_id,
+    const GURL& active_url)
     : channel_(channel),
       route_id_(route_id),
       flush_count_(0),
       last_put_offset_(-1),
-      next_signal_id_(0) {
+      next_signal_id_(0),
+      active_url_(active_url) {
 }
 
 CommandBufferProxyImpl::~CommandBufferProxyImpl() {
@@ -49,6 +51,8 @@ CommandBufferProxyImpl::~CommandBufferProxyImpl() {
 }
 
 bool CommandBufferProxyImpl::OnMessageReceived(const IPC::Message& message) {
+  TRACE_EVENT1("gpu", "CommandBufferProxyImpl::OnMessageReceived", "url", active_url_.possibly_invalid_spec());
+
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(CommandBufferProxyImpl, message)
     IPC_MESSAGE_HANDLER(GpuCommandBufferMsg_Destroyed, OnDestroyed);
@@ -483,6 +487,8 @@ gpu::error::Error CommandBufferProxyImpl::GetLastError() {
 }
 
 bool CommandBufferProxyImpl::Send(IPC::Message* msg) {
+  TRACE_EVENT1("gpu", "CommandBufferProxyImpl::Send", "url", active_url_.possibly_invalid_spec());
+
   // Caller should not intentionally send a message if the context is lost.
   DCHECK(last_state_.error == gpu::error::kNoError);
 

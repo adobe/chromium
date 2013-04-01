@@ -79,13 +79,14 @@ bool CollectBasicGraphicsInfo(content::GPUInfo* gpu_info) {
       base::android::BuildInfo::GetInstance();
   std::string model = build_info->model();
   model = StringToLowerASCII(model);
-  bool is_nexus7 = model.find("nexus 7") != std::string::npos;
+  //bool is_nexus7 = model.find("nexus 7") != std::string::npos;
   bool is_nexus10 = model.find("nexus 10") != std::string::npos;
 
   // IMG: avoid context switching perf problems, crashes with share groups
   // Mali-T604: http://crbug.com/154715
   // QualComm, NVIDIA: Crashes with share groups
-  if (is_img || is_mali_t604 || is_qualcomm || is_nexus7) {
+  // FIXME: Nexus 7 seems to work just fine with our demo. Removing it for now.
+  if (is_img || is_mali_t604 || is_qualcomm) {
     CommandLine::ForCurrentProcess()->AppendSwitch(
         switches::kEnableVirtualGLContexts);
   }

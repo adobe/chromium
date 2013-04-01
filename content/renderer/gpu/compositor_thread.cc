@@ -92,7 +92,7 @@ class CompositorThread::InputHandlerWrapper
 // TODO(epenner): Move thread priorities to base. (crbug.com/170549)
 namespace {
 void SetHighThreadPriority() {
-  int nice_value = -6; // High priority.
+  int nice_value = -8; // High priority.
   setpriority(PRIO_PROCESS, base::PlatformThread::CurrentId(), nice_value);
 }
 }

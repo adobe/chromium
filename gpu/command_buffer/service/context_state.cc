@@ -138,6 +138,7 @@ void ContextState::RestoreGlobalState() const {
 }
 
 void ContextState::RestoreState() const {
+  TRACE_EVENT0("gpu", "ContextState::RestoreState");
   // Restore Texture state.
   for (size_t ii = 0; ii < texture_units.size(); ++ii) {
     RestoreTextureUnitBindings(ii);

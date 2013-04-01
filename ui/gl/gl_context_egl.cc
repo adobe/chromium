@@ -20,6 +20,17 @@ extern "C" {
 }
 #endif
 
+#ifndef EGL_NV_system_time
+#define EGL_NV_system_time 1
+typedef khronos_uint64_t EGLuint64NV;
+typedef EGLuint64NV (EGLAPIENTRYP PFNEGLGETSYSTEMTIMEFREQUENCYNVPROC)(void);
+typedef EGLuint64NV (EGLAPIENTRYP PFNEGLGETSYSTEMTIMENVPROC)(void);
+#endif
+
+static bool g_initializedNvTime = false;
+static PFNEGLGETSYSTEMTIMEFREQUENCYNVPROC g_eglGetSystemTimeFrequencyNVProc = 0;
+static PFNEGLGETSYSTEMTIMENVPROC g_eglGetSystemTimeNVProc = 0;
+
 using ui::GetLastEGLErrorString;
 
 namespace gfx {
@@ -74,6 +85,17 @@ bool GLContextEGL::Initialize(
     return false;
   }
 
+  if (!g_initializedNvTime) {
+    g_initializedNvTime = true;
+    LOG(INFO) << "Looking up NV time";
+    g_eglGetSystemTimeFrequencyNVProc = (PFNEGLGETSYSTEMTIMEFREQUENCYNVPROC) eglGetProcAddress("eglGetSystemTimeFrequencyNV");
+    g_eglGetSystemTimeNVProc = (PFNEGLGETSYSTEMTIMENVPROC) eglGetProcAddress("eglGetSystemTimeNV");
+    if (g_eglGetSystemTimeFrequencyNVProc && g_eglGetSystemTimeNVProc) {
+      LOG(INFO) << "Found NV time";
+      g_eglGetSystemTimeFrequencyNVProc();
+      g_eglGetSystemTimeNVProc();
+    }
+  }
   return true;
 }
 
@@ -116,6 +138,9 @@ bool GLContextEGL::MakeCurrent(GLSurface* surface) {
     LOG(ERROR) << "Could not make current.";
     return false;
   }
+
+  if (g_eglGetSystemTimeNVProc)
+    g_eglGetSystemTimeNVProc();
 
   SetRealGLApi();
   return true;

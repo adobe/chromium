@@ -358,7 +358,7 @@ class CONTENT_EXPORT RenderThreadImpl : public RenderThread,
 
   void IdleHandlerInForegroundTab();
 
-  scoped_ptr<WebGraphicsContext3DCommandBufferImpl> CreateOffscreenContext3d();
+  scoped_ptr<WebGraphicsContext3DCommandBufferImpl> CreateOffscreenContext3d(const GURL& active_url);
 
   // These objects live solely on the render thread.
   scoped_ptr<AppCacheDispatcher> appcache_dispatcher_;

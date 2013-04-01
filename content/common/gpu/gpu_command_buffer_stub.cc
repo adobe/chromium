@@ -154,6 +154,7 @@ GpuMemoryManager* GpuCommandBufferStub::GetMemoryManager() {
 
 bool GpuCommandBufferStub::OnMessageReceived(const IPC::Message& message) {
   FastSetActiveURL(active_url_, active_url_hash_);
+  TRACE_EVENT1("gpu", "GpuCommandBufferStub::OnMessageReceived", "url", active_url_.possibly_invalid_spec());
 
   // Ensure the appropriate GL context is current before handling any IPC
   // messages directed at the command buffer. This ensures that the message
@@ -437,6 +438,9 @@ void GpuCommandBufferStub::OnInitialize(
     OnInitializeFailed(reply_message);
     return;
   }
+
+  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kDisableGpuVsync))
+    context->SetSwapInterval(0);
 
   if (!context->GetTotalGpuMemory(&total_gpu_memory_))
     total_gpu_memory_ = 0;

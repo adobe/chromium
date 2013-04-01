@@ -908,7 +908,7 @@ RenderThreadImpl::GetGpuVDAContext3D() {
 }
 
 scoped_ptr<WebGraphicsContext3DCommandBufferImpl>
-RenderThreadImpl::CreateOffscreenContext3d() {
+RenderThreadImpl::CreateOffscreenContext3d(const GURL& active_url) {
   WebKit::WebGraphicsContext3D::Attributes attributes;
   attributes.shareResources = true;
   attributes.depth = false;
@@ -920,11 +920,16 @@ RenderThreadImpl::CreateOffscreenContext3d() {
       WebGraphicsContext3DCommandBufferImpl::CreateOffscreenContext(
           this,
           attributes,
-          GURL("chrome://gpu/RenderThreadImpl::CreateOffscreenContext3d")));
+          active_url));
 }
 
 class RenderThreadImpl::RendererContextProviderCommandBuffer
     : public content::ContextProviderCommandBuffer {
+ public:
+  RendererContextProviderCommandBuffer(const GURL& active_url)
+    : content::ContextProviderCommandBuffer()
+    , active_url_(active_url) {
+  }
  protected:
   virtual ~RendererContextProviderCommandBuffer() {}
 
@@ -932,15 +937,19 @@ class RenderThreadImpl::RendererContextProviderCommandBuffer
   CreateOffscreenContext3d() {
     RenderThreadImpl* self = RenderThreadImpl::current();
     DCHECK(self);
-    return self->CreateOffscreenContext3d().Pass();
+    return self->CreateOffscreenContext3d(active_url_).Pass();
   }
+
+ private:
+  GURL active_url_;
 };
 
 scoped_refptr<cc::ContextProvider>
 RenderThreadImpl::OffscreenContextProviderForMainThread() {
   if (!shared_contexts_main_thread_ ||
       shared_contexts_main_thread_->DestroyedOnMainThread())
-    shared_contexts_main_thread_ = new RendererContextProviderCommandBuffer;
+    shared_contexts_main_thread_ = new RendererContextProviderCommandBuffer(
+      GURL("chrome://gpu/RenderThreadImpl::OffscreenContextProviderForMainThread"));
   return shared_contexts_main_thread_;
 }
 
@@ -949,7 +958,8 @@ RenderThreadImpl::OffscreenContextProviderForCompositorThread() {
   if (!shared_contexts_compositor_thread_ ||
       shared_contexts_compositor_thread_->DestroyedOnMainThread()) {
     shared_contexts_compositor_thread_ =
-        new RendererContextProviderCommandBuffer;
+        new RendererContextProviderCommandBuffer(
+          GURL("chrome://gpu/RenderThreadImpl::OffscreenContextProviderForCompositorThread"));
   }
   return shared_contexts_compositor_thread_;
 }
@@ -957,14 +967,16 @@ RenderThreadImpl::OffscreenContextProviderForCompositorThread() {
 scoped_refptr<cc::ContextProvider> RenderThreadImpl::CustomFilterContextProviderForMainThread() {
   if (!shared_custom_filter_contexts_main_thread_ ||
       shared_custom_filter_contexts_main_thread_->DestroyedOnMainThread())
-    shared_custom_filter_contexts_main_thread_ = new RendererContextProviderCommandBuffer;
+    shared_custom_filter_contexts_main_thread_ = new RendererContextProviderCommandBuffer(
+      GURL("chrome://gpu/RenderThreadImpl::CustomFilterContextProviderForMainThread"));
   return shared_custom_filter_contexts_main_thread_;
 }
 
 scoped_refptr<cc::ContextProvider> RenderThreadImpl::CustomFilterContextProviderForCompositorThread() {
   if (!shared_custom_filter_contexts_compositor_thread_ ||
       shared_custom_filter_contexts_compositor_thread_->DestroyedOnMainThread())
-    shared_custom_filter_contexts_compositor_thread_ = new RendererContextProviderCommandBuffer;
+    shared_custom_filter_contexts_compositor_thread_ = new RendererContextProviderCommandBuffer(
+      GURL("chrome://gpu/RenderThreadImpl::CustomFilterContextProviderForCompositorThread"));
   return shared_custom_filter_contexts_compositor_thread_;
 }
 

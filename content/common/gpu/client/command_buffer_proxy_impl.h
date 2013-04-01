@@ -22,6 +22,7 @@
 #include "gpu/command_buffer/common/command_buffer.h"
 #include "gpu/command_buffer/common/command_buffer_shared.h"
 #include "ipc/ipc_listener.h"
+#include "googleurl/src/gurl.h"
 
 struct GPUCommandBufferConsoleMessage;
 
@@ -46,7 +47,7 @@ class CommandBufferProxyImpl
   typedef base::Callback<void(
       const std::string& msg, int id)> GpuConsoleMessageCallback;
 
-  CommandBufferProxyImpl(GpuChannelHost* channel, int route_id);
+  CommandBufferProxyImpl(GpuChannelHost* channel, int route_id, const GURL&);
   virtual ~CommandBufferProxyImpl();
 
   // Sends an IPC message to create a GpuVideoDecodeAccelerator. Creates and
@@ -189,6 +190,8 @@ class CommandBufferProxyImpl
   // Tasks to be invoked in SignalSyncPoint responses.
   uint32 next_signal_id_;
   SignalTaskMap signal_tasks_;
+
+  GURL active_url_;
 
   DISALLOW_COPY_AND_ASSIGN(CommandBufferProxyImpl);
 };

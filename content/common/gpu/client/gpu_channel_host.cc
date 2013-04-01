@@ -155,7 +155,7 @@ CommandBufferProxyImpl* GpuChannelHost::CreateViewCommandBuffer(
     return NULL;
 
   CommandBufferProxyImpl* command_buffer =
-      new CommandBufferProxyImpl(this, route_id);
+      new CommandBufferProxyImpl(this, route_id, active_url);
   AddRoute(route_id, command_buffer->AsWeakPtr());
   proxies_[route_id] = command_buffer;
   return command_buffer;
@@ -193,7 +193,7 @@ CommandBufferProxyImpl* GpuChannelHost::CreateOffscreenCommandBuffer(
     return NULL;
 
   CommandBufferProxyImpl* command_buffer =
-      new CommandBufferProxyImpl(this, route_id);
+      new CommandBufferProxyImpl(this, route_id, active_url);
   AddRoute(route_id, command_buffer->AsWeakPtr());
   proxies_[route_id] = command_buffer;
   return command_buffer;

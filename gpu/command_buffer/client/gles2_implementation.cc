@@ -1193,6 +1193,7 @@ void GLES2Implementation::ShaderSource(
       }
     }
   });
+  TRACE_EVENT2("gpu", "GLES2Implementation::ShaderSource", "shader", shader, "source", count ? std::string(source[0], length[0]) : std::string());
   if (count < 0) {
     SetGLError(GL_INVALID_VALUE, "glShaderSource", "count < 0");
     return;
