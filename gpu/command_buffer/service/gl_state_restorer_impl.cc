@@ -16,9 +16,14 @@ GLStateRestorerImpl::GLStateRestorerImpl(
 GLStateRestorerImpl::~GLStateRestorerImpl() {
 }
 
-void GLStateRestorerImpl::RestoreState() {
+const gpu::gles2::ContextState* GLStateRestorerImpl::GetContextState() const {
   DCHECK(decoder_.get());
-  decoder_->RestoreState();
+  return decoder_->GetContextState();
+}
+
+void GLStateRestorerImpl::RestoreState(const gpu::gles2::ContextState* previous_state) {
+  DCHECK(decoder_.get());
+  decoder_->RestoreState(previous_state);
 }
 
 }  // namespace gpu

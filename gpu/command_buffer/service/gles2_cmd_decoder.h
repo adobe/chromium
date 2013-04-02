@@ -29,6 +29,7 @@ class StreamTextureManager;
 
 namespace gles2 {
 
+class ContextState;
 class ContextGroup;
 class GLES2Util;
 class QueryManager;
@@ -141,7 +142,8 @@ class GPU_EXPORT GLES2Decoder : public base::SupportsWeakPtr<GLES2Decoder>,
   virtual ContextGroup* GetContextGroup() = 0;
 
   // Gets the service id for any simulated backbuffer fbo.
-  virtual void RestoreState() const = 0;
+  virtual void RestoreState(const ContextState* context_state) const = 0;
+  virtual const ContextState* GetContextState() const = 0;
 
   // Restore States.
   virtual void RestoreActiveTexture() const = 0;

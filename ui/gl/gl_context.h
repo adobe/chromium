@@ -13,6 +13,12 @@
 #include "ui/gl/gl_share_group.h"
 #include "ui/gl/gpu_preference.h"
 
+namespace gpu {
+namespace gles2 {
+class ContextState;
+}
+}
+
 namespace gfx {
 
 class GLSurface;
@@ -49,6 +55,8 @@ class GL_EXPORT GLContext : public base::RefCounted<GLContext> {
 
   // Gets the GLStateRestore for the context.
   virtual GLStateRestorer* GetGLStateRestorer();
+
+  virtual const gpu::gles2::ContextState* GetGLContextState();
 
   // Set swap interval. This context must be current.
   virtual void SetSwapInterval(int interval) = 0;

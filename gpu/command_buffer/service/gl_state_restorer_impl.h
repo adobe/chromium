@@ -23,7 +23,8 @@ class GPU_EXPORT GLStateRestorerImpl : public gfx::GLStateRestorer {
    explicit GLStateRestorerImpl(base::WeakPtr<gles2::GLES2Decoder> decoder);
    virtual ~GLStateRestorerImpl();
 
-   virtual void RestoreState() OVERRIDE;
+   virtual const gpu::gles2::ContextState* GetContextState() const OVERRIDE;
+   virtual void RestoreState(const gpu::gles2::ContextState* previous_state) OVERRIDE;
 
  private:
    base::WeakPtr<gles2::GLES2Decoder> decoder_;

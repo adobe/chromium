@@ -92,6 +92,10 @@ GLStateRestorer* GLContext::GetGLStateRestorer() {
   return NULL;
 }
 
+const gpu::gles2::ContextState* GLContext::GetGLContextState() {
+  return NULL;
+}
+
 bool GLContext::WasAllocatedUsingRobustnessExtension() {
   return false;
 }

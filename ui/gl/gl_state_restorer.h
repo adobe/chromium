@@ -8,6 +8,12 @@
 #include "base/basictypes.h"
 #include "ui/gl/gl_export.h"
 
+namespace gpu {
+namespace gles2 {
+class ContextState;
+}
+}
+
 namespace gfx {
 
 // An interface for Restoring GL State.
@@ -17,7 +23,8 @@ class GL_EXPORT GLStateRestorer {
   GLStateRestorer();
   virtual ~GLStateRestorer();
 
-  virtual void RestoreState() = 0;
+  virtual const gpu::gles2::ContextState* GetContextState() const = 0;
+  virtual void RestoreState(const gpu::gles2::ContextState* previous_state) = 0;
 
   DISALLOW_COPY_AND_ASSIGN(GLStateRestorer);
 };

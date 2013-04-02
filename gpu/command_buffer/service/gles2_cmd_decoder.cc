@@ -539,28 +539,29 @@ class GLES2DecoderImpl : public GLES2Decoder {
   virtual GLES2Util* GetGLES2Util() OVERRIDE { return &util_; }
   virtual gfx::GLContext* GetGLContext() OVERRIDE { return context_.get(); }
   virtual ContextGroup* GetContextGroup() OVERRIDE { return group_.get(); }
-  virtual void RestoreState() const OVERRIDE;
+  virtual void RestoreState(const ContextState* previous_state) const OVERRIDE;
+  virtual const ContextState* GetContextState() const OVERRIDE;
 
   virtual void RestoreActiveTexture() const OVERRIDE {
-    state_.RestoreActiveTexture();
+    state_.RestoreActiveTexture(0);
   }
   virtual void RestoreAttribute(unsigned index) const OVERRIDE {
-    state_.RestoreAttribute(index);
+    state_.RestoreAttribute(index, 0);
   }
   virtual void RestoreBufferBindings() const OVERRIDE {
-    state_.RestoreBufferBindings();
+    state_.RestoreBufferBindings(0);
   }
   virtual void RestoreGlobalState() const OVERRIDE {
-    state_.RestoreGlobalState();
+    state_.RestoreGlobalState(0);
   }
   virtual void RestoreProgramBindings() const OVERRIDE {
-    state_.RestoreProgramBindings();
+    state_.RestoreProgramBindings(0);
   }
   virtual void RestoreRenderbufferBindings() const OVERRIDE {
-    state_.RestoreRenderbufferBindings();
+    state_.RestoreRenderbufferBindings(0);
   }
   virtual void RestoreTextureUnitBindings(unsigned unit) const OVERRIDE {
-    state_.RestoreTextureUnitBindings(unit);
+    state_.RestoreTextureUnitBindings(unit, 0);
   }
   virtual void RestoreFramebufferBindings() const OVERRIDE;
   virtual void RestoreTextureState(unsigned service_id) const OVERRIDE;
@@ -3638,12 +3639,16 @@ GLuint GLES2DecoderImpl::GetBackbufferServiceId() const {
       (surface_ ? surface_->GetBackingFrameBufferObject() : 0);
 }
 
-void GLES2DecoderImpl::RestoreState() const {
+const ContextState* GLES2DecoderImpl::GetContextState() const {
+  return &state_;
+}
+
+void GLES2DecoderImpl::RestoreState(const ContextState* previous_state) const {
   // Restore the Framebuffer first because of bugs in Intel drivers.
   // Intel drivers incorrectly clip the viewport settings to
   // the size of the current framebuffer object.
   RestoreFramebufferBindings();
-  state_.RestoreState();
+  state_.RestoreState(previous_state);
 }
 
 void GLES2DecoderImpl::RestoreFramebufferBindings() const {

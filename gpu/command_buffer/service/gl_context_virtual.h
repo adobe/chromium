@@ -21,6 +21,7 @@ class GLStateRestorer;
 namespace gpu {
 namespace gles2 {
 class GLES2Decoder;
+class ContextState;
 }
 
 // Encapsulates a virtual OpenGL context.
@@ -43,6 +44,7 @@ class GPU_EXPORT GLContextVirtual : public gfx::GLContext {
   virtual bool IsCurrent(gfx::GLSurface* surface) OVERRIDE;
   virtual void* GetHandle() OVERRIDE;
   virtual gfx::GLStateRestorer* GetGLStateRestorer() OVERRIDE;
+  virtual const gpu::gles2::ContextState* GetGLContextState() OVERRIDE;
   virtual void SetSwapInterval(int interval) OVERRIDE;
   virtual std::string GetExtensions() OVERRIDE;
   virtual bool GetTotalGpuMemory(size_t* bytes) OVERRIDE;

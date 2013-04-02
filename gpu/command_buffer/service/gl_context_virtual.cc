@@ -79,6 +79,10 @@ gfx::GLStateRestorer* GLContextVirtual::GetGLStateRestorer() {
   return state_restorer_.get();
 }
 
+const gpu::gles2::ContextState* GLContextVirtual::GetGLContextState() {
+  return state_restorer_->GetContextState();
+}
+
 void GLContextVirtual::SetSwapInterval(int interval) {
   shared_context_->SetSwapInterval(interval);
 }
