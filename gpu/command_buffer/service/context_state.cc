@@ -363,7 +363,7 @@ void ContextState::RestoreState(const ContextState* previous_state) const {
   for (size_t ii = 0; ii < texture_units.size(); ++ii) {
     RestoreTextureUnitBindings(ii, previous_state);
   }
-  RestoreActiveTexture(previous_state);
+  RestoreActiveTexture(0);
 
   // Restore Attrib State
   // TODO: This if should not be needed. RestoreState is getting called
