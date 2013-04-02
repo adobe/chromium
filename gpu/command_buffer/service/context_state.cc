@@ -228,7 +228,8 @@ void ContextState::RestoreInternalState(const ContextState* previous_state) cons
     glBlendColor(
       blend_color_red, blend_color_green, blend_color_blue, blend_color_alpha);
 
-  if (previous_state->blend_equation_rgb != blend_equation_rgb)
+  if (previous_state->blend_equation_rgb != blend_equation_rgb
+    || previous_state->blend_equation_alpha != blend_equation_alpha)
     glBlendEquationSeparate(blend_equation_rgb, blend_equation_alpha);
 
   if (previous_state->blend_source_rgb != blend_source_rgb

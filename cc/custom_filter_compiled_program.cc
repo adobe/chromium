@@ -6,6 +6,7 @@
 
 #include <iostream>
 
+#include "base/debug/trace_event.h"
 #include "cc/gl_renderer.h"
 #include "third_party/khronos/GLES2/gl2.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebCString.h"
@@ -30,6 +31,10 @@ CustomFilterCompiledProgram::CustomFilterCompiledProgram(WebKit::WebGraphicsCont
     , m_isInitialized(false)
 {
     m_context->makeContextCurrent();
+
+    TRACE_EVENT2("cc", "CustomFilterCompiledProgram", "vertexShader", validatedVertexShader.utf8().data(), "fragmentShader", validatedFragmentShader.utf8().data());
+    LOG(INFO) << "Vertex shader\n\n" << validatedVertexShader.utf8().data() << "\n\n";
+    LOG(INFO) << "Fragment shader\n\n" << validatedFragmentShader.utf8().data() << "\n\n";
 
     WebKit::WebGLId vertexShader = compileShader(GL_VERTEX_SHADER, validatedVertexShader);
     if (!vertexShader)
