@@ -21,7 +21,7 @@ class GLStateRestorer;
 namespace gpu {
 namespace gles2 {
 class GLES2Decoder;
-class ContextState;
+struct ContextState;
 }
 
 // Encapsulates a virtual OpenGL context.

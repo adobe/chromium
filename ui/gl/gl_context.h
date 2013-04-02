@@ -15,7 +15,7 @@
 
 namespace gpu {
 namespace gles2 {
-class ContextState;
+struct ContextState;
 }
 }
 

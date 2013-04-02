@@ -29,7 +29,7 @@ class StreamTextureManager;
 
 namespace gles2 {
 
-class ContextState;
+struct ContextState;
 class ContextGroup;
 class GLES2Util;
 class QueryManager;
