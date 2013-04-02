@@ -200,7 +200,7 @@ SchedulerStateMachine::Action SchedulerStateMachine::nextAction() const
             return ACTION_CHECK_FOR_COMPLETED_TILE_UPLOADS;
         if (shouldAttemptTreeActivation())
             return ACTION_ACTIVATE_PENDING_TREE_IF_NEEDED;
-        if (m_needsForcedRedraw && shouldDraw() || m_outputSurfaceState == OUTPUT_SURFACE_LOST)
+        if ((m_needsForcedRedraw && shouldDraw()) || m_outputSurfaceState == OUTPUT_SURFACE_LOST)
             return ACTION_DRAW_FORCED;
         // COMMIT_STATE_WAITING_FOR_FIRST_DRAW wants to enforce a draw. If m_canDraw is false
         // or textures are not available, proceed to the next step (similar as in COMMIT_STATE_IDLE).
