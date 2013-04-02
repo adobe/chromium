@@ -73,7 +73,7 @@ void ContextState::RestoreTextureUnitBindings(GLuint unit, const ContextState* p
     }
   } else {
     DCHECK_LT(unit, previous_state->texture_units.size());
-    const TextureUnit& prev_texture_unit = texture_units[unit];
+    const TextureUnit& prev_texture_unit = previous_state->texture_units[unit];
 
     bool activated_texture_unit = false;
     
