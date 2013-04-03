@@ -25,7 +25,8 @@ namespace {
 
 const int kDelayedScheduleManageTimeoutMs = 67;
 
-const uint64 kBytesAllocatedUnmanagedStep = 16 * 1024 * 1024;
+// FIXME: This seems to kill a lot of our resources while applying the filters.
+const uint64 kBytesAllocatedUnmanagedStep = 128 * 1024 * 1024;
 
 void TrackValueChanged(uint64 old_size, uint64 new_size, uint64* total_size) {
   DCHECK(new_size > old_size || *total_size >= (old_size - new_size));
